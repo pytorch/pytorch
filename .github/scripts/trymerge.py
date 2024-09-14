@@ -36,6 +36,7 @@ from warnings import warn
 
 import yaml
 from github_utils import (
+    gh_close_pr,
     gh_fetch_json_list,
     gh_fetch_merge_base,
     gh_fetch_url,
@@ -1174,11 +1175,11 @@ class GitHubPR:
             for pr in additional_merged_prs:
                 pr.add_numbered_label(MERGE_COMPLETE_LABEL, dry_run)
 
-        if comment_id and self.pr_num:
-            # When the merge process reaches this part, we can assume that the commit
-            # has been successfully pushed to trunk
-            merge_commit_sha = repo.rev_parse(name=REMOTE_MAIN_BRANCH)
+        # When the merge process reaches this part, we can assume that the commit
+        # has been successfully pushed to trunk
+        merge_commit_sha = repo.rev_parse(name=self.default_branch())
 
+        if comment_id and self.pr_num:
             # Finally, upload the record to Rockset. The list of pending and failed
             # checks are at the time of the merge
             save_merge_record(
@@ -1202,6 +1203,17 @@ class GitHubPR:
             )
         else:
             print("Missing comment ID or PR number, couldn't upload to Rockset")
+
+        # Usually Github will see that the commit has "resolves <pr_num>" in the
+        # commit message and close the PR, but sometimes it doesn't, leading to
+        # confusion.  When it doesn't, we close it manually.
+        time.sleep(60)  # Give Github some time to close the PR
+        manually_close_merged_pr(
+            pr=self,
+            additional_merged_prs=additional_merged_prs,
+            merge_commit_sha=merge_commit_sha,
+            dry_run=dry_run,
+        )
 
     def merge_changes(
         self,
@@ -1501,6 +1513,34 @@ def checks_to_markdown_bullets(
     return [
         f"- [{c[0]}]({c[1]})" if c[1] is not None else f"- {c[0]}" for c in checks[:5]
     ]
+
+
+def manually_close_merged_pr(
+    pr: GitHubPR,
+    additional_merged_prs: List[GitHubPR],
+    merge_commit_sha: str,
+    dry_run: bool,
+) -> None:
+    def _comment_and_close(pr: GitHubPR, comment: str) -> None:
+        pr = GitHubPR(pr.org, pr.project, pr.pr_num)  # Refresh the PR
+        if not pr.is_closed():
+            gh_post_pr_comment(pr.org, pr.project, pr.pr_num, comment, dry_run)
+            gh_close_pr(pr.org, pr.project, pr.pr_num, dry_run)
+
+    message = (
+        f"This PR (#{pr.pr_num}) was merged in {merge_commit_sha} but it is still open, likely due to a Github bug, "
+        "so mergebot is closing it manually.  If you think this is a mistake, please feel free to reopen and contact Dev Infra."
+    )
+    _comment_and_close(pr, message)
+    for additional_pr in additional_merged_prs:
+        message = (
+            f"This PR (#{additional_pr.pr_num}) was merged as part of PR #{pr.pr_num} in the stack under {merge_commit_sha} "
+            "but it is still open, likely due to a Github bug, so mergebot is closing it manually. "
+            "If you think this is a mistake, please feel free to reopen and contact Dev Infra."
+        )
+        _comment_and_close(additional_pr, message)
+
+    print(f"PR {pr.pr_num} and all additional PRs in the stack have been closed.")
 
 
 @retries_decorator()
