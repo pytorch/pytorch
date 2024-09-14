@@ -478,9 +478,9 @@ class FSDPParamGroup:
     def _register_post_backward_hook(
         self, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
-        # Compile relies on `root_post_backward_callback` to call each
+        # Traceable FSDP2 relies on `root_post_backward_callback` to call each
         # `FSDPParamGroup.post_backward`
-        if ca.compiled_autograd_enabled:
+        if (not torch._dynamo.config.skip_fsdp_hooks) or ca.compiled_autograd_enabled:
             return args, kwargs
         if not torch.is_grad_enabled():
             return args, kwargs
@@ -635,12 +635,26 @@ def _get_param_module_infos(
 
 class RegisterPostBackwardFunction(torch.autograd.Function):
     @staticmethod
+    def _assert_not_tracing_fsdp():
+        if ca.compiled_autograd_enabled:
+            # TODO: Find a way to print the offending FSDP2 module.
+            msg = """\
+When Traceable FSDP2 is enabled, we rely on `root_post_backward_callback` to call
+each `FSDPParamGroup.post_backward`, and we should not be calling into `RegisterPostBackwardFunction`.
+If you are here, it means the forward part of this FSDP2 instance is not compiled, and you must also
+compile the forward part if you want to use Traceable FSDP2."""
+            torch._dynamo.comptime.comptime.print(msg)
+            raise RuntimeError(msg)
+
+    @staticmethod
     def forward(ctx, param_group: FSDPParamGroup, *inputs: torch.Tensor):
         # All tensors in `inputs` should require gradient
+        RegisterPostBackwardFunction._assert_not_tracing_fsdp()
         ctx.param_group = param_group
         return inputs
 
     @staticmethod
     def backward(ctx, *grads: torch.Tensor):
+        RegisterPostBackwardFunction._assert_not_tracing_fsdp()
         ctx.param_group.post_backward()
         return (None,) + grads
