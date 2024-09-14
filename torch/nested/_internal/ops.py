@@ -1017,6 +1017,17 @@ def is_same_size_default(func, *args, **kwargs):
     return args[0]._size == args[1]._size
 
 
+@register_jagged_func(torch.ops.aten.sum.default, "self: jt_all, dtype: any?")
+def sum_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+
+    return func(inp._values, **new_kwargs)
+
+
 @register_jagged_func(
     torch.ops.aten.sum.dim_IntList,
     "self: jt_all, dim: any?, keepdim: any?, dtype: any?",
@@ -1097,8 +1108,7 @@ def sum_dim_IntList(func, *args, **kwargs):
             )  # need to read offsets --> pad jagged dimension and apply sum
 
         if new_kwargs["keepdim"]:
-            # TODO: Fix this; it's a bug. should be unsqueezing on ragged_idx
-            out = out.unsqueeze(0)
+            out = out.unsqueeze(inp._ragged_idx)
         return out
     else:  # raggedness preserved --> return nested tensor
         if (
@@ -1463,8 +1473,10 @@ def mean_dim(func, *args, **kwargs):
         # for every non-batch dimension,
         #   unsqueeze lengths into the same shape as the PyTorch sum,
         #   as the extra dimensions must all be divided by the same length
+        # Note: keepdim=True is on at this point so lengths has to be unsqueezed for
+        # that 1-size dim as well.
         lengths = inp._offsets.diff()
-        for _ in range(inp.dim() - 2):
+        for _ in range(inp.dim() - 1):
             lengths = lengths.unsqueeze(-1)
 
         return torch_sum / lengths.broadcast_to(torch_sum.shape)
