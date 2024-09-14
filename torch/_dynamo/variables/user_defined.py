@@ -1212,9 +1212,8 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
             except AttributeError:
                 pass
             else:
-                field_map[field.name] = VariableTracker.create(
-                    tx, attr, source, field.name
-                )
+                source = AttrSource(source, field.name)
+                field_map[field.name] = VariableTracker.create(tx, attr, source)
 
         return FrozenDataClassVariable(value, fields=field_map, source=source)
 
