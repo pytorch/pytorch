@@ -53,7 +53,12 @@ from typing_extensions import TypeAlias
 import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
-from torch._dynamo.utils import counters, dynamo_timed, get_chromium_event_logger
+from torch._dynamo.utils import (
+    add_remote_cache_time_saved,
+    counters,
+    dynamo_timed,
+    get_chromium_event_logger,
+)
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.codegen.rocm.compile_command import (
@@ -533,7 +538,7 @@ def _reduce_tensor(
         # TODO: These tensors don't currently pickle, so we can't cache a
         # compiled graph containing them. Just fail now. If mkldnn tensors
         # get pickling support, we can remove this.
-        raise BypassFxGraphCache("mkldnn tensors unpickleable.")
+        raise BypassFxGraphCache("mkldnn tensors unpickleable")
 
     # Very large tensors could be expensive to copy to cpu and hash. Let's
     # at least report if we find slowness.
@@ -564,7 +569,7 @@ def _reduce_unsupported(s: Any) -> NoReturn:
     See FxGraphCachePickler. Custom reducer to handle any objects that we don't
     support and therefore raise to bypass caching.
     """
-    raise BypassFxGraphCache("Reduce unsupported.")
+    raise BypassFxGraphCache("Reduce unsupported")
 
 
 class FxGraphCachePickler(pickle.Pickler):
@@ -602,7 +607,7 @@ class FxGraphCachePickler(pickle.Pickler):
                 # Some configs options are callables, e.g., post_grad_custom_pre_pass,
                 # and may not pickle.
                 log.warning("Can't pickle", exc_info=True)
-                raise BypassFxGraphCache("Config options may be unpickleable.") from e
+                raise BypassFxGraphCache("Config options may be unpickleable") from e
             return stream.getvalue()
 
     @classmethod
@@ -1254,25 +1259,27 @@ class FxGraphCache:
         # Freezing can embed constants that wouldn't be static across runs.
         if config.freezing or config.aot_inductor.use_runtime_constant_folding:
             raise BypassFxGraphCache(
-                "Freezing may introduce constants that aren't static across runs."
+                "Freezing may introduce constants that aren't static across runs"
             )
 
         # The treatment of guards in the caching implementation requires that
         # we have a shape env.
         if FxGraphCache._get_shape_env() is None:
             log.debug("fx graph cache no shape env")
-            raise BypassFxGraphCache("No shape env.")
+            raise BypassFxGraphCache("No shape env")
 
         # HigherOrderOperators should be handled on a case-by-case basis.
         # Currently, we just skip caching if we have any.
         # We also skip if there are any torchbind objects.
         for node in gm.graph.nodes:
             if isinstance(node.target, torch._ops.HigherOrderOperator):
-                raise BypassFxGraphCache("Can't cache HigherOrderOperators.")
+                raise BypassFxGraphCache(
+                    f"Can't cache HigherOrderOperator: {node.target.name()}"
+                )
             if node.op == "getattr" and isinstance(
                 getattr(gm, node.target), torch._C.ScriptObject
             ):
-                raise BypassFxGraphCache("Can't cache torchbind objects.")
+                raise BypassFxGraphCache("Can't cache torchbind objects")
 
     @staticmethod
     def load(  # type: ignore[no-untyped-def]
@@ -1350,6 +1357,7 @@ class FxGraphCache:
                 cache_event_time = time_ns()
                 if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
                     cache_info["time_saved_ns"] = time_saved_ns
+                    add_remote_cache_time_saved(time_saved_ns, fx_kwargs["is_backward"])
                     if (
                         ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
                             time_saved_ns
