@@ -828,6 +828,81 @@ class TestNew2dParallelStateDict(DTensorTestBase):
                 else:
                     self.assertEqual(new_state, state)
 
+    @with_comms
+    @with_temp_dir
+    @skip_if_lt_x_gpu(4)
+    def test_fsdp1_tp_2d_set_full_state_dict(self):
+        """
+        This is a workaround for loading full state dict into a FSDP1+TP 2D model.
+        Since named_parameters() in FSDP1 does not return DTensor, we don't have the information to shard the full_state_dict
+        and load it directly into the 2d model. In order to load a full state dict in FSDP1+TP 2D model, we need to do:
+        1) load the full state dict into a 1D FSDP model
+        2) dcp.save the full/shard state dict into storage
+        3) initialize a 2D FSDP1+TP model
+        4) get the default sharded state dict for the 2D model (full_state_dict=False)
+        5) dcp.load the state dict from storage
+        6) load the state dict into the 2D model
+        """
+        dummy_model = SimpleModel().cuda()
+        mesh_1d = init_device_mesh("cuda", (self.world_size,))
+        model = FSDP(dummy_model, device_mesh=mesh_1d)
+        optim = torch.optim.Adam(model.parameters(), lr=0.01)
+        model(model.get_input()).sum().backward()
+        optim.step()
+        ref_full_msd = get_model_state_dict(
+            model, options=StateDictOptions(full_state_dict=True, cpu_offload=True)
+        )
+        ref_full_osd = get_optimizer_state_dict(
+            model,
+            optimizers=optim,
+            options=StateDictOptions(full_state_dict=True, cpu_offload=True),
+        )
+        state_dict = {"model": ref_full_msd, "optim": ref_full_osd}
+        # save the full state dict into storage first
+        dcp.save(state_dict, checkpoint_id=self.temp_dir)
+
+        # initialize 2d model
+        dummy_model = SimpleModel().cuda()
+        mesh_2d = init_device_mesh(
+            "cuda",
+            (2, self.world_size // 2),
+            mesh_dim_names=("dp", "tp"),
+        )
+        tp_mesh = mesh_2d["tp"]
+        dp_mesh = mesh_2d["dp"]
+        parallelize_plan = {
+            "net1": ColwiseParallel(),
+            "net2": RowwiseParallel(),
+            "net3": ColwiseParallel(),
+        }
+        model_2d = parallelize_module(dummy_model, tp_mesh, parallelize_plan)
+        model_2d = FSDP(model_2d, device_mesh=dp_mesh, use_orig_params=True)
+        optim_2d = torch.optim.Adam(model_2d.parameters(), lr=0.01)
+        # get the default sharded state dict for model_2d
+        # note this is because we can not set full_state_dict back to 2D directly
+        msd = get_model_state_dict(model_2d)
+        osd = get_optimizer_state_dict(model_2d, optimizers=optim_2d)
+        state_dict = {"model": msd, "optim": osd}
+        dcp.load(state_dict=state_dict, checkpoint_id=self.temp_dir)
+
+        set_model_state_dict(model_2d, state_dict["model"])
+        set_optimizer_state_dict(
+            model_2d, optimizers=optim_2d, optim_state_dict=state_dict["optim"]
+        )
+
+        # check after setting sharded state dict, the model and optim full state dict
+        # are the same as the initial full state dict.
+        new_full_msd = get_model_state_dict(
+            model, options=StateDictOptions(full_state_dict=True, cpu_offload=True)
+        )
+        new_full_osd = get_optimizer_state_dict(
+            model,
+            optimizers=optim,
+            options=StateDictOptions(full_state_dict=True, cpu_offload=True),
+        )
+        self.assertEqual(ref_full_msd, new_full_msd)
+        self.assertEqual(ref_full_osd, new_full_osd)
+
 
 instantiate_parametrized_tests(TestNew2dParallelStateDict)
 
