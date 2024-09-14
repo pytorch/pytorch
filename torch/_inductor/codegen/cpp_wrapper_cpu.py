@@ -2122,8 +2122,7 @@ class CppWrapperCpu(WrapperCodeGen):
 
         def extract_output_name(out):
             if out is None:
-                # Because out is not a MultiOutput, we assume the kernel returns a single output
-                return [buf_name]
+                return None
             elif isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
                 return out.get_name()
             elif isinstance(out, (list, tuple)):
@@ -2134,9 +2133,13 @@ class CppWrapperCpu(WrapperCodeGen):
         # output_args has the same pytree structure as outputs
         output_args = None
         if config.abi_compatible:
-            output_args = extract_output_name(outputs)
-            if isinstance(output_args, str):
-                output_args = [output_args]
+            if outputs is None:
+                # outputs is not specified, the default is to write to buf_name
+                output_args = [buf_name]
+            else:
+                output_args = extract_output_name(outputs)
+                if isinstance(output_args, str):
+                    output_args = [output_args]
 
         if V.graph.aot_mode and config.abi_compatible:
             assert op_overload is not None
@@ -2347,13 +2350,16 @@ if (py_{buf_name}.get() == NULL) {{
             else:
                 # result is a tuple of tensors
                 for idx, output_arg in enumerate(output_args):
+                    if output_arg is None:
+                        continue
                     lines += f"""
 {output_arg} =
     reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}.get(), {idx}), NULL));"""
 
             declarations_before_scope = [
                 f"RAIIAtenTensorHandle {output_arg};"
-                for idx, output_arg in enumerate(output_args)
+                for output_arg in output_args
+                if output_arg is not None
             ]
             scope_gil_acquire = self.generate_scoped_gil_acquire(
                 declarations_before_scope, lines
