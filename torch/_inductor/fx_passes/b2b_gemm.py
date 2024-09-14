@@ -374,7 +374,9 @@ def is_b2b_gemm_good_on(
         B_node.meta["val"],
         C_node.meta["val"],
     )  # torch._subclasses.fake_tensor.FakeTensor
-    if not all([A.is_cuda, B.is_cuda, C.is_cuda]):
+    if not all([A.is_cuda, B.is_cuda, C.is_cuda]) and not all(
+        [A.is_xpu, B.is_xpu, C.is_xpu]
+    ):
         return False
     if not all([len(A.shape) == 2, len(B.shape) == 2, len(C.shape) == 2]):
         return False
