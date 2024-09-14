@@ -95,7 +95,7 @@ void from_json(const nlohmann::json& j, CoreMLConfig& config) {
   }
 }
 
-GenericList pack_outputs(const std::vector<TensorSpec>& output_specs, id<MLFeatureProvider> outputProvider) {
+static GenericList pack_outputs(const std::vector<TensorSpec>& output_specs, id<MLFeatureProvider> outputProvider) {
   c10::List<torch::Tensor> outputs;
   for (const TensorSpec& spec : output_specs) {
     NSString *name = [NSString stringWithUTF8String:spec.name.c_str()];
