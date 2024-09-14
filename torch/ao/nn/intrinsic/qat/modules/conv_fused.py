@@ -431,7 +431,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
             return conv
 
 
-class ConvBn1d(_ConvBnNd, nn.Conv1d):
+class ConvBn1d(_ConvBnNd, nn.Conv1d):  # type: ignore[misc]
     r"""
     A ConvBn1d module is a module fused from Conv1d and BatchNorm1d,
     attached with FakeQuantize modules for weight,
@@ -585,7 +585,7 @@ class ConvReLU1d(nnqat.Conv1d, nni._FusedModule):
     _FLOAT_MODULE: ClassVar[Type[nni.ConvReLU1d]] = nni.ConvReLU1d  # type: ignore[assignment, misc]
     _FLOAT_CONV_MODULE: ClassVar[Type[nn.Conv1d]] = nn.Conv1d
     _FLOAT_BN_MODULE: ClassVar[Optional[Type[nn.Module]]] = None
-    _FLOAT_RELU_MODULE = ClassVar[Optional[Type[nn.Module]]] = nn.ReLU
+    _FLOAT_RELU_MODULE: ClassVar[Optional[Type[nn.Module]]] = nn.ReLU
 
     def __init__(
         self,
@@ -628,7 +628,7 @@ class ConvReLU1d(nnqat.Conv1d, nni._FusedModule):
         )
 
 
-class ConvBn2d(_ConvBnNd, nn.Conv2d):
+class ConvBn2d(_ConvBnNd, nn.Conv2d):  # type: ignore[misc]
     r"""
     A ConvBn2d module is a module fused from Conv2d and BatchNorm2d,
     attached with FakeQuantize modules for weight,
@@ -825,7 +825,7 @@ class ConvReLU2d(nnqat.Conv2d, nni._FusedModule):
         )
 
 
-class ConvBn3d(_ConvBnNd, nn.Conv3d):
+class ConvBn3d(_ConvBnNd, nn.Conv3d):  # type: ignore[misc]
     r"""
     A ConvBn3d module is a module fused from Conv3d and BatchNorm3d,
     attached with FakeQuantize modules for weight,

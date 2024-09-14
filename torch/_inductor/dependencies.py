@@ -593,7 +593,7 @@ def extract_read_writes(
             inner.index_expr(name_to_index[entry.index_name], None)
         for entry in fn.memory_usage[MemoryUsageType.BUCKETIZE]:
             inner.bucketize(
-                None, entry.buffer_name, name_to_index[entry.index_name], None, None   # type: ignore[arg-type]
+                None, entry.buffer_name, name_to_index[entry.index_name], None, None  # type: ignore[arg-type]
             )
         # fn.memory_usage[MemoryUsageType.CHECK_BOUNDS] intentionally skipped
     else:
