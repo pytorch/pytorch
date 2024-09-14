@@ -793,7 +793,7 @@ def bsr_dense_addmm_meta(
             # _triton_ops_meta.py for ways to avoid this warning
             # message
             warn_once(
-                f"bsr_dense_addmm uses non-optimal triton kernel parameters for {M=} {K=} {N=} {Ms=}, {Ks=} {beta=} {alpha=}"
+                f"bsr_dense_addmm uses non-optimal triton kernel parameters for {M=} {K=} {N=} {Ms=}, {Ks=} {beta=} {alpha=} {dtype=}"
             )
 
     SPLIT_N = SPLIT_N or max(N // Ms, 1)
@@ -1191,6 +1191,7 @@ def bsr_dense_addmm(
     dense = tile_to_blocksize(dense, (BK, BN))
     input = tile_to_blocksize(input, (BM, BN))
 
+    # tl.dot supports float16, float32, int32 as accumulator types.
     dot_out_dtype = {
         torch.float16: tl.float32,
         torch.bfloat16: tl.float32,
