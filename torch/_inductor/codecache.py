@@ -1858,7 +1858,9 @@ class AotCodeCompiler:
             }[sys.platform](aot_constants)
 
             kernels_o = []
-            gpu_codecache = ROCmCodeCache if torch.version.hip else CUDACodeCache
+            gpu_codecache: Union[ROCmCodeCache, CUDACodeCache] = (
+                ROCmCodeCache() if torch.version.hip else CUDACodeCache()
+            )
             for entry in gpu_codecache.cache.values():
                 if entry.output_path.endswith(".o"):
                     kernels_o.append(entry.output_path)

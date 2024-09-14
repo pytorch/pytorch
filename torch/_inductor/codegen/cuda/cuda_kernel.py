@@ -172,16 +172,9 @@ class CUDATemplateKernel(CUDAKernel):
             # C-style symbol names.
             assert isinstance(wrapper, CppWrapperCpu)
             wrapper.initialized_kernels[name] = self
-            # Kinda hacky because we always originally initialize name with "KERNEL_NAME"
-            # So, we replace with the real kernel name passed as an arg to this function.
+            # We always originally initialize name with "KERNEL_NAME". So, we
+            # we replace with the real kernel name passed as an arg to this function.
             self.signature = self.signature.replace("KERNEL_NAME", name)
-
-        # NOTE:
-        # We have to use python_argdefs even for cpp wrapper because python_argdefs
-        # gives us torch.dtype which is useful when calling
-        # generate_args_decl(call_args, arg_types) in generate_kernel_call()
-
-        if V.graph.cpp_wrapper:
             _, call_args, arg_types = self.args.cpp_argdefs()
         else:
             _, call_args, _, arg_types = self.args.python_argdefs()

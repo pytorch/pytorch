@@ -664,6 +664,9 @@ class CppWrapperCpu(WrapperCodeGen):
 
         # Tell compiler we need to link with the non-mangled symbols
         for kernel in self.initialized_kernels.values():
+            assert hasattr(
+                kernel, "get_signature"
+            ), f"{kernel} must have get_signature implemented"
             signature = kernel.get_signature()
             self.prefix.writeline(f'extern "C" {signature};')
 
@@ -686,6 +689,9 @@ class CppWrapperCpu(WrapperCodeGen):
                 maybe_hipify_code_wrapper(f"    CUfunction {kernel}{{nullptr}};")
             )
         for name, kernel in self.initialized_kernels.items():
+            assert hasattr(
+                kernel, "get_signature"
+            ), f"{kernel} must have get_signature implemented"
             kernel_ptr = f"(*{name})"
             signature = kernel.get_signature().replace(name, kernel_ptr)
             self.prefix.writeline(f"    {signature} = torch::aot_inductor::{name};")
