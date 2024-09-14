@@ -6,7 +6,7 @@ from torch.utils._pytree import tree_any
 
 log = logging.getLogger(__name__)
 
-from ._device_daemon import daemon
+from ._device_daemon import driver
 from ._meta_parser import prepare_for_sending, to_device_no_copy
 
 
@@ -18,7 +18,7 @@ def _register_same_name(name, with_log=False):
     def _(*args, **kwargs):
         if with_log:
             log.info("Calling hook %s", name)
-        return daemon.exec(name, *args, **kwargs)
+        return driver.exec(name, *args, **kwargs)
 
     _IMPL_REGISTRY[name] = _
 
@@ -45,11 +45,11 @@ def _openreg_kernel_fallback(op, *args, **kwargs):
             # handled below as a regular copy
         elif from_.device.type == "openreg":
             args, _ = prepare_for_sending((from_,), {})
-            host_mem = daemon.exec("send_data", *args)
+            host_mem = driver.exec("send_data", *args)
             return to_.copy_(host_mem)
         elif to_.device.type == "openreg":
             args, _ = prepare_for_sending((to_,), {})
-            daemon.exec("recv_data", from_, *args)
+            driver.exec("recv_data", from_, *args)
             return to_
         else:
             raise RuntimeError("Should not happen")
@@ -63,7 +63,7 @@ def _openreg_kernel_fallback(op, *args, **kwargs):
         )
     elif op is torch.ops.aten._local_scalar_dense.default:
         args, _ = prepare_for_sending(args, {})
-        host_mem = daemon.exec("send_data", *args)
+        host_mem = driver.exec("send_data", *args)
         return host_mem.item()
 
     op_name = None
@@ -125,7 +125,7 @@ def _openreg_kernel_fallback(op, *args, **kwargs):
             # Slow version for data-dependent functions:
             # Run the op on the device just to get the output shape
             args_, kwargs_ = prepare_for_sending(args, kwargs)
-            shape = daemon.exec(
+            shape = driver.exec(
                 "get_op_output_shape",
                 op.overloadpacket._qualified_op_name,
                 args_,
@@ -142,7 +142,7 @@ def _openreg_kernel_fallback(op, *args, **kwargs):
 
     # 4. Run the compute and populate the output on the device
     args, kwargs = prepare_for_sending(args, kwargs)
-    daemon.exec("run_op", op_name, args, kwargs)
+    driver.exec("run_op", op_name, args, kwargs)
 
     if post_process is not None:
         post_process()

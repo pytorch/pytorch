@@ -506,9 +506,7 @@ def optimize_scatter_mm(
         def test_func():
             return bsr_scatter_mm(bsr, dense, indices_data=indices_data)
 
-        ms_min = triton.testing.do_bench(
-            test_func, warmup=500, rep=100, fast_flush=False
-        )
+        ms_min = triton.testing.do_bench(test_func, warmup=500, rep=100)
 
         return ms_min
 
@@ -662,7 +660,7 @@ def tune_bsr_dense_addmm(
                 input, bsr, dense, beta=beta, alpha=alpha, meta=meta, out=out
             )
 
-        return triton.testing.do_bench(test_func, warmup=500, rep=100, fast_flush=False)
+        return triton.testing.do_bench(test_func, warmup=500, rep=100)
 
     # The step function that increments a specified meta parameter:
     def step_meta_parameter(name, value, direction, meta, M=M, N=N, K=K, BM=BM, BK=BK):
@@ -865,9 +863,7 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
                         else:
                             raise NotImplementedError(op)
 
-                        ms_min = triton.testing.do_bench(
-                            test_func, warmup=500, rep=100, fast_flush=False
-                        )
+                        ms_min = triton.testing.do_bench(test_func, warmup=500, rep=100)
 
                         return ms_min
 

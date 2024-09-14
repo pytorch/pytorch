@@ -124,6 +124,27 @@ class DeviceOpOverrides:
     def cpp_getStreamFromExternal(self):
         raise NotImplementedError
 
+    def kernel_header(self):
+        raise NotImplementedError
+
+    def kernel_driver(self):
+        raise NotImplementedError
+
+    def abi_compatible_header(self):
+        raise NotImplementedError
+
+    def cpp_stream_type(self):
+        raise NotImplementedError
+
+    def aoti_get_stream(self):
+        raise NotImplementedError
+
+    def cpp_kernel_type(self):
+        raise NotImplementedError
+
+    def cpp_device_ptr(self):
+        raise NotImplementedError
+
 
 device_op_overrides_dict: Dict[str, DeviceOpOverrides] = {}
 
@@ -211,7 +232,7 @@ def get_wrapper_codegen_for_device(device: str, cpp_wrapper: bool = False):
 def init_backend_registration():
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
-    from .cpp_wrapper_cuda import CppWrapperCuda
+    from .cpp_wrapper_cuda import CppWrapperGpu
     from .cuda_combined_scheduling import CUDACombinedScheduling
     from .halide import HalideScheduling
     from .triton import TritonScheduling
@@ -233,7 +254,7 @@ def init_backend_registration():
             "cuda",
             lambda *args, **kwargs: cuda_backends[config.cuda_backend](*args, **kwargs),
             WrapperCodeGen,
-            CppWrapperCuda,
+            CppWrapperGpu,
         )
 
     if get_scheduling_for_device("xpu") is None:
