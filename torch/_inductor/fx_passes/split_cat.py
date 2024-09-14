@@ -447,6 +447,11 @@ def normalize_reshape_default(match: Match, *args, **kwargs):
         return
     reshape_input = get_arg_value(reshape_node, 0)
 
+    from torch.fx.experimental.symbolic_shapes import free_symbols
+    if free_symbols(reshape_node.meta["example_value"].shape):
+        log.debug("dynamic shape not supported: %s", reshape_node)
+        return
+
     with match.graph.inserting_after(reshape_node):
         new_reshape_node = match.graph.call_function(
             torch.reshape,
