@@ -3041,9 +3041,7 @@ def forward(self, x):
             torch.randn(2, 3),
             torch.randn(2, 3),
         )
-        gm, _ = torch._dynamo.export(mod, aten_graph=True)(
-            input_tensor, input_tensor2
-        )
+        gm, _ = torch._dynamo.export(mod, aten_graph=True)(input_tensor, input_tensor2)
         ref = mod(input_tensor, input_tensor2)
         res = gm(input_tensor, input_tensor2)
         self.assertTrue(torch._dynamo.utils.same(ref, res))
