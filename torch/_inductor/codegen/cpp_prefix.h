@@ -26,6 +26,7 @@
 #include <c10/util/generic_math.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON) || defined(CPU_CAPABILITY_VSX)
 #define INDUCTOR_USE_VECTOR_TYPES() 1
@@ -882,32 +883,6 @@ void mm_get_cache_blocking(
         num_threads, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks, Mc_blocks, Nc_blocks, Kc_blocks, L1_cache_size, L2_cache_size);
     cache[key] = std::make_tuple(Mc_blocks, Nc_blocks, Kc_blocks);
   }
-}
-
-inline void mm_get_thread_blocks(
-    int thread_id,
-    int64_t M_blocks,
-    int64_t N_blocks,
-    int64_t K_blocks,
-    int64_t Mt_blocks,
-    int64_t Nt_blocks,
-    int64_t Kt_blocks,
-    int64_t& m_block_start,
-    int64_t& m_block_end,
-    int64_t& n_block_start,
-    int64_t& n_block_end,
-    int64_t& k_block_start,
-    int64_t& k_block_end) {
-  int64_t num_Kt = (K_blocks + Kt_blocks - 1) / Kt_blocks;
-  k_block_start = (thread_id % num_Kt) * Kt_blocks;
-  k_block_end = std::min(k_block_start + Kt_blocks, K_blocks);
-  thread_id /= num_Kt;
-  int64_t num_Nt = (N_blocks + Nt_blocks - 1) / Nt_blocks;
-  n_block_start = (thread_id % num_Nt) * Nt_blocks;
-  n_block_end = std::min(n_block_start + Nt_blocks, N_blocks);
-  thread_id /= num_Nt;
-  m_block_start = std::min(thread_id * Mt_blocks, M_blocks);
-  m_block_end = std::min(m_block_start + Mt_blocks, M_blocks);
 }
 
 struct amx_tilecfg {
