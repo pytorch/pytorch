@@ -3693,9 +3693,9 @@ def huber_loss(
     target: Tensor,
     reduction: str = "mean",
     delta: float = 1.0,
-    weights: Optional[Tensor] = None,
+    weight: Optional[Tensor] = None,
 ) -> Tensor:
-    r"""huber_loss(input, target, reduction='mean', delta=1.0, weights=None) -> Tensor
+    r"""huber_loss(input, target, reduction='mean', delta=1.0, weight=None) -> Tensor
 
     Computes the Huber loss, with optional weighting.
 
@@ -3713,7 +3713,7 @@ def huber_loss(
                                    'sum': the output will be summed. 'none': no reduction will be applied.
                                    Default: 'mean'.
         delta (float, optional): The threshold at which to change between delta-scaled L1 and L2 loss. Default: 1.0.
-        weights (Tensor, optional): Weights for each sample. Default: None.
+        weight (Tensor, optional): Weights for each sample. Default: None.
 
     Returns:
         Tensor: Huber loss (optionally weighted).
@@ -3721,12 +3721,12 @@ def huber_loss(
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
             huber_loss,
-            (input, target, weights),
+            (input, target, weight),
             input,
             target,
             reduction=reduction,
             delta=delta,
-            weights=weights,
+            weight=weight,
         )
 
     if not (target.size() == input.size()):
@@ -3739,13 +3739,13 @@ def huber_loss(
 
     expanded_input, expanded_target = torch.broadcast_tensors(input, target)
 
-    if weights is None:
+    if weight is None:
         # Use the optimized C++ backend for standard Huber loss
         return torch._C._nn.huber_loss(
             expanded_input, expanded_target, _Reduction.get_enum(reduction), delta
         )
     else:
-        if weights.size() != input.size():
+        if weight.size() != input.size():
             raise ValueError("Weights and input must have the same size.")
 
         # Calculate the unweighted loss first
@@ -3753,15 +3753,15 @@ def huber_loss(
             expanded_input, expanded_target, _Reduction.get_enum("none"), delta
         )
 
-        # Apply weights to the unweighted loss
-        weighted_loss = unweighted_loss * weights
+        # Apply weight to the unweighted loss
+        weighted_loss = unweighted_loss * weight
 
         if reduction == "none":
             return weighted_loss
         elif reduction == "sum":
             return torch.sum(weighted_loss)
         elif reduction == "mean":
-            return torch.sum(weighted_loss) / torch.sum(weights)
+            return torch.sum(weighted_loss) / torch.sum(weight)
         else:
             raise ValueError(
                 f"Invalid reduction mode: {reduction}. Expected one of 'none', 'mean', 'sum'."
@@ -3774,9 +3774,9 @@ def l1_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-    weights: Optional[Tensor] = None,
+    weight: Optional[Tensor] = None,
 ) -> Tensor:  # noqa: D400,D402
-    r"""l1_loss(input, target, size_average=None, reduce=None, reduction='mean', weights=None) -> Tensor
+    r"""l1_loss(input, target, size_average=None, reduce=None, reduction='mean', weight=None) -> Tensor
 
     Function that calculates the mean element-wise absolute value difference, with optional weighting.
 
@@ -3785,13 +3785,13 @@ def l1_loss(
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
             l1_loss,
-            (input, target, weights),
+            (input, target, weight),
             input,
             target,
             size_average=size_average,
             reduce=reduce,
             reduction=reduction,
-            weights=weights,
+            weight=weight,
         )
     if not (target.size() == input.size()):
         warnings.warn(
@@ -3805,19 +3805,19 @@ def l1_loss(
 
     expanded_input, expanded_target = torch.broadcast_tensors(input, target)
 
-    if weights is not None:
-        if weights.size() != input.size():
+    if weight is not None:
+        if weight.size() != input.size():
             raise ValueError("Weights and input must have the same size.")
 
         absolute_errors = torch.abs(expanded_input - expanded_target)
-        weighted_absolute_errors = absolute_errors * weights
+        weighted_absolute_errors = absolute_errors * weight
 
         if reduction == "none":
             return weighted_absolute_errors
         elif reduction == "sum":
             return torch.sum(weighted_absolute_errors)
         elif reduction == "mean":
-            return torch.sum(weighted_absolute_errors) / torch.sum(weights)
+            return torch.sum(weighted_absolute_errors) / torch.sum(weight)
         else:
             raise ValueError(
                 f"Invalid reduction mode: {reduction}. Expected one of 'none', 'mean', 'sum'."
@@ -3834,9 +3834,9 @@ def mse_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-    weights: Optional[Tensor] = None,
+    weight: Optional[Tensor] = None,
 ) -> Tensor:
-    r"""mse_loss(input, target, size_average=None, reduce=None, reduction='mean', weights=None) -> Tensor
+    r"""mse_loss(input, target, size_average=None, reduce=None, reduction='mean', weight=None) -> Tensor
 
     Measures the element-wise mean squared error, with optional weighting.
 
@@ -3849,7 +3849,7 @@ def mse_loss(
                                    'none' | 'mean' | 'sum'. 'mean': the mean of the output is taken.
                                    'sum': the output will be summed. 'none': no reduction will be applied.
                                    Default: 'mean'.
-        weights (Tensor, optional): Weights for each sample. Default: None.
+        weight (Tensor, optional): Weights for each sample. Default: None.
 
     Returns:
         Tensor: Mean Squared Error loss (optionally weighted).
@@ -3857,13 +3857,13 @@ def mse_loss(
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
             mse_loss,
-            (input, target, weights),
+            (input, target, weight),
             input,
             target,
             size_average=size_average,
             reduce=reduce,
             reduction=reduction,
-            weights=weights,
+            weight=weight,
         )
 
     if not (target.size() == input.size()):
@@ -3877,21 +3877,21 @@ def mse_loss(
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
 
-    if weights is not None:
-        if weights.size() != input.size():
+    if weight is not None:
+        if weight.size() != input.size():
             raise ValueError("Weights and input must have the same size.")
 
         # Perform weighted MSE loss manually
         expanded_input, expanded_target = torch.broadcast_tensors(input, target)
         squared_errors = torch.pow(expanded_input - expanded_target, 2)
-        weighted_squared_errors = squared_errors * weights
+        weighted_squared_errors = squared_errors * weight
 
         if reduction == "none":
             return weighted_squared_errors
         elif reduction == "sum":
             return torch.sum(weighted_squared_errors)
         elif reduction == "mean":
-            return torch.sum(weighted_squared_errors) / torch.sum(weights)
+            return torch.sum(weighted_squared_errors) / torch.sum(weight)
         else:
             raise ValueError(
                 f"Invalid reduction mode: {reduction}. Expected one of 'none', 'mean', 'sum'."
