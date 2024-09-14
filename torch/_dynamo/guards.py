@@ -79,6 +79,7 @@ from .eval_frame import set_guard_error_hook
 from .source import (
     AttrProxySource,
     AttrSource,
+    CallFunctionNoArgsSource,
     ChainedSource,
     ConstDictKeySource,
     DefaultsSource,
@@ -1093,9 +1094,16 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
-        elif isinstance(source, WeakRefCallSource):
+        elif istype(source, WeakRefCallSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.weakref_call_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, CallFunctionNoArgsSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.call_function_no_args_manager(
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
@@ -1474,12 +1482,12 @@ class GuardBuilder(GuardBuilderBase):
         )
 
         if torch.distributed.is_available():
-            from torch.distributed._tensor.placement_types import (
+            from torch.distributed.device_mesh import DeviceMesh
+            from torch.distributed.tensor.placement_types import (
                 Partial,
                 Replicate,
                 Shard,
             )
-            from torch.distributed.device_mesh import DeviceMesh
 
             ok_types = ok_types + (
                 Shard,
