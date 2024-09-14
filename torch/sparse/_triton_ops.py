@@ -793,7 +793,8 @@ def bsr_dense_addmm_meta(
             # _triton_ops_meta.py for ways to avoid this warning
             # message
             warn_once(
-                f"bsr_dense_addmm uses non-optimal triton kernel parameters for {M=} {K=} {N=} {Ms=}, {Ks=} {beta=} {alpha=} {dtype=}"
+                "bsr_dense_addmm uses non-optimal triton kernel parameters"
+                f" for {M=} {K=} {N=} {Ms=}, {Ks=} {beta=} {alpha=} {dtype=}"
             )
 
     SPLIT_N = SPLIT_N or max(N // Ms, 1)
