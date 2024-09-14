@@ -465,6 +465,8 @@ def reorder_for_peak_memory(
     resulting topological order has the lowest peak memory estimation.
     """
 
+    torch_log.info("Reordering for peak memory")
+
     @dataclasses.dataclass
     class PeakMemoryResult:
         order: List[BaseSchedulerNode]
@@ -487,6 +489,7 @@ def reorder_for_peak_memory(
         nodes, name_to_input_buf, graph_outputs
     )
     peak_memory_diff_methods.append(PeakMemoryResult(nodes, estimated_peak_memory))
+    torch_log.info("Baseline peak memory: %d", estimated_peak_memory)
 
     # lpmf based method
     order_lpmf = topological_sort_lpmf(
@@ -497,6 +500,7 @@ def reorder_for_peak_memory(
         order_lpmf, name_to_input_buf, graph_outputs
     )
     peak_memory_diff_methods.append(PeakMemoryResult(order_lpmf, peak_memory_lpmf))
+    torch_log.info("LPMF peak memory: %d", peak_memory_lpmf)
 
     # bfs based method
     order_bfs = topological_sort_bfs(nodes)
@@ -505,6 +509,7 @@ def reorder_for_peak_memory(
         order_bfs, name_to_input_buf, graph_outputs
     )
     peak_memory_diff_methods.append(PeakMemoryResult(order_bfs, peak_memory_bfs))
+    torch_log.info("BFS peak memory: %d", peak_memory_bfs)
 
     # dfs based method
     order_dfs = topological_sort_dfs(nodes)
@@ -513,6 +518,7 @@ def reorder_for_peak_memory(
         order_dfs, name_to_input_buf, graph_outputs
     )
     peak_memory_diff_methods.append(PeakMemoryResult(order_dfs, peak_memory_dfs))
+    torch_log.info("DFS peak memory: %d", peak_memory_dfs)
 
     # get the optimal one
     best_result = min(peak_memory_diff_methods, key=lambda x: x.peak_memory)
