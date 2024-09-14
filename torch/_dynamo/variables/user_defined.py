@@ -1207,13 +1207,12 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
 
         field_map = {}
         for field in fields(value):
-            try:
-                attr = getattr(value, field.name)
-            except AttributeError:
-                pass
-            else:
-                source = AttrSource(source, field.name)
-                field_map[field.name] = VariableTracker.create(tx, attr, source)
+            if hasattr(value, field.name):
+                field_map[field.name] = VariableTracker.create(
+                    tx,
+                    getattr(value, field.name),
+                    AttrSource(source, field.name)
+                )
 
         return FrozenDataClassVariable(value, fields=field_map, source=source)
 
