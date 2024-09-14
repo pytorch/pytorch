@@ -84,7 +84,7 @@ except ImportError:
 try:
     from . import testing
 except ImportError:
-    import testing
+    import testing  # @manual=fbcode//caffe2/test:test_export-library
 # The following import pattern matters as `test_export.export` is patched
 # in other files (like test_export_nonstrict.py). `torch.export.export`
 # will invalidate the patch.
@@ -509,11 +509,9 @@ graph():
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(exported_program.module()(*args), m(*args))
 
-        from torch._export import capture_pre_autograd_graph
-
-        gm: torch.fx.GraphModule = capture_pre_autograd_graph(
+        gm: torch.fx.GraphModule = torch.export.export_for_training(
             m, args=example_args, dynamic_shapes=dynamic_shapes
-        )
+        ).module()
 
         args = (torch.randn(17, 3, 256, 256), torch.ones(17, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
@@ -715,6 +713,61 @@ graph():
                 foo, bad_example_inp, dynamic_shapes=dynamic_shapes, strict=False
             )
 
+    def test_unbacked_to_cond(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                az = a.nonzero()
+
+                def true_fn(x):
+                    return (x + 1).sum()
+
+                def false_fn(x):
+                    return (x + 3).sum()
+
+                r = torch.cond(az.size(0) > 3, true_fn, false_fn, (az,))
+                return r * 2
+
+        M()(torch.randn(7))
+        torch.export.export(M(), (torch.randn(7),))
+
+    def test_unbacked_to_cond_passthrough(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                az = a.nonzero()
+
+                def true_fn(x):
+                    return x + 1
+
+                def false_fn(x):
+                    return x + 3
+
+                r = torch.cond(az.size(0) > 3, true_fn, false_fn, (az,))
+                return r * 2
+
+        M()(torch.randn(7))
+        torch.export.export(M(), (torch.randn(7),))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_cond_contains_unbacked_no_escape(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b1, b2, c):
+                def true_fn(x):
+                    return x * b1.item()
+
+                def false_fn(x):
+                    return x * b2.item()
+
+                r = torch.cond(a, true_fn, false_fn, (c,))
+                return r * 2
+
+        args = (
+            torch.tensor(True),
+            torch.tensor([4]),
+            torch.tensor([4]),
+            torch.randn(10, requires_grad=True),
+        )
+        torch.export.export(M(), args)
+
     def test_state_tensors(self):
         class M(torch.nn.Module):  # simple with register buffer
             def __init__(self) -> None:
@@ -836,6 +889,44 @@ graph():
         self.assertTrue(
             torch.allclose(ep.module()(torch.zeros(2, 3)), torch.ones(2, 3) * 21)
         )
+
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # TODO(pianpwk): user_output signature
+    def test_real_tensor_for_max_op(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                x = x[x > 0]
+                y = y[y > 0]
+                return max(x.shape[0], y.shape[0])
+
+        model = Foo()
+        inputs = (torch.randn(64), torch.randn(64))
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = export(model, inputs)
+
+        self.assertEqual(ep.module()(*inputs), model(*inputs))
+        x = torch.zeros(64)
+        y = torch.ones(64)
+        self.assertEqual(ep.module()(x, x), model(x, x))
+        self.assertEqual(ep.module()(x, y), model(x, y))
+
+    def test_export_script_module(self):
+        class Foo(torch.nn.Module):
+            def forward(self, rv: torch.Tensor, t: torch.Tensor):
+                i = t.item()
+                return rv + i
+
+        foo = Foo()
+        foo_script = torch.jit.script(foo)
+        inp = (torch.zeros(3, 4), torch.tensor(7))
+
+        with self.assertRaisesRegex(
+            ValueError, "Exporting a ScriptModule is not supported"
+        ):
+            export(foo_script, inp)
+
+        from torch._export.converter import TS2EPConverter
+
+        TS2EPConverter(foo_script, inp).convert()
 
     def test_torch_fn(self):
         class M1(torch.nn.Module):
@@ -2416,6 +2507,36 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 strict=strict,
             )
 
+        class Box:
+            def __init__(self, content):
+                self.content = content
+
+        from torch.utils._pytree import register_pytree_node
+
+        register_pytree_node(
+            Box,
+            lambda box: ([box.content], None),  # flatten_fn
+            lambda contents, _context: Box(*contents),  # unflatten_fn
+            flatten_with_keys_fn=None,  # unflatten_fn
+            serialized_type_name="test_no_suggested_fixes_for_data_dependent_errors.Box",
+        )
+
+        class cf_stacklist_udd(torch.nn.Module):
+            def forward(self, xs, y):
+                box = Box(y.item())
+                # box.content is not a local, so we can't suggest a fix
+                return torch.stack(xs, 0).narrow(0, box.content, 1).squeeze()
+
+        with self.assertRaisesRegex(
+            error_type,
+            "Could not guard on data-dependent expression u0 < 0",
+        ):
+            export(
+                cf_stacklist_udd(),
+                ([torch.ones(5) * i for i in range(10)], torch.tensor(2)),
+                strict=strict,
+            )
+
     def test_tolist(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -2517,37 +2638,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             em.module()(x)
 
-    def test_mark_and_auto_dynamic(self):
-        # for this use case, mark_dynamic() and AUTO should have same effect.
-        # check that same symbol gets allocated to both dims without raising constraint violation.
-        AUTO, STATIC = Dim.AUTO, Dim.STATIC
-
-        class Foo(torch.nn.Module):
-            def forward(self, x, y):
-                torch._check(x.shape[0] == y.shape[0])
-                torch._check(x.shape[0] <= 64)
-                return x + 2, y + 2
-
-        inputs = (torch.randn(4, 4), torch.randn(4, 4))
-        ep_auto = torch.export.export(
-            Foo(), inputs, dynamic_shapes={"x": (AUTO, None), "y": (AUTO, None)}
-        )
-        torch._dynamo.mark_dynamic(inputs[0], 0)
-        torch._dynamo.mark_dynamic(inputs[1], 0)
-        ep_dynamic = torch.export.export(Foo(), inputs)
-
-        # test both programs have same effect
-        for ep in [ep_auto, ep_dynamic]:
-            gm = ep.module()
-            gm(torch.randn(32, 4), torch.randn(32, 4))
-            gm(torch.randn(1, 4), torch.randn(1, 4))
-            with self.assertRaises(RuntimeError):
-                gm(torch.randn(33, 4), torch.randn(32, 4))
-                gm(torch.randn(128, 4), torch.randn(128, 4))
-
     def test_dont_duck_size_for_auto_dynamic(self):
-        # for this use case, mark_dynamic() and AUTO should have same effect.
-        # check that same symbol gets allocated to both dims without raising constraint violation.
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
         class Foo(torch.nn.Module):
@@ -6239,7 +6330,6 @@ def forward(self, x):
         real_names_and_ops = [(node.name, node.op) for node in ep.graph.nodes]
         self.assertEqual(expected_names_and_ops, real_names_and_ops)
 
-    @testing.expectedFailureRetraceability
     def test_placeholder_naming_collisions_hoo_subgraphs(self):
         # test collisions between user inputs, top-level nodes, and HOO subgraph nodes
         class Foo(torch.nn.Module):
@@ -6295,11 +6385,7 @@ def forward(self, x):
         # (please never do this)
         class Foo(torch.nn.Module):
             def forward(self, input, true_graph, body_graph):
-                def map_body(x, y):
-                    return x + y
-
-                x = map(map_body, input, body_graph[0])
-                x = x + true_graph[0] + true_graph[1]
+                x = input + true_graph[0] + true_graph[1]
                 x = cond(x.sum() > 0, lambda x: x * 2.0, lambda x: x + 2.0, [x])
                 x = cond(x.sum() > 0, lambda x: x * 2.0, lambda x: x + 2.0, [x])
                 return x
@@ -6311,7 +6397,6 @@ def forward(self, x):
         )
         ep = export(Foo(), inputs)
         expected_getattr_names = [
-            "body_graph_1",
             "true_graph_2",
             "false_graph_0",
             "true_graph_3",
@@ -6920,6 +7005,26 @@ def forward(self, x, y):
         for node in const_gm.graph.nodes:
             if node.op == "call_function":
                 self.assertTrue(False)
+
+    @testing.expectedFailureTrainingIRToRunDecomp  # T200904004
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    def test_istft_op(self):
+        class istft_class(torch.nn.Module):
+            def forward(self, spec):
+                window = torch.hann_window(1024).type(torch.FloatTensor)
+                return torch.istft(
+                    spec,
+                    n_fft=1024,
+                    hop_length=512,
+                    window=window,
+                    length=144000,
+                )
+
+        model = istft_class()
+        real_part = torch.randn(1, 513, 282, dtype=torch.float32)
+        imaginary_part = torch.randn(1, 513, 282, dtype=torch.float32)
+        spec = torch.complex(real_part, imaginary_part)
+        export(model, (spec,))
 
     def test_automatic_dynamic_shapes_simple_equality(self):
         # The next 3 test cases tests for automatic dynamic shapes specs, verifying that automatic dynamism

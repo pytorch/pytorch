@@ -1,6 +1,8 @@
 # Owner(s): ["oncall: cpu inductor"]
 import contextlib
 import functools
+import logging
+import os
 import sys
 import unittest
 from typing import Optional
@@ -22,15 +24,23 @@ from torch.testing._internal.common_quantization import _generate_qdq_quantized_
 from torch.testing._internal.common_quantized import (
     _calculate_dynamic_per_channel_qparams,
 )
-from torch.testing._internal.common_utils import IS_MACOS, parametrize, TEST_MKL
+from torch.testing._internal.common_utils import (
+    IS_MACOS,
+    parametrize,
+    skipIfWindows,
+    TEST_MKL,
+)
+
+
+log = logging.getLogger(__name__)
 
 
 try:
     try:
         from . import test_cpu_repro, test_torchinductor
     except ImportError:
-        import test_cpu_repro
-        import test_torchinductor
+        import test_cpu_repro  # @manual=fbcode//caffe2/test/inductor:test_cpu_repro-library
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -264,6 +274,19 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             def forward(self, x):
                 return self.epilogue(self.linear(x))
 
+        # TODO: debug utils, safe to remove in Oct 2024
+        if inductor_config.is_fbcode():
+            log.warning(
+                f"DEBUG: torch.backends.mkl.is_available() is {torch.backends.mkl.is_available()}, "  # noqa: G004
+                f"torch.ops.mkldnn._is_mkldnn_fp16_supported() is {torch.ops.mkldnn._is_mkldnn_fp16_supported()}, "
+                f"torch.ops.mkldnn._is_mkldnn_bf16_supported() is {torch.ops.mkldnn._is_mkldnn_bf16_supported()}, "
+                f"inductor_config.freezing is {inductor_config.freezing}, "
+                f"mkldnn._is_mkldnn_acl_supported() is {torch.ops.mkldnn._is_mkldnn_acl_supported()}, "
+                f"torch._C.has_mkl is {torch._C.has_mkl}, "
+                f"PYTORCH_TEST_FBCODE is {os.getenv('PYTORCH_TEST_FBCODE')}, "
+                f"PYTORCH_TEST_REMOTE_GPU is {os.getenv('PYTORCH_TEST_REMOTE_GPU')}, "
+            )
+
         counters.clear()
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
         u = torch.randn(batch_size, out_features).to(dtype=dtype)
@@ -450,6 +473,77 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (8,))
+    @parametrize("in_features", (3,))
+    @parametrize("linear_in_features", (384,))
+    @parametrize("out_features", (196,))
+    @parametrize("bias", (True,))
+    @dtypes(torch.float)
+    def test_linear_with_input_of_flexible_layout(
+        self, batch_size, in_features, linear_in_features, out_features, bias, dtype
+    ):
+        # Reproducer from the resmlp_12_224 model in timm
+        flatten_BS = int(batch_size * linear_in_features)
+
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_features,
+                    linear_in_features,
+                    kernel_size=16,
+                    padding=0,
+                    stride=16,
+                    dilation=1,
+                    groups=1,
+                )
+                self._frozen_param151 = torch.randn(1, 1, linear_in_features)
+                self._frozen_param3 = torch.randn(1, 1, linear_in_features)
+                self._frozen_param2 = torch.randn(linear_in_features)
+
+                self.linear = torch.nn.Linear(out_features, out_features, bias)
+
+            def forward(self, arg150_1):
+                _convolution_pointwise_default = self.conv(arg150_1)
+                view_73 = torch.ops.aten.reshape.default(
+                    _convolution_pointwise_default,
+                    [batch_size, linear_in_features, out_features],
+                )
+                _convolution_pointwise_default = None
+                permute_62 = torch.ops.aten.permute.default(view_73, [0, 2, 1])
+                view_73 = None
+                mul_111 = torch.ops.aten.mul.Tensor(self._frozen_param151, permute_62)
+                add_73 = torch.ops.aten.add.Tensor(self._frozen_param3, mul_111)
+                permute_63 = torch.ops.aten.permute.default(add_73, [0, 2, 1])
+                add_73 = None
+                view_74 = torch.ops.aten.reshape.default(
+                    permute_63, [flatten_BS, out_features]
+                )
+                permute_63 = None
+                _mkl_linear_36 = self.linear(view_74)
+                view_75 = torch.ops.aten.reshape.default(
+                    _mkl_linear_36, [batch_size, linear_in_features, out_features]
+                )
+                _mkl_linear_36 = None
+                permute_65 = torch.ops.aten.permute.default(view_75, [0, 2, 1])
+                view_75 = None
+                mul_112 = torch.ops.aten.mul.Tensor(self._frozen_param2, permute_65)
+                _frozen_param2 = permute_65 = None
+                add_74 = torch.ops.aten.add.Tensor(permute_62, mul_112)
+                permute_62 = mul_112 = None
+                return add_74
+
+        v = torch.randn(batch_size, in_features, 224, 224).to(dtype=dtype)
+        mod = M(bias=bias).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("batch_size", (384,))
     @parametrize("in_features", (196,))
     @parametrize("out_features", (384, 385))
@@ -489,6 +583,40 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (384,))
+    @parametrize("in_features", (196,))
+    @parametrize("out_features", (384,))
+    @parametrize("bias", (True, False))
+    @parametrize(
+        "binary",
+        ("add",),
+    )
+    @dtypes(torch.float, torch.bfloat16, torch.half)
+    def test_linear_with_binary_input_3d(
+        self, batch_size, in_features, out_features, bias, binary, dtype
+    ):
+        class M(torch.nn.Module):
+            def __init__(self, bias, binary, other):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.binary = _get_epilogue(binary, other)
+
+            def forward(self, x):
+                return self.binary(self.linear(x))
+
+        counters.clear()
+        B = (2, batch_size)
+        v = torch.randn(*B, in_features).to(dtype=dtype)
+        u = torch.randn(*B, out_features).to(dtype=dtype)
+        mod = M(bias=bias, binary=binary, other=u).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1003,6 +1131,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             "gelu",
         ),
     )
+    @skipIfWindows(msg="Windows don't support quantize.")
     def test_quantized_linear_with_pointwise(
         self, batch_size, in_features, out_features, bias, input_3d, dtype, epilogue
     ):
@@ -1120,6 +1249,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             "relu",
         ),
     )
+    @skipIfWindows(msg="Windows don't support quantize.")
     def test_quantized_linear_with_pointwise_binary(
         self,
         batch_size,
@@ -1200,6 +1330,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("in_features", (4, 68, 128))  # k should be a multiple of 4
     @parametrize("out_features", (64, 65))
     @parametrize("bias", (True, False))
+    @skipIfWindows(msg="Windows don't support quantize.")
     def test_quantized_linear_amx(self, batch_size, in_features, out_features, bias):
         class M(torch.nn.Module):
             def __init__(self, bias):
@@ -1347,6 +1478,13 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     )
     test_quantized_linear_amx_dynamic_shapes = (
         TestSelectAlgorithm.test_quantized_linear_amx
+    )
+    test_linear_k_slicing_dynamic_shapes = TestSelectAlgorithm.test_linear_k_slicing
+    test_linear_cache_blocking_dynamic_shapes = (
+        TestSelectAlgorithm.test_linear_cache_blocking
+    )
+    test_linear_thread_factors_dynamic_shapes = (
+        TestSelectAlgorithm.test_linear_thread_factors
     )
 
 

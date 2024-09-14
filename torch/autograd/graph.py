@@ -108,6 +108,13 @@ class Node(abc.ABC):
             See :ref:`backward-hooks-execution` for more information on how when this hook
             is executed, and how its execution is ordered relative to other hooks.
 
+        .. note::
+            In the rare case where the hook is registered while the Node has already
+            begun execution, there is no longer any guarantee on :attr:`grad_outputs`
+            content (it might be as usual or empty depending on other factors). The
+            hook can still optionally return a new gradient to be used in place of
+            :attr:`grad_inputs` independent of :attr:`grad_outputs`.
+
         Example::
 
             >>> import torch
@@ -815,9 +822,10 @@ def _engine_run_backward(
     if attach_logging_hooks:
         unregister_hooks = _register_logging_hooks_on_whole_graph(t_outputs)
     try:
-        return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
-            t_outputs, *args, **kwargs
-        )  # Calls into the C++ engine to run the backward pass
+        with torch._dynamo.compiled_autograd.maybe_disable_compiled_autograd():
+            return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+                t_outputs, *args, **kwargs
+            )  # Calls into the C++ engine to run the backward pass
     finally:
         if attach_logging_hooks:
             unregister_hooks()  # type: ignore[possibly-undefined]
