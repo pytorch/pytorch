@@ -125,6 +125,12 @@ class ContextWrappingVariable(VariableTracker):
         if isinstance(args[0], UserFunctionVariable):
             return WrappedUserFunctionVariable(args[0], self)
 
+    def supports_graph_breaks(self):
+        return True
+
+    def exit_on_graph_break(self):
+        return True
+
 
 class GenericContextWrappingVariable(UserDefinedObjectVariable):
     # Some methods in ContextWrappingVariable assumes the arguments are
@@ -182,6 +188,12 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
 
         tx.generic_context_manager_depth -= 1
         return x
+
+    def supports_graph_breaks(self):
+        return False
+
+    def exit_on_graph_break(self):
+        return True
 
 
 class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
@@ -637,6 +649,8 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
 
     def _call_func(self, tx: "InstructionTranslator", values):
         assert len(values) == 1
+        tx.symbolic_torch_function_state.torch_function_subclass_enabled = values[0]
+        tx.symbolic_torch_function_state.torch_function_mode_enabled = values[0]
         tx.output.set_torch_function_state(values[0])
 
 
