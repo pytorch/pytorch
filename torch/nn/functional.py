@@ -3761,7 +3761,7 @@ def huber_loss(
         elif reduction == "sum":
             return torch.sum(weighted_loss)
         elif reduction == "mean":
-            return torch.sum(weighted_loss) / torch.sum(weight)
+            return weighted_loss.mean()
         else:
             raise ValueError(
                 f"Invalid reduction mode: {reduction}. Expected one of 'none', 'mean', 'sum'."
