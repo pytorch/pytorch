@@ -17,6 +17,24 @@ from .multi_kernel import MultiKernel
 log = logging.getLogger(__name__)
 
 
+def _print_debugging_tensor_value_info(msg, arg):
+    # helper for printing debugging stats for intermediate tensor values
+    # at jit inductor level codegen
+    max_numel_to_print = 64
+    print(msg)
+    numel = arg.float().numel()
+    # print the debug printing stats
+    if numel <= max_numel_to_print:
+        print(arg)
+    print("Number of elements: ", numel)
+    print("Size: ", arg.float().size())
+    print("Dtype: ", arg.float().mean().item())
+    print("Mean: ", arg.float().mean().item())
+    print("Min: ", arg.float().min().item())
+    print("Max: ", arg.float().max().item())
+    print("Std: ", arg.float().std().item())
+
+
 # AOTI debug printing related configs
 class IntermediateValueDebuggingLevel(Enum):
     # OFF: No intermediate tensor value debug info will be printed or saved.
@@ -102,6 +120,7 @@ class DebugPrinterManager:
         kernel_name: str,
         arg_signatures: Optional[List[type]],
         kernel,
+        kernel_type=None,
     ):
         # Note: MultiKernel debug printing is not supported for now
         if isinstance(kernel, MultiKernel):
@@ -109,7 +128,17 @@ class DebugPrinterManager:
                 "MultiKernel type is not supported in AOTI debug printer tool yet."
             )
             self.debug_printer_level = IntermediateValueDebuggingLevel.OFF
-        self.args_to_print_or_save = args_to_print_or_save
+
+        # Note: if the kernel type is an extern kernel, we do a special handling to get the list of args_to_print_or_save
+        # TODO: Find a more reliable way to detect kernel args types to print for extern kernel calls
+        if kernel_type == "extern":
+            args_to_print_or_save_extern = []
+            for arg in args_to_print_or_save:
+                if arg.startswith(("buf", "arg")):
+                    args_to_print_or_save_extern.append(arg)
+            self.args_to_print_or_save = args_to_print_or_save_extern
+        else:
+            self.args_to_print_or_save = args_to_print_or_save
         self.kernel_name = kernel_name
         self.arg_signatures = arg_signatures
         self.kernel = kernel
@@ -187,7 +216,6 @@ class DebugPrinterManager:
                     # TODO: add non-abi compatible mode debug printing info
                     pass
             else:
-                line = (
-                    f"print('inductor: {launch_prefix} - {kernel_name} - {arg}', {arg})"
+                V.graph.wrapper_code.writeline(
+                    f'_print_debugging_tensor_value_info("inductor: {launch_prefix} - {kernel_name} - {arg}", {arg})'
                 )
-                V.graph.wrapper_code.writeline(line)

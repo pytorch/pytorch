@@ -89,6 +89,8 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.autograd.graph.disable_saved_tensors_hooks,
         torch.cpu.amp.autocast_mode.autocast,
         torch.cuda.amp.autocast_mode.autocast,
+        torch.nn.attention.sdpa_kernel,
+        torch.nn.attention._sdpa_kernel_variadic,
     ]
 )
 
@@ -229,6 +231,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             GradModeVariable,
             InferenceModeVariable,
             JvpIncrementNestingCtxManagerVariable,
+            SDPAKernelVariable,
             SetFwdGradEnabledContextManager,
             StreamVariable,
             VmapIncrementNestingCtxManagerVariable,
@@ -328,6 +331,14 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             assert len(args) == 2
             return FSDPParamGroupUseTrainingStateVariable.create(
                 tx, args[0], args[1].as_python_constant()
+            )
+        elif self.value is torch.nn.attention.sdpa_kernel:
+            assert len(args) == 1 or (len(kwargs) == 1 and "backends" in kwargs)
+            backends = args[0] if len(args) == 1 else kwargs["backends"]
+            return SDPAKernelVariable.create(tx, backends.as_python_constant())
+        elif self.value is torch.nn.attention._sdpa_kernel_variadic:
+            return SDPAKernelVariable.create(
+                tx, [arg.as_python_constant() for arg in args]
             )
 
         return super().call_function(tx, args, kwargs)
@@ -445,6 +456,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             elif isinstance(input, TensorVariable):
                 # Workaround dynamic shapes issue
                 return input.call_method(tx, "numel", [], {})
+
+        @register(torch.compile)
+        def handle_torch_compile(self, tx: "InstructionTranslator", *args, **kwargs):
+            if len(args) == 1:
+                # torch.compile is a no-op in dynamo
+                return args[0]
+
+            unimplemented("torch.compile is used as a decorator in the compiled frame")
 
         @register(*REWRITE_OPS_TO_TENSOR_SIZE_METHOD)
         def handle_tensor_size_rewrites(self, tx: "InstructionTranslator", input):

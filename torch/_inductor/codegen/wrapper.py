@@ -545,6 +545,9 @@ class WrapperCodeGen(CodeGen):
         aot_config_comment = ""
         if context is not None and context.aot_graph_name is not None:
             aot_config_comment = f"# AOT ID: {context.aot_graph_name}"
+        aot_inductor_debug_utils = ""
+        if int(config.aot_inductor.debug_intermediate_value_printer) > 0:
+            aot_inductor_debug_utils = "from torch._inductor.codegen.debug_utils import _print_debugging_tensor_value_info"
         self.imports.splice(
             f"""
                 {aot_config_comment}
@@ -562,6 +565,7 @@ class WrapperCodeGen(CodeGen):
                 from {async_compile.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
                 from torch._inductor.codegen.multi_kernel import MultiKernelCall
+                {aot_inductor_debug_utils}
             """,
             strip=True,
         )
@@ -787,8 +791,12 @@ class WrapperCodeGen(CodeGen):
     def generate_extern_kernel_out(
         self, kernel: str, out: str, out_view: Optional[str], args: List[str]
     ):
+        # add debug printer code for triton kernel calls at (jit) inductor level
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
         args.append(f"out={out_view if out_view else out}")
-        self.writeline(f"{kernel}({', '.join(args)})")
+        with debug_printer_manager:
+            self.writeline(f"{kernel}({', '.join(args)})")
 
     def generate_user_defined_triton_kernel(
         self,
@@ -1270,15 +1278,15 @@ class WrapperCodeGen(CodeGen):
         from .common import KernelArgType, SizeArg, TensorArg
 
         signature: List[KernelArgType] = []
-        constants: Dict[int, Any] = {}
+        constants: Dict[str, Any] = {}
         non_constant_indices = []
-        equal_to_1_arg_idx: List[int] = []
+        equal_to_1_args: List[str] = []
         for idx, key in enumerate(kernel.arg_names):
             if key not in kwargs:
                 continue
             arg = kwargs[key]
             if idx in kernel.constexprs:
-                constants[idx] = arg
+                constants[key] = arg
             else:
                 non_constant_indices.append(idx)
                 if isinstance(arg, ir.Buffer):
@@ -1308,13 +1316,14 @@ class WrapperCodeGen(CodeGen):
                     ) and V.graph.sizevars.statically_known_equals(
                         arg, 1  # type: ignore[arg-type]
                     ):
-                        equal_to_1_arg_idx.append(idx)
+                        equal_to_1_args.append(key)
         index_dtype = "tl.int32"
         triton_meta = {
             "signature": signature_to_meta(
                 signature,
                 size_dtype=index_dtype,
                 indices=non_constant_indices,
+                argdefs=kernel.arg_names,
             ),
             "device": DeviceProperties.create(
                 V.graph.scheduler.get_current_device_or_throw()
@@ -1328,7 +1337,7 @@ class WrapperCodeGen(CodeGen):
             # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
             "constants": {
                 **constants,
-                **dict.fromkeys(equal_to_1_arg_idx, 1),
+                **dict.fromkeys(equal_to_1_args, 1),
             },
             "configs": [
                 config_of(

@@ -84,7 +84,7 @@ except ImportError:
 try:
     from . import testing
 except ImportError:
-    import testing
+    import testing  # @manual=fbcode//caffe2/test:test_export-library
 # The following import pattern matters as `test_export.export` is patched
 # in other files (like test_export_nonstrict.py). `torch.export.export`
 # will invalidate the patch.
@@ -889,6 +889,25 @@ graph():
         self.assertTrue(
             torch.allclose(ep.module()(torch.zeros(2, 3)), torch.ones(2, 3) * 21)
         )
+
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # TODO(pianpwk): user_output signature
+    def test_real_tensor_for_max_op(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                x = x[x > 0]
+                y = y[y > 0]
+                return max(x.shape[0], y.shape[0])
+
+        model = Foo()
+        inputs = (torch.randn(64), torch.randn(64))
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = export(model, inputs)
+
+        self.assertEqual(ep.module()(*inputs), model(*inputs))
+        x = torch.zeros(64)
+        y = torch.ones(64)
+        self.assertEqual(ep.module()(x, x), model(x, x))
+        self.assertEqual(ep.module()(x, y), model(x, y))
 
     def test_export_script_module(self):
         class Foo(torch.nn.Module):
@@ -2619,37 +2638,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             em.module()(x)
 
-    def test_mark_and_auto_dynamic(self):
-        # for this use case, mark_dynamic() and AUTO should have same effect.
-        # check that same symbol gets allocated to both dims without raising constraint violation.
-        AUTO, STATIC = Dim.AUTO, Dim.STATIC
-
-        class Foo(torch.nn.Module):
-            def forward(self, x, y):
-                torch._check(x.shape[0] == y.shape[0])
-                torch._check(x.shape[0] <= 64)
-                return x + 2, y + 2
-
-        inputs = (torch.randn(4, 4), torch.randn(4, 4))
-        ep_auto = torch.export.export(
-            Foo(), inputs, dynamic_shapes={"x": (AUTO, None), "y": (AUTO, None)}
-        )
-        torch._dynamo.mark_dynamic(inputs[0], 0)
-        torch._dynamo.mark_dynamic(inputs[1], 0)
-        ep_dynamic = torch.export.export(Foo(), inputs)
-
-        # test both programs have same effect
-        for ep in [ep_auto, ep_dynamic]:
-            gm = ep.module()
-            gm(torch.randn(32, 4), torch.randn(32, 4))
-            gm(torch.randn(1, 4), torch.randn(1, 4))
-            with self.assertRaises(RuntimeError):
-                gm(torch.randn(33, 4), torch.randn(32, 4))
-                gm(torch.randn(128, 4), torch.randn(128, 4))
-
     def test_dont_duck_size_for_auto_dynamic(self):
-        # for this use case, mark_dynamic() and AUTO should have same effect.
-        # check that same symbol gets allocated to both dims without raising constraint violation.
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
         class Foo(torch.nn.Module):
