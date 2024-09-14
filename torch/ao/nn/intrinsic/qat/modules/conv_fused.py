@@ -33,7 +33,7 @@ _BN_CLASS_MAP = {
 }
 
 
-class _ConvBnNd(nn.modules.conv.oop, nni._FusedModule):
+class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
     _version = 2
     _FLOAT_MODULE: ClassVar[Type[nn.modules.conv._ConvNd]]
 

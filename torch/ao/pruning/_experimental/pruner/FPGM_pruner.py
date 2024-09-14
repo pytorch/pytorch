@@ -75,7 +75,7 @@ class FPGMPruner(BaseStructuredSparsifier):
 
         return distance
 
-    def update_mask(  # type: ignore[overrideo]
+    def update_mask(  # type: ignore[override]
         self, module, tensor_name, sparsity_level, **kwargs
     ):
         tensor_weight = getattr(module, tensor_name)

@@ -582,18 +582,18 @@ def extract_read_writes(
         for entry in fn.memory_usage[MemoryUsageType.LOAD_SEED]:
             inner.load_seed(entry.buffer_name, int(name_to_index[entry.index_name]))  # type: ignore[arg-type]
         for entry in fn.memory_usage[MemoryUsageType.STORE]:
-            inner.store(  # type: ignore[arg-type]
-                entry.buffer_name, name_to_index[entry.index_name], None, entry.mode
+            inner.store(
+                entry.buffer_name, name_to_index[entry.index_name], None, entry.mode  # type: ignore[arg-type]
             )
         for entry in fn.memory_usage[MemoryUsageType.STORE_REDUCTION]:
-            inner.store_reduction(  # type: ignore[arg-type]
-                entry.buffer_name, name_to_index[entry.index_name], None
+            inner.store_reduction(
+                entry.buffer_name, name_to_index[entry.index_name], None  # type: ignore[arg-type]
             )
         for entry in fn.memory_usage[MemoryUsageType.INDEX_EXPR]:
             inner.index_expr(name_to_index[entry.index_name], None)
         for entry in fn.memory_usage[MemoryUsageType.BUCKETIZE]:
-            inner.bucketize(  # type: ignore[arg-type]
-                None, entry.buffer_name, name_to_index[entry.index_name], None, None
+            inner.bucketize(
+                None, entry.buffer_name, name_to_index[entry.index_name], None, None   # type: ignore[arg-type]
             )
         # fn.memory_usage[MemoryUsageType.CHECK_BOUNDS] intentionally skipped
     else:
