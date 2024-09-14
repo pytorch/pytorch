@@ -3294,6 +3294,7 @@ class Scheduler:
                 and n not in V.kernel.args.input_buffers
                 and n not in self.mutation_renames
                 and n not in self.mutation_real_name
+                and n != 'buf0'
             )
 
         names_to_remove = list(filter(remove_filter, names_to_remove))

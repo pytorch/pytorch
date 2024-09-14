@@ -667,6 +667,7 @@ class Scatter(Pointwise):
         )
 
     def store_output(self, output_name, indexer, vars):
+        # breakpoint()
         loader = self.make_loader()
         return ops.store(
             output_name,

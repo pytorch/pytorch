@@ -126,6 +126,8 @@ def build_subgraph_buffer(
                     return None
                 output_node = output
                 output_buffer = env[output_node]
+                if torch._inductor.ir.is_storage_and_layout(output_buffer):
+                    return output_buffer
                 assert isinstance(output_buffer, TensorBox), (
                     "The output node  for flex attention's subgraph must be a TensorBox, but got: ",
                     type(output_buffer),
@@ -1705,10 +1707,14 @@ def flex_attention_backward(*args, **kwargs):
     joint_placeholder_inps = fwd_placeholder_inps + [
         create_placeholder("grad_score_mod", dtype, device)
     ]
-    joint_subgraph_buffer, *_ = build_subgraph_buffer(
+    joint_subgraph_buffer, *outs = build_subgraph_buffer(
         joint_placeholder_inps + list(score_mod_other_buffers), joint_graph
     )
-
+    grad_outs = outs[4:]
+    joint_subgraph_buffer = V.graph.buffers.pop()
+    V.graph.operations.pop()
+    
+    
     mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
         for name, dtype in [
@@ -1882,4 +1888,5 @@ def flex_attention_backward(*args, **kwargs):
         grad_query,
         grad_key,
         grad_value,
+        grad_outs,
     )

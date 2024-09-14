@@ -671,6 +671,8 @@ class SIMDKernel(Kernel):
         self,
         index: sympy.Expr,
     ):
+        if isinstance(index, tuple):
+            breakpoint()
         index = self.simplify_indexing(index)
         index = sympy_subs(index, V.graph.sizevars.precomputed_replacements)
         # if simple replacements didn't get rid of floor/ceil, try full subs

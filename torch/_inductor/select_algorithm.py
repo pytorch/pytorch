@@ -346,7 +346,7 @@ class TritonTemplateKernel(TritonKernel):
             return ", ".join([texpr(self.rename_indexing(i)) for i in val])
 
     def modification(
-        self, subgraph_number: int, output_name: str, **fixed_inputs
+        self, subgraph_number: int, output_name: str, mask_loads=None, **fixed_inputs
     ) -> str:
         """This creates a modification function for a subgraph.
         To use this inside a template, the first argument should specify which subgraph to codegen for
@@ -373,6 +373,7 @@ class TritonTemplateKernel(TritonKernel):
                 return self.args.input(name)
 
             name = f"PlaceholderSubstitution_{subgraph_number}"
+            outer_self = self
 
             class PlaceholderSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
                 self.name = name
@@ -382,22 +383,36 @@ class TritonTemplateKernel(TritonKernel):
                         # If it's not a fixed input, it's a load from a captured
                         # tensor
                         var = add_input(name)
-                        return f"tl.load({var} + {index})"
+                        if mask_loads is None:
+                            return f"tl.load({var} + {index})"
+                        else:
+                            return f"tl.load({var} + {index}, mask={mask_loads})"
 
                     return f"({fixed_inputs[name]})"
 
                 def indirect_indexing(self, index_var, size, check, wrap_neg=True):
+                    # var = self.cse.generate(self.body, str(index_var))
+                    # return var
                     return sympy_index_symbol(str(index_var))
+                
+                def store(self, name, index, value, mode):
+                    print("storing")
+                    add_input(name)
+                    return self._inner.store(name, index, value, mode)
 
             with V.set_ops_handler(PlaceholderSubstitution(V.ops)):
                 assert isinstance(
                     subgraph, ir.ComputedBuffer
                 ), f"Expected the subgraph to be a ComputedBuffer, got {type(subgraph)}"
+                if "Scatter" in str(subgraph):
+                    subgraph.data.store_output('buf0', lambda x: x[0], [])
                 if isinstance(subgraph.data, ir.InputBuffer):
                     out = subgraph.data.make_loader()(())
                 else:
                     out = subgraph.data.inner_fn(())
 
+            if "Scatter" in str(subgraph):
+                print(self.stores)
             self.codegen_body()
             self.body.writeline(f"{output_name} = {out.value}")
 
@@ -708,7 +723,7 @@ class TritonTemplate(KernelTemplate):
             input_call_args,
             expected_input_args,
         )
-        assert output_call_args == expected_output_args, (
+        assert output_call_args[:len(expected_output_args)] == expected_output_args, (
             output_call_args,
             expected_output_args,
         )
