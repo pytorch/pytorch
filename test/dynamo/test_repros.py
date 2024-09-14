@@ -14,6 +14,7 @@ import inspect
 import itertools
 import os
 import random
+import sys
 import unittest
 import warnings
 import weakref
@@ -4546,6 +4547,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f(*args)
         self.assertEqual(num_compiles, 1)
 
+    @unittest.skipIf(sys.version_info < (3, 9), "requires python 3.9+")
     def test_issue134451(self):
         class BoundingBox2DIndex(IntEnum):
             _X = 0
