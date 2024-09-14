@@ -303,7 +303,7 @@ class FunctionalTensor(torch.Tensor):
     long = _conversion_method_template(dtype=torch.int64)
 
     # TODO(sparse-team): fixes #133174 but can we do without the relay?
-    def to_dense(self):
+    def to_dense(self):  # type: ignore[override]
         return self.elem.to_dense()
 
     @property

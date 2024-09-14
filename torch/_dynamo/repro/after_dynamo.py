@@ -8,7 +8,7 @@ import shutil
 import sys
 import textwrap
 from importlib import import_module
-from typing import List, Union
+from typing import Union
 
 import torch
 import torch.fx as fx
@@ -274,7 +274,7 @@ def dump_to_minify_after_dynamo(gm, args, compiler_name):
 
 @register_debug_backend  # type: ignore[arg-type]
 def dynamo_minifier_backend(
-    gm: fx.GraphModule, example_inputs: List[torch.Tensor], compiler_name: CompiledFn
+    gm: fx.GraphModule, example_inputs, compiler_name: CompiledFn
 ):
     from functorch.compile import minifier
 
@@ -315,9 +315,7 @@ def dynamo_minifier_backend(
 
 
 @register_debug_backend  # type: ignore[arg-type]
-def dynamo_accuracy_minifier_backend(
-    gm: fx.GraphModule, example_inputs: List[torch.Tensor], compiler_name: CompiledFn
-):
+def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
     from functorch.compile import minifier
 
     compiler_fn = lookup_backend(compiler_name)

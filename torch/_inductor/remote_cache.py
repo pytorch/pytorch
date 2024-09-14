@@ -101,7 +101,7 @@ class RemoteCache(Generic[_T]):
         self._put(key, value, sample)
         self._log_sample(sample)
 
-    def _decode(self, data: _U, sample: Optional[Sample]) -> _T:
+    def _decode(self, data: _U, sample: Optional[Sample]) -> _T:  # type: ignore[override]
         return self.serde.decode(data)
 
     def _encode(self, value: _T, sample: Optional[Sample]) -> Any:  # returns _U

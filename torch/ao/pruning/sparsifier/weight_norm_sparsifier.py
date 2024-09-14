@@ -208,7 +208,7 @@ class WeightNormSparsifier(BaseSparsifier):
         mask.data = mask_reshape.squeeze().reshape(mask.shape).contiguous()
         return mask
 
-    def update_mask(
+    def update_mask(  # type: ignore[call-override, override]
         self,
         module,
         tensor_name,
@@ -216,7 +216,7 @@ class WeightNormSparsifier(BaseSparsifier):
         sparse_block_shape,
         zeros_per_block,
         **kwargs,
-    ):  # type: ignore[call-override, override]
+    ):
         values_per_block = reduce(operator.mul, sparse_block_shape)
         if zeros_per_block > values_per_block:
             raise ValueError(

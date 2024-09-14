@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Tuple, TypeVar, Union
+from typing import ClassVar, Tuple, Type, TypeVar, Union
 
 import torch
 import torch.nn as nn
@@ -136,8 +136,8 @@ class Conv1d(_ConvNd, nn.Conv1d):
     Attributes:
         weight_fake_quant: fake quant module for weight
     """
-    _FLOAT_MODULE = nn.Conv1d
-    _FLOAT_CONV_MODULE = nn.Conv1d
+    _FLOAT_MODULE: ClassVar[Type[nn.Conv1d]] = nn.Conv1d
+    _FLOAT_CONV_MODULE: ClassVar[Type[nn.Conv1d]] = nn.Conv1d
 
     def __init__(
         self,
@@ -197,8 +197,8 @@ class Conv2d(_ConvNd, nn.Conv2d):
     Attributes:
         weight_fake_quant: fake quant module for weight
     """
-    _FLOAT_MODULE = nn.Conv2d
-    _FLOAT_CONV_MODULE = nn.Conv2d
+    _FLOAT_MODULE: ClassVar[Type[nn.Conv2d]] = nn.Conv2d
+    _FLOAT_CONV_MODULE: ClassVar[Type[nn.Conv2d]] = nn.Conv2d
 
     def __init__(
         self,
@@ -261,8 +261,8 @@ class Conv3d(_ConvNd, nn.Conv3d):
     Attributes:
         weight_fake_quant: fake quant module for weight
     """
-    _FLOAT_MODULE = nn.Conv3d
-    _FLOAT_CONV_MODULE = nn.Conv3d
+    _FLOAT_MODULE: ClassVar[Type[nn.Conv3d]] = nn.Conv3d
+    _FLOAT_CONV_MODULE: ClassVar[Type[nn.Conv3d]] = nn.Conv3d
 
     def __init__(
         self,
