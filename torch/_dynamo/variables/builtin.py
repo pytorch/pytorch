@@ -1604,7 +1604,7 @@ class BuiltinVariable(VariableTracker):
         if seq.has_force_unpack_var_sequence(tx):
             if start is self._SENTINEL:
                 start = variables.ConstantVariable.create(0)
-            items = seq.unpack_var_sequence(tx)
+            items = seq.force_unpack_var_sequence(tx)
 
             from .builder import SourcelessBuilder
 
