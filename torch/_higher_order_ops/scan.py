@@ -192,6 +192,10 @@ class ScanOp(HigherOrderOperator):
         return super().__call__(combine_fn, init, xs, dim, reverse, additional_inputs)
 
 
+def extract_scan_args(combine_fn, init, xs, dim, reverse, additional_inputs):
+    return combine_fn, init, xs, dim, reverse, additional_inputs
+
+
 scan_op = ScanOp()
 
 

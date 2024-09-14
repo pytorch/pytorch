@@ -1132,6 +1132,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> VariableTracker:
         from torch._higher_order_ops.scan import (
             _extract_carry_and_out,
+            extract_scan_args,
             first_slice_copy,
             stack_y,
         )
@@ -1140,10 +1141,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
-        def arg_extractor(combine_fn, init, xs, dim, reverse, additional_inputs):
-            return combine_fn, init, xs, dim, reverse, additional_inputs
-
-        combine_fn, init, xs, dim, reverse, additional_inputs = arg_extractor(
+        combine_fn, init, xs, dim, reverse, additional_inputs = extract_scan_args(
             *args, **kwargs
         )
         assert isinstance(additional_inputs, variables.BaseListVariable)

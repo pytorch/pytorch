@@ -6220,7 +6220,11 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
 
 @register_lowering(scan_op)
 def scan(combine_subgraph, init, inputs, dim, reverse, additional_inputs):
-    from torch._higher_order_ops.scan import _extract_carry_and_out, stack_y
+    from torch._higher_order_ops.scan import (
+        _extract_carry_and_out,
+        extract_scan_args,
+        stack_y,
+    )
 
     num_init_leaves = len(init)
     if any(map(is_triton, [init, inputs, *additional_inputs])):
@@ -6228,9 +6232,6 @@ def scan(combine_subgraph, init, inputs, dim, reverse, additional_inputs):
         if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
-
-    def extract_scan_args(combine_subraph, init, xs, dim, reverse, additional_inputs):
-        return combine_subraph, init, xs, dim, reverse, additional_inputs
 
     def _to_out_variant_graph(
         gm: torch.fx.GraphModule,
