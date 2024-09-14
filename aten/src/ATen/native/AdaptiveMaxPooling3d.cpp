@@ -410,7 +410,7 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_cpu)
               osizeW);
         });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, kHalf,
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf,
         input.scalar_type(), "adaptive_max_pool3d_backward", [&] {
           /* get raw pointers */
           scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
