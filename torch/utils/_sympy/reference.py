@@ -460,7 +460,6 @@ class TensorReferenceAnalysis:
     @staticmethod
     def pow_by_natural(a, b):
         # NB: pow handles int x int fine
-        # import fbvscode; fbvscode.set_trace()
         return torch.ops.aten.pow.Tensor_Tensor(a, b)
 
     @staticmethod
