@@ -1,4 +1,4 @@
-aten/src/ATen/native/AdaptiveMaxPooling3d.cpp#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
