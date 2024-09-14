@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -9,9 +10,10 @@
 import json
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Dict, Union, Optional
+from typing import Dict, Optional, Union
 
-__all__ = ['EventSource', 'Event', 'NodeState', 'RdzvEvent']
+
+__all__ = ["EventSource", "Event", "NodeState", "RdzvEvent"]
 
 EventMetadataValue = Union[str, int, float, bool, None]
 
@@ -51,7 +53,7 @@ class Event:
             return data
         if isinstance(data, str):
             data_dict = json.loads(data)
-        data_dict["source"] = EventSource[data_dict["source"]]
+        data_dict["source"] = EventSource[data_dict["source"]]  # type: ignore[possibly-undefined]
         return Event(**data_dict)
 
     def serialize(self) -> str:
@@ -105,7 +107,7 @@ class RdzvEvent:
             return data
         if isinstance(data, str):
             data_dict = json.loads(data)
-        data_dict["node_state"] = NodeState[data_dict["node_state"]]
+        data_dict["node_state"] = NodeState[data_dict["node_state"]]  # type: ignore[possibly-undefined]
         return RdzvEvent(**data_dict)
 
     def serialize(self) -> str:

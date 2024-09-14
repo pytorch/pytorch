@@ -75,39 +75,18 @@ static Tensor pixel_shuffle_helper(const Tensor& self, int64_t factor, bool upsc
 
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
-
-    // Create dictionary of inputs and outputs
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
-        @{selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()};
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return output;
 }
 
 Tensor pixel_shuffle_mps(const Tensor& self, int64_t upscale_factor) {
-  if (!is_macos_13_or_newer()) {
-    TORCH_WARN_ONCE("MPS: pixel_shuffle op is supported starting from macOS 13.0. ",
-                    "Falling back on CPU. This may have performance implications.");
-
-    return at::native::pixel_shuffle_cpu(self.to("cpu"), upscale_factor).to("mps");
-  }
-
   return pixel_shuffle_helper(self, upscale_factor, /*upscale=*/true);
 }
 
 Tensor pixel_unshuffle_mps(const Tensor& self, int64_t downscale_factor) {
-  if (!is_macos_13_or_newer()) {
-    TORCH_WARN_ONCE("MPS: pixel_unshuffle op is supported starting from macOS 13.0. ",
-                    "Falling back on CPU. This may have performance implications.");
-
-    return at::native::pixel_unshuffle_cpu(self.to("cpu"), downscale_factor).to("mps");
-  }
-
   return pixel_shuffle_helper(self, downscale_factor, /*upscale=*/false);
 }
 

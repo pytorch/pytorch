@@ -41,7 +41,7 @@ class _DropoutNd : public torch::nn::Cloneable<Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Dropout ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies dropout over a 1-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Dropout to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Dropout to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::DropoutOptions` class to learn what
@@ -71,7 +71,7 @@ TORCH_MODULE(Dropout);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Dropout2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies dropout over a 2-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Dropout2d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Dropout2d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::Dropout2dOptions` class to learn what
@@ -101,7 +101,7 @@ TORCH_MODULE(Dropout2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Dropout3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies dropout over a 3-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Dropout3d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Dropout3d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::Dropout3dOptions` class to learn what
@@ -131,7 +131,7 @@ TORCH_MODULE(Dropout3d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AlphaDropout ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies Alpha Dropout over the input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.AlphaDropout to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.AlphaDropout to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::AlphaDropoutOptions` class to learn

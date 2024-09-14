@@ -14,7 +14,7 @@ Tensor sum_dim(
     const at::Tensor& self,
     int64_t dim,
     bool keepdim,
-    const optional<ScalarType> dtype) {
+    const std::optional<ScalarType> dtype) {
   TORCH_CHECK(
       self.dim() >= 1 && self.dim() <= 4,
       "Vulkan sum.dim_IntList supports 1d, 2d, 3d, 4d tensors as input!");
@@ -27,7 +27,7 @@ Tensor sum_dim(
   const vTensor& v_input = convert(input);
 
   // Create the output texture
-  std::vector<int64_t> output_size = self.sizes().vec();
+  std::vector<int64_t> output_size = v_input.sizes();
   uint32_t dim_size = output_size[dim];
   if (keepdim) {
     output_size[dim] = 1;
@@ -43,7 +43,7 @@ Tensor sum_dim(
   vTensor v_output{
       context,
       output_size,
-      type,
+      convert_dtype(type),
   };
 
   // Required to determine how to insert memory barriers in the command buffer
@@ -91,7 +91,7 @@ Tensor sum_dim_IntList(
     const at::Tensor& self,
     const OptionalIntArrayRef opt_dim,
     bool keepdim,
-    const optional<ScalarType> dtype) {
+    const std::optional<ScalarType> dtype) {
   TORCH_CHECK(
       opt_dim.has_value(),
       "Vulkan sum.dim_IntList without a dim arg is not implemented");
@@ -132,7 +132,7 @@ Tensor sum_dim_IntList(
   return self;
 }
 
-Tensor sum(const Tensor& self, const c10::optional<ScalarType> dtype) {
+Tensor sum(const Tensor& self, const std::optional<ScalarType> dtype) {
   std::vector<int64_t> dims;
   for (int64_t d = 0; d < self.dim(); d++) {
     // If any dimension has zero elements, we will shortcut to a zero-dim.

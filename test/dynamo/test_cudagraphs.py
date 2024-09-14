@@ -4,13 +4,12 @@ import functools
 import unittest
 
 import torch
-
 import torch._dynamo
 import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same
-from torch.testing._internal.common_utils import skipIfRocm, TEST_CUDA_GRAPH
+from torch.testing._internal.common_utils import TEST_CUDA_GRAPH
 
 
 def composed(*decs):
@@ -105,7 +104,6 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
         y = torch.randn((), device="cpu")
         fn(x, y)
 
-    @skipIfRocm
     def test_mutate_input(self):
         def model(x, y):
             y.add_(3)

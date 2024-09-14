@@ -7,9 +7,10 @@ online tutorials.
 from pathlib import Path
 
 import matplotlib
+from matplotlib import pyplot as plt
 
 import torch
-from matplotlib import pyplot as plt
+
 
 matplotlib.use("Agg")
 
@@ -21,7 +22,7 @@ if not ACTIVATION_IMAGE_PATH.exists():
     ACTIVATION_IMAGE_PATH.mkdir()
 
 # In a refactor, these ought to go into their own module or entry
-# points so we can generate this list programmaticly
+# points so we can generate this list programmatically
 functions = [
     torch.nn.ELU(),
     torch.nn.Hardshrink(),

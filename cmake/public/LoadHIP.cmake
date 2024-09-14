@@ -136,6 +136,7 @@ if(HIP_FOUND)
   set(hiprand_DIR ${ROCM_PATH}/lib/cmake/hiprand)
   set(rocblas_DIR ${ROCM_PATH}/lib/cmake/rocblas)
   set(hipblas_DIR ${ROCM_PATH}/lib/cmake/hipblas)
+  set(hipblaslt_DIR ${ROCM_PATH}/lib/cmake/hipblaslt)
   set(miopen_DIR ${ROCM_PATH}/lib/cmake/miopen)
   set(rocfft_DIR ${ROCM_PATH}/lib/cmake/rocfft)
   set(hipfft_DIR ${ROCM_PATH}/lib/cmake/hipfft)
@@ -154,12 +155,9 @@ if(HIP_FOUND)
   find_package_and_print_version(hiprand REQUIRED)
   find_package_and_print_version(rocblas REQUIRED)
   find_package_and_print_version(hipblas REQUIRED)
+  find_package_and_print_version(hipblaslt REQUIRED)
   find_package_and_print_version(miopen REQUIRED)
-  if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "4.1.0")
-    find_package_and_print_version(hipfft REQUIRED)
-  else()
-    find_package_and_print_version(rocfft REQUIRED)
-  endif()
+  find_package_and_print_version(hipfft REQUIRED)
   find_package_and_print_version(hipsparse REQUIRED)
   find_package_and_print_version(rccl)
   find_package_and_print_version(rocprim REQUIRED)
@@ -183,8 +181,33 @@ if(HIP_FOUND)
   else()
     find_library(PYTORCH_RCCL_LIBRARIES ${rccl_LIBRARIES} HINTS ${ROCM_PATH}/lib)
   endif()
-  # hiprtc is part of HIP
-  find_library(ROCM_HIPRTC_LIB amdhip64 HINTS ${ROCM_PATH}/lib)
+  find_library(ROCM_HIPRTC_LIB hiprtc HINTS ${ROCM_PATH}/lib)
   # roctx is part of roctracer
   find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCM_PATH}/lib)
+
+  # check whether HIP declares new types
+  set(file "${PROJECT_BINARY_DIR}/hip_new_types.cc")
+  file(WRITE ${file} ""
+    "#include <hip/library_types.h>\n"
+    "int main() {\n"
+    "    hipDataType baz = HIP_R_8F_E4M3_FNUZ;\n"
+    "    return 0;\n"
+    "}\n"
+    )
+
+  try_compile(hip_compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
+    CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
+    COMPILE_DEFINITIONS -D__HIP_PLATFORM_AMD__ -D__HIP_PLATFORM_HCC__
+    OUTPUT_VARIABLE hip_compile_output)
+
+  if(hip_compile_result)
+    set(HIP_NEW_TYPE_ENUMS ON)
+    #message("HIP is using new type enums: ${hip_compile_output}")
+    message("HIP is using new type enums")
+  else()
+    set(HIP_NEW_TYPE_ENUMS OFF)
+    #message("HIP is NOT using new type enums: ${hip_compile_output}")
+    message("HIP is NOT using new type enums")
+  endif()
+
 endif()

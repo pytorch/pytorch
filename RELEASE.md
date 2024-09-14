@@ -12,11 +12,14 @@
     - [`pytorch/builder` / PyTorch domain libraries](#pytorchbuilder--pytorch-domain-libraries)
     - [Making release branch specific changes for PyTorch](#making-release-branch-specific-changes-for-pytorch)
     - [Making release branch specific changes for domain libraries](#making-release-branch-specific-changes-for-domain-libraries)
+  - [Running Launch Execution team Core XFN sync](#running-launch-execution-team-core-xfn-sync)
   - [Drafting RCs (Release Candidates) for PyTorch and domain libraries](#drafting-rcs-release-candidates-for-pytorch-and-domain-libraries)
     - [Release Candidate Storage](#release-candidate-storage)
     - [Release Candidate health validation](#release-candidate-health-validation)
     - [Cherry Picking Fixes](#cherry-picking-fixes)
+      - [How to do Cherry Picking](#how-to-do-cherry-picking)
     - [Cherry Picking Reverts](#cherry-picking-reverts)
+  - [Preparing and Creating Final Release candidate](#preparing-and-creating-final-release-candidate)
   - [Promoting RCs to Stable](#promoting-rcs-to-stable)
   - [Additional Steps to prepare for release day](#additional-steps-to-prepare-for-release-day)
     - [Modify release matrix](#modify-release-matrix)
@@ -31,9 +34,9 @@
     - [Building Binaries / Promotion to Stable](#building-binaries--promotion-to-stable)
 - [Hardware / Software Support in Binary Build Matrix](#hardware--software-support-in-binary-build-matrix)
   - [Python](#python)
-    - [TL;DR](#tldr)
   - [Accelerator Software](#accelerator-software)
     - [Special support cases](#special-support-cases)
+  - [Operating Systems](#operating-systems)
 - [Submitting Tutorials](#submitting-tutorials)
 - [Special Topics](#special-topics)
   - [Updating submodules for a release](#updating-submodules-for-a-release)
@@ -45,25 +48,32 @@
 
 Following is the Release Compatibility Matrix for PyTorch releases:
 
-| PyTorch version | Python | Stable CUDA | Experimental CUDA |
-| --- | --- | --- | --- |
-| 2.2 | >=3.8, <=3.11 | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 |
-| 2.1 | >=3.8, <=3.11 | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 |
-| 2.0 | >=3.8, <=3.11 | CUDA 11.7, CUDNN 8.5.0.96 | CUDA 11.8, CUDNN 8.7.0.84 |
-| 1.13 | >=3.7, <=3.10 | CUDA 11.6, CUDNN 8.3.2.44 | CUDA 11.7, CUDNN 8.5.0.96 |
-| 1.12 | >=3.7, <=3.10 | CUDA 11.3, CUDNN 8.3.2.44 | CUDA 11.6, CUDNN 8.3.2.44 |
+| PyTorch version | Python | Stable CUDA | Experimental CUDA | Stable ROCm |
+| --- | --- | --- | --- | --- |
+| 2.5 | >=3.9, <=3.12, (3.13 experimental) | CUDA 11.8, CUDA 12.1, CUDA 12.4, CUDNN 9.1.0.70  | None | ROCm 6.2 |
+| 2.4 | >=3.8, <=3.12 | CUDA 11.8, CUDA 12.1, CUDNN 9.1.0.70  | CUDA 12.4, CUDNN 9.1.0.70 | ROCm 6.1 |
+| 2.3 | >=3.8, <=3.11, (3.12 experimental) | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 | ROCm 6.0 |
+| 2.2 | >=3.8, <=3.11, (3.12 experimental) | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 | ROCm 5.7 |
+| 2.1 | >=3.8, <=3.11 | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 | ROCm 5.6 |
+| 2.0 | >=3.8, <=3.11 | CUDA 11.7, CUDNN 8.5.0.96 | CUDA 11.8, CUDNN 8.7.0.84 | ROCm 5.4 |
+| 1.13 | >=3.7, <=3.10 | CUDA 11.6, CUDNN 8.3.2.44 | CUDA 11.7, CUDNN 8.5.0.96 | ROCm 5.2 |
+| 1.12 | >=3.7, <=3.10 | CUDA 11.3, CUDNN 8.3.2.44 | CUDA 11.6, CUDNN 8.3.2.44 | ROCm 5.0 |
 
 ## Release Cadence
 
-Following is the release cadence for year 2023/2024. All dates below are tentative, for latest updates on the release scheduled please follow [dev discuss](https://dev-discuss.pytorch.org/c/release-announcements/27).
+Following is the release cadence for year 2023/2024. All dates below are tentative, for latest updates on the release scheduled please follow [dev discuss](https://dev-discuss.pytorch.org/c/release-announcements/27). Please note: Patch Releases are optional.
 
 | Minor Version | Release branch cut | Release date | First patch release date | Second patch release date|
 | --- | --- | --- | --- | --- |
 | 2.1 | Aug 2023 | Oct 2023 | Nov 2023 | Dec 2023 |
 | 2.2 | Dec 2023 | Jan 2024 | Feb 2024 | Mar 2024 |
-| 2.3 | Mar 2024 | Apr 2024 | May 2024 | Jun 2024 |
-| 2.4 | May 2024 | Jul 2024 | Aug 2024 | Sep 2024 |
-| 2.5 | Aug 2024 | Oct 2024 | Nov 2024 | Dec 2024 |
+| 2.3 | Mar 2024 | Apr 2024 | Jun 2024 | Not planned |
+| 2.4 | Jun 2024 | Jul 2024 | (Sept 2024) | Not planned |
+| 2.5 | Sep 2024 | Oct 2024 | (Nov 2024) | (Dec 2024) |
+| 2.6 | Dec 2024 | Jan 2025 | (Feb 2025) | (Mar 2025) |
+| 2.7 | Mar 2025 | Apr 2025 | (May 2025) | (Jun 2025) |
+| 2.8 | Jun 2025 | Jul 2025 | (Aug 2025) | (Sep 2025) |
+| 2.9 | Aug 2025 | Oct 2025 | (Nov 2025) | (Dec 2025) |
 
 ## General Overview
 
@@ -72,7 +82,8 @@ Releasing a new version of PyTorch generally entails 3 major steps:
 0. Cutting a release branch preparations
 1. Cutting a release branch and making release branch specific changes
 2. Drafting RCs (Release Candidates), and merging cherry picks
-3. Promoting RCs to stable and performing release day tasks
+3. Preparing and Creating Final Release Candidate
+4. Promoting Final RC to stable and performing release day tasks
 
 ### Frequently Asked Questions
 
@@ -84,7 +95,7 @@ Releasing a new version of PyTorch generally entails 3 major steps:
 
 ## Cutting a release branch preparations
 
-Following Requirements needs to be met prior to final RC Cut:
+Following Requirements needs to be met prior to cutting a release branch:
 
 * Resolve all outstanding issues in the milestones(for example [1.11.0](https://github.com/pytorch/pytorch/milestone/28))before first RC cut is completed. After RC cut is completed following script should be executed from builder repo in order to validate the presence of the fixes in the release branch :
 ``` python github_analyze.py --repo-path ~/local/pytorch --remote upstream --branch release/1.11 --milestone-id 26 --missing-in-branch ```
@@ -151,6 +162,22 @@ Follow these examples of PR that updates the version and sets RC Candidate uploa
 * torchvision : https://github.com/pytorch/vision/pull/5400
 * torchaudio: https://github.com/pytorch/audio/pull/2210
 
+## Running Launch Execution team Core XFN sync
+
+The series of meetings for Core XFN sync should be organized. The goal of these meetings are the following:
+1. Establish release POC's from each of the workstreams
+2. Cover the tactical phase of releasing minor releases to the market
+3. Discuss possible release blockers
+
+Following POC's should be assigned from each of the workstreams:
+* Core/Marketing
+* Release Eng
+* Doc Eng
+* Release notes
+* Partner
+
+**NOTE**: The meetings should start after the release branch is created and should continue until the week of the release.
+
 ## Drafting RCs (Release Candidates) for PyTorch and domain libraries
 
 To draft RCs, a user with the necessary permissions can push a git tag to the main `pytorch/pytorch` git repository. Please note: exactly same process is used for each of the domain library
@@ -198,7 +225,7 @@ Validate the release jobs for pytorch and domain libraries should be green. Vali
   * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/release%2F1.12)
   * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/release%2F1.12)
 
-Validate that the documentation build has completed and generated entry corresponding to the release in  [docs folder](https://github.com/pytorch/pytorch.github.io/tree/site/docs/) of pytorch.github.io repository
+Validate that the documentation build has completed and generated entry corresponding to the release in  [docs repository](https://github.com/pytorch/docs/tree/main/).
 
 ### Cherry Picking Fixes
 
@@ -213,11 +240,67 @@ Please also make sure to add milestone target to the PR/issue, especially if it 
 
 **NOTE**: The cherry pick process is not an invitation to add new features, it is mainly there to fix regressions
 
+#### How to do Cherry Picking
+
+You can now use `pytorchbot` to cherry pick a PyTorch PR that has been committed
+to the main branch using `@pytorchbot cherry-pick` command as follows.
+
+```
+usage: @pytorchbot cherry-pick --onto ONTO [--fixes FIXES] -c
+                               {regression,critical,fixnewfeature,docs,release}
+
+Cherry pick a pull request onto a release branch for inclusion in a release
+
+optional arguments:
+  --onto ONTO           Branch you would like to cherry pick onto (Example: release/2.2)
+  --fixes FIXES         Link to the issue that your PR fixes (i.e. https://github.com/pytorch/pytorch/issues/110666)
+  -c {regression,critical,fixnewfeature,docs,release}
+                        A machine-friendly classification of the cherry-pick reason.
+```
+
+For example, [#120567](https://github.com/pytorch/pytorch/pull/120567#issuecomment-1978964376)
+created a cherry pick PR [#121232](https://github.com/pytorch/pytorch/pull/121232) onto `release/2.2`
+branch to fix a regression issue. You can then refer to the original
+and the cherry-picked PRs on the release tracker issue. Please note
+that the cherry-picked PR will still need to be reviewed by PyTorch
+RelEng team before it can go into the release branch. This feature
+requires `pytorchbot`, so it's only available in PyTorch atm.
+
 ### Cherry Picking Reverts
 
-If PR that has been cherry-picked into release branch has been reverted, it's cherry-pick must be reverted as well.
+If PR that has been cherry-picked into release branch has been reverted, its cherry-pick must be reverted as well.
 
 Reverts for changes that was committed into the main branch prior to the branch cut, must be propagated into release branch as well.
+
+## Preparing and Creating Final Release candidate
+
+The following requirements need to be met prior to creating final Release Candidate :
+
+* Resolve all outstanding open issues in the milestone. There should be no open issues/PRs (for example [2.1.2](https://github.com/pytorch/pytorch/milestone/39)). The issue should either be closed or de-milestoned.
+
+* Validate that all closed milestone PRs are present in the release branch. Confirm this by running:
+``` python github_analyze.py --repo-path ~/local/pytorch --remote upstream --branch release/2.2 --milestone-id 40 --missing-in-branch ```
+
+* No outstanding cherry-picks that need to be reviewed in the issue tracker: https://github.com/pytorch/pytorch/issues/115300
+
+* Perform [Release Candidate health validation](#release-candidate-health-validation). CI should have the green signal.
+
+After the final RC is created. The following tasks should be performed :
+
+* Perform [Release Candidate health validation](#release-candidate-health-validation). CI should have the green signal.
+
+* Run and inspect the output [Validate Binaries](https://github.com/pytorch/builder/actions/workflows/validate-binaries.yml) workflow.
+
+* All the closed issues from [milestone](https://github.com/pytorch/pytorch/milestone/39) need to be validated. Confirm the validation by commenting on the issue: https://github.com/pytorch/pytorch/issues/113568#issuecomment-1851031064
+
+* Create validation issue for the release, see for example [Validations for 2.1.2 release](https://github.com/pytorch/pytorch/issues/114904) and perform required validations.
+
+* Run performance tests in [benchmark repository](https://github.com/pytorch/benchmark). Make sure there are no performance regressions.
+
+* Prepare and stage PyPI binaries for promotion. This is done with this script:
+[`pytorch/builder:release/pypi/promote_pypi_to_staging.sh`](https://github.com/pytorch/builder/blob/main/release/pypi/promote_pypi_to_staging.sh)
+
+* Validate staged PyPI binaries. Make sure generated packages are correct and package size does not exceeds maximum allowed PyPI package size.
 
 ## Promoting RCs to Stable
 
@@ -329,12 +412,13 @@ PyTorch has a support matrix across a couple of different axis. This section sho
 
 ## Python
 
-For versions of Python that we support we follow the [NEP 29 policy](https://numpy.org/neps/nep-0029-deprecation_policy.html), which was originally drafted by numpy.
+PyTorch supports all minor versions of CPython that are not EOL: https://devguide.python.org/versions/
 
-### TL;DR
+For each minor release independently, we only support patch releases as follows:
+- If the latest patch release is a bugfix release, we only support this one.
+- Otherwise, we support all the non-bugfix patch releases.
 
-* All minor versions of Python released 42 months prior to the project, and at minimum the two latest minor versions.
-* All minor versions of numpy released in the 24 months prior to the project, and at minimum the last three minor versions.
+See https://github.com/pytorch/rfcs/blob/master/RFC-0038-cpython-support.md for details on the rules and process for upgrade and sunset of each version.
 
 ## Accelerator Software
 
@@ -348,6 +432,15 @@ the size restrictions for publishing on PyPI so the default version that is publ
 
 These special support cases will be handled on a case by case basis and support may be continued if current PyTorch maintainers feel as though there may still be a
 need to support these particular versions of software.
+
+## Operating Systems
+Supported OS flavors are summarized in the table below:
+| Operating System family | Architecture | Notes |
+| --- | --- | --- |
+| Linux | aarch64, x86_64 | Wheels are manylinux2014 compatible, i.e. they should be runnable on any Linux system with glibc-2.17 or above. |
+| MacOS | arm64 | Builds should be compatible with MacOS 11 (Big Sur) or newer, but are actively tested against MacOS 14 (Sonoma). |
+| MacOS | x86_64 | Requires MacOS Catalina or above, not supported after 2.2, see https://github.com/pytorch/pytorch/issues/114602 |
+| Windows | x86_64 | Builds are compatible with Windows-10 or newer. |
 
 # Submitting Tutorials
 

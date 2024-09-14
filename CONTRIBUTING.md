@@ -11,6 +11,7 @@ aspects of contributing to PyTorch.
 <!-- toc -->
 
 - [Developing PyTorch](#developing-pytorch)
+  - [Setup the development environment](#setup-the-development-environment)
   - [Tips and Debugging](#tips-and-debugging)
 - [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
@@ -41,6 +42,7 @@ aspects of contributing to PyTorch.
     - [Use a faster linker](#use-a-faster-linker)
     - [Use pre-compiled headers](#use-pre-compiled-headers)
     - [Workaround for header dependency bug in nvcc](#workaround-for-header-dependency-bug-in-nvcc)
+  - [Rebuild few files with debug information](#rebuild-few-files-with-debug-information)
   - [C++ frontend development tips](#c-frontend-development-tips)
   - [GDB integration](#gdb-integration)
   - [C++ stacktraces](#c-stacktraces)
@@ -63,7 +65,23 @@ aspects of contributing to PyTorch.
 <!-- tocstop -->
 
 ## Developing PyTorch
+
 Follow the instructions for [installing PyTorch from source](https://github.com/pytorch/pytorch#from-source). If you get stuck when developing PyTorch on your machine, check out the [tips and debugging](#tips-and-debugging) section below for common solutions.
+
+### Setup the development environment
+
+First, you need to [fork the PyTorch project on GitHub](https://github.com/pytorch/pytorch/fork) and follow the instructions at [Connecting to GitHub with SSH](https://docs.github.com/en/authentication/connecting-to-github-with-ssh) to setup your SSH authentication credentials.
+
+Then clone the PyTorch project and setup the development environment:
+
+```bash
+git clone git@github.com:<USERNAME>/pytorch.git
+cd pytorch
+git remote add upstream git@github.com:pytorch/pytorch.git
+
+make setup-env  # or make setup-env-cuda for pre-built CUDA binaries
+conda activate pytorch-deps
+```
 
 ### Tips and Debugging
 
@@ -98,11 +116,6 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
   ```
 
   Next run `python setup.py clean`. After that, you can install in `develop` mode again.
-
-* If a commit is simple and doesn't affect any code (keep in mind that some docstrings contain code
-  that is used in tests), you can add `[skip ci]` (case sensitive) somewhere in your commit message to
-  [skip all build / test steps](https://github.blog/changelog/2021-02-08-github-actions-skip-pull-request-and-push-workflows-with-skip-ci/).
-  Note that changing the pull request body or title on GitHub itself has no effect.
 
 * If you run into errors when running `python setup.py develop`, here are some debugging steps:
   1. Run `printf '#include <stdio.h>\nint main() { printf("Hello World");}'|clang -x c -; ./a.out` to make sure
@@ -172,6 +185,13 @@ the regular environment parameters (`--name` or `--prefix`):
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch -n my-env
 conda activate my-env
+```
+
+To install the nightly binaries built with CUDA, you can pass in the flag `--cuda`:
+
+```bash
+./tools/nightly.py checkout -b my-nightly-branch --cuda
+conda activate pytorch-deps
 ```
 
 You can also use this tool to pull the nightly commits into the current branch:
@@ -324,7 +344,7 @@ command runs tests such as `TestNN.test_BCELoss` and
 Install all prerequisites by running
 
 ```bash
-make setup_lint
+make setup-lint
 ```
 
 You can now run the same linting steps that are used in CI locally via `make`:
@@ -666,7 +686,6 @@ only interested in a specific component.
 - Working on a test binary? Run `(cd build && ninja bin/test_binary_name)` to
   rebuild only that test binary (without rerunning cmake). (Replace `ninja` with
   `make` if you don't have ninja installed).
-- Don't need Caffe2?  Pass `BUILD_CAFFE2=0` to disable Caffe2 build.
 
 On the initial build, you can also speed things up with the environment
 variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `USE_FLASH_ATTENTION`, `USE_MEM_EFF_ATTENTION`, `BUILD_TEST`, `USE_FBGEMM`, `USE_NNPACK` and `USE_QNNPACK`.
@@ -789,7 +808,7 @@ USE_PRECOMPILED_HEADERS=1 python setup.py develop
 ```
 
 This adds a build step where the compiler takes `<ATen/ATen.h>` and essentially
-dumps it's internal AST to a file so the compiler can avoid repeating itself for
+dumps its internal AST to a file so the compiler can avoid repeating itself for
 every `.cpp` file.
 
 One caveat is that when enabled, this header gets included in every file by default.
@@ -810,6 +829,66 @@ this as a compiler launcher, similar to `ccache`
 export CMAKE_CUDA_COMPILER_LAUNCHER="python;`pwd`/tools/nvcc_fix_deps.py;ccache"
 python setup.py develop
 ```
+
+### Rebuild few files with debug information
+
+While debugging a problem one often had to maintain a debug build in a separate folder.
+But often only a few files needs to be rebuild with debug info to get a symbolicated backtrace or enable source debugging
+One can easily solve this with the help of `tools/build_with_debinfo.py`
+
+For example, suppose one wants to debug what is going on while tensor index is selected, which can be achieved by setting a breakpoint at `applySelect` function:
+```
+% lldb -o "b applySelect" -o "process launch" -- python3 -c "import torch;print(torch.rand(5)[3])"
+(lldb) target create "python"
+Current executable set to '/usr/bin/python3' (arm64).
+(lldb) settings set -- target.run-args  "-c" "import torch;print(torch.rand(5)[3])"
+(lldb) b applySelect
+Breakpoint 1: no locations (pending).
+WARNING:  Unable to resolve breakpoint to any actual locations.
+(lldb) process launch
+2 locations added to breakpoint 1
+Process 87729 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
+    frame #0: 0x00000001023d55a8 libtorch_python.dylib`at::indexing::impl::applySelect(at::Tensor const&, long long, c10::SymInt, long long, c10::Device const&, std::__1::optional<c10::ArrayRef<c10::SymInt>> const&)
+libtorch_python.dylib`at::indexing::impl::applySelect:
+->  0x1023d55a8 <+0>:  sub    sp, sp, #0xd0
+    0x1023d55ac <+4>:  stp    x24, x23, [sp, #0x90]
+    0x1023d55b0 <+8>:  stp    x22, x21, [sp, #0xa0]
+    0x1023d55b4 <+12>: stp    x20, x19, [sp, #0xb0]
+Target 0: (python) stopped.
+Process 87729 launched: '/usr/bin/python' (arm64)
+```
+Which is not very informative, but can be easily remedied by rebuilding `python_variable_indexing.cpp` with debug information
+```
+% ./tools/build_with_debinfo.py torch/csrc/autograd/python_variable_indexing.cpp
+[1 / 2] Building caffe2/torch/CMakeFiles/torch_python.dir/csrc/autograd/python_variable_indexing.cpp.o
+[2 / 2] Building lib/libtorch_python.dylib
+```
+And afterwards:
+```
+% lldb -o "b applySelect" -o "process launch" -- python3 -c "import torch;print(torch.rand(5)[3])"
+(lldb) target create "python"
+Current executable set to '/usr/bin/python3' (arm64).
+(lldb) settings set -- target.run-args  "-c" "import torch;print(torch.rand(5)[3])"
+(lldb) b applySelect
+Breakpoint 1: no locations (pending).
+WARNING:  Unable to resolve breakpoint to any actual locations.
+(lldb) process launch
+2 locations added to breakpoint 1
+Process 87741 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
+    frame #0: 0x00000001024e2628 libtorch_python.dylib`at::indexing::impl::applySelect(self=0x00000001004ee8a8, dim=0, index=(data_ = 3), real_dim=0, (null)=0x000000016fdfe535, self_sizes= Has Value=true ) at TensorIndexing.h:239:7
+   236         const at::Device& /*self_device*/,
+   237         const c10::optional<SymIntArrayRef>& self_sizes) {
+   238       // See NOTE [nested tensor size for indexing]
+-> 239       if (self_sizes.has_value()) {
+   240         auto maybe_index = index.maybe_as_int();
+   241         if (maybe_index.has_value()) {
+   242           TORCH_CHECK_INDEX(
+Target 0: (python) stopped.
+Process 87741 launched: '/usr/bin/python3' (arm64)
+```
+Which is much more useful, isn't it?
 
 ### C++ frontend development tips
 
@@ -1135,7 +1214,7 @@ build_with_asan()
   LDFLAGS="-stdlib=libstdc++" \
   CFLAGS="-fsanitize=address -fno-sanitize-recover=all -shared-libasan -pthread" \
   CXX_FLAGS="-pthread" \
-  USE_CUDA=0 USE_OPENMP=0 BUILD_CAFFE2_OPS=0 USE_DISTRIBUTED=0 DEBUG=1 \
+  USE_CUDA=0 USE_OPENMP=0 USE_DISTRIBUTED=0 DEBUG=1 \
   python setup.py develop
 }
 
@@ -1260,7 +1339,7 @@ There are two possible choices for which commit to use:
 1. Checkout commit `B`, the head of the PR (manually committed by the PR
    author).
 2. Checkout commit `C`, the hypothetical result of what would happen if the PR
-   were merged into it's destination (usually `main`).
+   were merged into its destination (usually `main`).
 
 For all practical purposes, most people can think of the commit being used as
 commit `B` (choice **1**).

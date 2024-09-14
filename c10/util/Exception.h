@@ -1,11 +1,15 @@
 #ifndef C10_UTIL_EXCEPTION_H_
 #define C10_UTIL_EXCEPTION_H_
 
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Backtrace.h>
+#include <c10/util/Lazy.h>
 #include <c10/util/StringUtil.h>
 
-#include <cstddef>
+#include <cstdint>
 #include <exception>
+#include <memory>
 #include <string>
 #include <variant>
 #include <vector>
@@ -24,6 +28,7 @@ namespace c10 {
 /// NB: c10::Error is handled specially by the default torch to suppress the
 /// backtrace, see torch/csrc/Exceptions.h
 class C10_API Error : public std::exception {
+ private:
   // The actual error message.
   std::string msg_;
 
@@ -35,14 +40,14 @@ class C10_API Error : public std::exception {
   // The C++ backtrace at the point when this exception was raised.  This
   // may be empty if there is no valid backtrace.  (We don't use optional
   // here to reduce the dependencies this file has.)
-  std::string backtrace_;
+  Backtrace backtrace_;
 
   // These two are derived fields from msg_stack_ and backtrace_, but we need
   // fields for the strings so that we can return a const char* (as the
   // signature of std::exception requires).  Currently, the invariant
   // is that these fields are ALWAYS populated consistently with respect
   // to msg_stack_ and backtrace_.
-  std::string what_;
+  mutable OptimisticLazy<std::string> what_;
   std::string what_without_backtrace_;
 
   // This is a little debugging trick: you can stash a relevant pointer
@@ -63,11 +68,14 @@ class C10_API Error : public std::exception {
       const uint32_t line,
       const char* condition,
       const std::string& msg,
-      const std::string& backtrace,
+      Backtrace backtrace,
       const void* caller = nullptr);
 
   // Base constructor
-  Error(std::string msg, std::string backtrace, const void* caller = nullptr);
+  Error(
+      std::string msg,
+      Backtrace backtrace = nullptr,
+      const void* caller = nullptr);
 
   // Add some new context to the message stack.  The last added context
   // will be formatted at the end of the context list upon printing.
@@ -83,16 +91,12 @@ class C10_API Error : public std::exception {
     return context_;
   }
 
-  const std::string& backtrace() const {
-    return backtrace_;
-  }
+  const Backtrace& backtrace() const;
 
   /// Returns the complete error message, including the source location.
   /// The returned pointer is invalidated if you call add_context() on
   /// this object.
-  const char* what() const noexcept override {
-    return what_.c_str();
-  }
+  const char* what() const noexcept override;
 
   const void* caller() const noexcept {
     return caller_;
@@ -445,8 +449,8 @@ C10_API std::string GetExceptionString(const std::exception& e);
     C10_THROW_ERROR(Error, TORCH_CHECK_MSG(cond, type, __VA_ARGS__)); \
   }
 #else
-namespace c10 {
-namespace detail {
+
+namespace c10::detail {
 template <typename... Args>
 decltype(auto) torchCheckMsgImpl(const char* /*msg*/, const Args&... args) {
   return ::c10::str(args...);
@@ -460,8 +464,7 @@ inline C10_API const char* torchCheckMsgImpl(
     const char* args) {
   return args;
 }
-} // namespace detail
-} // namespace c10
+} // namespace c10::detail
 
 #define TORCH_CHECK_MSG(cond, type, ...)                   \
   (::c10::detail::torchCheckMsgImpl(                       \
@@ -476,8 +479,7 @@ inline C10_API const char* torchCheckMsgImpl(
   }
 #endif
 
-namespace c10 {
-namespace detail {
+namespace c10::detail {
 
 [[noreturn]] C10_API void torchCheckFail(
     const char* func,
@@ -516,8 +518,7 @@ namespace detail {
     const char* condMsg,
     const std::string& userMsg);
 
-} // namespace detail
-} // namespace c10
+} // namespace c10::detail
 
 #ifdef STRIP_ERROR_MESSAGES
 #define TORCH_CHECK(cond, ...)                   \
@@ -645,8 +646,7 @@ namespace detail {
 // Deprecated macros
 // ----------------------------------------------------------------------------
 
-namespace c10 {
-namespace detail {
+namespace c10::detail {
 
 /*
 // Deprecation disabled until we fix sites in our codebase
@@ -675,8 +675,7 @@ https://github.com/pytorch/pytorch/issues/20287 for more details.")
 */
 inline void deprecated_AT_ASSERTM() {}
 
-} // namespace detail
-} // namespace c10
+} // namespace c10::detail
 
 // Deprecated alias; this alias was deprecated because people kept mistakenly
 // using it for user error checking.  Use TORCH_INTERNAL_ASSERT or TORCH_CHECK

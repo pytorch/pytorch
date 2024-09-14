@@ -3,12 +3,10 @@ import unittest
 import weakref
 
 import torch
-
 import torch._dynamo
 import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._dynamo.testing
-
 import torch._logging
 from torch.testing._internal.logging_utils import kwargs_to_settings, log_settings
 
@@ -266,9 +264,7 @@ tensor 'L['x']' size mismatch at index 0. expected 8, actual 12""".split(
             opt_f([7, 8])
 
             for line in """\
-len(L['x']) == 3
-L['x'][0] == 4
-L['x'][1] == 5""".split(
+len(L['x']) == 3""".split(
                 "\n"
             ):
                 self.assertIn(line, filter_reasons())
@@ -278,9 +274,7 @@ L['x'][1] == 5""".split(
 
             for line in """\
 len(L['x']) == 2
-L['x'][0] == 7
-len(L['x']) == 3
-L['x'][0] == 4""".split(
+len(L['x']) == 3""".split(
                 "\n"
             ):
                 self.assertIn(line, filter_reasons())

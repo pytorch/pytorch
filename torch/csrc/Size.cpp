@@ -12,7 +12,6 @@
 
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/frontend/tracer.h>
-#include <torch/csrc/utils/pybind.h>
 
 struct THPSize {
   PyTupleObject tuple;
@@ -167,8 +166,8 @@ static PyObject* wrap_tuple_fn(Args... args) {
 // We use an anonymous namespace instead of static to work around
 // (what @peterjc123 think is) a bug in Visual Studio
 namespace {
-auto sq_concat = PyTuple_Type.tp_as_sequence -> sq_concat;
-auto sq_repeat = PyTuple_Type.tp_as_sequence -> sq_repeat;
+auto sq_concat = PyTuple_Type.tp_as_sequence->sq_concat;
+auto sq_repeat = PyTuple_Type.tp_as_sequence->sq_repeat;
 binaryfunc mp_subscript = PyTuple_Type.tp_as_mapping->mp_subscript;
 } // namespace
 

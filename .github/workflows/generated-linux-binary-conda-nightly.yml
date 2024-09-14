@@ -4,6 +4,7 @@
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: linux-binary-conda
 
+
 on:
   push:
     # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
@@ -30,197 +31,24 @@ env:
   PYTORCH_FINAL_PACKAGE_DIR: /artifacts
   PYTORCH_ROOT: /pytorch
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-  SKIP_ALL_TESTS: 1
+  SKIP_ALL_TESTS: 0
 concurrency:
   group: linux-binary-conda-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
-  conda-py3_8-cpu-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
+  get-label-type:
+    name: get-label-type
+    uses: ./.github/workflows/_runner-determinator.yml
     with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
-      DESIRED_PYTHON: "3.8"
-      build_name: conda-py3_8-cpu
-      build_environment: linux-binary-conda
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  conda-py3_8-cpu-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_8-cpu-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
-      DESIRED_PYTHON: "3.8"
-      build_name: conda-py3_8-cpu
-      build_environment: linux-binary-conda
-      runs_on: linux.4xlarge
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  conda-py3_8-cpu-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_8-cpu-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu-main
-      DESIRED_PYTHON: "3.8"
-      build_name: conda-py3_8-cpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
-  conda-py3_8-cuda11_8-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu118
-      GPU_ARCH_VERSION: 11.8
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
-      DESIRED_PYTHON: "3.8"
-      runs_on: linux.24xlarge
-      build_name: conda-py3_8-cuda11_8
-      build_environment: linux-binary-conda
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  conda-py3_8-cuda11_8-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_8-cuda11_8-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu118
-      GPU_ARCH_VERSION: 11.8
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
-      DESIRED_PYTHON: "3.8"
-      build_name: conda-py3_8-cuda11_8
-      build_environment: linux-binary-conda
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  conda-py3_8-cuda11_8-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_8-cuda11_8-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu118
-      GPU_ARCH_VERSION: 11.8
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
-      DESIRED_PYTHON: "3.8"
-      build_name: conda-py3_8-cuda11_8
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
-  conda-py3_8-cuda12_1-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
-      DESIRED_PYTHON: "3.8"
-      runs_on: linux.24xlarge
-      build_name: conda-py3_8-cuda12_1
-      build_environment: linux-binary-conda
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  conda-py3_8-cuda12_1-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_8-cuda12_1-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
-      DESIRED_PYTHON: "3.8"
-      build_name: conda-py3_8-cuda12_1
-      build_environment: linux-binary-conda
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  conda-py3_8-cuda12_1-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_8-cuda12_1-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
-      DESIRED_PYTHON: "3.8"
-      build_name: conda-py3_8-cuda12_1
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
   conda-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -231,13 +59,16 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.9"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: conda-py3_9-cpu
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_9-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_9-cpu-build
+    needs:
+      - conda-py3_9-cpu-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -251,11 +82,15 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cpu
       build_environment: linux-binary-conda
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_9-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
     needs: conda-py3_9-cpu-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -270,8 +105,6 @@ jobs:
       build_name: conda-py3_9-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -279,6 +112,7 @@ jobs:
   conda-py3_9-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -290,14 +124,17 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
       DESIRED_PYTHON: "3.9"
-      runs_on: linux.24xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_9-cuda11_8
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_9-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_9-cuda11_8-build
+    needs:
+      - conda-py3_9-cuda11_8-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -312,11 +149,15 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda11_8
       build_environment: linux-binary-conda
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_9-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
     needs: conda-py3_9-cuda11_8-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -332,8 +173,6 @@ jobs:
       build_name: conda-py3_9-cuda11_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -341,6 +180,7 @@ jobs:
   conda-py3_9-cuda12_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -352,14 +192,17 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
       DESIRED_PYTHON: "3.9"
-      runs_on: linux.24xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_9-cuda12_1
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_9-cuda12_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_9-cuda12_1-build
+    needs:
+      - conda-py3_9-cuda12_1-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -374,11 +217,15 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda12_1
       build_environment: linux-binary-conda
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_9-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
     needs: conda-py3_9-cuda12_1-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -394,8 +241,74 @@ jobs:
       build_name: conda-py3_9-cuda12_1
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
+    uses: ./.github/workflows/_binary-upload.yml
+
+  conda-py3_9-cuda12_4-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: conda
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu124
+      GPU_ARCH_VERSION: 12.4
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DESIRED_PYTHON: "3.9"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
+      build_name: conda-py3_9-cuda12_4
+      build_environment: linux-binary-conda
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  conda-py3_9-cuda12_4-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - conda-py3_9-cuda12_4-build
+      - get-label-type
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: conda
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu124
+      GPU_ARCH_VERSION: 12.4
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DESIRED_PYTHON: "3.9"
+      build_name: conda-py3_9-cuda12_4
+      build_environment: linux-binary-conda
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.4xlarge.nvidia.gpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  conda-py3_9-cuda12_4-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: conda-py3_9-cuda12_4-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: conda
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu124
+      GPU_ARCH_VERSION: 12.4
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DESIRED_PYTHON: "3.9"
+      build_name: conda-py3_9-cuda12_4
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -403,6 +316,7 @@ jobs:
   conda-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -413,13 +327,16 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.10"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: conda-py3_10-cpu
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_10-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_10-cpu-build
+    needs:
+      - conda-py3_10-cpu-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -433,11 +350,15 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cpu
       build_environment: linux-binary-conda
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_10-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
     needs: conda-py3_10-cpu-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -452,8 +373,6 @@ jobs:
       build_name: conda-py3_10-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -461,6 +380,7 @@ jobs:
   conda-py3_10-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -472,14 +392,17 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
       DESIRED_PYTHON: "3.10"
-      runs_on: linux.24xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_10-cuda11_8
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_10-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_10-cuda11_8-build
+    needs:
+      - conda-py3_10-cuda11_8-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -494,11 +417,15 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda11_8
       build_environment: linux-binary-conda
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_10-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
     needs: conda-py3_10-cuda11_8-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -514,8 +441,6 @@ jobs:
       build_name: conda-py3_10-cuda11_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -523,6 +448,7 @@ jobs:
   conda-py3_10-cuda12_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -534,14 +460,17 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
       DESIRED_PYTHON: "3.10"
-      runs_on: linux.24xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_10-cuda12_1
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_10-cuda12_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_10-cuda12_1-build
+    needs:
+      - conda-py3_10-cuda12_1-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -556,11 +485,15 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda12_1
       build_environment: linux-binary-conda
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_10-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
     needs: conda-py3_10-cuda12_1-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -576,8 +509,74 @@ jobs:
       build_name: conda-py3_10-cuda12_1
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
+    uses: ./.github/workflows/_binary-upload.yml
+
+  conda-py3_10-cuda12_4-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: conda
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu124
+      GPU_ARCH_VERSION: 12.4
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DESIRED_PYTHON: "3.10"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
+      build_name: conda-py3_10-cuda12_4
+      build_environment: linux-binary-conda
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  conda-py3_10-cuda12_4-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - conda-py3_10-cuda12_4-build
+      - get-label-type
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: conda
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu124
+      GPU_ARCH_VERSION: 12.4
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DESIRED_PYTHON: "3.10"
+      build_name: conda-py3_10-cuda12_4
+      build_environment: linux-binary-conda
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.4xlarge.nvidia.gpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  conda-py3_10-cuda12_4-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: conda-py3_10-cuda12_4-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: conda
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu124
+      GPU_ARCH_VERSION: 12.4
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DESIRED_PYTHON: "3.10"
+      build_name: conda-py3_10-cuda12_4
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -585,6 +584,7 @@ jobs:
   conda-py3_11-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -595,13 +595,16 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.11"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: conda-py3_11-cpu
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_11-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_11-cpu-build
+    needs:
+      - conda-py3_11-cpu-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -615,11 +618,15 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cpu
       build_environment: linux-binary-conda
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_11-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
     needs: conda-py3_11-cpu-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -634,8 +641,6 @@ jobs:
       build_name: conda-py3_11-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -643,6 +648,7 @@ jobs:
   conda-py3_11-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -654,14 +660,17 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
       DESIRED_PYTHON: "3.11"
-      runs_on: linux.24xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_11-cuda11_8
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_11-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_11-cuda11_8-build
+    needs:
+      - conda-py3_11-cuda11_8-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -676,11 +685,15 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cuda11_8
       build_environment: linux-binary-conda
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_11-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
     needs: conda-py3_11-cuda11_8-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -696,8 +709,6 @@ jobs:
       build_name: conda-py3_11-cuda11_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -705,6 +716,7 @@ jobs:
   conda-py3_11-cuda12_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -716,14 +728,17 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
       DESIRED_PYTHON: "3.11"
-      runs_on: linux.24xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_11-cuda12_1
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_11-cuda12_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_11-cuda12_1-build
+    needs:
+      - conda-py3_11-cuda12_1-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -738,11 +753,15 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cuda12_1
       build_environment: linux-binary-conda
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_11-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
     needs: conda-py3_11-cuda12_1-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -758,8 +777,74 @@ jobs:
       build_name: conda-py3_11-cuda12_1
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
+    uses: ./.github/workflows/_binary-upload.yml
+
+  conda-py3_11-cuda12_4-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: conda
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu124
+      GPU_ARCH_VERSION: 12.4
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DESIRED_PYTHON: "3.11"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
+      build_name: conda-py3_11-cuda12_4
+      build_environment: linux-binary-conda
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  conda-py3_11-cuda12_4-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - conda-py3_11-cuda12_4-build
+      - get-label-type
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: conda
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu124
+      GPU_ARCH_VERSION: 12.4
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DESIRED_PYTHON: "3.11"
+      build_name: conda-py3_11-cuda12_4
+      build_environment: linux-binary-conda
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.4xlarge.nvidia.gpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  conda-py3_11-cuda12_4-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: conda-py3_11-cuda12_4-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: conda
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu124
+      GPU_ARCH_VERSION: 12.4
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DESIRED_PYTHON: "3.11"
+      build_name: conda-py3_11-cuda12_4
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -767,6 +852,7 @@ jobs:
   conda-py3_12-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -777,13 +863,16 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu-main
       DESIRED_PYTHON: "3.12"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: conda-py3_12-cpu
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_12-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_12-cpu-build
+    needs:
+      - conda-py3_12-cpu-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -797,11 +886,15 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cpu
       build_environment: linux-binary-conda
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_12-cpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
     needs: conda-py3_12-cpu-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -816,8 +909,6 @@ jobs:
       build_name: conda-py3_12-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -825,6 +916,7 @@ jobs:
   conda-py3_12-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -836,14 +928,17 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-main
       DESIRED_PYTHON: "3.12"
-      runs_on: linux.24xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_12-cuda11_8
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_12-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_12-cuda11_8-build
+    needs:
+      - conda-py3_12-cuda11_8-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -858,11 +953,15 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cuda11_8
       build_environment: linux-binary-conda
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_12-cuda11_8-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
     needs: conda-py3_12-cuda11_8-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -878,8 +977,6 @@ jobs:
       build_name: conda-py3_12-cuda11_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -887,6 +984,7 @@ jobs:
   conda-py3_12-cuda12_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -898,14 +996,17 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-main
       DESIRED_PYTHON: "3.12"
-      runs_on: linux.24xlarge
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
       build_name: conda-py3_12-cuda12_1
       build_environment: linux-binary-conda
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_12-cuda12_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_12-cuda12_1-build
+    needs:
+      - conda-py3_12-cuda12_1-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -920,11 +1021,15 @@ jobs:
       DESIRED_PYTHON: "3.12"
       build_name: conda-py3_12-cuda12_1
       build_environment: linux-binary-conda
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   conda-py3_12-cuda12_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
     needs: conda-py3_12-cuda12_1-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -940,8 +1045,74 @@ jobs:
       build_name: conda-py3_12-cuda12_1
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
+    uses: ./.github/workflows/_binary-upload.yml
+
+  conda-py3_12-cuda12_4-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: conda
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu124
+      GPU_ARCH_VERSION: 12.4
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DESIRED_PYTHON: "3.12"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.24xlarge.ephemeral
+      build_name: conda-py3_12-cuda12_4
+      build_environment: linux-binary-conda
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  conda-py3_12-cuda12_4-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - conda-py3_12-cuda12_4-build
+      - get-label-type
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: conda
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu124
+      GPU_ARCH_VERSION: 12.4
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DESIRED_PYTHON: "3.12"
+      build_name: conda-py3_12-cuda12_4
+      build_environment: linux-binary-conda
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.4xlarge.nvidia.gpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  conda-py3_12-cuda12_4-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: conda-py3_12-cuda12_4-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: conda
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu124
+      GPU_ARCH_VERSION: 12.4
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.4-main
+      DESIRED_PYTHON: "3.12"
+      build_name: conda-py3_12-cuda12_4
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml

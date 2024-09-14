@@ -1,15 +1,22 @@
+# mypy: allow-untyped-defs
 import logging
-from typing import Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
-from ... import ir
 from ...autotune_process import CUDABenchmarkRequest
-from ...ir import Buffer, CUDATemplateBuffer, IRNode, Layout, TensorBox
-from ...select_algorithm import ChoiceCaller
+from ...ir import (
+    Buffer,
+    ChoiceCaller,
+    CUDATemplateBuffer,
+    IRNode,
+    Layout,
+    PrimitiveInfoType,
+    TensorBox,
+)
 from ...utils import sympy_product
 from ...virtualized import V
-
 from ..common import IndentedBuffer, Kernel, OpOverrides
-from ..cpp import CppPrinter, DTYPE_TO_CPP
+from ..cpp_utils import CppPrinter, DTYPE_TO_CPP
+
 
 if TYPE_CHECKING:
     from torch._inductor.codegen.cuda.cuda_template import CUDATemplate
@@ -38,7 +45,7 @@ class CUDATemplateKernel(CUDAKernel):
 
     _EXTRA_CPP_ARGS = "size_t* workspace_size, uint8_t* workspace, cudaStream_t stream"
 
-    def __init__(self, kernel_name):
+    def __init__(self, kernel_name) -> None:
         """
         Initializes a new instance of the CUDATemplateKernel class.
 
@@ -137,7 +144,9 @@ class CUDATemplateKernel(CUDAKernel):
         return f"PT_EXPORT int {self.kernel_name}({', '.join(arg_defs)}, {self._EXTRA_CPP_ARGS})"
 
     def call_kernel(
-        self, name: str, node: "CUDATemplateBuffer", epilogue_nodes: List[ir.Buffer]
+        self,
+        name: str,
+        node: "CUDATemplateBuffer",  # type: ignore[name-defined]
     ) -> None:
         """
         Generates code to call the kernel through V.graph.wrapper_code.
@@ -148,7 +157,7 @@ class CUDATemplateKernel(CUDAKernel):
         as well as all required inputs and outputs.
         """
         wrapper = V.graph.wrapper_code
-        _, call_args, _ = self.args.python_argdefs()
+        _, call_args, _, arg_types = self.args.python_argdefs()
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
@@ -161,17 +170,22 @@ class CUDATemplateKernel(CUDAKernel):
         call_args.append("None")
 
         if node.get_workspace_size() > 0:
-            call_args.append(f"c_void_p({node.get_name()}_workspace.data_ptr())")
+            wrapper.generate_workspace_allocation(
+                node.get_workspace_size(), V.graph.scheduler.current_device, False
+            )
+            call_args.append("c_void_p(workspace.data_ptr())")
         else:
             call_args.append("None")
 
         wrapper.generate_kernel_call(
             name,
             call_args,
-            device_index=V.graph.scheduler.current_device.index,
-            cuda=True,
+            gpu=True,
             triton=False,
+            arg_types=arg_types,
         )
+        if node.get_workspace_size() > 0:
+            wrapper.writeline(wrapper.make_free_by_names(["workspace"]))
 
     def dtype(self, node: IRNode) -> Optional[str]:
         """
@@ -181,6 +195,23 @@ class CUDATemplateKernel(CUDAKernel):
         if node is None:
             return "void"
         return DTYPE_TO_CPP.get(node.get_layout().dtype)
+
+    def cutlass_dtype(self, node: IRNode, default_dtype="void") -> Optional[str]:
+        # Helper method, called into from CUTLASSGemmTemplate
+        if node is None:
+            return default_dtype
+        from torch._inductor.codegen.cuda.cuda_template import CUTLASSTemplate
+
+        return CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]
+
+    def max_valid_index(self, node: IRNode, default=-1):
+        # Helper method, called into from CUTLASSGemmTemplate
+        if node is None:
+            return default
+        max_valid_offset = 0
+        for i in range(len(node.get_size())):
+            max_valid_offset += (node.get_size()[i] - 1) * node.get_stride()[i]
+        return max_valid_offset
 
     def offset(self, node: IRNode) -> str:
         """
@@ -298,19 +329,27 @@ class CUDATemplateCaller(ChoiceCaller):
         layout: Layout,
         make_kernel_render: Callable[[CUDATemplateBuffer, Optional[List[IRNode]]], str],
         bmreq: CUDABenchmarkRequest,
-        template: "CUDATemplate",
-    ):
+        template: "CUDATemplate",  # type: ignore[name-defined]
+        info_kwargs: Optional[Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]],  # type: ignore[type-arg]
+    ) -> None:
         super().__init__(name, input_nodes, layout)
         self.category = category
         self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq
         self.template = template
+        self.info_kwargs = info_kwargs
+
+    def precompile(self) -> None:
+        assert self.bmreq is not None
+        self.bmreq.precompile()
 
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
-        return self.bmreq.benchmark(*args, output_tensor=out)
+        return self.bmreq.benchmark(
+            *args, output_tensor=out
+        )  # @TODO: Hack for ensuring that Cutlass Kernel is preferred
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"CUDATemplateCaller(source_file={self.bmreq.source_file})"
 
     def call_name(self) -> str:
@@ -324,7 +363,29 @@ class CUDATemplateCaller(ChoiceCaller):
             ]
         )
 
+    def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
+        """Information returned here is logged to the autotune log file when that is enabled."""
+        if self.info_kwargs is not None and "op" in self.info_kwargs:
+            op: Any = self.info_kwargs["op"]
+            return {
+                "backend": "CUDA",
+                "op_type": type(op).__name__,
+                "op_conf_name": str(op.configuration_name()),
+                "op_arch": str(op.arch),
+                "tile_shape": str(op.tile_description.tile_shape),
+                "epilogue_schedule": str(op.epilogue_schedule),
+                "kernel_schedule": str(op.kernel_schedule),
+                "element_accumulator": str(op.accumulator_type()),
+                "op_name": str(op.procedural_name()),
+                "instruction_shape": str(
+                    op.tile_description.math_instruction.instruction_shape
+                ),
+            }
+        else:
+            return {"backend": "CUDA", "op_type": "unknown"}
+
     def output_node(self) -> TensorBox:
+        self.bmreq.update_workspace_size()
         return TensorBox.create(
             CUDATemplateBuffer(
                 layout=self.layout,

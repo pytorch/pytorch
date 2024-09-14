@@ -1,12 +1,13 @@
+# mypy: ignore-errors
+
 from abc import abstractmethod
 import tempfile
 import unittest
 
 from copy import deepcopy
-from functools import reduce, partial, wraps
+from functools import reduce, partial
 from itertools import product
 from operator import mul
-from math import pi
 
 
 import torch
@@ -15,7 +16,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import _reduction as _Reduction
 from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
-    gradcheck, gradgradcheck, set_default_dtype
+    gradcheck, gradgradcheck, set_default_dtype, skipIfTorchDynamo
 from torch.testing._internal.common_cuda import TEST_CUDA, SM90OrLater
 from torch.autograd.gradcheck import _get_numerical_jacobian, _iter_tensors
 from torch.autograd import Variable
@@ -71,7 +72,7 @@ def get_weight(m):
 #    functional optional arguments. For example, if the test dict's `constructor` entry is
 #    `wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest')`,
 #    then the `cpp_options_args` entry should be
-#    "F::InterpolateFuncOptions().size(std::vector<int64_t>({12})).scale_factor(c10::nullopt).mode(torch::kNearest)".
+#    "F::InterpolateFuncOptions().size(std::vector<int64_t>({12})).scale_factor(std::nullopt).mode(torch::kNearest)".
 # 3. Otherwise, if the test dict's `constructor` entry looks like
 #    `wrap_functional(lambda i: F.some_functional_name(...))`,
 #    then you must add `cpp_function_call` entry to the test dict, with its value exactly matching the Python
@@ -1708,6 +1709,7 @@ new_module_tests = [
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         check_gradgrad=False,
         default_dtype=torch.double,
+        decorator=skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/117971")
     ),
     dict(
         module_name='Embedding',
@@ -1717,6 +1719,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='discontiguous',
         default_dtype=torch.double,
+        decorator=skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/117971")
     ),
     dict(
         module_name='EmbeddingBag',
@@ -1740,7 +1743,7 @@ new_module_tests = [
         module_name='EmbeddingBag',
         constructor_args=(4, 3, None, 2., False, 'sum'),
         cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
-                                .max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kSum)''',
+                                .max_norm(std::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kSum)''',
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         check_gradgrad=False,
         desc='sum',
@@ -1750,7 +1753,7 @@ new_module_tests = [
         module_name='EmbeddingBag',
         constructor_args=(4, 3, None, 2., False, 'max'),
         cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
-                                .max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kMax)''',
+                                .max_norm(std::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kMax)''',
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         check_gradgrad=False,
         desc='max',
@@ -1768,7 +1771,7 @@ new_module_tests = [
         fullname='EmbeddingBag_sum_padding_idx',
         constructor=lambda: nn.EmbeddingBag(4, 3, None, 2., False, 'sum', padding_idx=1),
         cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
-                                .max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kSum).padding_idx(1)''',
+                                .max_norm(std::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kSum).padding_idx(1)''',
         input_fn=lambda: torch.stack([torch.randperm(3), torch.randperm(3)]),
         check_gradgrad=False,
         default_dtype=torch.double,
@@ -1777,7 +1780,7 @@ new_module_tests = [
         fullname='EmbeddingBag_max_padding_idx',
         constructor=lambda: nn.EmbeddingBag(4, 3, None, 2., False, 'max', padding_idx=1),
         cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
-                                .max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kMax).padding_idx(1)''',
+                                .max_norm(std::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kMax).padding_idx(1)''',
         input_fn=lambda: torch.stack([torch.randperm(3), torch.randperm(3)]),
         check_gradgrad=False,
         default_dtype=torch.double,
@@ -1815,7 +1818,7 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12})).scale_factor(c10::nullopt).mode(torch::kNearest)''',
+                            .size(std::vector<int64_t>({12})).scale_factor(std::nullopt).mode(torch::kNearest)''',
         input_size=(1, 2, 4),
         fullname='interpolate_nearest_1d',
         pickle=False,
@@ -1824,7 +1827,7 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12})).scale_factor(c10::nullopt).mode(torch::kNearest)''',
+                            .size(std::vector<int64_t>({12})).scale_factor(std::nullopt).mode(torch::kNearest)''',
         input_size=(0, 2, 4),
         fullname='interpolate_nearest_1d_zero_dim',
         pickle=False,
@@ -1832,7 +1835,7 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=(12, ), scale_factor=None, mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>({12})).scale_factor(c10::nullopt).mode(torch::kNearest)''',
+                            .size(std::vector<int64_t>({12})).scale_factor(std::nullopt).mode(torch::kNearest)''',
         input_size=(1, 2, 3),
         fullname='interpolate_nearest_tuple_1d',
         pickle=False,
@@ -1841,7 +1844,7 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt).scale_factor(std::vector<double>({4.})).mode(torch::kNearest)''',
+                            .size(std::nullopt).scale_factor(std::vector<double>({4.})).mode(torch::kNearest)''',
         input_size=(1, 2, 4),
         fullname='interpolate_nearest_scale_1d',
         pickle=False,
@@ -1851,7 +1854,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='linear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kLinear)
                             .align_corners(false)''',
         input_size=(1, 2, 4),
@@ -1863,7 +1866,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=(4, ), scale_factor=None, mode='linear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({4}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kLinear)
                             .align_corners(false)''',
         input_size=(1, 2, 3),
@@ -1874,7 +1877,7 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='linear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({4.}))
                             .mode(torch::kLinear)
                             .align_corners(false)''',
@@ -1887,7 +1890,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='linear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kLinear)
                             .align_corners(false)''',
         input_size=(0, 2, 4),
@@ -1898,7 +1901,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='linear', align_corners=True),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kLinear)
                             .align_corners(true)''',
         input_size=(1, 2, 4),
@@ -1909,7 +1912,7 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='linear', align_corners=True),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({4.}))
                             .mode(torch::kLinear)
                             .align_corners(true)''',
@@ -1922,7 +1925,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=2, scale_factor=None, mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({2, 2}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kNearest)''',
         input_size=(1, 128, 1, 1),
         fullname='interpolate_nearest_2d_launch_configs',
@@ -1933,7 +1936,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kNearest)''',
         input_size=(1, 2, 4, 4),
         fullname='interpolate_nearest_2d',
@@ -1944,7 +1947,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=(12, 16), scale_factor=None, mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 16}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kNearest)''',
         input_size=(1, 2, 3, 4),
         fullname='interpolate_nearest_tuple_2d',
@@ -1954,7 +1957,7 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({4., 4.}))
                             .mode(torch::kNearest)''',
         input_size=(1, 2, 4, 4),
@@ -1966,7 +1969,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kNearest)''',
         input_size=(0, 2, 4, 4),
         fullname='interpolate_nearest_2d_zero_dim',
@@ -1976,7 +1979,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bilinear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kBilinear)
                             .align_corners(false)''',
         input_size=(1, 2, 4, 4),
@@ -1988,7 +1991,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bilinear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kBilinear)
                             .align_corners(false)''',
         input_size=(0, 2, 4, 4),
@@ -2000,7 +2003,7 @@ new_module_tests = [
                                     mode='bilinear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({4, 6}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kBilinear)
                             .align_corners(false)''',
         input_size=(1, 2, 2, 3),
@@ -2012,7 +2015,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4.,
                                     mode='bilinear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({4., 4.}))
                             .mode(torch::kBilinear)
                             .align_corners(false)''',
@@ -2025,7 +2028,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 2.),
                                     mode='bilinear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({2., 2.}))
                             .mode(torch::kBilinear)
                             .align_corners(false)''',
@@ -2038,7 +2041,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
                                     mode='bilinear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({2., 1.}))
                             .mode(torch::kBilinear)
                             .align_corners(false)''',
@@ -2051,7 +2054,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=(4, 6), scale_factor=None, mode='bilinear', align_corners=True),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({4, 6}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kBilinear)
                             .align_corners(true)''',
         input_size=(1, 2, 4, 4),
@@ -2063,7 +2066,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
                                     mode='bilinear', align_corners=True),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({2., 1.}))
                             .mode(torch::kBilinear)
                             .align_corners(true)''',
@@ -2076,7 +2079,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bicubic', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kBicubic)
                             .align_corners(false)''',
         input_size=(1, 2, 4, 4),
@@ -2088,7 +2091,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bicubic', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kBicubic)
                             .align_corners(false)''',
         input_size=(0, 2, 4, 4),
@@ -2100,7 +2103,7 @@ new_module_tests = [
                                     mode='bicubic', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({4, 6}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kBicubic)
                             .align_corners(false)''',
         input_size=(1, 2, 2, 3),
@@ -2111,7 +2114,7 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='bicubic', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({4., 4.}))
                             .mode(torch::kBicubic)
                             .align_corners(false)''',
@@ -2124,7 +2127,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 2.),
                                     mode='bicubic', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({2., 2.}))
                             .mode(torch::kBicubic)
                             .align_corners(false)''',
@@ -2137,7 +2140,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
                                     mode='bicubic', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({2., 1.}))
                             .mode(torch::kBicubic)
                             .align_corners(false)''',
@@ -2150,7 +2153,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=(4, 6), scale_factor=None, mode='bicubic', align_corners=True),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({4, 6}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kBicubic)
                             .align_corners(true)''',
         input_size=(1, 2, 4, 4),
@@ -2162,7 +2165,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
                                     mode='bicubic', align_corners=True),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({2., 1.}))
                             .mode(torch::kBicubic)
                             .align_corners(true)''',
@@ -2175,7 +2178,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 12, 12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kNearest)''',
         input_size=(1, 2, 4, 4, 4),
         fullname='interpolate_nearest_3d',
@@ -2186,7 +2189,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 12, 12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kNearest)''',
         input_size=(0, 2, 4, 4, 4),
         fullname='interpolate_nearest_3d_zero_dim',
@@ -2196,7 +2199,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=(12, 16, 16), scale_factor=None, mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 16, 16}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kNearest)''',
         input_size=(1, 2, 3, 4, 4),
         fullname='interpolate_nearest_tuple_3d',
@@ -2206,7 +2209,7 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({4., 4., 4.}))
                             .mode(torch::kNearest)''',
         input_size=(1, 2, 4, 4, 4),
@@ -2218,7 +2221,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='trilinear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 12, 12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kTrilinear)
                             .align_corners(false)''',
         input_size=(1, 2, 4, 4, 4),
@@ -2230,7 +2233,7 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='trilinear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12, 12, 12}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kTrilinear)
                             .align_corners(false)''',
         input_size=(0, 2, 4, 4, 4),
@@ -2242,7 +2245,7 @@ new_module_tests = [
                                     scale_factor=None, mode='trilinear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({4, 6, 6}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kTrilinear)
                             .align_corners(false)''',
         input_size=(1, 2, 2, 3, 3),
@@ -2253,7 +2256,7 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=3., mode='trilinear', align_corners=False),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({3., 3., 3.}))
                             .mode(torch::kTrilinear)
                             .align_corners(false)''',
@@ -2269,7 +2272,7 @@ new_module_tests = [
                                     mode='trilinear', align_corners=True),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({4, 6, 6}))
-                            .scale_factor(c10::nullopt)
+                            .scale_factor(std::nullopt)
                             .mode(torch::kTrilinear)
                             .align_corners(true)''',
         input_size=(1, 2, 2, 3, 3),
@@ -2280,7 +2283,7 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=3., mode='trilinear', align_corners=True),
         cpp_options_args='''F::InterpolateFuncOptions()
-                            .size(c10::nullopt)
+                            .size(std::nullopt)
                             .scale_factor(std::vector<double>({3., 3., 3.}))
                             .mode(torch::kTrilinear)
                             .align_corners(true)''',
@@ -2572,7 +2575,7 @@ new_module_tests = [
                                 .dim_feedforward(8)
                                 .dropout(0.0)
                                 .activation(torch::kReLU)''',
-        input_fn=lambda:(torch.rand(3, 3, 4), torch.rand(2, 3, 4), torch.rand(3, 3)),
+        input_fn=lambda: (torch.rand(3, 3, 4), torch.rand(2, 3, 4), torch.rand(3, 3)),
         check_gradgrad=False,
         desc='multilayer_coder',
         with_tf32=True,
@@ -2707,19 +2710,11 @@ for non_linear_activation in non_linear_activations_no_batch:
     new_module_tests.append(activation_test_info)
 
 
-def kldivloss_reference(input, target, reduction='mean'):
-    result = target * (target.log() - input)
-    if reduction == 'mean':
-        return result.mean()
-    elif reduction == 'sum':
-        return result.sum()
-    elif reduction == 'batchmean' and result.dim() != 0:
-        return result.sum() / result.size(0)
-    return result
-
-
-def kldivloss_log_target_reference(input, target, reduction='mean'):
-    result = torch.exp(target) * (target - input)
+def kldivloss_reference(input, target, reduction='mean', log_target=False):
+    if log_target:
+        result = torch.exp(target) * (target - input)
+    else:
+        result = target * (target.log() - input)
     if reduction == 'mean':
         return result.mean()
     elif reduction == 'sum':
@@ -2953,7 +2948,7 @@ def _multimarginloss_reference(input, target_idx, p, margin, weight):
     output = 0
     for i in range(0, len(input)):
         if i != target_idx:
-            output += max(0, weight[target_idx] * (margin - input[target_idx] + input[i]) ** p)
+            output += weight[target_idx] * (max(0, (margin - input[target_idx] + input[i])) ** p)
     return output
 
 
@@ -3021,7 +3016,7 @@ def marginrankingloss_reference(input1, input2, target, margin=0, reduction='mea
     return output
 
 
-# this directly follows Graves et al's paper, in contrast to the production implementation, it does not use log-space
+# this directly follows Graves et al.'s paper, in contrast to the production implementation, it does not use log-space
 def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0, reduction='mean'):
     input_lengths = torch.as_tensor(input_lengths, dtype=torch.long)
     target_lengths = torch.as_tensor(target_lengths, dtype=torch.long)
@@ -3052,16 +3047,16 @@ def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0
         losses.append(-alpha[-2:].sum().log()[None])
     output = torch.cat(losses, 0)
     if reduction == 'mean':
-        return (output / target_lengths.to(dtype=output.dtype, device=output.device)).mean()
+        output = (output / target_lengths.to(dtype=output.dtype, device=output.device)).mean()
     elif reduction == 'sum':
-        return output.sum()
+        output = output.sum()
     output = output.to(dt)
     return output
 
 
 loss_reference_fns: Dict['str', Callable] = {
     'KLDivLoss': kldivloss_reference,
-    'KLDivLoss_log_target': kldivloss_log_target_reference,
+    'KLDivLoss_log_target': partial(kldivloss_reference, log_target=True),
     'NLLLoss': nllloss_reference,
     'NLLLossNd': nlllossNd_reference,
     'SmoothL1Loss': smoothl1loss_reference,
@@ -3078,918 +3073,7 @@ loss_reference_fns: Dict['str', Callable] = {
 }
 
 
-criterion_tests = [
-    dict(
-        module_name='L1Loss',
-        input_size=(2, 3, 4),
-        target_fn=lambda: torch.randn((2, 3, 4), requires_grad=True),
-        reference_fn=lambda i, t, _: 1. / i.numel() *
-        sum((a - b).abs().sum() for a, b in zip(i, t)),
-        check_complex=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='NLLLoss',
-        input_fn=lambda: torch.rand(15, 10).log(),
-        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
-        reference_fn=lambda i, t, m:
-            nllloss_reference(i, t, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-        check_bfloat16=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='NLLLoss',
-        constructor_args=(None, None, 2),
-        cpp_constructor_args='torch::nn::NLLLossOptions().weight({}).ignore_index(2)',
-        input_fn=lambda: torch.rand(15, 10).log(),
-        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
-        reference_fn=lambda i, t, _: nllloss_reference(i, t, ignore_index=2),
-        desc='ignore_index',
-        check_bfloat16=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='NLLLoss',
-        constructor_args_fn=lambda: (torch.rand(10),),
-        cpp_constructor_args='torch::nn::NLLLossOptions().weight(torch::rand(10))',
-        input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
-        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
-        reference_fn=lambda i, t, m:
-            nllloss_reference(i, t, weight=get_weight(m)),
-        desc='weights',
-        check_bfloat16=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='NLLLoss',
-        constructor_args_fn=lambda: (torch.rand(10), None, 2),
-        cpp_constructor_args='torch::nn::NLLLossOptions().weight(torch::rand(10)).ignore_index(2)',
-        input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
-        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
-        reference_fn=lambda i, t, m:
-            nllloss_reference(i, t, weight=get_weight(m), ignore_index=2),
-        desc='weights_ignore_index',
-        check_bfloat16=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='NLLLoss',
-        constructor_args_fn=lambda: (torch.rand(10), None, -1),
-        cpp_constructor_args='torch::nn::NLLLossOptions().weight(torch::rand(10)).ignore_index(-1)',
-        input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
-        target_fn=lambda: torch.empty(15).uniform_().mul(10 + 1).floor().long() - 1,
-        reference_fn=lambda i, t, m:
-            nllloss_reference(i, t, weight=get_weight(m), ignore_index=-1),
-        desc='weights_ignore_index_neg',
-        check_bfloat16=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='KLDivLoss',
-        input_fn=lambda: torch.rand(10, 10).log(),
-        target_fn=lambda: torch.rand(10, 10),
-        reference_fn=lambda i, t, m:
-            kldivloss_reference(i, t, get_reduction(m)),
-        check_sum_reduction=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='KLDivLoss',
-        constructor=wraps(nn.KLDivLoss)(partial(nn.KLDivLoss, log_target=True)),
-        cpp_constructor_args='torch::nn::KLDivLossOptions().log_target(true)',
-        input_fn=lambda: torch.rand(10, 10).log(),
-        target_fn=lambda: torch.rand(10, 10).log(),
-        reference_fn=lambda i, t, m:
-            kldivloss_log_target_reference(i, t, get_reduction(m)),
-        check_sum_reduction=True,
-        desc='log_target',
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='MSELoss',
-        input_fn=lambda: torch.rand((2, 3, 4, 5), dtype=torch.double),
-        target_fn=lambda: torch.randn((2, 3, 4, 5), dtype=torch.double, requires_grad=True),
-        reference_fn=lambda i, t, m: ((i - t).abs().pow(2).sum() / (i.numel()
-                                      if get_reduction(m) == 'mean' else 1)),
-        check_sum_reduction=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='BCELoss',
-        input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
-        target_fn=lambda: torch.randn(15, 10).gt(0).to(torch.get_default_dtype()),
-        reference_fn=lambda i, t, m: -(t * i.log() + (1 - t) * (1 - i).log()).sum() /
-            (i.numel() if get_reduction(m) else 1),
-        check_bfloat16=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='BCELoss',
-        constructor_args_fn=lambda: (torch.rand(10),),
-        cpp_constructor_args='torch::nn::BCELossOptions().weight(torch::rand(10))',
-        input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
-        target_fn=lambda: torch.randn(15, 10).gt(0).to(torch.get_default_dtype()),
-        reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
-            (i.numel() if get_reduction(m) else 1),
-        desc='weights',
-        check_bfloat16=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='CrossEntropyLoss',
-        input_size=(15, 10),
-        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='CrossEntropyLoss',
-        constructor_args_fn=lambda: (torch.rand(10),),
-        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight(torch::rand(10))',
-        input_size=(15, 10),
-        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
-        desc='weights',
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='HingeEmbeddingLoss',
-        input_size=(10,),
-        target_fn=lambda: torch.randn(10).gt(0).to(torch.get_default_dtype()).mul_(2).sub(1),
-        reference_fn=lambda i, t, m:
-            hingeembeddingloss_reference(i, t, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='HingeEmbeddingLoss',
-        constructor_args=(0.5,),
-        cpp_constructor_args='torch::nn::HingeEmbeddingLossOptions().margin(0.5)',
-        input_size=(10,),
-        target_fn=lambda: torch.randn(10).gt(0).to(torch.get_default_dtype()).mul_(2).sub(1),
-        reference_fn=lambda i, t, m:
-            hingeembeddingloss_reference(i, t, margin=0.5, reduction=get_reduction(m)),
-        desc='margin',
-        check_sum_reduction=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='MultiLabelMarginLoss',
-        input_size=(10,),
-        target_fn=lambda: torch.rand(10).mul(10).floor().long(),
-        reference_fn=lambda i, t, m:
-            multilabelmarginloss_reference(i, t, reduction=get_reduction(m)),
-        desc="1d",
-        check_sum_reduction=True,
-        check_gradgrad=False,
-        check_bfloat16=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='MultiLabelMarginLoss',
-        input_size=(5, 10),
-        target_fn=lambda: torch.rand(5, 10).mul(10).floor().long(),
-        reference_fn=lambda i, t, m:
-            multilabelmarginloss_reference(i, t, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-        check_gradgrad=False,
-        check_bfloat16=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='MultiLabelSoftMarginLoss',
-        input_size=(5, 10),
-        target_fn=lambda: torch.rand(5, 10).mul(2).floor(),
-        reference_fn=lambda i, t, m: -(t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()).sum() / i.numel(),
-        check_gradgrad=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='MultiMarginLoss',
-        input_size=(5, 10),
-        target_fn=lambda: torch.rand(5).mul(8).floor().long(),
-        reference_fn=lambda i, t, m:
-            multimarginloss_reference(i, t, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-        check_gradgrad=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='MultiMarginLoss',
-        input_size=(10,),
-        target_fn=lambda: torch.rand(1).mul(8).floor().long(),
-        reference_fn=lambda i, t, m:
-            multimarginloss_reference(i, t, reduction=get_reduction(m)),
-        desc='1d',
-        check_sum_reduction=True,
-        check_gradgrad=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='MultiMarginLoss',
-        constructor_args=(2,),
-        cpp_constructor_args='torch::nn::MultiMarginLossOptions().p(2)',
-        input_fn=lambda: torch.rand(5, 10).clamp_(1e-2, 1 - 1e-2),
-        target_fn=lambda: torch.rand(5).mul(8).floor().long(),
-        reference_fn=lambda i, t, m:
-            multimarginloss_reference(i, t, p=2, reduction=get_reduction(m)),
-        desc='p',
-        check_sum_reduction=True,
-        check_gradgrad=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='MultiMarginLoss',
-        constructor_args=(1, 0.5),
-        cpp_constructor_args='torch::nn::MultiMarginLossOptions().p(1).margin(0.5)',
-        legacy_constructor_args=(1, None, 0.5),
-        input_size=(5, 10),
-        target_fn=lambda: torch.rand(5).mul(8).floor().long(),
-        reference_fn=lambda i, t, m:
-            multimarginloss_reference(i, t, margin=0.5, reduction=get_reduction(m)),
-        desc='margin',
-        check_sum_reduction=True,
-        check_gradgrad=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='MultiMarginLoss',
-        constructor_args=(1, 1., torch.rand(10, dtype=torch.double)),
-        cpp_constructor_args='torch::nn::MultiMarginLossOptions().p(1).margin(1.).weight(torch::rand(10).to(torch::kFloat64))',
-        legacy_constructor_args=(1, torch.rand(10, dtype=torch.double)),
-        input_fn=lambda: torch.rand(5, 10, dtype=torch.double),
-        target_fn=lambda: torch.rand(5).mul(8).floor().long(),
-        reference_fn=lambda i, t, m:
-            multimarginloss_reference(i, t, weight=get_weight(m), reduction=get_reduction(m)),
-        desc='weights',
-        check_sum_reduction=True,
-        check_gradgrad=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='SmoothL1Loss',
-        input_size=(5, 10),
-        target_fn=lambda: torch.randn((5, 10), requires_grad=True),
-        check_sum_reduction=True,
-        reference_fn=lambda i, t, m, b=1.0:
-            smoothl1loss_reference(i, t, reduction=get_reduction(m), beta=b),
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='HuberLoss',
-        input_size=(5, 10),
-        target_fn=lambda: torch.randn((5, 10), requires_grad=True),
-        check_sum_reduction=True,
-        check_half=True,
-        check_bfloat16=True,
-        reference_fn=lambda i, t, m:
-            huberloss_reference(i, t, reduction=get_reduction(m)),
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='SoftMarginLoss',
-        input_size=(5, 5),
-        target_fn=lambda: torch.randn(5, 5).sign(),
-        reference_fn=lambda i, t, m:
-            softmarginloss_reference(i, t, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='CosineEmbeddingLoss',
-        input_fn=lambda: (torch.rand(15, 10, dtype=torch.double), torch.rand(15, 10, dtype=torch.double)),
-        target_fn=lambda: torch.randn(15, dtype=torch.double).sign(),
-        reference_fn=lambda i, t, m:
-            cosineembeddingloss_reference(i[0], i[1], t, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-    ),
-    dict(
-        module_name='CosineEmbeddingLoss',
-        constructor_args=(0.7,),
-        cpp_constructor_args='torch::nn::CosineEmbeddingLossOptions().margin(0.7)',
-        input_fn=lambda: (torch.rand(15, 10, dtype=torch.double), torch.rand(15, 10, dtype=torch.double)),
-        target_fn=lambda: torch.randn(15, dtype=torch.double).sign(),
-        reference_fn=lambda i, t, m:
-            cosineembeddingloss_reference(i[0], i[1], t, margin=0.7, reduction=get_reduction(m)),
-        desc='margin',
-        check_sum_reduction=True,
-    ),
-    dict(
-        module_name='MarginRankingLoss',
-        input_fn=lambda: (torch.randn(50).mul(10), torch.randn(50).mul(10)),
-        target_fn=lambda: torch.randn(50).sign(),
-        reference_fn=lambda i, t, m:
-            marginrankingloss_reference(i[0], i[1], t, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='MarginRankingLoss',
-        constructor_args=(0.5,),
-        cpp_constructor_args='torch::nn::MarginRankingLossOptions().margin(0.5)',
-        input_fn=lambda: (torch.randn(50).mul(10), torch.randn(50).mul(10)),
-        target_fn=lambda: torch.randn(50).sign(),
-        reference_fn=lambda i, t, m:
-            marginrankingloss_reference(i[0], i[1], t, margin=0.5, reduction=get_reduction(m)),
-        desc='margin',
-        check_sum_reduction=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='BCEWithLogitsLoss',
-        input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
-        target_fn=lambda: torch.randn(15, 10).gt(0).to(torch.get_default_dtype()),
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='BCEWithLogitsLoss',
-        constructor_args=(torch.rand(10, dtype=torch.double),),
-        cpp_constructor_args='torch::nn::BCEWithLogitsLossOptions().weight(torch::rand(10).to(torch::kFloat64))',
-        input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
-        target_fn=lambda: torch.randn(15, 10).gt(0).to(torch.get_default_dtype()),
-        desc='weights',
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='BCEWithLogitsLoss',
-        constructor_args=(torch.rand((), dtype=torch.double),),
-        cpp_constructor_args='torch::nn::BCEWithLogitsLossOptions().weight(torch::rand({}).to(torch::kFloat64))',
-        input_fn=lambda: torch.rand(()).clamp_(1e-2, 1 - 1e-2),
-        target_fn=lambda: torch.randn(()).gt(0).to(torch.get_default_dtype()),
-        desc='scalar_weights',
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='NLLLoss',
-        input_size=(2, 3, 5, 5),
-        target_fn=lambda: torch.rand(2, 5, 5).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-        desc='2d',
-        check_bfloat16=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='NLLLoss',
-        constructor_args_fn=lambda: (torch.rand(3),),
-        cpp_constructor_args='torch::nn::NLLLossOptions().weight(torch::rand(3))',
-        input_size=(2, 3, 5, 5),
-        target=torch.rand(2, 5, 5).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['NLLLossNd'](i, t, weight=get_weight(m)),
-        desc='2d_weights',
-        check_bfloat16=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='NLLLoss',
-        constructor_args=(None, None, 1),
-        cpp_constructor_args='torch::nn::NLLLossOptions().weight({}).ignore_index(1)',
-        input_size=(2, 3, 5, 5),
-        target_fn=lambda: torch.rand(2, 5, 5).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['NLLLossNd'](i, t, ignore_index=1),
-        desc='2d_ignore_index',
-        check_bfloat16=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='NLLLoss',
-        input_size=(2, 3, 5, 5, 2, 2),
-        target_fn=lambda: torch.rand(2, 5, 5, 2, 2).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-        desc='higher_dim',
-        check_bfloat16=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='NLLLoss',
-        input_size=(2, 3, 5),
-        target_fn=lambda: torch.rand(2, 5).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-        desc='dim_is_3',
-        check_bfloat16=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='CrossEntropyLoss',
-        input_size=(2, 3, 5, 5),
-        target_fn=lambda: torch.rand(2, 5, 5).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-        desc='2d',
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='CrossEntropyLoss',
-        constructor_args_fn=lambda: (torch.rand(3),),
-        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight(torch::rand(3))',
-        input_size=(2, 3, 5, 5),
-        target=torch.rand(2, 5, 5).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, weight=get_weight(m)),
-        desc='2d_weights',
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='CrossEntropyLoss',
-        constructor_args=(None, None, 1),
-        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight({}).ignore_index(1)',
-        input_size=(2, 3, 5, 5),
-        target_fn=lambda: torch.rand(2, 5, 5).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, ignore_index=1),
-        desc='2d_ignore_index',
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='CrossEntropyLoss',
-        input_size=(2, 3, 5, 5, 2, 2),
-        target_fn=lambda: torch.rand(2, 5, 5, 2, 2).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-        desc='higher_dim',
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='CrossEntropyLoss',
-        input_size=(2, 3, 5),
-        target_fn=lambda: torch.rand(2, 5).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-        desc='dim_is_3',
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='CrossEntropyLoss',
-        input_size=(5, 3),
-        target_fn=lambda: torch.rand(5, 3).softmax(dim=1),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-        desc='2d_prob_target',
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='CrossEntropyLoss',
-        input_size=(5, 3, 4),
-        target_fn=lambda: torch.rand(5, 3, 4).softmax(dim=1),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-        desc='3d_prob_target',
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='CrossEntropyLoss',
-        input_size=(5, 3, 4, 2),
-        target_fn=lambda: torch.rand(5, 3, 4, 2).softmax(dim=1),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-        desc='4d_prob_target',
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='CrossEntropyLoss_2d_prob_target_smoothing_sum_reduction',
-        constructor=lambda *args, **kwargs: nn.CrossEntropyLoss(reduction='sum',
-                                                                label_smoothing=0.15),
-        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().label_smoothing(0.15).reduction(torch::kSum)',
-        input_size=(5, 3),
-        target_fn=lambda: torch.rand(5, 3).softmax(dim=1),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), label_smoothing=0.15),
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='CrossEntropyLoss_2d_prob_target_smoothing',
-        constructor=lambda *args: nn.CrossEntropyLoss(label_smoothing=0.15),
-        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().label_smoothing(0.15)',
-        input_size=(5, 3),
-        target_fn=lambda: torch.rand(5, 3).softmax(dim=1),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), label_smoothing=0.15),
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='CrossEntropyLoss_2d_prob_target_smoothing_weight',
-        constructor_args_fn=lambda: (torch.rand(3).abs(),),
-        constructor=lambda weight: nn.CrossEntropyLoss(weight, label_smoothing=0.15),
-        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().label_smoothing(0.15).weight(torch::rand(3).abs())',
-        input_size=(5, 3),
-        target_fn=lambda: torch.rand(5, 3).softmax(dim=1),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), weight=get_weight(m), label_smoothing=0.15),
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='CrossEntropyLoss_3d_prob_target_smoothing_sum_reduction',
-        constructor=lambda *args: nn.CrossEntropyLoss(reduction='sum',
-                                                                label_smoothing=0.15),
-        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().label_smoothing(0.15).reduction(torch::kSum)',
-        input_size=(5, 3, 4),
-        target_fn=lambda: torch.rand(5, 3, 4).softmax(dim=1),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), label_smoothing=0.15),
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='CrossEntropyLoss_3d_prob_target_smoothing',
-        constructor=lambda *args: nn.CrossEntropyLoss(label_smoothing=0.15),
-        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().label_smoothing(0.15)',
-        input_size=(5, 3, 4),
-        target_fn=lambda: torch.rand(5, 3, 4).softmax(dim=1),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), label_smoothing=0.15),
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='CrossEntropyLoss_3d_indices_target_smoothing',
-        constructor=lambda *args: nn.CrossEntropyLoss(label_smoothing=0.15),
-        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().label_smoothing(0.15)',
-        input_size=(2, 3, 5),
-        target_fn=lambda: torch.rand(2, 5).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), label_smoothing=0.15),
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='CrossEntropyLoss_3d_indices_target_smoothing_ignore_index',
-        constructor=lambda *args: nn.CrossEntropyLoss(label_smoothing=0.15, ignore_index=1),
-        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().label_smoothing(0.15).ignore_index(1)',
-        input_size=(2, 3, 5),
-        target_fn=lambda: torch.rand(2, 5).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), label_smoothing=0.15, ignore_index=1),
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='CrossEntropyLoss_3d_indices_target_smoothing_sum_reduction',
-        constructor=lambda *args: nn.CrossEntropyLoss(reduction='sum', label_smoothing=0.15),
-        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().label_smoothing(0.15).reduction(torch::kSum)',
-        input_size=(2, 3, 5),
-        target_fn=lambda: torch.rand(2, 5).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), label_smoothing=0.15),
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='CrossEntropyLoss_3d_indices_target_smoothing_sum_reduction_ignore_index',
-        constructor=lambda *args: nn.CrossEntropyLoss(reduction='sum', label_smoothing=0.15,
-                                                      ignore_index=1),
-        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().label_smoothing(0.15).reduction(torch::kSum).ignore_index(1)',
-        input_size=(2, 3, 5),
-        target_fn=lambda: torch.rand(2, 5).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), label_smoothing=0.15, ignore_index=1),
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='CrossEntropyLoss_2d_indices_target_smoothing',
-        constructor=lambda *args: nn.CrossEntropyLoss(label_smoothing=0.15),
-        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().label_smoothing(0.15)',
-        input_size=(15, 10),
-        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), label_smoothing=0.15),
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='CrossEntropyLoss_2d_indices_target_smoothing_sum_reduction',
-        constructor=lambda *args: nn.CrossEntropyLoss(reduction='sum', label_smoothing=0.15),
-        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().label_smoothing(0.15).reduction(torch::kSum)',
-        input_size=(15, 10),
-        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), label_smoothing=0.15),
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='CrossEntropyLoss_2d_indices_target_smoothing_ignore_index',
-        constructor=lambda *args: nn.CrossEntropyLoss(label_smoothing=0.15, ignore_index=3),
-        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().label_smoothing(0.15).ignore_index(3)',
-        input_size=(15, 10),
-        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), label_smoothing=0.15, ignore_index=3),
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        fullname='CrossEntropyLoss_2d_indices_target_smoothing_weight',
-        constructor_args_fn=lambda: (torch.rand(10).abs(),),
-        constructor=lambda weight: nn.CrossEntropyLoss(weight, label_smoothing=0.15),
-        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().label_smoothing(0.15).weight(torch::rand(10).abs())',
-        input_size=(15, 10),
-        target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), weight=get_weight(m), label_smoothing=0.15),
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='CrossEntropyLoss',
-        constructor_args_fn=lambda: (torch.rand(3),),
-        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight(torch::rand(3))',
-        input_size=(5, 3),
-        target_fn=lambda: torch.rand(5, 3).softmax(dim=1),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), weight=get_weight(m)),
-        check_sum_reduction=True,
-        desc='2d_prob_target_weights',
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='CrossEntropyLoss',
-        constructor_args_fn=lambda: (torch.rand(3),),
-        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight(torch::rand(3))',
-        input_size=(5, 3, 4),
-        target_fn=lambda: torch.rand(5, 3, 4).softmax(dim=1),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), weight=get_weight(m)),
-        check_sum_reduction=True,
-        desc='3d_prob_target_weights',
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='CrossEntropyLoss',
-        constructor_args_fn=lambda: (torch.rand(3),),
-        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight(torch::rand(3))',
-        input_size=(5, 3, 4, 2),
-        target_fn=lambda: torch.rand(5, 3, 4, 2).softmax(dim=1),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), weight=get_weight(m)),
-        check_sum_reduction=True,
-        desc='4d_prob_target_weights',
-        check_bfloat16=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='PoissonNLLLoss',  # Default is log_input=True, full=False
-        input_size=(2, 3, 4, 5),
-        target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
-        reference_fn=lambda i, t, _: (i.exp() - t.mul(i)).mean(),
-        desc='no_full_loss',
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='PoissonNLLLoss',
-        constructor_args=(False, False),  # log_input=False, full=False
-        cpp_constructor_args='torch::nn::PoissonNLLLossOptions().log_input(false).full(false)',
-        input_fn=lambda: torch.randn(2, 3, 4, 5).abs_().add_(0.001),
-        target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
-        reference_fn=lambda i, t, _: (i - t.mul((i + 1e-8).log())).mean(),
-        desc='no_full_loss_no_log_input',
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='PoissonNLLLoss',
-        constructor_args=(True, True),  # log_input=True, full=True
-        cpp_constructor_args='torch::nn::PoissonNLLLossOptions().log_input(true).full(true)',
-        input_size=(2, 3, 4, 5),
-        target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
-        reference_fn=lambda i, t, _:
-            (i.exp() - t.mul(i) + (t.mul(t.log()) - t + 0.5 * (2. * pi * t).log()).masked_fill(t <= 1, 0)).mean(),
-        desc='full_loss',
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='PoissonNLLLoss',
-        constructor_args=(False, True),  # log_input=False, full=True
-        cpp_constructor_args='torch::nn::PoissonNLLLossOptions().log_input(false).full(true)',
-        input_fn=lambda: torch.randn(2, 3, 4, 5).abs_().add_(0.001),
-        target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
-        reference_fn=lambda i, t, _: (
-            i - t.mul((i + 1e-8).log()) + (t.mul(t.log()) - t + 0.5 * (2. * pi * t).log()).masked_fill(t <= 1, 0)
-        ).mean(),
-        desc='full_loss_no_log_input',
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='L1Loss',
-        input_size=(),
-        target_fn=lambda: torch.randn((), requires_grad=True),
-        reference_fn=lambda i, t, _: 1. / i.numel() * (i - t).abs().sum(),
-        desc='scalar',
-        check_complex=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='KLDivLoss',
-        input_fn=lambda: torch.rand(()).log(),
-        target_fn=lambda: torch.rand(()),
-        reference_fn=lambda i, t, m:
-            kldivloss_reference(i, t, get_reduction(m)),
-        check_sum_reduction=True,
-        desc='scalar',
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='KLDivLoss',
-        constructor=wraps(nn.KLDivLoss)(partial(nn.KLDivLoss, log_target=True)),
-        cpp_constructor_args='torch::nn::KLDivLossOptions().log_target(true)',
-        input_fn=lambda: torch.rand(()).log(),
-        target_fn=lambda: torch.rand(()).log(),
-        reference_fn=lambda i, t, m:
-            kldivloss_log_target_reference(i, t, get_reduction(m)),
-        check_sum_reduction=True,
-        desc='scalar_log_target',
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='MSELoss',
-        input_fn=lambda: torch.rand((), dtype=torch.double),
-        target_fn=lambda: torch.randn((), requires_grad=True, dtype=torch.double),
-        reference_fn=lambda i, t, m: ((i - t).abs().pow(2).sum() /
-                                      (i.numel() if get_reduction(m) == 'mean' else 1)),
-        check_sum_reduction=True,
-        desc='scalar',
-        check_bfloat16=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='MSELoss',
-        input_fn=lambda: torch.ones(5, 68, 64, 64, dtype=torch.float) / 10,
-        target_fn=lambda: torch.zeros(5, 68, 64, 64, dtype=torch.float),
-        reference_fn=lambda i, t, m: ((i - t).abs().pow(2).sum() /
-                                      (i.numel() if get_reduction(m) == 'mean' else 1)),
-        check_forward_only=True,
-        desc='prec',
-        check_bfloat16=True,
-    ),
-    dict(
-        module_name='BCELoss',
-        constructor_args_fn=lambda: (torch.rand(()),),
-        cpp_constructor_args='torch::nn::BCELossOptions().weight(torch::rand({}))',
-        input_fn=lambda: torch.rand(()).clamp_(1e-2, 1 - 1e-2),
-        target_fn=lambda: torch.rand(()).gt(0).to(torch.get_default_dtype()),
-        reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
-            (i.numel() if get_reduction(m) == 'mean' else 1),
-        desc='scalar_weights',
-        check_bfloat16=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='HingeEmbeddingLoss',
-        constructor_args=(0.5,),
-        cpp_constructor_args='torch::nn::HingeEmbeddingLossOptions().margin(0.5)',
-        input_size=(),
-        target_fn=lambda: torch.randn(()).gt(0).to(torch.get_default_dtype()).mul_(2).sub(1),
-        desc='scalar_margin',
-        check_sum_reduction=True,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='SmoothL1Loss',
-        input_size=(),
-        target_fn=lambda: torch.randn((), requires_grad=True),
-        check_sum_reduction=True,
-        reference_fn=lambda i, t, m, b=1.0:
-            smoothl1loss_reference(i, t, reduction=get_reduction(m), beta=b),
-        desc='scalar',
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='MultiLabelSoftMarginLoss',
-        constructor_args=(torch.rand(10),),
-        cpp_constructor_args='torch::nn::MultiLabelSoftMarginLossOptions().weight(torch::rand(10))',
-        input_fn=lambda: torch.randn(5, 10),
-        target_fn=lambda: torch.rand(5, 10).mul(2).floor(),
-        reference_fn=lambda i, t, m: -((t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()) * get_weight(m)).sum() /
-            (i.numel() if get_reduction(m) == 'mean' else i.size(1) if get_reduction(m) == 'sum' else 1),
-        desc='weights',
-        check_sum_reduction=True,
-        check_gradgrad=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='CTCLoss',
-        constructor_args=(14,),  # blank=14
-        extra_args=([50, 50, 50], [30, 25, 20]),  # input_lengths, target_lengths
-        input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
-        target_fn=lambda: torch.randint(0, 14, (3, 30), dtype=torch.long),
-        reference_fn=lambda i, t, il, tl, m:
-            ctcloss_reference(i, t, il, tl, blank=14, reduction=get_reduction(m)),
-        desc='lengths_intlists',
-        check_forward_only=True,
-        check_sum_reduction=True,
-        check_gradgrad=False,
-        check_half=False,
-        # `CTCLoss` in C++ frontend doesn't accept integer list for `input_lengths` or `target_lengths`
-        test_cpp_api_parity=False,
-        check_jit=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='CTCLoss',
-        constructor_args=(14,),  # blank=14
-        cpp_constructor_args='torch::nn::CTCLossOptions().blank(14)',
-        extra_args=(torch.tensor([50, 50, 50]), torch.tensor([30, 25, 20])),  # input_lengths, target_lengths
-        input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
-        target_fn=lambda: torch.randint(0, 14, (3, 30), dtype=torch.long),
-        reference_fn=lambda i, t, il, tl, m:
-            ctcloss_reference(i, t, il, tl, blank=14, reduction=get_reduction(m)),
-        desc='lengths_tensors',
-        check_forward_only=True,
-        check_sum_reduction=True,
-        check_gradgrad=False,
-        check_half=False,
-        default_dtype=torch.double,
-    ),
-    # Test is flaky
-    # See https://github.com/pytorch/pytorch/issues/29380.
-    # dict(
-    #     module_name='CTCLoss',
-    #     desc='1d_target',
-    #     constructor_args=(14,),  # blank=14
-    #     extra_args=([50, 50, 50], [30, 25, 20]),  # input_lengths, target_lengths
-    #     input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
-    #     target_fn=lambda: torch.randint(0, 14, (3, 30), dtype=torch.long),
-    #     reference_fn=lambda i, t, il, tl, m:
-    #         ctcloss_reference(i, t, il, tl, blank=14, reduction=get_reduction(m)),
-    #     check_sum_reduction=True,
-    #     check_gradgrad=False,
-    #     check_half=False,
-    # ),
-    dict(
-        module_name='CTCLoss',
-        desc='2d_int_target_lengths_intlists',
-        constructor_args=(0,),  # blank=0
-        extra_args=([50, 50, 50], [30, 25, 20]),  # input_lengths, target_lengths
-        input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
-        target_fn=lambda: torch.randint(1, 15, (3, 30), dtype=torch.int),
-        reference_fn=lambda i, t, il, tl, m:
-            ctcloss_reference(i, t, il, tl, blank=0, reduction=get_reduction(m)),
-        check_forward_only=True,
-        check_sum_reduction=True,
-        check_gradgrad=False,
-        check_half=False,
-        # `CTCLoss` in C++ frontend doesn't accept integer list for `input_lengths` or `target_lengths`
-        test_cpp_api_parity=False,
-        check_jit=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='CTCLoss',
-        desc='2d_int_target_lengths_tensors',
-        constructor_args=(0,),  # blank=0
-        cpp_constructor_args='torch::nn::CTCLossOptions().blank(0)',
-        extra_args=(torch.tensor([50, 50, 50]), torch.tensor([30, 25, 20])),  # input_lengths, target_lengths
-        input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
-        target_fn=lambda: torch.randint(1, 15, (3, 30), dtype=torch.int),
-        reference_fn=lambda i, t, il, tl, m:
-            ctcloss_reference(i, t, il, tl, blank=0, reduction=get_reduction(m)),
-        check_forward_only=True,
-        check_sum_reduction=True,
-        check_gradgrad=False,
-        check_half=False,
-        default_dtype=torch.double,
-    ),
-    dict(
-        module_name='CTCLoss',
-        desc='2d_lengths_tensors',
-        constructor_args=(0,),  # blank=0
-        cpp_constructor_args='torch::nn::CTCLossOptions().blank(0)',
-        extra_args=(torch.tensor([50, 50, 50]), torch.tensor([30, 25, 20])),  # input_lengths, target_lengths
-        input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
-        target_fn=lambda: torch.randint(1, 15, (3, 30), dtype=torch.int),
-        reference_fn=lambda i, t, il, tl, m:
-            ctcloss_reference(i, t, il, tl, blank=0, reduction=get_reduction(m)),
-        check_forward_only=True,
-        check_sum_reduction=True,
-        check_gradgrad=False,
-        check_half=False,
-        default_dtype=torch.double,
-    ),
-]
+criterion_tests = []
 
 
 def single_batch_reference_criterion_fn(*args):
@@ -4194,7 +3278,7 @@ class NNTestCase(TestCase):
             if jacobian_parameters:
                 jacobian_param[:, i] = torch.cat(self._flatten_tensors(d_param), 0)
 
-        res: Tuple[torch.Tensor, ...] = tuple()
+        res: Tuple[torch.Tensor, ...] = ()
         if jacobian_input:
             res += jacobian_inp,
         if jacobian_parameters:
@@ -4206,7 +3290,7 @@ class NNTestCase(TestCase):
         def fw(*input):
             return self._forward(module, input).detach()
 
-        res: Tuple[torch.Tensor, ...] = tuple()
+        res: Tuple[torch.Tensor, ...] = ()
         if jacobian_input:
             res += _get_numerical_jacobian(fw, input, eps=1e-6),
         if jacobian_parameters:
@@ -4247,10 +3331,9 @@ class TestBase:
         for name in self._required_arg_names:
             if name not in kwargs and name + '_fn' not in kwargs and name + '_size' not in kwargs:
                 if name in {'constructor_args', 'extra_args'}:
-                    kwargs[name] = tuple()
+                    kwargs[name] = ()
                 else:
-                    raise ValueError("{}: Specify {} by a value, a function to generate it, or it's size!"
-                                     .format(self.get_name(), name))
+                    raise ValueError(f"{self.get_name()}: Specify {name} by a value, a function to generate it, or it's size!")
         self._extra_kwargs = kwargs
         self._arg_cache = {}
 
@@ -4354,7 +3437,8 @@ class ModuleTest(TestBase):
                     test_case._forward(module, input)
                     torch.save(module, f)
                     f.seek(0)
-                    module_copy = torch.load(f)
+                    # weights_only=False as this is legacy code that saves the model
+                    module_copy = torch.load(f, weights_only=False)
                     test_case.assertEqual(test_case._forward(module, input), test_case._forward(module_copy, input))
 
             self._do_test(test_case, module, input)
@@ -4884,17 +3968,17 @@ def _test_module_empty_input(test_case, module, inp, check_size=True, inference=
 
 def _create_basic_net():
     class Layer(nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.layer_dummy_param = nn.Parameter(torch.empty(3, 5))
-            self.register_buffer('layer_dummy_buf', torch.zeros(1, 3, 3, 7))
+            self.layer_dummy_buf = nn.Buffer(torch.zeros(1, 3, 3, 7))
 
     class Net(nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.l1 = Layer()
             self.dummy_param = nn.Parameter(torch.empty(3, 5))
-            self.register_buffer('dummy_buf', torch.zeros(7, 3, 3, 1))
+            self.dummy_buf = nn.Buffer(torch.zeros(7, 3, 3, 1))
 
     l = Layer()
     n = Net()

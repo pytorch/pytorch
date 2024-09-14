@@ -1,9 +1,9 @@
 # Owner(s): ["module: onnx"]
+import pytorch_test_common
+
 import torch
 import torch._dynamo
 import torch.fx
-
-from torch._custom_op import impl as custom_op
 from torch.onnx._internal.fx.passes import _utils as pass_utils
 from torch.testing._internal import common_utils
 
@@ -58,32 +58,25 @@ class TestFxPasses(common_utils.TestCase):
         ), f"Expected all names to be unique, got {nodes}"
 
     def test_onnx_dynamo_export_raises_when_model_contains_unsupported_fx_nodes(self):
-        @custom_op.custom_op("mylibrary::foo_op")
+        @torch.library.custom_op(
+            "mylibrary::foo_op", device_types="cpu", mutates_args=()
+        )
         def foo_op(x: torch.Tensor) -> torch.Tensor:
-            ...
-
-        @custom_op.custom_op("mylibrary::bar_op")
-        def bar_op(x: torch.Tensor) -> torch.Tensor:
-            ...
-
-        @foo_op.impl_abstract()
-        def foo_op_impl_abstract(x):
-            return torch.empty_like(x)
-
-        @foo_op.impl("cpu")
-        def foo_op_impl(x):
             return x + 1
 
-        @bar_op.impl_abstract()
-        def bar_op_impl_abstract(x):
-            return torch.empty_like(x)
-
-        @bar_op.impl("cpu")
-        def bar_op_impl(x):
+        @torch.library.custom_op(
+            "mylibrary::bar_op", device_types="cpu", mutates_args=()
+        )
+        def bar_op(x: torch.Tensor) -> torch.Tensor:
             return x + 2
 
-        torch._dynamo.allow_in_graph(foo_op)
-        torch._dynamo.allow_in_graph(bar_op)
+        @foo_op.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        @bar_op.register_fake
+        def _(x):
+            return torch.empty_like(x)
 
         def func(x, y, z):
             return foo_op(x) + bar_op(y) + z
@@ -102,8 +95,28 @@ class TestFxPasses(common_utils.TestCase):
         torch._dynamo.reset()
 
 
+@common_utils.instantiate_parametrized_tests
 class TestModularizePass(common_utils.TestCase):
-    def test_modularize_pass_succeeds_when_submodule_output_is_unused(self):
+    @pytorch_test_common.xfail(
+        error_message="'torch_nn_modules_activation_GELU_used_gelu_1' not found",
+        reason="optimizer",
+    )
+    @common_utils.parametrize(
+        "is_exported_program",
+        [
+            common_utils.subtest(
+                True,
+                name="exported_program",
+            ),
+            common_utils.subtest(
+                False,
+                name="nn_module",
+            ),
+        ],
+    )
+    def test_modularize_pass_succeeds_when_submodule_output_is_unused(
+        self, is_exported_program
+    ):
         # This is an ill-formed model, but exporter must not crash.
         # It is illegal for submodule to have zero output. For modularization pass it can happen
         # when the submodule output is unused, so no inner node is connected to any outer
@@ -113,7 +126,7 @@ class TestModularizePass(common_utils.TestCase):
         #
         # Minified repro from Background_Matting. https://github.com/pytorch/benchmark/issues/1768
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.unused_relu = torch.nn.ReLU()
                 self.used_gelu = torch.nn.GELU()
@@ -123,9 +136,14 @@ class TestModularizePass(common_utils.TestCase):
                 unused_relu_result = self.unused_relu(x)
                 return result
 
-        onnx_program = torch.onnx.dynamo_export(
-            TestModule(), torch.randn(3), torch.randn(3)
-        )
+        if is_exported_program:
+            model = torch.export.export(
+                TestModule(), args=(torch.randn(3), torch.randn(3))
+            )
+        else:
+            model = TestModule()
+
+        onnx_program = torch.onnx.dynamo_export(model, torch.randn(3), torch.randn(3))
         model_proto = onnx_program.model_proto
         function_proto_names = [function.name for function in model_proto.functions]
         self.assertIn(
@@ -133,9 +151,28 @@ class TestModularizePass(common_utils.TestCase):
         )
         self.assertFalse(any("ReLU" in name for name in function_proto_names))
 
-    def test_modularize_pass_succeeds_when_a_submodule_is_called_multiple_times(self):
+    @pytorch_test_common.xfail(
+        error_message="'torch_nn_modules_activation_ReLU_relu_1' not found",
+        reason="optimizer",
+    )
+    @common_utils.parametrize(
+        "is_exported_program",
+        [
+            common_utils.subtest(
+                True,
+                name="exported_program",
+            ),
+            common_utils.subtest(
+                False,
+                name="nn_module",
+            ),
+        ],
+    )
+    def test_modularize_pass_succeeds_when_a_submodule_is_called_multiple_times(
+        self, is_exported_program
+    ):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.relu = torch.nn.ReLU()
 
@@ -146,20 +183,42 @@ class TestModularizePass(common_utils.TestCase):
                 out = self.relu(out)
                 return out
 
-        onnx_program = torch.onnx.dynamo_export(
-            TestModule(), torch.randn(3), torch.randn(3)
-        )
+        if is_exported_program:
+            model = torch.export.export(
+                TestModule(), args=(torch.randn(3), torch.randn(3))
+            )
+        else:
+            model = TestModule()
+
+        onnx_program = torch.onnx.dynamo_export(model, torch.randn(3), torch.randn(3))
         model_proto = onnx_program.model_proto
         function_proto_names = [function.name for function in model_proto.functions]
         self.assertIn("torch_nn_modules_activation_ReLU_relu_1", function_proto_names)
         self.assertIn("torch_nn_modules_activation_ReLU_relu_2", function_proto_names)
 
+    @pytorch_test_common.xfail(
+        error_message="'torch_nn_modules_activation_ReLU_inner_module_relu_1' not found",
+        reason="optimizer",
+    )
+    @common_utils.parametrize(
+        "is_exported_program",
+        [
+            common_utils.subtest(
+                True,
+                name="exported_program",
+            ),
+            common_utils.subtest(
+                False,
+                name="nn_module",
+            ),
+        ],
+    )
     def test_modularize_pass_succeeds_when_a_submodule_is_called_from_multiple_layers(
-        self,
+        self, is_exported_program
     ):
         # Minified repro from basic_gnn_edgecnn.
         class InnerModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.relu = torch.nn.ReLU()
 
@@ -167,7 +226,7 @@ class TestModularizePass(common_utils.TestCase):
                 return self.relu(x)
 
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.inner_module = InnerModule()
 
@@ -178,9 +237,14 @@ class TestModularizePass(common_utils.TestCase):
                 out = self.inner_module.relu(out)
                 return out
 
-        onnx_program = torch.onnx.dynamo_export(
-            TestModule(), torch.randn(3), torch.randn(3)
-        )
+        if is_exported_program:
+            model = torch.export.export(
+                TestModule(), args=(torch.randn(3), torch.randn(3))
+            )
+        else:
+            model = TestModule()
+
+        onnx_program = torch.onnx.dynamo_export(model, torch.randn(3), torch.randn(3))
         model_proto = onnx_program.model_proto
         function_proto_names = [function.name for function in model_proto.functions]
         self.assertIn(

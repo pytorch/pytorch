@@ -81,7 +81,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
 
   at::Tensor MakeTensorFromComputationData(
       const torch::lazy::BackendDataPtr data,
-      c10::optional<at::ScalarType> logical_scalar_type) const override {
+      std::optional<at::ScalarType> logical_scalar_type) const override {
     const auto ts_data = std::static_pointer_cast<TSData>(data);
     return ts_data->data();
   }
@@ -220,7 +220,7 @@ std::vector<torch::lazy::BackendDataPtr> TSBackendImpl::ExecuteComputation(
     } else {
       // TODO(whc) should this check be made more general? it's written somewhat
       // oddly
-      CHECK(
+      TORCH_CHECK(
           static_cast<c10::DeviceType>(default_device_type_->type) !=
               at::kCUDA ||
           ts_data->data().device().type() == at::kCUDA);

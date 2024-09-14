@@ -9,6 +9,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
 
+
 __all__ = ["Wav2Letter"]
 
 
@@ -219,7 +220,7 @@ class BatchRNN(nn.Module):
 
 
 class Lookahead(nn.Module):
-    # Wang et al 2016 - Lookahead Convolution Layer for Unidirectional Recurrent Neural Networks
+    # Wang et al., 2016 - Lookahead Convolution Layer for Unidirectional Recurrent Neural Networks
     # input shape - sequence, batch, feature - TxNxH
     # output shape - same as input
     def __init__(self, n_features, context):

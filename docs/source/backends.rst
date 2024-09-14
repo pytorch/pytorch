@@ -12,9 +12,12 @@ These backends include:
 - ``torch.backends.cpu``
 - ``torch.backends.cuda``
 - ``torch.backends.cudnn``
+- ``torch.backends.cusparselt``
+- ``torch.backends.mha``
 - ``torch.backends.mps``
 - ``torch.backends.mkl``
 - ``torch.backends.mkldnn``
+- ``torch.backends.nnpack``
 - ``torch.backends.openmp``
 - ``torch.backends.opt_einsum``
 - ``torch.backends.xeon``
@@ -64,9 +67,9 @@ torch.backends.cuda
 
         Clears a cuFFT plan cache.
 
-.. autofunction:: torch.backends.cuda.preferred_linalg_library
+.. autofunction:: torch.backends.cuda.preferred_blas_library
 
-.. autoclass:: torch.backends.cuda.SDPBackend
+.. autofunction:: torch.backends.cuda.preferred_linalg_library
 
 .. autoclass:: torch.backends.cuda.SDPAParams
 
@@ -82,9 +85,17 @@ torch.backends.cuda
 
 .. autofunction:: torch.backends.cuda.enable_math_sdp
 
+.. autofunction:: torch.backends.cuda.cudnn_sdp_enabled
+
+.. autofunction:: torch.backends.cuda.enable_cudnn_sdp
+
+.. autofunction:: torch.backends.cuda.is_flash_attention_available
+
 .. autofunction:: torch.backends.cuda.can_use_flash_attention
 
 .. autofunction:: torch.backends.cuda.can_use_efficient_attention
+
+.. autofunction:: torch.backends.cuda.can_use_cudnn_attention
 
 .. autofunction:: torch.backends.cuda.sdp_kernel
 
@@ -125,6 +136,22 @@ torch.backends.cudnn
 
 .. py:module:: torch.backends.cudnn.rnn
 
+torch.backends.cusparselt
+^^^^^^^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.cusparselt
+
+.. autofunction:: torch.backends.cusparselt.version
+
+.. autofunction:: torch.backends.cusparselt.is_available
+
+torch.backends.mha
+^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.mha
+
+.. autofunction::  torch.backends.mha.get_fastpath_enabled
+.. autofunction::  torch.backends.mha.set_fastpath_enabled
+
+
 torch.backends.mps
 ^^^^^^^^^^^^^^^^^^
 .. automodule:: torch.backends.mps
@@ -151,6 +178,15 @@ torch.backends.mkldnn
 
 .. autoclass::  torch.backends.mkldnn.verbose
 
+torch.backends.nnpack
+^^^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.nnpack
+
+.. autofunction::  torch.backends.nnpack.is_available
+
+.. autofunction::  torch.backends.nnpack.flags
+
+.. autofunction::  torch.backends.nnpack.set_flags
 
 torch.backends.openmp
 ^^^^^^^^^^^^^^^^^^^^^

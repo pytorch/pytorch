@@ -9,11 +9,11 @@ namespace vulkan {
 namespace ops {
 using namespace api::utils;
 
-Tensor upsample_nearest2d(
+static Tensor upsample_nearest2d(
     const Tensor& input_arg,
     const IntArrayRef output_sizes,
-    const c10::optional<double> scales_h,
-    const c10::optional<double> scales_w) {
+    const std::optional<double> scales_h,
+    const std::optional<double> scales_w) {
   api::Context* const context = api::context();
 
   TORCH_CHECK(
@@ -32,7 +32,8 @@ Tensor upsample_nearest2d(
           output_sizes[Layout::Parameter::height],
           output_sizes[Layout::Parameter::width],
       },
-      input_arg.scalar_type()};
+      v_input.dtype(),
+  };
 
   if (v_input.is_quantized()) {
     v_output.set_is_quantized();
@@ -93,12 +94,12 @@ Tensor upsample_nearest2d(
   return convert(v_output);
 }
 
-Tensor upsample_bilinear2d(
+static Tensor upsample_bilinear2d(
     const Tensor& input_arg,
     const IntArrayRef output_sizes,
     bool align_corners,
-    const c10::optional<double> scales_h,
-    const c10::optional<double> scales_w) {
+    const std::optional<double> scales_h,
+    const std::optional<double> scales_w) {
   api::Context* const context = api::context();
 
   TORCH_CHECK(
@@ -116,7 +117,7 @@ Tensor upsample_bilinear2d(
           output_sizes[Layout::Parameter::height],
           output_sizes[Layout::Parameter::width],
       },
-      input_arg.scalar_type(),
+      v_input.dtype(),
   };
 
   const api::utils::uvec3 output_extents = v_output.extents();

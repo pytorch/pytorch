@@ -1,4 +1,5 @@
-#!/usr/bin/python3
+# mypy: allow-untyped-defs
+
 import enum
 from typing import Tuple
 

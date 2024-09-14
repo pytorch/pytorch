@@ -2,7 +2,6 @@
 
 import functools
 import sys
-
 from unittest import expectedFailure as xfail, skipIf as skipif
 
 from pytest import raises as assert_raises
@@ -38,7 +37,6 @@ if TEST_WITH_TORCHDYNAMO:
         vsplit,
     )
     from numpy.random import rand, randint
-
     from numpy.testing import assert_, assert_array_equal, assert_equal
 
 else:
@@ -86,9 +84,9 @@ class TestTakeAlongAxis(TestCase):
         a = rand(3, 4, 5)
 
         funcs = [
-            (np.sort, np.argsort, dict()),
-            (_add_keepdims(np.min), _add_keepdims(np.argmin), dict()),
-            (_add_keepdims(np.max), _add_keepdims(np.argmax), dict()),
+            (np.sort, np.argsort, {}),
+            (_add_keepdims(np.min), _add_keepdims(np.argmin), {}),
+            (_add_keepdims(np.max), _add_keepdims(np.argmax), {}),
             #  FIXME           (np.partition, np.argpartition, dict(kth=2)),
         ]
 
@@ -556,7 +554,7 @@ class TestColumnStack(TestCase):
     def test_generator(self):
         # numpy 1.24 emits a warning but we don't
         # with assert_warns(FutureWarning):
-        column_stack(np.arange(3) for _ in range(2))
+        column_stack([np.arange(3) for _ in range(2)])
 
 
 class TestDstack(TestCase):
@@ -604,7 +602,7 @@ class TestDstack(TestCase):
     def test_generator(self):
         # numpy 1.24 emits a warning but we don't
         # with assert_warns(FutureWarning):
-        dstack(np.arange(3) for _ in range(2))
+        dstack([np.arange(3) for _ in range(2)])
 
 
 # array_split has more comprehensive test of splitting.

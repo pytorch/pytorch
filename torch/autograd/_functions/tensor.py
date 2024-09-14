@@ -1,18 +1,21 @@
-import warnings
+# mypy: allow-untyped-defs
+import operator
 from functools import reduce
+from typing_extensions import deprecated
 
 import torch
 import torch._utils
-from ..function import Function
+from torch.autograd.function import Function
 
 
 class Type(Function):
     @staticmethod
+    @deprecated(
+        "`torch.autograd._functions.Type` is deprecated as of PyTorch 2.1, "
+        "please use `torch.tensor.to(dtype=dtype)` instead.",
+        category=FutureWarning,
+    )
     def forward(ctx, i, dest_type):
-        warnings.warn(
-            "torch.autograd._functions.Type is deprecated as of PyTorch 2.1, please use "
-            "torch.tensor.to(dtype=dtype) instead."
-        )
         ctx.input_type = type(i)
         ctx.input_device = -1 if not i.is_cuda else i.get_device()
         return i.type(dest_type)
@@ -31,7 +34,7 @@ class Resize(Function):
     @staticmethod
     def forward(ctx, tensor, sizes):
         ctx.sizes = sizes
-        ctx.numel = reduce(lambda x, y: x * y, sizes, 1)
+        ctx.numel = reduce(operator.mul, sizes, 1)
         if tensor.numel() != ctx.numel:
             raise RuntimeError(
                 (

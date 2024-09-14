@@ -9,9 +9,24 @@ from typing import cast, List, Optional, Tuple, Union
 
 import torch
 
-_INTEGRAL_TYPES = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
+
+_INTEGRAL_TYPES = [
+    torch.uint8,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+    torch.uint16,
+    torch.uint32,
+    torch.uint64,
+]
 _FLOATING_TYPES = [torch.float16, torch.bfloat16, torch.float32, torch.float64]
-_FLOATING_8BIT_TYPES = [torch.float8_e4m3fn, torch.float8_e5m2]
+_FLOATING_8BIT_TYPES = [
+    torch.float8_e4m3fn,
+    torch.float8_e5m2,
+    torch.float8_e4m3fnuz,
+    torch.float8_e5m2fnuz,
+]
 _COMPLEX_TYPES = [torch.complex32, torch.complex64, torch.complex128]
 _BOOLEAN_OR_INTEGRAL_TYPES = [torch.bool, *_INTEGRAL_TYPES]
 _FLOATING_OR_COMPLEX_TYPES = [*_FLOATING_TYPES, *_COMPLEX_TYPES]
@@ -136,8 +151,9 @@ def make_tensor(
             warnings.warn(
                 "Passing `low==high` to `torch.testing.make_tensor` for floating or complex types "
                 "is deprecated since 2.1 and will be removed in 2.3. "
-                "Use torch.full(...) instead.",
+                "Use `torch.full(...)` instead.",
                 FutureWarning,
+                stacklevel=3,
             )
         elif low >= high:
             raise ValueError(f"`low` must be less than `high`, but got {low} >= {high}")

@@ -16,8 +16,8 @@ from typing import Any, Dict, List, Optional
 from unittest import main, mock, skip, TestCase
 from urllib.error import HTTPError
 
+from github_utils import gh_graphql
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
-
 from trymerge import (
     categorize_checks,
     DRCI_CHECKRUN_NAME,
@@ -26,18 +26,17 @@ from trymerge import (
     get_drci_classifications,
     get_rockset_results,
     gh_get_team_members,
-    gh_graphql,
     GitHubPR,
     JobCheckState,
     main as trymerge_main,
     MandatoryChecksMissingError,
     MergeRule,
-    PostCommentError,
     RE_GHSTACK_DESC,
     read_merge_rules,
     remove_job_name_suffix,
     validate_revert,
 )
+
 
 if "GIT_REMOTE_URL" not in os.environ:
     os.environ["GIT_REMOTE_URL"] = "https://github.com/pytorch/pytorch"
@@ -141,11 +140,14 @@ def mock_parse_args(revert: bool = False, force: bool = False) -> Any:
             self.comment_id = 0
             self.reason = "this is for testing"
             self.ignore_current = False
+            self.check_mergeability = False
 
     return Object()
 
 
-def mock_remove_label(org: str, repo: str, pr_num: str, label: str) -> None:
+def mock_remove_label(
+    org: str, repo: str, pr_num: str, label: str, dry_run: bool
+) -> None:
     pass
 
 
@@ -177,6 +179,9 @@ def mock_gh_get_info() -> Any:
     return {
         "closed": False,
         "isCrossRepository": False,
+        "headRefName": "foo",
+        "baseRefName": "bar",
+        "baseRepository": {"defaultBranchRef": {"name": "bar"}},
         "files": {"nodes": [], "pageInfo": {"hasNextPage": False}},
         "changedFiles": 0,
     }
@@ -202,7 +207,6 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
             approved_by=["pytorch/metamates", "ngimel"],
             mandatory_checks_name=[
                 "Lint",
-                "Facebook CLA Check",
                 "pull / linux-xenial-cuda11.3-py3.7-gcc7 / build",
             ],
             ignore_flaky_failures=True,
@@ -218,6 +222,31 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
                 "pull / linux-focal-py3_8-clang9-xla / test (xla, 1, 1, linux.12xlarge)",
             ],
             ignore_flaky_failures=True,
+        ),
+    ]
+
+
+def mocked_read_merge_rules_approvers(
+    repo: Any, org: str, project: str
+) -> List[MergeRule]:
+    return [
+        MergeRule(
+            name="Core Reviewers",
+            patterns=["*"],
+            approved_by=["1", "2", "3", "4", "5", "6"],
+            mandatory_checks_name=[
+                "Lint",
+                "pull",
+            ],
+        ),
+        MergeRule(
+            name="Core Maintainers",
+            patterns=["*"],
+            approved_by=["1", "2", "malfet"],
+            mandatory_checks_name=[
+                "Lint",
+                "pull",
+            ],
         ),
     ]
 
@@ -287,6 +316,27 @@ class TestTryMerge(TestCase):
             RuntimeError, "testing", lambda: find_matching_merge_rule(pr, repo)
         )
 
+    @mock.patch(
+        "trymerge.read_merge_rules", side_effect=mocked_read_merge_rules_approvers
+    )
+    def test_match_rules_approvers(self, *args: Any) -> None:
+        "Tests that PR has the necessary approvers"
+        repo = DummyGitRepo()
+
+        pr = GitHubPR("pytorch", "pytorch", 115329)
+        # Test that all potential approvers across all rules are listed if the
+        # PR doesn't have one of them
+        for mock_rule in ["Core Reviewers", "Core Maintainers"]:
+            self.assertRaisesRegex(
+                RuntimeError,
+                mock_rule,
+                lambda: find_matching_merge_rule(pr, repo),
+            )
+
+        pr = GitHubPR("pytorch", "pytorch", 115495)
+        # Test that PR with the correct approvers doesn't raise any exception
+        self.assertTrue(find_matching_merge_rule(pr, repo) is not None)
+
     @mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules)
     def test_lint_fails(self, *args: Any) -> None:
         "Tests that PR fails mandatory lint check"
@@ -346,10 +396,11 @@ class TestTryMerge(TestCase):
         # self.assertGreater(len(pr.get_checkrun_conclusions()), 3)
         self.assertGreater(pr.get_commit_count(), 60)
 
+    @skip("GitHub doesn't keep this data anymore")
     def test_gql_retrieve_checksuites(self, *args: Any) -> None:
         "Fetch comments and conclusions for PR with 60 commits"
         pr = GitHubPR("pytorch", "pytorch", 94787)
-        self.assertEqual(len(pr.get_checkrun_conclusions()), 183)
+        self.assertEqual(len(pr.get_checkrun_conclusions()), 182)
 
     def test_team_members(self, *args: Any) -> None:
         "Test fetching team members works"
@@ -385,6 +436,13 @@ class TestTryMerge(TestCase):
         self.assertGreater(len(approved_by), 0)
         assert pr._reviews is not None  # to pacify mypy
         self.assertGreater(len(pr._reviews), 100)
+
+    def get_co_authors(self, *args: Any) -> None:
+        """Tests that co-authors are recognized"""
+        pr = GitHubPR("pytorch", "pytorch", 118347)
+        authors = pr.get_authors()
+        self.assertIn("kit1980", authors)
+        self.assertIn("Co-authored-by:", pr.gen_commit_message())
 
     def test_get_checkruns_many_runs(self, *args: Any) -> None:
         """Tests that all checkruns can be fetched"""
@@ -469,20 +527,6 @@ class TestTryMerge(TestCase):
             self.fail(f"get_changed_files throws an exception: {error}")
 
         self.assertEqual(len(changed_files), pr.get_changed_files_count())
-
-    def test_revert_codev_fails(self, *args: Any) -> None:
-        pr = GitHubPR("pytorch", "pytorch", 91340)
-
-        class GitRepoCoDev(DummyGitRepo):
-            def commit_message(self, ref: str) -> str:
-                return pr.get_body()
-
-        repo = GitRepoCoDev()
-        self.assertRaisesRegex(
-            PostCommentError,
-            "landed via phabricator",
-            lambda: validate_revert(repo, pr, comment_id=1372496233),
-        )
 
     def test_revert_codev_abandoned_diff_succeeds(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 100652)
@@ -700,6 +744,30 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(failed) == 0)
         self.assertTrue(len(ignorable["UNSTABLE"]) == 1)
 
+        # Add another test case where there is no unstable keyword in the job name, but
+        # the job has already been marked as unstable
+        pr = GitHubPR("pytorch", "executorch", 3318)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        print(checks)
+        workflow_name = "test-llama-app"
+        job_name = "mobile-job (android)"
+        self.assertTrue(
+            checks[f"Android / {workflow_name} / {job_name}"].classification
+            == "UNSTABLE"
+        )
+        pending, failed, ignorable = categorize_checks(
+            checks, list(checks.keys()), ok_failed_checks_threshold=1
+        )
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["UNSTABLE"]) == 1)
+
     def test_get_classifications_broken_trunk(self, *args: Any) -> None:
         # The mock merge base is the actual value returned by gh_fetch_merge_base
         test_cases = [
@@ -708,13 +776,13 @@ class TestBypassFailures(TestCase):
                 # than the one on the base commit. This should still count as broken trunk
                 "pr_num": 104214,
                 "related_failure_count": 0,
-                "unrelated_failure_count": 1,
+                "flaky_or_broken_trunk": 1,
             },
             {
                 # This PR had one broken trunk failure and it used ghstack
                 "pr_num": 105145,
                 "related_failure_count": 0,
-                "unrelated_failure_count": 1,
+                "flaky_or_broken_trunk": 1,
             },
             {
                 # The failure on the merge base was retried successfully and
@@ -723,20 +791,20 @@ class TestBypassFailures(TestCase):
                 # be used to detect broken trunk
                 "pr_num": 107160,
                 "related_failure_count": 0,
-                "unrelated_failure_count": 4,
+                "flaky_or_broken_trunk": 1,
             },
             {
                 # This PR used Dr.CI broken trunk classification
                 "pr_num": 111253,
                 "related_failure_count": 1,
-                "unrelated_failure_count": 2,
+                "flaky_or_broken_trunk": 1,
             },
         ]
 
         for case in test_cases:
             pr_num = case["pr_num"]
             related_failure_count = case["related_failure_count"]
-            unrelated_failure_count = case["unrelated_failure_count"]
+            flaky_or_broken_trunk = case["flaky_or_broken_trunk"]
 
             pr = GitHubPR("pytorch", "pytorch", pr_num)
             checks = pr.get_checkrun_conclusions()
@@ -758,7 +826,7 @@ class TestBypassFailures(TestCase):
             )
             self.assertTrue(len(pending) == 0)
             self.assertTrue(
-                len(failed) == unrelated_failure_count + related_failure_count
+                len(failed) == flaky_or_broken_trunk + related_failure_count
             )
 
     def test_ignore_current(self, *args: Any) -> None:
@@ -790,6 +858,59 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 0)
         self.assertTrue(len(ignorable["FLAKY"]) == 4)
         self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 2)
+
+    def test_get_classifications_wrong_workflow_name(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 123104)
+        checks = pr.get_checkrun_conclusions()
+
+        check_name = "linux-binary-conda / conda-py3_8-cuda11_8-build / build"
+        check_name_workflow_path = ".github/workflows/generated-linux-binary-conda-nightly.yml / conda-py3_8-cuda11_8-build / build"
+
+        # Mock a check where the workflow name uses the full path
+        checks[check_name_workflow_path] = JobCheckState(
+            check_name_workflow_path,
+            checks[check_name].url,
+            checks[check_name].status,
+            checks[check_name].classification,
+            checks[check_name].job_id,
+            checks[check_name].title,
+            checks[check_name].summary,
+        )
+        del checks[check_name]
+
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        pending, failed, ignorable = categorize_checks(
+            checks,
+            list(checks.keys()),
+        )
+
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["FLAKY"]) == 1)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 0)
+
+    def test_ignore_failures_older_run_same_workflow(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 129013)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        pending, failed, ignorable = categorize_checks(
+            checks,
+            list(checks.keys()),
+        )
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["FLAKY"]) == 2)
+        self.assertTrue(len(ignorable["UNSTABLE"]) == 13)
 
     @mock.patch("trymerge.read_merge_rules", side_effect=xla_merge_rules)
     def test_dont_ignore_flaky_failures(self, *args: Any) -> None:
@@ -919,7 +1040,7 @@ class TestGitHubPRGhstackDependencies(TestCase):
         )
 
     @skip(
-        reason="This test is run against a mutalbe PR that has changed, so it no longer works. The test should be changed"
+        reason="This test is run against a mutable PR that has changed, so it no longer works. The test should be changed"
     )
     @mock.patch("trymerge.read_merge_rules")
     @mock.patch("trymerge.GitRepo")

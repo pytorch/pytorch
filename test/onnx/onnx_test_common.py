@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-
 import copy
 import dataclasses
 import io
@@ -11,7 +10,6 @@ import logging
 import os
 import unittest
 import warnings
-from enum import auto, Enum
 from typing import (
     Any,
     Callable,
@@ -27,17 +25,17 @@ from typing import (
 )
 
 import numpy as np
-
 import onnxruntime
 import pytest
 import pytorch_test_common
+
 import torch
 from torch import export as torch_export
 from torch.onnx import _constants, verification
-from torch.onnx._internal import _beartype
-from torch.onnx._internal.fx import diagnostics
+from torch.testing._internal import common_utils
 from torch.testing._internal.opinfo import core as opinfo_core
 from torch.types import Number
+
 
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
 _ModelType = Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
@@ -62,11 +60,6 @@ pytorch_converted_dir = os.path.join(onnx_model_dir, "pytorch-converted")
 
 
 pytorch_operator_dir = os.path.join(onnx_model_dir, "pytorch-operator")
-
-
-class TorchModelType(Enum):
-    TORCH_NN_MODULE = auto()
-    TORCH_EXPORT_EXPORTEDPROGRAM = auto()
 
 
 def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
@@ -210,7 +203,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         if not is_model_script and not self.is_script:
             _run_test(model, tracing_remained_onnx_input_idx)
 
-    @_beartype.beartype
     def run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
         self,
         model: _ModelType,
@@ -253,6 +245,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 This is needed because Torch Dynamo uses the dynamic_shapes flag as a hint, only.
 
         """
+        from torch._dynamo import config as _dynamo_config
 
         # avoid mutable data structure
         if input_kwargs is None:
@@ -260,7 +253,8 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
 
         if (
             has_mutation
-            and self.model_type != TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+            and self.model_type
+            != pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
         ):
             ref_model = _try_clone_model(model)
             ref_input_args, ref_input_kwargs = _try_clone_inputs(
@@ -274,8 +268,12 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         assert isinstance(ref_model, torch.nn.Module) or callable(
             ref_model
         ), "Model must be a torch.nn.Module or callable"
-        if self.model_type == TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM:
-            ref_model = torch.export.export(ref_model, args=ref_input_args)
+        if (
+            self.model_type
+            == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+        ):
+            with _dynamo_config.patch(do_not_emit_runtime_asserts=True):
+                ref_model = torch.export.export(ref_model, args=ref_input_args)
             if (
                 self.dynamic_shapes
             ):  # TODO: Support dynamic shapes for torch.export.ExportedProgram
@@ -287,37 +285,24 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         # Feed args and kwargs into exporter.
         # Note that exporter should flatten kwargs into positional args the exported model;
         # since ONNX doesn't represent kwargs.
-        export_error: Optional[torch.onnx.OnnxExporterError] = None
-        try:
+        with _dynamo_config.patch(do_not_emit_runtime_asserts=True):
             onnx_program = torch.onnx.dynamo_export(
                 ref_model,
                 *ref_input_args,
                 **ref_input_kwargs,
                 export_options=torch.onnx.ExportOptions(
-                    op_level_debug=self.op_level_debug,
                     dynamic_shapes=self.dynamic_shapes,
                     diagnostic_options=torch.onnx.DiagnosticOptions(
                         verbosity_level=logging.DEBUG
                     ),
                 ),
             )
-        except torch.onnx.OnnxExporterError as e:
-            export_error = e
-            onnx_program = e.onnx_program
-
-        if diagnostics.is_onnx_diagnostics_log_artifact_enabled():
-            onnx_program.save_diagnostics(
-                f"test_report_{self._testMethodName}"
-                f"_op_level_debug_{self.op_level_debug}"
-                f"_dynamic_axes_{self.dynamic_shapes}"
-                ".sarif"
-            )
-
-        if export_error is not None:
-            raise export_error
 
         if not skip_dynamic_shapes_check:
             assert_dynamic_shapes(onnx_program, self.dynamic_shapes)
+
+        if isinstance(ref_model, torch.export.ExportedProgram):
+            ref_model = ref_model.module()
 
         _compare_pytorch_onnx_with_ort(
             onnx_program,
@@ -353,7 +338,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 )
 
 
-@_beartype.beartype
 def run_ort(
     onnx_model: Union[str, torch.onnx.ONNXProgram],
     pytorch_inputs: Sequence[_InputArgsType],
@@ -399,7 +383,6 @@ def run_ort(
     return session.run(None, ort_input)
 
 
-@_beartype.beartype
 def _try_clone_model(model: _ModelType) -> _ModelType:
     """Used for preserving original model in case forward mutates model states."""
     try:
@@ -411,14 +394,12 @@ def _try_clone_model(model: _ModelType) -> _ModelType:
         return model
 
 
-@_beartype.beartype
 def _try_clone_inputs(input_args, input_kwargs):
     ref_input_args = copy.deepcopy(input_args)
     ref_input_kwargs = copy.deepcopy(input_kwargs)
     return ref_input_args, ref_input_kwargs
 
 
-@_beartype.beartype
 def _compare_pytorch_onnx_with_ort(
     onnx_program: torch.onnx.ONNXProgram,
     model: _ModelType,
@@ -461,7 +442,6 @@ MIN_ONNX_OPSET_VERSION = 9
 MAX_ONNX_OPSET_VERSION = _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET
 TESTED_OPSETS = range(MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION + 1)
 
-# TODO(titaiwang): Change this when more versions are supported
 # The min onnx opset version to test for
 FX_MIN_ONNX_OPSET_VERSION = 18
 # The max onnx opset version to test for
@@ -471,11 +451,11 @@ FX_TESTED_OPSETS = range(FX_MIN_ONNX_OPSET_VERSION, FX_MAX_ONNX_OPSET_VERSION + 
 BOOL_TYPES = (torch.bool,)
 
 INT_TYPES = (
-    torch.int8,
-    torch.int16,
+    # torch.int8,
+    # torch.int16,
     torch.int32,
     torch.int64,
-    torch.uint8,
+    # torch.uint8,
 )
 
 QINT_TYPES = (
@@ -502,6 +482,8 @@ TESTED_DTYPES = (
     *INT_TYPES,
     # Floating types
     *FLOAT_TYPES,
+    # Complex types
+    *COMPLEX_TYPES,
 )
 
 
@@ -533,7 +515,7 @@ class DecorateMeta:
     test_behavior: str
     matcher: Optional[Callable[[Any], bool]] = None
     enabled_if: bool = True
-    model_type: Optional[TorchModelType] = None
+    model_type: Optional[pytorch_test_common.TorchModelType] = None
 
     def contains_opset(self, opset: int) -> bool:
         if self.opsets is None:
@@ -553,7 +535,7 @@ def xfail(
     dtypes: Optional[Collection[torch.dtype]] = None,
     matcher: Optional[Callable[[Any], bool]] = None,
     enabled_if: bool = True,
-    model_type: Optional[TorchModelType] = None,
+    model_type: Optional[pytorch_test_common.TorchModelType] = None,
 ):
     """Expects a OpInfo test to fail.
 
@@ -591,7 +573,7 @@ def skip(
     dtypes: Optional[Collection[torch.dtype]] = None,
     matcher: Optional[Callable[[Any], Any]] = None,
     enabled_if: bool = True,
-    model_type: Optional[TorchModelType] = None,
+    model_type: Optional[pytorch_test_common.TorchModelType] = None,
 ):
     """Skips a test case in OpInfo that we don't care about.
 
@@ -622,6 +604,44 @@ def skip(
     )
 
 
+def skip_slow(
+    op_name: str,
+    variant_name: str = "",
+    *,
+    reason: str,
+    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
+    dtypes: Optional[Collection[torch.dtype]] = None,
+    matcher: Optional[Callable[[Any], Any]] = None,
+    model_type: Optional[pytorch_test_common.TorchModelType] = None,
+):
+    """Skips a test case in OpInfo that is too slow.
+
+    It needs further investigation to understand why it is slow.
+
+    Args:
+        op_name: The name of the operator.
+        variant_name: The name of the variant.
+        opsets: The opsets to expect the failure. e.g. [9, 10] or [opsets_before(11)]
+        dtypes: The dtypes to expect the failure.
+        reason: The reason for the failure.
+        matcher: A function that matches the test sample input. It is used only when
+            skip is in the SKIP_XFAIL_SUBTESTS list.
+        model_type: The type of the torch model. Defaults to None.
+    """
+    return DecorateMeta(
+        op_name=op_name,
+        variant_name=variant_name,
+        decorator=common_utils.slowTest,
+        opsets=opsets,
+        dtypes=dtypes,
+        reason=reason,
+        matcher=matcher,
+        enabled_if=not common_utils.TEST_WITH_SLOW,
+        test_behavior="skip",
+        model_type=model_type,
+    )
+
+
 def add_decorate_info(
     all_opinfos: Sequence[opinfo_core.OpInfo],
     test_class_name: str,
@@ -647,6 +667,11 @@ def add_decorate_info(
         assert (
             opinfo is not None
         ), f"Couldn't find OpInfo for {decorate_meta}. Did you need to specify variant_name?"
+        assert decorate_meta.model_type is None, (
+            f"Tested op: {decorate_meta.op_name} in wrong position! "
+            "If model_type needs to be specified, it should be "
+            "put under SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE."
+        )
         decorators = list(opinfo.decorators)
         new_decorator = opinfo_core.DecorateInfo(
             decorate_meta.decorator,

@@ -8,47 +8,51 @@ namespace ops {
 
 Tensor _empty_affine_quantized(
     const IntArrayRef sizes,
-    const c10::optional<ScalarType> dtype,
-    const c10::optional<c10::Layout> layout,
-    const c10::optional<Device> device,
-    const c10::optional<bool> pin_memory,
+    const std::optional<ScalarType> dtype,
+    const std::optional<c10::Layout> layout,
+    const std::optional<Device> device,
+    const std::optional<bool> pin_memory,
     const double scale,
     const int64_t zero_point,
-    const optional<MemoryFormat> memory_format) {
+    const std::optional<MemoryFormat> memory_format) {
+  api::StorageType storage_type = api::StorageType::TEXTURE_3D;
   return convert_quantized(vTensor{
       api::context(),
-      sizes,
+      sizes.vec(),
       scale,
       zero_point,
-      dtype ? *dtype : c10::kFloat,
-      api::StorageType::TEXTURE_3D,
-      memory_format ? *memory_format : c10::MemoryFormat::Contiguous,
+      convert_dtype(dtype ? *dtype : c10::kFloat),
+      storage_type,
+      memory_format ? get_gpu_memory_layout(storage_type, *memory_format)
+                    : api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED,
   });
 }
 
-Tensor empty_memory_format(
+static Tensor empty_memory_format(
     const IntArrayRef sizes,
-    const c10::optional<ScalarType> dtype,
-    const c10::optional<c10::Layout> layout,
-    const c10::optional<Device> device,
-    const c10::optional<bool> pin_memory,
-    const optional<MemoryFormat> memory_format) {
+    const std::optional<ScalarType> dtype,
+    const std::optional<c10::Layout> layout,
+    const std::optional<Device> device,
+    const std::optional<bool> pin_memory,
+    const std::optional<MemoryFormat> memory_format) {
+  api::StorageType storage_type = api::StorageType::TEXTURE_3D;
   return convert(vTensor{
       api::context(),
-      sizes,
-      dtype ? *dtype : c10::kFloat,
-      api::StorageType::TEXTURE_3D,
-      memory_format ? *memory_format : c10::MemoryFormat::Contiguous,
+      sizes.vec(),
+      convert_dtype(dtype ? *dtype : c10::kFloat),
+      storage_type,
+      memory_format ? get_gpu_memory_layout(storage_type, *memory_format)
+                    : api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED,
   });
 }
 
-Tensor empty_strided(
+static Tensor empty_strided(
     const IntArrayRef sizes,
     const IntArrayRef /* strides */,
-    const optional<ScalarType> dtype,
-    const optional<c10::Layout> layout,
-    const optional<Device> device,
-    const optional<bool> pin_memory) {
+    const std::optional<ScalarType> dtype,
+    const std::optional<c10::Layout> layout,
+    const std::optional<Device> device,
+    const std::optional<bool> pin_memory) {
   return empty_memory_format(
       sizes, dtype, layout, device, pin_memory, c10::MemoryFormat::Contiguous);
 }

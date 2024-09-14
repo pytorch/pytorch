@@ -1,8 +1,10 @@
+# mypy: allow-untyped-defs
 import functools
 import logging
 import math
 import operator
 import sympy
+import builtins
 
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
@@ -14,6 +16,7 @@ import torch.fx.traceback as fx_traceback
 from torch._dynamo.exc import TorchDynamoException
 from torch.fx.node import Argument, Target
 from torch.utils._sympy.interp import sympy_interp
+from torch._dynamo.utils import dynamo_timed
 
 log = logging.getLogger(__name__)
 
@@ -215,6 +218,21 @@ try:
         def abs(self, number: z3.ArithRef) -> z3.ArithRef:
             return z3.Abs(number)
 
+        def round_to_int(self, number: z3.ArithRef) -> z3.ArithRef:
+            # Pythons builtin 'round' implements the 'round half to even' strategy
+            # See https://en.wikipedia.org/wiki/Rounding#Rounding_half_to_even
+            # z3 has an equivalent z3.fpRoundToIntegral(z3.RoundNearestTiesToEven(), ...), but this only applies to
+            # floating point numbers, which is different from real numbers that we are dealing with here.
+            # Instead, we implement 'round half to even' in terms of 'round half up' (floor(x + 0.5)) and
+            # 'round half down' (ceil(x - 0.5)).
+            # Assuming 'round half up' is the default case, we need to correct ..., -3.5, -1.5, 0.5, 2.5, 4.5, ...
+            # to round down, i.e. use the 'round half down' strategy
+            return z3.If(
+                self.mod(number, z3.IntVal(2)) == 0.5,
+                self.ceil(number - 0.5),
+                self.floor(number + 0.5),
+            )
+
     # Lifts a callable to be used in Z3.
     #
     # This function replaces the given 'op' by a function that:
@@ -224,8 +242,6 @@ try:
     #   2. Calls an operation that corresponds to 'op', but works with Z3
     #      inhabitants (left as is if it works as is)
     def z3op(op: Callable, validator: "TranslationValidator") -> Callable:
-        from torch.fx.experimental.sym_node import sym_sqrt
-
         # Operations that have booleans as their argument.
         # This is needed because the argument of some FX nodes were
         # literal integers, instead of booleans. So, whenever this flag
@@ -267,6 +283,7 @@ try:
             operator.truediv: lift(ops.div),
             operator.mod: lift(ops.mod),
             operator.abs: lift(ops.abs),
+            builtins.round: lift(ops.round_to_int),
 
             # Math module.
             math.ceil: lift(ops.ceil),
@@ -277,7 +294,7 @@ try:
             torch.sym_max: lift(ops.max),
             torch.sym_min: lift(ops.min),
             torch.sym_ite: lift(lambda b, t, f: t if b else f),
-            sym_sqrt: lift(ops.sqrt),
+            torch._sym_sqrt: lift(ops.sqrt),  # type: ignore[attr-defined]
             # Not lifted because we only use this function as a
             # marker for adding the expression as validator input.
             torch._assert: torch._assert,
@@ -308,9 +325,8 @@ try:
 
         def call_function(self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]) -> Any:
             if target != torch._assert:
-                # Actually runs the node target function (which is already
-                # lifted) with its arguments.
-                return super().call_function(target, args, kwargs)
+                # Lift and runs the node target function
+                return super().call_function(z3op(target, self.validator), args, kwargs)  # type: ignore[arg-type]
             # Adds the Z3 expression corresponding to the first argument
             # as a validator input.
             assert len(args) == 1, f"expected 1 argument on assertion. Got: {len(args)} "
@@ -333,6 +349,7 @@ try:
             self._ops = _Z3Ops(self._validator)
 
         def constant(self, value: Any, dtype: torch.dtype) -> z3.ExprRef:
+            # TODO: Probably OK to relax this and allow lower precision
             if dtype is torch.int64:
                 return z3.IntVal(int(value))
             if dtype is torch.double:
@@ -340,6 +357,20 @@ try:
             if dtype is torch.bool:
                 return z3.BoolVal(bool(value))
             raise ValueError(f"unsupported dtype (SympyToZ3): {dtype}")
+
+        def to_dtype(self, x: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:
+            if dtype == torch.float64:
+                return z3.ToReal(x)
+            raise NotImplementedError(f"to_dtype {dtype} NYI")
+
+        def trunc_to_int(self, x: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:
+            return z3.ToInt(x)
+
+        def round_to_int(self, x: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:
+            return self._ops.round_to_int(x)
+
+        def int_truediv(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
+            return self._ops.div(numerator, denominator)
 
         def truediv(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
             return self._ops.div(numerator, denominator)
@@ -353,8 +384,17 @@ try:
         def pow(self, base: z3.ArithRef, exp: z3.ArithRef) -> z3.ArithRef:
             return self._ops.pow(base, exp)
 
+        def pow_by_natural(self, base: z3.ArithRef, exp: z3.ArithRef) -> z3.ArithRef:
+            return self._ops.pow(base, exp)
+
         def mod(self, p: z3.ArithRef, q: z3.ArithRef) -> z3.ArithRef:
             return self._ops.mod(p, q)
+
+        def ceil_to_int(self, x: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:
+            return self._ops.ceil(x)
+
+        def floor_to_int(self, x: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:
+            return self._ops.floor(x)
 
         def __getattr__(self, name: str) -> Any:
             REPLACEMENT = {
@@ -478,8 +518,10 @@ try:
             self._assertions.add(ref)
 
         def validate(self) -> None:
-            from torch._dynamo.utils import dynamo_timed
+            with dynamo_timed("TranslationValidator.validate"):
+                return self._validate()
 
+        def _validate(self) -> None:
             if len(self._source_exprs) == 0 or len(self._target_exprs) == 0:
                 # If there are no source/target expressions, there's nothing we really
                 # wish to prove. So, we just return.
@@ -509,7 +551,7 @@ try:
             solver.add(*self._target_exprs)
 
             log.debug("translation validation: start")
-            r = dynamo_timed()(solver.check)()
+            r = solver.check()
             if r == z3.sat:
                 # Target expressions are unsound.
                 # Log the found model and the source expressions that failed.
@@ -678,7 +720,7 @@ def bisect(shape_env):
         shape_env.graph.lint()
         return check_shapeenv_fails(shape_env, events[number].tracked_fakes)
 
-    last_exception = check_shapeenv_fails(shape_env, shape_env.snapshot_tracked_fakes())
+    last_exception = check_shapeenv_fails(shape_env, shape_env._snapshot_tracked_fakes())
 
     if not last_exception:
         # We don't actually fail due to a produce_guards call.

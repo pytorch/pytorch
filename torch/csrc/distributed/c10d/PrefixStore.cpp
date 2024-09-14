@@ -83,6 +83,7 @@ void PrefixStore::append(
 std::vector<std::vector<uint8_t>> PrefixStore::multiGet(
     const std::vector<std::string>& keys) {
   std::vector<std::string> prefixed_keys;
+  prefixed_keys.reserve(keys.size());
   for (auto& key : keys) {
     prefixed_keys.push_back(joinKey(key));
   }
@@ -93,6 +94,7 @@ void PrefixStore::multiSet(
     const std::vector<std::string>& keys,
     const std::vector<std::vector<uint8_t>>& values) {
   std::vector<std::string> prefixed_keys;
+  prefixed_keys.reserve(keys.size());
   for (auto& key : keys) {
     prefixed_keys.push_back(joinKey(key));
   }
@@ -106,6 +108,24 @@ bool PrefixStore::hasExtendedApi() const {
 
 c10::intrusive_ptr<Store> PrefixStore::getUnderlyingStore() {
   return store_;
+}
+
+c10::intrusive_ptr<Store> PrefixStore::getUnderlyingNonPrefixStore() {
+  c10::intrusive_ptr<Store> store = store_;
+
+  while (store) {
+    // Attempt to dynamically cast to PrefixStore
+    PrefixStore* asPrefixStore = dynamic_cast<PrefixStore*>(store.get());
+    if (asPrefixStore) {
+      store = asPrefixStore->getUnderlyingStore();
+    } else {
+      break; // We've reached a non-PrefixStore
+    }
+  }
+
+  TORCH_CHECK(
+      store != nullptr, "Underlying Non-PrefixStore shouldn't be null.");
+  return store;
 }
 
 } // namespace c10d

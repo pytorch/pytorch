@@ -1,13 +1,22 @@
+from __future__ import annotations
+
 import decimal
 import inspect
+import sys
 import unittest
-from typing import Any, Dict
+from pathlib import Path
+from typing import Any
 from unittest import mock
 
-from tools.stats.upload_metrics import add_global_metric, emit_metric
 
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+
+from tools.stats.upload_metrics import add_global_metric, emit_metric
 from tools.stats.upload_stats_lib import BATCH_SIZE, upload_to_rockset
 
+
+sys.path.remove(str(REPO_ROOT))
 
 # default values
 REPO = "some/repo"
@@ -76,9 +85,9 @@ class TestUploadStats(unittest.TestCase):
         }
 
         # Preserve the metric emitted
-        emitted_metric: Dict[str, Any] = {}
+        emitted_metric: dict[str, Any] = {}
 
-        def mock_put_item(Item: Dict[str, Any]) -> None:
+        def mock_put_item(Item: dict[str, Any]) -> None:
             nonlocal emitted_metric
             emitted_metric = Item
 
@@ -110,9 +119,9 @@ class TestUploadStats(unittest.TestCase):
         }
 
         # Preserve the metric emitted
-        emitted_metric: Dict[str, Any] = {}
+        emitted_metric: dict[str, Any] = {}
 
-        def mock_put_item(Item: Dict[str, Any]) -> None:
+        def mock_put_item(Item: dict[str, Any]) -> None:
             nonlocal emitted_metric
             emitted_metric = Item
 
@@ -146,9 +155,9 @@ class TestUploadStats(unittest.TestCase):
         }
 
         # Preserve the metric emitted
-        emitted_metric: Dict[str, Any] = {}
+        emitted_metric: dict[str, Any] = {}
 
-        def mock_put_item(Item: Dict[str, Any]) -> None:
+        def mock_put_item(Item: dict[str, Any]) -> None:
             nonlocal emitted_metric
             emitted_metric = Item
 
@@ -182,9 +191,9 @@ class TestUploadStats(unittest.TestCase):
         ).start()
 
         # Preserve the metric emitted
-        emitted_metric: Dict[str, Any] = {}
+        emitted_metric: dict[str, Any] = {}
 
-        def mock_put_item(Item: Dict[str, Any]) -> None:
+        def mock_put_item(Item: dict[str, Any]) -> None:
             nonlocal emitted_metric
             emitted_metric = Item
 
@@ -203,7 +212,7 @@ class TestUploadStats(unittest.TestCase):
     ) -> None:
         metric = {"some_number": 123}
 
-        emit_should_include: Dict[str, Any] = metric.copy()
+        emit_should_include: dict[str, Any] = metric.copy()
 
         # Github Actions defaults some env vars to an empty string
         default_val = ""
@@ -215,9 +224,9 @@ class TestUploadStats(unittest.TestCase):
         ).start()
 
         # Preserve the metric emitted
-        emitted_metric: Dict[str, Any] = {}
+        emitted_metric: dict[str, Any] = {}
 
-        def mock_put_item(Item: Dict[str, Any]) -> None:
+        def mock_put_item(Item: dict[str, Any]) -> None:
             nonlocal emitted_metric
             emitted_metric = Item
 
@@ -259,7 +268,7 @@ class TestUploadStats(unittest.TestCase):
 
         put_item_invoked = False
 
-        def mock_put_item(Item: Dict[str, Any]) -> None:
+        def mock_put_item(Item: dict[str, Any]) -> None:
             nonlocal put_item_invoked
             put_item_invoked = True
 
@@ -278,13 +287,13 @@ class TestUploadStats(unittest.TestCase):
         mock.patch.dict(
             "os.environ",
             {
-                "BUILD_ENVIRONMENT": "",
+                "GITHUB_JOB": "",
             },
         ).start()
 
         put_item_invoked = False
 
-        def mock_put_item(Item: Dict[str, Any]) -> None:
+        def mock_put_item(Item: dict[str, Any]) -> None:
             nonlocal put_item_invoked
             put_item_invoked = True
 

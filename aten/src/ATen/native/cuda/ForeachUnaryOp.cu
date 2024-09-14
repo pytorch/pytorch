@@ -237,7 +237,7 @@ void floating_half_bfloat16_(TensorList tensors) {
   OP_CUSTOM_FUNCTOR(function, op_name, functor_name);
 
 OP(floating_half_bfloat16, erfc, Erfc);
-OP(floating_half, lgamma, Lgamma);
+OP(floating_half_bfloat16, lgamma, Lgamma);
 OP(floating_half_bfloat16, trunc, Truncf);
 OP(floating_half_bfloat16, floor, Floor);
 OP(floating_half_bfloat16, ceil, Ceil);
@@ -304,7 +304,7 @@ struct Sign {
   }
 };
 
-OP_CUSTOM_FUNCTOR(floating_half_bfloat16, sigmoid, Sigmoid)
+OP_CUSTOM_FUNCTOR(floating_complex_half_bfloat16, sigmoid, Sigmoid)
 OP_CUSTOM_FUNCTOR(floating_half_bfloat16, round, Round)
 OP_CUSTOM_FUNCTOR(floating_half_bfloat16, frac, Trunc)
 OP_CUSTOM_FUNCTOR(floating_complex_half_bfloat16, reciprocal, Reciprocal)
@@ -388,9 +388,10 @@ void foreach_tensor_zero_cuda_(TensorList tensors) {
   std::vector<std::vector<at::Tensor>> tensor_lists;
   tensor_lists.emplace_back(tensors.vec());
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       ScalarType::Half,
       ScalarType::BFloat16,
+      ScalarType::Bool,
       tensors[0].scalar_type(),
       "foreach_zero_cuda_",
       [&]() {

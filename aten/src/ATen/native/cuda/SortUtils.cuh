@@ -1,6 +1,5 @@
 #pragma once
 #include <c10/macros/Macros.h>
-#include <c10/util/Optional.h>
 
 #include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>

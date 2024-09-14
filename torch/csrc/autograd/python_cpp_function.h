@@ -8,8 +8,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/utils/object_ptr.h>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 struct THPCppFunction {
   PyObject_HEAD std::shared_ptr<Node> cdata;
@@ -52,19 +51,21 @@ PyObject* CppFunction_pynew(
     (char*)"_set_sequence_nr", THPCppFunction_set_sequence_nr, METH_O, nullptr \
   }
 
-#define THP_FUNCTION_DEFAULT_PROPERTIES                                   \
-  {(char*)"next_functions",                                               \
-   THPCppFunction_next_functions,                                         \
-   nullptr,                                                               \
-   nullptr,                                                               \
-   nullptr},                                                              \
-      {(char*)"requires_grad",                                            \
-       THPCppFunction_requires_grad,                                      \
-       nullptr,                                                           \
-       nullptr,                                                           \
-       nullptr},                                                          \
-  {                                                                       \
-    (char*)"metadata", THPCppFunction_metadata, nullptr, nullptr, nullptr \
+#define THP_FUNCTION_DEFAULT_PROPERTIES                                        \
+  {(char*)"next_functions",                                                    \
+   THPCppFunction_next_functions,                                              \
+   nullptr,                                                                    \
+   nullptr,                                                                    \
+   nullptr},                                                                   \
+      {(char*)"requires_grad",                                                 \
+       THPCppFunction_requires_grad,                                           \
+       nullptr,                                                                \
+       nullptr,                                                                \
+       nullptr},                                                               \
+      {(char*)"metadata", THPCppFunction_metadata, nullptr, nullptr, nullptr}, \
+  {                                                                            \
+    (char*)"_input_metadata", THPCppFunction_input_metadata, nullptr, nullptr, \
+        nullptr                                                                \
   }
 
 PyObject* THPCppFunction_next_functions(PyObject* self, void* _unused);
@@ -76,6 +77,7 @@ PyObject* THPCppFunction_register_prehook(PyObject* self, PyObject* hook);
 
 PyObject* THPCppFunction_name(PyObject* self, PyObject* noargs);
 PyObject* THPCppFunction_sequence_nr(PyObject* self, PyObject* noargs);
+PyObject* THPCppFunction_input_metadata(PyObject* self, void* _unused);
 
 PyTypeObject* _initFunctionPyTypeObject(
     PyTypeObject& type,
@@ -103,5 +105,4 @@ PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata);
 
 bool THPCppFunction_Check(PyObject* obj);
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

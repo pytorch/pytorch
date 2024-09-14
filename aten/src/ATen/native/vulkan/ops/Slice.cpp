@@ -232,8 +232,8 @@ Tensor slice_height(
 Tensor slice(
     const Tensor& self,
     int64_t dim,
-    c10::optional<int64_t> start,
-    c10::optional<int64_t> end,
+    std::optional<int64_t> start,
+    std::optional<int64_t> end,
     const int64_t step) {
   TORCH_CHECK(step > 0, "slice step must be positive");
   auto nDims = safe_downcast<uint32_t>(self.dim());
@@ -276,7 +276,9 @@ Tensor slice(
   }
   dim += 4 - nDims;
 
-  vTensor v_output{api::context(), newSizes, self.scalar_type()};
+  IntArrayRef output_sizes(newSizes);
+  vTensor v_output{
+      api::context(), output_sizes.vec(), convert_dtype(self.scalar_type())};
 
   if (dim == 3) {
     slice_width(self, start_val, end_val, step, v_output);

@@ -28,7 +28,7 @@
 
 #include <tuple>
 
-namespace at { namespace native {
+namespace at::native {
 
 static void check1d(
     const char* function_name,
@@ -68,8 +68,7 @@ std::tuple<Tensor,Tensor> adaptive_max_pool1d(const Tensor & self, IntArrayRef o
         " being empty");
   }
 
-  Tensor output, indices;
-  std::tie(output, indices) = at::adaptive_max_pool2d(
+  auto [output, indices] = at::adaptive_max_pool2d(
       self.unsqueeze(-2),
       {1, output_size[0]});
 
@@ -94,8 +93,7 @@ std::tuple<Tensor, Tensor> max_pool1d_with_indices(
 
   NoNamesGuard guard;
 
-  Tensor output, indices;
-  std::tie(output, indices) = at::max_pool2d_with_indices(
+  auto [output, indices] = at::max_pool2d_with_indices(
       self.unsqueeze(-2),
       {1, kernel_size[0]},
       {1, stride[0]},
@@ -186,5 +184,4 @@ Tensor max_pool3d(
   return std::get<0>(output_and_indices);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

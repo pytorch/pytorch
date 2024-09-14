@@ -14,6 +14,7 @@ using namespace at::cuda::detail;
 
 // Kernel for fast unfold+copy on volumes
 template <typename T>
+C10_LAUNCH_BOUNDS_1(1024)
 __global__ void vol2col_kernel(
     const int64_t n,
     const T* data_vol,
@@ -36,7 +37,7 @@ __global__ void vol2col_kernel(
     const int height_col,
     const int width_col,
     T* data_col) {
-  CUDA_KERNEL_LOOP(index, n) {
+  CUDA_KERNEL_LOOP_TYPE(index, n, int64_t) {
     auto w_out = index % width_col;
     index /= width_col;
     auto h_out = index % height_col;

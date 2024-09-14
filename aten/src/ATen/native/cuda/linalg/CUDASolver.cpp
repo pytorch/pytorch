@@ -4,7 +4,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/macros/Export.h>
 
-#if defined(CUDART_VERSION) || defined(ROCM_VERSION) && ROCM_VERSION >= 50300
+#if defined(CUDART_VERSION) || defined(USE_ROCM)
 
 namespace at::cuda::solver {
 

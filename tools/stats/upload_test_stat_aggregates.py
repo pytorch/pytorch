@@ -1,17 +1,19 @@
+from __future__ import annotations
+
 import argparse
 import ast
 import datetime
 import json
 import os
 import re
-from typing import Any, List, Union
+from typing import Any
 
 import rockset  # type: ignore[import]
 
 from tools.stats.upload_stats_lib import upload_to_s3
 
 
-def get_oncall_from_testfile(testfile: str) -> Union[List[str], None]:
+def get_oncall_from_testfile(testfile: str) -> list[str] | None:
     path = f"test/{testfile}"
     if not path.endswith(".py"):
         path += ".py"
@@ -22,9 +24,11 @@ def get_oncall_from_testfile(testfile: str) -> Union[List[str], None]:
                 if line.startswith("# Owner(s): "):
                     possible_lists = re.findall(r"\[.*\]", line)
                     if len(possible_lists) > 1:
-                        raise Exception("More than one list found")
+                        raise Exception("More than one list found")  # noqa: TRY002
                     elif len(possible_lists) == 0:
-                        raise Exception("No oncalls found or file is badly formatted")
+                        raise Exception(  # noqa: TRY002
+                            "No oncalls found or file is badly formatted"
+                        )  # noqa: TRY002
                     oncalls = ast.literal_eval(possible_lists[0])
                     return list(oncalls)
     except Exception as e:

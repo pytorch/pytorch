@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copyreg
 import enum
 import functools
@@ -9,7 +10,6 @@ from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 import torch._C as _C
-import torch.utils.hooks as hooks
 from torch._namedtensor_internals import (
     check_serializing_named_tensor,
     is_ellipsis,
@@ -25,7 +25,6 @@ from torch.overrides import (
     has_torch_function_unary,
     has_torch_function_variadic,
 )
-from torch.utils.dlpack import DLDeviceType
 
 
 def _handle_torch_function_and_wrap_type_error_to_not_implemented(f):
@@ -101,7 +100,7 @@ class Tensor(torch._C.TensorBase):
             if (
                 self.is_sparse
                 or self.device.type
-                in ["lazy", "xla", "mtia", "mps", "ort", "meta", "ipu"]
+                in ["lazy", "xla", "mtia", "mps", "maia", "meta", "ipu"]
                 or (
                     not torch._C._has_storage(self)
                     and self.device.type == torch._C._get_privateuse1_backend_name()
@@ -210,8 +209,19 @@ class Tensor(torch._C.TensorBase):
             return new_tensor
 
     def __reduce_ex__(self, proto):
+        materialize_fake_tensors = (
+            torch.serialization._serialization_tls.materialize_fake_tensors
+        )
         state = torch._utils._get_obj_state(self)
-        if type(self) is Tensor and not state:
+        # Ignore all state when using FakeTensor with skip_data(materialize_fake_tensors) because FakeTensor has
+        # some state that cannot be pickled
+        if (
+            # TODO: remove hasattr, it's a hack to support versions of torch that
+            # don't have _subclasses
+            hasattr(torch, "_subclasses")
+            and type(self) is torch._subclasses.fake_tensor.FakeTensor
+            and materialize_fake_tensors
+        ) or (type(self) is Tensor and not state):
             # Fast path for regular tensor without Python state.
             return self._reduce_ex_internal(proto)
         if has_torch_function_unary(self):
@@ -246,10 +256,19 @@ class Tensor(torch._C.TensorBase):
 
     def _reduce_ex_internal(self, proto):
         check_serializing_named_tensor(self)
+
+        from torch.utils.hooks import warn_if_has_hooks
+
         # See Note [Don't serialize hooks]
-        torch.utils.hooks.warn_if_has_hooks(self)
+        warn_if_has_hooks(self)
         backward_hooks: Dict[Any, Any] = OrderedDict()
-        # Note: Numpy array is chosen to be the rebuild component for XLA, MTIA, ORT Tensors.
+
+        skip_data = torch.serialization._serialization_tls.skip_data
+        materialize_fake_tensors = (
+            torch.serialization._serialization_tls.materialize_fake_tensors
+        )
+
+        # Note: Numpy array is chosen to be the rebuild component for XLA, MTIA, MAIA Tensors.
         # We considered a few options:
         # 1. CPU tensor can't be used here.
         #    Otherwise in torch.load CPU storage is reconstructed with randomly
@@ -259,13 +278,17 @@ class Tensor(torch._C.TensorBase):
         # 2. Python list is not a good fit due to performance reason.
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
-        if self.device.type in ["xla", "mtia", "ort"] or (
+        if self.device.type in ["xla", "mtia", "maia"] or (
             not torch._C._has_storage(self)
             and self.device.type == torch._C._get_privateuse1_backend_name()
         ):
             # Convert BFloat16 tesors to Float32 before conversion to numpy, as numpy doesn't
             # support BFloat16. The rebuild tensor from numpy takes in the original self.dtype,
             # this would reconstruct the BFloat16 tensor from numpy.
+            if skip_data:
+                raise RuntimeError(
+                    "Cannot serialize tensors on backends with no storage under skip_data context manager"
+                )
             numpy_tensor = (
                 self.cpu().numpy()
                 if self.dtype != torch.bfloat16
@@ -278,6 +301,10 @@ class Tensor(torch._C.TensorBase):
         if self.device.type == "meta":
             # NB: This implementation BREAKS storage sharing.  Current
             # hypothesis is that no one cares for meta tensors.
+            if skip_data:
+                warnings.warn(
+                    "Serializing tensors on the meta device under skip_data context manager is a no-op"
+                )
             arg_meta = (
                 self.dtype,
                 tuple(self.size()),
@@ -286,6 +313,10 @@ class Tensor(torch._C.TensorBase):
             )
             return (torch._utils._rebuild_meta_tensor_no_storage, arg_meta)
         if self.is_quantized:
+            if skip_data:
+                raise RuntimeError(
+                    "Cannot serialize qtensor under skip_data context manager, file an issue if you need this feature"
+                )
             # quantizer_params can be different type based on torch attribute
             quantizer_params: Union[
                 Tuple[torch.qscheme, float, int], Tuple[Any, Tensor, Tensor, int]
@@ -367,6 +398,10 @@ class Tensor(torch._C.TensorBase):
             )
             return (torch._utils._rebuild_sparse_tensor, args_sparse_compressed)
         elif self.is_nested:
+            if skip_data:
+                raise RuntimeError(
+                    "Cannot serialize nested tensor under skip_data context manager, file an issue if you need this feature"
+                )
             args_nested = (
                 # NB: values() currently returns the storage as a buffer in an unsafe way.
                 # Ideally, we'd use a private API for this instead. TODO: Switch to this if
@@ -378,9 +413,34 @@ class Tensor(torch._C.TensorBase):
             )
             return (torch._utils._rebuild_nested_tensor, args_nested)
         elif (
-            self.data_ptr() == 0
-            and type(self) is not torch.Tensor
+            type(self) is not torch.Tensor
             and type(self).__torch_dispatch__ is not torch.Tensor.__torch_dispatch__
+            and (
+                isinstance(self, torch._subclasses.functional_tensor.FunctionalTensor)
+                or (
+                    not isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
+                    and self.data_ptr() == 0
+                )
+            )
+        ):
+            arg_wrapper_subclass = (
+                type(self),
+                self.dtype,
+                tuple(self.size()),
+                self.stride(),
+                self.storage_offset(),
+                self.layout,
+                self.device,
+                self.requires_grad,
+            )
+            return (torch._utils._rebuild_wrapper_subclass, arg_wrapper_subclass)
+        elif (
+            type(self) is not torch.Tensor
+            and type(self).__torch_dispatch__ is not torch.Tensor.__torch_dispatch__
+            and (
+                isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
+                and not (skip_data and materialize_fake_tensors)
+            )
         ):
             arg_wrapper_subclass = (
                 type(self),
@@ -394,15 +454,7 @@ class Tensor(torch._C.TensorBase):
             )
             return (torch._utils._rebuild_wrapper_subclass, arg_wrapper_subclass)
         else:
-            v3_dtypes = [
-                torch.float8_e5m2,
-                torch.float8_e4m3fn,
-                torch.bits8,
-                torch.bits16,
-                torch.bits1x8,
-                torch.bits2x4,
-                torch.bits4x2,
-            ]
+            v3_dtypes = torch.storage._new_dtypes()
             if self.dtype in v3_dtypes:
                 rebuild_func = torch._utils._rebuild_tensor_v3
                 storage = self.untyped_storage()
@@ -415,6 +467,16 @@ class Tensor(torch._C.TensorBase):
                     dtype=self.dtype,
                     _internal=True,
                 )  # type: ignore[assignment]
+
+            # TODO: remove hasattr, it's a hack to support versions of torch that
+            # don't have _subclasses
+            if (
+                hasattr(torch, "_subclasses")
+                and isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
+                and skip_data
+            ):
+                storage._fake_device = self.device
+
             args = (
                 storage,
                 self.storage_offset(),
@@ -467,8 +529,8 @@ class Tensor(torch._C.TensorBase):
 
         The graph is differentiated using the chain rule. If the tensor is
         non-scalar (i.e. its data has more than one element) and requires
-        gradient, the function additionally requires specifying ``gradient``.
-        It should be a tensor of matching type and location, that contains
+        gradient, the function additionally requires specifying a ``gradient``.
+        It should be a tensor of matching type and shape, that represents
         the gradient of the differentiated function w.r.t. ``self``.
 
         This function accumulates gradients in the leaves - you might need to zero
@@ -490,12 +552,9 @@ class Tensor(torch._C.TensorBase):
             See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
 
         Args:
-            gradient (Tensor or None): Gradient w.r.t. the
-                tensor. If it is a tensor, it will be automatically converted
-                to a Tensor that does not require grad unless ``create_graph`` is True.
-                None values can be specified for scalar Tensors or ones that
-                don't require grad. If a None value would be acceptable then
-                this argument is optional.
+            gradient (Tensor, optional): The gradient of the function
+                being differentiated w.r.t. ``self``.
+                This argument can be omitted if ``self`` is a scalar.
             retain_graph (bool, optional): If ``False``, the graph used to compute
                 the grads will be freed. Note that in nearly all cases setting
                 this option to True is not needed and often can be worked around
@@ -504,10 +563,10 @@ class Tensor(torch._C.TensorBase):
             create_graph (bool, optional): If ``True``, graph of the derivative will
                 be constructed, allowing to compute higher order derivative
                 products. Defaults to ``False``.
-            inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be
-                accumulated into ``.grad``. All other Tensors will be ignored. If not
+            inputs (sequence of Tensor, optional): Inputs w.r.t. which the gradient will be
+                accumulated into ``.grad``. All other tensors will be ignored. If not
                 provided, the gradient is accumulated into all the leaf Tensors that were
-                used to compute the attr::tensors.
+                used to compute the :attr:`tensors`.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(
@@ -566,7 +625,10 @@ class Tensor(torch._C.TensorBase):
             self._backward_hooks = OrderedDict()
             if self.grad_fn is not None:
                 self.grad_fn._register_hook_dict(self)
-        handle = hooks.RemovableHandle(self._backward_hooks)
+
+        from torch.utils.hooks import RemovableHandle
+
+        handle = RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
         return handle
 
@@ -622,7 +684,10 @@ class Tensor(torch._C.TensorBase):
             )
         if self._post_accumulate_grad_hooks is None:
             self._post_accumulate_grad_hooks: Dict[Any, Any] = OrderedDict()
-        handle = hooks.RemovableHandle(self._post_accumulate_grad_hooks)
+
+        from torch.utils.hooks import RemovableHandle
+
+        handle = RemovableHandle(self._post_accumulate_grad_hooks)
         self._post_accumulate_grad_hooks[handle.id] = hook
         return handle
 
@@ -634,7 +699,7 @@ class Tensor(torch._C.TensorBase):
             trim(
                 r"""reinforce() was removed.
             Use torch.distributions instead.
-            See https://pytorch.org/docs/master/distributions.html
+            See https://pytorch.org/docs/main/distributions.html
 
             Instead of:
 
@@ -672,14 +737,6 @@ class Tensor(torch._C.TensorBase):
       Returned Tensor shares the same storage with the original one.
       In-place modifications on either of them will be seen, and may trigger
       errors in correctness checks.
-      IMPORTANT NOTE: Previously, in-place size / stride / storage changes
-      (such as `resize_` / `resize_as_` / `set_` / `transpose_`) to the returned tensor
-      also update the original tensor. Now, these in-place changes will not update the
-      original tensor anymore, and will instead trigger an error.
-      For sparse tensors:
-      In-place indices / values changes (such as `zero_` / `copy_` / `add_`) to the
-      returned tensor will not update the original tensor anymore, and will instead
-      trigger an error.
     """,
     )
 
@@ -716,6 +773,36 @@ class Tensor(torch._C.TensorBase):
         self._typed_storage()._share_memory_()
         return self
 
+    def module_load(self, other, assign=False):
+        r"""Defines how to transform ``other`` when loading it into ``self`` in :meth:`~nn.Module.load_state_dict`.
+
+        Used when :func:`~torch.__future__.get_swap_module_params_on_conversion` is ``True``.
+
+        It is expected that ``self`` is a parameter or buffer in an ``nn.Module`` and ``other`` is the
+        value in the state dictionary with the corresponding key, this method defines
+        how ``other`` is remapped before being swapped with ``self`` via
+        :func:`~torch.utils.swap_tensors` in :meth:`~nn.Module.load_state_dict`.
+
+        .. note::
+            This method should always return a new object that is not ``self`` or ``other``.
+            For example, the default implementation returns ``self.copy_(other).detach()``
+            if ``assign`` is ``False`` or ``other.detach()`` if ``assign`` is ``True``.
+
+        Args:
+            other (Tensor): value in state dict with key corresponding to ``self``
+            assign (bool): the assign argument passed to :meth:`nn.Module.load_state_dict`
+
+        """
+        if has_torch_function_variadic(self, other):
+            return handle_torch_function(
+                Tensor.module_load, (self, other), self, other, assign=assign
+            )
+
+        if assign:
+            return other.detach()
+        else:
+            return self.copy_(other).detach()
+
     def __reversed__(self):
         r"""Reverses the tensor along dimension 0."""
         if has_torch_function_unary(self):
@@ -740,22 +827,22 @@ class Tensor(torch._C.TensorBase):
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
     def solve(self, other):
-        from ._linalg_utils import solve
+        from torch._linalg_utils import solve
 
         return solve(self, other)
 
     def lstsq(self, other):
-        from ._linalg_utils import lstsq
+        from torch._linalg_utils import lstsq
 
         return lstsq(self, other)
 
     def eig(self, eigenvectors=False):
-        from ._linalg_utils import eig
+        from torch._linalg_utils import eig
 
         return eig(self, eigenvectors=eigenvectors)
 
     def symeig(self, eigenvectors=False):
-        from ._linalg_utils import _symeig
+        from torch._linalg_utils import _symeig
 
         return _symeig(self, eigenvectors=eigenvectors)
 
@@ -1075,7 +1162,7 @@ class Tensor(torch._C.TensorBase):
             array = array.astype("uint8")
         return torch.from_numpy(array)
 
-    def __contains__(self, element):
+    def __contains__(self, element: Any, /) -> bool:
         r"""Check if `element` is present in tensor
 
         Args:
@@ -1088,7 +1175,7 @@ class Tensor(torch._C.TensorBase):
             element, (torch.Tensor, Number, torch.SymInt, torch.SymFloat, torch.SymBool)
         ):
             # type hint doesn't understand the __contains__ result array
-            return (element == self).any().item()  # type: ignore[union-attr]
+            return bool((element == self).any().item())  # type: ignore[union-attr]
 
         raise RuntimeError(
             f"Tensor.__contains__ only supports Tensor or scalar, but you passed in a {type(element)}."
@@ -1103,22 +1190,24 @@ class Tensor(torch._C.TensorBase):
         """
         if has_torch_function_unary(self):
             # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
-            return handle_torch_function(Tensor.__cuda_array_interface__.__get__, (self,), self)  # type: ignore[attr-defined]
+            return handle_torch_function(
+                Tensor.__cuda_array_interface__.__get__,  # type: ignore[attr-defined]
+                (self,),
+                self,
+            )
 
         # raise AttributeError for unsupported tensors, so that
         # hasattr(cpu_tensor, "__cuda_array_interface__") is False.
         if not self.is_cuda:
             raise AttributeError(
-                "Can't get __cuda_array_interface__ on non-CUDA tensor type: %s "
+                f"Can't get __cuda_array_interface__ on non-CUDA tensor type: {self.type()} "
                 "If CUDA data is required use tensor.cuda() to copy tensor to device memory."
-                % self.type()
             )
 
         if self.is_sparse:
             raise AttributeError(
-                "Can't get __cuda_array_interface__ on sparse type: %s "
+                f"Can't get __cuda_array_interface__ on sparse type: {self.type()} "
                 "Use Tensor.to_dense() to convert to a dense tensor first."
-                % self.type()
             )
 
         # RuntimeError, matching tensor.__array__() behavior.
@@ -1133,14 +1222,19 @@ class Tensor(torch._C.TensorBase):
         typestr = {
             torch.complex64: "<c8",
             torch.complex128: "<c16",
+            torch.bfloat16: "<f2",
             torch.float16: "<f2",
             torch.float32: "<f4",
             torch.float64: "<f8",
             torch.uint8: "|u1",
             torch.int8: "|i1",
+            torch.uint16: "<u2",
             torch.int16: "<i2",
+            torch.uint32: "<u4",
             torch.int32: "<i4",
+            torch.uint64: "<u8",
             torch.int64: "<i8",
+            torch.bool: "|b1",
         }[self.dtype]
 
         itemsize = self.element_size()
@@ -1484,6 +1578,9 @@ class Tensor(torch._C.TensorBase):
     def __dlpack_device__(self) -> Tuple[enum.IntEnum, int]:
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__dlpack_device__, (self,), self)
+
+        from torch.utils.dlpack import DLDeviceType
+
         device = self.device
         idx = device.index if device.index is not None else 0
         torch_device_type = device.type

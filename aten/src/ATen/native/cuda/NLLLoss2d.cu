@@ -56,6 +56,7 @@ __global__ void nll_loss2d_forward_no_reduce_kernel(
   int64_t ignore_index
 ) {
   int64_t batch_size = input.size(0);
+  int64_t n_classes = input.size(1);
   int64_t H = input.size(2);
   int64_t W = input.size(3);
 
@@ -69,6 +70,7 @@ __global__ void nll_loss2d_forward_no_reduce_kernel(
       output[b][h][w] = static_cast<scalar_t>(0);
       continue;
     }
+    CUDA_KERNEL_ASSERT(cur_target >= 0 && cur_target < n_classes);
     scalar_t value = input[b][cur_target][h][w];
     scalar_t cur_weight = weight != nullptr ? weight[cur_target] : static_cast<scalar_t>(1);
     output[b][h][w] = -value * cur_weight;
@@ -231,7 +233,7 @@ void nll_loss2d_forward_out_cuda_template(
     Tensor& total_weight,
     const Tensor& input,
     const Tensor& target,
-    const c10::optional<Tensor>& weight_opt,
+    const std::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index) {
   // See Note [Writing Nondeterministic Operations]
@@ -354,7 +356,7 @@ void nll_loss2d_backward_out_cuda_template(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& target,
-    const c10::optional<Tensor>& weight_opt,
+    const std::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index,
     const Tensor& total_weight) {
@@ -465,7 +467,7 @@ void nll_loss2d_backward_out_cuda_template(
 std::tuple<Tensor&, Tensor&> nll_loss2d_forward_out_cuda(
     const Tensor& self,
     const Tensor& target,
-    const c10::optional<Tensor>& weight_opt,
+    const std::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index,
     Tensor& output,
@@ -478,7 +480,7 @@ std::tuple<Tensor&, Tensor&> nll_loss2d_forward_out_cuda(
 std::tuple<Tensor, Tensor> nll_loss2d_forward_cuda(
     const Tensor& self,
     const Tensor& target,
-    const c10::optional<Tensor>& weight_opt,
+    const std::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index) {
   auto output = at::empty({0}, self.options());
@@ -492,7 +494,7 @@ Tensor& nll_loss2d_backward_out_cuda(
     const Tensor& grad_output,
     const Tensor& self,
     const Tensor& target,
-    const c10::optional<Tensor>& weight_opt,
+    const std::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index,
     const Tensor& total_weight,
@@ -513,7 +515,7 @@ Tensor nll_loss2d_backward_cuda(
     const Tensor& grad_output,
     const Tensor& self,
     const Tensor& target,
-    const c10::optional<Tensor>& weight_opt,
+    const std::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index,
     const Tensor& total_weight) {

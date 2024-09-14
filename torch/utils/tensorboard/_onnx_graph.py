@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from tensorboard.compat.proto.graph_pb2 import GraphDef
 from tensorboard.compat.proto.node_def_pb2 import NodeDef
 from tensorboard.compat.proto.versions_pb2 import VersionDef
@@ -14,12 +15,10 @@ def load_onnx_graph(fname):
 
 
 def parse(graph):
-    nodes_proto = []
     nodes = []
     import itertools
 
-    for node in itertools.chain(graph.input, graph.output):
-        nodes_proto.append(node)
+    nodes_proto = list(itertools.chain(graph.input, graph.output))
 
     for node in nodes_proto:
         print(node.name)

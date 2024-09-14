@@ -11,8 +11,7 @@
 #include <pthread.h>
 #endif
 
-namespace torch {
-namespace mps {
+namespace torch::mps {
 
 namespace {
 // True for children forked after mps init
@@ -60,12 +59,14 @@ static PyObject* MPSModule_isAvailable(PyObject* _unused, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* MPSModule_isMacOS13orNewer(PyObject* _unused, PyObject* args) {
+static PyObject* MPSModule_isMacOSorNewer(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
-      THPUtils_checkLong(args), "invalid argument to isOnMacOS13orNewer()");
-  auto minor = THPUtils_unpackUInt32(args);
-  if (at::detail::getMPSHooks().isOnMacOS13orNewer(minor)) {
+  size_t major = 0;
+  size_t minor = 0;
+  if (!PyArg_ParseTuple(args, "LL", &major, &minor)) {
+    return nullptr;
+  }
+  if (at::detail::getMPSHooks().isOnMacOSorNewer(major, minor)) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -93,7 +94,7 @@ static PyObject* MPSModule_setMemoryFraction(
     PyObject* _unused,
     PyObject* args) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  TORCH_CHECK(
       THPUtils_checkDouble(args), "invalid argument to setMemoryFraction()");
   double fraction = THPUtils_unpackDouble(args);
   at::detail::getMPSHooks().setMemoryFraction(fraction);
@@ -116,6 +117,15 @@ static PyObject* MPSModule_driverAllocatedMemory(
   HANDLE_TH_ERRORS
   return THPUtils_packUInt64(
       at::detail::getMPSHooks().getDriverAllocatedMemory());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* MPSModule_recommendedMaxMemory(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packUInt64(
+      at::detail::getMPSHooks().getRecommendedMaxMemory());
   END_HANDLE_TH_ERRORS
 }
 
@@ -214,9 +224,7 @@ static PyObject* MPSModule_elapsedTimeOfEvents(
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,
-// cppcoreguidelines-avoid-non-const-global-variables,
-// cppcoreguidelines-avoid-c-arrays)
+// NOLINTNEXTLINE(*-c-arrays, *-global-variables)
 static struct PyMethodDef _MPSModule_methods[] = {
     {"_mps_deviceSynchronize",
      MPSModule_deviceSynchronize,
@@ -224,9 +232,9 @@ static struct PyMethodDef _MPSModule_methods[] = {
      nullptr},
     {"_mps_is_in_bad_fork", MPSModule_isInBadFork, METH_NOARGS, nullptr},
     {"_mps_is_available", MPSModule_isAvailable, METH_NOARGS, nullptr},
-    {"_mps_is_on_macos_13_or_newer",
-     MPSModule_isMacOS13orNewer,
-     METH_O,
+    {"_mps_is_on_macos_or_newer",
+     MPSModule_isMacOSorNewer,
+     METH_VARARGS,
      nullptr},
     {"_mps_get_default_generator",
      MPSModule_getDefaultMPSGenerator,
@@ -240,6 +248,10 @@ static struct PyMethodDef _MPSModule_methods[] = {
      nullptr},
     {"_mps_driverAllocatedMemory",
      MPSModule_driverAllocatedMemory,
+     METH_NOARGS,
+     nullptr},
+    {"_mps_recommendedMaxMemory",
+     MPSModule_recommendedMaxMemory,
      METH_NOARGS,
      nullptr},
     {"_mps_profilerStartTrace",
@@ -266,5 +278,4 @@ PyMethodDef* python_functions() {
   return _MPSModule_methods;
 }
 
-} // namespace mps
-} // namespace torch
+} // namespace torch::mps

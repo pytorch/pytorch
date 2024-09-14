@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 import os
 import subprocess
 import sys
-from typing import List
 
 
-def run_cmd(cmd: List[str]) -> None:
+def run_cmd(cmd: list[str]) -> None:
     print(f"Running: {cmd}")
     result = subprocess.run(
         cmd,
@@ -27,6 +28,7 @@ def update_submodules() -> None:
 
 def gen_compile_commands() -> None:
     os.environ["USE_NCCL"] = "0"
+    os.environ["USE_PRECOMPILED_HEADERS"] = "1"
     os.environ["CC"] = "clang"
     os.environ["CXX"] = "clang++"
     run_cmd([sys.executable, "setup.py", "--cmake-only", "build"])

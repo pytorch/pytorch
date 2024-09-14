@@ -19,8 +19,7 @@
 #include <ATen/ops/zero_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Tensor& fill_out(Tensor& self, const Scalar& value) {
@@ -146,7 +145,7 @@ static Tensor& zero_cpu_(Tensor &self, int64_t nelements) {
   if (nullptr == ptr) {
     return self.fill_(0);
   }
-  int64_t size_bytes = nelements * self.dtype().itemsize();
+  auto size_bytes = nelements * self.dtype().itemsize();
   if (size_bytes > 0) {
     std::memset(ptr, 0, size_bytes);
   }
@@ -167,5 +166,4 @@ Tensor& zero_meta_(Tensor& self) {
   return self;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

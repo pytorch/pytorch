@@ -5,9 +5,9 @@
 // Always include this file (Allocator.h) instead.
 //
 
-#ifdef USE_VULKAN_API
+#include <ATen/native/vulkan/api/vk_api.h>
 
-#include <ATen/native/vulkan/api/Common.h>
+#ifdef USE_VULKAN_API
 
 #define VMA_VULKAN_VERSION 1000000
 
@@ -41,10 +41,13 @@
 */
 #endif /* VULKAN_DEBUG */
 
+// Note: Do not try to use C10 convenience macors here, as this header is
+// included from ExecuTorch that does not want to have dependency on C10
 #ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wnullability-completeness"
 #pragma clang diagnostic ignored "-Wunused-variable"
+#pragma clang diagnostic ignored "-Winconsistent-missing-destructor-override"
 #endif /* __clang__ */
 
 #include <include/vk_mem_alloc.h>

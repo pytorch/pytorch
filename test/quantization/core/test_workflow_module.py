@@ -43,7 +43,7 @@ from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TestCase, skipIfTorchDynamo
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     AnnotatedSingleLayerLinearModel,
@@ -137,16 +137,17 @@ class TestObserver(QuantizationTestCase):
             state_dict = myobs.state_dict()
             b = io.BytesIO()
             torch.save(state_dict, b)
-            b.seek(0)
-            loaded_dict = torch.load(b)
-            for key in state_dict:
-                self.assertEqual(state_dict[key], loaded_dict[key])
-            loaded_obs = MinMaxObserver(dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
-            loaded_obs.load_state_dict(loaded_dict)
-            loaded_qparams = loaded_obs.calculate_qparams()
-            self.assertEqual(myobs.min_val, loaded_obs.min_val)
-            self.assertEqual(myobs.max_val, loaded_obs.max_val)
-            self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
+            for weights_only in [True, False]:
+                b.seek(0)
+                loaded_dict = torch.load(b, weights_only=weights_only)
+                for key in state_dict:
+                    self.assertEqual(state_dict[key], loaded_dict[key])
+                loaded_obs = MinMaxObserver(dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
+                loaded_obs.load_state_dict(loaded_dict)
+                loaded_qparams = loaded_obs.calculate_qparams()
+                self.assertEqual(myobs.min_val, loaded_obs.min_val)
+                self.assertEqual(myobs.max_val, loaded_obs.max_val)
+                self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
@@ -357,6 +358,19 @@ class TestObserver(QuantizationTestCase):
             result = torch.softmax(input + dequant_mask, dim=1)
             self.assertEqual(result, ref_result)
 
+    def test_histogram_observer_handle_OOM_due_to_close_min_max_value(self):
+        obser = HistogramObserver.with_args(reduce_range=False)()
+        # close min and max value in the 1st forward() pass of observer tends
+        # to cause OOM in the following pass.
+        # This is due to the allocation of histogram tensor during _combine_histograms().
+        # With sanity check on the size of histogram tensor, we expect the histogram observer
+        # can still work by resetting the histogram
+        x1 = torch.tensor([0, 1e-9])
+        obser(x1)
+
+        x2 = torch.tensor([2.0, 3.0])
+        obser(x2)
+
     def test_histogram_observer_save_load_state_dict(self):
         """
         Smoke test on saving/loading state_dict
@@ -448,6 +462,18 @@ class TestObserver(QuantizationTestCase):
             scale, zero_point = torch._choose_qparams_per_tensor(x)
             self.assertEqual(scale, params[0])
             self.assertEqual(zero_point, params[1])
+
+    def test_per_channel_observers_load_state_dict(self):
+        observer_list = [PerChannelMinMaxObserver, MovingAveragePerChannelMinMaxObserver]
+
+        for obs_cls in observer_list:
+            obs = obs_cls()
+            obs(torch.randn((32, 32)))
+            new_obs = obs_cls()
+            # make sure the state_dict can be loaded
+            new_obs.load_state_dict(obs.state_dict())
+            self.assertTrue(torch.equal(obs.min_val, new_obs.min_val))
+            self.assertTrue(torch.equal(obs.max_val, new_obs.max_val))
 
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):
@@ -710,7 +736,8 @@ class TestHistogramObserver(QuantizationTestCase):
         self.assertEqual(qparams[1].item(), 0)
 
     def test_histogram_observer_same_inputs(self):
-        myobs = HistogramObserver(bins=3, dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
+        myobs = HistogramObserver(bins=3, dtype=torch.qint8, qscheme=torch.per_tensor_symmetric,
+                                  reduce_range=False)
         w = torch.ones(4, requires_grad=True)
         x = torch.zeros(4, requires_grad=True)
         y = torch.tensor([2.0, 3.0, 4.0, 5.0], requires_grad=True)
@@ -721,10 +748,11 @@ class TestHistogramObserver(QuantizationTestCase):
         myobs(y)
         myobs(z)
         qparams = myobs.calculate_qparams()
-        self.assertEqual(myobs.min_val, 2.0)
+        self.assertEqual(myobs.min_val, 0.0)
         self.assertEqual(myobs.max_val, 8.0)
-        self.assertEqual(myobs.histogram, [2., 3., 3.])
+        self.assertEqual(myobs.histogram, [13.25, 3.75, 3.])
 
+    @skipIfTorchDynamo("too slow")
     @given(N=st.sampled_from([10, 1000]),
            bins=st.sampled_from([256, 512, 1024, 2048]),
            dtype=st.sampled_from([torch.qint8, torch.quint8]),
@@ -774,6 +802,33 @@ class TestHistogramObserver(QuantizationTestCase):
             obs(torch.randn(i, i))
             self.assertEqual(obs.histogram.sum().item(), i**2)
 
+    def test_histogram_observer_single_inputs(self):
+        # Make sure that if we pass single valued tensors to the observer, the code runs
+        observer = HistogramObserver(bins=10)
+        a = torch.FloatTensor([1])
+        b = torch.FloatTensor([3])
+        c = torch.FloatTensor([2])
+        d = torch.FloatTensor([4])
+
+        observer(a)
+        observer(b)
+        observer(c)
+        observer(d)
+
+        self.assertEqual(observer.min_val, 1)
+        self.assertEqual(observer.max_val, 4)
+        self.assertEqual(torch.sum(observer.histogram), 4)
+
+    def test_histogram_observer_update_within_range_succeeds(self):
+        # test if an update within the existing range actually updates
+        myobs = HistogramObserver(bins=10)
+        x = torch.tensor([0.0, 3.0, 4.0, 9.0])
+        y = torch.tensor([2.0, 3.0, 7.0, 8.0])
+        myobs(x)
+        myobs(y)
+        self.assertEqual(myobs.min_val, 0.0)
+        self.assertEqual(myobs.max_val, 9.0)
+        self.assertEqual(myobs.histogram, [1., 0., 1., 2., 1., 0., 0., 1., 1., 1.])
 
 class TestFakeQuantize(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
@@ -941,7 +996,7 @@ class TestDistributed(QuantizationTestCase):
         with override_quantized_engine('fbgemm'):
             # create conv-bn
             class Model(nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.conv = nn.Conv2d(4, 1, 3, padding=1)
                     self.bn = nn.BatchNorm2d(1)
@@ -990,7 +1045,7 @@ class TestDistributed(QuantizationTestCase):
         """
         class Model(nn.Module):
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = nn.Conv2d(1, 1, 1)
                 self.bn = nn.BatchNorm2d(1)
@@ -1221,7 +1276,7 @@ class TestFusedObsFakeQuantModule(TestCase):
 
     def test_embedding_bag_qat_config(self):
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.emb1 = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
                                                   include_last_offset=True, scale_grad_by_freq=False, mode='sum')
@@ -1301,7 +1356,7 @@ class TestFusedObsFakeQuantModule(TestCase):
 
     def test_default_fused_qat_config(self):
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(2, 2)
                 self.relu = nn.ReLU()

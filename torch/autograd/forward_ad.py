@@ -1,10 +1,12 @@
+# mypy: allow-untyped-defs
 import os
 from collections import namedtuple
-
 from typing import Any
 
 import torch
+
 from .grad_mode import _DecoratorContextManager
+
 
 __all__ = [
     "UnpackedDualTensor",
@@ -60,6 +62,11 @@ def exit_dual_level(*, level=None):
     _current_level = level - 1
 
 
+def _maybe_load_decompositions():
+    if os.environ.get("PYTORCH_JIT", "1") == "1" and __debug__:
+        from torch._decomp import decompositions_for_jvp  # noqa: F401
+
+
 def make_dual(tensor, tangent, *, level=None):
     r"""Associate a tensor value with its tangent to create a "dual tensor" for forward AD gradient computation.
 
@@ -100,8 +107,7 @@ def make_dual(tensor, tangent, *, level=None):
     #         buffer = z
     #     return min - torch.log1p(z), buffer
     #     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
-    if os.environ.get("PYTORCH_JIT", "1") == "1" and __debug__:
-        from torch._decomp import decompositions_for_jvp  # noqa: F401
+    _maybe_load_decompositions()
 
     if level is None:
         level = _current_level
@@ -132,8 +138,6 @@ class UnpackedDualTensor(_UnpackedDualTensor):
     See :func:`unpack_dual` for more details.
 
     """
-
-    pass
 
 
 def unpack_dual(tensor, *, level=None):

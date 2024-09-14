@@ -4,7 +4,6 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorNames.h>
 #include <c10/util/Exception.h>
-#include <c10/util/C++17.h>
 #include <c10/util/irange.h>
 
 using at::Dimname;
@@ -12,7 +11,6 @@ using at::DimnameList;
 using at::Symbol;
 using at::namedinference::TensorName;
 using at::namedinference::TensorNames;
-using std::make_unique;
 
 static Dimname dimnameFromString(const std::string& str) {
   return Dimname::fromSymbol(Symbol::dimname(str));
@@ -82,9 +80,9 @@ TEST(NamedTensorTest, internalSetNamesInplace) {
   ASSERT_TRUE(dimnames_equal(retrieved_names, names));
 
   // Drop names
-  at::internal_set_names_inplace(tensor, at::nullopt);
+  at::internal_set_names_inplace(tensor, std::nullopt);
   ASSERT_TRUE(tensor.get_named_tensor_meta() == nullptr);
-  ASSERT_TRUE(tensor.opt_names() == at::nullopt);
+  ASSERT_TRUE(tensor.opt_names() == std::nullopt);
 }
 
 TEST(NamedTensorTest, empty) {
@@ -95,10 +93,10 @@ TEST(NamedTensorTest, empty) {
   std::vector<Dimname> names = { N, C, H, W };
 
   auto tensor = at::empty({});
-  ASSERT_EQ(tensor.opt_names(), at::nullopt);
+  ASSERT_EQ(tensor.opt_names(), std::nullopt);
 
   tensor = at::empty({1, 2, 3});
-  ASSERT_EQ(tensor.opt_names(), at::nullopt);
+  ASSERT_EQ(tensor.opt_names(), std::nullopt);
 
   tensor = at::empty({1, 2, 3, 4}, names);
   ASSERT_TRUE(dimnames_equal(tensor.opt_names().value(), names));

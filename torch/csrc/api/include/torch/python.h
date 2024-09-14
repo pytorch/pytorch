@@ -212,8 +212,8 @@ py::class_<ModuleType, Extra...> add_module_bindings(
 ///  }
 /// \endrst
 template <typename ModuleType, bool force_enable = false>
-torch::disable_if_t<
-    torch::detail::has_forward<ModuleType>::value && !force_enable,
+std::enable_if_t<
+    !torch::detail::has_forward<ModuleType>::value || force_enable,
     detail::PyModuleClass<ModuleType>>
 bind_module(py::module module, const char* name) {
   py::module cpp = module.def_submodule("cpp");
@@ -249,8 +249,7 @@ bind_module(py::module module, const char* name) {
 /// \endrst
 template <
     typename ModuleType,
-    typename =
-        torch::enable_if_t<torch::detail::has_forward<ModuleType>::value>>
+    typename = std::enable_if_t<torch::detail::has_forward<ModuleType>::value>>
 detail::PyModuleClass<ModuleType> bind_module(
     py::module module,
     const char* name) {

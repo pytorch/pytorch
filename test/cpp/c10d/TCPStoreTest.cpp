@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <future>
 #include <iostream>
+#include <string>
 #include <system_error>
 #include <thread>
 
@@ -28,7 +29,7 @@ c10::intrusive_ptr<c10d::TCPStore> _createServer(
           /* waitWorkers */ false,
           /* timeout */ std::chrono::seconds(timeout),
           /* multiTenant */ false,
-          /* masterListenFd */ c10::nullopt,
+          /* masterListenFd */ std::nullopt,
           /* useLibUV*/ useLibUV});
 }
 
@@ -165,11 +166,11 @@ TEST(TCPStoreTest, testHelperUV) {
 }
 
 TEST(TCPStoreTest, testHelperPrefix) {
-  testHelper(false, "testPrefix");
+  testHelper(false, "testPrefixNoUV");
 }
 
 TEST(TCPStoreTest, testHelperPrefixUV) {
-  testHelper(true, "testPrefix");
+  testHelper(true, "testPrefixUV");
 }
 
 TEST(TCPStoreTest, testCleanShutdown) {
@@ -177,11 +178,12 @@ TEST(TCPStoreTest, testCleanShutdown) {
 
   auto serverTCPStore = std::make_unique<c10d::TCPStore>(
       "127.0.0.1",
-      0,
-      numWorkers,
-      true,
-      std::chrono::seconds(defaultTimeout),
-      /* wait */ false);
+      c10d::TCPStoreOptions{
+          /* port */ 0,
+          /* isServer */ true,
+          numWorkers,
+          /* waitWorkers */ false,
+          /* timeout */ std::chrono::seconds(defaultTimeout)});
   c10d::test::set(*serverTCPStore, "key", "val");
 
   auto clientTCPStore = c10::make_intrusive<c10d::TCPStore>(
@@ -200,6 +202,50 @@ TEST(TCPStoreTest, testCleanShutdown) {
 
   // start server shutdown during a client request
   serverTCPStore = nullptr;
+
+  clientThread.join();
+}
+
+TEST(TCPStoreTest, testLibUVPartialRead) {
+  int numWorkers = 2; // thread 0 creates both server and client
+
+  // server part
+  c10d::TCPStoreOptions server_opts{
+      0,
+      true, // is master
+      numWorkers,
+      false, // don't wait otherwise client thread won't spawn
+      std::chrono::seconds(defaultTimeout)};
+  server_opts.useLibUV = true;
+
+  auto serverTCPStore =
+      std::make_unique<c10d::TCPStore>("127.0.0.1", server_opts);
+
+  // client part
+  c10d::TCPStoreOptions client_opts{
+      serverTCPStore->getPort(),
+      false, // is master
+      numWorkers,
+      false, // wait workers
+      std::chrono::seconds(defaultTimeout)};
+  client_opts.useLibUV = true;
+  auto clientTCPStore =
+      c10::make_intrusive<c10d::TCPStore>("127.0.0.1", client_opts);
+  auto clientThread = std::thread([&clientTCPStore] {
+    std::string keyPrefix(
+        "/default_pg/0//b7dc24de75e482ba2ceb9f9ee20732c25c0166d8//cuda//");
+    std::string value("v");
+    std::vector<uint8_t> valueBuf(value.begin(), value.end());
+
+    // split store->set(key, valueBuf) into two requests
+    for (int i = 0; i < 10; ++i) {
+      std::string key = keyPrefix + std::to_string(i);
+      clientTCPStore->_splitSet(key, valueBuf);
+
+      // check the result on server
+      c10d::test::check(*clientTCPStore, key, "v");
+    }
+  });
 
   clientThread.join();
 }

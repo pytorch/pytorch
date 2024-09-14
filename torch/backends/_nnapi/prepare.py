@@ -1,7 +1,10 @@
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
 from typing import List, Optional
 
 import torch
 from torch.backends._nnapi.serializer import _NnapiSerializer
+
 
 ANEURALNETWORKS_PREFER_LOW_POWER = 0
 ANEURALNETWORKS_PREFER_FAST_SINGLE_ANSWER = 1
@@ -75,7 +78,7 @@ class NnapiModule(torch.nn.Module):
             elif fmt == 1:
                 fixed_args.append(args[idx].permute(0, 2, 3, 1).contiguous())
             else:
-                raise Exception("Invalid mem_fmt")
+                raise ValueError("Invalid mem_fmt")
         comp.run(fixed_args, outs)
         assert len(outs) == len(self.out_mem_fmts)
         for idx in range(len(self.out_templates)):
@@ -87,7 +90,7 @@ class NnapiModule(torch.nn.Module):
             elif fmt == 1:
                 outs[idx] = outs[idx].permute(0, 3, 1, 2)
             else:
-                raise Exception("Invalid mem_fmt")
+                raise ValueError("Invalid mem_fmt")
         return outs
 
 
@@ -179,8 +182,6 @@ def process_for_nnapi(
         module.prepare will mutate ser_model according to the computed operand
         shapes, based on the shapes of args.  Returns a list of output templates.
         """
-
-        pass
 
     shape_compute_module = torch.jit.script(ShapeComputeModule())
     real_shape_compute_lines = [

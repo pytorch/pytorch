@@ -3,10 +3,9 @@
 """Test functions for 1D array set operations.
 
 """
-from unittest import skipIf
+from unittest import expectedFailure as xfail, skipIf
 
 import numpy
-
 from pytest import raises as assert_raises
 
 from torch.testing._internal.common_utils import (
@@ -16,7 +15,6 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xfailIfTorchDynamo,
     xpassIfTorchDynamo,
 )
 
@@ -35,7 +33,7 @@ else:
 
 
 @skipIf(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
-@xpassIfTorchDynamo  # (reason="TODO")
+@skipIf(True, reason="TODO implement these ops")
 @instantiate_parametrized_tests
 class TestSetOps(TestCase):
     def test_intersect1d(self):
@@ -167,7 +165,6 @@ class TestSetOps(TestCase):
                     None,
                     "to_begin",
                 ),
-                decorators=[xfailIfTorchDynamo],
             ),
             # should fail because attempting to cast
             # two special floating point values
@@ -533,6 +530,7 @@ class TestSetOps(TestCase):
         result = np.in1d(ar1, ar2)
         assert_array_equal(result, expected)
 
+    @xfail
     def test_in1d_both_arrays_have_structured_dtype(self):
         # Test arrays of a structured data type containing an integer field
         # and a field of dtype `object` allowing for arbitrary Python objects

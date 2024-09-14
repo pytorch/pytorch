@@ -7,11 +7,19 @@
 #include <cusparse.h>
 #include <cublas_v2.h>
 
+// cublasLT was introduced in CUDA 10.1 but we enable only for 11.1 that also
+// added bf16 support
+#include <cublasLt.h>
+
 #ifdef CUDART_VERSION
 #include <cusolverDn.h>
 #endif
 
-#if defined(USE_ROCM) && ROCM_VERSION >= 50300
+#if defined(USE_CUDSS)
+#include <cudss.h>
+#endif
+
+#if defined(USE_ROCM)
 #include <hipsolver/hipsolver.h>
 #endif
 
@@ -65,22 +73,27 @@ TORCH_CUDA_CPP_API cudaDeviceProp* getCurrentDeviceProperties();
 
 TORCH_CUDA_CPP_API int warp_size();
 
-TORCH_CUDA_CPP_API cudaDeviceProp* getDeviceProperties(int64_t device);
+TORCH_CUDA_CPP_API cudaDeviceProp* getDeviceProperties(c10::DeviceIndex device);
 
 TORCH_CUDA_CPP_API bool canDeviceAccessPeer(
-    int64_t device,
-    int64_t peer_device);
+    c10::DeviceIndex device,
+    c10::DeviceIndex peer_device);
 
 TORCH_CUDA_CPP_API c10::Allocator* getCUDADeviceAllocator();
 
 /* Handles */
 TORCH_CUDA_CPP_API cusparseHandle_t getCurrentCUDASparseHandle();
 TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle();
+TORCH_CUDA_CPP_API cublasLtHandle_t getCurrentCUDABlasLtHandle();
 
 TORCH_CUDA_CPP_API void clearCublasWorkspaces();
 
-#if defined(CUDART_VERSION) || defined(USE_ROCM) && ROCM_VERSION >= 50300
+#if defined(CUDART_VERSION) || defined(USE_ROCM)
 TORCH_CUDA_CPP_API cusolverDnHandle_t getCurrentCUDASolverDnHandle();
+#endif
+
+#if defined(USE_CUDSS)
+TORCH_CUDA_CPP_API cudssHandle_t getCurrentCudssHandle();
 #endif
 
 } // namespace at::cuda

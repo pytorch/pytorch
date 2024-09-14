@@ -5,8 +5,7 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/Exception.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 template <typename T>
 struct InlineEvent final {
@@ -102,6 +101,32 @@ struct InlineEvent final {
     return backend_.queryEvent(event_);
   }
 
+  void* eventId() const {
+    return event_;
+  }
+
+  double elapsedTime(const InlineEvent& other) const {
+    TORCH_CHECK(
+        other.was_marked_for_recording(),
+        "other was not marked for recording.");
+    TORCH_CHECK(
+        was_marked_for_recording(), "self was not marked for recording.");
+    TORCH_CHECK(
+        other.device_type() == device_type_,
+        "Event device type ",
+        DeviceTypeName(device_type_),
+        " does not match other's device type ",
+        DeviceTypeName(other.device_type()),
+        ".");
+    return backend_.elapsedTime(event_, other.event_, device_index_);
+  }
+
+  void synchronize() const {
+    if (!was_marked_for_recording_)
+      return;
+    backend_.synchronizeEvent(event_);
+  }
+
  private:
   void* event_ = nullptr;
   T backend_;
@@ -111,5 +136,4 @@ struct InlineEvent final {
   bool was_marked_for_recording_ = false;
 };
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

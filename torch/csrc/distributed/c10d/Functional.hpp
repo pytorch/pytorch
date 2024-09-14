@@ -1,12 +1,11 @@
-#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#pragma once
 
-namespace c10d_functional {
+#include <torch/csrc/distributed/c10d/Work.hpp>
 
-void register_process_group(
-    const std::string& tag,
-    c10::intrusive_ptr<c10d::ProcessGroup> pg);
+namespace c10d {
 
-c10::intrusive_ptr<c10d::ProcessGroup> resolve_process_group(
-    const std::string& tag);
+C10_EXPORT void register_work(
+    const at::Tensor& tensor,
+    const c10::intrusive_ptr<c10d::Work>& work);
 
-} // namespace c10d_functional
+} // namespace c10d

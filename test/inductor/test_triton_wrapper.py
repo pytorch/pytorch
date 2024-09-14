@@ -4,9 +4,10 @@ import subprocess
 import sys
 
 import torch
-from torch._dynamo.test_case import run_tests, TestCase
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._inductor.codecache import PyCodeCache
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 class TestTritonWrapper(TestCase):
@@ -22,7 +23,7 @@ class TestTritonWrapper(TestCase):
         self.assertTrue(compiled_module is not None)
         return compiled_module
 
-    def test_wrapper_using_cuda_seed(self):
+    def test_wrapper_using_gpu_seed(self):
         """
         Make sure the subprocess.check_output does not throw.
         """
@@ -34,8 +35,8 @@ class TestTritonWrapper(TestCase):
             return z + y
 
         N = 10
-        x = torch.rand(N).to("cuda")
-        y = torch.rand(N).to("cuda")
+        x = torch.rand(N).to(device=GPU_TYPE)
+        y = torch.rand(N).to(device=GPU_TYPE)
         out = f(x, y)
         compiled_module = self.get_compiled_module()
 
@@ -49,5 +50,5 @@ class TestTritonWrapper(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA:
+    if HAS_GPU:
         run_tests()

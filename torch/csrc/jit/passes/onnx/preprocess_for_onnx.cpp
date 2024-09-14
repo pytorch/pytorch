@@ -6,8 +6,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace onnx {
 using namespace ::c10::onnx;
@@ -15,18 +14,18 @@ using namespace ::c10::onnx;
 
 namespace {
 
-at::optional<Node*> FindFusibleListUnpack(Node* n) {
+std::optional<Node*> FindFusibleListUnpack(Node* n) {
   // 1. number of outputs is restricted to 1.
   // 2. output is only used by prim::ListUnpack.
   if (n->outputs().size() != 1) {
-    return at::nullopt;
+    return std::nullopt;
   }
   if (n->output()->uses().size() != 1) {
-    return at::nullopt;
+    return std::nullopt;
   }
   auto listUnpackNode = n->output()->uses()[0].user;
   if (listUnpackNode->kind() != prim::ListUnpack) {
-    return at::nullopt;
+    return std::nullopt;
   }
   return listUnpackNode;
 }
@@ -229,5 +228,4 @@ void PreprocessForONNX(std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("After fuseListAndListUnpack: ", graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from numbers import Number
 
 import torch
@@ -12,6 +13,8 @@ from torch.distributions.utils import (
     logits_to_probs,
     probs_to_logits,
 )
+from torch.types import _size
+
 
 __all__ = ["LogitRelaxedBernoulli", "RelaxedBernoulli"]
 
@@ -30,10 +33,10 @@ class LogitRelaxedBernoulli(Distribution):
         logits (Number, Tensor): the log-odds of sampling `1`
 
     [1] The Concrete Distribution: A Continuous Relaxation of Discrete Random
-    Variables (Maddison et al, 2017)
+    Variables (Maddison et al., 2017)
 
     [2] Categorical Reparametrization with Gumbel-Softmax
-    (Jang et al, 2017)
+    (Jang et al., 2017)
     """
     arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
     support = constraints.real
@@ -86,7 +89,7 @@ class LogitRelaxedBernoulli(Distribution):
     def param_shape(self):
         return self._param.size()
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
         shape = self._extended_shape(sample_shape)
         probs = clamp_probs(self.probs.expand(shape))
         uniforms = clamp_probs(

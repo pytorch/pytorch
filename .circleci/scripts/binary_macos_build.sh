@@ -4,10 +4,6 @@ set -eux -o pipefail
 source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
 mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
-if [[ -z "${GITHUB_ACTIONS:-}" ]]; then
-  export PATH="${workdir:-${HOME}}/miniconda/bin:${PATH}"
-fi
-
 # Build
 export USE_PYTORCH_METAL_EXPORT=1
 export USE_COREML_DELEGATE=1

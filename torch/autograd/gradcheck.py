@@ -1,14 +1,17 @@
+# mypy: allow-untyped-defs
 import collections
 import functools
 import warnings
 from itertools import product
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing_extensions import deprecated
 
 import torch
 import torch.testing
 from torch._vmap_internals import _vmap, vmap
 from torch.overrides import is_tensor_like
 from torch.types import _TensorOrTensors
+
 
 # Note: `get_*_jacobian` functions are added here even though we didn't intend to make them public
 # since they have been exposed from before we added `__all__`  and we already maintain BC for them
@@ -25,8 +28,6 @@ __all__ = [
 
 class GradcheckError(RuntimeError):
     r"""Error raised by :func:`gradcheck` and :func:`gradgradcheck`."""
-
-    pass
 
 
 def _is_sparse_compressed_tensor(obj: torch.Tensor):
@@ -306,6 +307,14 @@ def _get_numerical_jacobian(
     return jacobians
 
 
+@deprecated(
+    "`get_numerical_jacobian` was part of PyTorch's private API and not "
+    "meant to be exposed. We are deprecating it and it will be removed "
+    "in a future version of PyTorch. If you have a specific use for "
+    "this or feature request for this to be a stable API, please file "
+    "us an issue at https://github.com/pytorch/pytorch/issues/new",
+    category=FutureWarning,
+)
 def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
     """Compute the numerical Jacobian for a given fn and its inputs.
 
@@ -325,13 +334,6 @@ def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
     Note that `target` may not even be part of `input` to `fn`, so please be
     **very careful** in this to not clone `target`.
     """
-    warnings.warn(
-        "get_numerical_jacobian was part of PyTorch's private API and not "
-        "meant to be exposed. We are deprecating it and it will be removed "
-        "in a future version of PyTorch. If you have a specific use for "
-        "this or feature request for this to be a stable API, please file "
-        "us an issue at https://github.com/pytorch/pytorch/issues/new"
-    )
     if (
         grad_out != 1.0
     ):  # grad_out param is only kept for backward compatibility reasons
@@ -349,8 +351,8 @@ def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
 
 
 def _compute_numerical_gradient(fn, entry, v, norm_v, nbhd_checks_fn):
-    # Performs finite differencing by perturbing `entry` in-place by `v` and
-    # returns the gradient of each of the outputs wrt to x at idx.
+    # Computes numerical directional derivative as finite difference
+    # of function `fn` at input `entry`, perturbed by vector `v`.
     if _is_sparse_compressed_tensor(entry):
         # sparse compressed tensors don't implement sub/add/copy_
         # yet. However, in non-masked semantics context entry and v
@@ -373,7 +375,7 @@ def _compute_numerical_gradient(fn, entry, v, norm_v, nbhd_checks_fn):
 
     def compute(a, b):
         nbhd_checks_fn(a, b)
-        ret = (b - a) / (2 * norm_v)
+        ret = (b - a) / (2 * norm_v)  # use central difference approx
         return ret.detach().reshape(-1)
 
     return tuple(compute(a, b) for (a, b) in zip(outa, outb))
@@ -754,7 +756,7 @@ def _check_analytical_jacobian_attributes(
     inputs, output, nondet_tol, check_grad_dtypes, fast_mode=False, v=None
 ) -> Tuple[torch.Tensor, ...]:
     # This is used by both fast and slow mode:
-    #  - For slow mode, vjps[i][j] is the jth row the Jacobian wrt the ith
+    #  - For slow mode, vjps[i][j] is the jth row of the Jacobian wrt the ith
     #    input.
     #  - For fast mode, vjps[i][0] is a linear combination of the rows
     #    of the Jacobian wrt the ith input
@@ -818,16 +820,17 @@ def _get_analytical_vJu_backward_mode(
     return reduced_jacobians
 
 
+@deprecated(
+    "`get_analytical_jacobian` was part of PyTorch's private API and not "
+    "meant to be exposed. We are deprecating it and it will be removed "
+    "in a future version of PyTorch. If you have a specific use for "
+    "this or feature request for this to be a stable API, please file "
+    "us an issue at https://github.com/pytorch/pytorch/issues/new",
+    category=FutureWarning,
+)
 def get_analytical_jacobian(inputs, output, nondet_tol=0.0, grad_out=1.0):
     # Replicates the behavior of the old get_analytical_jacobian before the refactor
     # This shares much of its code with _check_analytical_jacobian_attributes
-    warnings.warn(
-        "get_analytical_jacobian was part of PyTorch's private API and not "
-        "meant to be exposed. We are deprecating it and it will be removed "
-        "in a future version of PyTorch. If you have a specific use for "
-        "this or feature request for this to be a stable API, please file "
-        "us an issue at https://github.com/pytorch/pytorch/issues/new"
-    )
     if (
         grad_out != 1.0
     ):  # grad_out param is only kept for backward compatibility reasons
@@ -873,7 +876,8 @@ def _get_analytical_jacobian(inputs, outputs, input_idx, output_idx):
 def _compute_analytical_jacobian_rows(
     vjp_fn, sample_output
 ) -> List[List[Optional[torch.Tensor]]]:
-    # Computes Jacobian row-by-row using backward function `vjp_fn` = v^T J
+    # Computes Jacobian row-by-row by projecting `vjp_fn` = v^T J on standard basis
+    # vectors: vjp_fn(e) = e^T J is a corresponding row of the Jacobian.
     # NB: this function does not assume vjp_fn(v) to return tensors with the same
     # number of elements for different v. This is checked when we later combine the
     # rows into a single tensor.
@@ -881,11 +885,11 @@ def _compute_analytical_jacobian_rows(
         sample_output, memory_format=torch.legacy_contiguous_format
     )
     flat_grad_out = grad_out_base.view(-1)
-    # jacobians_rows[i][j] represents the jth row of the ith input
+    # jacobians_rows[i][j] is the Jacobian jth row for the ith input
     jacobians_rows: List[List[Optional[torch.Tensor]]] = []
     for j in range(flat_grad_out.numel()):
         flat_grad_out.zero_()
-        flat_grad_out[j] = 1.0
+        flat_grad_out[j] = 1.0  # projection for jth row of Jacobian
         grad_inputs = vjp_fn(grad_out_base)
         for i, d_x in enumerate(grad_inputs):
             if j == 0:
@@ -1741,11 +1745,11 @@ If the test
 
 
 def _run_slow_mode_and_get_error(
-    func, tupled_inputs, outputs, input_idx, output_idx, rtol, atol, is_forward_ad
+    func, tupled_inputs, outputs, input_idx, output_idx, rtol, atol, eps, is_forward_ad
 ):
     # Compute jacobians in slow mode for better error message
     slow_numerical = _get_numerical_jacobian(
-        func, tupled_inputs, outputs, is_forward_ad=is_forward_ad
+        func, tupled_inputs, outputs, eps=eps, is_forward_ad=is_forward_ad
     )[input_idx][output_idx]
     if is_forward_ad:
 
@@ -1829,6 +1833,7 @@ def _check_analytical_numerical_equal(
     all_u,
     rtol,
     atol,
+    eps,
     test_imag,
     *,
     is_forward_ad=False,
@@ -1844,7 +1849,7 @@ def _check_analytical_numerical_equal(
             updated_atol = _adjusted_atol(atol, all_u[i], all_v[j] if all_v else None)
             if not _allclose_with_type_promotion(a, n.to(a.device), rtol, updated_atol):
                 jacobians_str = _run_slow_mode_and_get_error(
-                    func, tupled_inputs, outputs, i, j, rtol, atol, is_forward_ad
+                    func, tupled_inputs, outputs, i, j, rtol, atol, eps, is_forward_ad
                 )
                 raise GradcheckError(
                     _get_notallclose_msg(
@@ -1928,6 +1933,7 @@ def _fast_gradcheck(
         all_u,
         rtol,
         atol,
+        eps,
         test_imag,
         is_forward_ad=use_forward_ad,
     )
@@ -1949,7 +1955,6 @@ def gradcheck(
     atol: float = 1e-5,
     rtol: float = 1e-3,
     raise_exception: bool = True,
-    check_sparse_nnz: Optional[bool] = None,
     nondet_tol: float = 0.0,
     check_undefined_grad: bool = True,
     check_grad_dtypes: bool = False,
@@ -2004,12 +2009,6 @@ def gradcheck(
         raise_exception (bool, optional): indicating whether to raise an exception if
             the check fails. The exception gives more information about the
             exact nature of the failure. This is helpful when debugging gradchecks.
-        check_sparse_nnz (bool, optional): if ``True``, gradcheck allows
-            for SparseTensor input, and for any SparseTensor inputs,
-            gradcheck will perform its check at ``nnz`` positions only.
-            The ``check_sparse_nnz`` argument is deprecated, use the
-            ``masked`` argument instead. If ``check_sparse_nnz != masked``, an
-            exception is raised.
         nondet_tol (float, optional): tolerance for non-determinism. When running
             identical inputs through the differentiation, the results must either match
             exactly (default, 0.0) or be within this tolerance.
@@ -2033,22 +2032,6 @@ def gradcheck(
         ``True`` if all differences satisfy allclose condition
 
     """
-    if check_sparse_nnz is None:
-        if masked is None:
-            check_sparse_nnz = masked = False
-        else:
-            check_sparse_nnz = masked
-    else:
-        warnings.warn(
-            "Backwards compatibility: check_sparse_nnz is deprecated, it will be removed in a future version of PyTorch."
-            f" Use masked={check_sparse_nnz} instead."
-        )
-        if masked is None:
-            masked = check_sparse_nnz
-        elif check_sparse_nnz != masked:
-            raise ValueError(
-                f"Expected specified check_sparse_nnz (={check_sparse_nnz}) to be equal to masked (={masked})."
-            )
     assert (
         check_forward_ad or check_backward_ad
     ), "Expected at least one of check_forward_ad or check_backward_ad to be True"
@@ -2060,7 +2043,6 @@ def gradcheck(
     ), "Setting check_batched_forward_grad=True requires check_forward_ad to be True"
     args = locals().copy()
     args.pop("raise_exception")
-    args.pop("check_sparse_nnz")
     if not raise_exception:
         try:
             return _gradcheck_helper(**args)

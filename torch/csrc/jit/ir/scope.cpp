@@ -113,7 +113,7 @@ InlinedCallStack::InlinedCallStack(Function* fn, SourceRange source_range)
 InlinedCallStack::InlinedCallStack(
     Function* fn,
     SourceRange source_range,
-    c10::optional<ModuleInstanceInfo> module_instance_info)
+    std::optional<ModuleInstanceInfo> module_instance_info)
     : fn_(fn),
       fn_name_(fn_ ? fn_->name() : ""),
       source_range_(std::move(source_range)),
@@ -122,7 +122,7 @@ InlinedCallStack::InlinedCallStack(
 InlinedCallStack::InlinedCallStack(
     Function* fn,
     SourceRange source_range,
-    c10::optional<ModuleInstanceInfo> module_instance_info,
+    std::optional<ModuleInstanceInfo> module_instance_info,
     std::string& function_name)
     : fn_(fn),
       fn_name_(std::move(function_name)),
@@ -142,7 +142,7 @@ InlinedCallStack::InlinedCallStack(
     InlinedCallStackPtr callee,
     Function* fn,
     SourceRange source_range,
-    c10::optional<ModuleInstanceInfo> module_instance_info,
+    std::optional<ModuleInstanceInfo> module_instance_info,
     std::string& function_name)
     : callee_(std::move(callee)),
       fn_(fn),
@@ -154,22 +154,22 @@ InlinedCallStack::InlinedCallStack(
     InlinedCallStackPtr callee,
     Function* fn,
     SourceRange source_range,
-    c10::optional<ModuleInstanceInfo> module_instance_info)
+    std::optional<ModuleInstanceInfo> module_instance_info)
     : callee_(std::move(callee)),
       fn_(fn),
       fn_name_(fn_ ? fn_->name() : ""),
       source_range_(std::move(source_range)),
       module_instance_info_(std::move(module_instance_info)) {}
 
-c10::optional<InlinedCallStackPtr> InlinedCallStack::callee() const {
+std::optional<InlinedCallStackPtr> InlinedCallStack::callee() const {
   return callee_;
 }
 
-void InlinedCallStack::setCallee(c10::optional<InlinedCallStackPtr> callee) {
+void InlinedCallStack::setCallee(std::optional<InlinedCallStackPtr> callee) {
   callee_ = std::move(callee);
 }
 
-c10::optional<ModuleInstanceInfo> InlinedCallStack::module_instance() const {
+std::optional<ModuleInstanceInfo> InlinedCallStack::module_instance() const {
   return module_instance_info_;
 }
 
@@ -187,7 +187,7 @@ const std::string& InlinedCallStack::function_name() const {
 
 std::vector<InlinedCallStackEntry> InlinedCallStack::vec() {
   std::vector<InlinedCallStackEntry> r;
-  c10::optional<InlinedCallStackPtr> current = intrusive_from_this();
+  std::optional<InlinedCallStackPtr> current = intrusive_from_this();
   while (current) {
     r.emplace_back(
         (*current)->fn_,

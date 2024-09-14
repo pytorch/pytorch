@@ -2,8 +2,6 @@
 #include <ATen/Utils.h>
 #include <c10/util/ArrayRef.h>
 
-#include <vector>
-
 namespace at {
 /// MatrixRef - Like an ArrayRef, but with an extra recorded strides so that
 /// we can easily view it as a multidimensional array.
@@ -94,16 +92,16 @@ class MatrixRef {
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
-  typename std::enable_if<std::is_same<U, T>::value, MatrixRef<T>>::type&
-  operator=(U&& Temporary) = delete;
+  std::enable_if_t<std::is_same_v<U, T>, MatrixRef<T>>& operator=(
+      U&& Temporary) = delete;
 
   /// Disallow accidental assignment from a temporary.
   ///
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
-  typename std::enable_if<std::is_same<U, T>::value, MatrixRef<T>>::type&
-  operator=(std::initializer_list<U>) = delete;
+  std::enable_if_t<std::is_same_v<U, T>, MatrixRef<T>>& operator=(
+      std::initializer_list<U>) = delete;
 };
 
 } // end namespace at

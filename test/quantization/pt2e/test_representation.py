@@ -42,9 +42,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
         model = prepare_pt2e(model, quantizer)
         # Calibrate
         model(*example_inputs)
-        model = convert_pt2e(
-            model, use_reference_representation=True, fold_quantize=True
-        )
+        model = convert_pt2e(model, use_reference_representation=True)
         self.checkGraphModuleNodes(model, expected_node_occurrence=ref_node_occurrence)
         # make sure it runs
         pt2e_quant_output = model(*example_inputs)
@@ -54,9 +52,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
         model_copy = prepare_pt2e(model_copy, quantizer)
         # Calibrate
         model_copy(*example_inputs)
-        model_copy = convert_pt2e(
-            model_copy, use_reference_representation=False, fold_quantize=True
-        )
+        model_copy = convert_pt2e(model_copy, use_reference_representation=False)
         self.checkGraphModuleNodes(
             model_copy, expected_node_occurrence=non_ref_node_occurrence
         )
@@ -85,7 +81,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
 
     def test_static_linear(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
 
@@ -107,7 +103,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
 
     def test_dynamic_linear(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
 
@@ -132,7 +128,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
 
     def test_conv2d(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv2d = torch.nn.Conv2d(3, 3, 3)
 
@@ -154,7 +150,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
 
     def test_add(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, y):
@@ -180,7 +176,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
 
     def test_add_relu(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, y):
@@ -228,7 +224,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
         """Test representation for quantize_per_channel and dequantize_per_channel op"""
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
 
@@ -279,7 +275,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
         """Test representation for quantize and dequantize op"""
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, y):

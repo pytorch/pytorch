@@ -26,8 +26,7 @@
 
 #include <c10/util/irange.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 bool is_same_size(const Tensor& self, const Tensor& other) {
   return self.sym_sizes().equals(other.sym_sizes());
@@ -106,10 +105,6 @@ Tensor & detach_(Tensor & self) {
   return self;
 }
 
-static Tensor contiguous(const Tensor & self) {
-  return contiguous(self, MemoryFormat::Contiguous);
-}
-
 Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
   if (self.is_contiguous(memory_format)) {
     return self;
@@ -135,5 +130,4 @@ bool is_set_to(const Tensor& self, const Tensor& src) {
   return false;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

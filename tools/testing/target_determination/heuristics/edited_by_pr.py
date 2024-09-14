@@ -1,4 +1,6 @@
-from typing import Any, Dict, List, Set
+from __future__ import annotations
+
+from typing import Any
 from warnings import warn
 
 from tools.testing.target_determination.heuristics.interface import (
@@ -9,28 +11,21 @@ from tools.testing.target_determination.heuristics.utils import (
     python_test_file_to_test_name,
     query_changed_files,
 )
+from tools.testing.test_run import TestRun
 
 
 class EditedByPR(HeuristicInterface):
-    def __init__(self, **kwargs: Dict[str, Any]):
+    def __init__(self, **kwargs: dict[str, Any]) -> None:
         super().__init__(**kwargs)
 
-    def get_test_priorities(self, tests: List[str]) -> TestPrioritizations:
-        # Tests must always be returned in a deterministic order.
-        # Otherwise it breaks our test sharding logic
-        critical_tests = sorted(_get_modified_tests())
-        test_rankings = TestPrioritizations(
-            tests_being_ranked=tests, high_relevance=critical_tests
+    def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:
+        critical_tests = _get_modified_tests()
+        return TestPrioritizations(
+            tests, {TestRun(test): 1 for test in critical_tests if test in tests}
         )
 
-        return test_rankings
 
-    def get_prediction_confidence(self, tests: List[str]) -> Dict[str, float]:
-        critical_tests = _get_modified_tests()
-        return {test: 1 for test in critical_tests if test in tests}
-
-
-def _get_modified_tests() -> Set[str]:
+def _get_modified_tests() -> set[str]:
     try:
         changed_files = query_changed_files()
     except Exception as e:

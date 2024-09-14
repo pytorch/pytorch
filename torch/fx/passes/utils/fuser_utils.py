@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 from queue import SimpleQueue
 from typing import List, Dict, Tuple
@@ -13,7 +14,7 @@ from torch.fx._compatibility import compatibility
 @compatibility(is_backward_compatible=False)
 def topo_sort(nodes: NodeList) -> NodeList:
     # sort nodes according to the topological order
-    indegree_map = {node : 0 for node in nodes}
+    indegree_map = dict.fromkeys(nodes, 0)
     candidates: SimpleQueue = SimpleQueue()
 
     for node in nodes:
@@ -23,7 +24,7 @@ def topo_sort(nodes: NodeList) -> NodeList:
         if indegree_map[node] == 0:
             candidates.put(node)
 
-    sorted_nodes: NodeList = list()
+    sorted_nodes: NodeList = []
     while not candidates.empty():
         node = candidates.get()
         sorted_nodes.append(node)
@@ -46,7 +47,7 @@ def validate_partition(partition: NodeList) -> bool:
 
     partition_set = set(partition)
 
-    outputs: NodeList = list()
+    outputs: NodeList = []
     for node in partition_set:
         for user_node in node.users:
             if user_node not in partition_set:
@@ -117,7 +118,7 @@ def fuse_as_graphmodule(gm: GraphModule,
     for node in nodes:
         assert node.graph.owning_module is gm, f"{node} doesn't belong to passed in graph module {gm._get_name()}"
         assert not node._erased, f"{node} has been removed from owning graph"
-        assert node in gm.graph.nodes, f"{node} is not found in graph module {gm._get_name()}"
+        assert node in gm.graph._find_nodes_lookup_table, f"{node} is not found in graph module {gm._get_name()}"
 
     # validates partition doesn't introduce dependency circles in the graph
     assert validate_partition(nodes), "Invalid partition, found dependency cycles"
@@ -205,6 +206,8 @@ def insert_subgm(gm: GraphModule, sub_gm: GraphModule, orig_inputs: Tuple[Node, 
             # Use Proxy to record getitem access.
             proxy_out = torch.fx.Proxy(module_node)[i].node  # type: ignore[index]
             orig_output.replace_all_uses_with(proxy_out, propagate_meta=True)
+
+        module_node.meta["val"] = tuple(orig_output.meta.get("val", None) for orig_output in orig_outputs)
     return gm
 
 @compatibility(is_backward_compatible=False)
@@ -216,11 +219,11 @@ def erase_nodes(gm: GraphModule, nodes: NodeList):
 
 
 @compatibility(is_backward_compatible=False)
-def fuse_by_partitions(gm: GraphModule, partitions: List[NodeList]) -> GraphModule:
+def fuse_by_partitions(gm: GraphModule, partitions: List[NodeList], prefix: str = "fused_") -> GraphModule:
     for partition_id, nodes in enumerate(partitions):
         sorted_nodes = topo_sort(nodes)
 
-        submodule_name = "fused_" + str(partition_id)
+        submodule_name = prefix + str(partition_id)
         sub_gm, orig_inputs, orig_outputs = fuse_as_graphmodule(gm, sorted_nodes, submodule_name)
 
         insert_subgm(gm, sub_gm, orig_inputs, orig_outputs)

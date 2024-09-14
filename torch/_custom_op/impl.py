@@ -1,28 +1,29 @@
+# mypy: allow-untyped-defs
 import dataclasses
 import functools
 import inspect
 import sys
 import typing
 import weakref
+import warnings
 
 from torchgen.model import FunctionSchema, OperatorName, SchemaKind, BaseType, ListType, BaseTy
 
 import torch
 import torch._C as _C
 import torch.library as library
-from torch._library.abstract_impl import AbstractImplCtx
 from torch.library import get_ctx
 
 from .autograd import autograd_kernel_indirection, construct_autograd_kernel
+import torch._library.infer_schema
+from torch._library.infer_schema import infer_schema
 
 """
-For a detailed guide on custom ops, please see
-https://docs.google.com/document/d/1aGWtgxV3HppuxQAdddyPrs74_aEntpkYt9MalnCKnhk
-
-This file includes pieces of the implementation of our custom operator API.
+torch._custom_op is deprecated. We shipped a production-ready version of it into torch.library.
+Please use those APIs instead.
 """
 
-__all__ = ["custom_op", "CustomOp", "get_ctx", "AbstractImplCtx"]
+__all__ = ["custom_op", "CustomOp", "get_ctx"]
 
 
 SUPPORTED_DEVICE_TYPE_TO_KEY = {
@@ -41,76 +42,19 @@ RESERVED_NS = {
     "pytorch",
 }
 
+def warn_deprecated():
+    warnings.warn(
+        "torch._custom_op is deprecated and will be removed in PyTorch 2.6, please "
+        "use the equivalent torch.library API instead.", DeprecationWarning)
+
 
 def custom_op(
     qualname: str, manual_schema: typing.Optional[str] = None
 ) -> typing.Callable:
-    r"""Creates a new CustomOp object.
-
-    WARNING: if you're a user, please do not use this directly
-    (instead use the torch._custom_ops APIs).
-    Also please see the following for a detailed guide on custom ops.
-    https://docs.google.com/document/d/1aGWtgxV3HppuxQAdddyPrs74_aEntpkYt9MalnCKnhk
-
-    In PyTorch, defining an op (short for "operator") is a two step-process:
-    - we need to define (create) the op
-    - we need to implement behavior for how the operator interacts with
-      various PyTorch subsystems, like CPU/CUDA Tensors, Autograd, etc.
-
-    This entrypoint defines the CustomOp object (the first step);
-    you must then perform the second step by calling various methods on
-    the CustomOp object.
-
-    This API is used as a decorator (see examples).
-
-    Arguments:
-        qualname (str): Should be a string that looks like
-            "namespace::operator_name". Operators in PyTorch need a namespace to
-            avoid name collisions; a given operator may only be created once.
-            If you are writing a Python library, we recommend the namespace to
-            be the name of your top-level module. The operator_name must be
-            the same as the name of the function you pass to custom_op
-            (see examples).
-        manual_schema (Optional[str]): Each PyTorch operator needs a schema that
-            tells PyTorch the types of the inputs/outputs. If None (default),
-            we will infer the schema from the type annotations on the function
-            (see examples). Otherwise, if you don't want to use type annotations,
-            you may provide us the schema string.
-
-    Example::
-        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
-        >>> import numpy as np
-        >>> from torch import Tensor
-        >>>
-        >>> # Step 1: define the CustomOp.
-        >>> # We need to provide the decorator a "prototype function"
-        >>> # (a function with Python ellipses as the body).
-        >>> @custom_op("my_library::numpy_sin")
-        >>> def numpy_sin(x: Tensor) -> Tensor:
-        >>>     ...
-        >>>
-        >>> # numpy_sin is now an instance of class CustomOp
-        >>> print(type(numpy_sin))
-        >>>
-        >>> # Step 2: Register an implementation for various PyTorch subsystems
-        >>>
-        >>> # Register an implementation for CPU tensors
-        >>> @numpy_sin.impl('cpu')
-        >>> def numpy_sin_impl_cpu(x):
-        >>>     return torch.from_numpy(np.sin(x.numpy()))
-        >>>
-        >>> # Register an implementation for CUDA tensors
-        >>> @numpy_sin.impl('cuda')
-        >>> def numpy_sin_impl_cuda(x):
-        >>>     return torch.from_numpy(np.sin(x.cpu().numpy())).to(x.device)
-        >>>
-        >>> x = torch.randn(3)
-        >>> numpy_sin(x)  # calls numpy_sin_impl_cpu
-        >>>
-        >>> x_cuda = x.cuda()
-        >>> numpy_sin(x)  # calls numpy_sin_impl_cuda
-
+    r"""
+    This API is deprecated, please use torch.library.custom_op instead
     """
+    warn_deprecated()
 
     def inner(func):
         if not inspect.isfunction(func):
@@ -129,7 +73,7 @@ def custom_op(
                 f"is passed to `custom_op`"
             )
 
-        schema = infer_schema(func) if manual_schema is None else manual_schema
+        schema = infer_schema(func, mutates_args=()) if manual_schema is None else manual_schema
         schema_str = f"{name}{schema}"
         function_schema = FunctionSchema.parse(schema_str)
         validate_schema(function_schema)
@@ -168,17 +112,13 @@ global_registry: typing.Dict[str, "CustomOp"] = {}
 
 
 class CustomOp:
-    r"""Class for custom operators in PyTorch.
-
-    Use the CustomOp API to create user-defined custom operators that behave
-    just like regular PyTorch operators (e.g. torch.sin, torch.mm) when it
-    comes to various PyTorch subsystems (like torch.compile).
-
-    To construct a `CustomOp`, use `custom_op`.
+    r"""
+    This API is deprecated, please use torch.library.custom_op instead
     """
 
     def __init__(self, lib, cpp_ns, schema, operator_name, ophandle, *, _private_access=False):
         super().__init__()
+        warn_deprecated()
         if not _private_access:
             raise RuntimeError(
                 "The CustomOp constructor is private and we do not guarantee "
@@ -258,48 +198,8 @@ class CustomOp:
     def impl(
         self, device_types: typing.Union[str, typing.Iterable[str]], _stacklevel=2,
     ) -> typing.Callable:
-        r"""Register an implementation for a device type for this CustomOp object.
-
-        WARNING: if you're a user, please do not use this directly
-        (instead use the torch._custom_ops APIs).
-        Also please see the following for a detailed guide on custom ops.
-        https://docs.google.com/document/d/1aGWtgxV3HppuxQAdddyPrs74_aEntpkYt9MalnCKnhk
-
-        If the CustomOp is passed multiple Tensor inputs with different device
-        types, it will dispatch to the registered implementation for the highest
-        priority device type among those present.
-        The supported device types, in order of priority, are {'cuda', 'cpu'}.
-
-        This API is used as a decorator (see examples).
-
-        Arguments:
-            device_types (str or Iterable[str]): the device type(s) to register the function for.
-
-        Examples::
-            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
-            >>> import numpy as np
-            >>> from torch import Tensor
-            >>>
-            >>> @custom_op("my_library::numpy_cos")
-            >>> def numpy_cos(x: Tensor) -> Tensor:
-            >>>     ...
-            >>>
-            >>> # Register an implementation for CPU Tensors
-            >>> @numpy_cos.impl('cpu')
-            >>> def numpy_cos_impl_cpu(x):
-            >>>     return torch.from_numpy(np.cos(x.numpy()))
-            >>>
-            >>> # Register an implementation for CUDA Tensors
-            >>> @numpy_cos.impl('cuda')
-            >>> def numpy_cos_impl_cuda(x):
-            >>>     return torch.from_numpy(np.cos(x.cpu().numpy())).to(x.device)
-            >>>
-            >>> x = torch.randn(3)
-            >>> numpy_cos(x)  # calls numpy_cos_impl_cpu
-            >>>
-            >>> x_cuda = x.cuda()
-            >>> numpy_cos(x)  # calls numpy_cos_impl_cuda
-
+        r"""
+        This API is deprecated, please use torch.library.custom_op instead
         """
         if isinstance(device_types, str):
             device_types = [device_types]
@@ -337,75 +237,8 @@ class CustomOp:
         return inner
 
     def impl_abstract(self, _stacklevel=2) -> typing.Callable:
-        r"""Register an abstract implementation for this operator.
-
-        WARNING: please do not use this directly (and instead use the torch._custom_ops
-        APIs). Also please see the following for a detailed guide on custom ops.
-        https://docs.google.com/document/d/1aGWtgxV3HppuxQAdddyPrs74_aEntpkYt9MalnCKnhk
-
-        An "abstract implementation" specifies the behavior of this operator on
-        Tensors that carry no data. Given some input Tensors with certain properties
-        (sizes/strides/storage_offset/device), it specifies what the properties of
-        the output Tensors are.
-
-        The abstract implementation has the same signature as the operator.
-        It is run for both FakeTensors and meta tensors. To write an abstract
-        implementation, assume that all Tensor inputs to the operator are
-        regular CPU/CUDA/Meta tensors, but they do not have storage, and
-        you are trying to return regular CPU/CUDA/Meta tensor(s) as output.
-        The abstract implementation must consist of only PyTorch operations
-        (and may not directly access the storage or data of any input or
-        intermediate Tensors).
-
-        This API is used as a decorator (see examples).
-
-        Examples::
-            >>> import numpy as np
-            >>> from torch import Tensor
-            >>>
-            >>> # Example 1: an operator without data-dependent output shape
-            >>> @custom_op('my_library::custom_linear')
-            >>> def custom_linear(x: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
-            >>>     ...
-            >>>
-            >>> @custom_linear.impl_abstract()
-            >>> def custom_linear_abstract(x, weight):
-            >>>     assert x.dim() == 2
-            >>>     assert weight.dim() == 2
-            >>>     assert bias.dim() == 1
-            >>>     assert x.shape[1] == weight.shape[1]
-            >>>     assert weight.shape[0] == bias.shape[0]
-            >>>     assert x.device == weight.device
-            >>>
-            >>>     return (x @ weight.t()) + bias
-            >>>
-            >>> # Example 2: an operator with data-dependent output shape
-            >>> @custom_op('my_library::custom_nonzero')
-            >>> def custom_nonzero(x: Tensor) -> Tensor:
-            >>>     ...
-            >>>
-            >>> @custom_nonzero.impl_abstract()
-            >>> def custom_nonzero_abstract(x):
-            >>>     # Number of nonzero-elements is data-dependent.
-            >>>     # Since we cannot peek at the data in an abstract impl,
-            >>>     # we use the ctx object to construct a new symint that
-            >>>     # represents the data-dependent size.
-            >>>     ctx = torch._custom_op.get_ctx()
-            >>>     nnz = ctx.create_unbacked_symint()
-            >>>     shape = [x.dim(), nnz]
-            >>>     result = x.new_empty(shape, dtype=torch.long)
-            >>>     return result
-            >>>
-            >>> @custom_nonzero.impl(['cpu', 'cuda'])
-            >>> def custom_nonzero_impl(x):
-            >>>     x_np = to_numpy(x)
-            >>>     res = np.stack(np.nonzero(x_np), axis=1)
-            >>>     # unbacked symbolic ints in PyTorch must be >= 2, so we
-            >>>     # constrain the range to at least 2
-            >>>     if res.shape[0] <= 1:
-            >>>         raise RuntimeError("not supported")
-            >>>     return torch.tensor(res, device=x.device)
-
+        r"""
+        This API is deprecated, please use torch.library.custom_op instead
         """
 
         def inner(f):
@@ -430,7 +263,7 @@ class CustomOp:
                         f"at {location}"
                     )
 
-                with torch._library.abstract_impl.set_ctx_getter(error_on_ctx):
+                with torch._library.fake_impl.set_ctx_getter(error_on_ctx):
                     return f(*args, **kwargs)
 
             self._lib.impl(self._opname, f_with_ctx, "Meta")
@@ -568,41 +401,8 @@ class CustomOp:
         return inner
 
     def impl_backward(self, output_differentiability=None, _stacklevel=2):
-        r"""Registers a backward formula.
-
-        WARNING: if you're a user, please do not use this directly
-        (instead use the torch._custom_ops APIs).
-        Also please see the following for a detailed guide on custom ops.
-        https://docs.google.com/document/d/1aGWtgxV3HppuxQAdddyPrs74_aEntpkYt9MalnCKnhk
-
-        In order for the CustomOp to work with autograd, you need to register
-        a backward formula. There are two pieces to this:
-        1. You must give us a function to specify what to save for backward.
-           Call this the "save for backward" function.
-        2. You must give us a function that computes gradients. Call this the
-           "backward" function.
-
-        Use `impl_save_for_backward` to define a "save for backward" function
-        that specifies what gets saved for backward. The function should accept
-        two arguments ``(inputs, output)`` and return the quantities to be saved
-        for backward.
-
-        During runtime, when you call the CustomOp, PyTorch will invoke the
-        "save for backward" function with the inputs and output of the CustomOp.
-
-        Use `impl_backward` to define the "backward" function. The backward
-        function must accept ``(ctx, saved, *grads)``:
-        - ``ctx`` is a context object where we may provide information
-        - ``saved`` is exactly what gets returned from the "save for backward"
-          function
-        - ``grads`` is one or more gradients. The number of gradients matches
-          the number of outputs of the CustomOp.
-
-        The backward function must return a dict that maps the name of
-        an input to the CustomOp to its corresponding gradient. All inputs that
-        were declared to be Tensors in the CustomOp definition must be accounted
-        for in the dict. The gradient may be a Tensor or None.
-
+        r"""
+        This API is deprecated, please use torch.library.custom_op instead
         """
         if output_differentiability is not None:
             def yell():
@@ -769,112 +569,6 @@ def validate_function_matches_schema(
     compare(kwargonly, schema.arguments.flat_kwarg_only)
 
 
-def infer_schema(prototype_function: typing.Callable) -> str:
-    sig = inspect.signature(prototype_function)
-
-    def error_fn(what):
-        raise ValueError(
-            f"custom_op(...)(func): {what} " f"Got func with signature {sig})"
-        )
-
-    params = [
-        parse_param(name, param, error_fn) for name, param in sig.parameters.items()
-    ]
-    ret = parse_return(sig.return_annotation, error_fn)
-    return f"({', '.join(params)}) -> {ret}"
-
-
-def parse_param(name, param, error_fn):
-    if not supported_param(param):
-        error_fn("We do not support positional-only args, varargs, or varkwargs.")
-
-    if param.annotation is inspect.Parameter.empty:
-        error_fn(f"Parameter {name} must have a type annotation.")
-
-    if param.annotation not in SUPPORTED_PARAM_TYPES.keys():
-        error_fn(
-            f"Parameter {name} has unsupported type {param.annotation}. "
-            f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
-        )
-
-    if param.default is not inspect.Parameter.empty:
-        error_fn(
-            f"Parameter {name} has a default value; this is not supported. "
-            f"If you want to use default values then create a function with "
-            f"default values that calls the CustomOp"
-        )
-
-    return f"{SUPPORTED_PARAM_TYPES[param.annotation]} {name}"
-
-
-def derived_types(
-    base_type, cpp_type, list_base, optional_base_list, optional_list_base
-):
-    result = [
-        (base_type, cpp_type),
-        (typing.Optional[base_type], f"{cpp_type}?"),
-    ]
-    if list_base:
-        result.append((typing.Sequence[base_type], f"{cpp_type}[]"))  # type: ignore[valid-type]
-    if optional_base_list:
-        result.append((typing.Sequence[typing.Optional[base_type]], f"{cpp_type}?[]"))  # type: ignore[valid-type]
-    if optional_list_base:
-        result.append((typing.Optional[typing.Sequence[base_type]], f"{cpp_type}[]?"))  # type: ignore[valid-type]
-    return result
-
-
-def get_supported_param_types():
-    data = [
-        # (python type, schema type, type[] variant, type?[] variant, type[]? variant
-        (torch.Tensor, "Tensor", True, True, False),
-        (int, "SymInt", True, False, True),
-        (float, "float", True, False, True),
-        (bool, "bool", True, False, True),
-        (str, "str", False, False, False),
-        (torch.types.Number, "Scalar", True, False, False),
-        (torch.dtype, "ScalarType", False, False, False),
-        (torch.device, "Device", False, False, False),
-    ]
-    result = []
-    for line in data:
-        result.extend(derived_types(*line))
-    return dict(result)
-
-
-SUPPORTED_RETURN_TYPES = {
-    torch.Tensor: "Tensor",
-    typing.List[torch.Tensor]: "Tensor[]",
-    int: "SymInt",
-    float: "float",
-    bool: "bool",
-    torch.types.Number: "Scalar",
-}
-
-
-def parse_return(annotation, error_fn):
-    origin = typing.get_origin(annotation)
-    if origin is not tuple:
-        if annotation not in SUPPORTED_RETURN_TYPES.keys():
-            error_fn(
-                f"Return has unsupported type {annotation}. "
-                f"The valid types are: {SUPPORTED_RETURN_TYPES}."
-            )
-        return SUPPORTED_RETURN_TYPES[annotation]
-
-    args = typing.get_args(annotation)
-    for arg in args:
-        if arg not in SUPPORTED_RETURN_TYPES:
-            error_fn(
-                f"Return has unsupported type {annotation}. "
-                f"The valid types are: {SUPPORTED_RETURN_TYPES}."
-            )
-
-    return "(" + ", ".join([SUPPORTED_RETURN_TYPES[arg] for arg in args]) + ")"
-
-
-SUPPORTED_PARAM_TYPES = get_supported_param_types()
-
-
 def report_error_callback(custom_op: typing.Any, key: str) -> None:
     if key == "Undefined":
         raise NotImplementedError(
@@ -940,7 +634,7 @@ def _find_custom_op(qualname, also_check_torch_library=False):
         return global_registry[qualname]
     if not also_check_torch_library:
         raise RuntimeError(
-            f"Could not find custom op \"{qualname}\". Did you register it via "
+            f'Could not find custom op "{qualname}". Did you register it via '
             f"the torch._custom_ops API?")
     overload = get_op(qualname)
     result = custom_op_from_existing(overload)
@@ -958,14 +652,14 @@ def get_abstract_impl(qualname):
     return custom_op._get_impl("abstract").func
 
 
-def _custom_op_with_schema(qualname, schema):
+def _custom_op_with_schema(qualname, schema, needs_fixed_stride_order=True):
     ns, name = qualname.split("::")
     schema_str = f"{name}{schema}"
     function_schema = FunctionSchema.parse(schema_str)
     validate_schema(function_schema)
-
+    tags = [torch._C.Tag.needs_fixed_stride_order] if needs_fixed_stride_order else []
     lib = library.Library(ns, "FRAGMENT")
-    lib.define(schema_str)
+    lib.define(schema_str, tags=tags)
     ophandle = find_ophandle_or_throw(ns, function_schema.name)
     result = CustomOp(lib, ns, function_schema, name, ophandle, _private_access=True)
     result._register_autograd_kernel_indirection()

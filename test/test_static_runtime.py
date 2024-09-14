@@ -7,29 +7,8 @@ import numpy as np
 import torch
 from torch import nn
 from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.static_module import StaticModule
 from typing import List
-
-class StaticModule:
-    def __init__(self, scripted):
-        # this is an nn.Module
-        if hasattr(scripted, "_c"):
-            self.static_module = torch._C._jit_to_static_module(scripted._c)
-        else:
-            self.static_module = torch._C._jit_to_static_module(scripted.graph)
-
-    def __call__(self, *args, **kwargs):
-        return self.static_module(*args, **kwargs)
-
-    def benchmark(self, args, kwargs, warmup_runs, main_runs):
-        self.static_module.benchmark(args, kwargs, warmup_runs, main_runs)
-
-    def runAsync(self, args, kwargs):
-        return self.static_module.runAsync(args, kwargs)
-
-    def benchmark_individual_ops(self, args, kwargs, warmup_runs, main_runs):
-        return self.static_module.benchmark_individual_ops(
-            args, kwargs, warmup_runs, main_runs
-        )
 
 
 def linear_shim(
@@ -177,7 +156,7 @@ def output_graph(a, b, c, iters: int):
 
 
 class SubModule(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.a = 11
         self.b = 2
@@ -187,7 +166,7 @@ class SubModule(nn.Module):
 
 
 class SubModule2(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.a = 12
         self.b = 2
@@ -198,7 +177,7 @@ class SubModule2(nn.Module):
 
 
 class TestModule(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.sub1 = SubModule()
         self.sub2 = SubModule2()
@@ -351,7 +330,7 @@ class TestStaticModule(TestCase):
                 raise RuntimeError(
                     "Tried execution of add.Tensors with incompatible shape. "
                     "Exception raised by forked runtime execution does "
-                    f"not contain expected substring: \"{expected_error_msg}\""
+                    f'not contain expected substring: "{expected_error_msg}"'
                 ) from error
 
     """
@@ -381,7 +360,7 @@ class TestStaticModule(TestCase):
                 raise RuntimeError(
                     "Tried execution of add.Tensors with incompatible shape. "
                     "Exception raised by forked runtime execution does "
-                    f"not contain expected substring: \"{expected_error_msg}\""
+                    f'not contain expected substring: "{expected_error_msg}"'
                 ) from error
 
     def test_multihead_attention_layer(self):

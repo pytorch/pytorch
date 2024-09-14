@@ -14,6 +14,7 @@ import sys
 import time
 from typing import Any, BinaryIO
 
+
 LINTER_CODE = "RUFF"
 IS_WINDOWS: bool = os.name == "nt"
 
@@ -225,6 +226,7 @@ def check_files(
                 sys.executable,
                 "-m",
                 "ruff",
+                "check",
                 "--exit-zero",
                 "--quiet",
                 "--output-format=json",
@@ -307,6 +309,7 @@ def check_file_for_fixes(
                     sys.executable,
                     "-m",
                     "ruff",
+                    "check",
                     "--fix-only",
                     "--exit-zero",
                     *([f"--config={config}"] if config else []),

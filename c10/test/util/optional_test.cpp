@@ -1,4 +1,4 @@
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -22,7 +22,7 @@ using testing::Not;
 template <typename T>
 class OptionalTest : public ::testing::Test {
  public:
-  using optional = c10::optional<T>;
+  using optional = std::optional<T>;
 };
 
 template <typename T>
@@ -67,7 +67,7 @@ TYPED_TEST(OptionalTest, Empty) {
   EXPECT_FALSE(empty.has_value());
 
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access,hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  EXPECT_THROW(empty.value(), c10::bad_optional_access);
+  EXPECT_THROW(empty.value(), std::bad_optional_access);
 }
 
 TYPED_TEST(OptionalTest, Initialized) {
@@ -96,10 +96,10 @@ TYPED_TEST(OptionalTest, Initialized) {
   }
 }
 
-class SelfCompareTest : public testing::TestWithParam<c10::optional<int>> {};
+class SelfCompareTest : public testing::TestWithParam<std::optional<int>> {};
 
 TEST_P(SelfCompareTest, SelfCompare) {
-  c10::optional<int> x = GetParam();
+  std::optional<int> x = GetParam();
   EXPECT_THAT(x, Eq(x));
   EXPECT_THAT(x, Le(x));
   EXPECT_THAT(x, Ge(x));
@@ -111,48 +111,48 @@ TEST_P(SelfCompareTest, SelfCompare) {
 INSTANTIATE_TEST_SUITE_P(
     nullopt,
     SelfCompareTest,
-    testing::Values(c10::nullopt));
+    testing::Values(std::nullopt));
 INSTANTIATE_TEST_SUITE_P(
     int,
     SelfCompareTest,
-    testing::Values(c10::make_optional(2)));
+    testing::Values(std::make_optional(2)));
 
 TEST(OptionalTest, Nullopt) {
-  c10::optional<int> x = 2;
+  std::optional<int> x = 2;
 
-  EXPECT_THAT(c10::nullopt, Not(Eq(x)));
-  EXPECT_THAT(x, Not(Eq(c10::nullopt)));
+  EXPECT_THAT(std::nullopt, Not(Eq(x)));
+  EXPECT_THAT(x, Not(Eq(std::nullopt)));
 
-  EXPECT_THAT(x, Ne(c10::nullopt));
-  EXPECT_THAT(c10::nullopt, Ne(x));
+  EXPECT_THAT(x, Ne(std::nullopt));
+  EXPECT_THAT(std::nullopt, Ne(x));
 
-  EXPECT_THAT(x, Not(Lt(c10::nullopt)));
-  EXPECT_THAT(c10::nullopt, Lt(x));
+  EXPECT_THAT(x, Not(Lt(std::nullopt)));
+  EXPECT_THAT(std::nullopt, Lt(x));
 
-  EXPECT_THAT(x, Not(Le(c10::nullopt)));
-  EXPECT_THAT(c10::nullopt, Le(x));
+  EXPECT_THAT(x, Not(Le(std::nullopt)));
+  EXPECT_THAT(std::nullopt, Le(x));
 
-  EXPECT_THAT(x, Gt(c10::nullopt));
-  EXPECT_THAT(c10::nullopt, Not(Gt(x)));
+  EXPECT_THAT(x, Gt(std::nullopt));
+  EXPECT_THAT(std::nullopt, Not(Gt(x)));
 
-  EXPECT_THAT(x, Ge(c10::nullopt));
-  EXPECT_THAT(c10::nullopt, Not(Ge(x)));
+  EXPECT_THAT(x, Ge(std::nullopt));
+  EXPECT_THAT(std::nullopt, Not(Ge(x)));
 }
 
 // Ensure comparisons work...
 using CmpTestTypes = testing::Types<
     // between two optionals
-    std::pair<c10::optional<int>, c10::optional<int>>,
+    std::pair<std::optional<int>, std::optional<int>>,
 
     // between an optional and a value
-    std::pair<c10::optional<int>, int>,
+    std::pair<std::optional<int>, int>,
     // between a value and an optional
-    std::pair<int, c10::optional<int>>,
+    std::pair<int, std::optional<int>>,
 
     // between an optional and a differently typed value
-    std::pair<c10::optional<int>, long>,
+    std::pair<std::optional<int>, long>,
     // between a differently typed value and an optional
-    std::pair<long, c10::optional<int>>>;
+    std::pair<long, std::optional<int>>>;
 template <typename T>
 class CmpTest : public testing::Test {};
 TYPED_TEST_SUITE(CmpTest, CmpTestTypes);

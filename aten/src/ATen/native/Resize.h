@@ -38,8 +38,9 @@ TORCH_API bool resize_output_check_symint(const Tensor& output, SymIntArrayRef s
 
 TORCH_API void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes);
 TORCH_API void resize_bytes_meta(StorageImpl* storage, c10::SymInt size_bytes);
+TORCH_API void resize_bytes_nocuda(const Storage& storage, const c10::SymInt& size_bytes);
 
-static inline void maybe_resize_storage_cpu(TensorImpl* self, size_t new_size_bytes) {
+inline void maybe_resize_storage_cpu(TensorImpl* self, size_t new_size_bytes) {
   // It does not make sense to try to resize a storage
   // to hold 0 elements, and this can break
   // if storage_offset is positive but
@@ -78,7 +79,7 @@ template <>
 inline int64_t maybe_convert_symint(c10::SymInt x) { return x.guard_int(__FILE__, __LINE__); }
 
 template <typename T>
-static inline void checkInBoundsForStorage(
+inline void checkInBoundsForStorage(
     ArrayRef<T> size,
     ArrayRef<T> stride,
     T storage_offset,
@@ -110,7 +111,7 @@ static inline void checkInBoundsForStorage(
 }
 
 template <typename T>
-static inline void checkSetStorage(Tensor& result, Storage storage, T storage_offset,
+inline void checkSetStorage(Tensor& result, Storage storage, T storage_offset,
                                    ArrayRef<T> size, ArrayRef<T> stride) {
   // FIXME: stride should be optional
   if (stride.data()) {
@@ -166,7 +167,7 @@ inline void setStrided(
 
   /* storage offset */
   TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
-  self_->set_sizes_and_strides(size, stride, c10::make_optional(storage_offset));
+  self_->set_sizes_and_strides(size, stride, std::make_optional(storage_offset));
 }
 
 } // namespace at::native

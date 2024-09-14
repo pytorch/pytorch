@@ -1,6 +1,7 @@
+# mypy: allow-untyped-defs
 import functools
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 
 import torch
@@ -27,7 +28,7 @@ class TracingConfig:
             in :meth:`~torch.fx.Tracer.trace`.
     """
 
-    tracer: torch.fx.Tracer = torch.fx.Tracer()
+    tracer: torch.fx.Tracer = field(default_factory=torch.fx.Tracer)
     concrete_args: Optional[Dict[str, Any]] = None
 
 
@@ -95,11 +96,11 @@ class _ExecOrderTracer:
         self.exec_info = _ExecutionInfo(root_module)
         orig_call_module = tracer.call_module
         orig_create_proxy = tracer.create_proxy
-        tracer.call_module = functools.partial(
+        tracer.call_module = functools.partial(  # type: ignore[method-assign]
             self._patched_call_module, orig_call_module, self.exec_info
         )
         fqn_to_param = dict(root_module.named_parameters())
-        tracer.create_proxy = functools.partial(
+        tracer.create_proxy = functools.partial(  # type: ignore[method-assign]
             self._patched_create_proxy,
             orig_create_proxy,
             self.exec_info,
@@ -108,8 +109,8 @@ class _ExecOrderTracer:
         try:
             yield
         finally:
-            tracer.call_module = orig_call_module
-            tracer.create_proxy = orig_create_proxy
+            tracer.call_module = orig_call_module  # type: ignore[method-assign]
+            tracer.create_proxy = orig_create_proxy  # type: ignore[method-assign]
 
     def _patched_call_module(
         self,
@@ -215,8 +216,8 @@ class _ExecOrderTracer:
                         isinstance(arg, torch.fx.Proxy)
                         and arg.node.target in fqn_to_param
                     ):
-                        param = fqn_to_param[arg.node.target]
-                        named_params.append((arg.node.target, param))
+                        param = fqn_to_param[arg.node.target]  # type: ignore[index]
+                        named_params.append((arg.node.target, param))  # type: ignore[arg-type]
                         if param not in exec_info.visited_params:
                             exec_info.visited_params.add(param)
                             exec_info.param_forward_order.append(param)

@@ -11,9 +11,7 @@
 #include <mutex>
 #include <thread>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 using DeviceMap = std::unordered_map<c10::Device, c10::Device>;
 
@@ -170,7 +168,7 @@ class TORCH_API RpcAgent {
       RpcRetryOptions retryOptions = RpcRetryOptions());
 
   // Return a reference to the ``WorkerInfo`` of this RpcAgent.
-  // NB: not using ``c10::optional<const std::string&>`` here because we might
+  // NB: not using ``std::optional<const std::string&>`` here because we might
   // need to create a separate RPC API lib and avoid forcing all ``RpcAgent``
   // implementations to depend on libtorch.
   const WorkerInfo& getWorkerInfo() const;
@@ -326,9 +324,7 @@ class TORCH_API RpcAgent {
   std::mutex rpcRetryMutex_;
 };
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc
 
 namespace std {
 template <>

@@ -8,9 +8,21 @@
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/library.h>
 
-namespace torch {
-namespace inductor {
+#include <ATen/FunctionalTensorWrapper.h>
+
+namespace torch::inductor {
 using namespace at;
+
+Tensor _mm_plus_mm_out(
+    Tensor& out,
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& c,
+    const Tensor& d) {
+  at::mm_out(out, a, b);
+  out.addmm_(c, d);
+  return out;
+}
 
 Tensor _mm_plus_mm(
     const Tensor& a,
@@ -18,9 +30,7 @@ Tensor _mm_plus_mm(
     const Tensor& c,
     const Tensor& d,
     Tensor& out) {
-  at::mm_out(out, a, b);
-  out.addmm_(c, d);
-  return out;
+  return _mm_plus_mm_out(out, a, b, c, d);
 }
 
 Tensor _alloc_from_pool(
@@ -37,7 +47,8 @@ Tensor _alloc_from_pool(
       self.key_set(),
       caffe2::TypeMeta::fromScalarType(dtype));
   auto* self_tmp_ = self_.unsafeGetTensorImpl();
-  self_tmp_->set_storage_offset(offset_bytes / c10::elementSize(dtype));
+  self_tmp_->set_storage_offset(
+      offset_bytes / static_cast<int64_t>(c10::elementSize(dtype)));
   self_tmp_->set_sizes_and_strides(size, stride);
   return self_;
 }
@@ -61,11 +72,15 @@ Tensor _reinterpret_tensor(
 static void accumulate_grad_(const Tensor& variable, const Tensor& new_grad) {
   at::Tensor& grad = variable.mutable_grad();
   if (new_grad.device() != kMeta) {
+    // Do not call into this codepath from C++ frontend, instead call directly
+    // into accumulateGrad with num_expected_refs set to 1 Here,
+    // num_expected_refs is set to 2 to steal the gradient when this is called
+    // from Python
     torch::autograd::AccumulateGrad::accumulateGrad(
         variable,
         grad,
         new_grad,
-        1 /* num_expected_refs */,
+        2 /* num_expected_refs */,
         [&grad](at::Tensor&& grad_update) { grad = std::move(grad_update); });
   } else {
     // no shape checking for `device="meta"` to workaround FSDP inplace mutation
@@ -95,5 +110,4 @@ TORCH_LIBRARY_FRAGMENT(inductor, m) {
       {at::Tag::pt2_compliant_tag});
 }
 
-} // namespace inductor
-} // namespace torch
+} // namespace torch::inductor

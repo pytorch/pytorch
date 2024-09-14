@@ -1,10 +1,13 @@
 # flake8: noqa
-import torch
 
-import torch._dynamo
-import torch._inductor.config
 import triton
 from prettytable import PrettyTable
+
+import torch
+import torch._dynamo
+import torch._inductor.config
+from torch._inductor.runtime.benchmarking import benchmarker
+
 
 # torch._inductor.config.debug = True
 torch._inductor.config.triton.dense_indexing = True
@@ -72,12 +75,12 @@ def bench(shape, layer_id, p, fusion_types=[""]):
             return fn_mm(*args)
 
         torch._inductor.config.triton.mm = "aten"
-        torch_mm_ms, _, _ = triton.testing.do_bench(fn)
+        torch_mm_ms, _, _ = benchmarker.benchmark_gpu(fn)
         torch._inductor.config.triton.mm = "triton"
         # reset to force code gen new python code
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
-        triton_mm_ms, _, _ = triton.testing.do_bench(fn)
+        triton_mm_ms, _, _ = benchmarker.benchmark_gpu(fn)
         assert (
             torch._inductor.metrics.generated_kernel_count == 1
         ), "codegen #kernel != 1"

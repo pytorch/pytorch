@@ -69,8 +69,6 @@ Some notable attributes of the :class:`torch.export.ExportedProgram` class are:
   that are exported with data dependent behavior, the metadata on each node will
   contain symbolic shapes (which look like ``s0``, ``i0``). This attribute maps
   the symbolic shapes to their lower/upper ranges.
-- ``equality_constraints`` (``List[Tuple[InputDim, InputDim]]``): A list of
-  nodes in the graph and dimensions that have the same shape.
 
 Graph
 -----
@@ -112,7 +110,7 @@ Example::
        def forward(self, x, y):
          return x + y
 
-   mod = torch._export.export(MyModule())
+   mod = torch.export.export(MyModule())
    print(mod.graph)
 
 The above is the textual representation of a Graph, with each line being a node.

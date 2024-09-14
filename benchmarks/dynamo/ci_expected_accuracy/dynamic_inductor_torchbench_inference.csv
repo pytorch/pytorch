@@ -14,10 +14,6 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,pass,11
-
-
-
 LearningToPaint,pass,0
 
 
@@ -54,7 +50,7 @@ dcgan,pass,0
 
 
 
-demucs,eager_fail_to_run,0
+demucs,pass,3
 
 
 
@@ -83,6 +79,10 @@ detectron2_fasterrcnn_r_50_dc5,eager_fail_to_run,0
 
 
 detectron2_fasterrcnn_r_50_fpn,eager_fail_to_run,0
+
+
+
+detectron2_fcos_r_50_fpn,pass,21
 
 
 
@@ -138,6 +138,14 @@ hf_Bart,pass,0
 
 
 
+hf_Bert,pass,0
+
+
+
+hf_Bert_large,pass,0
+
+
+
 hf_BigBird,fail_to_run,0
 
 
@@ -166,7 +174,7 @@ hf_T5_base,eager_fail_to_run,0
 
 
 
-hf_T5_generate,fail_to_run,5
+hf_T5_generate,pass,5
 
 
 
@@ -178,7 +186,7 @@ hf_Whisper,pass,0
 
 
 
-hf_clip,eager_fail_to_run,0
+hf_distil_whisper,pass,0
 
 
 
@@ -191,6 +199,14 @@ llama,pass,0
 
 
 llama_v2_7b_16h,model_fail_to_load,0
+
+
+
+llava,model_fail_to_load,0
+
+
+
+maml,pass_due_to_skip,0
 
 
 
@@ -214,7 +230,11 @@ mobilenet_v3_large,pass,0
 
 
 
-moco,pass,11
+moco,pass,5
+
+
+
+moondream,model_fail_to_load,0
 
 
 
@@ -227,10 +247,6 @@ nvidia_deeprecommender,pass,0
 
 
 opacus_cifar10,pass,0
-
-
-
-phi_1_5,model_fail_to_load,0
 
 
 
@@ -247,6 +263,10 @@ pyhpc_equation_of_state,pass,0
 
 
 pyhpc_isoneutral_mixing,pass,0
+
+
+
+pyhpc_turbulent_kinetic_energy,pass,0
 
 
 
@@ -346,8 +366,8 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,17
+vision_maskrcnn,pass,18
 
 
 
-yolov3,pass,2
+yolov3,pass,0

@@ -2,7 +2,6 @@
 
 #include <c10/util/Exception.h>
 
-#include <mutex>
 #include <string>
 #include <unordered_map>
 
@@ -78,14 +77,14 @@ C10_EXPORT int stringToKind(const std::string& str) {
   }();
   try {
     return str_to_kind.at(str);
-  } catch (std::out_of_range& err) {
+  } catch (std::out_of_range&) {
     throw std::out_of_range("unknown token in stringToKind");
   }
 }
 
 C10_EXPORT std::string kindToString(int kind) {
   if (kind < 256)
-    return std::string(1, kind);
+    return std::string(1, static_cast<char>(kind));
   switch (kind) {
 #define DEFINE_CASE(tok, str, _) \
   case tok:                      \

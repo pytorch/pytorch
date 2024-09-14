@@ -5,13 +5,11 @@
 
 #include <ATen/core/Tensor.h>
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
 at::Tensor nested_tensor_ctor(
     c10::DispatchKey dispatch_key,
     at::ScalarType scalar_type,
     PythonArgs& r);
 
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils

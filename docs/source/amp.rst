@@ -19,16 +19,15 @@ are much faster in ``lower_precision_fp``. Other ops, like reductions, often req
 range of ``float32``.  Mixed precision tries to match each op to its appropriate datatype.
 
 Ordinarily, "automatic mixed precision training" with datatype of ``torch.float16`` uses :class:`torch.autocast` and
-:class:`torch.cuda.amp.GradScaler` together, as shown in the :ref:`CUDA Automatic Mixed Precision examples<amp-examples>`
-and `CUDA Automatic Mixed Precision recipe <https://pytorch.org/tutorials/recipes/recipes/amp_recipe.html>`_.
-However, :class:`torch.autocast` and :class:`torch.cuda.amp.GradScaler` are modular, and may be used separately if desired.
+:class:`torch.amp.GradScaler` together, as shown in the :ref:`Automatic Mixed Precision examples<amp-examples>`
+and `Automatic Mixed Precision recipe <https://pytorch.org/tutorials/recipes/recipes/amp_recipe.html>`_.
+However, :class:`torch.autocast` and :class:`torch.GradScaler` are modular, and may be used separately if desired.
 As shown in the CPU example section of :class:`torch.autocast`, "automatic mixed precision training/inference" on CPU with
 datatype of ``torch.bfloat16`` only uses :class:`torch.autocast`.
 
-For CUDA and CPU, APIs are also provided separately:
-
-* ``torch.autocast("cuda", args...)`` is equivalent to ``torch.cuda.amp.autocast(args...)``.
-* ``torch.autocast("cpu", args...)`` is equivalent to ``torch.cpu.amp.autocast(args...)``. For CPU, only lower precision floating point datatype of ``torch.bfloat16`` is supported for now.
+.. warning::
+    ``torch.cuda.amp.autocast(args...)`` and ``torch.cpu.amp.autocast(args...)`` will be deprecated. Please use ``torch.autocast("cuda", args...)`` or ``torch.autocast("cpu", args...)`` instead.
+    ``torch.cuda.amp.GradScaler(args...)`` and ``torch.cpu.amp.GradScaler(args...)`` will be deprecated. Please use ``torch.GradScaler("cuda", args...)`` or ``torch.GradScaler("cpu", args...)`` instead.
 
 :class:`torch.autocast` and :class:`torch.cpu.amp.autocast` are new in version `1.10`.
 
@@ -38,10 +37,20 @@ For CUDA and CPU, APIs are also provided separately:
 
 Autocasting
 ^^^^^^^^^^^
+.. currentmodule:: torch.amp.autocast_mode
+
+.. autofunction::  is_autocast_available
+
 .. currentmodule:: torch
 
 .. autoclass:: autocast
     :members:
+
+.. currentmodule:: torch.amp
+
+.. autofunction::  custom_fwd
+
+.. autofunction::  custom_bwd
 
 .. currentmodule:: torch.cuda.amp
 
@@ -85,6 +94,11 @@ updates the parameters, so the scale factor does not interfere with the learning
   or gradients when running with AMP/fp16, verify your model is compatible.
 
 .. currentmodule:: torch.cuda.amp
+
+.. autoclass:: GradScaler
+    :members:
+
+.. currentmodule:: torch.cpu.amp
 
 .. autoclass:: GradScaler
     :members:
@@ -247,6 +261,100 @@ In this case, combine the two layers using :func:`torch.nn.functional.binary_cro
 or :mod:`torch.nn.BCEWithLogitsLoss`.  ``binary_cross_entropy_with_logits`` and ``BCEWithLogits``
 are safe to autocast.
 
+.. _autocast-xpu-op-reference:
+
+XPU Op-Specific Behavior (Experimental)
+---------------------------------------
+The following lists describe the behavior of eligible ops in autocast-enabled regions.
+These ops always go through autocasting whether they are invoked as part of a :class:`torch.nn.Module`,
+as a function, or as a :class:`torch.Tensor` method. If functions are exposed in multiple namespaces,
+they go through autocasting regardless of the namespace.
+
+Ops not listed below do not go through autocasting.  They run in the type
+defined by their inputs.  However, autocasting may still change the type
+in which unlisted ops run if they're downstream from autocasted ops.
+
+If an op is unlisted, we assume it's numerically stable in ``float16``.
+If you believe an unlisted op is numerically unstable in ``float16``,
+please file an issue.
+
+XPU Ops that can autocast to ``float16``
+""""""""""""""""""""""""""""""""""""""""
+
+``addbmm``,
+``addmm``,
+``addmv``,
+``addr``,
+``baddbmm``,
+``bmm``,
+``chain_matmul``,
+``multi_dot``,
+``conv1d``,
+``conv2d``,
+``conv3d``,
+``conv_transpose1d``,
+``conv_transpose2d``,
+``conv_transpose3d``,
+``GRUCell``,
+``linear``,
+``LSTMCell``,
+``matmul``,
+``mm``,
+``mv``,
+``RNNCell``
+
+XPU Ops that can autocast to ``float32``
+""""""""""""""""""""""""""""""""""""""""
+
+``__pow__``,
+``__rdiv__``,
+``__rpow__``,
+``__rtruediv__``,
+``binary_cross_entropy_with_logits``,
+``cosine_embedding_loss``,
+``cosine_similarity``,
+``cumsum``,
+``dist``,
+``exp``,
+``group_norm``,
+``hinge_embedding_loss``,
+``kl_div``,
+``l1_loss``,
+``layer_norm``,
+``log``,
+``log_softmax``,
+``margin_ranking_loss``,
+``nll_loss``,
+``normalize``,
+``poisson_nll_loss``,
+``pow``,
+``reciprocal``,
+``rsqrt``,
+``soft_margin_loss``,
+``softmax``,
+``softmin``,
+``sum``,
+``triplet_margin_loss``
+
+XPU Ops that promote to the widest input type
+"""""""""""""""""""""""""""""""""""""""""""""
+These ops don't require a particular dtype for stability, but take multiple inputs
+and require that the inputs' dtypes match.  If all of the inputs are
+``float16``, the op runs in ``float16``.  If any of the inputs is ``float32``,
+autocast casts all inputs to ``float32`` and runs the op in ``float32``.
+
+``bilinear``,
+``cross``,
+``grid_sample``,
+``index_put``,
+``scatter_add``,
+``tensordot``
+
+Some ops not listed here (e.g., binary ops like ``add``) natively promote
+inputs without autocasting's intervention.  If inputs are a mixture of ``float16``
+and ``float32``, these ops run in ``float32`` and produce ``float32`` output,
+regardless of whether autocast is enabled.
+
 .. _autocast-cpu-op-reference:
 
 CPU Op-Specific Behavior
@@ -262,7 +370,7 @@ in which unlisted ops run if they're downstream from autocasted ops.
 
 If an op is unlisted, we assume it's numerically stable in ``bfloat16``.
 If you believe an unlisted op is numerically unstable in ``bfloat16``,
-please file an issue.
+please file an issue. ``float16`` shares the lists of ``bfloat16``.
 
 CPU Ops that can autocast to ``bfloat16``
 """""""""""""""""""""""""""""""""""""""""
@@ -272,19 +380,25 @@ CPU Ops that can autocast to ``bfloat16``
 ``conv3d``,
 ``bmm``,
 ``mm``,
+``linalg_vecdot``,
 ``baddbmm``,
 ``addmm``,
 ``addbmm``,
 ``linear``,
 ``matmul``,
-``_convolution``
+``_convolution``,
+``conv_tbc``,
+``mkldnn_rnn_layer``,
+``conv_transpose1d``,
+``conv_transpose2d``,
+``conv_transpose3d``,
+``prelu``,
+``scaled_dot_product_attention``,
+``_native_multi_head_attention``
 
 CPU Ops that can autocast to ``float32``
 """"""""""""""""""""""""""""""""""""""""
 
-``conv_transpose1d``,
-``conv_transpose2d``,
-``conv_transpose3d``,
 ``avg_pool3d``,
 ``binary_cross_entropy``,
 ``grid_sampler``,
@@ -318,9 +432,22 @@ CPU Ops that can autocast to ``float32``
 ``replication_pad2d``,
 ``replication_pad3d``,
 ``mse_loss``,
+``cosine_embedding_loss``,
+``nll_loss``,
+``nll_loss2d``,
+``hinge_embedding_loss``,
+``poisson_nll_loss``,
+``cross_entropy_loss``,
+``l1_loss``,
+``huber_loss``,
+``margin_ranking_loss``,
+``soft_margin_loss``,
+``triplet_margin_loss``,
+``multi_margin_loss``,
 ``ctc_loss``,
 ``kl_div``,
 ``multilabel_margin_loss``,
+``binary_cross_entropy_with_logits``,
 ``fft_fft``,
 ``fft_ifft``,
 ``fft_fft2``,
@@ -335,7 +462,6 @@ CPU Ops that can autocast to ``float32``
 ``fft_irfftn``,
 ``fft_hfft``,
 ``fft_ihfft``,
-``linalg_matrix_norm``,
 ``linalg_cond``,
 ``linalg_matrix_rank``,
 ``linalg_solve``,
@@ -348,14 +474,10 @@ CPU Ops that can autocast to ``float32``
 ``linalg_tensorinv``,
 ``linalg_tensorsolve``,
 ``fake_quantize_per_tensor_affine``,
-``eig``,
 ``geqrf``,
-``lstsq``,
 ``_lu_with_info``,
 ``qr``,
-``solve``,
 ``svd``,
-``symeig``,
 ``triangular_solve``,
 ``fractional_max_pool2d``,
 ``fractional_max_pool3d``,
@@ -392,4 +514,6 @@ regardless of whether autocast is enabled.
 .. py:module:: torch.cpu.amp.autocast_mode
 .. py:module:: torch.cuda.amp.autocast_mode
 .. py:module:: torch.cuda.amp.common
+.. py:module:: torch.amp.grad_scaler
+.. py:module:: torch.cpu.amp.grad_scaler
 .. py:module:: torch.cuda.amp.grad_scaler

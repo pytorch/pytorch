@@ -3,10 +3,11 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
-import torch
-from torch import nn
-from functorch.dim import dims, dimlists, softmax, cat
 import math
+
+import torch
+from functorch.dim import cat, dimlists, dims, softmax
+from torch import nn
 
 
 class Linear(nn.Linear):
@@ -16,10 +17,17 @@ class Linear(nn.Linear):
         result = (input[b, ci] * self.weight[co, ci]).sum(ci) + self.bias[co]
         return result.order(b, co)
 
+
 class BertSelfAttention(nn.Module):
-    def __init__(self, hidden_size, num_attention_heads,
-                 attention_probs_dropout_prob, position_embedding_type=None,
-                 max_position_embeddings=None, linear=Linear):
+    def __init__(
+        self,
+        hidden_size,
+        num_attention_heads,
+        attention_probs_dropout_prob,
+        position_embedding_type=None,
+        max_position_embeddings=None,
+        linear=Linear,
+    ):
         super().__init__()
         if hidden_size % num_attention_heads != 0:
             raise ValueError(
@@ -41,7 +49,9 @@ class BertSelfAttention(nn.Module):
         if self.position_embedding_type is not None:
             assert max_position_embeddings is not None
             self.max_position_embeddings = max_position_embeddings
-            self.distance_embedding = nn.Embedding(2 * max_position_embeddings - 1, self.attention_head_size)
+            self.distance_embedding = nn.Embedding(
+                2 * max_position_embeddings - 1, self.attention_head_size
+            )
 
     def forward(
         self,
@@ -70,7 +80,6 @@ class BertSelfAttention(nn.Module):
         k = k[batch, key_sequence, [heads, features]]
         v = v[batch, key_sequence, [heads, features]]
 
-
         # this option allows the model to attend to not just the elements of the current sequence
         # but the previous elements as well as additional tokens.
         if past_key_value is not None:
@@ -84,7 +93,6 @@ class BertSelfAttention(nn.Module):
             # for the rest of the function, we will just use extended_key_sequence in lieu of
             # key_sequence
             key_sequence = extended_key_sequence
-
 
         # Take the dot product between "query" and "key" to get the raw attention scores.
         # The actual outer-product and summation are explicitly represented here,
@@ -112,7 +120,9 @@ class BertSelfAttention(nn.Module):
             # this form of indirect indexing is more straightforward than either advanced indexing or torch.gather which both
             # have a lot of dependencies on the positions of indexing tensors.
 
-            positional_embedding = self.distance_embedding.weight[self.max_position_embeddings - 1 + distance, features]
+            positional_embedding = self.distance_embedding.weight[
+                self.max_position_embeddings - 1 + distance, features
+            ]
 
             if self.position_embedding_type == "relative_key":
                 # these were einsum ops in the positional code because they are not easy to fit to existing matmul operators
@@ -120,16 +130,24 @@ class BertSelfAttention(nn.Module):
                 relative_position_scores = (q * positional_embedding).sum(features)
                 attention_scores = attention_scores + relative_position_scores
             elif self.position_embedding_type == "relative_key_query":
-                relative_position_scores_query = (q * positional_embedding).sum(features)
+                relative_position_scores_query = (q * positional_embedding).sum(
+                    features
+                )
                 relative_position_scores_key = (k * positional_embedding).sum(features)
-                attention_scores = attention_scores + relative_position_scores_query + relative_position_scores_key
+                attention_scores = (
+                    attention_scores
+                    + relative_position_scores_query
+                    + relative_position_scores_key
+                )
 
         attention_probs = attention_scores
         # Normalize the attention scores to probabilities.
         attention_probs = softmax(attention_scores, dim=key_sequence)
         # # This is actually dropping out entire tokens to attend to, which might
         # # seem a bit unusual, but is taken from the original Transformer paper.
-        attention_probs = torch.nn.functional.dropout(attention_probs, p=self.dropout_prob)
+        attention_probs = torch.nn.functional.dropout(
+            attention_probs, p=self.dropout_prob
+        )
 
         # similarly, we can replace the matmul with a direct listing of the outer product, which makes it clear
         # we are weighting the values v across all keys with the attention scores.

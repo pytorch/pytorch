@@ -137,7 +137,7 @@ bool CUDAHooks::isPinnedPtr(const void* data) const {
   cudaPointerAttributes attr;
   // We do not believe that CUDA needs mutable access to the data
   // here.
-  cudaError_t err = cudaPointerGetAttributes(&attr, const_cast<void*>(data));
+  cudaError_t err = cudaPointerGetAttributes(&attr, data);
 #if !defined(USE_ROCM)
   if (err == cudaErrorInvalidValue) {
     (void)cudaGetLastError(); // clear CUDA error
@@ -151,11 +151,7 @@ bool CUDAHooks::isPinnedPtr(const void* data) const {
     return false;
   }
 #endif
-#if !defined(USE_ROCM)
   return attr.type == cudaMemoryTypeHost;
-#else
-  return attr.memoryType == cudaMemoryTypeHost;
-#endif
 }
 
 bool CUDAHooks::hasCUDA() const {
@@ -177,7 +173,17 @@ bool CUDAHooks::hasCuDNN() const {
 bool CUDAHooks::hasCuSOLVER() const {
 #if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION)
   return true;
-#elif AT_ROCM_ENABLED() && defined(ROCM_VERSION) && ROCM_VERSION >= 50300
+#elif AT_ROCM_ENABLED()
+  return true;
+#else
+  return false;
+#endif
+}
+
+bool CUDAHooks::hasCuBLASLt() const {
+#if defined(CUDART_VERSION)
+  return true;
+#elif AT_ROCM_ENABLED()
   return true;
 #else
   return false;
@@ -227,7 +233,7 @@ const at::cuda::NVRTC& CUDAHooks::nvrtc() const {
 }
 
 DeviceIndex current_device() {
-  int device;
+  c10::DeviceIndex device = 0;
   cudaError_t err = c10::cuda::GetDevice(&device);
   if (err == cudaSuccess) {
     return device;
@@ -433,6 +439,20 @@ void CUDAHooks::cuFFTClearPlanCache(DeviceIndex device_index) const {
 int CUDAHooks::getNumGPUs() const {
   return at::cuda::device_count();
 }
+
+#ifdef USE_ROCM
+bool CUDAHooks::isGPUArch(DeviceIndex device_index, const std::vector<std::string>& archs) const {
+  hipDeviceProp_t* prop = at::cuda::getDeviceProperties(device_index);
+  std::string device_arch = prop->gcnArchName;
+  for (std::string arch : archs) {
+      size_t substring = device_arch.find(arch);
+      if (substring != std::string::npos) {
+          return true;
+      }
+  }
+  return false;
+}
+#endif
 
 void CUDAHooks::deviceSynchronize(DeviceIndex device_index) const {
   at::DeviceGuard device_guard(at::Device(at::DeviceType::CUDA, device_index));

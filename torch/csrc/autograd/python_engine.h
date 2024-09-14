@@ -7,9 +7,7 @@
 
 bool THPEngine_initModule(PyObject* module);
 
-namespace torch {
-namespace autograd {
-namespace python {
+namespace torch::autograd::python {
 
 struct PythonEngine : public Engine {
   static Engine& get_python_engine();
@@ -19,7 +17,7 @@ struct PythonEngine : public Engine {
       const std::shared_ptr<ReadyQueue>& ready_queue,
       bool should_increment) override;
   void thread_on_exception(
-      std::shared_ptr<GraphTask> graph_task,
+      const std::shared_ptr<GraphTask>& graph_task,
       const std::shared_ptr<Node>& fn,
       std::exception& e) override;
   variable_list execute(
@@ -43,6 +41,4 @@ struct PythonEngine : public Engine {
   PythonEngine();
 };
 
-} // namespace python
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd::python

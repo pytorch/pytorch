@@ -1,17 +1,16 @@
-import contextlib
-import itertools
+# mypy: allow-untyped-defs
 import operator
-import weakref
 from enum import Enum
 from functools import partial, reduce
-from typing import Any, Callable, List, Optional, Sequence, Tuple, Type, Union
+from typing import Callable, List, Optional, Sequence, Tuple, Type, Union
 
 import torch
-
 import torch._prims_common as utils
 import torch.library
-from torch import sym_float, Tensor, TypedStorage
+from torch import sym_float, Tensor
 from torch._C import _get_default_device
+from torch._higher_order_ops.effects import new_token_tensor
+from torch._library.utils import is_functional_schema
 from torch._prims.debug_prims import register_debug_prims
 from torch._prims.rng_prims import register_rng_prims
 from torch._prims_common import (
@@ -32,6 +31,7 @@ from torch._prims_common.wrappers import backwards_not_supported
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.overrides import handle_torch_function, has_torch_function
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+
 
 prim = torch.library.Library("prims", "DEF")
 prim_impl = torch.library.Library("prims", "IMPL", "CompositeExplicitAutograd")
@@ -113,6 +113,7 @@ __all__ = [
     "fmax",
     "fmin",
     "fmod",
+    "frexp",
     "gcd",
     "ge",
     "gt",
@@ -211,6 +212,11 @@ __all__ = [
     "fft_r2c",
     "fft_c2c",
     "fft_c2r",
+    #
+    # prims for making/sinking tokens
+    #
+    "_make_token",
+    "_sink_tokens",
 ]
 
 
@@ -246,10 +252,10 @@ def TensorMeta(
         assert dtype is not None
         assert device is not None
 
-    shape = inferred_shape if shape is None else tuple(shape)
-    strides = inferred_strides if strides is None else tuple(strides)
-    dtype = inferred_dtype if dtype is None else dtype
-    device = inferred_device if device is None else device
+    shape = inferred_shape if shape is None else tuple(shape)  # type: ignore[possibly-undefined]
+    strides = inferred_strides if strides is None else tuple(strides)  # type: ignore[possibly-undefined]
+    dtype = inferred_dtype if dtype is None else dtype  # type: ignore[possibly-undefined]
+    device = inferred_device if device is None else device  # type: ignore[possibly-undefined]
 
     if isinstance(device, str):
         device = torch.device(device)
@@ -265,13 +271,13 @@ def _make_prim(
     impl_aten: Callable,
     doc: str,
     tags: Optional[Sequence[torch.Tag]] = None,
+    use_old_custom_ops_api: bool = False,
+    register_conj_neg_fallthrough: bool = False,
 ):
     """
     Creates a primitive operation.
 
     """
-
-    prim.define(schema, tags=torch.Tag.pt2_compliant_tag)
 
     def _prim_impl(*args, **kwargs):
         # always run the meta function because aten implementation will
@@ -296,14 +302,52 @@ def _make_prim(
             return _prim_impl(*args, **kwargs)
 
     name = schema.split("(")[0]
-    prim_impl.impl(name, _prim_impl)
-    prim_autograd_impl.impl(name, _autograd_impl)
-    prim_meta_impl.impl(name, meta)
+    schema = schema[len(name) :]
+
+    # register non-functional ops with old custom ops API
+    cpp_schema = torch._C.parse_schema(name + schema)
+    if use_old_custom_ops_api or not is_functional_schema(cpp_schema):
+        prim.define(name + schema, tags=torch.Tag.pt2_compliant_tag)
+        prim_impl.impl(name, _prim_impl)
+        prim_autograd_impl.impl(name, _autograd_impl)
+        prim_meta_impl.impl(name, meta)
+    else:
+        mutates_args = []
+        for arg in cpp_schema.arguments:
+            if arg.alias_info is not None and arg.alias_info.is_write:
+                mutates_args.append(arg.name)
+        prim_def = torch.library.custom_op(
+            "prims::" + name,
+            _prim_impl,
+            mutates_args=tuple(mutates_args),
+            schema=schema,
+        )
+        prim_def.register_fake(meta)
+
+        # all view ops get conj/neg fallthroughs
+        if return_type == RETURN_TYPE.VIEW or register_conj_neg_fallthrough:
+            prim_def._lib.impl(name, torch.library.fallthrough_kernel, "Conjugate")
+            prim_def._lib.impl(name, torch.library.fallthrough_kernel, "Negative")
 
     _prim_packet = getattr(torch._ops.ops.prims, name)
     _prim = _prim_packet.default
     if tags:
         _prim._tags = tags
+    elif aten_packet := getattr(torch.ops.aten, name, None):
+        overload_tags = [
+            getattr(aten_packet, overload).tags for overload in aten_packet.overloads()
+        ]
+        tags_intersection = set(overload_tags[0])
+        tags_intersection.intersection_update(*overload_tags[1:])
+
+        # dont inadvertently add to prim ops
+        tags_intersection.discard(torch.Tag.core)
+        # causes errors with python ref executor tests, none of the
+        # data dependent pytorch ops actually decompose to prims
+        tags_intersection.discard(torch.Tag.data_dependent_output)
+
+        # iter over first tags for determinism
+        _prim._tags = tuple(t for t in overload_tags[0] if t in tags_intersection)
 
     from torch._subclasses.fake_tensor import contains_tensor_types
 
@@ -664,6 +708,7 @@ clone = _make_prim(
     impl_aten=torch.clone,
     doc="Returns the copy of a tensor",
     return_type=RETURN_TYPE.NEW,
+    register_conj_neg_fallthrough=True,
 )
 
 digamma = _make_elementwise_unary_prim(
@@ -746,7 +791,7 @@ floor = _make_elementwise_unary_prim(
 )
 
 imag = _make_prim(
-    schema="imag(Tensor self) -> Tensor",
+    schema="imag(Tensor(a) self) -> Tensor(a)",
     meta=partial(
         _complex_only_elementwise_meta,
         type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
@@ -799,7 +844,7 @@ log10 = _make_elementwise_unary_prim(
 )
 
 real = _make_prim(
-    schema="real(Tensor self) -> Tensor",
+    schema="real(Tensor(a) self) -> Tensor(a)",
     meta=partial(
         _complex_only_elementwise_meta,
         type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
@@ -1210,6 +1255,8 @@ as_strided = _make_prim(
 def _broadcast_in_dim_meta(
     a: TensorLikeType, shape: ShapeType, broadcast_dimensions: Sequence[int]
 ):
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     # Type checks
     assert isinstance(a, TensorLike)
     assert isinstance(shape, Sequence)
@@ -1235,7 +1282,11 @@ def _broadcast_in_dim_meta(
 
     # shape must be broadcastable to
     for idx, new_idx in enumerate(broadcast_dimensions):
-        assert a.shape[idx] == 1 or a.shape[idx] == shape[new_idx]
+        if not guard_size_oblivious(a.shape[idx] == 1):
+            torch._check(
+                a.shape[idx] == shape[new_idx],
+                lambda: f"{a.shape[idx]} must be broadcastable to {shape[new_idx]}",
+            )
 
     new_strides = []
     original_idx = 0
@@ -1243,13 +1294,13 @@ def _broadcast_in_dim_meta(
         if idx in broadcast_dimensions:
             # Assigns a stride of zero to dimensions
             # which were actually broadcast
-            if a.shape[original_idx] != shape[idx]:
+            if guard_size_oblivious(a.shape[original_idx] != shape[idx]):
                 new_strides.append(0)
             else:
                 new_strides.append(a.stride()[original_idx])
             original_idx = original_idx + 1
         else:
-            if shape[idx] != 1:
+            if guard_size_oblivious(shape[idx] != 1):
                 new_strides.append(0)
             elif original_idx == a.ndim:
                 new_strides.append(1)
@@ -1325,6 +1376,8 @@ def _collapse_view_helper(
 ) -> Tuple[Optional[ShapeType], Optional[StrideType]]:
     assert isinstance(a, TensorLike)
 
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     _validate_collapse_args(a, start, end)
 
     # Special-case for zero dimensional tensors
@@ -1341,21 +1394,28 @@ def _collapse_view_helper(
     length = shape[end]
     stride = strides[end]
     for idx in range(end - 1, start - 1, -1):
-        if shape[idx] == 0 or shape[idx + 1] == 0:
+        if guard_size_oblivious(shape[idx] == 0) or guard_size_oblivious(
+            shape[idx + 1] == 0
+        ):
             length = 0
             stride = 0
             break
 
-        if shape[idx] == 1:
+        if guard_size_oblivious(shape[idx] == 1):
             continue
 
         length = length * shape[idx]
-        stride = min(stride, strides[idx])
+        if guard_size_oblivious(stride < strides[idx]):
+            stride = stride
+        else:
+            stride = strides[idx]
 
         if (
-            a.numel() > 0
-            and shape[idx + 1] != 1
-            and not (strides[idx] == strides[idx + 1] * shape[idx + 1])
+            guard_size_oblivious(a.numel() > 0)
+            and guard_size_oblivious(shape[idx + 1] != 1)
+            and not guard_size_oblivious(
+                strides[idx] == strides[idx + 1] * shape[idx + 1]
+            )
         ):
             return None, None
 
@@ -1363,7 +1423,7 @@ def _collapse_view_helper(
     new_strides = strides[:start] + (stride,) + strides[end + 1 :]
 
     # NOTE: when the input has no elements it's restrided as if it were contiguous
-    if a.numel() == 0:
+    if guard_size_oblivious(a.numel() == 0):
         new_strides = utils.make_contiguous_strides_for(new_shape)
 
     return new_shape, new_strides
@@ -1647,8 +1707,9 @@ def _split_dim_meta(a: TensorLikeType, dim: int, outer_length: int) -> TensorLik
     inner_length = a.shape[dim] // outer_length
 
     if (a.shape[dim] % outer_length) != 0:
-        msg = "Attempting to split dimension of length {}, but outer length of {} divides it with a remainder!".format(
-            a.shape[dim], outer_length
+        msg = (
+            f"Attempting to split dimension of length {a.shape[dim]}, "
+            f"but outer length of {outer_length} divides it with a remainder!"
         )
         raise ValueError(msg)
 
@@ -1726,9 +1787,7 @@ squeeze = _make_prim(
 
 def _transpose_meta(a: TensorLikeType, permutation: DimsSequenceType) -> TensorLikeType:
     if a.ndim != len(permutation):
-        msg = "Attempting to permute a tensor of rank {}, but received a permutation of length {}!".format(
-            a.ndim, len(permutation)
-        )
+        msg = f"Attempting to permute a tensor of rank {a.ndim}, but received a permutation of length {len(permutation)}!"
         raise ValueError(msg)
 
     if not utils.is_valid_permutation(a.ndim, permutation):
@@ -1778,7 +1837,7 @@ _view_of_doc = """
     """
 
 view_of = _make_prim(
-    schema="view_of(Tensor(a) a) -> Tensor",
+    schema="view_of(Tensor(a) a) -> Tensor(a)",
     meta=_view_of_meta,
     impl_aten=_view_of_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1799,7 +1858,7 @@ _view_element_type_doc = """
     """
 
 view_element_type = _make_prim(
-    schema="view_of_dtype(Tensor(a) a, ScalarType dtype) -> Tensor",
+    schema="view_of_dtype(Tensor(a) a, ScalarType dtype) -> Tensor(a)",
     meta=_view_element_type_meta,
     impl_aten=_view_element_type_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1888,11 +1947,15 @@ collapse = _make_prim(
 
 
 # TODO: review stride logic
+# NB: unlike torch.cat, this is more strict about empty tensors and dim is
+# never negative
 def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
     # Verifies same shape (except in the concat dimension)
+    assert dim >= 0
     shape = tensors[0].shape
     concat_length = 0
     for tensor_idx, tensor in enumerate(tensors):
+        assert len(shape) == len(tensor.shape)
         for idx, (common_length, length) in enumerate(zip(shape, tensor.shape)):
             if idx == dim:
                 concat_length = concat_length + length
@@ -2212,6 +2275,7 @@ copy_to = _make_prim(
     impl_aten=_copy_to_aten,
     return_type=RETURN_TYPE.INPLACE,
     doc=_copy_to_doc,
+    register_conj_neg_fallthrough=True,
 )
 
 
@@ -2295,7 +2359,7 @@ def _reduction_meta(inp, dims, *, output_dtype=None):
     )
 
 
-def _var_reduction_meta(inp, dims, *, correction):
+def _var_reduction_meta(inp, dims, correction):
     if utils.is_complex_dtype(inp.dtype):
         output_dtype = utils.corresponding_real_dtype(inp.dtype)
     else:
@@ -2342,7 +2406,7 @@ def _make_reduction_prim(name: str, impl_aten, doc):
 def _make_var_reduction_prim(name: str, impl_aten, doc):
     """Creates a reduction prim."""
     return _make_prim(
-        schema=f"{name}(Tensor inp, int[]? dims, *, float correction, ScalarType? output_dtype=None) -> Tensor",
+        schema=f"{name}(Tensor inp, int[]? dims, float? correction=1, *, ScalarType? output_dtype=None) -> Tensor",
         meta=_var_reduction_meta,
         impl_aten=impl_aten,
         return_type=RETURN_TYPE.NEW,
@@ -2380,6 +2444,8 @@ def _prod_aten(
     dtype: Optional[torch.dtype] = None,
 ) -> Tensor:
     if dims is not None:
+        if len(dims) == 0:
+            return inp.clone()
         for d in sorted(dims, reverse=True):
             assert d >= 0
             inp = torch.prod(inp, d, dtype=dtype)
@@ -2394,9 +2460,15 @@ prod = _make_reduction_prim(
     doc=_prod_doc,
 )
 
+
+# torch.var, but correction is not kwarg-only
+def torch_var(input, dim=None, correction=1, **kwargs):
+    return torch.var(input, dim=dim, correction=correction, **kwargs)
+
+
 var = _make_var_reduction_prim(
     name="var",
-    impl_aten=torch.var,
+    impl_aten=torch_var,
     doc=_var_doc,
 )
 
@@ -2992,6 +3064,50 @@ fft_c2r = _make_prim(
     return_type=RETURN_TYPE.NEW,
     doc=_fft_c2r_doc,
 )
+
+
+def _frexp_meta(self: TensorLikeType) -> Tuple[TensorLikeType, TensorLikeType]:
+    torch._check(
+        self.dtype.is_floating_point,
+        lambda: "torch.frexp() only supports floating-point dtypes",
+    )
+    return torch.empty_like(self), torch.empty_like(self, dtype=torch.int32)
+
+
+frexp = _make_prim(
+    schema="frexp(Tensor self) -> (Tensor mantissa, Tensor exponent)",
+    meta=_frexp_meta,
+    return_type=(RETURN_TYPE.NEW, RETURN_TYPE.NEW),
+    impl_aten=torch.frexp,
+    doc="",
+)
+
+
+def _make_token_aten() -> TensorLikeType:
+    return new_token_tensor()
+
+
+_make_token = _make_prim(
+    schema="_make_token() -> Tensor",
+    meta=_make_token_aten,
+    return_type=RETURN_TYPE.NEW,
+    impl_aten=_make_token_aten,
+    doc="Creates a token used for keeping track of side effects.",
+)
+
+
+def _sink_tokens_aten(tokens) -> None:
+    pass
+
+
+_sink_tokens = _make_prim(
+    schema="_sink_tokens(Tensor[] tokens) -> ()",
+    meta=_sink_tokens_aten,
+    return_type=RETURN_TYPE.NONE,
+    impl_aten=_sink_tokens_aten,
+    doc="Sink all of the tokens which were previously used for keeping track of side effects.",
+)
+
 
 register_rng_prims()
 register_debug_prims()

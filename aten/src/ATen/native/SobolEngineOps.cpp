@@ -17,8 +17,7 @@
 #include <ATen/ops/empty.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 using namespace sobol_utils;
 
@@ -28,7 +27,7 @@ using namespace sobol_utils;
 /// an extra operation to obtain the size of the first dimension of
 /// `sobolstate`.
 std::tuple<Tensor, Tensor> _sobol_engine_draw(const Tensor& quasi, int64_t n, const Tensor& sobolstate,
-                                              int64_t dimension, int64_t num_generated, optional<ScalarType> dtype) {
+                                              int64_t dimension, int64_t num_generated, std::optional<ScalarType> dtype) {
   TORCH_CHECK(sobolstate.dtype() == at::kLong,
            "sobolstate needs to be of type ", at::kLong);
   TORCH_CHECK(quasi.dtype() == at::kLong,
@@ -189,5 +188,4 @@ Tensor& _sobol_engine_initialize_state_(Tensor& sobolstate, int64_t dimension) {
   return sobolstate;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

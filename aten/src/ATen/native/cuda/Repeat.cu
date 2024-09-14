@@ -12,8 +12,8 @@
 
 template <typename index_t>
 __global__ static void compute_cuda_kernel(
-    index_t* repeat_ptr,
-    int64_t* cumsum_ptr,
+    const index_t* repeat_ptr,
+    const int64_t* cumsum_ptr,
     index_t* result_ptr,
     int64_t size,
     int64_t result_size) {
@@ -35,8 +35,8 @@ __global__ static void compute_cuda_kernel(
 
 template <typename index_t>
 static void compute_cuda(
-    index_t* repeat_ptr,
-    int64_t* cumsum_ptr,
+    const index_t* repeat_ptr,
+    const int64_t* cumsum_ptr,
     index_t* result_ptr,
     int64_t size,
     int64_t result_size) {
@@ -54,7 +54,7 @@ namespace at::native {
 
 Tensor repeat_interleave_cuda(
     const Tensor& repeat,
-    c10::optional<int64_t> output_size) {
+    std::optional<int64_t> output_size) {
   Tensor output;
   AT_DISPATCH_INDEX_TYPES(
       repeat.scalar_type(), "repeat_interleave_cuda", [&]() {

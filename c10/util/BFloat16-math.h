@@ -2,7 +2,6 @@
 
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
-#include <c10/util/math_compat.h>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
@@ -15,8 +14,7 @@ template <typename T>
 struct is_reduced_floating_point
     : std::integral_constant<
           bool,
-          std::is_same<T, c10::Half>::value ||
-              std::is_same<T, c10::BFloat16>::value> {};
+          std::is_same_v<T, c10::Half> || std::is_same_v<T, c10::BFloat16>> {};
 
 template <typename T>
 constexpr bool is_reduced_floating_point_v =
@@ -69,6 +67,12 @@ template <
     typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
 inline T expm1(T a) {
   return std::expm1(float(a));
+}
+template <
+    typename T,
+    typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+inline bool isfinite(T a) {
+  return std::isfinite(float(a));
 }
 template <
     typename T,
@@ -239,10 +243,9 @@ C10_HOST_DEVICE inline T nextafter(T from, T to) {
   // Reference:
   // https://git.musl-libc.org/cgit/musl/tree/src/math/nextafter.c
   using int_repr_t = uint16_t;
-  using float_t = T;
   constexpr uint8_t bits = 16;
   union {
-    float_t f;
+    T f;
     int_repr_t i;
   } ufrom = {from}, uto = {to};
 

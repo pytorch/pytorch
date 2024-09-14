@@ -120,8 +120,8 @@ namespace impl {
 
 template <class T, class Iterator>
 ListElementReference<T, Iterator>::operator std::conditional_t<
-    std::is_reference<typename c10::detail::ivalue_to_const_ref_overload_return<
-        T>::type>::value,
+    std::is_reference_v<typename c10::detail::ivalue_to_const_ref_overload_return<
+        T>::type>,
     const T&,
     T>() const {
   return iterator_->template to<T>();
@@ -146,7 +146,7 @@ ListElementReference<T, Iterator>& ListElementReference<T, Iterator>::operator=(
 }
 
 template<class T, class Iterator>
-void swap(ListElementReference<T, Iterator>&& lhs, ListElementReference<T, Iterator>&& rhs) {
+void swap(ListElementReference<T, Iterator>&& lhs, ListElementReference<T, Iterator>&& rhs)  noexcept {
   std::swap(*lhs.iterator_, *rhs.iterator_);
 }
 
@@ -168,8 +168,8 @@ list_element_to_const_ref(const IValue& element) {
 }
 
 template<>
-inline typename ListElementConstReferenceTraits<c10::optional<std::string>>::const_reference
-list_element_to_const_ref<c10::optional<std::string>>(const IValue& element) {
+inline typename ListElementConstReferenceTraits<std::optional<std::string>>::const_reference
+list_element_to_const_ref<std::optional<std::string>>(const IValue& element) {
   return element.toOptionalStringRef();
 }
 
@@ -186,8 +186,8 @@ void List<T>::set(size_type pos, value_type&& value) const {
 }
 
 template<class T>
-typename List<T>::value_type List<T>::get(size_type pos) const {
-  return c10::detail::list_element_to<T>(impl_->list.at(pos));
+typename List<T>::internal_const_reference_type List<T>::get(size_type pos) const {
+  return operator[](pos);
 }
 
 template<class T>
@@ -350,11 +350,4 @@ void List<T>::unsafeSetElementType(TypePtr t) {
   impl_->elementType = std::move(t);
 }
 
-namespace impl {
-
-inline const IValue* ptr_to_first_element(const GenericList& list) {
-  return &list.impl_->list[0];
-}
-
-}
 }

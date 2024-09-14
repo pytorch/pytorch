@@ -33,6 +33,7 @@
 #pragma once
 
 #include <c10/macros/Export.h>
+#include <cstdint>
 #include <iosfwd>
 
 namespace c10 {
@@ -48,7 +49,7 @@ struct uint128_pod;
 #endif
 
 class uint128;
-static inline uint128& operator<<=(uint128& self, int amount);
+inline uint128& operator<<=(uint128& self, int amount);
 
 // An unsigned 128-bit integer type. Thread-compatible.
 class C10_API uint128 {
@@ -225,11 +226,11 @@ LOGIC128(^)
 
 #undef LOGIC128
 
-#define LOGICASSIGN128(op)                                             \
-  C10_API inline uint128& uint128::operator op(const uint128& other) { \
-    hi_ op other.hi_;                                                  \
-    lo_ op other.lo_;                                                  \
-    return *this;                                                      \
+#define LOGICASSIGN128(op)                                              \
+  C10_API inline uint128& uint128::operator op(const uint128 & other) { \
+    hi_ op other.hi_;                                                   \
+    lo_ op other.lo_;                                                   \
+    return *this;                                                       \
   }
 
 LOGICASSIGN128(|=)
@@ -276,7 +277,7 @@ inline uint128 operator>>(const uint128& val, int amount) {
   }
 }
 
-static inline uint128& operator<<=(uint128& self, int amount) {
+inline uint128& operator<<=(uint128& self, int amount) {
   // uint64_t shifts of >= 64 are undefined, so we will need some
   // special-casing.
   if (amount < 64) {

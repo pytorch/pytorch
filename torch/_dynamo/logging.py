@@ -1,7 +1,9 @@
+# mypy: allow-untyped-defs
 import itertools
 import logging
 
 from torch.hub import _Faketqdm, tqdm
+
 
 # Disable progress bar by default, not in dynamo config because otherwise get a circular import
 disable_progress = True
@@ -51,7 +53,7 @@ def get_step_logger(logger):
 
     step = next(_step_counter)
 
-    def log(level, msg):
-        logger.log(level, "Step %s: %s", step, msg)
+    def log(level, msg, **kwargs):
+        logger.log(level, "Step %s: %s", step, msg, **kwargs)
 
     return log

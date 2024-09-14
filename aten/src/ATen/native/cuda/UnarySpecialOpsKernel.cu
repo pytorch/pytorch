@@ -288,7 +288,7 @@ void erfinv_kernel_cuda(TensorIteratorBase& iter) {
                         /*arity=*/ 1>(iter, erfinv_string);
       });
   #else
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(ScalarType::Half, ScalarType::BFloat16,
+    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16,
         iter.common_dtype(), "erfinv_cuda", [&]() {
           gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
             return ::erfinv(a);

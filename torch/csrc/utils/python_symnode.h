@@ -95,6 +95,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("is_bool")().is(py::handle(Py_True));
   }
 
+  bool is_nested_int() const override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("is_nested_int")().is(py::handle(Py_True));
+  }
+
   bool has_hint() override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("has_hint")().is(py::handle(Py_True));
@@ -125,16 +130,21 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("expect_size")(file, line).cast<bool>();
   }
 
+  bool guard_size_oblivious(const char* file, int64_t line) override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("guard_size_oblivious")(file, line).cast<bool>();
+  }
+
   int64_t int_() override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("int_")().cast<int64_t>();
   }
 
-  c10::optional<int64_t> maybe_as_int() override {
+  std::optional<int64_t> maybe_as_int() override {
     py::gil_scoped_acquire acquire;
     const auto& r = getPyObj().attr("maybe_as_int")();
     if (r.is_none()) {
-      return c10::nullopt;
+      return std::nullopt;
     } else {
       return r.cast<int64_t>();
     }
@@ -143,6 +153,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   std::string str() override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("str")().cast<std::string>();
+  }
+
+  std::string _graph_repr() override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("_graph_repr")().cast<std::string>();
   }
 
   c10::SymNode dispatch_sym_ite_(
@@ -188,11 +203,31 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return dispatch_common_(__func__, other);
   }
 
+  c10::SymNode float_truediv(const c10::SymNode& other) override {
+    return dispatch_common_(__func__, other);
+  }
+
+  c10::SymNode int_truediv(const c10::SymNode& other) override {
+    return dispatch_common_(__func__, other);
+  }
+
   c10::SymNode pow(const c10::SymNode& other) override {
     return dispatch_common_(__func__, other);
   }
 
+  c10::SymNode float_pow(const c10::SymNode& other) override {
+    return dispatch_common_(__func__, other);
+  }
+
+  c10::SymNode pow_by_natural(const c10::SymNode& other) override {
+    return dispatch_common_(__func__, other);
+  }
+
   c10::SymNode floordiv(const c10::SymNode& other) override {
+    return dispatch_common_(__func__, other);
+  }
+
+  c10::SymNode int_floordiv(const c10::SymNode& other) override {
     return dispatch_common_(__func__, other);
   }
 
@@ -268,8 +303,8 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return dispatch_common_(__func__);
   }
 
-  py::handle getPyObj() {
-    return py::handle(pyobj_.get()->ptr(getPyInterpreter()));
+  py::handle getPyObj() const {
+    return py::handle(pyobj_->ptr(getPyInterpreter()));
   }
   std::shared_ptr<c10::SafePyObject> pyobj_ = nullptr;
 };

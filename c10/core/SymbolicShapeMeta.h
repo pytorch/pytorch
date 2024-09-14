@@ -1,10 +1,14 @@
 #pragma once
 #include <c10/core/SymBool.h>
 #include <c10/core/SymInt.h>
+#include <c10/macros/Export.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/DimVector.h>
 
 #include <atomic>
+#include <cstdint>
 #include <mutex>
+#include <utility>
 
 namespace c10 {
 
@@ -19,6 +23,8 @@ class C10_API SymbolicShapeMeta {
 
   SymbolicShapeMeta() = default;
   SymbolicShapeMeta(const SymbolicShapeMeta& other);
+  SymbolicShapeMeta& operator=(const SymbolicShapeMeta& other) = delete;
+  SymbolicShapeMeta& operator=(SymbolicShapeMeta&& other) = delete;
 
   void refresh_numel() {
     // Non-const, don't need to hold mutables_ lock

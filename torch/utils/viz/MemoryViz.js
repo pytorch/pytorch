@@ -762,7 +762,12 @@ function frameFilter({name, filename}) {
 
 function format_frames(frames) {
   if (frames.length === 0) {
-    return `<block was allocated before _record_history was enabled>`;
+    return (
+      `This block has no frames. Potential causes:\n` +
+      `1) This block was allocated before _record_memory_history was enabled.\n` +
+      `2) The context or stacks passed to _record_memory_history does not include this block. Consider changing context to 'state', 'alloc', or 'all', or changing stacks to 'all'.\n` +
+      `3) This event occurred during backward, which has no python frames, and memory history did not include C++ frames. Use stacks='all' to record both C++ and python frames.`
+    );
   }
   const frame_strings = frames
     .filter(frameFilter)
@@ -901,6 +906,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
     current_data.push(e);
     data.push(e);
     total_mem += size;
+    element_obj.max_allocated_mem = total_mem + total_summarized_mem;
   }
 
   for (const elem of initially_allocated) {
@@ -969,11 +975,17 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
     elements_length: elements.length,
     context_for_id: id => {
       const elem = elements[id];
-      let text = `${formatAddr(elem)} ${formatSize(elem.size)} allocation (${
-        elem.size
-      } bytes)`;
+      let text = `Addr: ${formatAddr(elem)}`;
+      text = `${text}, Size: ${formatSize(elem.size)} allocation`;
+      text = `${text}, Total memory used after allocation: ${formatSize(
+        elem.max_allocated_mem,
+      )}`;
       if (elem.stream !== null) {
         text = `${text}, stream ${elem.stream}`;
+      }
+      if (elem.timestamp !== null) {
+        var d = new Date(elem.time_us / 1000);
+        text = `${text}, timestamp ${d}`;
       }
       if (!elem.action.includes('alloc')) {
         text = `${text}\nalloc not recorded, stack trace for free:`;
@@ -1263,6 +1275,22 @@ function create_trace_view(
   plot.set_delegate(delegate);
 }
 
+function create_settings_view(dst, snapshot, device) {
+  dst.selectAll('svg').remove();
+  dst.selectAll('div').remove();
+  const settings_div = dst.append('div');
+  settings_div.append('p').text('CUDA Caching Allocator Settings:');
+
+  // Check if allocator_settings exists in snapshot
+  if ('allocator_settings' in snapshot) {
+    settings_div
+      .append('pre')
+      .text(JSON.stringify(snapshot.allocator_settings, null, 2));
+  } else {
+    settings_div.append('p').text('No allocator settings found.');
+  }
+}
+
 function unpickle(buffer) {
   const bytebuffer = new Uint8Array(buffer);
   const decoder = new TextDecoder();
@@ -1402,17 +1430,42 @@ function unpickle(buffer) {
       case LONG1:
         {
           const s = bytebuffer[offset++];
-          if (s > 8) {
-            throw new Error(`Unsupported number bigger than 8 bytes ${s}`);
+          if (s <= 8) {
+            for (let i = 0; i < s; i++) {
+              scratch_bytes[i] = bytebuffer[offset++];
+            }
+            const fill = scratch_bytes[s - 1] >= 128 ? 0xff : 0x0;
+            for (let i = s; i < 8; i++) {
+              scratch_bytes[i] = fill;
+            }
+            stack.push(Number(big[0]));
+          } else { // BigInt
+            let scratch_bytes_unbounded = [];
+            for (let i = 0; i < s; i++) {
+              scratch_bytes_unbounded.push(bytebuffer[offset++]);
+            }
+
+            // BigInt can only convert from unsigned hex, thus we need to
+            // convert from twos-complement if negative
+            const negative = scratch_bytes_unbounded[s - 1] >= 128;
+            if (negative) {
+              // implements scratch_bytes_unbounded = ~scratch_bytes_unbounded + 1
+              // byte-by-byte.
+              let carry = 1;
+              for (let i = 0; i < s; i++) {
+                const twos_complement = (0xff ^ scratch_bytes_unbounded[i]) + carry;
+                carry = twos_complement > 0xff ? 1 : 0;
+                scratch_bytes_unbounded[i] = 0xff & twos_complement;
+              }
+            }
+
+            const hex_str = Array.from(scratch_bytes_unbounded.reverse(), byte => {
+              return byte.toString(16).padStart(2, '0');
+            }).join('');
+
+            const big_int = negative ? -BigInt(`0x${hex_str}`) : BigInt(`0x${hex_str}`);
+            stack.push(big_int);
           }
-          for (let i = 0; i < s; i++) {
-            scratch_bytes[i] = bytebuffer[offset++];
-          }
-          const fill = scratch_bytes[s - 1] >= 128 ? 0xff : 0x0;
-          for (let i = s; i < 8; i++) {
-            scratch_bytes[i] = fill;
-          }
-          stack.push(Number(big[0]));
         }
         break;
       case LONG_BINGET:
@@ -1531,6 +1584,7 @@ const kinds = {
   'Allocator State History': create_segment_view,
   'Active Cached Segment Timeline': (dst, snapshot, device) =>
     create_trace_view(dst, snapshot, device, true),
+  'Allocator Settings': create_settings_view,
 };
 
 const snapshot_cache = {};

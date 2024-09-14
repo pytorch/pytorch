@@ -4,7 +4,6 @@ import copy
 import gc
 import random
 import threading
-
 import unittest
 
 import torch
@@ -220,13 +219,7 @@ class WeakTest(TestCase):
             del k
             del v
 
-        t_copy = threading.Thread(
-            target=dict_copy,
-            args=(
-                d,
-                exc,
-            ),
-        )
+        t_copy = threading.Thread(target=dict_copy, args=(d, exc))
         t_collect = threading.Thread(target=pop_and_collect, args=(keys,))
 
         t_copy.start()
@@ -293,7 +286,7 @@ class WeakKeyDictionaryTestCase(TestCase):
         # Indexing
         for key, value in self.reference.items():
             self.assertEqual(d[key], value)
-        knownkey = list(self.other.keys())[0]
+        knownkey = next(iter(self.other.keys()))
         self.assertRaises(KeyError, lambda: d[knownkey])
         # len
         self.assertEqual(len(p), 0)
@@ -389,8 +382,8 @@ class WeakKeyDictionaryTestCase(TestCase):
         d = self._empty_mapping()
         self.assertEqual(list(d.keys()), [])
         d = self.reference
-        self.assertIn(list(self.inmapping.keys())[0], d.keys())
-        self.assertNotIn(list(self.other.keys())[0], d.keys())
+        self.assertIn(next(iter(self.inmapping.keys())), d.keys())
+        self.assertNotIn(next(iter(self.other.keys())), d.keys())
         self.assertRaises(TypeError, d.keys, None)
 
     def test_values(self):
@@ -412,7 +405,7 @@ class WeakKeyDictionaryTestCase(TestCase):
     def test_getitem(self):
         d = self.reference
         self.assertEqual(
-            d[list(self.inmapping.keys())[0]], list(self.inmapping.values())[0]
+            d[next(iter(self.inmapping.keys()))], next(iter(self.inmapping.values()))
         )
 
         self.assertRaises(TypeError, d.__getitem__)
@@ -445,7 +438,7 @@ class WeakKeyDictionaryTestCase(TestCase):
         outerself = self
 
         class SimpleUserDict:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.d = outerself.reference
 
             def keys(self):
@@ -476,7 +469,7 @@ class WeakKeyDictionaryTestCase(TestCase):
         class FailingUserDict:
             def keys(self):
                 class BogonIter:
-                    def __init__(self):
+                    def __init__(self) -> None:
                         self.i = 1
 
                     def __iter__(self):
@@ -498,7 +491,7 @@ class WeakKeyDictionaryTestCase(TestCase):
         class FailingUserDict:
             def keys(self):
                 class BogonIter:
-                    def __init__(self):
+                    def __init__(self) -> None:
                         self.i = ord("a")
 
                     def __iter__(self):
@@ -525,7 +518,7 @@ class WeakKeyDictionaryTestCase(TestCase):
                 return self
 
             def __next__(self):
-                raise Exc()
+                raise Exc
 
         self.assertRaises(Exc, d.update, badseq())
 
@@ -535,16 +528,18 @@ class WeakKeyDictionaryTestCase(TestCase):
 
     def test_get(self):
         d = self._empty_mapping()
-        self.assertTrue(d.get(list(self.other.keys())[0]) is None)
-        self.assertEqual(d.get(list(self.other.keys())[0], 3), 3)
+        self.assertTrue(d.get(next(iter(self.other.keys()))) is None)
+        self.assertEqual(d.get(next(iter(self.other.keys())), 3), 3)
         d = self.reference
-        self.assertTrue(d.get(list(self.other.keys())[0]) is None)
-        self.assertEqual(d.get(list(self.other.keys())[0], 3), 3)
+        self.assertTrue(d.get(next(iter(self.other.keys()))) is None)
+        self.assertEqual(d.get(next(iter(self.other.keys())), 3), 3)
         self.assertEqual(
-            d.get(list(self.inmapping.keys())[0]), list(self.inmapping.values())[0]
+            d.get(next(iter(self.inmapping.keys()))),
+            next(iter(self.inmapping.values())),
         )
         self.assertEqual(
-            d.get(list(self.inmapping.keys())[0], 3), list(self.inmapping.values())[0]
+            d.get(next(iter(self.inmapping.keys())), 3),
+            next(iter(self.inmapping.values())),
         )
         self.assertRaises(TypeError, d.get)
         self.assertRaises(TypeError, d.get, None, None, None)
@@ -560,9 +555,9 @@ class WeakKeyDictionaryTestCase(TestCase):
 
     def test_pop(self):
         d = self._empty_mapping()
-        k, v = list(self.inmapping.items())[0]
+        k, v = next(iter(self.inmapping.items()))
         d[k] = v
-        self.assertRaises(KeyError, d.pop, list(self.other.keys())[0])
+        self.assertRaises(KeyError, d.pop, next(iter(self.other.keys())))
 
         self.assertEqual(d.pop(k), v)
         self.assertEqual(len(d), 0)
@@ -632,7 +627,7 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
         # Indexing
         for key, value in self.reference.items():
             self.assertEqual(d[key], value)
-        knownkey = list(self.other.keys())[0]
+        knownkey = next(iter(self.other.keys()))
         self.assertRaises(KeyError, lambda: d[knownkey])
         # len
         self.assertEqual(len(p), 0)
@@ -728,8 +723,8 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
         d = self._empty_mapping()
         self.assertEqual(list(d.keys()), [])
         d = self.reference
-        self.assertIn(list(self.inmapping.keys())[0], d.keys())
-        self.assertNotIn(list(self.other.keys())[0], d.keys())
+        self.assertIn(next(iter(self.inmapping.keys())), d.keys())
+        self.assertNotIn(next(iter(self.other.keys())), d.keys())
         self.assertRaises(TypeError, d.keys, None)
 
     def test_values(self):
@@ -751,7 +746,7 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
     def test_getitem(self):
         d = self.reference
         self.assertEqual(
-            d[list(self.inmapping.keys())[0]], list(self.inmapping.values())[0]
+            d[next(iter(self.inmapping.keys()))], next(iter(self.inmapping.values()))
         )
 
         self.assertRaises(TypeError, d.__getitem__)
@@ -784,7 +779,7 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
         outerself = self
 
         class SimpleUserDict:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.d = outerself.reference
 
             def keys(self):
@@ -815,7 +810,7 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
         class FailingUserDict:
             def keys(self):
                 class BogonIter:
-                    def __init__(self):
+                    def __init__(self) -> None:
                         self.i = 1
 
                     def __iter__(self):
@@ -837,7 +832,7 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
         class FailingUserDict:
             def keys(self):
                 class BogonIter:
-                    def __init__(self):
+                    def __init__(self) -> None:
                         self.i = ord("a")
 
                     def __iter__(self):
@@ -864,7 +859,7 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
                 return self
 
             def __next__(self):
-                raise Exc()
+                raise Exc
 
         self.assertRaises(Exc, d.update, badseq())
 
@@ -874,16 +869,18 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
 
     def test_get(self):
         d = self._empty_mapping()
-        self.assertTrue(d.get(list(self.other.keys())[0]) is None)
-        self.assertEqual(d.get(list(self.other.keys())[0], 3), 3)
+        self.assertTrue(d.get(next(iter(self.other.keys()))) is None)
+        self.assertEqual(d.get(next(iter(self.other.keys())), 3), 3)
         d = self.reference
-        self.assertTrue(d.get(list(self.other.keys())[0]) is None)
-        self.assertEqual(d.get(list(self.other.keys())[0], 3), 3)
+        self.assertTrue(d.get(next(iter(self.other.keys()))) is None)
+        self.assertEqual(d.get(next(iter(self.other.keys())), 3), 3)
         self.assertEqual(
-            d.get(list(self.inmapping.keys())[0]), list(self.inmapping.values())[0]
+            d.get(next(iter(self.inmapping.keys()))),
+            next(iter(self.inmapping.values())),
         )
         self.assertEqual(
-            d.get(list(self.inmapping.keys())[0], 3), list(self.inmapping.values())[0]
+            d.get(next(iter(self.inmapping.keys())), 3),
+            next(iter(self.inmapping.values())),
         )
         self.assertRaises(TypeError, d.get)
         self.assertRaises(TypeError, d.get, None, None, None)
@@ -899,9 +896,9 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
 
     def test_pop(self):
         d = self._empty_mapping()
-        k, v = list(self.inmapping.items())[0]
+        k, v = next(iter(self.inmapping.items()))
         d[k] = v
-        self.assertRaises(KeyError, d.pop, list(self.other.keys())[0])
+        self.assertRaises(KeyError, d.pop, next(iter(self.other.keys())))
 
         self.assertEqual(d.pop(k), v)
         self.assertEqual(len(d), 0)

@@ -1,5 +1,7 @@
-from typing import Dict, Tuple, Any
+# mypy: allow-untyped-defs
 import traceback as tb
+from typing import Any, Dict, Tuple
+
 
 WRAPPED_EXCEPTION = Tuple[BaseException, tb.StackSummary]
 
@@ -15,9 +17,7 @@ def _is_wrapped_exception(obj: Any) -> bool:
         return False
     if len(obj) != 2:
         return False
-    return isinstance(obj[0], BaseException) and isinstance(
-        obj[1], tb.StackSummary
-    )
+    return isinstance(obj[0], BaseException) and isinstance(obj[1], tb.StackSummary)
 
 
 class CheckpointException(BaseException):

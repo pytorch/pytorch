@@ -28,14 +28,11 @@
 #include <c10/util/irange.h>
 
 #include <c10/core/Layout.h>
-#include <tuple>
-#include <vector>
 
 using namespace at;
 using namespace torch::autograd::utils;
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 Py_ssize_t THPVariable_length(PyObject* self) {
   HANDLE_TH_ERRORS
@@ -66,12 +63,10 @@ static inline int64_t count_specified_dimensions(PyObject* index) {
   // Count the number of indexed dimensions (everything but ellipsis and None)
   // -1 is a sentinel for __torch_function__
   int64_t count = 0;
-  auto size =
-      PyTuple_GET_SIZE(index); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
+  auto size = PyTuple_GET_SIZE(index);
   for (Py_ssize_t i = 0; i < size; i++) {
-    PyObject* obj = PyTuple_GET_ITEM(
-        index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
-    if (!THPVariable_CheckExact(obj) && check_has_torch_function(obj))
+    PyObject* obj = PyTuple_GET_ITEM(index, i);
+    if (check_has_torch_function(obj))
       return -1;
     if (THPVariable_Check(obj)) {
       const auto& var = THPVariable_Unpack(obj);
@@ -83,7 +78,7 @@ static inline int64_t count_specified_dimensions(PyObject* index) {
       }
     } else if (
         obj != Py_None && obj != Py_Ellipsis && obj != Py_True &&
-        obj != Py_False) { // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
+        obj != Py_False) {
       count++;
     }
   }
@@ -91,17 +86,19 @@ static inline int64_t count_specified_dimensions(PyObject* index) {
 }
 
 [[noreturn]] static inline void invalid_index(PyObject* obj) {
-  throw IndexError(
+  TORCH_CHECK_INDEX(
+      false,
       "only integers, slices (`:`), ellipsis (`...`), None and long or byte "
-      "Variables are valid indices (got %s)",
-      Py_TYPE(obj)->tp_name);
+      "Variables are valid indices (got ",
+      Py_TYPE(obj)->tp_name,
+      ")");
 }
 
 static inline Variable sequenceToVariable(
     c10::TensorOptions options,
     PyObject* seq) {
   return torch::utils::indexing_tensor_from_data(
-      options, kLong, c10::nullopt, seq);
+      options, kLong, std::nullopt, seq);
 }
 
 inline Variable valueToTensor(
@@ -179,10 +176,9 @@ static inline Variable applySlicing(
     variable_list& outIndices,
     bool is_tracing,
     const at::Device& self_device,
-    const c10::optional<int64_t>& self_ndim,
+    const std::optional<int64_t>& self_ndim,
     int64_t specified_dims) {
-  int64_t size =
-      PyTuple_GET_SIZE(index); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
+  int64_t size = PyTuple_GET_SIZE(index);
   int64_t dim = 0;
 
   // See NOTE [nested tensor size for indexing]
@@ -195,15 +191,14 @@ static inline Variable applySlicing(
 
   Variable result = self;
   for (const auto i : c10::irange(size)) {
-    PyObject* obj = PyTuple_GET_ITEM(
-        index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
+    PyObject* obj = PyTuple_GET_ITEM(index, i);
     // NOTE [nested tensor size for indexing]
     // nested tensor does not have a size (yet) so for now we represent its size
     // as null may need to be changed after we reach a better solution for
     // nested tensor size
-    c10::optional<SymIntArrayRef> result_sizes = result.is_nested()
-        ? c10::optional<SymIntArrayRef>(c10::nullopt)
-        : c10::optional<SymIntArrayRef>(result.sym_sizes());
+    std::optional<SymIntArrayRef> result_sizes = result.is_nested()
+        ? std::optional<SymIntArrayRef>(std::nullopt)
+        : std::optional<SymIntArrayRef>(result.sym_sizes());
     result = at::indexing::handleDimInMultiDimIndexing(
         /*prev_dim_result=*/result,
         /*original_tensor=*/self,
@@ -323,8 +318,7 @@ static inline THPObjectPtr wrapTuple(PyObject* index) {
   if (treatSequenceAsTuple(index)) {
     res = PySequence_Tuple(index);
   } else {
-    res = PyTuple_Pack(
-        1, index); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
+    res = PyTuple_Pack(1, index);
   }
   if (!res)
     throw python_error();
@@ -341,7 +335,7 @@ static inline THPObjectPtr wrapTuple(PyObject* index) {
 // indexing is needed, it calls C++ `at::indexing::dispatch_index`.
 PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
-  if (!THPVariable_CheckExact(self) && check_has_torch_function(self)) {
+  if (check_has_torch_function(self)) {
     return handle_torch_function_indexing(self, index);
   }
   const auto& self_ = THPVariable_Unpack(self);
@@ -438,9 +432,8 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   if (py_value == nullptr) {
     throw TypeError("Tensor does not support deleting items");
   }
-  if ((!THPVariable_CheckExact(self) && check_has_torch_function(self)) ||
-      (!THPVariable_CheckExact(py_value) &&
-       check_has_torch_function(py_value))) {
+  if ((check_has_torch_function(self)) ||
+      (check_has_torch_function(py_value))) {
     py::object ret = py::reinterpret_steal<py::object>(
         handle_torch_function_indexing(self, index, py_value));
     return 0;
@@ -466,7 +459,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   }
 
   // handle simple types: ellipsis, none, bool
-  if (index == Py_False) { // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
+  if (index == Py_False) {
     // do nothing for false (technically we should check the size, but we don't
     // have real 0-sized shapes.
     return 0;
@@ -495,7 +488,6 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     dispatch_set_item(self_, {at::indexing::TensorIndex(symint)}, value);
     return 0;
   } else if (PySlice_Check(index)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     auto val = __PySlice_Unpack(index);
     if (is_tracing) {
       recordSliceTrace(index);
@@ -553,5 +545,4 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

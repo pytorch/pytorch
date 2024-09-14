@@ -50,3 +50,11 @@ the server and client.
 
 .. autoclass:: TimerClient
    :members:
+
+
+Debug info logging
+-------------------
+
+.. automodule:: torch.distributed.elastic.timer.debug_info_logging
+
+.. autofunction:: torch.distributed.elastic.timer.debug_info_logging.log_debug_info_for_expired_timers

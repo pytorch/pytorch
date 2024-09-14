@@ -261,19 +261,19 @@ struct alignas(sizeof(T) * 2) complex {
 #endif
 
     if (abs_c >= abs_d) {
-      if (abs_c == 0 && abs_d == 0) {
+      if (abs_c == U(0) && abs_d == U(0)) {
         /* divide by zeros should yield a complex inf or nan */
         real_ = a / abs_c;
         imag_ = b / abs_d;
       } else {
         auto rat = d / c;
-        auto scl = 1.0 / (c + d * rat);
+        auto scl = U(1.0) / (c + d * rat);
         real_ = (a + b * rat) * scl;
         imag_ = (b - a * rat) * scl;
       }
     } else {
       auto rat = c / d;
-      auto scl = 1.0 / (d + c * rat);
+      auto scl = U(1.0) / (d + c * rat);
       real_ = (a * rat + b) * scl;
       imag_ = (b * rat - a) * scl;
     }
@@ -320,7 +320,7 @@ struct alignas(sizeof(T) * 2) complex {
   constexpr void real(T value) {
     real_ = value;
   }
-  constexpr T imag() const {
+  C10_HOST_DEVICE constexpr T imag() const {
     return imag_;
   }
   constexpr void imag(T value) {
@@ -433,9 +433,9 @@ constexpr complex<T> operator/(const T& lhs, const complex<T>& rhs) {
 // not support this when T is a floating-point number. This is useful because it
 // saves a lot of "static_cast" when operate a complex and an integer. This
 // makes the code both less verbose and potentially more efficient.
-#define COMPLEX_INTEGER_OP_TEMPLATE_CONDITION                           \
-  typename std::enable_if_t<                                            \
-      std::is_floating_point<fT>::value && std::is_integral<iT>::value, \
+#define COMPLEX_INTEGER_OP_TEMPLATE_CONDITION                 \
+  typename std::enable_if_t<                                  \
+      std::is_floating_point_v<fT> && std::is_integral_v<iT>, \
       int> = 0
 
 template <typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>

@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/EmptyTensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/cuda/EmptyTensor.h>
@@ -70,7 +71,16 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
   auto temp_storage = allocator.allocate(temp_storage_bytes);
   cub::DeviceReduce::Sum(temp_storage.get(), temp_storage_bytes, itr, (int*)num_nonzeros.get(), N, stream);
   int num_nonzeros_h;
-  at::cuda::memcpy_and_sync(&num_nonzeros_h, num_nonzeros.get(), sizeof(int), cudaMemcpyDeviceToHost, stream);
+  auto pinned_num_nonzeros_h = at::detail::empty_cpu(
+            {1}, /* size */
+            c10::CppTypeToScalarType<int>(), /* dtype */
+            std::nullopt, /* layout */
+            std::nullopt, /* device */
+            true, /* pin_memory */
+            std::nullopt /* memory format */
+          );
+  at::cuda::memcpy_and_sync((void *)pinned_num_nonzeros_h.const_data_ptr<int>(), num_nonzeros.get(), sizeof(int), cudaMemcpyDeviceToHost, stream);
+  num_nonzeros_h = (int)*(pinned_num_nonzeros_h.const_data_ptr<int>());
   //expected output size is num_nonzeros x ndim
   //we are producing output with size {num_nonzeros, ndim} and strides {1, num_nonzeros} (that is, transposed ndim x num_nonzeros output)
   //we are able to directly use passed output with this size and strides, and we can also (per contract)
@@ -112,7 +122,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
 
 Tensor& nonzero_out_cuda(const Tensor& self, Tensor& out){
   TORCH_CHECK(self.numel() < std::numeric_limits<int>::max(), "nonzero is not supported for tensors with more than INT_MAX elements, \
-  file a support request");
+  See https://github.com/pytorch/pytorch/issues/51871");
   TORCH_CHECK(out.dtype() == at::kLong, "Expected object of scalar type ", at::kLong, " as out, but got ", out.dtype());
   TORCH_CHECK(self.device() == out.device(), "expected self and out to be on the same device, but got out on ",
   out.device(), " and self on ", self.device());

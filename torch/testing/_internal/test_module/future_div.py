@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 
 
 def div_int_future():

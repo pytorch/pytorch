@@ -2,11 +2,10 @@
 
 // Complex number math operations that act as no-ops for other dtypes.
 #include <c10/util/complex.h>
-#include <c10/util/math_compat.h>
 #include <c10/util/MathConstants.h>
 #include<ATen/NumericUtils.h>
 
-namespace at { namespace native {
+namespace at::native {
 inline namespace CPU_CAPABILITY {
 
 template <typename SCALAR_TYPE, typename VALUE_TYPE=SCALAR_TYPE>
@@ -248,4 +247,4 @@ inline TYPE min_impl (TYPE a, TYPE b) {
 }
 
 } // end namespace
-}} //end at::native
+} //end at::native

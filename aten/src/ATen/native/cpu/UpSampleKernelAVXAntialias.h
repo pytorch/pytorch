@@ -66,7 +66,7 @@ at::Tensor unpack_rgb(const at::Tensor& packed_tensor) {
   // into as 32 bits. This generalizes to num_channels <= 4 and also works for
   // non-channels_last tensors.
 
-  const uint8_t* packed = (const uint8_t*)packed_tensor.data_ptr<uint8_t>();
+  const uint8_t* packed = (const uint8_t*)packed_tensor.const_data_ptr<uint8_t>();
   auto num_pixels = packed_tensor.size(1) * packed_tensor.size(2);
   auto num_channels = packed_tensor.size(0);
 
@@ -180,18 +180,18 @@ void ImagingResampleHorizontal(
   // Although this may not be needed if / when we port all this code to use
   // Vec.h since this would potentially give us another fall-back implem
 
-  const int16_t* kk = (int16_t*)(horiz_indices_weights[3].data_ptr<double>());
+  const int16_t* kk = (int16_t*)(horiz_indices_weights[3].const_data_ptr<double>());
 
   auto xout = unpacked_output.size(2);
   auto yout = unpacked_output.size(1);
   auto xin = unpacked_input.size(2);
   TORCH_INTERNAL_ASSERT(num_channels == unpacked_input.size(0));
 
-  const int64_t* idx_ptr_xmin = horiz_indices_weights[0].data_ptr<int64_t>();
-  const int64_t* idx_ptr_size = horiz_indices_weights[1].data_ptr<int64_t>();
+  const int64_t* idx_ptr_xmin = horiz_indices_weights[0].const_data_ptr<int64_t>();
+  const int64_t* idx_ptr_size = horiz_indices_weights[1].const_data_ptr<int64_t>();
 
   uint8_t* unpacked_output_p = unpacked_output.data_ptr<uint8_t>();
-  const uint8_t* unpacked_input_p = unpacked_input.data_ptr<uint8_t>();
+  const uint8_t* unpacked_input_p = unpacked_input.const_data_ptr<uint8_t>();
 
   int64_t yy = 0;
   auto xout_stride = xout * num_channels;
@@ -255,13 +255,13 @@ void ImagingResampleVertical(
   // basic_loop_aa_vertical<uint8_t>)
   // Although this may not be needed if / when we port all this code to use
   // Vec.h since this would potentially give us another fall-back implem
-  const int16_t* kk = (int16_t*)(vert_indices_weights[3].data_ptr<double>());
+  const int16_t* kk = (int16_t*)(vert_indices_weights[3].const_data_ptr<double>());
 
-  const int64_t* idx_ptr_xmin = vert_indices_weights[0].data_ptr<int64_t>();
-  const int64_t* idx_ptr_size = vert_indices_weights[1].data_ptr<int64_t>();
+  const int64_t* idx_ptr_xmin = vert_indices_weights[0].const_data_ptr<int64_t>();
+  const int64_t* idx_ptr_size = vert_indices_weights[1].const_data_ptr<int64_t>();
 
   uint8_t* unpacked_output_p = unpacked_output.data_ptr<uint8_t>();
-  const uint8_t* unpacked_input_p = unpacked_input.data_ptr<uint8_t>();
+  const uint8_t* unpacked_input_p = unpacked_input.const_data_ptr<uint8_t>();
 
   auto xout = unpacked_output.size(2);
   auto yout = unpacked_output.size(1);
@@ -296,7 +296,7 @@ void ImagingResampleVertical(
 // [ Weights computation for uint8_t and multiplication trick ]
 // For details on how the AVX kernels are implemented, see
 // https://gist.github.com/NicolasHug/47c97d731f05eaad5694c173849b86f5
-// See also [ Support for antialias=False as a subcase of antilias=True ] to
+// See also [ Support for antialias=False as a subcase of antialias=True ] to
 // learn more about how the antialias=False case is computed. The same holds
 // here: all these kernels are general enough to handle an arbitrary number of
 // weights, but when aa=False they could be optimized further.
@@ -344,7 +344,7 @@ void upsample_avx_bilinear_bicubic_uint8(
     int interp_dim = 3;
     auto stride = (skip_unpacking) ? num_channels : 4;
     std::tie(horiz_indices_weights, ksize_horiz, horiz_weights_precision) =
-        F::compute_indices_int16_weights_aa(
+        F::compute_index_ranges_int16_weights(
             /*input_size=*/xin,
             /*output_size=*/xout,
             /*stride=*/stride,
@@ -360,7 +360,7 @@ void upsample_avx_bilinear_bicubic_uint8(
     int interp_dim = 2;
     auto stride = (skip_unpacking) ? num_channels * xout : 4 * xout;
     std::tie(vert_indices_weights, ksize_vert, vert_weights_precision) =
-        F::compute_indices_int16_weights_aa(
+        F::compute_index_ranges_int16_weights(
             /*input_size=*/yin,
             /*output_size=*/yout,
             /*stride=*/stride,
@@ -699,7 +699,7 @@ void ImagingResampleHorizontalConvolution8u4x(
       // Memcpy 4-bytes is faster than 3-bytes and this is a boundary case when we want to write
       // 4 bytes (R G B | X) to the output buffer (X1 X2 X3 | R1).
       // The 4th byte in the register (X) has a garbage value and 4th byte in the output buffer (R1) has a correct
-      // value which was preveiously computed by another line. In other words, it means that we can not overwrite
+      // value which was previously computed by another line. In other words, it means that we can not overwrite
       // it by simply writing 4 bytes from the register to the output. We'll do the following:
       //               v----------|
       // Output = [... X1 X2 X3 | R1 G1 B1 R2 ...]
@@ -1040,7 +1040,7 @@ void ImagingResampleHorizontalConvolution8u(
         // Memcpy 4-bytes is faster than 3-bytes and this is a boundary case when we want to write
         // 4 bytes (R G B | X) to the output buffer (X1 X2 X3 | R1).
         // The 4th byte in the register (X) has a garbage value and 4th byte in the output buffer (R1) has a correct
-        // value which was preveiously computed by another line. In other words, it means that we can not overwrite
+        // value which was previously computed by another line. In other words, it means that we can not overwrite
         // it by simply writing 4 bytes from the register to the output. We'll do the following:
         //               v----------|
         // Output = [... X1 X2 X3 | R1 G1 B1 R2 ...]

@@ -1,7 +1,10 @@
+# mypy: allow-untyped-defs
 import torch
 from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
 from torch.distributions.distribution import Distribution
+from torch.types import _size
+
 
 __all__ = ["OneHotCategorical", "OneHotCategoricalStraightThrough"]
 
@@ -119,11 +122,11 @@ class OneHotCategoricalStraightThrough(OneHotCategorical):
     through gradient estimator from [1].
 
     [1] Estimating or Propagating Gradients Through Stochastic Neurons for Conditional Computation
-    (Bengio et al, 2013)
+    (Bengio et al., 2013)
     """
     has_rsample = True
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
         samples = self.sample(sample_shape)
         probs = self._categorical.probs  # cached via @lazy_property
         return samples + (probs - probs.detach())

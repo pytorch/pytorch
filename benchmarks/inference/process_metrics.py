@@ -10,9 +10,11 @@ import os
 
 import pandas as pd
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Parse output files")
     parser.add_argument("--csv", type=str, help="Path to csv file")
+    parser.add_argument("--name", type=str, help="Name of experiment")
     args = parser.parse_args()
 
     input_csv = "./results/" + args.csv
@@ -23,8 +25,8 @@ if __name__ == "__main__":
 
     # Calculate mean and standard deviation for a subset of metrics
     metrics = ["warmup_latency", "average_latency", "throughput", "gpu_util"]
-    means = dict()
-    stds = dict()
+    means = {}
+    stds = {}
 
     for metric in metrics:
         means[metric] = df[metric].mean()
@@ -37,13 +39,13 @@ if __name__ == "__main__":
         if write_header:
             f.write(f"## Batch Size {batch_size} Compile {compile}\n\n")
             f.write(
-                "| Warmup_latency (s) | Average_latency (s) | Throughput (samples/sec) | GPU Utilization (%) |\n"
+                "| Experiment | Warmup_latency (s) | Average_latency (s) | Throughput (samples/sec) | GPU Utilization (%) |\n"
             )
             f.write(
-                "| ------------------ | ------------------- | ------------------------ | ------------------- |\n"
+                "| ---------- | ------------------ | ------------------- | ------------------------ | ------------------- |\n"
             )
 
-        line = "|"
+        line = f"| {args.name} |"
         for metric in metrics:
             line += f" {means[metric]:.3f} +/- {stds[metric]:.3f} |"
         f.write(line + "\n")

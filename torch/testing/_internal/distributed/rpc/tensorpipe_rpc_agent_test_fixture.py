@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+
 import torch.distributed.rpc as rpc
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,

@@ -6,21 +6,18 @@ Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --produce-onnx-test-data: generate onnx test data
           --accept: accept onnx updates and overwrite models
 """
+
 import glob
 import inspect
 import io
 import itertools
+import operator
 import os
 import shutil
 import tempfile
 
 # Full diff for expect files
 import unittest
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.onnx
 
 from pytorch_test_common import (
     BATCH_SIZE,
@@ -29,6 +26,11 @@ from pytorch_test_common import (
     RNN_INPUT_SIZE,
     RNN_SEQUENCE_LENGTH,
 )
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.onnx
 from torch.autograd import Function, Variable
 from torch.nn import functional, Module
 from torch.onnx._internal import diagnostics
@@ -38,7 +40,8 @@ from torch.onnx.symbolic_helper import (
     parse_args,
 )
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfCaffe2, skipIfNoLapack
+from torch.testing._internal.common_utils import skipIfNoLapack
+
 
 unittest.TestCase.maxDiff = None
 
@@ -172,27 +175,27 @@ class TestOperators(common_utils.TestCase):
     def test_add_broadcast(self):
         x = torch.randn(2, 3, requires_grad=True).double()
         y = torch.randn(3, requires_grad=True).double()
-        self.assertONNX(lambda x, y: x + y, (x, y))
+        self.assertONNX(operator.add, (x, y))
 
     def test_add_left_broadcast(self):
         x = torch.randn(3, requires_grad=True).double()
         y = torch.randn(2, 3, requires_grad=True).double()
-        self.assertONNX(lambda x, y: x + y, (x, y))
+        self.assertONNX(operator.add, (x, y))
 
     def test_add_size1_broadcast(self):
         x = torch.randn(2, 3, requires_grad=True).double()
         y = torch.randn(2, 1, requires_grad=True).double()
-        self.assertONNX(lambda x, y: x + y, (x, y))
+        self.assertONNX(operator.add, (x, y))
 
     def test_add_size1_right_broadcast(self):
         x = torch.randn(2, 3, requires_grad=True).double()
         y = torch.randn(3, requires_grad=True).double()
-        self.assertONNX(lambda x, y: x + y, (x, y))
+        self.assertONNX(operator.add, (x, y))
 
     def test_add_size1_singleton_broadcast(self):
         x = torch.randn(2, 3, requires_grad=True).double()
         y = torch.randn(1, 3, requires_grad=True).double()
-        self.assertONNX(lambda x, y: x + y, (x, y))
+        self.assertONNX(operator.add, (x, y))
 
     def test_rsub(self):
         x = torch.randn(2, 3, requires_grad=True).double()
@@ -282,7 +285,7 @@ class TestOperators(common_utils.TestCase):
             def symbolic(g, x):
                 # The inside of this function should never be invoked, because
                 # we will fail due to an argument mismatch first.
-                raise AssertionError()
+                raise AssertionError
 
             @staticmethod
             def forward(ctx, x, y):
@@ -413,7 +416,6 @@ class TestOperators(common_utils.TestCase):
         x = torch.randn(20, 16, 50)
         self.assertONNX(nn.MaxPool1d(3, stride=2, return_indices=True), x)
 
-    @skipIfCaffe2
     def test_at_op(self):
         x = torch.randn(3, 4)
 
@@ -541,27 +543,27 @@ class TestOperators(common_utils.TestCase):
     def test_equal(self):
         x = torch.randn(1, 2, 3, 1, requires_grad=False).int()
         y = torch.randn(1, 4, requires_grad=False).int()
-        self.assertONNX(lambda x, y: x == y, (x, y))
+        self.assertONNX(operator.eq, (x, y))
 
     def test_lt(self):
         x = torch.randn(1, 2, 3, 1, requires_grad=False).int()
         y = torch.randn(1, 4, requires_grad=False).int()
-        self.assertONNX(lambda x, y: x < y, (x, y))
+        self.assertONNX(operator.lt, (x, y))
 
     def test_gt(self):
         x = torch.randn(1, 2, 3, 1, requires_grad=False).int()
         y = torch.randn(1, 4, requires_grad=False).int()
-        self.assertONNX(lambda x, y: x > y, (x, y))
+        self.assertONNX(operator.gt, (x, y))
 
     def test_le(self):
         x = torch.randn(3, 4, requires_grad=False).int()
         y = torch.randn(3, 4, requires_grad=False).int()
-        self.assertONNX(lambda x, y: x <= y, (x, y))
+        self.assertONNX(operator.le, (x, y))
 
     def test_ge(self):
         x = torch.randn(3, 4, requires_grad=False).int()
         y = torch.randn(3, 4, requires_grad=False).int()
-        self.assertONNX(lambda x, y: x >= y, (x, y))
+        self.assertONNX(operator.ge, (x, y))
 
     def test_exp(self):
         x = torch.randn(3, 4, requires_grad=True)
@@ -693,7 +695,6 @@ class TestOperators(common_utils.TestCase):
             keep_initializers_as_inputs=True,
         )
 
-    @skipIfCaffe2
     def test_embedding_bags(self):
         emb_bag = nn.EmbeddingBag(10, 8)
         input = torch.tensor([1, 2, 3, 4]).long()
@@ -862,7 +863,7 @@ class TestOperators(common_utils.TestCase):
     def test_master_opset(self):
         x = torch.randn(2, 3).float()
         y = torch.randn(2, 3).float()
-        self.assertONNX(lambda x, y: x + y, (x, y), opset_version=10)
+        self.assertONNX(operator.add, (x, y), opset_version=10)
 
     def test_std(self):
         x = torch.randn(2, 3, 4).float()
@@ -874,39 +875,13 @@ class TestOperators(common_utils.TestCase):
         x = torch.randn(2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.cumsum(x, dim=1), x, opset_version=11)
 
-    # Github Issue: https://github.com/pytorch/pytorch/issues/71095
-    #    def test_c2_op(self):
-    #        class MyModel(torch.nn.Module):
-    #            def __init__(self):
-    #                super().__init__()
-    #
-    #            def forward(self, scores, bbox_deltas, im_info, anchors):
-    #                a, b = torch.ops._caffe2.GenerateProposals(
-    #                    (scores), (bbox_deltas), (im_info), (anchors),
-    #                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0, True,
-    #                )
-    #                return a, b
-    #
-    #        model = MyModel()
-    #        A = 4
-    #        H = 10
-    #        W = 8
-    #        img_count = 3
-    #        scores = torch.ones(img_count, A, H, W, dtype=torch.float32)
-    #        bbox_deltas = torch.linspace(0, 10, steps=img_count * 4 * A * H * W,
-    #                                     dtype=torch.float32)
-    #        bbox_deltas = bbox_deltas.view(img_count, 4 * A, H, W)
-    #        im_info = torch.ones(img_count, 3, dtype=torch.float32)
-    #        anchors = torch.ones(A, 4, dtype=torch.float32)
-    #        inputs = (scores, bbox_deltas, im_info, anchors)
-    #        self.assertONNX(model, inputs, custom_opsets={"org.pytorch._caffe2": 0})
-
     def test_dict(self):
         class MyModel(torch.nn.Module):
             def forward(self, x_in):
                 x_out = {}
                 x_out["test_key_out"] = torch.add(
-                    x_in[list(x_in.keys())[0]], list(x_in.keys())[0]
+                    x_in[list(x_in.keys())[0]],  # noqa: RUF015
+                    list(x_in.keys())[0],  # noqa: RUF015
                 )
                 return x_out
 
@@ -939,7 +914,15 @@ class TestOperators(common_utils.TestCase):
         input = torch.arange(24, dtype=torch.uint8).reshape(3, 4, 2)
         self.assertONNX(BitshiftModel(), input, opset_version=11)
 
-    @skipIfCaffe2
+    def test_bitwise_and(self):
+        class BiwiseAndModel(torch.nn.Module):
+            def forward(self, input, other):
+                return torch.bitwise_and(input, other), input & 2
+
+        input = torch.randint(0, 100, (2, 3, 4), dtype=torch.uint8)
+        other = torch.randint(-50, 50, (2, 3, 4), dtype=torch.int8)
+        self.assertONNX(BiwiseAndModel(), (input, other), opset_version=18)
+
     def test_layer_norm_aten(self):
         model = torch.nn.LayerNorm([10, 10])
         x = torch.randn(20, 5, 10, 10)
@@ -1080,7 +1063,7 @@ class TestOperators(common_utils.TestCase):
         c0 = torch.randn(1, BATCH_SIZE, RNN_HIDDEN_SIZE)
 
         class LSTMModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.rnn = torch.nn.LSTM(
                     RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False
@@ -1176,7 +1159,7 @@ class TestOperators(common_utils.TestCase):
         )
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.emb = torch.nn.Embedding(4, 8)
 
@@ -1193,7 +1176,6 @@ class TestOperators(common_utils.TestCase):
         torch.onnx.unregister_custom_op_symbolic("::embedding", _onnx_opset_version)
 
     # This is test_aten_embedding_1 with shape inference on custom symbolic aten::embedding.
-    @skipIfCaffe2
     def test_aten_embedding_2(self):
         _onnx_opset_version = 12
 
@@ -1227,7 +1209,7 @@ class TestOperators(common_utils.TestCase):
         )
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.emb = torch.nn.Embedding(4, 8)
 

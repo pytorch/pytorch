@@ -133,7 +133,7 @@ void checkDoubleInRange(double a) {
       a > double(std::numeric_limits<int64_t>::max()) ||
       a < double(std::numeric_limits<int64_t>::min())) {
     throw c10::Error(
-        "Cannot convert float " + c10::to_string(a) + " to integer", "");
+        "Cannot convert float " + std::to_string(a) + " to integer");
     return;
   }
 }
@@ -265,8 +265,7 @@ void listSelect(Stack& stack) {
   int64_t idx = pop(stack).to<int64_t>();
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
-  auto element = getItem(list, idx);
-  push(stack, std::move(element));
+  push(stack, getItem(list, idx));
 }
 
 void listLen(Stack& stack) {
@@ -288,12 +287,12 @@ void listAdd(Stack& stack) {
   c10::List<IValue> ret = make_result_list<IValue>(a.elementType());
 
   if (a.use_count() == 1) {
-    ret = std::move(a);
+    ret = a;
   } else {
     ret = a.copy();
   }
 
-  ret.append(std::move(b));
+  ret.append(b);
 
   push(stack, std::move(ret));
 }
@@ -301,7 +300,7 @@ void listAdd(Stack& stack) {
 void listInplaceAdd(Stack& stack) {
   c10::List<IValue> b = pop(stack).to<c10::List<IValue>>();
   c10::List<IValue> a = pop(stack).to<c10::List<IValue>>();
-  a.append(std::move(b));
+  a.append(b);
   push(stack, std::move(a));
 }
 
@@ -404,7 +403,7 @@ void listSetItem(Stack& stack) {
 
 at::Generator make_generator_for_device(
     c10::Device device,
-    c10::optional<int64_t> seed) {
+    std::optional<int64_t> seed) {
   if (device.is_cpu()) {
     if (seed.has_value()) {
       return at::detail::createCPUGenerator(seed.value());

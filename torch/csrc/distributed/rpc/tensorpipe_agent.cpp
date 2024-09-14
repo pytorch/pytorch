@@ -18,9 +18,7 @@ C10_DIAGNOSTIC_POP()
 #include <c10/core/StreamGuard.h>
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 namespace {
 
@@ -111,7 +109,7 @@ std::vector<c10::Stream> getCurrentStreamsForDevices(
 
 std::vector<c10::Device> getDevicesOfTensors(
     const std::vector<torch::Tensor>& tensors) {
-  c10::optional<c10::impl::VirtualGuardImpl> impl;
+  std::optional<c10::impl::VirtualGuardImpl> impl;
   size_t deviceCount = 0;
   std::vector<bool> indexBitset;
   for (const torch::Tensor& tensor : tensors) {
@@ -386,7 +384,7 @@ TensorPipeAgent::TensorPipeAgent(
     const c10::intrusive_ptr<::c10d::Store>& store,
     std::string selfName,
     worker_id_t selfId,
-    optional<int> worldSize,
+    std::optional<int> worldSize,
     TensorPipeRpcBackendOptions opts,
     std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
     std::vector<c10::Device> devices,
@@ -460,8 +458,7 @@ void TensorPipeAgent::startImpl() {
       lowestPriorityTransport = key;
     }
     addresses.push_back(c10::str(key, "://", reg->address));
-    context_->registerTransport(
-        priority, std::move(key), std::move(reg->transport));
+    context_->registerTransport(priority, key, reg->transport);
   }
 
   // Register channels
@@ -485,8 +482,7 @@ void TensorPipeAgent::startImpl() {
     if (priority == -1) {
       priority = reg->priority;
     }
-    context_->registerChannel(
-        priority, std::move(key), std::move(reg->channel));
+    context_->registerChannel(priority, key, reg->channel);
   }
 
   listener_ = context_->listen(addresses);
@@ -564,10 +560,7 @@ void TensorPipeAgent::pipeRead(
       GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
       streams = getStreamsFromPoolForDevices(devices_);
     }
-    tensorpipe::Allocation tpAllocation;
-    TensorpipeReadBuffers tpBuffers;
-    std::tie(tpAllocation, tpBuffers) =
-        tensorpipeAllocate(tpDescriptor, streams);
+    auto [tpAllocation, tpBuffers] = tensorpipeAllocate(tpDescriptor, streams);
 
     pipe->read(
         std::move(tpAllocation),
@@ -597,10 +590,7 @@ void TensorPipeAgent::pipeWrite(
     std::vector<c10::Device>&& devices,
     std::vector<c10::Stream> streams,
     std::function<void(const tensorpipe::Error&)> fn) noexcept {
-  tensorpipe::Message tpMessage;
-  TensorpipeWriteBuffers tpBuffers;
-
-  std::tie(tpMessage, tpBuffers) =
+  auto [tpMessage, tpBuffers] =
       tensorpipeSerialize(std::move(rpcMessage), std::move(devices), streams);
 
   pipe->write(
@@ -816,11 +806,15 @@ c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
       // An instance of ClientPipe cannot be copied or moved as it contains a
       // mutex, and to force in-place construction in GCC 5 we need piecewise
       // construction in order to work around an issue.
-      std::tie(it, std::ignore) = connectedPipes_.emplace(
-          std::piecewise_construct,
-          std::forward_as_tuple(toWorkerInfo.id_),
-          std::forward_as_tuple(context_->connect(
-              url, tensorpipe::PipeOptions().remoteName(toWorkerInfo.name_))));
+      it = connectedPipes_
+               .emplace(
+                   std::piecewise_construct,
+                   std::forward_as_tuple(toWorkerInfo.id_),
+                   std::forward_as_tuple(context_->connect(
+                       url,
+                       tensorpipe::PipeOptions().remoteName(
+                           toWorkerInfo.name_))))
+               .first;
     }
   }
   ClientPipe& clientPipe = it->second;
@@ -1281,13 +1275,13 @@ void TensorPipeAgent::updateGroupMembership(
 }
 std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {
   std::unordered_map<std::string, std::string> metrics;
-  metrics[kThreadPoolSize] = c10::to_string(threadPool_.size());
-  metrics[kNumIdleThreads] = c10::to_string(threadPool_.numAvailable());
+  metrics[kThreadPoolSize] = std::to_string(threadPool_.size());
+  metrics[kNumIdleThreads] = std::to_string(threadPool_.numAvailable());
   {
     std::unique_lock<std::mutex> lock(callCountMutex_);
-    metrics[kClientActiveCalls] = c10::to_string(clientActiveCalls_);
-    metrics[kServerActiveCalls] = c10::to_string(serverActiveCalls_);
-    metrics[kServerActiveAsyncCalls] = c10::to_string(serverActiveAsyncCalls_);
+    metrics[kClientActiveCalls] = std::to_string(clientActiveCalls_);
+    metrics[kServerActiveCalls] = std::to_string(serverActiveCalls_);
+    metrics[kServerActiveAsyncCalls] = std::to_string(serverActiveAsyncCalls_);
   }
   if (isGILProfilingEnabled()) {
     {
@@ -1297,7 +1291,7 @@ std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {
       auto averageGilWaitTime =
           timeSeriesMetrics_[kGilAverageWaitTime].computeAverage();
       lock.unlock();
-      metrics[kGilAverageWaitTime] = c10::to_string(averageGilWaitTime);
+      metrics[kGilAverageWaitTime] = std::to_string(averageGilWaitTime);
     }
   }
 
@@ -1472,8 +1466,6 @@ size_t TensorPipeAgent::messageIdToTimeoutMapSize() {
   return messageIdToTimeout_.size();
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc
 
 #endif // USE_TENSORPIPE

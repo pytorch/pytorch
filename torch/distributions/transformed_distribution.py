@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Dict
 
 import torch
@@ -6,6 +7,8 @@ from torch.distributions.distribution import Distribution
 from torch.distributions.independent import Independent
 from torch.distributions.transforms import ComposeTransform, Transform
 from torch.distributions.utils import _sum_rightmost
+from torch.types import _size
+
 
 __all__ = ["TransformedDistribution"]
 
@@ -67,9 +70,7 @@ class TransformedDistribution(Distribution):
         transform = ComposeTransform(self.transforms)
         if len(base_shape) < transform.domain.event_dim:
             raise ValueError(
-                "base_distribution needs to have shape with size at least {}, but got {}.".format(
-                    transform.domain.event_dim, base_shape
-                )
+                f"base_distribution needs to have shape with size at least {transform.domain.event_dim}, but got {base_shape}."
             )
         forward_shape = transform.forward_shape(base_shape)
         expanded_base_shape = transform.inverse_shape(forward_shape)
@@ -142,7 +143,7 @@ class TransformedDistribution(Distribution):
                 x = transform(x)
             return x
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
         """
         Generates a sample_shape shaped reparameterized sample or sample_shape
         shaped batch of reparameterized samples if the distribution parameters

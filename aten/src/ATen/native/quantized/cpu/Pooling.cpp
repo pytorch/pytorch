@@ -5,6 +5,7 @@
 #include <ATen/Parallel.h>
 #include <torch/library.h>
 #include <ATen/native/Pool.h>
+#include <ATen/native/MaxPooling.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
@@ -271,7 +272,7 @@ Tensor q_maxpool_2d(
             .memory_format(qx.suggest_memory_format()),
           qx.q_scale(),
           qx.q_zero_point(),
-          c10::nullopt);
+          std::nullopt);
     }
     qmaxpool_2d_nhwc_stub(qx.device().type(), qx, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
     return qy;
@@ -421,7 +422,7 @@ Tensor q_maxpool_3d(
           .memory_format(qx.suggest_memory_format()),
         qx.q_scale(),
         qx.q_zero_point(),
-        c10::nullopt);
+        std::nullopt);
     qmaxpool_3d_nthwc_stub(qx.device().type(), qx, iC, iT, iH, iW, oT, oH, oW, kT, kH, kW, sT, sH, sW, pT, pH, pW, dT, dH, dW, qy);
     return qy;
   } else {
@@ -702,6 +703,7 @@ Tensor quantized_max_pool1d(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
+  check_max_pool1d(qx, kernel_size, stride, padding, dilation, ceil_mode);
   // (C, L) -> (C, 1, L) => kSqueezeDim = 1
   // (N, C, L) -> (N, C, 1, L) => kSqueezeDim = 2
   const int32_t kSqueezeDim = qx.dim() - 1;

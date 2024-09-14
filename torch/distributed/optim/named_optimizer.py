@@ -1,8 +1,18 @@
+# mypy: allow-untyped-defs
 import logging
 import warnings
-
 from copy import deepcopy
-from typing import Any, Callable, Collection, Dict, List, Mapping, Optional, Union, overload
+from typing import (
+    Any,
+    Callable,
+    Collection,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    overload,
+    Union,
+)
 
 import torch
 import torch.nn as nn
@@ -244,9 +254,7 @@ class _NamedOptimizer(optim.Optimizer):
 
         src_group_map = {}
         for group in src_param_groups:
-            param_keys = []
-            for param_key in group["params"]:
-                param_keys.append(param_key)
+            param_keys = list(group["params"])
             src_group_map[_gen_param_group_key(param_keys)] = group
         new_group_map = {}
         for new_group in new_param_groups:
