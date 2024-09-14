@@ -18,7 +18,7 @@ from typing_extensions import ParamSpec
 
 import torch
 import torch.library
-from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
+from torch._ops import HigherOrderOperator, OperatorBase, OpOverload, OpOverloadPacket
 from torch._prims_common import CustomOutParamAnnotation
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.utils import _pytree as pytree
@@ -300,7 +300,7 @@ def _is_cia_op(op: "OpOverload") -> bool:
 
 
 @lru_cache(maxsize=1)
-def _collect_all_valid_cia_ops() -> Set["OpOverload"]:
+def _collect_all_valid_cia_ops() -> Set["OperatorBase"]:
     """
     This is an util function that gets the all CIA functional ops.
 
