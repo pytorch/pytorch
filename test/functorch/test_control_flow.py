@@ -1353,6 +1353,7 @@ def forward(self, pred_1, x_1):
         self.assertEqual(out, exp_out)
 
     @requires_cuda
+    @unittest.skipIf(not SM70OrLater, "triton")
     @parametrize("reverse", [False, True])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])

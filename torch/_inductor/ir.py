@@ -6734,45 +6734,18 @@ class SequentialScan(ExternKernel):
         num_init_leaves = len(init)
         init = [cls.realize_input(x) for x in init]
         xs = [cls.realize_input(x) for x in xs]
+        scan_length = xs[0].get_size()[dim]
         additional_inputs = [cls.realize_input(x) for x in additional_inputs]
         all_inputs = init + xs + additional_inputs
-
-        def extract_scan_args(
-            combine_subraph, init, xs, dim, reverse, additional_inputs
-        ):
-            return combine_subraph, init, xs, dim, reverse, additional_inputs
-
-        _, fx_init, fx_xs, _, _, fx_additional_inputs = extract_scan_args(
-            *V.graph.current_node.args
-        )
-        fx_all_inputs = fx_init + fx_xs + fx_additional_inputs
-
-        if combine_subgraph.graph is None:
-            # create and lower subgraphs
-            combine_subgraph.graph = V.graph.make_subgraph(
-                gm=combine_subgraph.graph_module,
-                example_inputs=fx_all_inputs,  # type: ignore[arg-type]
-                subgraph_name=combine_subgraph.name,
-            )
-            with V.set_graph_handler(combine_subgraph.graph):
-                # dim could be a SymInt, we cast it to int since it's specialized and guarded.
-                specialized_dim = int(dim)
-                fake_sliced_inputs = (
-                    [node.meta["val"] for node in fx_init]
-                    + [node.meta["val"].select(int(dim), 0) for node in fx_xs]
-                    + [node.meta["val"] for node in fx_additional_inputs]
-                )  # type: ignore[union-attr]
-                combine_subgraph.graph.run(*fake_sliced_inputs)
 
         carry, ys = _extract_carry_and_out(combine_subgraph.graph.graph_outputs, num_init_leaves)  # type: ignore[union-attr]
 
         if _has_aliased_buffers(carry + ys):
             raise AssertionError(
-                "Output aliasing is currently not supported in compiled torch.scan. "
-                f"The outputs of the combine_fn subgraph of torch.scan are aliased: {combine_subgraph.graph.graph_outputs}"
+                f"Output aliasing is currently not supported in compiled torch.scan. "
+                f"The outputs of the combine_fn subgraph of torch.scan are aliased: {combine_subgraph.graph.graph_outputs}"  # type: ignore[union-attr]
             )
         device = all_inputs[0].get_device()
-        scan_length = xs[0].get_size()[dim]
 
         # make sure init and outputs are structurally equivalent
         assert len(carry) == num_init_leaves, (init, carry)

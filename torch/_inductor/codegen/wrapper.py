@@ -2039,49 +2039,73 @@ class WrapperCodeGen(CodeGen):
         outer_carry_out, outer_ys_out = _extract_carry_and_out(
             outer_outputs, len(outer_init)
         )
-        # Initialize the carry output to be init.
-        for carry_out, init in zip(outer_carry_out, outer_init):
-            self.writeline(f"{carry_out} = {init}")
+        # Initialize the carry output to be a clone of init.
+        outer_carry_outs = []
+        self.writeline(f"outer_carry_out = [None for i in range({len(outer_init)})]")
+        for i, init in enumerate(
+            _extract_carry_and_out(sequential_scan.outputs, len(outer_init))[0]
+        ):
+            self.writeline(f"outer_carry_out[{i}] = {outer_init[i]}.clone()")
+            self.writeline(f"{name}[{i}] = outer_carry_out[{i}]")
+            outer_carry_outs.append(f"outer_carry_out[{i}]")
+
+        self.writeline(f"innner_carry_out = [None] * {len(outer_carry_outs)}")
+        inner_carry_outs = []
+        for i in range(len(outer_carry_outs)):
+            inner_carry_outs.append(f"innner_carry_out[{i}]")
+
+        # Initialize the ys_output to an empty buffer.
+        outer_ys_outs = []
+        self.writeline(f"outer_ys_out = [None for i in range({len(outer_ys_out)})]")
+        for i, ys_out in enumerate(
+            _extract_carry_and_out(sequential_scan.outputs, len(outer_init))[1]
+        ):
+            self.writeline(
+                self.make_allocation(
+                    f"outer_ys_out[{i}]",
+                    ys_out.get_device(),
+                    ys_out.get_dtype(),
+                    ys_out.get_size(),
+                    ys_out.get_stride(),
+                )
+            )
+            self.writeline(f"{name}[{i+len(outer_carry_out)}] = outer_ys_out[{i}]")
+            outer_ys_outs.append(f"outer_ys_out[{i}]")
 
         self.writeline(f"scan_length = {outer_xs[0]}.shape[{dim}]")
         self.writeline(f"dim = {sequential_scan.dim}")
         self.writeline(f"reverse = {sequential_scan.reverse}")
-        scatter_idxs = []
-        self.writeline(f"intermediate_outs = [[] for i in range({len(outer_ys_out)})]")
 
         self.writeline("for i in range(scan_length):")
         self.writeline(EnterSubgraphLine(self, sequential_scan.combine_subgraph.graph))
         # set idx to i if not reverse, else to scan_length - i - 1
         self.writeline("idx = i if not reverse else scan_length - i - 1")
+        self.writeline("idx_tensor = torch.tensor(idx)")
         # inner_input = outer_input[idx]
         self.writeline(f"inner_input = [None] * {len(outer_xs)}")
         inner_xs = []
         for i, inp in enumerate(outer_xs):
+            # TODO: put the select also in subgraph
             self.writeline(f"inner_input[{i}] = {inp}.select(dim, idx)")
             inner_xs.append(f"inner_input[{i}]")
 
-        inner_ys_out = []
-        self.writeline(f"inner_ys_out = [None] * {len(outer_ys_out)}")
-        for i in range(len(outer_ys_out)):
-            inner_ys_out.append(f"inner_ys_out[{i}]")
-
         self.codegen_subgraph(
             sequential_scan.combine_subgraph,
-            outer_carry_out + inner_xs + outer_additional_inputs,
-            outer_carry_out + inner_ys_out,
+            outer_carry_outs
+            + inner_xs
+            + outer_additional_inputs
+            + outer_ys_outs
+            + ["idx_tensor"],
+            inner_carry_outs + ["_"] * len(outer_ys_outs),
         )
 
-        for i, inner_ys in enumerate(inner_ys_out):
-            self.writeline(f"intermediate_outs[{i}].append({inner_ys})")
+        # Note: we have to copy the inner_carry_outs to outer_carry_outs in wrapper instead of in
+        # subgraph. This is to avoid the case where inplace overrides the inputs causes
+        # other parts of the subgraph to be using the overwritten version.
+        for i in range(len(inner_carry_outs)):
+            self.writeline(f"{outer_carry_outs[i]}.copy_({inner_carry_outs[i]})")
 
         self.writeline(ExitSubgraphLine(self))
-        for i, outer_ys in enumerate(outer_ys_out):
-            if sequential_scan.reverse:
-                self.writeline(
-                    f"{outer_ys} = torch.stack(tuple(reversed(intermediate_outs[{i}])))"
-                )
-            else:
-                self.writeline(f"{outer_ys} = torch.stack(intermediate_outs[{i}])")
 
     @staticmethod
     def statically_known_int_or_none(x):
