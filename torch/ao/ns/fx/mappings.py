@@ -432,7 +432,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
     for source_to_target in (
         quantization_mappings.DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS,
     ):
-        for source, target in source_to_target.items():
+        for source, target in source_to_target.items():  # type:ignore[assignment]
             new_connections.append((source, target))
 
     # add the new connections from backend_config

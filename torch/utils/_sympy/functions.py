@@ -829,7 +829,7 @@ class Max(MinMaxBase, Application):  # type: ignore[misc]
     def _eval_is_nonnegative(self):  # type:ignore[override]
         return fuzzy_or(a.is_nonnegative for a in self.args)  # type: ignore[attr-defined]
 
-    def _eval_is_negative(self):
+    def _eval_is_negative(self):  # type:ignore[override]
         return fuzzy_and(a.is_negative for a in self.args)
 
 
@@ -847,7 +847,7 @@ class Min(MinMaxBase, Application):  # type: ignore[misc]
     def _eval_is_nonnegative(self):  # type:ignore[override]
         return fuzzy_and(a.is_nonnegative for a in self.args)  # type: ignore[attr-defined]
 
-    def _eval_is_negative(self):
+    def _eval_is_negative(self):  # type:ignore[override]
         return fuzzy_or(a.is_negative for a in self.args)
 
 

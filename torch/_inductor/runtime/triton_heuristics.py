@@ -957,7 +957,7 @@ class DebugAutotuner(CachingAutotuner):
         super().__init__(*args, **kwargs)
         self.cached = None
 
-    def run(self, *args, grid, stream):
+    def run(self, *args, grid, stream):  # type: ignore[override]
         possible_names = _find_names(self)
         kernel_name = f"{max(possible_names, key=len)}"
         if not re.match(self.regex_filter, kernel_name):

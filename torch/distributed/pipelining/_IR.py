@@ -932,8 +932,7 @@ class Pipe(torch.nn.Module):
                         if node.op == "get_attr":
                             # get_attr might get access deeper level attribute
                             fqn = scope + "." + node.target if scope else node.target
-                            if fqn in unused_attributes:  # used, remove it
-                                unused_attributes.remove(fqn)
+                            unused_attributes.discard(fqn)
                 for _name, _submod in _mod.named_children():
                     stack.append((scope + "." + _name if scope else _name, _submod))
             # delete unused attributes

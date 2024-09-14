@@ -102,7 +102,7 @@ class RemoteCache(Generic[_T]):
         self._log_sample(sample)
 
     def _decode(self, data: _U, sample: Optional[Sample]) -> _T:  # type: ignore[override]
-        return self.serde.decode(data)
+        return self.serde.decode(data)  # type: ignore[arg-type]
 
     def _encode(self, value: _T, sample: Optional[Sample]) -> Any:  # returns _U
         return self.serde.encode(value)
