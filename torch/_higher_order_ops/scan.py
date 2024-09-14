@@ -566,6 +566,22 @@ class ScanAutogradOp(torch.autograd.Function):
 
             return g_xs
 
+        def prepare_initial_gradients(
+            flat_grads, additional_inputs, num_leaves_init, num_leaves_ys, dim
+        ):
+            # The flat gradients are a list of g_c_T, g_ys
+            g_c_T, g_ys, _ = ScanAutogradOp.extract_init_xs_additional_inputs(
+                list(flat_grads), num_leaves_init, num_leaves_ys
+            )
+
+            # In case the reverse flag is used, the upstream g_ys need to be flipped along dim
+            if reverse:
+                g_ys = [torch.flip(g, [dim]) for g in g_ys]
+
+            # The initial gradients for the additional_inputs are all zeros
+            g_additional_inputs = [torch.zeros_like(ai) for ai in additional_inputs]
+            return g_c_T, g_ys, g_additional_inputs
+
         joint_graph = ctx._joint_graph
         dim = ctx._dim
         reverse = ctx._reverse
@@ -595,11 +611,14 @@ class ScanAutogradOp(torch.autograd.Function):
         ]
 
         with torch._C._AutoDispatchBelowAutograd():
-            # The flat gradients are a list of g_c_T, g_ys and optionally the gradients for the additional_inputs
-            g_c_T, g_ys, _ = ScanAutogradOp.extract_init_xs_additional_inputs(
-                list(flat_grads), num_leaves_init, num_leaves_ys
+            # Prepare the initial gradients for the backward scan
+            g_c_T, g_ys, g_additional_inputs = prepare_initial_gradients(
+                list(flat_grads),
+                additional_inputs,
+                num_leaves_init,
+                num_leaves_ys,
+                bwd_scan_dim,
             )
-            g_additional_inputs = [torch.zeros_like(ai) for ai in additional_inputs]
 
             # Prepare the inputs for the backward scan.
             # This involves flipping the input xs if needed as well as
