@@ -14,6 +14,17 @@ from torch.utils._device import DeviceContext
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
+class TestMode(BaseTorchFunctionMode):
+    def __torch_function__(self, func, types, args, kwargs=None):
+        if not kwargs:
+            kwargs = {}
+
+        if func == torch.add:
+            return torch.zeros(2, 2)
+
+        return super().__torch_function__(func, types, args, kwargs)
+
+
 class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -323,6 +334,130 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
                 fn(inp)
             fn(inp)
         self.assertEqual(cnt.frame_count, 2)
+
+    def test_nested_torch_function_mode(self):
+        mode_1_called = False
+        mode_2_called = False
+
+        def reset_state():
+            nonlocal mode_1_called
+            nonlocal mode_2_called
+            mode_1_called = False
+            mode_2_called = False
+
+        ones = torch.ones(2, 2)
+        zeros = torch.zeros(2, 2)
+
+        class TestMode1(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                if not kwargs:
+                    kwargs = {}
+
+                nonlocal mode_1_called
+
+                mode_1_called = True
+
+                if func == torch.add:
+                    return zeros
+
+                return super().__torch_function__(func, types, args, kwargs)
+
+        class TestMode2(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                if not kwargs:
+                    kwargs = {}
+
+                nonlocal mode_2_called
+
+                mode_2_called = True
+
+                if func == torch.mul:
+                    return ones
+
+                return super().__torch_function__(func, types, args, kwargs)
+
+        def fn(x):
+            return torch.add(x, 3)
+
+        def fn_2(x):
+            return torch.mul(x, 3) + torch.add(x, 3)
+
+        inp = torch.ones(2, 2) + 1
+
+        for fn_i in [fn, fn_2]:
+            fn_opt = torch.compile(fn_i, fullgraph=True)
+            with TestMode1(), TestMode2():
+                expected = fn_i(inp), mode_1_called, mode_2_called
+                reset_state()
+                actual = fn_opt(inp), mode_1_called, mode_2_called
+                reset_state()
+
+            self.assertEqual(expected, actual)
+
+    def test_torch_function_mode_disable(self):
+        class TestSubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                if not kwargs:
+                    kwargs = {}
+                if func == torch.add:
+                    return torch.ones(2, 2)
+                return super().__torch_function__(func, types, args, kwargs)
+
+        class TestMode(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                if not kwargs:
+                    kwargs = {}
+
+                if func == torch.add:
+                    return torch.zeros(2, 2)
+
+                return super().__torch_function__(func, types, args, kwargs)
+
+        def fn(x):
+            return torch.add(x, 3)
+
+        inp = (torch.ones(2, 2) + 1).as_subclass(TestSubclass)
+
+        fn_opt = torch.compile(fn, fullgraph=True)
+        with TestMode(), torch._dynamo.config.patch(
+            "traceable_tensor_subclasses", {TestSubclass}
+        ):
+            with torch._C.DisableTorchFunctionSubclass():
+                expected = fn(inp)
+                actual = fn_opt(inp)
+
+            self.assertEqual(expected, actual)
+
+            with torch._C.DisableTorchFunction():
+                expected = fn(inp)
+                actual = fn_opt(inp)
+
+            self.assertEqual(expected, actual)
+
+    def test_torch_function_mode_highest_priority(self):
+        class TestSubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                if not kwargs:
+                    kwargs = {}
+                if func == torch.add:
+                    return torch.ones(2, 2)
+                return super().__torch_function__(func, types, args, kwargs)
+
+        def fn(x):
+            return torch.add(x, 3)
+
+        inp = (torch.ones(2, 2) + 1).as_subclass(TestSubclass)
+
+        fn_opt = torch.compile(fn, fullgraph=True)
+        with TestMode(), torch._dynamo.config.patch(
+            "traceable_tensor_subclasses", {TestSubclass}
+        ):
+            expected = fn(inp)
+            actual = fn_opt(inp)
+
+        self.assertEqual(expected, actual)
 
 
 if __name__ == "__main__":
