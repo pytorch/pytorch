@@ -79,15 +79,31 @@ struct CheckBytePack<T, /*EltPerPack*/8> {
   }
 };
 
-// (v) Template specialization for Float8_e4m3fn.
+// (v) Template specialization for Float8 types.
 // EltPerPack = 16 / 1 = 16
+
+// We want to check 8 x FP8 simultaneously, hence this template definition.
+template<typename T>
+struct HasNanFP8x8 {
+  // I am a dumb implementation. You should never call in here, unless the check
+  // for your datatype hasn't been implemented. File a Feature Request in that
+  // case.
+  static __device__ __forceinline__ bool check(uint64_t fp8x8) {
+    T* data = &fp8x8;
+    bool hasNan = false;
+    for (int i = 0; i < 8; i++) {
+      hasNan |= isnan(data[i]);
+    }
+    return hasNan;
+  }
+};
 
 // isnan condition for Float8_e4m3fn:
 // (x & 0b01111111) == 0b01111111
 // i.e.
 // (x & 0x7f) == 0x7f
 
-// We want to check 8 x FP8 simultaneously. The algorithm is as follows:
+// The algorithm is as follows:
 // (1) Mask out the most significant bit with mask 0x7f.
 // (2) If the result is 0x7f (is nan), the following arithmetic would cause the
 //     8th bit to be 1: x[i] = x[i] + 0x01
@@ -95,16 +111,34 @@ struct CheckBytePack<T, /*EltPerPack*/8> {
 // (4) If any x[i] is nan, then the whole x != 0.
 
 template<>
-struct CheckBytePack<c10::Float8_e4m3fn, /*EltPerPack*/16> {
-  static __device__ __forceinline__ bool hasNanFP8x8(uint64_t fp8x8) {
+struct HasNanFP8x8<c10::Float8_e4m3fn> {
+  static __device__ __forceinline__ bool check(uint64_t fp8x8) {
     auto t = fp8x8 & 0x7F7F7F7F7F7F7F7FULL;
     auto incremented = t + 0x0101010101010101ULL;
     auto overflow = incremented & 0x8080808080808080ULL;
     return overflow != 0;
   }
+};
 
+// isnan condition for Float8_e5m2:
+// (x & 0x7f) > 0x7c
+// This case does not overflow: 0x7c + 0x03 == 0x7f but adding 0x03 to anything
+// greater than 0x7c will overflow.
+
+template<>
+struct HasNanFP8x8<c10::Float8_e5m2> {
+  static __device__ __forceinline__ bool check(uint64_t fp8x8) {
+    auto t = fp8x8 & 0x7F7F7F7F7F7F7F7FULL;
+    auto incremented = t + 0x0303030303030303ULL;
+    auto overflow = incremented & 0x8080808080808080ULL;
+    return overflow != 0;
+  }
+};
+
+template<typename T>
+struct CheckBytePack<T, /*EltPerPack*/16> {
   static __device__ __forceinline__ void check(BytePack* tmp) {
-    if (hasNanFP8x8(tmp->ul[0]) || hasNanFP8x8(tmp->ul[1]))
+    if (HasNanFP8x8<T>::check(tmp->ul[0]) || HasNanFP8x8<T>::check(tmp->ul[1]))
         __trap();
   }
 };
