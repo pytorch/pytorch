@@ -232,6 +232,8 @@ def scan(
         raise RuntimeError("Reverse must be a bool, but got " + str(type(reverse)))
 
     # TODO: Unify handling of pytrees for control flow ops, such as cond, while_loop, etc.
+    # TODO: The dim argument can alternatively be handled by always moving this dim
+    # to zero, scan over the 0-th dim and then move the dim back for the results
 
     if not torch._dynamo.is_compiling():
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
@@ -670,7 +672,8 @@ def scan_autograd(combine_fn, init, xs, dim, reverse, additional_inputs):
         # The scan dim in the backward backward is always zero, because the
         # scan outputs during the forward are always collected at dim=0
         bwd_dim = 0
-        return scan_op(combine_fn, init, xs, bwd_dim, reverse, additional_inputs)
+        with torch._C._AutoDispatchBelowAutograd():
+            return scan_op(combine_fn, init, xs, bwd_dim, reverse, additional_inputs)
 
     num_leaves_init = len(init)
     num_leaves_xs = len(xs)
