@@ -1237,9 +1237,29 @@ class GraphLowering(torch.fx.Interpreter):
         If fx_node mutates any of new_args/new_kwargs, and they are different from
         old_args/old_kwargs, then we need to update the original tensor.
         """
-        assert isinstance(fx_node.target, torch._ops.OpOverload)
         assert len(old_args) == len(new_args)
         assert len(old_kwargs) == len(new_kwargs)
+
+        if fx_node.target is torch.ops.higher_order.triton_kernel_wrapper_mutation:
+            kwargs = fx_node.kwargs["kwargs"]
+            assert isinstance(kwargs, dict)
+            mutated = torch._higher_order_ops.triton_kernel_wrap.get_mutated_tensors(
+                old_kwargs["kernel_idx"],
+                old_kwargs["constant_args_idx"],
+                {
+                    k: v.meta["val"] if isinstance(v, torch.fx.Node) else v
+                    for k, v in kwargs.items()
+                },
+            )
+            for name in mutated:
+                old_arg = old_kwargs["kwargs"][name]
+                new_arg = new_kwargs["kwargs"][name]
+                if old_arg is new_args:
+                    continue
+                self.call_function(torch.ops.aten.copy_.default, (old_arg, new_arg), {})
+            return
+
+        assert isinstance(fx_node.target, torch._ops.OpOverload)
 
         def maybe_propagate(
             schema_arg: torch._C.Argument, old_arg: ir.IRNode, new_arg: ir.IRNode
@@ -1302,6 +1322,25 @@ class GraphLowering(torch.fx.Interpreter):
                 # if they do, and if the target is mutable, then we need to
                 # write the new values back into the original inputs.
                 self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
+            elif (
+                n.op == "call_function"
+                and n.target is torch.ops.higher_order.triton_kernel_wrapper_mutation
+                and config.triton_kernel_default_layout_constraint != "flexible_layout"
+            ):
+                debug("user_defined_triton_kernel_layout_constraints")
+                if (
+                    config.triton_kernel_default_layout_constraint
+                    == "needs_fixed_stride_order"
+                ):
+                    old_args = args  # type: ignore[possibly-undefined]
+                    old_kwargs = kwargs  # type: ignore[possibly-undefined]
+                    args, kwargs = torch._inductor.lowering.constrain_to_fx_strides(n, *args, **kwargs)  # type: ignore[index]
+                    result = self.call_function(n.target, args, kwargs)  # type: ignore[arg-type]
+                    self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
+                else:
+                    raise RuntimeError(
+                        f"Unknown triton_kernel_default_layout_constraint: {config.triton_kernel_default_layout_constraint}"
+                    )
             elif is_magic_method(n.target):
                 # TODO: this is sus, it probably should be handled in the
                 # lowerings themselves similarly to sym_size/sym-stride
