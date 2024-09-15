@@ -2821,7 +2821,7 @@ def forward(self, pred_1, x_1):
             inp_flat = pytree.tree_leaves(inp)
             self.check_autograd(result, expected_result, (*init_flat, *inp_flat))
 
-    @skipIfNoDynamoSupport
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @parametrize("autograd", [False, True])
     def test_scan_closure_RNN(self, autograd):
         dim = 1
@@ -2840,6 +2840,12 @@ def forward(self, pred_1, x_1):
         b_ih = rnn.bias_ih_l0.clone()
         W_hh = rnn.weight_hh_l0.T.clone()
         b_hh = rnn.bias_hh_l0.clone()
+
+        if not autograd:
+            W_ih = W_ih.detach()
+            b_ih = b_ih.detach()
+            W_hh = W_hh.detach()
+            b_hh = b_hh.detach()
 
         def RNN(x: torch.Tensor, y: torch.Tensor):
             c_new = y @ W_ih + b_ih
@@ -2884,7 +2890,7 @@ def forward(self, pred_1, x_1):
             grads = grads[:2]
             self.assertEqual(grads, expected_grads)
             self.assertEqual(add_input_grads, expected_add_input_grads)
-            
+
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
@@ -2892,17 +2898,18 @@ def forward(self, pred_1, x_1):
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_closure_RNN_partial_autograd(self, reverse, compile_mode, device):
         import random
-        
+
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
         autograds = []
+        autograds.append([True, True, True, True, True, True])
         autograds.append([False, False, True, True, True, True])
         autograds.append([True, True, False, False, False, False])
         autograds.append([True, False, False, False, False, False])
         autograds.append([False, True, False, False, False, False])
-        for _ in range(10):
+        for _ in range(5):
             autograds.append([bool(random.randint(0, 1)) for _ in range(6)])
-        
+
         for autograd in autograds:
             x = torch.randn(3, 10, 5, device=device, requires_grad=autograd[0])
             h = torch.randn(3, 7, device=device, requires_grad=autograd[1])
@@ -2910,7 +2917,7 @@ def forward(self, pred_1, x_1):
             b_ih = torch.randn(7, device=device, requires_grad=autograd[3])
             W_hh = torch.randn(7, 7, device=device, requires_grad=autograd[4])
             b_hh = torch.randn(7, device=device, requires_grad=autograd[5])
-            
+
             params = [p for p, a in zip([x, h, W_ih, b_ih, W_hh, b_hh], autograd) if a]
 
             def RNN(x: torch.Tensor, y: torch.Tensor):
@@ -2918,12 +2925,57 @@ def forward(self, pred_1, x_1):
                 h_new = torch.tanh(c_new + x @ W_hh + b_hh)
                 return c_new, h_new
 
+            if False in autograd:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "scan currently only supports Autograd if all.*",
+                ):
+                    result = scan_fct(RNN, h, x, dim=dim, reverse=reverse)
+            else:
+                result = scan_fct(RNN, h, x, dim=dim, reverse=reverse)
+                result_exp = _fake_scan(RNN, h, x, dim=dim, reverse=reverse)
+                self.assertEqual(result, result_exp)
+
+                if autograd:
+                    self.check_autograd(result, result_exp, params)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("autograd", [False, True])
+    def test_scan_closure_combine_fn_with_no_grad(
+        self, reverse, compile_mode, device, autograd
+    ):
+        dim = 1
+        scan_fct = compile_mode_helper(scan, compile_mode)
+        x = torch.randn(3, 10, 5, device=device, requires_grad=autograd)
+        h = torch.randn(3, 7, device=device, requires_grad=autograd)
+        W_ih = torch.randn(5, 7, device=device, requires_grad=autograd)
+        b_ih = torch.randn(7, device=device, requires_grad=autograd)
+        W_hh = torch.randn(7, 7, device=device, requires_grad=autograd)
+        b_hh = torch.randn(7, device=device, requires_grad=autograd)
+
+        def RNN(x: torch.Tensor, y: torch.Tensor):
+            c_new = y @ W_ih + b_ih
+            with torch.no_grad():
+                h_new = torch.tanh(c_new + x @ W_hh + b_hh)
+            return c_new, h_new
+
+        if autograd:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "scan currently only supports Autograd if all.*",
+            ):
+                result = scan_fct(RNN, h, x, dim=dim, reverse=reverse)
+        else:
             result = scan_fct(RNN, h, x, dim=dim, reverse=reverse)
             result_exp = _fake_scan(RNN, h, x, dim=dim, reverse=reverse)
             self.assertEqual(result, result_exp)
 
             if autograd:
-                self.check_autograd(result, result_exp, params)
+                self.check_autograd(result, result_exp, (x, h, W_ih, b_ih, W_hh, b_hh))
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda

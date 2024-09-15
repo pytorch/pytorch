@@ -112,6 +112,15 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs):
                 wrapper_fwd_combine_fn(*fw_init, *fw_xs, *fw_additional_inputs),
                 num_init,
             )
+            # TODO: Support this in the future
+            if pytree.tree_any(
+                lambda t: not t.requires_grad,  # type: ignore[union-attr]
+                combine_fn(*fw_init, *fw_xs, *fw_additional_inputs),
+            ):
+                raise RuntimeError(
+                    "scan currently only supports Autograd if all init, xs and lifted parameters require gradients."
+                )
+
             fw_carry, fw_outputs = [pytree.tree_map(_from_fun, c) for c in carry], [
                 pytree.tree_map(_from_fun, o) for o in outs
             ]
@@ -671,6 +680,15 @@ def scan_autograd(combine_fn, init, xs, dim, reverse, additional_inputs):
     ):
         with torch._C._AutoDispatchBelowAutograd():
             return scan_op(combine_fn, init, xs, dim, reverse, additional_inputs)
+
+    # TODO: Support this in the future
+    if pytree.tree_any(
+        lambda t: not t.requires_grad,  # type: ignore[union-attr]
+        (init, xs, additional_inputs),
+    ):
+        raise RuntimeError(
+            "scan currently only supports Autograd if all init, xs and lifted parameters require gradients."
+        )
 
     # TODO: The create_fw_bw is always invoked twice:
     # Once in the forward path and
