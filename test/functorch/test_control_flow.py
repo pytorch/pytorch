@@ -30,8 +30,10 @@ from torch.testing._internal.common_utils import (
     parametrize,
     requires_cuda,
     run_tests,
+    skipIfCrossRef,
     skipIfRocm,
     skipIfTorchDynamo,
+    TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfTorchDynamo,
@@ -1303,7 +1305,7 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and params["device"] == torch.device("cpu")
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
     def test_associative_scan_compile(
@@ -1562,7 +1564,7 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and params["device"] == torch.device("cpu")
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
     def test_associative_scan_dim(self, combine_mode, reverse, device):
@@ -1648,7 +1650,7 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and params["device"] == torch.device("cpu")
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
     def test_associative_scan_binary_operator(self, combine_mode, reverse, device):
@@ -1734,6 +1736,7 @@ def forward(self, pred_1, x_1):
             )
             self.assertEqual(grads, expected_grads)
 
+    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("combine_mode", ["pointwise", "generic"])
@@ -1745,7 +1748,7 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and params["device"] == torch.device("cpu")
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
     def test_associative_scan_tuple(self, combine_mode, reverse, device):
@@ -1765,6 +1768,7 @@ def forward(self, pred_1, x_1):
         )
         self.assertEqual(result1, expected_result)
 
+    @skipIfRocm(msg="Unsupported on ROCM yet")
     @requires_cuda
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
@@ -1841,7 +1845,7 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and params["device"] == torch.device("cpu")
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
     def test_associative_scan_complex_pytree(self, combine_mode, reverse, device):
@@ -1948,7 +1952,7 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and params["device"] == torch.device("cpu")
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
     def test_associative_scan_downstream_scan_matmul(
@@ -1987,7 +1991,7 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and params["device"] == torch.device("cpu")
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
     def test_associative_scan_downstream_scan_scan(
@@ -2038,7 +2042,7 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and params["device"] == torch.device("cpu")
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
     def test_associative_scan_downstream_scan_scan_different_dim(
@@ -3080,6 +3084,7 @@ def forward(self, pred_1, x_1):
             gm = make_fx(f, tracing_mode="symbolic")(add_wrong_dtype, init, x)
 
     @skipIfNoDynamoSupport
+    @skipIfCrossRef  # Arg order changes with crossref
     def test_scan_simple_graph(self):
         from torch._dynamo.testing import EagerAndRecordGraphs
 
@@ -3180,6 +3185,7 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(graph(x, torch.tensor(True)), f(x, torch.tensor(True)))
 
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipIfCrossRef  # Arg order changes with crossref
     def test_cond_simple_with_linear_compile_check_graph(self):
         from torch._dynamo.testing import EagerAndRecordGraphs
 
@@ -3442,6 +3448,7 @@ def forward(self, arg0_1):
         self._check_compile(fn, inp, backend=backend)
 
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipIfCrossRef  # Arg order changes with cross ref
     def test_while_loop_simple_with_linear_compile_check_graph(self):
         fn, inp = WHILE_LOOP_TESTS["simple_with_linear"]
         from torch._dynamo.testing import EagerAndRecordGraphs
@@ -5618,9 +5625,32 @@ def forward(self, l_inp_, l_tmp_):
         exp_out = _fake_scan(add, init, xs)
 
         self.assertEqual(len(backend.graphs), 1)
-        self.assertExpectedInline(
-            backend.graphs[0].code.strip(),
-            """\
+        if TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                backend.graphs[0].code.strip(),
+                """\
+def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_cell_contents_0_param_ : torch.Tensor, L_add_closure_0_cell_contents_1_0_ : torch.Tensor):
+    l_init_ = L_init_
+    l_xs_ = L_xs_
+    l_add_closure_0_cell_contents_0_param_ = L_add_closure_0_cell_contents_0_param_
+    l_add_closure_0_cell_contents_1_0_ = L_add_closure_0_cell_contents_1_0_
+    select = l_xs_.select(0, 0)
+    matmul = l_init_ @ l_add_closure_0_cell_contents_0_param_
+    matmul_1 = matmul @ select;  matmul = select = None
+    ret = matmul_1 + l_add_closure_0_cell_contents_1_0_;  matmul_1 = None
+    sum_1 = ret.sum();  ret = sum_1 = None
+    child = l_init_.clone();  child = None
+    r = torch.select_copy(l_xs_, 0, 0);  r = None
+    scan_combine_fn_0 = self.scan_combine_fn_0
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], 0, False, [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = l_xs_ = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
+    getitem = scan[0]
+    getitem_1 = scan[1];  scan = None
+    return (getitem, getitem_1)""",  # noqa: B950
+            )
+        else:
+            self.assertExpectedInline(
+                backend.graphs[0].code.strip(),
+                """\
 def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_cell_contents_0_param_ : torch.Tensor, L_add_closure_0_cell_contents_1_0_ : torch.Tensor):
     l_init_ = L_init_
     l_xs_ = L_xs_
@@ -5638,7 +5668,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     return (getitem, getitem_1)""",  # noqa: B950
-        )
+            )
         self.assertEqual(eager_out, exp_out)
         self.assertEqual(compiled_out, exp_out)
 

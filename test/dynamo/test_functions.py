@@ -700,6 +700,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x - 1
 
     @make_test
+    def test_dict_update_kwargs(x):
+        d = {"a": 2}
+        d.update(b=4)
+        return x * d["a"] * d["b"]
+
+    @make_test
     def test_defaultdict_setdefault1(x):
         d = collections.defaultdict.fromkeys("a", "b")
         d["a"] = 1
