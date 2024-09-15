@@ -15938,8 +15938,7 @@ op_db: List[OpInfo] = [
             wrapper_set_seed(torch.nn.functional.rrelu, input, *args, **kwargs),
         inplace_variant=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.rrelu, input, *args, inplace=True, **kwargs),
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
         gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
