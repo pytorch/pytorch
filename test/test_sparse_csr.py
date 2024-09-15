@@ -4066,6 +4066,8 @@ class TestSparseCompressedTritonKernels(TestCase):
             # definitions above and all other definitions below are
             # identical between _int_bsr_dense_addmm and
             # bsr_dense_addmm.
+            if dtype.is_floating_point or dtype.is_complex:
+                self.skipTest(f"Redundant test: {op} on {dtype} tensors")
             op = 'bsr_dense_addmm'
 
         def nc_copy(t, axes=(-1,)):
