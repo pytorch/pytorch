@@ -389,6 +389,7 @@ y = FakeTensor(..., size=(2,))
         @torch._dynamo.optimize(cnt)
         def f(x):
             y = x * 2
+            lit = 2  # pylint: disable=unused-variable
 
             @comptime
             def _(ctx):
