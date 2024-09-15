@@ -476,7 +476,8 @@ class InspectParameterVariable(VariableTracker):
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         try:
             attr_value = getattr(self.value, name)
-            return VariableTracker.create(tx, attr_value, AttrSource(self.source, name))
+            source = self.source and AttrSource(self.source, name)
+            return VariableTracker.create(tx, attr_value, source)
         except AttributeError:
             unimplemented(f"getattr({self.value}, {name})")
 
@@ -906,7 +907,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             if self.needs_input_grad is not None:
                 return variables.ConstantVariable.create(self.needs_input_grad)
             if self.source:
-                source = (AttrSource(self.source, "needs_input_grad"),)
+                source = AttrSource(self.source, "needs_input_grad")
                 return VariableTracker.create(tx, self.value.needs_input_grad, source)
 
         return super().var_getattr(tx, name)

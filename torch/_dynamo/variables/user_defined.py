@@ -9,6 +9,7 @@ import inspect
 import itertools
 import random
 import sys
+import threading
 import types
 import warnings
 from typing import Dict, Generic, List, TYPE_CHECKING
@@ -82,11 +83,6 @@ def is_forbidden_context_manager(ctx):
         from _pytest.python_api import RaisesContext
         from _pytest.recwarn import WarningsChecker
 
-        # TODO mlazos: Temporary to get this stack to pass
-        # remove in subsequent PR
-        from torch.overrides import BaseTorchFunctionMode
-
-        f_ctxs.append(BaseTorchFunctionMode)
         f_ctxs.append(RaisesContext)
         f_ctxs.append(WarningsChecker)
     except ImportError:
@@ -189,6 +185,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if isinstance(obj, staticmethod):
             return VariableTracker.create(tx, obj.__get__(self.value), source)
         elif isinstance(obj, classmethod):
+            if isinstance(obj.__func__, property):
+                return variables.UserFunctionVariable(obj.__func__.fget).call_function(
+                    tx, [self], {}
+                )
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif isinstance(obj, types.ClassMethodDescriptorType):
             # e.g.: inspect.getattr_static(dict, "fromkeys")
@@ -406,15 +406,25 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and self.source
             and not is_forbidden_context_manager(self.value)
         ):
-            # import here to avoid an unfortunate circular dependency.
+            from torch.overrides import TorchFunctionMode
+
             from .ctx_manager import GenericContextWrappingVariable
+            from .torch_function import TorchFunctionModeVariable
+
+            if issubclass(
+                self.value, TorchFunctionMode
+            ) and TorchFunctionModeVariable.is_supported_torch_function_mode(
+                self.value
+            ):
+                var_cls = TorchFunctionModeVariable
+            else:
+                var_cls = GenericContextWrappingVariable
 
             cm_obj = tx.output.side_effects.track_object_new(
-                self.source, self.value, GenericContextWrappingVariable, {}
+                self.source, self.value, var_cls, {}
             )
             cm_obj.call_method(tx, "__init__", args, kwargs)
             return cm_obj
-
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
             # check if this a quasi-namedtuple or a real one
@@ -702,7 +712,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if method is object.__init__:
                 return ConstantVariable.create(None)
 
-            if is_standard_setattr(method):
+            if is_standard_setattr(method) or isinstance(self.value, threading.local):
                 return self.method_setattr_standard(tx, *args, **kwargs)
 
             # [NOTE] OrderedDict, dict subtypes must always have source
@@ -800,7 +810,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def needs_slow_setattr(self):
         return not is_standard_setattr(
             inspect.getattr_static(self.value, "__setattr__", None)
-        )
+        ) and not isinstance(self.value, threading.local)
 
     def unpack_var_sequence(self, tx):
         if (
@@ -1209,9 +1219,7 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         for field in fields(value):
             if hasattr(value, field.name):
                 field_map[field.name] = VariableTracker.create(
-                    tx,
-                    getattr(value, field.name),
-                    AttrSource(source, field.name)
+                    tx, getattr(value, field.name), AttrSource(source, field.name)
                 )
 
         return FrozenDataClassVariable(value, fields=field_map, source=source)
