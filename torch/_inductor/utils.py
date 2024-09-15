@@ -464,13 +464,23 @@ class CachedMethod(Protocol, Generic[P, RV]):
 
 # See https://github.com/python/mypy/issues/13222#issuecomment-1193073470 to understand the type signature
 def cache_on_self(fn: Callable[Concatenate[Any, P], RV]) -> CachedMethod[P, RV]:
-    key = f"__{fn.__name__}_cache"
+    name = fn.__name__
+    key = f"__{name}_cache"
 
-    @functools.wraps(fn)
-    def wrapper(self):
-        if not hasattr(self, key):
-            setattr(self, key, fn(self))
-        return getattr(self, key)
+    # wrapper is likely on the hot path, compile a specialized version of it
+    ctx = {"fn": fn}
+    exec(
+        f"""\
+        def {name}_cache_on_self(self):
+            try:
+                return self.{key}
+            except AttributeError:
+                self.{key} = rv = fn(self)
+                return rv
+        """.lstrip(),
+        ctx,
+    )
+    wrapper = functools.wraps(fn)(ctx[f"{name}_cache_on_self"])
 
     def clear_cache(self):
         if hasattr(self, key):
@@ -1054,7 +1064,9 @@ def is_big_gpu(index) -> bool:
 
 
 def use_max_autotune() -> bool:
-    return config.max_autotune or config.max_autotune_gemm
+    return (
+        config.max_autotune or config.max_autotune_gemm or config.search_autotune_cache
+    )
 
 
 def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> bool:
@@ -1087,7 +1099,13 @@ def use_triton_template(layout, *, enable_int32=False, enable_float8=False):
     if enable_float8:
         layout_dtypes.extend([torch.float8_e4m3fn, torch.float8_e5m2])
     return (
-        _use_template_for_cuda(layout, layout_dtypes)
+        (
+            (
+                layout.device.type == "cuda"
+                and _use_template_for_cuda(layout, layout_dtypes)
+            )
+            or (layout.device.type == "cpu" and layout.dtype in layout_dtypes)
+        )
         and _use_autotune_backend("TRITON")
         and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
     )
