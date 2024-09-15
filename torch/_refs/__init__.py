@@ -290,6 +290,7 @@ __all__ = [
     "take_along_dim",
     "tensor_split",
     "transpose",
+    "transpose_copy",
     "unbind_copy",
     "unfold",
     "unfold_copy",
@@ -3550,12 +3551,6 @@ def istft(
     y = y.narrow(dim=1, start=start, length=length)
     window_envelop = window_envelop.narrow(dim=1, start=start, length=length)
 
-    window_envelop_lowest = window_envelop.abs().min().lt(1e-11)
-    torch._check(
-        not window_envelop_lowest.item(),
-        lambda: "window overlap add min less than 1e-11",
-    )
-
     y = y / window_envelop
     if original_ndim == 2:
         y = y.squeeze(0)
@@ -6342,6 +6337,7 @@ expand_copy = _make_copy_from_view(aten.expand)
 # no sparse support. See narrow_copy_sparse in core.
 narrow_copy = _make_copy_from_view(aten.narrow)
 t_copy = _make_copy_from_view(aten.t)
+transpose_copy = _make_copy_from_view(aten.transpose)
 unbind_copy = _make_copy_from_view(aten.unbind)
 unsqueeze_copy = _make_copy_from_view(aten.unsqueeze)
 view_copy = _make_copy_from_view(aten.view)

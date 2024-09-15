@@ -14,13 +14,14 @@ import inspect
 import itertools
 import os
 import random
+import sys
 import unittest
 import warnings
 import weakref
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
-from enum import Enum
+from enum import Enum, IntEnum
 from functools import wraps
 from typing import Any, Dict, Iterator, List, Tuple
 from unittest import mock
@@ -4546,6 +4547,82 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f(*args)
         self.assertEqual(num_compiles, 1)
 
+    @unittest.skipIf(sys.version_info < (3, 9), "requires python 3.9+")
+    def test_issue134451(self):
+        class BoundingBox2DIndex(IntEnum):
+            _X = 0
+            _Y = 1
+            _HEADING = 2
+            _LENGTH = 3
+            _WIDTH = 4
+
+            @classmethod
+            def size(cls):
+                return 5
+
+            @classmethod
+            @property
+            def X(cls):
+                return cls._X
+
+            @classmethod
+            @property
+            def Y(cls):
+                return cls._Y
+
+            @classmethod
+            @property
+            def HEADING(cls):
+                return cls._HEADING
+
+            @classmethod
+            @property
+            def LENGTH(cls):
+                return cls._LENGTH
+
+            @classmethod
+            @property
+            def WIDTH(cls):
+                return cls._WIDTH
+
+            @classmethod
+            @property
+            def POINT(cls):
+                # assumes X, Y have subsequent indices
+                return slice(cls._X, cls._Y + 1)
+
+            @classmethod
+            @property
+            def STATE_SE2(cls):
+                # assumes X, Y, HEADING have subsequent indices
+                return slice(cls._X, cls._HEADING + 1)
+
+        class SimpleModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self._mlp_states = nn.Sequential(
+                    nn.Linear(10, 20),
+                    nn.ReLU(),
+                    nn.Linear(20, BoundingBox2DIndex.size()),
+                )
+
+            def forward(self, x):
+                agent_states = self._mlp_states(x)
+                agent_states[..., BoundingBox2DIndex.POINT] = (
+                    agent_states[..., BoundingBox2DIndex.POINT].tanh() * 32
+                )
+                agent_states[..., BoundingBox2DIndex.HEADING] = (
+                    agent_states[..., BoundingBox2DIndex.HEADING].tanh() * torch.pi
+                )
+                return agent_states
+
+        model = SimpleModel().eval()
+        input_tensor = torch.randn(1, 10, dtype=torch.float32)
+        opt = torch.compile(model.eval(), backend="eager", fullgraph=True)
+        actual = opt(input_tensor)
+        expected = model(input_tensor)
+        self.assertEqual(actual, expected)
+
     def test_invalid_seq_unpack(self):
         def myfn(arg):
             (a, b) = arg
@@ -5476,15 +5553,17 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return x, y
 
         def g(x, y):
-            return tuple(map(f, x, y))
+            return map(f, x, y)
 
         opt_g = torch.compile(g, fullgraph=True, backend="eager")
 
         inps = gen_inps(3, 3)
-        self.assertEqual(g(*inps), opt_g(*inps))
+        self.assertEqual(type(g(*inps)), type(opt_g(*inps)))
+        self.assertEqual(tuple(g(*inps)), tuple(opt_g(*inps)))
 
         inps = gen_inps(3, 5)
-        self.assertEqual(g(*inps), opt_g(*inps))
+        self.assertEqual(type(g(*inps)), type(opt_g(*inps)))
+        self.assertEqual(tuple(g(*inps)), tuple(opt_g(*inps)))
 
     def test_staticmethod_allow_in_graph(self):
         class MyClass:
@@ -5555,7 +5634,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             z0 = x.sin()
             z1 = x.sin()
             y = x + 1
-            torch.ops.fsdp.set_.default(x, y)
+            torch.ops.fsdp.copy_.default(x, y)
             # z3 and z3 can be CSEd with each other,
             # but *not* with z0/z1 (they cross a mutation boundary)
             z2 = x.sin()
@@ -5587,7 +5666,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             z = x.sin()
             y = x + 1
             # graph input has its storage mutated
-            torch.ops.fsdp.set_.default(x, y)
+            torch.ops.fsdp.copy_.default(x, y)
             z2 = x.sin()
             return z2, l**2
 
@@ -5853,6 +5932,77 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         out = f(x)
         self.assertEqual(torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0]), out[0])
+
+    # https://github.com/pytorch/pytorch/issues/88813
+    def test_return_value_duplication_tensor(self) -> None:
+        def fn(val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            return val * 2, val * 2
+
+        x = torch.randn(2, requires_grad=True)
+
+        expect = fn(x)
+        self.assertNotEqual(
+            expect[0].untyped_storage().data_ptr(),
+            expect[1].untyped_storage().data_ptr(),
+        )
+
+        actual = torch.compile(fn, backend="aot_eager")(x)
+        self.assertNotEqual(
+            actual[0].untyped_storage().data_ptr(),
+            actual[1].untyped_storage().data_ptr(),
+        )
+
+    # https://github.com/pytorch/pytorch/issues/114344
+    def test_return_value_duplication_mixed_grad(self) -> None:
+        def fn(val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            with torch.no_grad():
+                out0 = val + 1
+            out1 = val + 1
+            return out0, out1
+
+        x = torch.randn(2, requires_grad=True)
+
+        with torch.enable_grad():
+            expect = fn(x)
+            actual = torch.compile(fn, backend="aot_eager")(x)
+
+            self.assertEqual(expect[0].requires_grad, actual[0].requires_grad)
+            self.assertEqual(expect[1].requires_grad, actual[1].requires_grad)
+
+    # https://github.com/pytorch/pytorch/pull/134726#discussion_r1738774371
+    def test_return_value_duplication_scalar(self) -> None:
+        def fn(val: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            x, y = val * 2, val * 2
+            return x[0], y[0]
+
+        x = torch.randn(2, requires_grad=True)
+
+        expect = fn(x)
+        self.assertNotEqual(
+            expect[0].untyped_storage().data_ptr(),
+            expect[1].untyped_storage().data_ptr(),
+        )
+
+        actual = torch.compile(fn, backend="aot_eager")(x)
+        self.assertNotEqual(
+            actual[0].untyped_storage().data_ptr(),
+            actual[1].untyped_storage().data_ptr(),
+        )
+
+    def test_torch_compile_in_compile_frame(self):
+        def gn(x, c=None):
+            if c is None:
+                c = 2
+            return c * x
+
+        def outer_func(x):
+            return torch.compile(gn, backend="eager")(x)
+
+        compile_outer = torch.compile(outer_func, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = outer_func(x)
+        res = compile_outer(x)
+        self.assertEqual(ref, res)
 
 
 instantiate_parametrized_tests(ReproTests)

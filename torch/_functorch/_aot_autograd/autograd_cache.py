@@ -256,7 +256,7 @@ class FXGraphCacheLoadable:
         # [Note: AOTAutogradCache and FXGraphCache Guard interactions]
         # As mentioned, AOTAutograd takes in the symint inputs from dynamo's list of arguments.
         # FXGraphCache serializes guards that are needed in the shape_env based on these symint inputs to the graph.
-        # he invariant that AOTAutograd uses here is that the sources for symints given to it by dynamo are exactly
+        # The invariant that AOTAutograd uses here is that the sources for symints given to it by dynamo are exactly
         # the same as the ones it passes to inductor, for both the forward and backward passes.
         # (This does not mean that the tensor values passed in are the same: only that their symints are).
         # That is, AOTAutograd and Inductor never create new guards based on symints with different sources

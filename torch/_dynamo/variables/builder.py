@@ -95,6 +95,7 @@ from ..utils import (
     get_fake_value,
     get_locals_to_steal,
     get_static_address_type,
+    is_frozen_dataclass,
     is_function_or_wrapper,
     is_lru_cache_wrapped_function,
     is_namedtuple,
@@ -203,9 +204,11 @@ from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .torch_function import (
     build_torch_function_fn,
     TensorWithTFOverrideVariable,
+    torch_function_mode_stack_state_mgr,
     TorchFunctionModeVariable,
 )
 from .user_defined import (
+    FrozenDataClassVariable,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
     SourcelessGraphModuleVariable,
@@ -545,10 +548,6 @@ class VariableBuilder:
         if id_dispatch is not None:
             return id_dispatch(self, value)
 
-        # Note - There are some nested values where types mismatch!
-        # We want to get those out and wrap those.
-        value = inspect.getattr_static(value, "_torchdynamo_inline", value)
-
         # Everything else (NB: order matters!)
         if is_traceable_wrapper_subclass(value) or istype(
             value, config.traceable_tensor_subclasses
@@ -845,6 +844,9 @@ class VariableBuilder:
         elif isinstance(value, (torch._C._SDPAParams)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return SDPAParamsVariable.create(self.tx, value, self.source)
+        elif isinstance(value, torch._C._SDPBackend):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return ConstantVariable(value)
         elif isinstance(value, _EventBase):
             self.install_guards(GuardBuilder.ID_MATCH)
             torch._dynamo.utils.store_user_object_weakref(value)
@@ -985,6 +987,13 @@ class VariableBuilder:
         elif is_lru_cache_wrapped_function(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return WrapperUserFunctionVariable(value, "__wrapped__", source=self.source)
+        elif is_function_or_wrapper(value) and inspect.getattr_static(
+            value, "_torchdynamo_inline", False
+        ):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return WrapperUserFunctionVariable(
+                value, "_torchdynamo_inline", source=self.source
+            )
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
             # For these wrappers, Dynamo points to the wrapped function,
@@ -1161,6 +1170,10 @@ class VariableBuilder:
         elif issubclass(type(value), MutableMapping):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return MutableMappingVariable(value, source=self.source)
+        elif is_frozen_dataclass(value):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            result = FrozenDataClassVariable.create(self.tx, value, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         else:
             return self.wrap_user_defined(value)
 
@@ -1656,15 +1669,16 @@ class VariableBuilder:
                 # but warning is not the end of the world
                 assert isinstance(value.base, np.nditer)
 
-        try:
-            tensor_value = _util._try_convert_to_tensor(value)
-            if readonly:
-                from torch._prims_common import clone_preserve_strides
+        with torch_function_mode_stack_state_mgr.temp_restore_stack():
+            try:
+                tensor_value = _util._try_convert_to_tensor(value)
+                if readonly:
+                    from torch._prims_common import clone_preserve_strides
 
-                tensor_value = clone_preserve_strides(tensor_value)
-        except NotImplementedError as e:
-            # failed to convert to tensor, graph break
-            unimplemented(str(e))
+                    tensor_value = clone_preserve_strides(tensor_value)
+            except NotImplementedError as e:
+                # failed to convert to tensor, graph break
+                unimplemented(str(e))
 
         # We do this because we want the full behavior of guarding the numpy ndarray as if it were
         # a tensor. It's a little annoying to make a VT to throw out, but there's so many side effects here
@@ -1771,7 +1785,8 @@ class VariableBuilder:
             else:
                 # Apply the updates
                 for sub_state in st.all_states:
-                    update_frame_state(sub_state.input_sizes[name])
+                    if name in sub_state.input_sizes:
+                        update_frame_state(sub_state.input_sizes[name])
                 frame_state_entry = self.tx.output.frame_state[name]
 
             # TODO: This should be dynamic, as we in general do not
@@ -2429,6 +2444,9 @@ def _automatic_dynamic(
 
     # Prep for automatic dynamic
     def update_frame_state(size, stride):
+        # Intentionally shadow e from parent scope so it is not accidentally
+        # called
+        e = None
         frame_state_entry = None
         if name not in tx.output.frame_state:
             # If there is no entry for this source, add the tensor to frame state with its current static size.
@@ -2439,13 +2457,13 @@ def _automatic_dynamic(
         else:
             frame_state_entry = tx.output.frame_state[name]
             if frame_state_entry.size is not None:
-                if e.ndim != len(frame_state_entry.size):
+                if len(size) != len(frame_state_entry.size):
                     # If there is already an entry, and the dim mismatches, replace the frame state entry with None.
                     # E.g. {"x": [2, 3, 4]} -> {"x": None}
                     log.debug(
                         "automatic dynamic %s dim %s != %s",
                         name,
-                        e.ndim,
+                        len(size),
                         frame_state_entry.size,
                     )
                     frame_state_entry.size = None
@@ -2462,7 +2480,7 @@ def _automatic_dynamic(
                                 "automatic dynamic %s size(%s) %s != %s",
                                 name,
                                 i,
-                                e.size(i),
+                                size[i],
                                 dim,
                             )
                             frame_state_entry.size[i] = None
@@ -2492,7 +2510,7 @@ def _automatic_dynamic(
                                     "automatic dynamic %s stride(%s) %s != %s",
                                     name,
                                     i,
-                                    e.stride(i),
+                                    stride[i],
                                     dim,
                                 )
                                 frame_state_entry.stride[i] = None
@@ -2512,9 +2530,11 @@ def _automatic_dynamic(
     else:
         # Apply the updates
         for sub_state in st.all_states:
-            update_frame_state(
-                sub_state.input_sizes[name], sub_state.input_strides[name]
-            )
+            # Not all inputs are necessarily present on all ranks
+            if name in sub_state.input_sizes and name in sub_state.input_strides:
+                update_frame_state(
+                    sub_state.input_sizes[name], sub_state.input_strides[name]
+                )
         frame_state_entry = tx.output.frame_state[name]
 
     # TODO: index export_constraints ahead of time so we don't have to

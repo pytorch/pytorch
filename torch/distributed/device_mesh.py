@@ -469,7 +469,7 @@ else:
             world_size = get_world_size()
             if self.mesh.numel() > world_size:
                 raise RuntimeError(
-                    f"Mesh should not be bigger than default world size, but found {self.mesh.numel()} ranks!"
+                    f"Mesh should not be bigger than default world size {world_size}, but found {self.mesh.numel()} ranks!"
                 )
 
             device_handle = _get_device_handle(self.device_type)

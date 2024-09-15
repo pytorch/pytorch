@@ -31,6 +31,18 @@ def eager(gm, fake_tensor_inputs, **kwargs):
     return gm.forward
 
 
+def make_eager_backend_with_torch_function_mode(mode):
+    """Used to trace HOPs (cond and while) for eager exectution, the metadata
+    TF mode mutates vars outside of the scope of the HOP, and we can't have graph breaks
+    in the HOP, so we need to externally run this mode and not trace it."""
+
+    def fn(gm, fake_tensor_inputs, **kwargs):
+        with mode:
+            return gm.forward
+
+    return fn
+
+
 @register_backend
 def eager_noexcept(gm, fake_tensor_inputs, **kwargs):
     if kwargs:
