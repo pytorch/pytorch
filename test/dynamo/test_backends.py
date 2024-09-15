@@ -267,7 +267,7 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         self.assertTrue(backend_run)
 
     def test_lookup_backend(self):
-        from torch._dynamo import list_backends, lookup_backend
+        from torch._dynamo import lookup_backend
 
         backend_run = False
 

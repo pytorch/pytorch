@@ -3560,7 +3560,7 @@ class TestCudaMallocAsync(TestCase):
             def foo():
                 return torch.rand(311, 411, device="cuda")
 
-            x = foo(). # pylint: disable=unused-variable
+            x = foo()  # pylint: disable=unused-variable
 
             ss = torch.cuda.memory._snapshot()["segments"]
             found_it = False
