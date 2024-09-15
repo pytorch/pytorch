@@ -2502,7 +2502,7 @@ class TritonKernel(SIMDKernel):
 
             result.writeline("args = get_args()")
             result.writeline(
-                "ms = benchmarker.benchmark_gpu(lambda: call(args), rep=40, fast_flush=True)"
+                "ms = benchmarker.benchmark_gpu(lambda: call(args), rep=40)"
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
@@ -2647,7 +2647,7 @@ class TritonKernel(SIMDKernel):
         mutated_args = sorted(mutated_args)
 
         triton_meta_signature = signature_to_meta(
-            signature, size_dtype=self.index_dtype
+            signature, size_dtype=self.index_dtype, argdefs=argdefs
         )
         triton_meta = {
             "signature": triton_meta_signature,
@@ -2675,7 +2675,7 @@ class TritonKernel(SIMDKernel):
         for tree in self.active_range_trees():
             sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
             signature.append(sizearg)
-            triton_meta_signature[len(argdefs)] = signature_of(
+            triton_meta_signature[sizearg.name] = signature_of(
                 sizearg, size_dtype=self.index_dtype
             )
             argdefs.append(f"{tree.prefix}numel")
@@ -2693,7 +2693,7 @@ class TritonKernel(SIMDKernel):
         # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
         # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
         for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
-            triton_meta["constants"][arg_num] = 1  # type: ignore[index]
+            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index]
 
         self.triton_meta = triton_meta
 
@@ -2834,7 +2834,7 @@ class TritonKernel(SIMDKernel):
             call_args,
             grid,
             current_device.index,
-            cuda=True,
+            gpu=True,
             triton=True,
             arg_types=arg_types,
             grid_fn=self._get_grid_fn(),
@@ -3066,7 +3066,9 @@ class TritonScheduling(SIMDScheduling):
         return kernel_name
 
     def benchmark_fused_nodes(self, nodes):
-        with preserve_rng_state():
+        with preserve_rng_state(), torch.cuda.device(
+            self.scheduler.get_current_device_or_throw()
+        ):
             src_code = self.generate_kernel_code_from_nodes(
                 nodes, benchmark_kernel=True
             )
@@ -3130,9 +3132,10 @@ class TritonScheduling(SIMDScheduling):
                 # in the case of mutating/in-placeable second fusion
                 # TODO - would be better as a hook in triton do_bench that reset
                 # the input values between benchmarking
-                ms = ms - benchmarker.benchmark_gpu(
-                    lambda: wrapped_jit_function.clone_args(*args)
-                )
+                if len(wrapped_jit_function.mutated_arg_names) > 0:
+                    ms = ms - benchmarker.benchmark_gpu(
+                        lambda: wrapped_jit_function.clone_args(*args)
+                    )
 
             log.debug(
                 "The fused kernel for %s took %.3f ms to run",
