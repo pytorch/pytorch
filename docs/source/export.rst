@@ -293,8 +293,8 @@ computations in the model, we can go with the non-strict mode's result.
 
 .. _Training Export:
 
-Training Export
-^^^^^^^^^^^^^^^^^
+Export for Training and Inference
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 In PyTorch 2.5, we introduced a new API called :func:`export_for_training`.
 It's still going through hardening, so if you run into any issues, please file
@@ -302,13 +302,13 @@ them to Github with the "oncall: export" tag.
 
 In this API, we produce the most generic IR that contains all ATen operators
 (including both functional and non-functional) which can be used to train in
-eager PyTorch Autograd. This API is intended for PT2 quantization training use cases
-and will soon be the default IR of torch.export.export in the near future. To read further about
+eager PyTorch Autograd. This API is intended for eager training use cases such as PT2 Quantization
+and will soon be the default IR of torch.export.export. To read further about
 the motivation behind this change, please refer to
 https://dev-discuss.pytorch.org/t/why-pytorch-does-not-need-a-new-standardized-operator-set/2206
 
-With this API, and :func:`run_decompositions()`, you should be able to get any inference IR with
-your custom decomposition behaviour.
+When this API is combined with :func:`run_decompositions()`, you should be able to get inference IR with
+any desired decomposition behavior.
 
 To show some examples:
 
@@ -360,11 +360,11 @@ To show some examples:
     Range constraints: {}
 
 
-From the above output, you can see :func:`export_for_training` produces pretty much the same `ExportedProgram`
-as :func:`export` except for the operators in the graph. You can see that we captured `batch_norm` in the most general
-form. This op is non-functional and will be lowered to different ops when running under inference mode.
+From the above output, you can see that :func:`export_for_training` produces pretty much the same ExportedProgram
+as :func:`export` except for the operators in the graph. You can see that we captured batch_norm in the most general
+form. This op is non-functional and will be lowered to different ops when running inference.
 
-You can also go from this IR to an inference IR via :func:`run_decompositions` with arbitrary customizations
+You can also go from this IR to an inference IR via :func:`run_decompositions` with arbitrary customizations.
 
 ::
 
@@ -408,8 +408,10 @@ You can also go from this IR to an inference IR via :func:`run_decompositions` w
     )
     Range constraints: {}
 
-Here you can see that, we kept `conv2d` op in the IR while decomposing the rest. Now the IR is an functional IR
-containing core aten opset except for `conv2d` which you specified.
+Here you can see that we kept `conv2d` op in the IR while decomposing the rest. Now the IR is a functional IR
+containing core aten operators except for `conv2d`.
+
+You can do even more customization by directly registering your chosen decomposition behaviors.
 
 You can do even more customizations by directly registering custom decomp behaviour
 
@@ -847,6 +849,7 @@ API Reference
 .. autofunction:: load
 .. autofunction:: register_dataclass
 .. autofunction:: torch.export.dynamic_shapes.Dim
+.. autofunction:: torch.export.exported_program.core_aten_decompositions
 .. autofunction:: dims
 .. autoclass:: torch.export.dynamic_shapes.ShapesCollection
 
