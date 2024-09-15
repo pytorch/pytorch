@@ -38,15 +38,15 @@ from torch.testing._internal.inductor_utils import skipCUDAIf
 
 try:
     try:
-        import triton
-        from triton import language as tl
+        import triton  # @manual
+        from triton import language as tl  # @manual
     except ImportError:
         raise unittest.SkipTest("requires triton")  # noqa: B904
 
     try:
         from . import test_torchinductor
     except ImportError:
-        import test_torchinductor
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -433,7 +433,11 @@ class CudaReproTests(TestCase):
                 triton.Config({"XBLOCK": 2}),
             ],
             meta={
-                "signature": {0: "*fp32", 1: "*fp32", 2: "i32"},
+                "signature": {
+                    "in_out_ptr0": "*fp32",
+                    "in_ptr0": "*fp32",
+                    "xnumel": "i32",
+                },
                 "device": DeviceProperties.create(torch.device("cuda")),
                 "configs": [instance_descriptor(divisible_by_16=(0, 1), equal_to_1=())],
                 "constants": {},

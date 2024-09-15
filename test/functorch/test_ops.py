@@ -1409,18 +1409,6 @@ class TestOperators(TestCase):
                 xfail("nn.functional.soft_margin_loss", ""),
                 xfail("nn.functional.max_unpool1d", "grad"),
                 xfail("nn.functional.embedding", ""),
-                xfail(
-                    "scatter_reduce", "sum"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
-                xfail(
-                    "scatter_reduce", "mean"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
-                xfail(
-                    "scatter_reduce", "amin"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
-                xfail(
-                    "scatter_reduce", "amax"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
                 xfail("nn.functional.glu"),
                 xfail("nn.functional.bilinear"),  # trilinear doesn't have batching rule
                 xfail("linalg.lu", ""),
@@ -1430,6 +1418,7 @@ class TestOperators(TestCase):
                 xfail("renorm"),  # hit vmap fallback, which is disabled
                 xfail("squeeze_copy"),
                 xfail("t_copy"),
+                xfail("transpose_copy"),
                 xfail("unsqueeze_copy"),
             }
         ),
@@ -1492,18 +1481,6 @@ class TestOperators(TestCase):
                 xfail("nanquantile"),
                 xfail("ormqr"),
                 xfail("put"),
-                xfail(
-                    "scatter_reduce", "sum"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
-                xfail(
-                    "scatter_reduce", "mean"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
-                xfail(
-                    "scatter_reduce", "amin"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
-                xfail(
-                    "scatter_reduce", "amax"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
                 xfail("quantile"),
                 xfail("renorm"),
                 xfail("squeeze_copy"),
@@ -1531,7 +1508,6 @@ class TestOperators(TestCase):
                 xfail("nn.functional.multi_margin_loss", ""),
                 xfail("nn.functional.multilabel_margin_loss", ""),
                 xfail("nn.functional.pdist", ""),
-                xfail("scatter_reduce", "prod"),
                 xfail("nn.functional.max_unpool1d", ""),
                 xfail("nn.functional.max_unpool3d", ""),
                 xfail("nn.functional.max_unpool3d", "grad"),
@@ -1570,6 +1546,7 @@ class TestOperators(TestCase):
                 ),  # aten::_unique hit the vmap fallback which is currently disabled
                 xfail("squeeze_copy"),
                 xfail("t_copy"),
+                xfail("transpose_copy"),
                 xfail("unsqueeze_copy"),
             }
         ),
