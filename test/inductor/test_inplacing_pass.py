@@ -46,8 +46,8 @@ def sin_cos(x: torch.Tensor, out_sin: torch.Tensor, out_cos: torch.Tensor) -> No
 
 
 if HAS_GPU:
-    import triton
-    import triton.language as tl
+    import triton  # @manual
+    import triton.language as tl  # @manual
 
     @triton.jit
     def sin_kernel(
