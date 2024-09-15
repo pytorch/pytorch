@@ -2276,7 +2276,7 @@ add_docstr(
     r"""
 cat(tensors, dim=0, *, out=None) -> Tensor
 
-Concatenates the given sequence of :attr:`seq` tensors in the given dimension.
+Concatenates the given sequence of tensors in :attr:`tensors` in the given dimension.
 All tensors must either have the same shape (except in the concatenating
 dimension) or be a 1-D empty tensor with size ``(0,)``.
 
