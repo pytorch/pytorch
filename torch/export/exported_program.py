@@ -78,6 +78,7 @@ __all__ = [
     "ExportedProgram",
     "ModuleCallEntry",
     "ModuleCallSignature",
+    "core_aten_decompositions",
 ]
 
 
@@ -287,6 +288,17 @@ def _split_decomp_table_to_cia_and_python_decomp(
         cia_ops_to_callable[k] = _special_op_to_preserve_cia
 
     return cia_ops_to_callable, decomp_table
+
+
+def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
+    """
+    This is the default decomposition table which contains decomposition of
+    all ATEN operators to core aten opset. Use this API together with
+    :func:`run_decompositions()`
+    """
+    from torch._decomp import core_aten_decompositions
+
+    return core_aten_decompositions()
 
 
 def _decompose_and_get_gm_with_new_signature_constants(
@@ -1015,8 +1027,7 @@ class ExportedProgram:
         .. code-block:: python
 
             ep = torch.export.export(model, ...)
-            from torch._decomp import core_aten_decompositions
-            decomp_table = core_aten_decompositions()
+            decomp_table = torch.export.core_aten_decompositions()
             decomp_table[your_op] = your_custom_decomp
             ep = ep.run_decompositions(decomp_table=decomp_table)
         """
