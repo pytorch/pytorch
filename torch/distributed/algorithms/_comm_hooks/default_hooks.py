@@ -168,6 +168,7 @@ def fp16_compress_hook(
         output (torch.Tensor): Stores a single shard of the gradient after ``reduce_scatter``.
     """
     fp16_hook = functools.partial(_low_precision_hook, torch.float16)
+    assert output is not None
     return fp16_hook(state, grad, output)
 
 
@@ -189,4 +190,5 @@ def bf16_compress_hook(
         output (torch.Tensor): Stores a single shard of the gradient after ``reduce_scatter``.
     """
     bf16_hook = functools.partial(_low_precision_hook, torch.bfloat16)
+    assert output is not None
     return bf16_hook(state, grad, output)
