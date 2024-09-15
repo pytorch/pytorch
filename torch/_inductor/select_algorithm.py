@@ -533,6 +533,8 @@ class TritonTemplateKernel(TritonKernel):
             output_index = self.rename_indexing(output_index)
             if output_index == contiguous_index:
                 output_index = sympy.Symbol("xindex", integer=True)
+            else:
+                output_index = f"{output_index}.broadcast_to(xindex.shape)"
 
             # Generate load code
             load_code = f"{output_name} = tl.load({input_name} + ({output_index})"
@@ -540,6 +542,7 @@ class TritonTemplateKernel(TritonKernel):
                 load_code += f", mask={mask}, other={other})"
             else:
                 load_code += ")"
+
         hook_key = f"<LOAD_INPUT_{input_name}>"
 
         def hook():
