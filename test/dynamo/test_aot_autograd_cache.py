@@ -609,7 +609,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return x.sin().cos()
 
-        def fn2(x):
+        def fn2(x):  # pylint: disable-next=unused-variable
             y = x.sin()
             z = y.cos()
             return z
@@ -620,7 +620,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         config2.aot_id = 1
 
         c1 = self.gen_cache_key(fn, config)
-        c2 = self.gen_cache_key(fn2, config2)
+        c2 = self.gen_cache_key(fn, config2)
         self.assertEqual(c1, c2)
 
     def test_different_graphs(self):
