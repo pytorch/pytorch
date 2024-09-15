@@ -1,5 +1,3 @@
-"""Build decomp table from PyTorch."""
-
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
@@ -83,7 +81,14 @@ def create_onnx_friendly_decomposition_table(
         Dict[torch._ops.OperatorBase, Callable]: A dictionary that maps op overloads to their corresponding
         decomposition functions.
     """
-    decomposition_table: dict[torch._ops.OperatorBase, Callable] = {}
+    # This table contains all CIA decomps, so we should filter out ONNX supported CIAs from it
+    decomposition_table: dict[torch._ops.OperatorBase, Callable] = (
+        torch._decomp._decomp_table_to_post_autograd_aten()
+    )
+    can_preserve = get_preserve_ops().intersection(onnx_registered_ops)
+    for op in list(decomposition_table.keys()):
+        if op in can_preserve:
+            del decomposition_table[op]
 
     # NOTE: If we import torch._decomp, we will get RuntimeError: Only a single
     # TORCH_LIBRARY can be used to register the namespace nvprims; please put all of your
@@ -94,6 +99,9 @@ def create_onnx_friendly_decomposition_table(
         # NOTE: Do not skip torch._refs decomps. They are fine because otherwise the model is
         # not exportable anyways.
         if op_overload in onnx_registered_ops:
+            continue
+        # If it is HOP, we filter those out as well.
+        if not hasattr(op_overload, "_schema"):
             continue
         decomposition_table[op_overload] = decomp_fn
 
