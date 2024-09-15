@@ -84,7 +84,7 @@ except ImportError:
 try:
     from . import testing
 except ImportError:
-    import testing
+    import testing  # @manual=fbcode//caffe2/test:test_export-library
 # The following import pattern matters as `test_export.export` is patched
 # in other files (like test_export_nonstrict.py). `torch.export.export`
 # will invalidate the patch.
@@ -293,19 +293,50 @@ class TestExport(TestCase):
         # )
 
     def _check_dynamic_shapes_specs_and_shapes(
-        self, model, inputs, specs, passing_shapes, failing_shapes
+        self, model, inputs, specs, passing_shapes, failing_shapes, test_serdes=False
     ):
+        from torch._export.serde.dynamic_shapes import (
+            _dump_dynamic_shapes,
+            _load_dynamic_shapes,
+        )
+        from torch.utils._pytree import tree_map
+
+        def _construct_inputs(shapes):
+            def _is_tensor_leaf(x):
+                return isinstance(x, tuple) and all(isinstance(y, int) for y in x)
+
+            return tree_map(
+                lambda x: torch.randn(*x) if _is_tensor_leaf(x) else x,
+                shapes,
+                is_leaf=_is_tensor_leaf,
+            )
+
         # exports with a list of equivalent dynamic shapes specs,
         # then tests for pass/fail on list of shapes
         for _specs in specs:
             ep = export(model, inputs, dynamic_shapes=_specs)
-            for shapes in passing_shapes:
-                test_inputs = (torch.randn(*shape) for shape in shapes)
-                ep.module()(*test_inputs)
-            for shapes in failing_shapes:
-                test_inputs = (torch.randn(*shape) for shape in shapes)
-                with self.assertRaises(RuntimeError):
+            eps = [ep]
+            if test_serdes:
+                # test dynamic shapes serialization
+                # test that behavior remains the same when exporting with ser/des specs:
+                # serialize + deserialize original specs, and export.
+                ep_serdes = export(
+                    model,
+                    inputs,
+                    dynamic_shapes=_load_dynamic_shapes(
+                        _dump_dynamic_shapes(_specs, inputs)
+                    ),
+                )
+                eps.append(ep_serdes)
+
+            for ep in eps:
+                for shapes in passing_shapes:
+                    test_inputs = _construct_inputs(shapes)
                     ep.module()(*test_inputs)
+                for shapes in failing_shapes:
+                    test_inputs = _construct_inputs(shapes)
+                    with self.assertRaises(RuntimeError):
+                        ep.module()(*test_inputs)
 
     def test_basic(self):
         class Module(torch.nn.Module):
@@ -478,16 +509,46 @@ graph():
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(exported_program.module()(*args), m(*args))
 
-        from torch._export import capture_pre_autograd_graph
-
-        gm: torch.fx.GraphModule = capture_pre_autograd_graph(
+        gm: torch.fx.GraphModule = torch.export.export_for_training(
             m, args=example_args, dynamic_shapes=dynamic_shapes
-        )
+        ).module()
 
         args = (torch.randn(17, 3, 256, 256), torch.ones(17, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
+
+    def test_masked_select_dynamic(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                mask = x.ge(0.5)
+                return torch.masked_select(x, mask)
+
+        example_args = (torch.randn(3, 4, 5),)
+        dim0_x_max, dim1_x_max = 100, 7
+        dynamic_shapes = {
+            "x": {
+                0: Dim("dim0_x", max=dim0_x_max),
+                1: Dim("dim1_x_max", max=dim1_x_max),
+            }
+        }
+        m = M()
+        exported_program: torch.export.ExportedProgram = export(
+            m, args=example_args, dynamic_shapes=dynamic_shapes
+        )
+
+        # Test that the expected upper bound is among the range constraints.
+        expected_upper_bound = dim0_x_max * dim1_x_max * 5
+        vr_upper_bounds = [
+            vr.upper for vr in exported_program.range_constraints.values()
+        ]
+        self.assertTrue(expected_upper_bound in set(vr_upper_bounds))
+        # Test that none of the upper bounds are larger.
+        for vr_upper in vr_upper_bounds:
+            self.assertTrue(vr_upper <= expected_upper_bound)
 
     def test_setgrad_lifted_tensor(self):
         class M(torch.nn.Module):
@@ -686,6 +747,27 @@ graph():
         M()(torch.randn(7))
         torch.export.export(M(), (torch.randn(7),))
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_cond_contains_unbacked_no_escape(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b1, b2, c):
+                def true_fn(x):
+                    return x * b1.item()
+
+                def false_fn(x):
+                    return x * b2.item()
+
+                r = torch.cond(a, true_fn, false_fn, (c,))
+                return r * 2
+
+        args = (
+            torch.tensor(True),
+            torch.tensor([4]),
+            torch.tensor([4]),
+            torch.randn(10, requires_grad=True),
+        )
+        torch.export.export(M(), args)
+
     def test_state_tensors(self):
         class M(torch.nn.Module):  # simple with register buffer
             def __init__(self) -> None:
@@ -807,6 +889,44 @@ graph():
         self.assertTrue(
             torch.allclose(ep.module()(torch.zeros(2, 3)), torch.ones(2, 3) * 21)
         )
+
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # TODO(pianpwk): user_output signature
+    def test_real_tensor_for_max_op(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                x = x[x > 0]
+                y = y[y > 0]
+                return max(x.shape[0], y.shape[0])
+
+        model = Foo()
+        inputs = (torch.randn(64), torch.randn(64))
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = export(model, inputs)
+
+        self.assertEqual(ep.module()(*inputs), model(*inputs))
+        x = torch.zeros(64)
+        y = torch.ones(64)
+        self.assertEqual(ep.module()(x, x), model(x, x))
+        self.assertEqual(ep.module()(x, y), model(x, y))
+
+    def test_export_script_module(self):
+        class Foo(torch.nn.Module):
+            def forward(self, rv: torch.Tensor, t: torch.Tensor):
+                i = t.item()
+                return rv + i
+
+        foo = Foo()
+        foo_script = torch.jit.script(foo)
+        inp = (torch.zeros(3, 4), torch.tensor(7))
+
+        with self.assertRaisesRegex(
+            ValueError, "Exporting a ScriptModule is not supported"
+        ):
+            export(foo_script, inp)
+
+        from torch._export.converter import TS2EPConverter
+
+        TS2EPConverter(foo_script, inp).convert()
 
     def test_torch_fn(self):
         class M1(torch.nn.Module):
@@ -970,16 +1090,6 @@ def forward(self, p_linear_weight, p_linear_bias, x):
     return (getitem, getitem_1, getitem_2)""",
         )
 
-    # TODO(yidi)
-    # Expected failure for test cases that calls run_decomposition().
-    # The top-level cond node has pre-existing metadata,
-    # which overrides the metadata for operators in subgraph due to interpreter.run(),
-    # where cond is a single node in the interpreter.run(). And we preserve metadata
-    # by copying current node's metadata for all nodes created during interpreting.
-    @testing.expectedFailurePreDispatchRunDecomp
-    @testing.expectedFailureRetraceability
-    @testing.expectedFailureTrainingIRToRunDecomp  # T193700910
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_export_cond_preserve_torch_fn_for_subgraphs(self):
         class MySubModule(torch.nn.Module):
             def foo(self, x):
@@ -1478,18 +1588,16 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
             decomp_table={},
             _preserve_ops=testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY,
         )
+
         self.assertExpectedInline(
             str(ep_has_linear_convd.graph_module.code).strip(),
             """\
 def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_linear_weight, b_linear_bias, x, y):
-    convolution = torch.ops.aten.convolution.default(x, p_conv_weight, p_conv_bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  x = p_conv_weight = p_conv_bias = None
-    convolution_1 = torch.ops.aten.convolution.default(y, p_conv1d_weight, p_conv1d_bias, [1], [0], [1], False, [0], 1);  y = p_conv1d_weight = p_conv1d_bias = None
-    view = torch.ops.aten.view.default(convolution, [31680, 98]);  convolution = None
-    t = torch.ops.aten.t.default(b_linear_weight);  b_linear_weight = None
-    addmm = torch.ops.aten.addmm.default(b_linear_bias, view, t);  b_linear_bias = view = t = None
-    view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
-    cos = torch.ops.aten.cos.default(view_1);  view_1 = None
-    sum_1 = torch.ops.aten.sum.default(convolution_1);  convolution_1 = None
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
+    conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
+    linear = torch.ops.aten.linear.default(conv2d, b_linear_weight, b_linear_bias);  conv2d = b_linear_weight = b_linear_bias = None
+    cos = torch.ops.aten.cos.default(linear);  linear = None
+    sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
     add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
     return (add,)""",
         )
@@ -1501,18 +1609,19 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
                 torch.ops.aten.conv1d.default,
             ],
         )
+
         self.assertExpectedInline(
             str(ep_has_convd.graph_module.code).strip(),
             """\
 def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_linear_weight, b_linear_bias, x, y):
-    convolution = torch.ops.aten.convolution.default(x, p_conv_weight, p_conv_bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  x = p_conv_weight = p_conv_bias = None
-    convolution_1 = torch.ops.aten.convolution.default(y, p_conv1d_weight, p_conv1d_bias, [1], [0], [1], False, [0], 1);  y = p_conv1d_weight = p_conv1d_bias = None
-    view = torch.ops.aten.view.default(convolution, [31680, 98]);  convolution = None
-    t = torch.ops.aten.t.default(b_linear_weight);  b_linear_weight = None
-    addmm = torch.ops.aten.addmm.default(b_linear_bias, view, t);  b_linear_bias = view = t = None
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
+    conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
+    view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
+    permute = torch.ops.aten.permute.default(b_linear_weight, [1, 0]);  b_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(b_linear_bias, view, permute);  b_linear_bias = view = permute = None
     view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
     cos = torch.ops.aten.cos.default(view_1);  view_1 = None
-    sum_1 = torch.ops.aten.sum.default(convolution_1);  convolution_1 = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(conv1d, []);  conv1d = None
     add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
     return (add,)""",
         )
@@ -1520,18 +1629,19 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
         ep_has_convd = ep_has_convd.run_decompositions(
             decomp_table=None, _preserve_ops=[torch.ops.aten.conv2d.default]
         )
+
         self.assertExpectedInline(
             str(ep_has_convd.graph_module.code).strip(),
             """\
 def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_linear_weight, b_linear_bias, x, y):
-    convolution = torch.ops.aten.convolution.default(x, p_conv_weight, p_conv_bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  x = p_conv_weight = p_conv_bias = None
-    convolution_1 = torch.ops.aten.convolution.default(y, p_conv1d_weight, p_conv1d_bias, [1], [0], [1], False, [0], 1);  y = p_conv1d_weight = p_conv1d_bias = None
-    view = torch.ops.aten.view.default(convolution, [31680, 98]);  convolution = None
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
+    convolution = torch.ops.aten.convolution.default(y, p_conv1d_weight, p_conv1d_bias, [1], [0], [1], False, [0], 1);  y = p_conv1d_weight = p_conv1d_bias = None
+    view = torch.ops.aten.view.default(conv2d, [31680, 98]);  conv2d = None
     permute = torch.ops.aten.permute.default(b_linear_weight, [1, 0]);  b_linear_weight = None
     addmm = torch.ops.aten.addmm.default(b_linear_bias, view, permute);  b_linear_bias = view = permute = None
     view_1 = torch.ops.aten.view.default(addmm, [20, 33, 48, 20]);  addmm = None
     cos = torch.ops.aten.cos.default(view_1);  view_1 = None
-    sum_1 = torch.ops.aten.sum.dim_IntList(convolution_1, []);  convolution_1 = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(convolution, []);  convolution = None
     add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
     return (add,)""",
         )
@@ -1761,9 +1871,9 @@ def forward(self, x):
             """\
 def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
     add = torch.ops.aten.add.Tensor(b_buffer, 5);  b_buffer = None
-    t = torch.ops.aten.t.default(p_linear_weight);  p_linear_weight = None
-    addmm = torch.ops.aten.addmm.default(p_linear_bias, x, t);  p_linear_bias = x = t = None
-    sum_1 = torch.ops.aten.sum.default(add)
+    permute = torch.ops.aten.permute.default(p_linear_weight, [1, 0]);  p_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(p_linear_bias, x, permute);  p_linear_bias = x = permute = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(add, [])
     add_1 = torch.ops.aten.add.Tensor(addmm, sum_1);  addmm = sum_1 = None
     return (add, add_1)""",
         )
@@ -2014,7 +2124,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             + re.escape(
                 "specified at `dynamic_shapes[0]['k']['k'][0]` "
                 "(expected either a list/tuple of dimensions, or a dict mapping indices to dimensions,"
-                " where each dimension is None, an int, a Dim, Dim.AUTO, or Dim.STATIC)"
+                " where each dimension is an int, a Dim, Dim.AUTO, or Dim.STATIC)"
             ),
         ):
             export(M(), inputs, dynamic_shapes=dynamic_shapes)
@@ -2267,8 +2377,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         M = M_v3
         export(N(), (t,), strict=strict)
 
-    @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # unbacked symint not tracked?
     @testing.expectedFailureSerDer  # T195866111
     def test_suggested_fixes_for_data_dependent_errors_puzzlers(self):
         # suggested fixes for data-dependent errors only work in non-strict mode
@@ -2399,6 +2507,44 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 strict=strict,
             )
 
+        class Box:
+            def __init__(self, content):
+                self.content = content
+
+        from torch.utils._pytree import register_pytree_node
+
+        register_pytree_node(
+            Box,
+            lambda box: ([box.content], None),  # flatten_fn
+            lambda contents, _context: Box(*contents),  # unflatten_fn
+            flatten_with_keys_fn=None,  # unflatten_fn
+            serialized_type_name="test_no_suggested_fixes_for_data_dependent_errors.Box",
+        )
+
+        class cf_stacklist_udd(torch.nn.Module):
+            def forward(self, xs, y):
+                box = Box(y.item())
+                # box.content is not a local, so we can't suggest a fix
+                return torch.stack(xs, 0).narrow(0, box.content, 1).squeeze()
+
+        with self.assertRaisesRegex(
+            error_type,
+            "Could not guard on data-dependent expression u0 < 0",
+        ):
+            export(
+                cf_stacklist_udd(),
+                ([torch.ones(5) * i for i in range(10)], torch.tensor(2)),
+                strict=strict,
+            )
+
+    def test_tolist(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.tolist()
+
+        ep = export(M(), (torch.ones(3, dtype=torch.int),))
+        self.assertEqual(ep.module()(torch.tensor([1, 2, 3])), [1, 2, 3])
+
     def test_if_functional(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2492,37 +2638,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             em.module()(x)
 
-    def test_mark_and_auto_dynamic(self):
-        # for this use case, mark_dynamic() and AUTO should have same effect.
-        # check that same symbol gets allocated to both dims without raising constraint violation.
-        AUTO, STATIC = Dim.AUTO, Dim.STATIC
-
-        class Foo(torch.nn.Module):
-            def forward(self, x, y):
-                torch._check(x.shape[0] == y.shape[0])
-                torch._check(x.shape[0] <= 64)
-                return x + 2, y + 2
-
-        inputs = (torch.randn(4, 4), torch.randn(4, 4))
-        ep_auto = torch.export.export(
-            Foo(), inputs, dynamic_shapes={"x": (AUTO, None), "y": (AUTO, None)}
-        )
-        torch._dynamo.mark_dynamic(inputs[0], 0)
-        torch._dynamo.mark_dynamic(inputs[1], 0)
-        ep_dynamic = torch.export.export(Foo(), inputs)
-
-        # test both programs have same effect
-        for ep in [ep_auto, ep_dynamic]:
-            gm = ep.module()
-            gm(torch.randn(32, 4), torch.randn(32, 4))
-            gm(torch.randn(1, 4), torch.randn(1, 4))
-            with self.assertRaises(RuntimeError):
-                gm(torch.randn(33, 4), torch.randn(32, 4))
-                gm(torch.randn(128, 4), torch.randn(128, 4))
-
     def test_dont_duck_size_for_auto_dynamic(self):
-        # for this use case, mark_dynamic() and AUTO should have same effect.
-        # check that same symbol gets allocated to both dims without raising constraint violation.
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
         class Foo(torch.nn.Module):
@@ -6214,7 +6330,6 @@ def forward(self, x):
         real_names_and_ops = [(node.name, node.op) for node in ep.graph.nodes]
         self.assertEqual(expected_names_and_ops, real_names_and_ops)
 
-    @testing.expectedFailureRetraceability
     def test_placeholder_naming_collisions_hoo_subgraphs(self):
         # test collisions between user inputs, top-level nodes, and HOO subgraph nodes
         class Foo(torch.nn.Module):
@@ -6270,11 +6385,7 @@ def forward(self, x):
         # (please never do this)
         class Foo(torch.nn.Module):
             def forward(self, input, true_graph, body_graph):
-                def map_body(x, y):
-                    return x + y
-
-                x = map(map_body, input, body_graph[0])
-                x = x + true_graph[0] + true_graph[1]
+                x = input + true_graph[0] + true_graph[1]
                 x = cond(x.sum() > 0, lambda x: x * 2.0, lambda x: x + 2.0, [x])
                 x = cond(x.sum() > 0, lambda x: x * 2.0, lambda x: x + 2.0, [x])
                 return x
@@ -6286,7 +6397,6 @@ def forward(self, x):
         )
         ep = export(Foo(), inputs)
         expected_getattr_names = [
-            "body_graph_1",
             "true_graph_2",
             "false_graph_0",
             "true_graph_3",
@@ -6896,6 +7006,26 @@ def forward(self, x, y):
             if node.op == "call_function":
                 self.assertTrue(False)
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T200904004
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    def test_istft_op(self):
+        class istft_class(torch.nn.Module):
+            def forward(self, spec):
+                window = torch.hann_window(1024).type(torch.FloatTensor)
+                return torch.istft(
+                    spec,
+                    n_fft=1024,
+                    hop_length=512,
+                    window=window,
+                    length=144000,
+                )
+
+        model = istft_class()
+        real_part = torch.randn(1, 513, 282, dtype=torch.float32)
+        imaginary_part = torch.randn(1, 513, 282, dtype=torch.float32)
+        spec = torch.complex(real_part, imaginary_part)
+        export(model, (spec,))
+
     def test_automatic_dynamic_shapes_simple_equality(self):
         # The next 3 test cases tests for automatic dynamic shapes specs, verifying that automatic dynamism
         # leads to replacement symbols being set for equalities, and inferred relationships being checked
@@ -6927,6 +7057,7 @@ def forward(self, x, y):
                 ((4, 4), (4, 4), (4, 3)),
                 ((4, 4), (5, 4), (4, 5)),
             ],
+            test_serdes=True,
         )
         # static s1
         self._check_dynamic_shapes_specs_and_shapes(
@@ -6947,6 +7078,7 @@ def forward(self, x, y):
                 ((1, 1), (1, 1), (1, 1)),
                 ((0, 9), (0, 9), (0, 9)),
             ],
+            test_serdes=True,
         )
         # fully static
         self._check_dynamic_shapes_specs_and_shapes(
@@ -6962,6 +7094,7 @@ def forward(self, x, y):
                 ((1, 3), (1, 3), (1, 3)),
                 ((0, 9), (0, 9), (0, 9)),
             ],
+            test_serdes=True,
         )
 
     def test_automatic_dynamic_shapes_constant_relation(self):
@@ -6989,6 +7122,7 @@ def forward(self, x, y):
             failing_shapes=[
                 ((10,), (13,)),
             ],
+            test_serdes=True,
         )
         # static s1 should specialize s0
         self._check_dynamic_shapes_specs_and_shapes(
@@ -7005,6 +7139,7 @@ def forward(self, x, y):
                 ((3,), (7,)),
                 ((2,), (6,)),
             ],
+            test_serdes=True,
         )
 
     def test_automatic_dynamic_shapes_linear_relation(self):
@@ -7037,6 +7172,7 @@ def forward(self, x, y):
                 ((34,), (8,)),
                 ((22,), (5,)),
             ],
+            test_serdes=False,
         )
         # static s1 shouldn't actually specialize s0 (guard: (s0 + 2) // 4 == 5)
         self._check_dynamic_shapes_specs_and_shapes(
@@ -7055,6 +7191,7 @@ def forward(self, x, y):
             failing_shapes=[
                 ((33,), (8,)),
             ],
+            test_serdes=False,
         )
         # but static s0 will definitely specialize s1 (guard: (21 + 2) // 4 == s1 -> 5 == s1)
         self._check_dynamic_shapes_specs_and_shapes(
@@ -7069,7 +7206,218 @@ def forward(self, x, y):
             failing_shapes=[
                 ((22,), (5,)),
             ],
+            test_serdes=True,
         )
+
+    def test_dynamic_shapes_serdes_generic(self):
+        from torch._export.serde.dynamic_shapes import (
+            _dump_dynamic_shapes,
+            _load_dynamic_shapes,
+        )
+
+        class Foo(torch.nn.Module):
+            def forward(self, a, b, c, d):
+                if d == "hello":
+                    x = a[0] + a[1][1:]
+                    b = torch.cat([b, b], dim=0).reshape([-1, 1])
+                    return x + b, c * 2
+
+        # test de/serialization on some generic specs
+        dz = Dim("dz", min=4, max=16)
+        dx = 2 * dz
+        dy = dx + 1
+        inputs = (
+            [
+                torch.randn(8, 4),
+                torch.randn(9, 4),
+            ],
+            torch.randn(4),
+            torch.randn(4, 4),
+            "hello",
+        )
+        dynamic_shapes = {
+            "a": [
+                (dx, 4),
+                (dy, 4),
+            ],
+            "b": (dz,),
+            "c": None,
+            "d": None,
+        }
+        ep = export(Foo(), inputs, dynamic_shapes=dynamic_shapes)
+        self._check_dynamic_shapes_specs_and_shapes(
+            Foo(),
+            inputs,
+            [dynamic_shapes],
+            [
+                ([(16, 4), (17, 4)], (8,), (4, 4), "hello"),
+                ([(24, 4), (25, 4)], (12,), (4, 4), "hello"),
+            ],
+            [
+                ([(16, 4), (17, 4)], (8,), (5, 5), "hello"),
+            ],
+            test_serdes=True,
+        )
+        self.assertExpectedInline(
+            _dump_dynamic_shapes(dynamic_shapes, inputs),
+            """DynamicShapesSpec(dynamic_shapes=([['2*dz', 4], ['2*dz + 1', 4]], ['dz'], ['_DimHint.STATIC', '_DimHint.STATIC'], None), dims={'dz': RootDim(min=4, max=16, derived=['2*dz', '2*dz + 1'])})""",
+        )
+        self.assertExpectedInline(
+            _dump_dynamic_shapes(dynamic_shapes, inputs, to_dict=True),
+            """{'dynamic_shapes': ([['2*dz', 4], ['2*dz + 1', 4]], ['dz'], ['_DimHint.STATIC', '_DimHint.STATIC'], None), 'dims': {'dz': {'min': 4, 'max': 16, 'derived': ['2*dz', '2*dz + 1']}}}""",
+        )
+        ((dx, _), (dy, _)), (dz,), (_, _), _ = _load_dynamic_shapes(
+            _dump_dynamic_shapes(dynamic_shapes, inputs)
+        )
+        self.assertEqual(dx.root, dz)
+        self.assertEqual(dy.root, dz)
+
+    def test_dynamic_shapes_serdes_various(self):
+        # serialization for dataclass inputs, Dim.AUTO/STATIC, and kwargs
+        from torch._export.serde.dynamic_shapes import (
+            _dump_dynamic_shapes,
+            _load_dynamic_shapes,
+        )
+
+        auto, static = Dim.AUTO, Dim.STATIC
+
+        @dataclass
+        class Input:
+            a: Tensor
+            b: Tensor
+
+        register_dataclass_as_pytree_node(
+            Input,
+            serialized_type_name="test_dynamic_shapes_serdes_various.Input",
+        )
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x - torch.randn(4), y.a + y.b + z[1:]
+
+        args = (torch.randn(4, 4),)
+        kwargs = {
+            "y": Input(a=torch.randn(8, 8), b=torch.randn(8, 8)),
+            "z": torch.randn(9, 8),
+        }
+        dynamic_shapes = {
+            "x": (auto, static),
+            "y": [(auto, auto), (auto, auto)],
+            "z": (auto, 8),
+        }
+
+        # dump dynamic_shapes
+        self.assertExpectedInline(
+            _dump_dynamic_shapes(dynamic_shapes, args, kwargs),
+            """DynamicShapesSpec(dynamic_shapes=(['_DimHint.AUTO', '_DimHint.STATIC'], [['_DimHint.AUTO', '_DimHint.AUTO'], ['_DimHint.AUTO', '_DimHint.AUTO']], ['_DimHint.AUTO', 8]), dims={})""",
+        )
+        self.assertExpectedInline(
+            _dump_dynamic_shapes(dynamic_shapes, args, kwargs, to_dict=True),
+            """{'dynamic_shapes': (['_DimHint.AUTO', '_DimHint.STATIC'], [['_DimHint.AUTO', '_DimHint.AUTO'], ['_DimHint.AUTO', '_DimHint.AUTO']], ['_DimHint.AUTO', 8]), 'dims': {}}""",
+        )
+
+    def test_dynamic_shapes_serdes_user_errors(self):
+        # check error messages for dynamic shapes de/serialization
+        from torch._export.serde.dynamic_shapes import (
+            _dump_dynamic_shapes,
+            _load_dynamic_shapes,
+            DynamicShapesSpec,
+            RootDim,
+        )
+        from torch._export.serde.serialize import _dataclass_to_dict
+
+        # this stuff should be well tested in `test_mismatched_dynamic_shapes`
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            re.escape(
+                "Detected mismatch between the structure of `inputs` and `dynamic_shapes`: `inputs[0]['k']` "
+                "is a <class 'list'>, but `dynamic_shapes[0]['k']` is a <class 'tuple'>"
+            ),
+        ):
+            dynamic_shapes = {"x": {"k": (Dim("dx"), Dim("dy"))}}
+            _dump_dynamic_shapes(dynamic_shapes, ({"k": [torch.randn(4, 4)]},))
+
+        # loading with from_dict=True/False
+        spec = DynamicShapesSpec(
+            dynamic_shapes=[["dx"]],
+            dims={"dx": RootDim(min=4, max=16, derived=[])},
+        )
+        spec_dict = _dataclass_to_dict(spec)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            re.escape(
+                "With from_dict=True, expected `spec` to be a dict, "
+                "got <class 'torch._export.serde.dynamic_shapes.DynamicShapesSpec'>"
+            ),
+        ):
+            _load_dynamic_shapes(spec, from_dict=True)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            re.escape("Expected `spec` to be a DynamicShapesSpec, got <class 'dict'>"),
+        ):
+            _load_dynamic_shapes(spec_dict, from_dict=False)
+
+        self.assertExpectedInline(
+            _load_dynamic_shapes(spec, from_dict=False),
+            """[[<class 'torch._export.serde.dynamic_shapes.dx'>]]""",
+        )
+
+        # check incorrect info in dims
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            re.escape(
+                "Expected dims in `spec['dims']` to map `min` to an int, got dx: None"
+            ),
+        ):
+            spec = {
+                "dynamic_shapes": [["dx"]],
+                "dims": {
+                    "dx": {
+                        "min": None,
+                        "max": 4,
+                        "derived": [],
+                    },
+                },
+            }
+            _load_dynamic_shapes(spec, from_dict=True)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            re.escape(
+                "Expected dims in `spec['dynamic_shapes']` to be tracked in `spec['dims']`, "
+                "got dx which is not in dict_keys(['dy'])"
+            ),
+        ):
+            spec = {
+                "dynamic_shapes": [["dx"]],
+                "dims": {
+                    "dy": {
+                        "min": 2,
+                        "max": 4,
+                        "derived": [],
+                    },
+                },
+            }
+            _load_dynamic_shapes(spec, from_dict=True)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            re.escape(
+                "Expected derived expressions to be linear expressions, got dx**2 + 4"
+            ),
+        ):
+            spec = {
+                "dynamic_shapes": [["dx"]],
+                "dims": {
+                    "dx": {
+                        "min": 2,
+                        "max": 4,
+                        "derived": ["dx**2 + 4"],
+                    },
+                },
+            }
+            _load_dynamic_shapes(spec, from_dict=True)
 
     @testing.expectedFailureNonStrict
     @testing.expectedFailureTrainingIRToRunDecompNonStrict  # unbacked symint not tracked?
@@ -7682,13 +8030,6 @@ class TestExportCustomClass(TorchTestCase):
             ):
                 arg = node.args[0]
                 self.assertTrue(arg.op == "placeholder")
-
-    def test_tolist_nonstrict_output(self):
-        class M(torch.nn.Module):
-            def forward(self, x):
-                x.tolist()
-
-        ep = torch.export.export(M(), (torch.ones(3),), strict=False)
 
     def test_preserve_non_cia_op(self):
         class M(torch.nn.Module):
