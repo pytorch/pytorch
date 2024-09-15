@@ -6294,7 +6294,6 @@ def scan(combine_subgraph, init, inputs, dim, reverse, additional_inputs):
         combine_subgraph.graph_module = _to_out_variant_graph(
             combine_subgraph.graph_module, fake_sliced_inputs, fake_ys
         )
-        combine_subgraph.graph_module.print_readable()
 
         example_inputs = fake_sliced_inputs + fake_ys + [fake_idx]
         # create and lower subgraphs
