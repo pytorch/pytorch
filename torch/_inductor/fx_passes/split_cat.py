@@ -7,6 +7,7 @@ from typing_extensions import TypeAlias
 
 import torch
 from torch._dynamo.utils import counters
+from torch.fx.experimental.symbolic_shapes import free_symbols
 
 from ..pattern_matcher import (
     Arg,
@@ -446,6 +447,9 @@ def normalize_reshape_default(match: Match, *args, **kwargs):
     reshape_node = match.nodes[0]
     if not is_node_meta_valid(reshape_node):
         log.debug("example value absent for node: %s", reshape_node)
+        return
+    if free_symbols(reshape_node.meta["example_value"].shape):
+        log.debug("dynamic shape not supported: %s", reshape_node)
         return
     reshape_input = get_arg_value(reshape_node, 0)
 
