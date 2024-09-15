@@ -85,17 +85,19 @@ struct CheckBytePack<T, /*EltPerPack*/8> {
 // We want to check 8 x FP8 simultaneously, hence this template definition.
 template<typename T>
 struct HasNanFP8x8 {
-  // I am a dumb implementation. You should never call in here, unless the check
-  // for your datatype hasn't been implemented. File a Feature Request in that
-  // case.
-  static __device__ __forceinline__ bool check(uint64_t fp8x8) {
-    T* data = &fp8x8;
-    bool hasNan = false;
-    for (int i = 0; i < 8; i++) {
-      hasNan |= isnan(data[i]);
-    }
-    return hasNan;
+  static __device__ __forceinline__ bool check(uint64_t fp8x8) = delete;
+  /*
+  {
+    // `static_assert` in template definition requires c++23 onwards.
+    // But the error message still applies if you find yourself here.
+    static_assert(
+      false,
+      "You should never call this template definition because it is empty. You "
+      "can follow the example of Float8_e4m3fn below to implement the check for "
+      "your new datatype."
+    );
   }
+  */
 };
 
 // isnan condition for Float8_e4m3fn:
