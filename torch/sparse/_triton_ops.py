@@ -89,14 +89,14 @@ def make_triton_contiguous(t):
     """Return input as a triton-contiguous tensor.
 
     A triton-contiguous tensor is defined as a tensor that has strides
-    with minimal value equal to 1.
+    with minimal value smaller than or equal to 1.
 
     While triton kernels support triton-non-contiguous tensors (all
-    strides being greater than 1 or having 0 strides) arguments, a
-    considerable slow-down occurs because tensor data is copied
-    element-wise rather than chunk-wise.
+    strides being greater than 1) arguments, a considerable slow-down
+    occurs because tensor data is copied element-wise rather than
+    chunk-wise. Zero strides is assumed to not have this defect.
     """
-    if min(t.stride()) != 1:
+    if min(t.stride()) > 1:
         # TODO: investigate if contiguity along other axes than the
         # last one can be beneficial for performance
         return t.contiguous()
@@ -1198,6 +1198,8 @@ def bsr_dense_addmm(
         right_alpha = right_alpha.view(*original_batch_dims_broadcasted, 1, N).expand(
             *original_batch_dims_broadcasted, M, N
         )
+    assert left_alpha.stride()[-1] == 0
+    assert right_alpha.stride()[-2] == 0
 
     if meta is None:
         sparsity = round(1 - bsr._nnz() * blocksize[0] * blocksize[1] / (M * K), 2)
@@ -1233,6 +1235,7 @@ def bsr_dense_addmm(
     out = tile_to_blocksize(out, (BM, BN))
     dense = tile_to_blocksize(dense, (BK, BN))
     input = tile_to_blocksize(input, (BM, BN))
+
     left_alpha = tile_to_blocksize(left_alpha, (BM, BN))
     right_alpha = tile_to_blocksize(right_alpha, (BM, BN))
 
@@ -2331,16 +2334,16 @@ if has_triton():
         left_alpha_ptr,
         left_alpha_batch_stride,
         left_alpha_tiled_row_stride,
-        left_alpha_tiled_col_stride,
+        left_alpha_tiled_col_stride: tl.constexpr,
         left_alpha_row_block_stride,
-        left_alpha_col_block_stride,
+        left_alpha_col_block_stride: tl.constexpr,
         # left_alpha epilogue
         # right_alpha prologue
         right_alpha_ptr,
         right_alpha_batch_stride,
-        right_alpha_tiled_row_stride,
+        right_alpha_tiled_row_stride: tl.constexpr,
         right_alpha_tiled_col_stride,
-        right_alpha_row_block_stride,
+        right_alpha_row_block_stride: tl.constexpr,
         right_alpha_col_block_stride,
         # right_alpha epilogue
         # output prologue
@@ -2366,6 +2369,12 @@ if has_triton():
         GROUP_SIZE_ROW: tl.constexpr,
         SPLIT_N: tl.constexpr,
     ):
+        # left/right_alpha tensors are originally (* + 1)-dimensional
+        assert left_alpha_tiled_col_stride == 0
+        assert left_alpha_col_block_stride == 0
+        assert right_alpha_tiled_row_stride == 0
+        assert right_alpha_row_block_stride == 0
+
         batch_pid = tl.program_id(axis=2)
         row_block_pid = tl.program_id(axis=0)
         col_block_pid = tl.program_id(axis=1)
