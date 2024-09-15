@@ -979,7 +979,7 @@ class PagedCache:
             logical_block_idx = self.physical_to_logical[b, physical_kv_block]
             logical_kv_idx = logical_block_idx * self.page_size + physical_kv_offset
             return torch.where(
-                logical_kv_idx >= 0, mask_mod(b, h, q_idx, logical_kv_idx), False
+                logical_block_idx >= 0, mask_mod(b, h, q_idx, logical_kv_idx), False
             )
 
         return new_mask_mod
@@ -991,7 +991,7 @@ class PagedCache:
             logical_block_idx = self.physical_to_logical[b, physical_kv_block]
             logical_kv_idx = logical_block_idx * self.page_size + physical_kv_offset
             return torch.where(
-                logical_kv_idx >= 0,
+                logical_block_idx >= 0,
                 score_mod(score, b, h, q_idx, logical_kv_idx),
                 False,
             )

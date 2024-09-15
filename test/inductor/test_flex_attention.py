@@ -2551,7 +2551,7 @@ class TestPagedCache(InductorTestCase):
         self.assertEqual(paged_cache.page_table, expected_page_table)
 
         expected_physical_to_logical = torch.tensor(
-            [[0, -1, -1, 1, -1, 2, -1, 3, -1], [-1, 1, 0, -1, 3, -1, 4, -1, -1]],
+            [[0, -1, -1, 1, -1, 2, -1, 3, -1], [-1, 1, 0, -1, 2, -1, 3, -1, -1]],
             device="cuda",
         )
         self.assertEqual(paged_cache.physical_to_logical, expected_physical_to_logical)
@@ -2570,6 +2570,10 @@ class TestPagedCache(InductorTestCase):
         self.assertEqual(converted_causal_mask(1, 0, 256, 384), False)
         # Equivalent to: causal_mask(1, 0, 64, 14)
         self.assertEqual(converted_causal_mask(1, 0, 64, 270), True)
+
+        # from torch.nn.attention.flex_attention import create_mask
+        # mask_tensor = create_mask(converted_causal_mask, max_batch_size, 1, max_seq_len, page_size*n_pages)
+        # breakpoint()
 
     @supported_platform
     def test_update(self):
