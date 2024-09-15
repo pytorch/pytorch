@@ -2041,18 +2041,13 @@ class WrapperCodeGen(CodeGen):
         )
         # Initialize the carry output to be a clone of init.
         outer_carry_outs = []
-        self.writeline(f"outer_carry_out = [None for i in range({len(outer_init)})]")
+        inner_carry_outs = []
+        self.writeline(f"inner_carry_out = [None for i in range({len(outer_init)})]")
         for i, init in enumerate(
             _extract_carry_and_out(sequential_scan.outputs, len(outer_init))[0]
         ):
-            self.writeline(f"outer_carry_out[{i}] = {outer_init[i]}.clone()")
-            self.writeline(f"{name}[{i}] = outer_carry_out[{i}]")
-            outer_carry_outs.append(f"outer_carry_out[{i}]")
-
-        self.writeline(f"innner_carry_out = [None] * {len(outer_carry_outs)}")
-        inner_carry_outs = []
-        for i in range(len(outer_carry_outs)):
-            inner_carry_outs.append(f"innner_carry_out[{i}]")
+            self.writeline(f"inner_carry_out[{i}] = {outer_init[i]}.clone()")
+            inner_carry_outs.append(f"inner_carry_out[{i}]")
 
         # Initialize the ys_output to an empty buffer.
         outer_ys_outs = []
@@ -2091,7 +2086,7 @@ class WrapperCodeGen(CodeGen):
 
         self.codegen_subgraph(
             sequential_scan.combine_subgraph,
-            outer_carry_outs
+            inner_carry_outs
             + inner_xs
             + outer_additional_inputs
             + outer_ys_outs
@@ -2099,13 +2094,9 @@ class WrapperCodeGen(CodeGen):
             inner_carry_outs + ["_"] * len(outer_ys_outs),
         )
 
-        # Note: we have to copy the inner_carry_outs to outer_carry_outs in wrapper instead of in
-        # subgraph. This is to avoid the case where inplace overrides the inputs causes
-        # other parts of the subgraph to be using the overwritten version.
-        for i in range(len(inner_carry_outs)):
-            self.writeline(f"{outer_carry_outs[i]}.copy_({inner_carry_outs[i]})")
-
         self.writeline(ExitSubgraphLine(self))
+        for i in range(len(inner_carry_outs)):
+            self.writeline(f"{name}[{i}] = {inner_carry_outs[i]}")
 
     @staticmethod
     def statically_known_int_or_none(x):
