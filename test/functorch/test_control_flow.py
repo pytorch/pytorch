@@ -29,6 +29,7 @@ from torch.testing._internal.common_utils import (
     skipIfCrossRef,
     skipIfRocm,
     skipIfTorchDynamo,
+    TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfTorchDynamo,
@@ -5374,9 +5375,32 @@ def forward(self, l_inp_, l_tmp_):
         exp_out = _fake_scan(add, init, xs)
 
         self.assertEqual(len(backend.graphs), 1)
-        self.assertExpectedInline(
-            backend.graphs[0].code.strip(),
-            """\
+        if TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                backend.graphs[0].code.strip(),
+                """\
+def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_cell_contents_0_param_ : torch.Tensor, L_add_closure_0_cell_contents_1_0_ : torch.Tensor):
+    l_init_ = L_init_
+    l_xs_ = L_xs_
+    l_add_closure_0_cell_contents_0_param_ = L_add_closure_0_cell_contents_0_param_
+    l_add_closure_0_cell_contents_1_0_ = L_add_closure_0_cell_contents_1_0_
+    select = l_xs_.select(0, 0)
+    matmul = l_init_ @ l_add_closure_0_cell_contents_0_param_
+    matmul_1 = matmul @ select;  matmul = select = None
+    ret = matmul_1 + l_add_closure_0_cell_contents_1_0_;  matmul_1 = None
+    sum_1 = ret.sum();  ret = sum_1 = None
+    child = l_init_.clone();  child = None
+    r = torch.select_copy(l_xs_, 0, 0);  r = None
+    scan_combine_fn_0 = self.scan_combine_fn_0
+    scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], 0, False, [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = l_xs_ = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
+    getitem = scan[0]
+    getitem_1 = scan[1];  scan = None
+    return (getitem, getitem_1)""",  # noqa: B950
+            )
+        else:
+            self.assertExpectedInline(
+                backend.graphs[0].code.strip(),
+                """\
 def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_cell_contents_0_param_ : torch.Tensor, L_add_closure_0_cell_contents_1_0_ : torch.Tensor):
     l_init_ = L_init_
     l_xs_ = L_xs_
@@ -5394,7 +5418,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     return (getitem, getitem_1)""",  # noqa: B950
-        )
+            )
         self.assertEqual(eager_out, exp_out)
         self.assertEqual(compiled_out, exp_out)
 
