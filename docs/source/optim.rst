@@ -356,9 +356,12 @@ Assuming that for the following ``model2`` we wish to load the states of ``fc`` 
 To load the state dict for ``optimizer2`` with the state dict of the previous optimizer we need the following hook::
 
     def adapt_state_dict_ids(optimizer, state_dict):
-        current_state_group0 = optimizer.state_dict()['param_groups'][0]
-        loaded_state_group0 = state_dict['param_groups'][0]
         adapted_state_dict = deepcopy(optimizer.state_dict())
+        # Copy setup parameters (lr, weight_decay, etc.), in case they differ in the loaded state dict.
+        for k, v in state_dict['param_groups'][0].items():
+            if k not in ['params', 'param_names']:
+                adapted_state_dict[k] = v
+
         lookup_dict = {'fc1': 'fc', 'fc2': 'fc'}
 
         for param_id, param_name in zip(
@@ -377,6 +380,8 @@ To load the state dict for ``optimizer2`` with the state dict of the previous op
 
 This ensures that the adapted state_dict with the correct states for the layers of ``model2`` will be used
 during model loading.
+Note that this code is designed specifically for this example (e.g., assuming a single parameter group),
+and other cases might require different adaptations.
 
 
 Weight Averaging (SWA and EMA)
