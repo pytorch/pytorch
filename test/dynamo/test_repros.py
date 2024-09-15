@@ -14,13 +14,14 @@ import inspect
 import itertools
 import os
 import random
+import sys
 import unittest
 import warnings
 import weakref
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
-from enum import Enum
+from enum import Enum, IntEnum
 from functools import wraps
 from typing import Any, Dict, Iterator, List, Tuple
 from unittest import mock
@@ -4545,6 +4546,82 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with torch.no_grad():
             f(*args)
         self.assertEqual(num_compiles, 1)
+
+    @unittest.skipIf(sys.version_info < (3, 9), "requires python 3.9+")
+    def test_issue134451(self):
+        class BoundingBox2DIndex(IntEnum):
+            _X = 0
+            _Y = 1
+            _HEADING = 2
+            _LENGTH = 3
+            _WIDTH = 4
+
+            @classmethod
+            def size(cls):
+                return 5
+
+            @classmethod
+            @property
+            def X(cls):
+                return cls._X
+
+            @classmethod
+            @property
+            def Y(cls):
+                return cls._Y
+
+            @classmethod
+            @property
+            def HEADING(cls):
+                return cls._HEADING
+
+            @classmethod
+            @property
+            def LENGTH(cls):
+                return cls._LENGTH
+
+            @classmethod
+            @property
+            def WIDTH(cls):
+                return cls._WIDTH
+
+            @classmethod
+            @property
+            def POINT(cls):
+                # assumes X, Y have subsequent indices
+                return slice(cls._X, cls._Y + 1)
+
+            @classmethod
+            @property
+            def STATE_SE2(cls):
+                # assumes X, Y, HEADING have subsequent indices
+                return slice(cls._X, cls._HEADING + 1)
+
+        class SimpleModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self._mlp_states = nn.Sequential(
+                    nn.Linear(10, 20),
+                    nn.ReLU(),
+                    nn.Linear(20, BoundingBox2DIndex.size()),
+                )
+
+            def forward(self, x):
+                agent_states = self._mlp_states(x)
+                agent_states[..., BoundingBox2DIndex.POINT] = (
+                    agent_states[..., BoundingBox2DIndex.POINT].tanh() * 32
+                )
+                agent_states[..., BoundingBox2DIndex.HEADING] = (
+                    agent_states[..., BoundingBox2DIndex.HEADING].tanh() * torch.pi
+                )
+                return agent_states
+
+        model = SimpleModel().eval()
+        input_tensor = torch.randn(1, 10, dtype=torch.float32)
+        opt = torch.compile(model.eval(), backend="eager", fullgraph=True)
+        actual = opt(input_tensor)
+        expected = model(input_tensor)
+        self.assertEqual(actual, expected)
 
     def test_invalid_seq_unpack(self):
         def myfn(arg):
