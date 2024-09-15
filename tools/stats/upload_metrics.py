@@ -137,7 +137,7 @@ def emit_metric(
             "calling_file": calling_file,
             "calling_module": calling_module,
             "calling_function": calling_function,
-            "timestamp": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f"),
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f"),
             **{m.name: m.value() for m in env_var_metrics if m.value()},
         }
     except ValueError as e:

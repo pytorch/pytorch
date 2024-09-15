@@ -115,7 +115,7 @@ if __name__ == "__main__":
     while not kill_now:
         try:
             stats = {
-                "time": datetime.datetime.utcnow().isoformat("T") + "Z",
+                "time": datetime.datetime.now(datetime.timezone.utc).isoformat("T") + "Z",
                 "total_cpu_percent": psutil.cpu_percent(),
                 "per_process_cpu_info": get_per_process_cpu_info(),
             }
@@ -137,7 +137,7 @@ if __name__ == "__main__":
                 )["umc_activity"]
         except Exception as e:
             stats = {
-                "time": datetime.datetime.utcnow().isoformat("T") + "Z",
+                "time": datetime.datetime.now(datetime.timezone.utc).isoformat("T") + "Z",
                 "error": str(e),
             }
         finally:

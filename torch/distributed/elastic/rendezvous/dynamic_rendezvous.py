@@ -471,7 +471,7 @@ class _BackendRendezvousStateHolder(_RendezvousStateHolder):
     def _sanitize(self) -> None:
         state = self._state
 
-        expire_time = datetime.utcnow() - (
+        expire_time = datetime.now(datetime.timezone.utc) - (
             self._settings.keep_alive_interval * self._settings.keep_alive_max_attempt
         )
 
@@ -716,7 +716,7 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
         self._record(message=msg)
         logger.debug(msg)
 
-        self._state.last_heartbeats[self._node] = datetime.utcnow()
+        self._state.last_heartbeats[self._node] = datetime.now(datetime.timezone.utc)
 
     def _add_to_participants(self) -> None:
         msg = (
@@ -740,7 +740,7 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
         self._keep_alive()
 
         if len(state.participants) == self._settings.min_nodes:
-            state.deadline = datetime.utcnow() + self._settings.timeout.last_call
+            state.deadline = datetime.now(datetime.timezone.utc) + self._settings.timeout.last_call
 
         if len(state.participants) == self._settings.max_nodes:
             self._mark_rendezvous_complete()
@@ -848,7 +848,7 @@ def _should_keep_alive(ctx: _RendezvousContext) -> bool:
     except KeyError:
         return False
 
-    return last_heartbeat <= datetime.utcnow() - ctx.settings.keep_alive_interval
+    return last_heartbeat <= datetime.now(datetime.timezone.utc) - ctx.settings.keep_alive_interval
 
 
 class _RendezvousExitOp:
@@ -937,7 +937,7 @@ class _RendezvousJoinOp:
                 len(state.participants) >= ctx.settings.min_nodes
                 and len(state.participants) <= ctx.settings.max_nodes
             ):
-                if cast(datetime, state.deadline) < datetime.utcnow():
+                if cast(datetime, state.deadline) < datetime.now(datetime.timezone.utc):
                     msg = (
                         f"The node '{ctx.node}' marking the rendezvous complete, "
                         f"quorum established within deadline"
