@@ -2,7 +2,7 @@
 import functools
 import itertools
 import logging
-from typing import cast, List, Tuple
+from typing import cast, Sequence, Tuple
 
 import sympy
 
@@ -28,7 +28,7 @@ def filtered_configs(
     m: int,
     n: int,
     k: int,
-    configs: List[Tuple[int, int, int, int, int]],
+    configs: Sequence[Tuple[int, int, int, int, int]],
     has_int8_tensor=False,
 ):
     """Heuristic to shrink configs when they are bigger than the input size"""
