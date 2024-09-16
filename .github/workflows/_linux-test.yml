@@ -60,8 +60,12 @@ on:
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
+# permissions:
+#   pull-requests: write
 jobs:
   test:
+    # permissions:
+    #   pull-requests: write
     # Don't run on forked repos or empty test matrix
     if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
     strategy:
@@ -184,6 +188,7 @@ jobs:
         id: test
         timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -236,6 +241,7 @@ jobs:
           # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
             ${GPU_FLAG:-} \
+            -e GITHUB_TOKEN \
             -e BUILD_ENVIRONMENT \
             -e PR_NUMBER \
             -e GITHUB_ACTIONS \
