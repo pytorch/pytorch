@@ -610,6 +610,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return WrapWithSetGradEnabledHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "auto_functionalized":
             return AutoFunctionalizeHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "invoke_subgraph":
+            return InvokeSubgraphHigherOrderVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -1502,6 +1504,12 @@ class FunctionalCallVariable(FunctorchHigherOrderVariable):
         return super().call_function(tx, args, kwargs)
 
 
+class WrapHigherOrderVariableBase(TorchHigherOrderOperatorVariable):
+    def __init__(self, value, source, description, **kwargs):
+        self.description = description
+        super().__init__(value, source, **kwargs)
+
+
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def create_wrapped_node(
         self, tx: "InstructionTranslator", args, kwargs, description
@@ -1949,6 +1957,11 @@ class AutoFunctionalizeHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ),
             example_value=None,
         )
+
+
+# TODO(anijin2305) - Refactor the base class - WrapHigherOrderVariable - to share code
+class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
+    pass
 
 
 class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
