@@ -14,9 +14,9 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 
 try:
-    from .test_fp8 import _quantize_tensorwise
+    from .test_fp8 import _quantize_tensorwise, _quantize_rowwise
 except ImportError:
-    from test_fp8 import _quantize_tensorwise
+    from test_fp8 import _quantize_tensorwise, _quantize_rowwise
 
 
 torch.set_float32_matmul_precision("high")
@@ -265,8 +265,9 @@ class TestCKBackend(TestCase):
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     @parametrize("dtype", (torch.bfloat16,))
     @parametrize("use_fast_accum", (True,))
+    @parametrize("quantize_type", ("tensorwise", "rowwise"))
     def test_max_autotune_scaled_mm(
-        self, max_autotune_gemm_backends, dtype, use_fast_accum
+        self, max_autotune_gemm_backends, dtype, use_fast_accum, quantize_type
     ):
         tensor_options = {"device": "cuda", "dtype": dtype}
 
@@ -275,12 +276,14 @@ class TestCKBackend(TestCase):
 
         dtype_float8 = torch.float8_e4m3fnuz
 
+        f_quantize = _quantize_tensorwise if quantize_type == "tensorwise" else _quantize_rowwise
+
         # quantize weight (prior to inference)
-        w_fp8, w_inverse_scale = _quantize_tensorwise(w, dtype_float8)
+        w_fp8, w_inverse_scale = f_quantize(w, dtype_float8)
         w_t_fp8 = w_fp8.t()
 
         # quantize input x
-        x_fp8, x_inverse_scale = _quantize_tensorwise(x, dtype_float8)
+        x_fp8, x_inverse_scale = f_quantize(x, dtype_float8)
 
         assert "rocm" in dir(config)
 
