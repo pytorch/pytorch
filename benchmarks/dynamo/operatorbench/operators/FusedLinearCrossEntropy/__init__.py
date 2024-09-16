@@ -5,7 +5,7 @@ from typing import Optional
 H = 4096
 V = 128256
 # Each file defines an operator variant
-valid_operator_files = ["baseline.py", "custom.py"]
+valid_operator_files = ["baseline.py", "custom.py", "inductor.py"]
 
 
 # Reference: https://github.com/linkedin/Liger-Kernel/blob/3d0653b035222cbb845435a1994854e4fd219107/benchmark/scripts/benchmark_fused_linear_cross_entropy.py

@@ -85,7 +85,7 @@ def benchmark_operator(
     help=f"phase to benchmark. {[phase.value.lower() for phase in Phase]}. ",
     default="forward",
 )
-@click.option("--repeat", help="repeat", default=15)
+@click.option("--repeat", help="repeat", default=3)
 @click.option(
     "--metrics",
     help=f"metrics to benchmark. {[metric.value.lower() for metric in Metrics]}. split by ','",
