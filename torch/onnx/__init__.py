@@ -98,15 +98,17 @@ from . import (  # usort: skip. Keep the order instead of sorting lexicographica
     symbolic_opset20,
     utils,
 )
+
+
 from ._internal._exporter_legacy import (  # usort: skip. needs to be last to avoid circular import
     DiagnosticOptions,
     ExportOptions,
     ONNXProgram,
     ONNXRuntimeOptions,
     OnnxRegistry,
-    ONNXRuntimeOptions,
     enable_fake_mode,
 )
+
 
 if TYPE_CHECKING:
     import os
@@ -128,36 +130,6 @@ is_onnxrt_backend_supported.__module__ = "torch.onnx"
 
 producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION
-
-_CUSTOM_ONNX_DECOMPS = {}
-
-
-def register_decomp(
-    target: Callable, onnx_decomp: Callable, is_complex: bool = False
-) -> None:
-    """Register a function to decompose a PyTorch node to ONNX.
-
-    Args:
-        target: The PyTorch node callable target. E.g. ``torch.ops.aten.add``.
-        onnx_decomp: The ONNX decomposition function to register.
-        is_complex: Whether the function is a function that handles complex valued inputs.
-    """
-    _CUSTOM_ONNX_DECOMPS[target] = (onnx_decomp, is_complex)
-
-
-def unregister_decomp(target: Callable) -> None:
-    """Unregister a function to decompose a PyTorch node to ONNX.
-
-    Args:
-        target: The PyTorch node callable target. E.g. ``torch.ops.aten.add``.
-    """
-    if target in _CUSTOM_ONNX_DECOMPS:
-        del _CUSTOM_ONNX_DECOMPS[target]
-
-
-def clear_decomps() -> None:
-    """Clear all registered custom decompositions."""
-    _CUSTOM_ONNX_DECOMPS.clear()
 
 
 def export(
@@ -182,6 +154,7 @@ def export(
     # Dynamo only options
     external_data: bool = True,
     dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None = None,
+    custom_decomp_table: dict[Callable, Callable] | None = None,
     report: bool = False,
     verify: bool = False,
     profile: bool = False,
@@ -313,14 +286,22 @@ def export(
             :func:`torch.export.export` for more details. This is only used (and preferred) when dynamo is True.
             Only one parameter `dynamic_axes` or `dynamic_shapes` should be set
             at the same time.
-        report: Whether to generate a markdown report for the export process.
-        verify: Whether to verify the exported model using ONNX Runtime.
-        profile: Whether to profile the export process.
+        custom_decomp_table: A dictionary of custom decompositions for operators in the model.
+            The dictionary should have the callable target in the fx Node as the key (e.g. ``torch.ops.aten.stft.default``),
+            and the value should be a function that builds that graph using ONNX Script. This option
+            is only valid when dynamo is True.
+        report: Whether to generate a markdown report for the export process. This option
+            is only valid when dynamo is True.
+        verify: Whether to verify the exported model using ONNX Runtime. This option
+            is only valid when dynamo is True.
+        profile: Whether to profile the export process. This option
+            is only valid when dynamo is True.
         dump_exported_program: Whether to dump the :class:`torch.export.ExportedProgram` to a file.
-            This is useful for debugging the exporter.
+            This is useful for debugging the exporter. This option is only valid when dynamo is True.
         artifacts_dir: The directory to save the debugging artifacts like the report and the serialized
-            exported program.
+            exported program. This option is only valid when dynamo is True.
         fallback: Whether to fallback to the TorchScript exporter if the dynamo exporter fails.
+            This option is only valid when dynamo is True.
 
         training: Deprecated option. Instead, set the training mode of the model before exporting.
         operator_export_type: Deprecated option. Only ONNX is supported.
@@ -378,7 +359,7 @@ def export(
             input_names=input_names,
             output_names=output_names,
             opset_version=opset_version,
-            additional_decomp=_CUSTOM_ONNX_DECOMPS,
+            custom_decomp_table=custom_decomp_table,
             dynamic_axes=dynamic_axes,
             keep_initializers_as_inputs=keep_initializers_as_inputs,
             external_data=external_data,

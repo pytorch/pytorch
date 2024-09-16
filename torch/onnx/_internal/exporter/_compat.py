@@ -125,7 +125,7 @@ def export_compat(
     input_names: Sequence[str] | None = None,
     output_names: Sequence[str] | None = None,
     opset_version: int | None = None,
-    additional_decomp: dict[Callable, tuple[Callable, bool]] | None = None,
+    custom_decomp_table: dict[Callable, tuple[Callable, bool]] | None = None,
     dynamic_axes: Mapping[str, Mapping[int, str]]
     | Mapping[str, Sequence[int]]
     | None = None,
@@ -158,9 +158,9 @@ def export_compat(
                 output_names=set(output_names or ()),
             )
 
-    if additional_decomp is not None:
-        registry = _registration.ONNXRegistry.from_torchlib()
-        for torch_op, (onnx_op, is_complex) in additional_decomp.items():
+    registry = _registration.ONNXRegistry.from_torchlib()
+    if custom_decomp_table is not None:
+        for torch_op, (onnx_op, is_complex) in custom_decomp_table.items():
             registry.register_op(torch_op, onnx_op, is_complex=is_complex)
     try:
         onnx_program = _core.export(
