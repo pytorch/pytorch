@@ -1,7 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
-from typing import Any, Callable, Dict, Tuple, Union
+from typing import Any, Callable, Dict, Sequence, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -21,6 +21,53 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.graph_module import GraphModule
 from torch.overrides import TorchFunctionMode
+
+
+# Duplicate of _inductor/kernel/flex_attention.py to avoid circular import
+def _construct_strides(
+    sizes: Sequence[int],
+    fill_order: Sequence[int],
+) -> Sequence[int]:
+    """From a list of sizes and a fill order, construct the strides of the permuted tensor."""
+    # Initialize strides
+    assert len(sizes) == len(
+        fill_order
+    ), "Length of sizes must match the length of the fill order"
+    strides = [0] * len(sizes)
+
+    # Start with stride 1 for the innermost dimension
+    current_stride = 1
+
+    # Iterate through the fill order populating strides
+    for dim in fill_order:
+        strides[dim] = current_stride
+        current_stride *= sizes[dim]
+
+    return strides
+
+
+def _permute_strides(out: torch.Tensor, query_strides: Tuple[int, ...]) -> torch.Tensor:
+    """
+    Create a new tensor with the same data and shape as the input,
+    but with strides permuted based on the input tensor's stride order.
+
+    Args:
+        out (torch.Tensor): The output tensor of attention.
+        query_strides (List[int]): The stride order of the input query tensor
+
+    Returns:
+        torch.Tensor: A new tensor with same shape and data as the input,
+        but with strides permuted based on the query tensor's stride order.
+    """
+    from torch._inductor.ir import get_stride_order, stride_order2fill_order
+
+    stride_order = get_stride_order(query_strides)
+    fill_order = stride_order2fill_order(stride_order)
+    assert out.storage_offset() == 0, "Only support storage_offset == 0"
+    out_strides = _construct_strides(out.shape, fill_order)
+    new_out = out.new_empty(out.shape).as_strided(out.shape, out_strides)
+    new_out.copy_(out)
+    return new_out
 
 
 class TransformGetItemToIndex(TorchFunctionMode):
@@ -244,7 +291,7 @@ def sdpa_dense(
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
-    out = out.contiguous()
+    out = _permute_strides(out, query.stride())
     return out, lse
 
 
@@ -432,7 +479,9 @@ def flex_attention_fake_tensor_mode(
             batch_size, num_heads, seq_len_q, dtype=torch.float32
         )
         out_shape = (batch_size, num_heads, seq_len_q, v_head_dim)
-        return query.new_empty(out_shape), logsumexp
+        out = query.new_empty(out_shape)
+        out = _permute_strides(out, query.stride())
+        return out, logsumexp
 
 
 # ---------------------------- Autograd Implementation ----------------------------

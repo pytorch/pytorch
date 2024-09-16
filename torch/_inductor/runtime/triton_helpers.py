@@ -31,6 +31,21 @@ except ImportError:
         raise NotImplementedError
 
 
+def set_driver_to_cpu():
+    if backend := triton.backends.backends.get("cpu", None):
+        triton.runtime.driver.set_active(backend.driver())
+        return
+    raise RuntimeError("Could not find an active CPU backend")
+
+
+def set_driver_to_gpu():
+    for name, backend in triton.backends.backends.items():
+        if backend.driver.is_active() and name != "cpu":
+            triton.runtime.driver.set_active(backend.driver())
+            return
+    raise RuntimeError("Could not find an active GPU backend")
+
+
 @triton.jit
 def promote_to_tensor(x):
     # Addition promotes to tensor for us
@@ -198,14 +213,11 @@ def any(a, dim):
 
 @triton.jit
 def bucketize_binary_search(
-    values: tl.tensor,
-    offsets_ptr: tl.pointer_type,
-    sorter_ptr: tl.pointer_type,  # optional pointer of the same shape as offsets_ptr, None if not present
-    indexing_dtype: tl.dtype,
+    values,  # 1D tensor
+    offsets_ptr,
+    indexing_dtype,
     right,  # bool: if true, use intervals closed on the left; see [Note: Inductor bucketize op]
-    OFFSETS_INDICES: tl.tensor,  # Indices pointing to the beginning of the 1-D sequence of offsets used to bucketize each value
-    OFFSETS_SIZE: int,  # flattened length of the entire offsets/sorter array
-    NUM_BUCKET_BOUNDARIES: int,  # length of an individual 1-D sequence of offsets.  Equal to OFFSETS_SIZE in the 1-D case.
+    OFFSETS_SIZE: int,
     BLOCK_SHAPE,  # tuple/list of block shape
 ):
     """
@@ -213,23 +225,13 @@ def bucketize_binary_search(
     """
 
     low = tl.zeros(BLOCK_SHAPE, dtype=indexing_dtype)
-    high = tl.full(BLOCK_SHAPE, NUM_BUCKET_BOUNDARIES, dtype=indexing_dtype)
+    high = tl.full(BLOCK_SHAPE, OFFSETS_SIZE, dtype=indexing_dtype)
 
-    full_range = NUM_BUCKET_BOUNDARIES + 1
+    full_range = OFFSETS_SIZE + 1
     while full_range > 1:
         mid = (high + low) // 2
-        mask = mid + OFFSETS_INDICES < OFFSETS_SIZE and mid < NUM_BUCKET_BOUNDARIES
-        mid_indices = (
-            mid
-            if sorter_ptr is None
-            else tl.load(sorter_ptr + mid + OFFSETS_INDICES, mask=mask, other=0)
-        )
-
-        bucket_upper_bound = tl.load(
-            offsets_ptr + mid_indices + OFFSETS_INDICES,
-            mask=mask,
-            other=0,
-        )
+        mask = mid < OFFSETS_SIZE
+        bucket_upper_bound = tl.load(offsets_ptr + mid, mask=mask, other=0.0)
         if right:
             is_above = values >= bucket_upper_bound
         else:
