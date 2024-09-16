@@ -295,7 +295,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         else:
             return dense_input
 
-    def to_dense(self):  # type:ignore[override]
+    def to_dense(self):
         col = self.shape[-1]
         return torch.mm(self, torch.eye(col, dtype=self.dtype, device=self.device))
 
@@ -420,7 +420,7 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
             requires_grad=original_tensor.requires_grad,
         )
 
-    def to_dense(self):  # type: ignore[override]
+    def to_dense(self):
         assert self.meta is not None and self.packed is not None
         return (
             sparse_semi_structured_to_dense_cutlass(

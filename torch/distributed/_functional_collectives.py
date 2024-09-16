@@ -600,7 +600,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         elem = inner_tensors["elem"]
         return AsyncCollectiveTensor(elem)
 
-    def __repr__(self) -> str:  # type: ignore[override]
+    def __repr__(self):
         return f"AsyncCollectiveTensor({self.trigger_wait()})"
 
     def trigger_wait(self):
@@ -653,7 +653,7 @@ class AsyncCollectiveTensor(torch.Tensor):
 
         return out
 
-    def numpy(self):  # type: ignore[override]
+    def numpy(self):
         return self.wait().numpy()
 
 

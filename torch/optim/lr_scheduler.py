@@ -910,7 +910,7 @@ class SequentialLR(LRScheduler):
 
         self._last_lr = schedulers[0].get_last_lr()
 
-    def step(self):  # type: ignore[override]
+    def step(self):
         """Perform a step."""
         self.last_epoch += 1
         idx = bisect_right(self._milestones, self.last_epoch)
@@ -1179,7 +1179,7 @@ class ChainedScheduler(LRScheduler):
             group["lr"] for group in self._schedulers[-1].optimizer.param_groups
         ]
 
-    def step(self):  # type: ignore[override]
+    def step(self):
         """Perform a step."""
         for scheduler in self._schedulers:
             scheduler.step()

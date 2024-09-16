@@ -221,7 +221,7 @@ class FunctionalTensor(torch.Tensor):
             "Attempting to use FunctionalTensor on its own. Instead, please use it with a corresponding FunctionalTensorMode()"
         )
 
-    def __repr__(self) -> str:  # type: ignore[override]
+    def __repr__(self):
         return f"FunctionalTensor({repr(self.elem)})"
 
     @staticmethod
@@ -302,7 +302,7 @@ class FunctionalTensor(torch.Tensor):
     long = _conversion_method_template(dtype=torch.int64)
 
     # TODO(sparse-team): fixes #133174 but can we do without the relay?
-    def to_dense(self):  # type: ignore[override]
+    def to_dense(self):
         return self.elem.to_dense()
 
     @property
