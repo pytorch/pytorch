@@ -12654,6 +12654,7 @@
   dispatch:
     CPU: upsample_bicubic2d_out_cpu
     CUDA: upsample_bicubic2d_out_cuda
+    MPS: upsample_bicubic2d_out_mps
 
 - func: upsample_bicubic2d(Tensor self, SymInt[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   python_module: nn
