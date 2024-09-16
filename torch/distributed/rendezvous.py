@@ -182,15 +182,21 @@ def _create_c10d_store(
 
     if _torchelastic_use_agent_store():
         # We create a new TCPStore for every retry so no need to add prefix for each attempt.
-        return TCPStore(hostname, port, world_size, False, timeout)
+        return TCPStore(
+            host_name=hostname,
+            port=port,
+            world_size=world_size,
+            is_master=False,
+            timeout=timeout,
+        )
     else:
         start_daemon = rank == 0
         return TCPStore(
-            hostname,
-            port,
-            world_size,
-            start_daemon,
-            timeout,
+            host_name=hostname,
+            port=port,
+            world_size=world_size,
+            is_master=start_daemon,
+            timeout=timeout,
             multi_tenant=True,
             use_libuv=use_libuv,
         )
