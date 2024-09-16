@@ -896,6 +896,8 @@ class OpInfo:
 
     is_factory_function: bool = False
 
+    is_randomized_result: bool = False
+
     def __post_init__(self):
         self._original_opinfo_args = asdict(self).copy()
 
