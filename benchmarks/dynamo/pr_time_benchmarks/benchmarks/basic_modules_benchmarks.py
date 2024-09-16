@@ -20,12 +20,15 @@ class ListOfLinears(nn.Module):
 
 
 class Benchmark(BenchmarkBase):
-    def __init__(self, ModuleClass, backend, is_gpu=False, dynamic=False):
+    def __init__(
+        self, ModuleClass, backend, is_gpu=False, dynamic=False, force_shape_pad=False
+    ):
         self.ModuleClass = ModuleClass
         self.backend = backend
         self._name = ModuleClass.__name__
         self._is_gpu = is_gpu
         self._dynamic = dynamic
+        self._force_shape_pad = force_shape_pad
 
     def name(self):
         prefix = f"basic_modules_{self._name}_{self.backend}"
@@ -33,6 +36,8 @@ class Benchmark(BenchmarkBase):
             prefix += "_dynamic"
         if self._is_gpu:
             prefix += "_gpu"
+        if self._force_shape_pad:
+            prefix += "_force_shape_pad"
         return prefix
 
     def _prepare_once(self):
@@ -57,6 +62,8 @@ def main():
         Benchmark(ListOfLinears, "eager"),
         Benchmark(ListOfLinears, "inductor"),
         Benchmark(ListOfLinears, "inductor", is_gpu=True),
+        Benchmark(ListOfLinears, "inductor", is_gpu=True),
+        Benchmark(ListOfLinears, "inductor", is_gpu=True, force_shape_pad=True),
     ]
     for b in benchmarks:
         b.enable_compile_time_instruction_count().collect_all().append_results(
