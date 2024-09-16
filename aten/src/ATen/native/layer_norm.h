@@ -36,20 +36,24 @@ C10_ALWAYS_INLINE std::pair<int64_t, int64_t> _check_layer_norm_inputs(
       " and normalized_shape = ",
       normalized_shape);
 
-  const auto sym_input_shape = input.sym_sizes();
+  // Validation for NT is done elsewhere.
+  // TODO: Remove the nested-specific logic if the rms_norm op is ever updated
+  // for symbolic shapes.
   const auto input_ndim = input.dim();
-
-  if (input_ndim < normalized_ndim ||
-      !C10_AS_INTARRAYREF_SLOW(sym_input_shape.slice(input_ndim - normalized_ndim))
-           .equals(normalized_shape)) {
-    std::stringstream ss;
-    ss << "Given normalized_shape=" << normalized_shape
-       << ", expected input with shape [*";
-    for (auto size : normalized_shape) {
-      ss << ", " << size;
+  if (!input.is_nested()) {
+    const auto input_shape = input.sizes();
+    if (input_ndim < normalized_ndim ||
+        !input_shape.slice(input_ndim - normalized_ndim)
+             .equals(normalized_shape)) {
+      std::stringstream ss;
+      ss << "Given normalized_shape=" << normalized_shape
+         << ", expected input with shape [*";
+      for (auto size : normalized_shape) {
+        ss << ", " << size;
+      }
+      ss << "], but got input of size" << input_shape;
+      AT_ERROR(ss.str());
     }
-    ss << "], but got input of size" << sym_input_shape;
-    AT_ERROR(ss.str());
   }
 
   if (calc_mn) {
