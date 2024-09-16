@@ -1655,8 +1655,8 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
     return (x * s2pi);
   }
 
-  T x = ::sqrt(T{-2.0} * std::log(y));
-  const T x0 = x - std::log(x) / x;
+  T x = ::sqrt(T{-2.0} * ::log(y));
+  const T x0 = x - ::log(x) / x;
 
   const T z = one / x;
   T x1;

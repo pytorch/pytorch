@@ -121,8 +121,8 @@ C10_DEFINE_TEST(TestLog, Definition) {
   }
   {
     c10::complex<float> x(1.2, 3.4);
-    c10::complex<float> l = std::log(x);
-    float expected_real = std::log(std::abs(x));
+    c10::complex<float> l = ::log(x);
+    float expected_real = ::log(std::abs(x));
     float expected_imag = std::arg(x);
     C10_ASSERT_NEAR(l.real(), expected_real, tol);
     C10_ASSERT_NEAR(l.imag(), expected_imag, tol);
@@ -137,8 +137,8 @@ C10_DEFINE_TEST(TestLog, Definition) {
   }
   {
     c10::complex<double> x(1.2, 3.4);
-    c10::complex<double> l = std::log(x);
-    float expected_real = std::log(std::abs(x));
+    c10::complex<double> l = ::log(x);
+    float expected_real = ::log(std::abs(x));
     float expected_imag = std::arg(x);
     C10_ASSERT_NEAR(l.real(), expected_real, tol);
     C10_ASSERT_NEAR(l.imag(), expected_imag, tol);
@@ -155,7 +155,7 @@ C10_DEFINE_TEST(TestLog10, Rev) {
   }
   {
     c10::complex<float> x(0.1, 1.2);
-    c10::complex<float> l = std::log10(::pow(float(10), x));
+    c10::complex<float> l = ::log10(::pow(float(10), x));
     C10_ASSERT_NEAR(l.real(), float(0.1), tol);
     C10_ASSERT_NEAR(l.imag(), float(1.2), tol);
   }
@@ -167,7 +167,7 @@ C10_DEFINE_TEST(TestLog10, Rev) {
   }
   {
     c10::complex<double> x(0.1, 1.2);
-    c10::complex<double> l = std::log10(::pow(double(10), x));
+    c10::complex<double> l = ::log10(::pow(double(10), x));
     C10_ASSERT_NEAR(l.real(), double(0.1), tol);
     C10_ASSERT_NEAR(l.imag(), double(1.2), tol);
   }
