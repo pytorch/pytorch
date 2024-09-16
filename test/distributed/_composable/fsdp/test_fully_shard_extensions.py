@@ -24,8 +24,16 @@ from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.two_tensor import TwoTensor
 
 
-def two_tensor_fsdp_pre_all_gather(
+def two_tensor_fsdp_pre_all_gather_v1(
     self, mesh: DeviceMesh
+) -> Tuple[Tuple[torch.Tensor, ...], Any]:
+    all_gather_inputs = (self.a, self.b)
+    metadata = None
+    return all_gather_inputs, metadata
+
+
+def two_tensor_fsdp_pre_all_gather_v2(
+    self, mesh: DeviceMesh, module: nn.Module, mp_policy: MixedPrecisionPolicy
 ) -> Tuple[Tuple[torch.Tensor, ...], Any]:
     all_gather_inputs = (self.a, self.b)
     metadata = None
@@ -66,9 +74,12 @@ class TestFullyShardAllGatherExtensionsCommon:
         return 2
 
     @contextlib.contextmanager
-    def _patch_two_tensor_fsdp_all_gather(self):
+    def _patch_two_tensor_fsdp_all_gather(self, pre_all_gather_version: int):
         lock = threading.Lock()
-        TwoTensor.fsdp_pre_all_gather = two_tensor_fsdp_pre_all_gather
+        if pre_all_gather_version == 1:
+            TwoTensor.fsdp_pre_all_gather = two_tensor_fsdp_pre_all_gather_v1
+        elif pre_all_gather_version == 2:
+            TwoTensor.fsdp_pre_all_gather = two_tensor_fsdp_pre_all_gather_v2
         TwoTensor.fsdp_post_all_gather = two_tensor_fsdp_post_all_gather
         dist.barrier()
         try:
@@ -100,7 +111,12 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
 ):
     @skip_if_lt_x_gpu(2)
     def test_all_gather_extensions_train_parity(self):
-        with self._patch_two_tensor_fsdp_all_gather():
+        with self._patch_two_tensor_fsdp_all_gather(pre_all_gather_version=1):
+            self.run_subtests(
+                {"reshard_after_forward": [True, False]},
+                self._test_all_gather_extensions_train_parity,
+            )
+        with self._patch_two_tensor_fsdp_all_gather(pre_all_gather_version=2):
             self.run_subtests(
                 {"reshard_after_forward": [True, False]},
                 self._test_all_gather_extensions_train_parity,
@@ -148,7 +164,12 @@ class TestFullyShardAllGatherExtensionsMultiThread(
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_all_gather_extensions_end_to_end(self):
-        with self._patch_two_tensor_fsdp_all_gather():
+        with self._patch_two_tensor_fsdp_all_gather(pre_all_gather_version=1):
+            self.run_subtests(
+                {"reshard_after_forward": [True, False]},
+                self._test_all_gather_extensions_end_to_end,
+            )
+        with self._patch_two_tensor_fsdp_all_gather(pre_all_gather_version=2):
             self.run_subtests(
                 {"reshard_after_forward": [True, False]},
                 self._test_all_gather_extensions_end_to_end,
