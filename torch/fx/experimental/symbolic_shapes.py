@@ -386,6 +386,38 @@ def canonicalize_bool_expr(expr: SympyBoolean) -> SympyBoolean:
         expr = sympy.logic.boolalg.to_cnf(expr)
     return _canonicalize_bool_expr_impl(expr)
 
+
+def _sympy_from_args(
+        cls: type,
+        args: List[sympy.Expr],
+        sort: bool = True,
+        is_commutative: Optional[bool] = None,
+) -> sympy.Expr:
+    # These args are already in canonical form, so we avoid calling
+    # Add(*args) to avoid expensive Add.flatten operation
+    if sort:
+        if cls is sympy.Add:
+            sort_fn = sympy.core.add._addsort
+        elif cls is sympy.Mul:
+            sort_fn = sympy.core.mul._mulsort
+        else:
+            raise ValueError(f"Unknown cls: {cls}")
+
+        # we don't support non commutative with sort
+        assert is_commutative is True
+        args = list(args)
+        if args[0].is_Number:
+            rest = args[1:]
+            sort_fn(rest)
+            return cls._from_args(args[0] + rest, is_commutative=is_commutative)
+        else:
+            sort_fn(args)
+            return cls._from_args(args, is_commutative=is_commutative)
+    else:
+        # if the args are already sorted, we create directly
+        return cls._from_args(args, is_commutative=is_commutative)
+
+
 def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
     """
     After canonicalization, we are guaranteed to have eliminated Ge/Gt relations
@@ -416,8 +448,10 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
                 neg.append(-term)
             else:
                 pos.append(term)
-        lhs = sympy.Add._from_args(neg)
-        rhs = sympy.Add._from_args(pos)
+        # these are already sorted
+        rhs = _sympy_from_args(sympy.Add, pos, sort=False)
+        # the terms were changed, so needs a sorting
+        lhs = _sympy_from_args(sympy.Add, neg, sort=True)
     elif is_neg(rhs):
         # lhs == 0
         lhs, rhs = -rhs, 0
@@ -453,7 +487,7 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
                 # Mul._from_args require a canonical list of args
                 # so we remove the first arg (x.args[0] / factor) if it was 1
                 args = x.args[1:]
-            return sympy.Mul._from_args(args, is_commutative=x.is_commutative)
+            return _sympy_from_args(sympy.Mul, args, is_commutative=x.is_commutative)
 
     if expr.is_Add:
         atoms = expr.args
@@ -461,7 +495,7 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
         if factor == 1:
             return expr
         atoms = [div_by_factor(x, factor) for x in atoms]
-        return sympy.Add._from_args(atoms)
+        return _sympy_from_args(sympy.Add, atoms, sort=True)
     elif expr.is_Integer:
         return sympy.One
     elif expr.is_Mul:
