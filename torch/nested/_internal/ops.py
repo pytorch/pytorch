@@ -366,6 +366,37 @@ def jagged_torch_function(func, *args, **kwargs):
 
         return inp.reshape(*new_shape)
 
+    # Handle input validation for rms_norm because it's CompositeImplicit.
+    if func.__name__ == "rms_norm":
+
+        def _rms_norm_sig(input, normalized_shape, weight=None, eps=None):
+            pass
+
+        _, new_kwargs = normalize_function(  # type: ignore[misc]
+            _rms_norm_sig, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+        )
+
+        inp = new_kwargs.pop("input")
+        normalized_shape = new_kwargs.pop("normalized_shape")
+
+        num_non_normalized = inp.dim() - len(normalized_shape)
+        if num_non_normalized < 0 or inp.shape[num_non_normalized:] != normalized_shape:
+            raise ValueError(
+                f"rms_morm(): Given normalized_shape={normalized_shape}, expected input with "
+                f"shape [*, {', '.join(str(s) for s in normalized_shape)}], but got input of "
+                f"size {inp.shape}"
+            )
+
+        # can't normalize over the ragged dim (yet)
+        max_normalizable = inp.dim() - inp._ragged_idx - 1
+        if len(normalized_shape) > max_normalizable:
+            raise ValueError(
+                "rms_norm(): Normalization over the ragged dim not supported for nested tensors"
+            )
+
+        with torch._C.DisableTorchFunctionSubclass():
+            return func(*args, **kwargs)
+
     raise NotImplementedError(func)
 
 
@@ -415,7 +446,7 @@ def prim_layout_default(func, *args, **kwargs):
 def tensor_attr_unsupported_getter(func, *args, **kwargs):
     if func == torch.ops.aten.size.default:
         raise RuntimeError(
-            "NestedTensors does not support directly calling torch.ops.aten.size "
+            "NestedTensor does not support directly calling torch.ops.aten.size; "
             "please use `nested_tensor.size()` instead."
         )
 
