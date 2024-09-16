@@ -13,6 +13,7 @@ from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
+from torch.fx.passes.tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
 
 from ...utils._ordered_set import OrderedSet
@@ -459,7 +460,6 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     if config.pattern_matcher:
         for patterns in pass_patterns:
             count += patterns.apply(graph.graph)  # type: ignore[arg-type]
-
 
     fake_mode = detect_fake_mode()
     if fake_mode is not None:

@@ -1,5 +1,5 @@
-
 import torch
+
 
 torch._dynamo.config.assume_static_by_default = False
 torch._dynamo.config.capture_dynamic_output_shape_ops = True
@@ -32,8 +32,10 @@ torch._dynamo.config.specialize_float = False
 #         add: "f32[s0][1]cpu" = l_x_ + truediv;  l_x_ = truediv = None
 #         return (add,)
 
+
 def fn(x):
     return x + 1.0 / x.size(0)
+
 
 x = torch.arange(10)
 print(torch._dynamo.optimize("inductor")(fn)(x))

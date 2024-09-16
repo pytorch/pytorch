@@ -1,7 +1,8 @@
-import torch
 import logging
-
 from typing import Any, TYPE_CHECKING, Union
+
+import torch
+
 
 if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -15,6 +16,7 @@ from torch.fx.graph_module import GraphModule
 # TODO: refactor
 from torch.fx.passes.runtime_assert import _get_sym_val
 from torch.utils._sympy.reference import TensorReferenceAnalysis
+
 
 log = logging.getLogger(__name__)
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
@@ -56,6 +58,7 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 #
 # TODO: make sure this runs before CPU->CUDA pass for cudagraph friendliness
 
+
 def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
     import sympy
 
@@ -77,21 +80,22 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
 
     Analysis = TensorReferenceAnalysis
 
-    def _sympy_interp(expr, sympy.Expr) -> fx.Proxy:
+    def _sympy_interp(expr: sympy.Expr) -> fx.Proxy:
         # sympy_interp() with hash consing, and special handling for
         # generating constants correctly
         from sympy import Integer, Number, Symbol
         from sympy.logic.boolalg import BooleanAtom
+
         from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 
         # hash cons
-        if isintance(expr, Symbol) and expr not in expr_to_tensor_proxy:
+        if isinstance(expr, Symbol) and expr not in expr_to_tensor_proxy:
             # This is guaranteed to be populated by invariant established by
             # insert_deferred_runtime_asserts
             expr_to_tensor_proxy[expr] = fx.Proxy(
                 graph.call_function(
                     torch.ops.aten.scalar_tensor.default,
-                    (expr_to_sym_proxy[expr].node, )
+                    (expr_to_sym_proxy[expr].node,),
                 ),
                 tracer=tracer,
             )
@@ -103,7 +107,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
             if isinstance(expr, BooleanAtom):
                 dtype = torch.bool
                 c = bool(expr)
-            elif isintance(expr, sympy.Integer):
+            elif isinstance(expr, sympy.Integer):
                 dtype = torch.int64
                 c = int(expr)
             elif isinstance(expr, sympy.Number):
@@ -114,7 +118,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                 graph.call_function(
                     torch.ops.aten.scalar_tensor.default, (c,), {"dtype": dtype}
                 ),
-                tracer = tracer,
+                tracer=tracer,
             )
 
         if expr in expr_to_tensor_proxy:
@@ -122,12 +126,12 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
 
         # don't cache
         if isinstance(expr, Symbol):
-            return sympy_interp(Analysis, expr_to_tensor_proxy, expr) # type: ignore[arg-type]
+            return sympy_interp(Analysis, expr_to_tensor_proxy, expr)  # type: ignore[arg-type]
 
         # hash cons on arguments, run expr handler
         expr_to_tensor_proxy[expr] = _run_sympy_handler(
             Analysis,
-            [_sympy_interp(arg) for arg in expr.args], # type: ignore[arg-type]
+            [_sympy_interp(arg) for arg in expr.args],  # type: ignore[arg-type]
             expr,
         )
 
@@ -135,21 +139,21 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
 
     nodes = list(graph.nodes)
     for i, node in enumerate(nodes[:-1]):
-        with grpah.inserting_before(
+        with graph.inserting_before(
             nodes[i + 1] if node not in placeholders else first_non_placeholder
         ):
             # Look for tensor.item() calls on placeholders
             if unbacked_bindings := node.meta.get("unacked_bindings"):
                 for s, keypath in unbacked_bindings.items():
+
                     def go(
                         node: fx.Node, keypath: tuple[object, ...]
                     ) -> fx.Node | None:
-                        if keypath == ()
+                        if keypath == ():
                             return node
                         elif isinstance(keypath[0], CallMethodKey):
                             return go(
-                                graph.call_method(keypath[0].name, (node,)),
-                                keypath[1:]
+                                graph.call_method(keypath[0].name, (node,)), keypath[1:]
                             )
                         else:
                             return None
@@ -172,7 +176,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
 
             elif (sym_expr := _get_sym_val(node)) is not None:
                 if sym_expr not in expr_to_sym_proxy and not isinstance(
-                    sym_expr, (sympy.Number, sympy.logic.boolalg,BooleanAtom)
+                    sym_expr, (sympy.Number, sympy.logic.boolalg.BooleanAtom)
                 ):
                     expr_to_sym_proxy[sym_expr] = fx.Proxy(node, tracer=tracer)
 
@@ -181,7 +185,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                 args = []
                 transform = False
                 for a in node.args:
-                    if isinstnace(a, fx.Node) and isinstance(
+                    if isinstance(a, fx.Node) and isinstance(
                         zf := a.meta["val"], torch.SymFloat
                     ):
                         transform = True
@@ -209,6 +213,5 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
             graph.erase_node(proxy.node)
 
     graph_code_log.debug(
-        "%s",
-        lazy_format_graph_code("tensorify_python_scalars", gm, colored=True)
+        "%s", lazy_format_graph_code("tensorify_python_scalars", gm, colored=True)
     )
