@@ -10,7 +10,7 @@ class MetricResult:
     def __init__(self) -> None:
         self.op_name: str = ""
         self.op_variantant: str = ""
-        # The first dimension is the sample index, the second dimension is the metric value
+        # The first dimension is the sample index, the second dimension is the metric value for each repeat
         self.execution_time: List[List[float]] = []  # List of lists for execution times
         self.mem_throughput: List[
             List[float]
