@@ -5,7 +5,13 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._higher_order_ops.utils import _from_fun, create_fw_bw_graph, reenter_make_fx
+from torch._higher_order_ops.utils import (
+    _from_fun,
+    _maybe_reenter_make_fx,
+    clone_outputs_aliasing_inputs,
+    prepare_fw_with_masks,
+    reenter_make_fx,
+)
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
@@ -27,6 +33,77 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 
 
 invoke_subgraph = InvokeSubgraphHOP()
+
+
+# TODO(anijain2305) - COPIED FROM UTILS FOR PARTITIONER
+def create_fw_bw_graph(
+    fn, use_output_and_grad_bw, fw_inputs, fw_outputs, partition_fn=None
+):
+    from torch._functorch.aot_autograd import AOTConfig, create_joint
+
+    # Note:[HOP create fw_bw graph] We create "clean" environments for make_fx by suspending all dispatch keys
+    # between Autograd and Python key. Currently, we only suspend functionalization but more can be
+    # added when required. Will encounter two problems if we don't suspend functionalization:
+    #
+    # 1. make_fx fails to capture operations on input: the inputs are wrapped as _to_functional_tensor_wrapper,
+    # but they will be unwrapped before entering ProxyTorchDispatchMode as part of the dispatching.
+    # However, it's the outside wrapper that tracer creates proxies for. This casuses tracer fail to
+    # fetch the proxy for the inputs and fail to capture any operations on them.
+    #
+    # 2. make_fx fails to capture output: the outputs after ProxyTorchDispatchMode are further
+    # wrapped as FunctionalTensorWrapper in Functionalize key after return. However, the tracer
+    # only associates the inner tensor with proxy in ProxyTorchDispatchMode. Therefore,
+    # when creating the output node, it fails to associate the wrapped tensor with its proxy.
+    # Instead, it will create _tensor_constant as output.
+
+    dummy_aot_config = AOTConfig(
+        fw_compiler=None,  # type: ignore[arg-type]
+        bw_compiler=None,  # type: ignore[arg-type]
+        partition_fn=None,  # type: ignore[arg-type]
+        decompositions={},
+        num_params_buffers=0,
+        aot_id=0,
+        keep_inference_input_mutations=False,
+    )
+
+    example_grad = [_from_fun(out) for out in fw_outputs]
+    num_grads = len(example_grad)
+    fw_graph = _maybe_reenter_make_fx(fn)(*fw_inputs)
+
+    def joint_fn(*joint_operands_grads):
+        inputs = joint_operands_grads[:len(fw_inputs)]
+        example_grads = joint_operands_grads[len(fw_inputs) :]
+
+        joint = create_joint(prepare_fw_with_masks(fn), aot_config=dummy_aot_config)
+        outs, grads = joint(
+            list(inputs),
+            [grad for grad in example_grads if grad is not None and grad.requires_grad],
+        )
+
+        # In order to keep map functional for backward graph,
+        # we clone outputs that are aliasing inputs
+        maybe_clone = clone_outputs_aliasing_inputs(joint_operands_grads)
+
+        return pytree.tree_map(maybe_clone, list(outs) + list(grads))
+
+    example_xs_out = list(fw_inputs)
+    joint_graph = _maybe_reenter_make_fx(joint_fn)(
+        *(list(fw_inputs) + list(example_grad))
+    )
+
+    if partition_fn:
+        # breakpoint()
+        fw_graph, bw_graph = partition_fn(
+            joint_graph,
+            list(fw_inputs) + list(example_grad),
+            num_fwd_outputs=len(fw_outputs),
+        )
+        # breakpoint()
+        print(fw_graph)
+        print(bw_graph)
+        return fw_graph, bw_graph
+
+    return fw_graph, joint_graph
 
 
 # TODO(anijain2305) - Just for testing - We can remove this .. I think
@@ -71,9 +148,10 @@ def create_fw_bw_graph_local(subgraph, *args):
     """
     This needs to call make_fx with functionalization, partitioner and decomps.
     """
+    # TODO(anijain2305) - Need to get this from the top - min_cut_rematerialization_partition
+    from functorch.compile import min_cut_rematerialization_partition
 
     # See Note [HOP create fw_bw graph] in create_fw_bw_graph in utils.py
-
     # TODO(anijain2305) - Not sure if we should disable functionalization
     with suspend_functionalization(), disable_functional_mode():
         with disable_proxy_modes_tracing():
@@ -91,8 +169,13 @@ def create_fw_bw_graph_local(subgraph, *args):
                     f"Got types {[type(out) for out in fw_outputs]}."
                 )
 
+            # TODO(anijain2305) - Need to get this from the top - min_cut_rematerialization_partition
             fw_graph, joint_graph = create_fw_bw_graph(
-                subgraph, False, fw_inputs, fw_outputs
+                subgraph,
+                False,
+                fw_inputs,
+                fw_outputs,
+                partition_fn=min_cut_rematerialization_partition,
             )
             return fw_graph, joint_graph
 

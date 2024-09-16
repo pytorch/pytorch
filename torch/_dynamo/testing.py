@@ -180,6 +180,9 @@ class CompileCounter:
                 self.op_count += 1
         return gm.forward
 
+    def __eq__(self, other):
+        return isinstance(other, CompileCounter)
+
     def clear(self):
         self.frame_count = 0
         self.op_count = 0
@@ -202,12 +205,17 @@ class CompileCounterWithBackend:
         self.graphs.append(gm)
         return lookup_backend(self.backend)(gm, example_inputs)
 
+    def __eq__(self, other):
+        return isinstance(other, CompileCounterWithBackend)
 
 # Equivalent to backend="eager", but also records graphs that
 # we can assert on
 class EagerAndRecordGraphs:
     def __init__(self):
         self.graphs = []
+
+    def __eq__(self, other):
+        return isinstance(other, EagerAndRecordGraphs)
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         self.graphs.append(gm)
