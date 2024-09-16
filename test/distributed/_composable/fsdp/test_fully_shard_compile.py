@@ -155,7 +155,7 @@ class TestFullyShardCompile(FSDPTest):
         self.assertEqual(x, ref_x)
 
     def _assert_no_aliased_unsharded_params_in_graph_inputs(
-        self, model, graph: torch.fx.Graph
+        self, model, graph: torch.fx.Graph, fullgraph,
     ) -> None:
         # FSDP2 unsharded params are mutated in the graph without going through functionalization.
         # Therefore, we want to make sure they don't have aliases in the graph inputs, to make it easier
@@ -174,12 +174,16 @@ class TestFullyShardCompile(FSDPTest):
                 and node.args[0].op == "placeholder"
             ):
                 unsharded_param_graph_inputs.add(node.args[0])
-        assert len(unsharded_param_graph_inputs) > 0
+        assert len(unsharded_param_graph_inputs) > 0, f"""\
+Expected unsharded params to exist in graph inputs, but it's not true!
+Offending graph: {graph}
+"""
         assert len(unsharded_param_graph_inputs) == len(
             list(model.parameters())
-        ), """\
+        ), f"""\
 Expected all model parameters to be wrapped by FSDP2 and
 have their unsharded version as graph input, but it's not true!
+Offending graph: {graph}
 """
         no_aliased_unsharded_params_in_graph_inputs = True
         err_msg = ""
@@ -198,20 +202,17 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         self, model, fullgraph
     ):
         def _run_with_checks(graph, orig_fn):
-            self._assert_no_aliased_unsharded_params_in_graph_inputs(model, graph)
+            self._assert_no_aliased_unsharded_params_in_graph_inputs(model, graph, fullgraph)
             orig_fn(graph)
 
-        if fullgraph:
-            return mock.patch.object(
-                comms,
-                "remove_fsdp2_unsharded_param_graph_input_usage",
-                functools.partial(
-                    _run_with_checks,
-                    orig_fn=comms.remove_fsdp2_unsharded_param_graph_input_usage,
-                ),
-            )
-        else:
-            return contextlib.nullcontext()
+        return mock.patch.object(
+            comms,
+            "remove_fsdp2_unsharded_param_graph_input_usage",
+            functools.partial(
+                _run_with_checks,
+                orig_fn=comms.remove_fsdp2_unsharded_param_graph_input_usage,
+            ),
+        )
 
     def _check_fsdp_copy_and_resize_ops_count_in_graph(
         self,
@@ -475,9 +476,11 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             skip_fsdp_hooks=False,
             # warmup_runs=1,
         ), torch._functorch.config.patch(
+            enable_autograd_cache=False,
             recompute_views=True,
             cse=False,
         ), torch._inductor.config.patch(
+            fx_graph_cache=False,
             reorder_for_compute_comm_overlap=True,
             reorder_for_compute_comm_overlap_passes=[
                 "sink_waits",
@@ -630,6 +633,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_inductor(self):
         for fullgraph in [True, False]:
+            log.warning(f"fullgraph={fullgraph}")  # noqa: G004, G001
             with self._reinplace_all_gather_with_optional_checks(
                 fullgraph
             ), self._maybe_run_decide_global_ordering_of_comms_with_checks(
