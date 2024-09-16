@@ -905,7 +905,8 @@ class triton:
     autotune_cublasLt = True
 
     # Tune the generated Triton kernels at compile time instead of first time they run
-    autotune_at_compile_time = False
+    # Setting to None means uninitialized
+    autotune_at_compile_time: Optional[bool] = None
 
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
@@ -1136,7 +1137,7 @@ class rocm:
     use_preselected_instances: bool = False
 
 
-# Backend to use for CPU codegen either "cpp" or "halide" (experimental)
+# Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental)
 cpu_backend = "cpp"
 
 # Backend to use for CUDA codegen either "triton" or "halide" (experimental)
