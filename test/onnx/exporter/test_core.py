@@ -3,10 +3,9 @@
 
 from __future__ import annotations
 
-import onnxscript
+import numpy as np
 
 import torch
-import numpy as np
 from torch.onnx._internal.exporter import _core
 from torch.testing._internal import common_utils
 
@@ -42,7 +41,6 @@ class TorchTensorTest(common_utils.TestCase):
         self.assertEqual(tensor.numpy().dtype, np_dtype)
         self.assertEqual(tensor.__array__().dtype, np_dtype)
         self.assertEqual(np.array(tensor).dtype, np_dtype)
-
 
 
 if __name__ == "__main__":
