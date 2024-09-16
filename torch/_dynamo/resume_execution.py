@@ -6,6 +6,7 @@ import types
 from typing import Any, cast, Dict, List, Optional, Tuple
 
 from .bytecode_transformation import (
+    add_push_null,
     create_call_function,
     create_call_method,
     create_dup_top,
@@ -47,6 +48,109 @@ def _initial_push_null(insts):
 class ReenterWith:
     stack_index: int
     target_values: Optional[Tuple[Any, ...]] = None
+
+    def try_except_torch_function_mode(self, code_options, cleanup: List[Instruction]):
+        """
+        Codegen based off of:
+        try:
+            (rest)
+        except:
+            (restore previous stack)
+
+        """
+        from .variables.torch_function import get_prev_stack_var_name
+
+        except_jump_target = create_instruction(
+            "NOP" if sys.version_info < (3, 11) else "PUSH_EXC_INFO"
+        )
+        cleanup_complete_jump_target = create_instruction("NOP")
+
+        setup_finally: List[Instruction] = []
+
+        if sys.version_info < (3, 11):
+            setup_finally.append(
+                create_instruction("SETUP_FINALLY", target=except_jump_target)
+            )
+        else:
+            exn_tab_begin = create_instruction("NOP")
+            exn_tab_end = create_instruction("NOP")
+            exn_tab_begin.exn_tab_entry = InstructionExnTabEntry(
+                exn_tab_begin,
+                exn_tab_end,
+                except_jump_target,
+                self.stack_index + 1,
+                False,
+            )
+            setup_finally.append(exn_tab_begin)
+
+        def create_reset():
+            insts = [
+                create_instruction(
+                    "LOAD_GLOBAL", argval="__import_torch_dot__dynamo_dot_utils"
+                ),
+                create_instruction("LOAD_ATTR", argval="set_torch_function_mode_stack"),
+            ]
+            add_push_null(insts)
+            return [
+                *insts,
+                create_instruction("LOAD_FAST", argval=get_prev_stack_var_name()),
+                *create_call_function(1, False),
+                create_instruction("POP_TOP"),
+            ]
+
+        if sys.version_info < (3, 9):
+            epilogue = [
+                create_instruction("POP_BLOCK"),
+                create_instruction("JUMP_FORWARD", target=cleanup_complete_jump_target),
+                except_jump_target,
+                *create_reset(),
+                create_instruction("POP_TOP"),
+                create_instruction("POP_TOP"),
+                create_instruction("POP_TOP"),
+                *create_reset(),
+                create_instruction("RAISE_VARARGS", argval=0),
+                create_instruction("POP_EXCEPT", argval=0),
+                create_instruction("END_FINALLY"),
+                cleanup_complete_jump_target,
+            ]
+        elif sys.version_info < (3, 11):
+            epilogue = [
+                create_instruction("POP_BLOCK"),
+                create_instruction("JUMP_FORWARD", target=cleanup_complete_jump_target),
+                except_jump_target,
+                create_instruction("POP_TOP"),
+                create_instruction("POP_TOP"),
+                create_instruction("POP_TOP"),
+                *create_reset(),
+                create_instruction("RAISE_VARARGS", argval=0),
+                create_instruction("POP_EXCEPT", argval=0),
+                cleanup_complete_jump_target,
+            ]
+        else:
+            finally_exn_tab_end = create_instruction("RAISE_VARARGS", argval=0)
+            finally_exn_tab_target = create_instruction("COPY", arg=3)
+            except_jump_target.exn_tab_entry = InstructionExnTabEntry(
+                except_jump_target,
+                finally_exn_tab_end,
+                finally_exn_tab_target,
+                self.stack_index + 2,
+                True,
+            )
+            epilogue = [
+                exn_tab_end,
+                create_instruction("JUMP_FORWARD", target=cleanup_complete_jump_target),
+                except_jump_target,  # PUSH_EXC_INFO
+                create_instruction("POP_TOP"),
+                *create_reset(),
+                finally_exn_tab_end,
+                finally_exn_tab_target,  # COPY 3
+                create_instruction("POP_EXCEPT"),
+                create_instruction("RERAISE", arg=1),  # RERAISE 1
+                cleanup_complete_jump_target,
+            ]
+
+        cleanup[:] = epilogue + cleanup
+        return setup_finally
 
     # If we do not want to destroy the stack, we can do the same thing as a
     # `SETUP_WITH` block, only that we store the context manager in a local_symbol
