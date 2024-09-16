@@ -96,7 +96,7 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
             )
             self.averager.step = 0
 
-    def step(self):  # type: ignore[override]
+    def step(self):
         r"""
         Performs a single optimization step (parameter update).
         """

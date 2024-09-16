@@ -225,7 +225,7 @@ def _map_module_function_to_aten_operator_type():
         ),
     )
     for map_item in map_list:
-        module_function_to_aten_operator.update(dict.fromkeys(map_item[0], map_item[1]))  # type: ignore[arg-type, call-overload]
+        module_function_to_aten_operator.update(dict.fromkeys(map_item[0], map_item[1]))  # type: ignore[call-overload]
     return module_function_to_aten_operator
 
 
