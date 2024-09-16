@@ -393,6 +393,8 @@ def _sympy_from_args(
         sort: bool = True,
         is_commutative: Optional[bool] = None,
 ) -> sympy.Expr:
+    if not args:
+        return cls.identity
     # These args are already in canonical form, so we avoid calling
     # Add(*args) to avoid expensive Add.flatten operation
     if sort:
@@ -486,7 +488,7 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
             else:
                 # Mul._from_args require a canonical list of args
                 # so we remove the first arg (x.args[0] / factor) if it was 1
-                args = x.args[1:]
+                args = list(x.args[1:])
             return _sympy_from_args(sympy.Mul, args, is_commutative=x.is_commutative)
 
     if expr.is_Add:
