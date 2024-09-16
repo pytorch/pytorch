@@ -2485,6 +2485,23 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
 
 class TestPagedCache(InductorTestCase):
+    def _check_equal(
+        self,
+        golden_out: torch.Tensor,
+        ref_out: torch.Tensor,
+        compiled_out: torch.Tensor,
+        fudge_factor: float,
+        tensor_name: Optional[str] = None,
+    ):
+        compiled_error = (golden_out - compiled_out).abs().mean()
+        ref_error = (golden_out - ref_out).abs().mean()
+        if torch.isnan(compiled_error).any() or torch.isnan(ref_error).any():
+            self.assertTrue(False, "Output/Grad with NaN")
+        if compiled_error > ref_error * fudge_factor:
+            name = tensor_name if tensor_name is not None else ""
+            msg = f"{name} Compiled error {compiled_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
+            self.assertTrue(False, msg)
+
     def allocate_page_cache(self, n_pages: int, page_size: int):
         n_heads, head_dim, max_batch_size, max_seq_len = 4, 8, 3, 128
         paged_cache = PagedCache(
@@ -2759,8 +2776,6 @@ class TestPagedCache(InductorTestCase):
         block_mask = create_block_mask(
             causal_mask, max_batch_size, 1, max_seq_len, max_seq_len
         )
-        # compiled_flex_attention = flex_attention
-        compiled_flex_attention = torch.compile(flex_attention)
 
         """
         page_table = tensor([
@@ -2771,7 +2786,7 @@ class TestPagedCache(InductorTestCase):
         """
 
         # Get q, k, v. Compute expected out, q_grad, k_grad, v_grad
-        q = torch.ones(
+        q = torch.randn(
             max_batch_size,
             n_heads,
             max_seq_len,
@@ -2780,7 +2795,7 @@ class TestPagedCache(InductorTestCase):
             dtype=torch.float16,
             requires_grad=True,
         )
-        k = torch.ones(
+        k = torch.randn(
             max_batch_size,
             n_heads,
             max_seq_len,
@@ -2789,7 +2804,7 @@ class TestPagedCache(InductorTestCase):
             dtype=torch.float16,
             requires_grad=True,
         )
-        v = torch.ones(
+        v = torch.randn(
             max_batch_size,
             n_heads,
             max_seq_len,
@@ -2798,6 +2813,55 @@ class TestPagedCache(InductorTestCase):
             dtype=torch.float16,
             requires_grad=True,
         )
+
+        q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
+
+        # compiled_flex_attention = flex_attention
+        compiled_flex_attention = torch.compile(flex_attention)
+        sdpa_partial = create_attention(_identity, block_mask, enable_gqa=False)
+        compiled_sdpa = torch.compile(sdpa_partial)
+
+        golden_out = sdpa_partial(q_gold, k_gold, v_gold)
+        ref_out = sdpa_partial(q_ref, k_ref, v_ref)
+        # compiled_out = compiled_sdpa(q, k, v)
+
+        k_cache = torch.zeros(
+            1,
+            n_heads,
+            n_pages * page_size,
+            head_dim,
+            device="cuda",
+            dtype=torch.float16,
+        )
+        v_cache = torch.zeros(
+            1,
+            n_heads,
+            n_pages * page_size,
+            head_dim,
+            device="cuda",
+            dtype=torch.float16,
+        )
+
+        input_pos = torch.tensor(
+            range(0, max_seq_len), device="cuda", dtype=torch.int32
+        )
+        paged_cache.update(input_pos, k, k_cache)
+        paged_cache.update(input_pos, v, v_cache)
+
+        new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
+        paged_out = compiled_sdpa(q, k_cache, v_cache, block_mask=new_block_mask)
+
+        with torch.no_grad():
+            dtype = ref_out.dtype
+            if dtype == torch.float32:
+                fudge_factor = 10.0
+            else:
+                fudge_factor = 1.1
+
+            # Checkout output
+            self._check_equal(golden_out, ref_out, paged_out, fudge_factor, "Out")
+
         # v = (
         #     torch.arange(1, max_batch_size + 1, device="cuda", dtype=torch.float16)
         #     .view(max_batch_size, 1, 1, 1)
@@ -2857,145 +2921,145 @@ class TestPagedCache(InductorTestCase):
 
         """
 
-        q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
+        # q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
 
-        # torch.ones(
-        #     max_batch_size,
+        # # torch.ones(
+        # #     max_batch_size,
+        # #     n_heads,
+        # #     max_seq_len,
+        # #     head_dim,
+        # #     device="cuda",
+        # #     dtype=torch.float16,
+        # #     requires_grad=True,
+        # # )
+        # out = compiled_flex_attention(q, k, v, block_mask=block_mask)
+        # # out.sum()
+
+        # # write k, v to cache according to the page table
+        # k_cache = torch.zeros(
+        #     1,
         #     n_heads,
-        #     max_seq_len,
+        #     n_pages * page_size,
         #     head_dim,
         #     device="cuda",
         #     dtype=torch.float16,
-        #     requires_grad=True,
         # )
-        out = compiled_flex_attention(q, k, v, block_mask=block_mask)
-        # out.sum()
+        # v_cache = torch.zeros(
+        #     1,
+        #     n_heads,
+        #     n_pages * page_size,
+        #     head_dim,
+        #     device="cuda",
+        #     dtype=torch.float16,
+        # )
+        # input_pos = torch.tensor(
+        #     range(0, max_seq_len), device="cuda", dtype=torch.int32
+        # )
 
-        # write k, v to cache according to the page table
-        k_cache = torch.zeros(
-            1,
-            n_heads,
-            n_pages * page_size,
-            head_dim,
-            device="cuda",
-            dtype=torch.float16,
-        )
-        v_cache = torch.zeros(
-            1,
-            n_heads,
-            n_pages * page_size,
-            head_dim,
-            device="cuda",
-            dtype=torch.float16,
-        )
-        input_pos = torch.tensor(
-            range(0, max_seq_len), device="cuda", dtype=torch.int32
-        )
+        # paged_cache.update(input_pos, k_ref, k_cache)
+        # paged_cache.update(input_pos, v_ref, v_cache)
 
-        paged_cache.update(input_pos, k_ref, k_cache)
-        paged_cache.update(input_pos, v_ref, v_cache)
+        # """
+        # paged_cache.page_table
+        # tensor([[0, 3],
+        # [2, 1]], device='cuda:0')
+        # """
 
-        """
-        paged_cache.page_table
-        tensor([[0, 3],
-        [2, 1]], device='cuda:0')
-        """
+        # """
+        # v_cache. shape: [1,h,MAX_LEN,d] = [1, 2, 512, 16]
+        # [
+        #     b = 0
+        #     [
+        #         h = 0
+        #         [
+        #             page = 0
+        #             s = 0
+        #             [1,1,1,...,1], # 16 elements
+        #             s = 1
+        #             [1,1,1,...,1], # 16 elements
+        #             ...
+        #             s = 127
+        #             [1,1,1,...,1], # 16 elements
 
-        """
-        v_cache. shape: [1,h,MAX_LEN,d] = [1, 2, 512, 16]
-        [
-            b = 0
-            [
-                h = 0
-                [
-                    page = 0
-                    s = 0
-                    [1,1,1,...,1], # 16 elements
-                    s = 1
-                    [1,1,1,...,1], # 16 elements
-                    ...
-                    s = 127
-                    [1,1,1,...,1], # 16 elements
+        #             page = 1
+        #             s = 128
+        #             [2,2,2,...,2], # 16 elements
+        #             s = 129
+        #             [2,2,2,...,2], # 16 elements
+        #             ...
+        #             s = 255
+        #             [2,2,2,...,2], # 16 elements
 
-                    page = 1
-                    s = 128
-                    [2,2,2,...,2], # 16 elements
-                    s = 129
-                    [2,2,2,...,2], # 16 elements
-                    ...
-                    s = 255
-                    [2,2,2,...,2], # 16 elements
+        #             page = 2
+        #             s = 256
+        #             [2,2,2,...,2], # 16 elements
+        #             s = 257
+        #             [2,2,2,...,2], # 16 elements
+        #             ...
+        #             s = 383
+        #             [2,2,2,...,2], # 16 elements
 
-                    page = 2
-                    s = 256
-                    [2,2,2,...,2], # 16 elements
-                    s = 257
-                    [2,2,2,...,2], # 16 elements
-                    ...
-                    s = 383
-                    [2,2,2,...,2], # 16 elements
+        #             page = 3
+        #             s = 384
+        #             [1,1,1,...,1], # 16 elements
+        #             s = 385
+        #             [1,1,1,...,1], # 16 elements
+        #             ...
+        #             s = 511
+        #             [1,1,1,...,1], # 16 elements
+        #         ],
+        #         h = 1
+        #         [
+        #             page = 0
+        #             s = 0
+        #             [1,1,1,...,1], # 16 elements
+        #             s = 1
+        #             [1,1,1,...,1], # 16 elements
+        #             ...
+        #             s = 127
+        #             [1,1,1,...,1], # 16 elements
 
-                    page = 3
-                    s = 384
-                    [1,1,1,...,1], # 16 elements
-                    s = 385
-                    [1,1,1,...,1], # 16 elements
-                    ...
-                    s = 511
-                    [1,1,1,...,1], # 16 elements
-                ],
-                h = 1
-                [
-                    page = 0
-                    s = 0
-                    [1,1,1,...,1], # 16 elements
-                    s = 1
-                    [1,1,1,...,1], # 16 elements
-                    ...
-                    s = 127
-                    [1,1,1,...,1], # 16 elements
+        #             page = 1
+        #             s = 128
+        #             [2,2,2,...,2], # 16 elements
+        #             s = 129
+        #             [2,2,2,...,2], # 16 elements
+        #             ...
+        #             s = 255
+        #             [2,2,2,...,2], # 16 elements
 
-                    page = 1
-                    s = 128
-                    [2,2,2,...,2], # 16 elements
-                    s = 129
-                    [2,2,2,...,2], # 16 elements
-                    ...
-                    s = 255
-                    [2,2,2,...,2], # 16 elements
+        #             page = 2
+        #             s = 256
+        #             [2,2,2,...,2], # 16 elements
+        #             s = 257
+        #             [2,2,2,...,2], # 16 elements
+        #             ...
+        #             s = 383
+        #             [2,2,2,...,2], # 16 elements
 
-                    page = 2
-                    s = 256
-                    [2,2,2,...,2], # 16 elements
-                    s = 257
-                    [2,2,2,...,2], # 16 elements
-                    ...
-                    s = 383
-                    [2,2,2,...,2], # 16 elements
+        #             page = 3
+        #             s = 384
+        #             [1,1,1,...,1], # 16 elements
+        #             s = 385
+        #             [1,1,1,...,1], # 16 elements
+        #             ...
+        #             s = 511
+        #             [1,1,1,...,1], # 16 elements
+        #         ],
+        #     ]
+        # ]
+        # """
 
-                    page = 3
-                    s = 384
-                    [1,1,1,...,1], # 16 elements
-                    s = 385
-                    [1,1,1,...,1], # 16 elements
-                    ...
-                    s = 511
-                    [1,1,1,...,1], # 16 elements
-                ],
-            ]
-        ]
-        """
+        # # Get new block mask with convert_logical_block_mask
+        # new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
 
-        # Get new block mask with convert_logical_block_mask
-        new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
-
-        # Compute paged_out, paged_q_grad, paged_k_grad, paged_v_grad based on the new block mask & page table
-        # TODO: something goes run when we use compiled_flex_attention
-        paged_out = compiled_flex_attention(
-            q_ref, k_cache, v_cache, block_mask=new_block_mask
-        )
-        breakpoint()
-        self.assertEqual(out, paged_out)
+        # # Compute paged_out, paged_q_grad, paged_k_grad, paged_v_grad based on the new block mask & page table
+        # # TODO: something goes run when we use compiled_flex_attention
+        # paged_out = compiled_flex_attention(
+        #     q_ref, k_cache, v_cache, block_mask=new_block_mask
+        # )
+        # breakpoint()
+        # self.assertEqual(out, paged_out)
 
     """
     without paged attention:
