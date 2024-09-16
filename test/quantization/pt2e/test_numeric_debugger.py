@@ -9,6 +9,7 @@ import torch
 from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization import (
     compare_results,
+    CUSTOM_KEY,
     extract_results_from_loggers,
     generate_numeric_debug_handle,
     NUMERIC_DEBUG_HANDLE_KEY,
@@ -19,16 +20,22 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
     XNNPACKQuantizer,
 )
+from torch.export import export_for_training
 from torch.testing._internal.common_quantization import TestHelperModules
-from torch.testing._internal.common_utils import IS_WINDOWS, TestCase
+from torch.testing._internal.common_utils import IS_WINDOWS, skipIfCrossRef, TestCase
 
 
 def _extract_debug_handles(model) -> Dict[torch.fx.Node, int]:
     debug_handle_map: Dict[torch.fx.Node, int] = {}
 
     for node in model.graph.nodes:
-        if NUMERIC_DEBUG_HANDLE_KEY in node.meta:
-            debug_handle_map[str(node)] = node.meta[NUMERIC_DEBUG_HANDLE_KEY]
+        if (
+            CUSTOM_KEY in node.meta
+            and NUMERIC_DEBUG_HANDLE_KEY in node.meta[CUSTOM_KEY]
+        ):
+            debug_handle_map[str(node)] = node.meta[CUSTOM_KEY][
+                NUMERIC_DEBUG_HANDLE_KEY
+            ]
 
     return debug_handle_map
 
@@ -47,8 +54,8 @@ class TestNumericDebugger(TestCase):
         unique_ids = set()
         count = 0
         for n in m.graph.nodes:
-            if NUMERIC_DEBUG_HANDLE_KEY in n.meta:
-                unique_ids.add(n.meta[NUMERIC_DEBUG_HANDLE_KEY])
+            if CUSTOM_KEY in n.meta and NUMERIC_DEBUG_HANDLE_KEY in n.meta[CUSTOM_KEY]:
+                unique_ids.add(n.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY])
                 count += 1
         self.assertEqual(len(unique_ids), count)
 
@@ -71,7 +78,7 @@ class TestNumericDebugger(TestCase):
         res_counter = Counter(debug_handle_map.values())
         repeated_debug_handle_ids = [2, 3, 6]
         # 3 ids were repeated because we copy over the id from node to its output observer
-        # torch.ops.aten.conv2d.default, torch.ops.aten.squeeze.dim, torch.ops.aten.conv1d.default
+        # torch.ops.aten.conv2d.default, torch.ops.aten.squeeze.dim and torch.ops.aten.conv1d.default
         for dh_id in repeated_debug_handle_ids:
             self.assertEqual(res_counter[dh_id], 2)
 
@@ -110,18 +117,36 @@ class TestNumericDebugger(TestCase):
 
         self.assertEqual(debug_handle_map, debug_handle_map_ref)
 
-    @unittest.skip("All nodes' meta are preserved but get_attr nodes' meta are wrong.")
+    @skipIfCrossRef  # mlazos: retracing FX graph with torch function mode doesn't propagate metadata, because the stack
+    # trace of the mode torch function impl doesn't match the traced graph stored lineno.
     def test_re_export_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = export_for_training(m, example_inputs).module()
         generate_numeric_debug_handle(m)
 
         debug_handle_map_ref = _extract_debug_handles(m)
-        m_export = capture_pre_autograd_graph(m, example_inputs)
+        m_export = export_for_training(m, example_inputs).module()
         debug_handle_map = _extract_debug_handles(m_export)
 
         self.assertEqual(debug_handle_map, debug_handle_map_ref)
+
+    def test_run_decompositions_preserve_handle(self):
+        m = TestHelperModules.Conv2dThenConv1d()
+        example_inputs = m.example_inputs()
+        m = torch.export.export(m, example_inputs)
+        generate_numeric_debug_handle(m)
+
+        debug_handle_map_ref = _extract_debug_handles(m)
+
+        m_copy = copy.copy(m)
+        m_copy = m_copy.run_decompositions()
+        debug_handle_map = _extract_debug_handles(m_copy)
+
+        # checking the map still has the same ids, the node may change
+        self.assertEqual(
+            set(debug_handle_map.values()), set(debug_handle_map_ref.values())
+        )
 
     def test_prepare_for_propagation_comparison(self):
         m = TestHelperModules.Conv2dThenConv1d()
@@ -135,7 +160,7 @@ class TestNumericDebugger(TestCase):
         from torch.ao.quantization.pt2e._numeric_debugger import OutputLogger
 
         loggers = [m for m in m_logger.modules() if isinstance(m, OutputLogger)]
-        self.assertEqual(len(loggers), 8)
+        self.assertEqual(len(loggers), 7)
         self.assertTrue("conv2d" in [logger.node_name for logger in loggers])
         self.assertEqual(res, ref)
 

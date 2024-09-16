@@ -168,6 +168,14 @@ class UserError(Unsupported):
         self.message = msg
 
 
+class SkipCodeRecursiveException(TorchDynamoException):
+    pass
+
+
+class CacheLimitExceeded(SkipCodeRecursiveException, Unsupported):
+    pass
+
+
 class UnsafeScriptObjectError(TorchDynamoException):
     pass
 

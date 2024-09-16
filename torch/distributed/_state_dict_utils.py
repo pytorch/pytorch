@@ -27,7 +27,8 @@ from torch.distributed._functional_collectives import AsyncCollectiveTensor
 if dist.is_available() or TYPE_CHECKING:
     from torch.distributed import distributed_c10d
     from torch.distributed._shard.sharded_tensor import ShardedTensor
-    from torch.distributed._tensor import distribute_tensor, DTensor, Replicate
+    from torch.distributed.tensor import distribute_tensor, DTensor, Replicate
+    from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
 
 
 def _identity_func(
@@ -551,8 +552,14 @@ def _distribute_tensors(
 
         local_state = _local_state[0]
         full_tensor = _local_state[1]
-        local_state_dict[key] = distribute_tensor(
-            full_tensor, local_state.device_mesh, local_state.placements
+
+        shape, offset = compute_local_shape_and_global_offset(
+            full_tensor.shape, local_state.device_mesh, local_state.placements
+        )
+        slices = [slice(offset[i], shape[i] + offset[i]) for i in range(len(shape))]
+        local_tensor = full_tensor[slices]
+        local_state_dict[key] = DTensor.from_local(
+            local_tensor, local_state.device_mesh, local_state.placements
         )
 
 
@@ -627,16 +634,17 @@ def _distribute_state_dict(
             local_state_dict[key] = value.cpu()
         else:
             assert isinstance(value, torch.Tensor)
-            full_tensor = value.detach().to(device)
             local_state = local_state_dict.get(key, None)
             if local_state is None:
                 continue
             elif isinstance(local_state, DTensor):
-                local_state_dict[key] = (local_state, full_tensor)
+                local_state_dict[key] = distribute_tensor(
+                    value.detach().to(device),
+                    local_state.device_mesh,
+                    local_state.placements,
+                )
             else:
-                local_state_dict[key] = full_tensor
-
-            _distribute_tensors(local_state_dict, [key], device, pg)
+                local_state_dict[key] = value.detach().to(device)
 
 
 # These APIs are from torch.distributed.checkpoint.

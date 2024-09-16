@@ -53,13 +53,20 @@ from .numbers import int_oo
 __all__ = [
     "FloorDiv",
     "ModularIndexing",
+    "Where",
+    "PythonMod",
+    "Mod",
     "CleanDiv",
+    "CeilToInt",
+    "FloorToInt",
     "CeilDiv",
     "IntTrueDiv",
     "FloatTrueDiv",
     "LShift",
     "RShift",
     "IsNonOverlappingAndDenseIndicator",
+    "TruncToFloat",
+    "TruncToInt",
     "RoundToInt",
     "RoundDecimal",
     "ToFloat",
@@ -86,6 +93,46 @@ def fuzzy_eq(x, y):
     if None in (x, y):
         return None
     return x == y
+
+
+def simple_floordiv_gcd(p, q):
+    """
+    Fast path for sympy.gcd, using a simple factoring strategy.
+
+    We try to rewrite p and q in the form n*e*p1 + n*e*p2 and n*e*q0,
+    where n is the greatest common integer factor and e is the largest
+    syntactic common factor (i.e., common sub-expression) in p and q.
+    Then the gcd returned is n*e, cancelling which we would be left with
+    p1 + p2 and q0.
+
+    Note that further factoring of p1 + p2 and q0 might be possible with
+    sympy.factor (which uses domain-specific theories). E.g., we are unable
+    to find that x*y + x + y + 1 is divisible by x + 1. More generally,
+    when q is of the form q1 + q2 (instead of being already factored) it
+    might be necessary to fall back on sympy.gcd.
+    """
+
+    def integer_coefficient(x):
+        integer_coefficients = [
+            abs(int(arg))
+            for arg in sympy.Mul.make_args(x)
+            if isinstance(arg, (int, sympy.Integer))
+        ]
+        return math.prod(integer_coefficients)
+
+    def integer_factor(expr):
+        integer_factors = map(integer_coefficient, sympy.Add.make_args(expr))
+        return functools.reduce(math.gcd, integer_factors)
+
+    gcd = math.gcd(integer_factor(p), integer_factor(q))
+    p, q = p / gcd, q / gcd
+
+    base_splits = list(map(sympy.Mul.make_args, sympy.Add.make_args(p)))
+    divisor_split = sympy.Mul.make_args(q)
+    for x in divisor_split:
+        if all(x in base_split for base_split in base_splits):
+            gcd = gcd * x
+    return gcd
 
 
 # It would be nice to have assertions on whether or not inputs is_integer
@@ -195,7 +242,9 @@ class FloorDiv(sympy.Function):
                 return FloorDiv(base - term, divisor) + quotient
 
         try:
-            gcd = sympy.gcd(base, divisor)
+            gcd = simple_floordiv_gcd(base, divisor)
+            if equal_valued(gcd, 1) and isinstance(divisor, sympy.Add):
+                gcd = sympy.gcd(base, divisor)
             if not equal_valued(gcd, 1):
                 return FloorDiv(
                     sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
@@ -261,11 +310,11 @@ class ModularIndexing(sympy.Function):
         if isinstance(base, FloorDiv):
             return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
 
-    def _eval_is_nonnegative(self):
+    def _eval_is_nonnegative(self):  # type:ignore[override]
         p, q = self.args[:2]
         return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)  # type: ignore[attr-defined]
 
-    def _eval_is_positive(self):
+    def _eval_is_positive(self):  # type:ignore[override]
         p, q = self.args[:2]
         return fuzzy_eq(p.is_positive, q.is_positive)  # type: ignore[attr-defined]
 
@@ -280,14 +329,14 @@ class Where(sympy.Function):
     def _eval_is_integer(self):
         return True if self.args[1].is_integer and self.args[2].is_integer else None  # type: ignore[attr-defined]
 
-    def _eval_is_nonnegative(self):
+    def _eval_is_nonnegative(self):  # type:ignore[override]
         return (
             True
             if self.args[1].is_nonnegative and self.args[2].is_nonnegative  # type: ignore[attr-defined]
             else None
         )
 
-    def _eval_is_positive(self):
+    def _eval_is_positive(self):  # type:ignore[override]
         return True if self.args[1].is_positive and self.args[2].is_positive else None  # type: ignore[attr-defined]
 
     @classmethod
@@ -348,7 +397,7 @@ class PythonMod(sympy.Function):
             return S.Zero
 
     # NB: args[1] for PythonMod
-    def _eval_is_nonnegative(self):
+    def _eval_is_nonnegative(self):  # type:ignore[override]
         return True if self.args[1].is_positive else None  # type: ignore[attr-defined]
 
     def _eval_is_nonpositive(self):
@@ -774,13 +823,13 @@ class Max(MinMaxBase, Application):  # type: ignore[misc]
     zero = S.Infinity
     identity = S.NegativeInfinity
 
-    def _eval_is_positive(self):
+    def _eval_is_positive(self):  # type:ignore[override]
         return fuzzy_or(a.is_positive for a in self.args)  # type: ignore[attr-defined]
 
-    def _eval_is_nonnegative(self):
+    def _eval_is_nonnegative(self):  # type:ignore[override]
         return fuzzy_or(a.is_nonnegative for a in self.args)  # type: ignore[attr-defined]
 
-    def _eval_is_negative(self):
+    def _eval_is_negative(self):  # type:ignore[override]
         return fuzzy_and(a.is_negative for a in self.args)
 
 
@@ -792,13 +841,13 @@ class Min(MinMaxBase, Application):  # type: ignore[misc]
     zero = S.NegativeInfinity
     identity = S.Infinity
 
-    def _eval_is_positive(self):
+    def _eval_is_positive(self):  # type:ignore[override]
         return fuzzy_and(a.is_positive for a in self.args)  # type: ignore[attr-defined]
 
-    def _eval_is_nonnegative(self):
+    def _eval_is_nonnegative(self):  # type:ignore[override]
         return fuzzy_and(a.is_nonnegative for a in self.args)  # type: ignore[attr-defined]
 
-    def _eval_is_negative(self):
+    def _eval_is_negative(self):  # type:ignore[override]
         return fuzzy_or(a.is_negative for a in self.args)
 
 

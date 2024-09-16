@@ -19,9 +19,11 @@ from torch._dynamo.testing import (
     CompileCounter,
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
+    empty_line_normalizer,
     normalize_gm,
 )
 from torch._dynamo.utils import counters, ifdynstaticdefault
+from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.wrap import wrap
 from torch.testing._internal.common_utils import (
     munge_exc,
@@ -2501,6 +2503,139 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
             ):
                 torch.compile(fn, backend="eager")(pred, pytree_in)
 
+    def test_hints_wrapper(self):
+        def ref_fn(x, y):
+            x = x + y
+            x = torch.relu(x)
+            x = x + y
+            return torch.abs(x)
+
+        def fn_with_hints(x, y):
+            x = x + y
+
+            def inner_body_fn(x, y):
+                x = torch.relu(x)
+                x = x + y
+                return x
+
+            def outer_body_fn(x, y):
+                x = hints_wrapper(inner_body_fn, (x, y), {}, hints={"inner_body": True})
+                x = torch.abs(x)
+                return x
+
+            res = hints_wrapper(outer_body_fn, (x, y), {}, hints={"outer_body": True})
+            return res
+
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        x = torch.randn(2, 4)
+        y = torch.ones(4)
+
+        eager_res = fn_with_hints(x, y)
+        compiled_res = torch.compile(fn_with_hints, backend=cnt)(x, y)
+        ref_res = ref_fn(x, y)
+        self.assertEqual(eager_res, ref_res)
+        self.assertEqual(compiled_res, ref_res)
+        self.assertEqual(len(cnt.graphs), 1)
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        graph = backend.graphs[0]
+        self.assertExpectedInline(
+            normalize_gm(graph.print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[2, 4]", L_y_: "f32[4]"):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        x: "f32[2, 4]" = l_x_ + l_y_;  l_x_ = None
+
+        hints_wrapper_body_1 = self.hints_wrapper_body_1
+        hints_wrapper = torch.ops.higher_order.hints_wrapper(hints_wrapper_body_1, (x, l_y_), {}, hints = {'outer_body': True});  hints_wrapper_body_1 = x = l_y_ = None
+        res: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
+        return (res,)
+
+    class hints_wrapper_body_1(torch.nn.Module):
+        def forward(self, x: "f32[2, 4]", l_y_: "f32[4]"):
+            hints_wrapper_body_0 = self.hints_wrapper_body_0
+            hints_wrapper = torch.ops.higher_order.hints_wrapper(hints_wrapper_body_0, (x, l_y_), {}, hints = {'inner_body': True});  hints_wrapper_body_0 = x = l_y_ = None
+            x_1: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
+
+            x_2: "f32[2, 4]" = torch.abs(x_1);  x_1 = None
+            return (x_2,)
+
+        class hints_wrapper_body_0(torch.nn.Module):
+            def forward(self, x: "f32[2, 4]", l_y_: "f32[4]"):
+                x_1: "f32[2, 4]" = torch.relu(x);  x = None
+
+                x_2: "f32[2, 4]" = x_1 + l_y_;  x_1 = l_y_ = None
+                return (x_2,)
+""",
+        )
+
+    def test_hints_wrapper_no_hints(self):
+        def fn_with_hints(x, y):
+            def outer_body_fn(x, y):
+                x = torch.add(x, y)
+                return x
+
+            res = hints_wrapper(outer_body_fn, (x, y), {})
+            return res
+
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        x = torch.randn(2, 4)
+        y = torch.ones(4)
+
+        msg = "hints_wrapper - key hints not provided"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            compiled_res = torch.compile(fn_with_hints, backend=cnt)(x, y)
+
+    def test_hints_wrapper_incorrect_type(self):
+        def fn_with_hints(x, y):
+            def outer_body_fn(x, y):
+                x = torch.add(x, y)
+                return x
+
+            res = hints_wrapper(outer_body_fn, (x, y), {}, hints={"test": (True,)})
+            return res
+
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        x = torch.randn(2, 4)
+        y = torch.ones(4)
+
+        msg = r"hints must be a dict containing int, float, bool or str value,"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            compiled_res = torch.compile(fn_with_hints, backend=cnt)(x, y)
+
+    def test_hints_wrapper_pytree_inputs(self):
+        def fn_with_hints(x, y):
+            def outer_body_fn(x):
+                res = torch.add(x[0], x[1]["test"])
+                return res
+
+            res = hints_wrapper(
+                outer_body_fn, ((x, {"test": y}),), {}, hints={"test": True}
+            )
+            return res
+
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        x = torch.randn(2, 4)
+        y = torch.ones(4)
+
+        msg = r"args must be a tuple of tensors, ints, floats, or bools,"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn_with_hints(x, y)
+
 
 class HigherOrderOpVmapGuardTests(LoggingTestCase):
     @make_logging_test(recompiles=True)
@@ -3673,9 +3808,7 @@ class GraphModule(torch.nn.Module):
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         if torch._dynamo.config.inline_inbuilt_nn_modules:
-            self.assertExpectedInline(
-                actual,
-                """\
+            expected = """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_params_l1_weight_: "f32[1, 1]", L_params_l1_bias_: "f32[1]", L_buffers_buffer_: "f32[1]", L_inputs_: "f32[1, 1]"):
         l_params_l1_weight_ = L_params_l1_weight_
@@ -3684,9 +3817,14 @@ class GraphModule(torch.nn.Module):
         l_inputs_ = L_inputs_
 
         linear: "f32[1, 1]" = torch._C._nn.linear(l_inputs_, l_params_l1_weight_, l_params_l1_bias_);  l_inputs_ = l_params_l1_weight_ = l_params_l1_bias_ = None
+
         add: "f32[1, 1]" = linear + l_buffers_buffer_;  linear = l_buffers_buffer_ = None
         return (add,)
-""",
+"""
+            # We found Windows/Linux have some empty line difference, empty_line_normalizer will help fix it.
+            self.assertExpectedInline(
+                empty_line_normalizer(actual),
+                empty_line_normalizer(normalize_gm(expected)),
             )
         else:
             self.assertExpectedInline(
@@ -6302,6 +6440,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         class _FallthroughTestOnly(torch._ops.HigherOrderOperator):
             def __init__(self):
                 super().__init__("_fallthrough_test_only")
+
+            def __call__(self, *args, **kwargs):
+                return super().__call__(*args, **kwargs)
 
         test_op = _FallthroughTestOnly()
         default_keys = torch._ops._HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS

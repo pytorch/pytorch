@@ -46,7 +46,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.utils._triton import has_triton
+from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils.checkpoint import checkpoint
 
 
@@ -299,6 +299,70 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, ref)
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_dynamo_dtensor_from_local_dynamic_shapes(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # Case 1: all dims dynamic
+        def fn(x):
+            dt = DTensor.from_local(
+                x,
+                mesh,
+                [Replicate()],
+                run_check=False,
+                shape=x.shape,
+                stride=x.stride(),
+            )
+            return dt.to_local() + 2
+
+        inp = torch.randn(4, 6, requires_grad=True)
+        ref = fn(inp)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        res = torch.compile(fn, backend=cnt, fullgraph=True, dynamic=True)(inp)
+        res.sum().backward()
+
+        self.assertEqual(res, ref)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Case 2: only sizes are dynamic, strides are static
+        def fn(x):
+            dt = DTensor.from_local(
+                x, mesh, [Replicate()], run_check=False, shape=x.shape, stride=(1,)
+            )
+            return dt.to_local() + 2
+
+        inp = torch.randn(4, requires_grad=True)
+        torch._dynamo.mark_dynamic(inp, 0)
+        ref = fn(inp)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        res = torch.compile(fn, backend=cnt, fullgraph=True)(inp)
+        res.sum().backward()
+
+        self.assertEqual(res, ref)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Case 3: both sizes and strides have a mix of dynamic and static dims
+        def fn(x):
+            dt = DTensor.from_local(
+                x,
+                mesh,
+                [Replicate()],
+                run_check=False,
+                shape=(x.shape[0], x.shape[1], 2),
+                stride=(x.stride()[0], 2, 1),
+            )
+            return dt.to_local() + 2
+
+        inp = torch.randn(4, 6, 2, requires_grad=True)
+        torch._dynamo.mark_dynamic(inp, 0)
+        torch._dynamo.mark_dynamic(inp, 1)
+        ref = fn(inp)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        res = torch.compile(fn, backend=cnt, fullgraph=True)(inp)
+        res.sum().backward()
+
+        self.assertEqual(res, ref)
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_dynamo_dtensor_recompile(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -356,7 +420,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             tmp_dt._local_tensor.stride(), tmp_dt_fake._local_tensor.stride()
         )
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent(self):
         # Partial -> Shard on an unbalanced tensor results in:
         # - A contiguous DTensor
@@ -432,7 +496,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         out_test = opt_mod(dt)
         self.assertEqual(out_ref, out_test)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_dtensor_different_gradient_placement(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -564,7 +628,7 @@ def forward(self, primals_1):
     return (sin_1, primals_1, wait_tensor)""",
         )
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_dtensor_partial_placement_graph_output(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -582,7 +646,7 @@ def forward(self, primals_1):
         out_dt = torch.matmul(tmp_dt, y_dt)
         out_dt.sum().backward()
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(1)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)

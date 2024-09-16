@@ -192,42 +192,12 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return self.conv2(input)
 
         x = torch.randn(20, 16, 50, 50)
-        onnx_program = dynamo_export(
-            TraceModel(), x, export_options=ExportOptions(op_level_debug=False)
-        )
+        onnx_program = dynamo_export(TraceModel(), x)
         assert_has_diagnostics(
             onnx_program.diagnostic_context,
             diagnostics.rules.find_opschema_matched_symbolic_function,
             diagnostics.levels.NONE,
             expected_node="aten.convolution.default",
-        )
-
-    def test_dispatch_overload_fall_back_default_raise_diagnostic_warning(self):
-        class TraceModel(torch.nn.Module):
-            def forward(self, input):
-                return torch.ops.aten.add.Tensor(input, input)
-
-        onnx_registry = torch.onnx.OnnxRegistry()
-        self.assertTrue(
-            onnx_registry.is_registered_op(
-                namespace="aten", op_name="add", overload="Tensor"
-            )
-        )
-
-        aten_add_Tensor = registration.OpName.from_name_parts(
-            namespace="aten", op_name="add", overload="Tensor"
-        )
-        onnx_registry._registry.pop(aten_add_Tensor)
-
-        x = torch.tensor(3)
-        onnx_program = dynamo_export(
-            TraceModel(), x, export_options=ExportOptions(onnx_registry=onnx_registry)
-        )
-        assert_has_diagnostics(
-            onnx_program.diagnostic_context,
-            diagnostics.rules.find_operator_overloads_in_onnx_registry,
-            diagnostics.levels.WARNING,
-            expected_node="aten.add.Tensor",
         )
 
     def test_aten_clone_does_not_raise_warning_of_lack_of_memory_format(self):
@@ -270,20 +240,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 TraceModel(),
                 x,
                 export_options=torch.onnx.ExportOptions(onnx_registry=registry),
-            )
-
-        try:
-            torch.onnx.dynamo_export(
-                TraceModel(),
-                x,
-                export_options=torch.onnx.ExportOptions(onnx_registry=registry),
-            )
-        except torch.onnx.OnnxExporterError as e:
-            assert_has_diagnostics(
-                e.onnx_program.diagnostic_context,
-                diagnostics.rules.no_symbolic_function_for_call_function,
-                diagnostics.levels.ERROR,
-                expected_node="aten.mul.Tensor",
             )
 
     def test_symbolic_shape_of_values_inside_function_is_exported_as_graph_value_info(
@@ -574,34 +530,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.checker.check_model(onnx_program.model_proto)
             onnx.shape_inference.infer_shapes(onnx_program.model_proto)
 
-    def test_exported_program_input_with_custom_fx_tracer(self):
-        from torch.onnx._internal import _exporter_legacy
-        from torch.onnx._internal.fx import dynamo_graph_extractor
-
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                return x + 1
-
-        x = torch.randn(1, 1, 2)
-        exported_program = torch.export.export(Model(), args=(x,))
-
-        export_options = torch.onnx.ExportOptions()
-        export_options = _exporter_legacy.ResolvedExportOptions(
-            export_options, model=exported_program
-        )
-        export_options.fx_tracer = (
-            dynamo_graph_extractor.DynamoExport()
-        )  # Override fx_tracer to an unsupported tracer
-        with self.assertRaises(torch.onnx.OnnxExporterError):
-            onnx_program = torch.onnx.dynamo_export(
-                exported_program,
-                x,
-                export_options=export_options,
-            )
-            self.assertTrue(onnx_program._export_exception is not None)
-            with self.assertRaises(torch.onnx.InvalidExportOptionsError):
-                raise self._export_exception
-
     def test_exported_program_torch_distributions_normal_Normal(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -635,21 +563,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         # The input of Div node should be the input of the model,
         # with no Cast node in between.
         self.assertEqual(div_node.input[0], model_proto.graph.input[0].name)
-
-    def test_exported_program_as_input_with_model_signature(self):
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                return x + 1.0
-
-        x = torch.randn(1, 1, 2, dtype=torch.float)
-        exported_program = torch.export.export(Model(), args=(x,))
-
-        onnx_program = torch.onnx.dynamo_export(
-            exported_program,
-            x,
-        )
-
-        self.assertTrue(onnx_program.model_signature, torch.export.ExportGraphSignature)
 
     @common_utils.parametrize(
         "float8_type",
@@ -818,11 +731,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         onnx_program = torch.onnx.dynamo_export(
             model, tensor_x, export_options=export_options
         )
+        onnx_program.apply_weights(state_dict)
         with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
             onnx_program.save(
                 tmp_onnx_file.name,
                 include_initializers=include_initializer,
-                model_state=state_dict if include_initializer else None,
             )
             onnx_model = onnx.load(tmp_onnx_file.name)
             self.assertEqual(

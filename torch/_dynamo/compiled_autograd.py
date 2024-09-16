@@ -237,14 +237,14 @@ class AutogradCompilerInstance:
         assert isinstance(input, torch.Tensor)
         assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
-        proxies = self.proxy_call_hook(
+        proxy = self.proxy_call_hook(
             hook,
             input,
             hook_type="post_acc_grad_hook",
         )
         with disable_proxy_modes_tracing():
             input = [maybe_clone(input)]
-            self.bind_tensors_to_proxies(input, proxies)
+            self.bind_tensors_to_proxies(input, [proxy])
         return input
 
     # Note: [Compiled autograd and cudagraphs]
@@ -523,6 +523,10 @@ def disable():
         if prior:
             compiled_autograd_enabled = True
         torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+
+
+def maybe_disable_compiled_autograd():
+    return disable() if in_compiled_autograd_region else contextlib.nullcontext()
 
 
 # return to starting state of a new process

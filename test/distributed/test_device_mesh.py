@@ -5,12 +5,6 @@ import os
 import torch
 import torch.distributed._functional_collectives as funcol
 from torch.distributed._tensor import DTensor
-from torch.distributed._tensor._collective_utils import (
-    mesh_broadcast,
-    mesh_scatter,
-    unpad_tensor,
-)
-from torch.distributed._tensor.placement_types import _Partial, Shard
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 from torch.distributed.distributed_c10d import (
     _get_default_group,
@@ -22,6 +16,12 @@ from torch.distributed.distributed_c10d import (
     is_nccl_available,
     ProcessGroup,
 )
+from torch.distributed.tensor._collective_utils import (
+    mesh_broadcast,
+    mesh_scatter,
+    unpad_tensor,
+)
+from torch.distributed.tensor.placement_types import _Partial, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -135,6 +135,10 @@ class DeviceMeshTest(DTensorTestBase):
         tp_mesh = mesh_2d["tp"]
         self.assertEqual(dp_mesh.get_local_rank(), mesh_2d.get_local_rank("dp"))
         self.assertEqual(tp_mesh.get_local_rank(), mesh_2d.get_local_rank("tp"))
+
+        # Verify flattened mesh local rank correctness.
+        flattened_mesh = mesh_2d["dp", "tp"]._flatten()
+        self.assertEqual(flattened_mesh.get_local_rank(), self.rank)
 
     @with_comms
     def test_device_mesh_2d(self):
@@ -691,6 +695,17 @@ class TestMeshEnv(DTensorTestBase):
 
         self.assertEqual(_mesh_resources.get_mesh_dim_by_name(mesh_2d, "DP"), 0)
         self.assertEqual(_mesh_resources.get_mesh_dim_by_name(mesh_2d, "TP"), 1)
+
+    @with_comms
+    def test_get_all_submeshes(self):
+        mesh_2d = init_device_mesh(
+            self.device_type, (2, 4), mesh_dim_names=("replicate", "shard")
+        )
+        all_submeshes = _mesh_resources._get_all_submeshes(mesh_2d, "replicate")
+        self.assertEqual(len(all_submeshes), 4)
+        self.assertEqual(
+            all(submesh.mesh.numel() == 2 for submesh in all_submeshes), True
+        )
 
 
 class DeviceMeshCollectiveTest(DTensorTestBase):

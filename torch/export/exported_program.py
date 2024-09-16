@@ -5,7 +5,6 @@ import copy
 import dataclasses
 import functools
 import operator
-import re
 import types
 import warnings
 from collections import namedtuple
@@ -26,8 +25,10 @@ from typing import (
 
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._library.fake_class_registry import FakeScriptObject
+from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 
 if TYPE_CHECKING:
@@ -41,15 +42,22 @@ if TYPE_CHECKING:
 
 import torch
 import torch.utils._pytree as pytree
+from torch._export.utils import (
+    _collect_and_set_constant_attrs,
+    _collect_param_buffer_metadata,
+    _detect_fake_mode_from_gm,
+    _name_hoo_subgraph_placeholders,
+    _overwrite_signature_for_non_persistent_buffers,
+    _populate_param_buffer_metadata_to_new_gm,
+    _rename_without_collisions,
+)
 from torch._export.verifier import Verifier
+from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import unset_fake_temporarily
-from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.export._tree_utils import is_equivalent, reorder_kwargs
 from torch.fx._compatibility import compatibility
-from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
-from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 from .graph_signature import (  # noqa: F401
     ArgumentSpec,
@@ -70,6 +78,7 @@ __all__ = [
     "ExportedProgram",
     "ModuleCallEntry",
     "ModuleCallSignature",
+    "core_aten_decompositions",
 ]
 
 
@@ -82,6 +91,14 @@ class ModuleCallSignature:
     outputs: List[ArgumentSpec]
     in_spec: pytree.TreeSpec
     out_spec: pytree.TreeSpec
+
+    def replace_all_uses_with(self, original_node, new_node):
+        for i in self.inputs:
+            if i.name == original_node.name:
+                i.name = new_node.name
+        for o in self.outputs:
+            if o.name == original_node.name:
+                o.name = new_node.name
 
 
 @dataclasses.dataclass
@@ -157,7 +174,7 @@ _AUTOGRAD_ALIAS_BACKEND_KEYS_TO_OVERRIDE = [
 
 
 @contextmanager
-def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
+def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
     # This function overrides CompositeImplicitAutograd decomp for
     # functional composite ops that user specified. Ideally we want to not-decompose
     # ALL composite ops but today's C++ functinalization relies on
@@ -165,49 +182,17 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
     # Hence we can only do it for functional ops. One caveat is that
     # there are some composite ops that lie about their schema (claimed to be
     # functional but not really aka dropout), for these cases, we just decompose.
+
+    # When safe=False, we will assume that ops_to_preserve can be mutating/aliasing
+    # and their usual decompositions need to be shadowed rather than overridden.
+    # Thus we will avoid asserting that they are valid to preserve, and will not
+    # replace their CompositeImplicitAutograd kernels with NotImplemented.
+    # The only current users of this mode are variants of aten::to that we will
+    # replace with aten::_to_copy in FunctionalTensorMode.__torch_dispatch__.
+
     saved_tables = {}
     patched_ops = set()
-    removed_decomps = {}
-    for op_overload in ops_to_preserve:
-        # Our strategy for deciding if we can preserve CIA is following:
-        # 1. The op should be known statically that it is functional
-        # 2. If it is maybe aliasing, we decompose because we must know if an op
-        #    is mutating or aliasing.
-        # TODO (tmanlaibaatar) make this utility function and share it with functional_tensor
-        # decomp part. (https://github.com/pytorch/pytorch/issues/129431)
-        def assert_valid_to_preserve(op_overload):
-            if op_overload in FunctionalTensor.maybe_aliasing_or_mutating_ops:
-                raise RuntimeError(
-                    f"We can't detect {op_overload} as a functional op statically, so we can't preserve it"
-                )
-            if op_overload in FunctionalTensor.metadata_fns:
-                raise RuntimeError(
-                    f"{op_overload} is a metadata query function, "
-                    "it will be preserved implicitly in our tracing system. "
-                    "Please file an issue on github if you see otherwise"
-                )
-
-            alias_info = len(
-                [i for i in op_overload._schema.arguments if i.alias_info is not None]
-            )
-
-            is_mutating_or_aliasing = alias_info != 0 or op_overload._schema.is_mutable
-
-            if is_mutating_or_aliasing:
-                raise RuntimeError(
-                    f"{op_overload} is a mutating/aliasing op, we can't preserve it as is"
-                )
-
-            if not torch._C._dispatch_has_kernel(op_overload.name()):
-                raise RuntimeError(
-                    f"{op_overload} is a TorchScript op, we can't preserve it as is"
-                )
-
-            return True
-
-        # If we didn't error, it means we can go ahead
-        assert_valid_to_preserve(op_overload)
-
+    for op_overload, decomp_callable in cia_ops_to_callable.items():
         saved_tables[op_overload] = op_overload.py_kernels.copy()
         patched_ops.add(op_overload)
 
@@ -220,20 +205,16 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
         if torch._C.DispatchKey.CompositeImplicitAutograd in op_overload.py_kernels:
             del op_overload.py_kernels[torch._C.DispatchKey.CompositeImplicitAutograd]
 
-        def _(*args, **kwargs):
-            return NotImplemented
-
-        op_overload.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)(_)
+        if safe:
+            op_overload.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)(
+                decomp_callable
+            )
 
         # For fake tensor prop, we do want to register meta kernel directly
         if torch._C.DispatchKey.Meta not in op_overload.py_kernels:
             op_overload.py_impl(torch._C.DispatchKey.Meta)(
                 functools.partial(_register_cia_to_meta, kernel=op_overload)
             )
-
-        if op_overload in decomp_table:
-            removed_decomps[op_overload] = decomp_table[op_overload]
-            del decomp_table[op_overload]
 
     try:
         yield
@@ -243,91 +224,91 @@ def _override_composite_implicit_decomp(ops_to_preserve, decomp_table):
             op.py_kernels.update(saved_tables[op])
             op._dispatch_cache.clear()
 
-        for op, decomp in removed_decomps.items():
-            decomp_table[op] = decomp
+
+def _special_op_to_preserve_cia(*args, **kwargs):
+    "This is an special marker that tells our infra that we shouldn't decompose this op"
+    return NotImplemented
 
 
-def _rename_without_collisions(
-    name_map: Dict[str, str],
-    orig_name: str,
-    name: str,
-    is_placeholder: bool = False,
-):
+@contextmanager
+def _override_decomp_aten_to_variants():
+    # Preserve variants of aten::to understanding that they are mutating/aliasing
+    # and their CompositeImplicitAutograd kernels will not become NotImplemented.
+    # We will later replace them with aten._to_copy when functionalizing.
+    with _override_composite_implicit_decomp(
+        {
+            torch.ops.aten.to.dtype_layout: _special_op_to_preserve_cia,
+            torch.ops.aten.to.dtype: _special_op_to_preserve_cia,
+        },
+        safe=False,
+    ):
+        yield
+
+
+def _split_decomp_table_to_cia_and_python_decomp(
+    decomp_table: Dict[torch._ops.OperatorBase, Callable]
+) -> Tuple[Dict[torch._ops.OperatorBase, Callable], ...]:
+    from torch._decomp import _collect_all_valid_cia_ops, _get_decomp_for_cia
+
+    all_preservable_cia_ops = set(_collect_all_valid_cia_ops())
+    cia_ops_to_callable = {}
+
+    for op in list(decomp_table.keys()):
+        # TODO we are silently allowing non-safe(non-functional) ops through a crack
+        # due to core aten decomp table having non-functional entries. Once we have
+        # a tigher check around core aten decomp, we should warn users about them.
+        # Tracking issue: (https://github.com/pytorch/pytorch/issues/135759)
+
+        # if it is a valid CIA op we can mess with in export, we check if it is:
+        #  1. Has been marked as to be decomposed. Example:
+        #        decomp_table = decomp_table_to_core_aten()
+        #        del decomp_table[aten.linear]
+        #     In this case, user says decompose everything except for aten.linear
+        #  2. Has been marked with custom decomp behavour. Example:
+        #        decomp_table = {aten.linear: some_op}
+        # For (1), we want to remove all the CIA ops that weren't handled by user as
+        # it suggests they are safe to decompose, so we should remove from preservable_list.
+        # for (2), we just plumb the custom decomp to AOTDIspatcher.
+        # In both cases, we want to remove this CIA op from the decomp_table as it is special
+        # handled.
+        if op in all_preservable_cia_ops:
+            # TODO this is annpying case where aten.item has
+            # prim decomposition which later calls into aten.item
+            # and recurses infinitely. (https://github.com/pytorch/pytorch/issues/136050)
+            if op == torch.ops.aten.item.default:
+                cia_ops_to_callable[op] = _get_decomp_for_cia(op)
+            else:
+                cia_ops_to_callable[op] = decomp_table[op]
+            all_preservable_cia_ops.remove(op)
+            del decomp_table[op]
+
+    # If we reached here, it means user intentionally deleted these CIA ops from
+    # decomp table.
+    for k in all_preservable_cia_ops:
+        cia_ops_to_callable[k] = _special_op_to_preserve_cia
+
+    return cia_ops_to_callable, decomp_table
+
+
+def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
     """
-    Renames nodes to avoid name collisions, with suffixing.
-    name_map: map from original name to new name
-    orig_name: mapping key
-    name: candidate name (potentially suffixed, e.g. mul_2)
-    is_placeholder: if the node is a placeholder, avoid detecting suffix
+    This is the default decomposition table which contains decomposition of
+    all ATEN operators to core aten opset. Use this API together with
+    :func:`run_decompositions()`
     """
-    if name in name_map.values():
-        # non-placeholder nodes may be suffixed with the count
-        # instead of adding another suffix, we will try to increment it
-        match = re.match(r"(.*)_(\d+)", name)
-        if match and not is_placeholder:
-            name, n = match.group(1), int(match.group(2))
-        else:
-            n = 0
-        while (dup_name := f"{name}_{n + 1}") in name_map.values():
-            n += 1
-        name_map[orig_name] = dup_name
-    else:
-        name_map[orig_name] = name
-    return name_map[orig_name]
+    from torch._decomp import core_aten_decompositions
 
-
-def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
-    """
-    Propagate placeholder names from the top-level graph into HigherOrderOp subgraphs,
-    and handle collisions with non-placeholders by count suffixing.
-    Different HOO subgraph types have different input schemas, so we first enumerate them
-    and gather the top-level named placeholder nodes.
-    """
-    # gather all HOO subgraphs and their top-level named placeholder nodes
-    subgraph_ph_tuples: List[Tuple[torch.fx.GraphModule, List[torch.fx.Node]]] = []
-    for node in gm.graph.nodes:
-        if node.op == "call_function" and isinstance(
-            node.target, torch._ops.HigherOrderOperator
-        ):
-            # HOO subgraphs have varying input schemas, so we enumerate them there
-            if node.target._name == "cond":
-                _, true_graph, false_graph, cond_args = node._args
-                subgraph_ph_tuples.append((getattr(gm, true_graph.target), cond_args))
-                subgraph_ph_tuples.append((getattr(gm, false_graph.target), cond_args))
-            elif node.target._name == "wrap_with_set_grad_enabled":
-                subgraph, phs = node._args[1], node._args[2:]
-                subgraph_ph_tuples.append((getattr(gm, subgraph.target), phs))
-            elif node.target._name == "map_impl":
-                body_graph, array, args = node._args
-                subgraph_ph_tuples.append(
-                    (getattr(gm, body_graph.target), array + args)
-                )
-
-    # propagate names
-    for subgraph, hoo_phs in subgraph_ph_tuples:
-        name_map: Dict[str, str] = {}
-        for i, node in enumerate(subgraph.graph.nodes):
-            if i < len(hoo_phs):  # placeholder, retain name
-                name_map[node.name] = hoo_phs[i].name
-                node.name = node.target = hoo_phs[i].name
-            else:  # non-placeholder, check for collisions
-                node.name = _rename_without_collisions(name_map, node.name, node.name)
-
-        # recurse and recompile
-        _name_hoo_subgraph_placeholders(subgraph)
-        subgraph.recompile()
+    return core_aten_decompositions()
 
 
 def _decompose_and_get_gm_with_new_signature_constants(
     ep,
     *,
-    decomp_table: Dict[torch._ops.OperatorBase, Callable],
-    _preserve_ops: Tuple[torch._ops.OpOverload],
+    cia_to_decomp: Dict[torch._ops.OperatorBase, Callable],
+    python_decomp_table: Dict[torch._ops.OperatorBase, Callable],
     joint_loss_index: Optional[int],
 ):
-    from torch._export.passes.lift_constants_pass import ConstantAttrMap
     from torch._functorch.aot_autograd import aot_export_module
-    from torch._guards import detect_fake_mode
     from torch._subclasses.fake_tensor import FakeTensorMode
     from torch.export._trace import (
         _export_to_aten_ir,
@@ -339,12 +320,18 @@ def _decompose_and_get_gm_with_new_signature_constants(
     )
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
+    # TODO Merge this path with inference IR decomp, but it will require some additional work
+    # so I will leave it for now. T200307782
     if ep.verifier.dialect == "TRAINING":
         mod = ep.module()
-        fake_args = [
-            node.meta["val"] for node in mod.graph.nodes if node.op == "placeholder"
-        ]
-        fake_mode = torch._export.utils._detect_fake_mode_from_gm(mod)
+
+        fake_args = []
+        for node in mod.graph.nodes:
+            if node.op == "placeholder":
+                fake_args.append(node.meta["val"])
+
+        fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
+        fake_mode = _detect_fake_mode_from_gm(mod)
         if fake_mode is None:
             fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
 
@@ -370,51 +357,20 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # the exported module will store constants & non-persistent buffers such that
         # retracing treats them as persistent buffers, so we inform the constants lifting pass
         # and overwrite the new graph signature using the previous program.
-        constant_attrs = ConstantAttrMap()
-        non_persistent_buffers = {
-            spec.target
-            for spec in ep.graph_signature.input_specs
-            if spec.kind == InputKind.BUFFER and not spec.persistent
-        }
-        for name, value in ep.constants.items():
-            if name in non_persistent_buffers:
-                continue
-            # recursive getattr
-            _mod = mod
-            *atoms, attr = name.split(".")
-            for atom in atoms:
-                _mod = getattr(_mod, atom)
-            # remove as buffer, reassign as constant/non-persistent buffer
-            _mod._buffers.pop(attr, None)
-            setattr(_mod, attr, value)
-            constant_attrs.add(value, name)
+        constant_attrs = _collect_and_set_constant_attrs(
+            ep.graph_signature, ep.constants, mod
+        )
 
         # get params & buffers after excluding constants
         fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
 
-        params_buffers_to_node_meta = {}
-        for node in mod.graph.nodes:
-            target = node.target
-            meta = node.meta
-            if node.op == "get_attr":
-                params_buffers_to_node_meta[target] = meta
+        params_buffers_to_node_meta = _collect_param_buffer_metadata(mod)
 
-            # If the call_function uses param as input, we also need to update params' meta
-            # with this call_function node's meta.
-            # This is basically the same flow as torch.fx.traceback.preserve_meta()
-            if node.op == "call_function" and not isinstance(
-                node.target, torch._ops.HigherOrderOperator
-            ):
-                for arg in node._input_nodes:
-                    if arg.op == "get_attr":
-                        for entry in torch.fx.proxy._COPY_META_FIELDS:
-                            if entry in meta:
-                                params_buffers_to_node_meta[arg.target][entry] = meta[
-                                    entry
-                                ]
-
-        with fake_mode:
-            fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
+        with _ignore_backend_decomps(), (
+            fake_mode
+        ), _override_decomp_aten_to_variants(), _override_composite_implicit_decomp(
+            cia_to_decomp,
+        ):
             aten_export_artifact = _export_to_aten_ir(
                 mod,
                 # this requires empty kwargs, but not in pytree.flattened format
@@ -425,49 +381,27 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 {},
                 fake_params_buffers,
                 constant_attrs,
+                decomp_table=python_decomp_table,
                 _check_autograd_state=False,
             )
 
         gm = aten_export_artifact.gm
         new_graph_signature = aten_export_artifact.sig
 
-        for node in gm.graph.nodes:
-            # nn_module_stack
-            if node.op not in ["placeholder", "output"]:
-                for key, (fqn, mod_cls) in node.meta["nn_module_stack"].items():
-                    if isinstance(mod_cls, type):
-                        node.meta["nn_module_stack"][key] = (
-                            fqn,
-                            mod_cls.__module__ + "." + mod_cls.__qualname__,
-                        )
-
-        # Don't copy over nn_module_stack, stack_trace metadata for params/buffers nodes
-        for metadata in params_buffers_to_node_meta.values():
-            metadata.pop("nn_module_stack", None)
-            metadata.pop("stack_trace", None)
-
-        for node in gm.graph.nodes:
-            if node.op == "placeholder":
-                if node.target in new_graph_signature.inputs_to_parameters:
-                    param_name = new_graph_signature.inputs_to_parameters[node.target]
-                    if param_name in params_buffers_to_node_meta:
-                        for k, v in params_buffers_to_node_meta[param_name].items():
-                            node.meta[k] = v
-                if node.target in new_graph_signature.inputs_to_buffers:
-                    buffer_name = new_graph_signature.inputs_to_buffers[node.target]
-                    if buffer_name in params_buffers_to_node_meta:
-                        for k, v in params_buffers_to_node_meta[buffer_name].items():
-                            node.meta[k] = v
+        _populate_param_buffer_metadata_to_new_gm(
+            params_buffers_to_node_meta, gm, new_graph_signature
+        )
 
         # overwrite signature for non-persistent buffers
-        for spec in new_graph_signature.input_specs:
-            if spec.kind == InputKind.BUFFER and spec.target in non_persistent_buffers:
-                spec.persistent = False
+        new_graph_signature = _overwrite_signature_for_non_persistent_buffers(
+            ep.graph_signature, new_graph_signature
+        )
 
         _verify_nn_module_stack(gm)
         _verify_stack_trace(gm)
         _verify_placeholder_names(gm, new_graph_signature)
-        return gm, new_graph_signature
+
+        return _remove_unneccessary_copy_op_pass(gm, new_graph_signature)
 
     old_placeholders = [
         node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
@@ -482,13 +416,12 @@ def _decompose_and_get_gm_with_new_signature_constants(
     fake_mode = detect_fake_mode(fake_args)
     fake_mode = contextlib.nullcontext() if fake_mode is None else fake_mode
     with _ignore_backend_decomps(), fake_mode, _override_composite_implicit_decomp(
-        _preserve_ops,
-        decomp_table,
+        cia_to_decomp
     ):
         gm, graph_signature = aot_export_module(
             ep.graph_module,
             fake_args,
-            decompositions=decomp_table,
+            decompositions=python_decomp_table,
             trace_joint=True if joint_loss_index is not None else False,
             output_loss_index=joint_loss_index
             if joint_loss_index is not None
@@ -631,7 +564,34 @@ def _decompose_and_get_gm_with_new_signature_constants(
     return gm, new_graph_signature
 
 
-def _common_getitem_elimination_pass(gm: torch.fx.GraphModule, graph_signature):
+def _remove_unneccessary_copy_op_pass(
+    gm: torch.fx.GraphModule, new_graph_signature: ExportGraphSignature
+) -> Tuple[torch.fx.GraphModule, ExportGraphSignature]:
+    """
+    Removes redundant copy_ node that was introduced due to mutated buffer.
+    """
+    with gm._set_replace_hook(new_graph_signature.get_replace_hook()):
+        for node in gm.graph.nodes:
+            if node.op == "output":
+                args, _ = pytree.tree_flatten(node.args)
+                for out in args:
+                    if (
+                        isinstance(out, torch.fx.Node)
+                        and out.name in new_graph_signature.buffers_to_mutate
+                    ):
+                        if (
+                            out.op == "call_function"
+                            and out.target == torch.ops.aten.copy.default
+                        ):
+                            out.replace_all_uses_with(out.args[1])  # type: ignore[arg-type]
+                            gm.graph.erase_node(out)
+        gm.recompile()
+    return gm, new_graph_signature
+
+
+def _common_getitem_elimination_pass(
+    gm: torch.fx.GraphModule, graph_signature, module_call_graph
+):
     with gm._set_replace_hook(graph_signature.get_replace_hook()):
         for module in gm.modules():
             if not isinstance(module, torch.fx.GraphModule):
@@ -639,12 +599,17 @@ def _common_getitem_elimination_pass(gm: torch.fx.GraphModule, graph_signature):
 
             node_id: Dict[torch.fx.Node, str] = {}
             getitems: Dict[str, torch.fx.Node] = {}
-            for node in module.graph.nodes:
+            for node in list(module.graph.nodes):
                 if node.op == "call_function" and node.target == operator.getitem:
                     source, idx = node.args
                     new_id = f"{node_id[source]}.{idx}"
                     if new_id in getitems:
                         node.replace_all_uses_with(getitems[new_id])
+                        for entry in module_call_graph:
+                            if entry.signature is not None:
+                                entry.signature.replace_all_uses_with(
+                                    node, getitems[new_id]
+                                )
                         module.graph.erase_node(node)
                     else:
                         getitems[new_id] = node
@@ -656,14 +621,14 @@ def _common_getitem_elimination_pass(gm: torch.fx.GraphModule, graph_signature):
 def _decompose_exported_program(
     ep,
     *,
-    decomp_table: Dict[torch._ops.OperatorBase, Callable],
-    _preserve_ops: Tuple[torch._ops.OpOverload],
+    cia_to_decomp: Dict[torch._ops.OperatorBase, Callable],
+    python_decomp_table: Dict[torch._ops.OperatorBase, Callable],
     joint_loss_index: Optional[int],
 ):
     gm, new_graph_signature = _decompose_and_get_gm_with_new_signature_constants(
         ep,
-        decomp_table=decomp_table,
-        _preserve_ops=_preserve_ops,
+        cia_to_decomp=cia_to_decomp,
+        python_decomp_table=python_decomp_table,
         joint_loss_index=joint_loss_index,
     )
 
@@ -727,7 +692,9 @@ class ExportedProgram:
         if isinstance(root, torch.fx.GraphModule):
             self._graph_module.meta.update(root.meta)
 
-        _common_getitem_elimination_pass(self._graph_module, graph_signature)
+        _common_getitem_elimination_pass(
+            self._graph_module, graph_signature, module_call_graph
+        )
         self._graph_signature: ExportGraphSignature = graph_signature
         self._state_dict: Dict[str, Any] = state_dict
         self._range_constraints: Dict[sympy.Symbol, ValueRanges] = range_constraints
@@ -1038,16 +1005,82 @@ class ExportedProgram:
         `Core ATen Operator Set <https://pytorch.org/docs/stable/torch.compiler_ir.html>`_.
 
         For now, we do not decompose joint graphs.
-        """
-        from torch._decomp import core_aten_decompositions
 
-        if decomp_table is None:
-            decomp_table = core_aten_decompositions()
+        Args:
+            decomp_table:
+             An optional argument that specifies decomp behaviour for Aten ops
+             (1) If None, we decompose to core aten decompositions
+             (2) If empty, we don't decompose any operator
+
+
+        Some examples:
+
+        If you don't want to decompose anything
+
+        .. code-block:: python
+
+            ep = torch.export.export(model, ...)
+            ep = ep.run_decompositions(decomp_table={})
+
+        If you want to get a core aten operator set except for certain operator, you can do following:
+
+        .. code-block:: python
+
+            ep = torch.export.export(model, ...)
+            decomp_table = torch.export.core_aten_decompositions()
+            decomp_table[your_op] = your_custom_decomp
+            ep = ep.run_decompositions(decomp_table=decomp_table)
+        """
+        from torch._decomp import (
+            _decomp_table_to_post_autograd_aten,
+            core_aten_decompositions,
+        )
+        from torch._inductor import config
+
+        # FIXME delete this option after PTC, Executorch syncing is
+        # bit annoying so can't get rid of it easily
+        if _preserve_ops != ():
+            warnings.warn(
+                "This API is deprecated and soon will be removed. "
+                "Please look at the docstring to see how to preserve "
+                "an operator."
+            )
+
+        _decomp_table = (
+            core_aten_decompositions() if decomp_table is None else dict(decomp_table)
+        )
+
+        if config.is_fbcode():
+            # This means the decomp_table would only be containing post-autograd ops
+            # We should manually add CIA decomps
+            for k, v in _decomp_table_to_post_autograd_aten().items():
+                _decomp_table[k] = v
+
+        for op in _preserve_ops:
+            if op in _decomp_table:
+                del _decomp_table[op]
+
+        # Note [Seperating decomp_table into CIA decomps and non-CIA decomps]
+        # At this point, we have a decomp_table that contains decomp behaviour for
+        # both CIA and post-autograd ops.
+        # We need to separate the op into two categories:
+        # 1. CIA op: These are the ops that we want to override
+        #    CompositeImplicitAutograd decomp for. For them, we need to use _override_composite_implicit_decomp
+        #    context manager to plumb it through AOTDispatcher
+        # 2. Non-CIA op: These ops are only relevant after AOTDIspatcher runs, so just
+        #    checking if they are statically functional is enough.
+        # For joint IR case tho, we need to use the old path because we can't register
+        # custom decomps this way because we can't use context manager as it installs
+        # autograd_error node.
+        (
+            cia_to_decomp,
+            python_decomp_table,
+        ) = _split_decomp_table_to_cia_and_python_decomp(_decomp_table)
 
         return _decompose_exported_program(
             self,
-            decomp_table=decomp_table,
-            _preserve_ops=_preserve_ops,  # type: ignore[arg-type]
+            cia_to_decomp=cia_to_decomp,
+            python_decomp_table=python_decomp_table,
             joint_loss_index=None,
         )
 
