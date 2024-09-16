@@ -17,6 +17,7 @@ from torch.nn.attention.flex_attention import (
     BlockMask,
     create_block_mask,
     flex_attention,
+    PagedAttention,
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -385,6 +386,123 @@ class TestFlexDecoding(InductorTestCase):
         output = sdpa_hop(q, k, v, _identity, block_mask)
 
         output.backward(backward_grad)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_paged_attention_builtin_score_mods(
+        self, dtype: torch.dtype, score_mod: Callable
+    ):
+        n_pages, page_size, max_batch_size, max_seq_len = 32, 128, 4, 512
+        n_heads, head_dim = 4, 16
+
+        def generate_causal_offset(offset: torch.Tensor):
+            def causal_offset_mask(b, h, q_idx, kv_idx):
+                return (offset + q_idx) >= kv_idx
+
+            return causal_offset_mask
+
+        def noop(score, b, h, q_idx, kv_idx):
+            return score
+
+        mod = generate_causal_offset(
+            torch.tensor(192, device="cuda", dtype=torch.int32)
+        )
+        block_mask = create_block_mask(mod, max_batch_size, 1, 1, max_seq_len)
+
+        q = torch.randn(
+            (max_batch_size, n_heads, 1, head_dim),
+            dtype=dtype,
+            device="cuda",
+            requires_grad=False,
+        )
+        k = torch.randn(
+            (max_batch_size, n_heads, max_seq_len, head_dim), dtype=dtype, device="cuda", requires_grad=False
+        )
+        v = torch.randn(
+            (max_batch_size, n_heads, max_seq_len, head_dim), dtype=dtype, device="cuda", requires_grad=False
+        )
+        q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
+
+        sdpa_partial = create_attention(
+            score_mod, block_mask, enable_gqa=False
+        )
+        golden_out, gold_lse = sdpa_partial(q_gold, k_gold, v_gold, return_lse=True)
+        ref_out, ref_lse = sdpa_partial(q_ref, k_ref, v_ref, return_lse=True)
+
+        MAX_CACHED_SEQ_LEN = n_pages * page_size
+        k_cache = torch.zeros(
+            1,
+            n_heads,
+            MAX_CACHED_SEQ_LEN,
+            head_dim,
+            device="cuda",
+            dtype=dtype,
+        )
+        v_cache = torch.zeros(
+            1,
+            n_heads,
+            MAX_CACHED_SEQ_LEN,
+            head_dim,
+            device="cuda",
+            dtype=dtype,
+        )
+
+        paged_cache = PagedAttention(n_pages, page_size, max_batch_size, max_seq_len)
+
+        paged_cache.allocate_until_length(
+            torch.tensor([100, 200, 50, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([100, 512, 300, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([512, 512, 300, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([512, 512, 512, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([512, 512, 512, 512], device="cuda")
+        )
+
+        input_pos = torch.tensor(
+            range(0, max_seq_len), device="cuda", dtype=torch.int32
+        )
+        paged_cache.update(input_pos, k, k_cache)
+        paged_cache.update(input_pos, v, v_cache)
+
+        new_block_mask = paged_cache.convert_logical_block_mask(
+            block_mask, MAX_CACHED_SEQ_LEN
+        )
+        compiled_sdpa = torch.compile(create_attention(
+            paged_cache.get_score_mod(score_mod), block_mask, enable_gqa=False
+        ))
+
+
+        compiled_out, compiled_lse = compiled_sdpa(q, k_cache, v_cache, return_lse=True, block_mask=new_block_mask)
+
+        self._check_out(
+            golden_out,
+            ref_out,
+            compiled_out,
+        )
+        self._check_out(
+            gold_lse,
+            ref_lse,
+            compiled_lse,
+        )
+
+    @supported_platform
+    def test_flex_decoding_masks(self):
+        # TODO: Add test for different block masks
+        return
+    
+    @supported_platform
+    def test_flex_decoding_gqa(self):
+        # TODO
+        return
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)

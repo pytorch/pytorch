@@ -2807,10 +2807,7 @@ class TestPagedAttention(InductorTestCase):
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
 
-        # compiled_flex_attention = flex_attention
-        compiled_flex_attention = torch.compile(flex_attention)
-        sdpa_partial = create_attention(_identity, block_mask, enable_gqa=False)
-        compiled_sdpa = torch.compile(sdpa_partial)
+        sdpa_partial = create_attention(score_mod, block_mask, enable_gqa=False)
 
         golden_out = sdpa_partial(q_gold, k_gold, v_gold)
         ref_out = sdpa_partial(q_ref, k_ref, v_ref)
@@ -2860,6 +2857,8 @@ class TestPagedAttention(InductorTestCase):
         new_block_mask = paged_cache.convert_logical_block_mask(
             block_mask, MAX_CACHED_SEQ_LEN
         )
+
+        compiled_sdpa = torch.compile(create_attention(paged_cache.get_score_mod(score_mod), block_mask, enable_gqa=False))
         paged_out = compiled_sdpa(q, k_cache, v_cache, block_mask=new_block_mask)
 
         with torch.no_grad():
@@ -2873,26 +2872,10 @@ class TestPagedAttention(InductorTestCase):
             self._check_equal(golden_out, ref_out, paged_out, fudge_factor, "Out")
 
     @supported_platform
-    def test_flex_attention_score_mod(self):
-        # flex_attention(q, k, v, score_mod, block_mask) works with paged cache
-        return
-
-    @supported_platform
     def test_flex_attention_gqa(self):
         # flex_attention(q, k, v, block_mask=causal_mask, enable_gqa=True) works with paged cache
         return
 
-    @supported_platform
-    def test_flex_decoding_causal_mask(self):
-        return
-
-    @supported_platform
-    def test_flex_decoding_score_mod(self):
-        return
-
-    @supported_platform
-    def test_flex_decoding_gqa(self):
-        return
 
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
