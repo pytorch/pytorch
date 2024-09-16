@@ -263,6 +263,19 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   return std::make_tuple(out, mean, rstd);
 }
 
+Tensor rms_norm_symint(
+    const Tensor& input,
+    c10::SymIntArrayRef normalized_shape,
+    const std::optional<Tensor>& weight_opt /* optional */,
+    std::optional<double> eps) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  _check_rms_norm_inputs_symint(input, normalized_shape, weight);
+
+  return at::native::rms_norm(input, C10_AS_INTARRAYREF_SLOW(normalized_shape), weight_opt, eps);
+}
+
 Tensor rms_norm(
     const Tensor& input,
     IntArrayRef normalized_shape,
@@ -272,9 +285,6 @@ Tensor rms_norm(
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  auto bias_opt = std::optional<Tensor>();
-  const Tensor& bias = *at::borrow_from_optional_tensor(bias_opt);
-  (void) _check_layer_norm_inputs(input, normalized_shape, weight, bias, /*calc_mn=*/false);
 
   std::vector<int64_t> dims_to_reduce;
   for (const auto i : c10::irange(normalized_shape.size())) {
