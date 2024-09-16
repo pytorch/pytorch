@@ -40,12 +40,12 @@ class Metrics(Enum):
     GPU_PEAK_MEM = "gpu_peak_mem"
 
 
-def get_execution_time(fn, quantiles=None, grad_to_none=None, device=None, **kwargs):
+def get_execution_time(fn, grad_to_none=None, device=None, **kwargs):
     """
     Get the execution time of a function.
     For CUDA, we use triton's do_bench. Note: it has a default repeat of 100 and warmup of 25.
     """
     if device == Device.CUDA:
-        return do_bench(fn, quantiles=quantiles, grad_to_none=grad_to_none, **kwargs)
+        return do_bench(fn, grad_to_none=grad_to_none, **kwargs)
     else:
         raise ValueError(f"Device {device} is not supported")

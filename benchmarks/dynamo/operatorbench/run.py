@@ -10,7 +10,6 @@ import torch
 
 
 enable_profile = False
-QUANTILES = [0.2, 0.5, 0.8]
 
 
 def benchmark_operator(
@@ -83,7 +82,6 @@ def benchmark_operator(
                             execution_time.append(
                                 get_execution_time(
                                     fn,
-                                    quantiles=QUANTILES,
                                     grad_to_none=grad_to_none,
                                     device=device,
                                 )
@@ -114,7 +112,7 @@ def benchmark_operator(
     help=f"phase to benchmark. {[phase.value.lower() for phase in Phase]}. ",
     default="forward",
 )
-@click.option("--repeat", help="repeat", default=3)
+@click.option("--repeat", help="repeat", default=5)
 @click.option(
     "--metrics",
     help=f"metrics to benchmark. {[metric.value.lower() for metric in Metrics]}. split by ','",
