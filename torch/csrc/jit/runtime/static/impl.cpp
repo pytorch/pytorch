@@ -457,8 +457,7 @@ ManagedTensorRanges::ManagedTensorRanges(
   for (auto* managed_tensor : managed_tensor_values) {
     auto* lifetime = getLifetime(managed_tensor);
     DCHECK(lifetime && lifetime->end <= num_nodes);
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Node* freeing_node;
+    Node* freeing_node = nullptr;
     if (lifetime->end == num_nodes) {
       freeing_node = block.return_node();
     } else {

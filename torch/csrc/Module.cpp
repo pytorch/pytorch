@@ -69,6 +69,7 @@
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/functorch/init.h>
 #include <torch/csrc/fx/node.h>
+#include <torch/csrc/inductor/aoti_package/pybind.h>
 #include <torch/csrc/inductor/aoti_runner/pybind.h>
 #include <torch/csrc/instruction_counter/Module.h>
 #include <torch/csrc/jit/python/init.h>
@@ -170,7 +171,7 @@ static PyObject* THPModule_initExtension(
     PyObject* _unused,
     PyObject* shm_manager_path) {
   HANDLE_TH_ERRORS
-#if !defined(FBCODE_CAFFE2)
+#if !defined(FBCODE_CAFFE2) && !defined(__aarch64__)
   if (torch::get_cpp_stacktraces_enabled()) {
     c10::SetStackTraceFetcher([]() -> std::string {
       auto tb = torch::CapturedTraceback::gather(false, false, true);
@@ -1687,6 +1688,7 @@ PyObject* initModule() {
   torch::python::init_bindings(module);
   torch::lazy::initLazyBindings(module);
   torch::inductor::initAOTIRunnerBindings(module);
+  torch::inductor::initAOTIPackageBindings(module);
 #ifdef USE_ITT
   torch::profiler::initIttBindings(module);
 #endif

@@ -139,14 +139,14 @@ def disable_apex_o2_state_dict_hook(model: torch.nn.Module | torch.jit.ScriptFun
 
 @contextlib.contextmanager
 def setup_onnx_logging(verbose: bool):
-    is_originally_enabled = torch.onnx.is_onnx_log_enabled()
-    if is_originally_enabled or verbose:
-        torch.onnx.enable_log()
+    is_originally_enabled = _C._jit_is_onnx_log_enabled
+    if is_originally_enabled or verbose:  # type: ignore[truthy-function]
+        _C._jit_set_onnx_log_enabled(True)
     try:
         yield
     finally:
-        if not is_originally_enabled:
-            torch.onnx.disable_log()
+        if not is_originally_enabled:  # type: ignore[truthy-function]
+            _C._jit_set_onnx_log_enabled(False)
 
 
 @contextlib.contextmanager
@@ -175,7 +175,7 @@ def _get_torch_export_args(
 def export(
     model: torch.nn.Module | torch.jit.ScriptModule | torch.jit.ScriptFunction,
     args: tuple[Any, ...] | torch.Tensor,
-    f: str | None = None,
+    f: str,
     *,
     kwargs: dict[str, Any] | None = None,
     export_params: bool = True,
@@ -1125,7 +1125,7 @@ def _model_to_graph(
             module=module,
         )
     except Exception as e:
-        torch.onnx.log("Torch IR graph at exception: ", graph)
+        _C._jit_onnx_log("Torch IR graph at exception: ", graph)
         raise
 
     is_script = isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule))
@@ -1452,7 +1452,7 @@ def _get_module_attributes(module):
         try:
             attrs[k] = getattr(module, k)
         except AttributeError:
-            torch.onnx.log(f"Skipping module attribute '{k}'")
+            _C._jit_onnx_log(f"Skipping module attribute '{k}'")
             continue
     return attrs
 
@@ -1642,20 +1642,8 @@ def _export(
                 custom_opsets,
             )
             if verbose:
-                torch.onnx.log("Exported graph: ", graph)
+                _C._jit_onnx_log("Exported graph: ", graph)
             onnx_proto_utils._export_file(proto, f, export_type, export_map)
-            # The ONNX checker only works for ONNX graph. So if the operator_export_type is not ONNX,
-            # we can skip this check.
-            # If large model format export is enabled, proto will only contain data location instead of
-            # raw data and _check_onnx_proto() will fail because it can only handle the raw ONNX proto
-            # string in memory.
-            if (operator_export_type is _C_onnx.OperatorExportTypes.ONNX) and (
-                not val_use_external_data_format
-            ):
-                try:
-                    _C._check_onnx_proto(proto)
-                except RuntimeError as e:
-                    raise errors.CheckerError(e) from e
     finally:
         assert GLOBALS.in_onnx_export
         GLOBALS.in_onnx_export = False

@@ -7,7 +7,7 @@ import os
 import sys
 import unittest
 from functools import partial
-from typing import List
+from typing import List, Tuple
 
 import torch
 import torch.library
@@ -27,8 +27,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     IS_ARM64,
-    IS_CI,
-    IS_WINDOWS,
+    IS_FBCODE,
     parametrize,
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
@@ -37,18 +36,10 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 
-if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "Windows CI does not have necessary dependencies for test_torchinductor_dynamic_shapes yet\n"
-    )
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
-
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from inductor.test_torchinductor import (
+from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
     check_model,
     check_model_gpu,
     CommonTemplate,
@@ -372,7 +363,7 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([3], device=device), torch.randn(10, device=device))
 
-    @unittest.expectedFailure
+    @unittest.skipUnless(IS_FBCODE, "")
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
@@ -567,6 +558,28 @@ class TestInductorDynamic(TestCase):
             r = torch.ops.test.foo(x)
             y = r.stride(0)
             return torch.empty(y, device=x.device)
+
+        f(torch.tensor([3], device=device))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    @torch._inductor.config.patch(implicit_fallbacks=True)
+    def test_multi_output_unbacked_custom_op(self, device):
+        @torch.library.custom_op("test::foo", mutates_args=())
+        def foo(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            return torch.empty(2, device=x.device), torch.empty(3, device=x.device)
+
+        @foo.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            ctx = torch.library.get_ctx()
+            u0 = ctx.new_dynamic_size()
+            return torch.empty(u0, device=x.device), torch.empty(3, device=x.device)
+
+        @torch.compile(fullgraph=True)
+        def f(x):
+            a, b = torch.ops.test.foo(x)
+            return a.sum() + b.sum()
 
         f(torch.tensor([3], device=device))
 
