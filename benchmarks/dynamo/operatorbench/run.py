@@ -1,4 +1,5 @@
 from contextlib import nullcontext
+
 import click
 import operators
 from operators import BaseOperator
@@ -6,6 +7,7 @@ from utils.common import BenchmarkConfig, Device, dtype_mapping, Phase
 from utils.metrics import get_execution_time, MetricResult, Metrics
 
 import torch
+
 
 enable_profile = False
 QUANTILES = [0.2, 0.5, 0.8]
@@ -70,6 +72,7 @@ def benchmark_operator(
 
                     def fn():
                         return phase_fn(input, target)
+
                     record_repeat_context = (
                         torch.profiler.record_function(f"repeat_{repeat_idx}")
                         if enable_profile

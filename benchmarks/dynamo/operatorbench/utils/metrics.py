@@ -7,18 +7,21 @@ from .common import Device
 
 
 class MetricResult:
-    # The first dimension is the sample index, the second dimension is the metric value
-    op_name: str = ""
-    op_variantant: str = ""
-    execution_time: List[List[float]] = []
-    mem_throughput: List[List[float]] = []
-    cpu_peak_mem: float = None
-    gpu_peak_mem: float = None
-    input: List[
-        Tuple[Any, Any]
-    ] = []  # Correlate metrics with inputs. indexing by sample
+    def __init__(self) -> None:
+        self.op_name: str = ""
+        self.op_variantant: str = ""
+        # The first dimension is the sample index, the second dimension is the metric value
+        self.execution_time: List[List[float]] = []  # List of lists for execution times
+        self.mem_throughput: List[
+            List[float]
+        ] = []  # List of lists for memory throughput
+        self.cpu_peak_mem: float = None  # Peak CPU memory usage
+        self.gpu_peak_mem: float = None  # Peak GPU memory usage
+        self.input: List[
+            Tuple[Any, Any]
+        ] = []  # Correlate metrics with inputs, indexed by sample
 
-    def __str__(self):
+    def __str__(self) -> str:
         return (
             f"MetricResult(op_name={self.op_name}, "
             f"op_variantant={self.op_variantant}, "
