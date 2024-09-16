@@ -83,7 +83,14 @@ class RendezvousStoreInfo:
         # TODO swap to collectives comms API
         if rank == 0:
             addr = local_addr or socket.getfqdn()
-            port = get_free_port()
+            # If the store is not a TCPStore, we need to create a new TCPStore.
+            # Also to avoid race condition in getting port for TCPStore, we will reuse
+            # the existing store as much as possible.
+            if hasattr(store, "port"):
+                port = store.port
+            else:
+                # Not all stores define the property of port, so we fallback to get_free_port.
+                port = get_free_port()
             store.set(RendezvousStoreInfo.MASTER_ADDR_KEY, addr.encode(encoding="UTF-8"))  # type: ignore[arg-type]
             store.set(RendezvousStoreInfo.MASTER_PORT_KEY, str(port).encode(encoding="UTF-8"))  # type: ignore[arg-type]
 
