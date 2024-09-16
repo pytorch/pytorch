@@ -409,7 +409,7 @@ def _sympy_from_args(
         if args[0].is_Number:
             rest = args[1:]
             sort_fn(rest)
-            return cls._from_args(args[0] + rest, is_commutative=is_commutative)
+            return cls._from_args([args[0]] + rest, is_commutative=is_commutative)
         else:
             sort_fn(args)
             return cls._from_args(args, is_commutative=is_commutative)
