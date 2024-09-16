@@ -39,10 +39,10 @@ def input_reshard(
     Return:
         A :class:`nn.Module` object registered with TP input resharding.
     """
-    cx: Optional[torch.autograd.graph.saved_tensors_hooks] = None
-    
     if input_reshard_dim is None:
         return module
+
+    cx: Optional[torch.autograd.graph.saved_tensors_hooks] = None
 
     def input_reshard_forward_pre_hook(_: torch.nn.Module, _i: Tuple[Any, ...]) -> None:
         saved_tensor_hooks = torch.autograd.graph.saved_tensors_hooks(
