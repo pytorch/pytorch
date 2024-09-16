@@ -112,27 +112,30 @@ def _maybe_set_eval_frame(callback: DynamoCallback, context_id: int, state: str)
         )
         return callback
     else:
-        assert state in ["enter", "exit"]
-        if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-            # NOTE: Compiled Autograd graph cannot be executed in eager mode and must be Dynamo traced through
+        if config.warmup_runs == 0:
             return set_eval_frame(callback)
         else:
-            if context_id not in context_id_to_warmup_count:
-                context_id_to_warmup_count[context_id] = 0
-            if state == "enter":
-                if context_id_to_warmup_count[context_id] < config.warmup_runs:
-                    # TODO: insert eager profiling start event here
-                    # TODO: maybe kick off Remote Execution of torch.compile here
-                    return set_eval_frame(None)
-                else:
-                    return set_eval_frame(callback)
-            elif state == "exit":
-                if context_id_to_warmup_count[context_id] < config.warmup_runs:
-                    # TODO: insert eager profiling end event here
-                    context_id_to_warmup_count[context_id] += 1
-                    return set_eval_frame(callback)
-                else:
-                    return set_eval_frame(callback)
+            assert state in ["enter", "exit"]
+            if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+                # NOTE: Compiled Autograd graph cannot be executed in eager mode and must be Dynamo traced through
+                return set_eval_frame(callback)
+            else:
+                if context_id not in context_id_to_warmup_count:
+                    context_id_to_warmup_count[context_id] = 0
+                if state == "enter":
+                    if context_id_to_warmup_count[context_id] < config.warmup_runs:
+                        # TODO: insert eager profiling start event here
+                        # TODO: maybe kick off Remote Execution of torch.compile here
+                        return set_eval_frame(None)
+                    else:
+                        return set_eval_frame(callback)
+                elif state == "exit":
+                    if context_id_to_warmup_count[context_id] < config.warmup_runs:
+                        # TODO: insert eager profiling end event here
+                        context_id_to_warmup_count[context_id] += 1
+                        return set_eval_frame(callback)
+                    else:
+                        return set_eval_frame(callback)
 
 
 def _reset_guarded_backend_cache():
