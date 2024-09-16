@@ -4214,7 +4214,7 @@ def tensor_split(
 
             indices = indices_or_sections.tolist()
 
-        indices = list(indices) + [a.shape[_dim]]
+        indices = [0] + list(indices) + [a.shape[_dim]]
         split_sizes = [indices[i + 1] - indices[i] for i in range(len(indices) - 1)]
         return tuple(aten.split_with_sizes(a, split_sizes, dim=_dim))
 
