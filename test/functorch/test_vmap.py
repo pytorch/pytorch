@@ -4471,6 +4471,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("histc"),
                 xfail("as_strided"),
                 xfail("as_strided_copy"),
+                xfail("permute_copy"),
                 xfail("t_copy"),
                 xfail("unsqueeze_copy"),
                 xfail("istft"),
