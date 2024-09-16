@@ -578,22 +578,22 @@ def extract_read_writes(
             repl = {v: sympy.Symbol(f"tmp{i}") for i, v in enumerate(fn.indirect_vars)}
             name_to_index = {k: sympy_subs(v, repl) for k, v in name_to_index.items()}
         for entry in fn.memory_usage[MemoryUsageType.LOAD]:
-            inner.load(entry.buffer_name, name_to_index[entry.index_name])  # type: ignore[arg-type]
+            inner.load(entry.buffer_name, name_to_index[entry.index_name])
         for entry in fn.memory_usage[MemoryUsageType.LOAD_SEED]:
-            inner.load_seed(entry.buffer_name, int(name_to_index[entry.index_name]))  # type: ignore[arg-type]
+            inner.load_seed(entry.buffer_name, int(name_to_index[entry.index_name]))
         for entry in fn.memory_usage[MemoryUsageType.STORE]:
             inner.store(
-                entry.buffer_name, name_to_index[entry.index_name], None, entry.mode  # type: ignore[arg-type]
+                entry.buffer_name, name_to_index[entry.index_name], None, entry.mode
             )
         for entry in fn.memory_usage[MemoryUsageType.STORE_REDUCTION]:
             inner.store_reduction(
-                entry.buffer_name, name_to_index[entry.index_name], None  # type: ignore[arg-type]
+                entry.buffer_name, name_to_index[entry.index_name], None
             )
         for entry in fn.memory_usage[MemoryUsageType.INDEX_EXPR]:
             inner.index_expr(name_to_index[entry.index_name], None)
         for entry in fn.memory_usage[MemoryUsageType.BUCKETIZE]:
             inner.bucketize(
-                None, entry.buffer_name, name_to_index[entry.index_name], None, None  # type: ignore[arg-type]
+                None, entry.buffer_name, name_to_index[entry.index_name], None, None
             )
         # fn.memory_usage[MemoryUsageType.CHECK_BOUNDS] intentionally skipped
     else:

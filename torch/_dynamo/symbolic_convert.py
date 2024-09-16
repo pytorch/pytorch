@@ -3198,7 +3198,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def run_ctx_mgr(self):
         return TracingContext.current_frame(self.parent.frame_summary())
 
-    def STORE_DEREF(self, inst):  # type: ignore[override]
+    def STORE_DEREF(self, inst):
         if inst.argval in self.closure_cells:
             cell = self.closure_cells[inst.argval]
             val = self.pop()

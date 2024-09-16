@@ -272,7 +272,7 @@ class EphemeralSource(Source):
     def name(self):
         return f"<ephemeral{': ' + self.desc if self.desc is not None else ''}>"
 
-    def make_guard(self, fn):
+    def make_guard(self):
         raise NotImplementedError
 
     def is_ephemeral(self):
