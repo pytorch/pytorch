@@ -215,6 +215,23 @@ def sample_inputs_elementwise_njt_binary(
         # (T, NT)
         yield SampleInput(t, args=(njt1,), kwargs=dict(op_kwargs))
 
+    # mixed broadcasting case: (B, j0, 1) with (B, 1, D)
+    B = 4
+    D = 16
+    njt = random_nt_from_dims(
+        (B, None, 1),
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
+        layout=torch.jagged,
+    )
+    t = torch.randn(B, 1, D, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # (NT, T)
+    yield SampleInput(njt, args=(t,), kwargs=dict(op_kwargs))
+    # (T, NT)
+    yield SampleInput(t, args=(njt,), kwargs=dict(op_kwargs))
+
 
 def sample_inputs_njt_reduction(
     op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs
