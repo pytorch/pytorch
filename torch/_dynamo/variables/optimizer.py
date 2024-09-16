@@ -212,7 +212,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         vt = VariableTracker.create(tx, self.value.param_groups, params_groups_source)
         param_groups_vt = LazyVariableTracker.realize_all(vt)
 
-        state_source = AttrSource(self.source, "state")
+        state_source = self.source and AttrSource(self.source, "state")
         state_vt = VariableTracker.create(tx, self.value.state, state_source)
 
         # We need to realize the top level state dict to populate
@@ -235,15 +235,16 @@ class OptimizerVariable(UserDefinedObjectVariable):
                                 key_index = i
                                 break
                         if key_index:
-                            state_source = AttrSource(self.source, "state")
-                            source = GetItemSource(
-                                state_source,
-                                ConstDictKeySource(state_source, key_index),
+                            LazyVariableTracker.realize_all(
+                                VariableTracker.create(
+                                    tx,
+                                    self.value.state[param],
+                                    GetItemSource(
+                                        state_source,
+                                        ConstDictKeySource(state_source, key_index),
+                                    ),
+                                )
                             )
-                            vt = VariableTracker.create(
-                                tx, self.value.state[param], source
-                            )
-                            LazyVariableTracker.realize_all(vt)
                             break
 
             group_source = group_vt.source
@@ -265,7 +266,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         # We have to again iterate over the state dict to collect the
         # tensor_to_source dict. This is used for the finalizer.
-        state_source = AttrSource(self.source, "state")
         for idx, (p, value) in enumerate(self.value.state.items()):
             p_state_source = GetItemSource(
                 state_source, ConstDictKeySource(state_source, idx)
