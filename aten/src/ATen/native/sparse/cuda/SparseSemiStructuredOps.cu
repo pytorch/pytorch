@@ -3,9 +3,18 @@
 #include <ATen/cuda/CUDAUtils.h>
 #include <ATen/Dispatch.h>
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#elif defined(USE_ROCM)
 #include <ck/ck.hpp>
 #include <ck/tensor_operation/gpu/device/tensor_layout.hpp>
+#include <ck/utility/data_type.hpp>
+#include <ck/library/reference_tensor_operation/cpu/reference_gemm.hpp>
+#include <ck/library/utility/check_err.hpp>
+#include <ck/library/utility/device_memory.hpp>
+#include <ck/library/utility/fill.hpp>
+#include <ck/library/utility/host_tensor.hpp>
+#include <ck/library/utility/host_tensor_generator.hpp>
+#include <ck/library/utility/literals.hpp>
 #else
 #include <cuda_runtime.h>
 #include <cutlass/cutlass.h>
@@ -18,7 +27,7 @@
 #include <type_traits>
 #include <tuple>
 //TODO: add check for ROCm
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
 #else
 #define CUTLASS_STATUS_CHECK(status)                                    \
   {                                                                     \
