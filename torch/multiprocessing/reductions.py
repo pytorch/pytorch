@@ -74,7 +74,7 @@ class SharedCache(dict):
     def _after_fork(self):
         self.lock = threading.Lock()
 
-    def get(self, key):  # type: ignore[override]
+    def get(self, key):
         with self.lock:
             return dict.get(self, key)
 

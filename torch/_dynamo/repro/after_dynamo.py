@@ -12,7 +12,6 @@ from typing import Union
 
 import torch
 import torch.fx as fx
-from torch._dynamo.backends.registry import CompiledFn
 from torch._dynamo.debug_utils import (
     AccuracyError,
     backend_accuracy_fails,
@@ -272,10 +271,8 @@ def dump_to_minify_after_dynamo(gm, args, compiler_name):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-@register_debug_backend  # type: ignore[arg-type]
-def dynamo_minifier_backend(
-    gm: fx.GraphModule, example_inputs, compiler_name: CompiledFn
-):
+@register_debug_backend
+def dynamo_minifier_backend(gm, example_inputs, compiler_name):
     from functorch.compile import minifier
 
     compiler_fn = lookup_backend(compiler_name)
@@ -314,7 +311,7 @@ def dynamo_minifier_backend(
     return gm
 
 
-@register_debug_backend  # type: ignore[arg-type]
+@register_debug_backend
 def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
     from functorch.compile import minifier
 
