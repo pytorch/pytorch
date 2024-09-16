@@ -143,7 +143,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             if safe_to_set_capturable(group):
                 group["capturable"] = True
 
-        source = AttrSource(self.source, "param_groups")
+        source = self.source and AttrSource(self.source, "param_groups")
         param_groups_vt = LazyVariableTracker.realize_all(
             VariableTracker.create(tx, self.value.param_groups, source)
         )
