@@ -168,6 +168,14 @@ def gh_post_commit_comment(
     )
 
 
+def gh_close_pr(org: str, repo: str, pr_num: int, dry_run: bool = False) -> None:
+    url = f"{GITHUB_API_URL}/repos/{org}/{repo}/pulls/{pr_num}"
+    if dry_run:
+        print(f"Dry run closing PR {pr_num}")
+    else:
+        gh_fetch_url(url, method="PATCH", data={"state": "closed"})
+
+
 def gh_delete_comment(org: str, repo: str, comment_id: int) -> None:
     url = f"{GITHUB_API_URL}/repos/{org}/{repo}/issues/comments/{comment_id}"
     gh_fetch_url(url, method="DELETE")

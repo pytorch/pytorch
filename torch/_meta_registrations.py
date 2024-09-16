@@ -6343,7 +6343,7 @@ def meta_searchsorted(
 
 def _check_for_unsupported_isin_dtype(dtype):
     torch._check(
-        dtype not in [torch.bool, torch.bfloat16, torch.complex128, torch.complex64],
+        dtype not in (torch.bool, torch.complex128, torch.complex64),
         lambda: f"Unsupported input type encountered for isin(): {dtype}",
     )
 
@@ -6489,28 +6489,6 @@ def meta__jagged_to_padded_dense_forward(
     S = max_lengths[0]
     output_shape = (B, S, *values.shape[1:])
     return values.new_empty(output_shape)
-
-
-@register_meta(aten._padded_dense_to_jagged_forward.default)
-def meta__padded_dense_to_jagged_forward(
-    padded: Tensor,
-    offsets: List[Tensor],
-    total_L: Optional[int] = None,
-):
-    # only one jagged dim is supported for now
-    assert len(offsets) == 1
-
-    if not total_L:
-        assert isinstance(padded, torch._subclasses.FakeTensor)
-        shape_env = padded.fake_mode.shape_env
-        assert shape_env is not None
-        total_L = shape_env.create_unbacked_symint()
-        torch.fx.experimental.symbolic_shapes._constrain_range_for_size(
-            total_L, min=0, max=None
-        )
-
-    output_shape = (total_L, *padded.shape[2:])
-    return padded.new_empty(output_shape)
 
 
 def _create_unary_float_meta_func(func):
