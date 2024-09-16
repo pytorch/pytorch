@@ -805,7 +805,7 @@ def create_block_mask(
         Q_LEN (int): Sequence length of query.
         KV_LEN (int): Sequence length of key/value.
         device (str): Device to run the mask creation on.
-        BLOCK_SIZE (int or Tuple[int, int]): Block size for the block mask. If a single int is provided,
+        BLOCK_SIZE (int or Tuple[int, int]): Block size for the block mask. If a single int is provided it is used for both query and key/value.
         _compile (bool): Whether to compile the mask_mod function. Default is False.
 
     Returns:
