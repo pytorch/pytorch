@@ -482,7 +482,7 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
             return x / factor
         elif x.is_Mul:
             if x.args[0] != factor:
-                args = (x.args[0] / factor, *x.args[1:])
+                args = [x.args[0] / factor, *x.args[1:]]
             else:
                 # Mul._from_args require a canonical list of args
                 # so we remove the first arg (x.args[0] / factor) if it was 1
