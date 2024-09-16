@@ -754,16 +754,21 @@ class FSDPParam:
         local_tensor = new_param._local_tensor
         if local_tensor.is_meta:
             return
+        updated_local_tensor = False
         padded_sharded_size = self.padded_sharded_param_size
         if local_tensor.size() != padded_sharded_size:
             padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
             padded_local_tensor[: local_tensor.size(0)].copy_(local_tensor)
             local_tensor = padded_local_tensor
+            updated_local_tensor = True
         if self.pin_memory and not local_tensor.is_pinned():
             local_tensor = local_tensor.cpu().pin_memory()
+            updated_local_tensor = True
         self._sharded_param_data = local_tensor.view(-1)
         assert isinstance(self.sharded_param, DTensor)  # mypy
-        self.sharded_param._local_tensor = local_tensor[: self.sharded_size[0]]
+        if updated_local_tensor:
+            # Only change the local tensor object if needed
+            self.sharded_param._local_tensor = local_tensor[: self.sharded_size[0]]
 
     def __repr__(self):
         return f"FSDPParam(fqn={self._param_fqn}, orig_size={self._orig_size})"
