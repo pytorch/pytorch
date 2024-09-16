@@ -25,6 +25,26 @@ if TYPE_CHECKING:
         sys as sys,
     )
 
+from torch.overrides import BaseTorchFunctionMode
+
+
+# These classes handle support for TorchFunctionModes across
+# graph breaks
+# Today the TorchFunctionMode enter (for the classes we support)
+# simply pushes the mode onto the stack. Since after this occurs
+# the stack is mutated, and we replay these mutations, we don't need
+# any cleanup logic to be run once the graph break occurs, we simply replay
+# these mutations to ensure at the graph break the torch function mode stack is correct
+#  and reconstruct the torch function mode stack normally
+# when we compile the resume function on the other side of the break.
+# However, to ensure we exit properly
+# in the resume function, we need to re-enter the contexts as we do other contexts.
+# These contexts do nothing on enter, but provide the correct exit logic to ensure
+# the stack state is correct.
+class NoEnterTorchFunctionMode(BaseTorchFunctionMode):
+    def __enter__(self):
+        pass
+
 
 def index(iterator, item, start=0, end=None):
     from itertools import islice
