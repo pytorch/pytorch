@@ -1006,12 +1006,15 @@ class TensorVariable(VariableTracker):
 
             from .builder import wrap_fx_proxy
 
+            self_proxy = self.as_proxy()
+            self_proxy.node.meta["has_backward_hook"] = True
+
             return wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
                     "call_function",
                     _register_hook_trampoline,
-                    (self.as_proxy(), bw_state_proxy),
+                    (self_proxy, bw_state_proxy),
                     {},
                 ),
             )
