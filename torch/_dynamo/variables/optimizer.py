@@ -208,7 +208,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         # Recursively realize the variable trackers for optim.state and
         # optim.param_groups, which recursively install the necessary guards.
-        params_groups_source = AttrSource(self.source, "param_groups")
+        params_groups_source = self.source and AttrSource(self.source, "param_groups")
         vt = VariableTracker.create(tx, self.value.param_groups, params_groups_source)
         param_groups_vt = LazyVariableTracker.realize_all(vt)
 
