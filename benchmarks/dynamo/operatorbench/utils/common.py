@@ -37,7 +37,6 @@ class BenchmarkConfig:
     phase: str
     max_samples: int
     repeat: int
-    single_run: bool
 
 
 class Phase(Enum):

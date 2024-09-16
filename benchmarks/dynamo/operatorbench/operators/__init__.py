@@ -19,9 +19,11 @@ class BaseOperator:
     name = None
     variant = None
     benchmark_config = None
+    full_name = None
 
     def __init__(self, benchmark_config: BenchmarkConfig):
         self.benchmark_config = benchmark_config
+        self.full_name = f"{self.name}.{self.variant}"
 
     def forward(self):
         raise NotImplementedError("Subclasses must implement this method.")
