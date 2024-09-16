@@ -17,7 +17,9 @@ valid_operator_files = ["baseline.py", "custom.py", "inductor.py"]
 
 
 class FusedLinearCrossEntropyOperator(BaseOperator):
+    # The base operator name
     name = "FusedLinearCrossEntropy"
+    # The variant placeholder. No need to set in the base operator class
     variant = None
     example_inputs_list = []
 
@@ -35,9 +37,8 @@ class FusedLinearCrossEntropyOperator(BaseOperator):
 
     @classmethod
     def generate_inputs(cls, benchmark_config: BenchmarkConfig):
-        # Need OOM check
-        # for BT in [2**i for i in range(12, 16)]:
-        for BT in [2**12]:
+        # May need OOM check
+        for BT in [2**i for i in range(12, 16)]:
             _input = torch.randn(
                 BT,
                 H,
@@ -64,5 +65,6 @@ class FusedLinearCrossEntropyOperator(BaseOperator):
 
         return f()
 
+    # single run with a specific input
     def single_run(self, fn, *inputs):
         fn(*inputs)

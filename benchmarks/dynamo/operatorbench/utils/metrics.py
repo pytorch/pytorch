@@ -35,7 +35,7 @@ class MetricResult:
 # Define an Enum for metrics
 class Metrics(Enum):
     EXECUTION_TIME = "execution_time"
-    THROUGHPUT = "throughput"
+    MEM_THROUGHPUT = "mem_throughput"
     CPU_PEAK_MEM = "cpu_peak_mem"
     GPU_PEAK_MEM = "gpu_peak_mem"
 

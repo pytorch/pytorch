@@ -102,7 +102,7 @@ def benchmark_operator(
 @click.option(
     "--max-samples",
     help="max samples per op. each operator may have different inputs. this is the number of inputs to sample.",
-    default=1,
+    default=15,
 )
 @click.option(
     "--device",
@@ -122,7 +122,7 @@ def benchmark_operator(
 )
 @click.option(
     "--skip-variants",
-    help="variants to be skipped, [liger, baseline, inductor]",
+    help="variants to be skipped, [liger, baseline, inductor]. split by ','",
     default="",
 )
 @click.option("--profile", help="profile", is_flag=True, default=False)
