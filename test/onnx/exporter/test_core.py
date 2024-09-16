@@ -42,6 +42,34 @@ class TorchTensorTest(common_utils.TestCase):
         self.assertEqual(tensor.__array__().dtype, np_dtype)
         self.assertEqual(np.array(tensor).dtype, np_dtype)
 
+    @common_utils.parametrize(
+        "dtype",
+        [
+            (torch.bfloat16),
+            (torch.bool),
+            (torch.complex128),
+            (torch.complex64),
+            (torch.float16),
+            (torch.float32),
+            (torch.float64),
+            (torch.float8_e4m3fn),
+            (torch.float8_e4m3fnuz),
+            (torch.float8_e5m2),
+            (torch.float8_e5m2fnuz),
+            (torch.int16),
+            (torch.int32),
+            (torch.int64),
+            (torch.int8),
+            (torch.uint16),
+            (torch.uint32),
+            (torch.uint64),
+            (torch.uint8),
+        ],
+    )
+    def test_tobytes(self, dtype: torch.dtype):
+        tensor = _core.TorchTensor(torch.tensor([1], dtype=dtype))
+        self.assertEqual(tensor.tobytes(), tensor.numpy().tobytes())
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
