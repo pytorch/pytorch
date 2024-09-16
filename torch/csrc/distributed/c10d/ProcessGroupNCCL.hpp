@@ -278,6 +278,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
         int rank,
         OpType opType,
         uint64_t seq,
+        bool isP2P = false,
         const char* profilingTitle = nullptr,
         const std::optional<std::vector<at::Tensor>>& inputs = std::nullopt,
         bool desyncDebug = false,
@@ -384,8 +385,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Time point representing when the work started.
     std::chrono::time_point<std::chrono::steady_clock> workStartTime_;
 
-    // Record the collective sequential number.
+    // Record the sequential number of collective or p2p.
     uint64_t seq_;
+    bool isP2P_;
 
     // Indicates if the nccl start event has been updated to the store trace.
     // This will be used by desync debug.
@@ -740,6 +742,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       at::Device& device,
       int rank,
       OpType opType,
+      bool isP2P,
       const char* profilingTitle = nullptr,
       const std::vector<at::Tensor>& inputs = {},
       const std::vector<at::Tensor>& outputs = {},
