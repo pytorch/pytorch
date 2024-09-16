@@ -26,7 +26,7 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
     noop_mask,
     or_masks,
-    PagedCache,
+    PagedAttention,
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -2484,7 +2484,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         torch.testing.assert_close(causal_mask_out, sdpa_mask_out, atol=5e-3, rtol=0.0)
 
 
-class TestPagedCache(InductorTestCase):
+class TestPagedAttention(InductorTestCase):
     def _check_equal(
         self,
         golden_out: torch.Tensor,
@@ -2504,7 +2504,7 @@ class TestPagedCache(InductorTestCase):
 
     def allocate_page_cache(self, n_pages: int, page_size: int):
         n_heads, head_dim, max_batch_size, max_seq_len = 4, 8, 3, 128
-        paged_cache = PagedCache(
+        paged_cache = PagedAttention(
             n_pages, page_size, head_dim, max_batch_size, max_seq_len, n_heads
         )
         return paged_cache
@@ -2577,7 +2577,7 @@ class TestPagedCache(InductorTestCase):
     @supported_platform
     def test_convert_logical_block_mask(self):
         n_pages, page_size, max_batch_size, max_seq_len = 16, 128, 2, 512
-        paged_cache = PagedCache(n_pages, page_size, max_batch_size, max_seq_len)
+        paged_cache = PagedAttention(n_pages, page_size, max_batch_size, max_seq_len)
 
         paged_cache.allocate_until_length(torch.tensor([100, 200], device="cuda"))
         paged_cache.allocate_until_length(torch.tensor([150, 300], device="cuda"))
@@ -2636,7 +2636,7 @@ class TestPagedCache(InductorTestCase):
     @supported_platform
     def test_convert_mask_mod(self):
         n_pages, page_size, max_batch_size, max_seq_len = 9, 128, 2, 512
-        paged_cache = PagedCache(n_pages, page_size, max_batch_size, max_seq_len)
+        paged_cache = PagedAttention(n_pages, page_size, max_batch_size, max_seq_len)
 
         paged_cache.allocate_until_length(torch.tensor([100, 200], device="cuda"))
         paged_cache.allocate_until_length(torch.tensor([150, 300], device="cuda"))
@@ -2683,7 +2683,7 @@ class TestPagedCache(InductorTestCase):
         dtype = torch.float32
 
         n_pages, page_size, max_batch_size, max_seq_len = 6, 2, 2, 6
-        paged_cache = PagedCache(n_pages, page_size, max_batch_size, max_seq_len)
+        paged_cache = PagedAttention(n_pages, page_size, max_batch_size, max_seq_len)
 
         n_heads, head_dim = 2, 3
         cache_shape = (1, n_heads, n_pages * page_size, head_dim)
@@ -2760,15 +2760,11 @@ class TestPagedCache(InductorTestCase):
         self.assertEqual(cache, expected_cache)
 
     @supported_platform
-    def test_flex_attention_causal_mask_batch2(self):
-        # flex_attention(q, k, v, block_mask=causal_mask) works with paged cache
-        n_pages, page_size, max_batch_size, max_seq_len = 4, 128, 2, 256
-        n_heads, head_dim = 2, 16
-
-        paged_cache = PagedCache(n_pages, page_size, max_batch_size, max_seq_len)
-
-        paged_cache.allocate_until_length(torch.tensor([100, 200], device="cuda"))
-        paged_cache.allocate_until_length(torch.tensor([256, 256], device="cuda"))
+    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_paged_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
+        n_pages, page_size, max_batch_size, max_seq_len = 32, 128, 4, 512
+        n_heads, head_dim = 4, 16
 
         def causal_mask(b, h, q, kv):
             return q >= kv
@@ -2777,15 +2773,6 @@ class TestPagedCache(InductorTestCase):
             causal_mask, max_batch_size, 1, max_seq_len, max_seq_len
         )
 
-        """
-        page_table = tensor([
-            [0, 3],
-            [2, 1]
-        ], device='cuda:0')
-
-        """
-
-        # Get q, k, v. Compute expected out, q_grad, k_grad, v_grad
         q = torch.randn(
             max_batch_size,
             n_heads,
@@ -2824,7 +2811,6 @@ class TestPagedCache(InductorTestCase):
 
         golden_out = sdpa_partial(q_gold, k_gold, v_gold)
         ref_out = sdpa_partial(q_ref, k_ref, v_ref)
-        # compiled_out = compiled_sdpa(q, k, v)
 
         k_cache = torch.zeros(
             1,
@@ -2841,6 +2827,24 @@ class TestPagedCache(InductorTestCase):
             head_dim,
             device="cuda",
             dtype=torch.float16,
+        )
+
+        paged_cache = PagedAttention(n_pages, page_size, max_batch_size, max_seq_len)
+
+        paged_cache.allocate_until_length(
+            torch.tensor([100, 200, 50, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([100, 512, 300, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([512, 512, 300, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([512, 512, 512, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([512, 512, 512, 512], device="cuda")
         )
 
         input_pos = torch.tensor(
@@ -2861,321 +2865,6 @@ class TestPagedCache(InductorTestCase):
 
             # Checkout output
             self._check_equal(golden_out, ref_out, paged_out, fudge_factor, "Out")
-
-        # v = (
-        #     torch.arange(1, max_batch_size + 1, device="cuda", dtype=torch.float16)
-        #     .view(max_batch_size, 1, 1, 1)
-        #     .expand(max_batch_size, n_heads, max_seq_len, head_dim)
-        #     .clone()
-        # )
-
-        """
-        v = [
-            b = 0
-            [
-                h = 0
-                [
-                    s = 0
-                    [1,1,1,...,1], # 16 elements
-                    s = 1
-                    [1,1,1,...,1], # 16 elements
-                    ...
-                    s = 255
-                    [1,1,1,...,1], # 16 elements
-                ],
-                h = 1
-                [
-                    s = 0
-                    [1,1,1,...,1], # 16 elements
-                    s = 1
-                    [1,1,1,...,1], # 16 elements
-                    ...
-                    s = 255
-                    [1,1,1,...,1], # 16 elements
-                ],
-            ],
-            b = 1
-            [
-                h = 0
-                [
-                    s = 0
-                    [2,2,2,...,2], # 16 elements
-                    s = 1
-                    [2,2,2,...,2], # 16 elements
-                    ...
-                    s = 255
-                    [2,2,2,...,2], # 16 elements
-                ],
-                h = 1
-                [
-                    s = 0
-                    [2,2,2,...,2], # 16 elements
-                    s = 1
-                    [2,2,2,...,2], # 16 elements
-                    ...
-                    s = 255
-                    [2,2,2,...,2], # 16 elements
-                ],
-            ],
-        ]
-
-        """
-
-        # q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
-
-        # # torch.ones(
-        # #     max_batch_size,
-        # #     n_heads,
-        # #     max_seq_len,
-        # #     head_dim,
-        # #     device="cuda",
-        # #     dtype=torch.float16,
-        # #     requires_grad=True,
-        # # )
-        # out = compiled_flex_attention(q, k, v, block_mask=block_mask)
-        # # out.sum()
-
-        # # write k, v to cache according to the page table
-        # k_cache = torch.zeros(
-        #     1,
-        #     n_heads,
-        #     n_pages * page_size,
-        #     head_dim,
-        #     device="cuda",
-        #     dtype=torch.float16,
-        # )
-        # v_cache = torch.zeros(
-        #     1,
-        #     n_heads,
-        #     n_pages * page_size,
-        #     head_dim,
-        #     device="cuda",
-        #     dtype=torch.float16,
-        # )
-        # input_pos = torch.tensor(
-        #     range(0, max_seq_len), device="cuda", dtype=torch.int32
-        # )
-
-        # paged_cache.update(input_pos, k_ref, k_cache)
-        # paged_cache.update(input_pos, v_ref, v_cache)
-
-        # """
-        # paged_cache.page_table
-        # tensor([[0, 3],
-        # [2, 1]], device='cuda:0')
-        # """
-
-        # """
-        # v_cache. shape: [1,h,MAX_LEN,d] = [1, 2, 512, 16]
-        # [
-        #     b = 0
-        #     [
-        #         h = 0
-        #         [
-        #             page = 0
-        #             s = 0
-        #             [1,1,1,...,1], # 16 elements
-        #             s = 1
-        #             [1,1,1,...,1], # 16 elements
-        #             ...
-        #             s = 127
-        #             [1,1,1,...,1], # 16 elements
-
-        #             page = 1
-        #             s = 128
-        #             [2,2,2,...,2], # 16 elements
-        #             s = 129
-        #             [2,2,2,...,2], # 16 elements
-        #             ...
-        #             s = 255
-        #             [2,2,2,...,2], # 16 elements
-
-        #             page = 2
-        #             s = 256
-        #             [2,2,2,...,2], # 16 elements
-        #             s = 257
-        #             [2,2,2,...,2], # 16 elements
-        #             ...
-        #             s = 383
-        #             [2,2,2,...,2], # 16 elements
-
-        #             page = 3
-        #             s = 384
-        #             [1,1,1,...,1], # 16 elements
-        #             s = 385
-        #             [1,1,1,...,1], # 16 elements
-        #             ...
-        #             s = 511
-        #             [1,1,1,...,1], # 16 elements
-        #         ],
-        #         h = 1
-        #         [
-        #             page = 0
-        #             s = 0
-        #             [1,1,1,...,1], # 16 elements
-        #             s = 1
-        #             [1,1,1,...,1], # 16 elements
-        #             ...
-        #             s = 127
-        #             [1,1,1,...,1], # 16 elements
-
-        #             page = 1
-        #             s = 128
-        #             [2,2,2,...,2], # 16 elements
-        #             s = 129
-        #             [2,2,2,...,2], # 16 elements
-        #             ...
-        #             s = 255
-        #             [2,2,2,...,2], # 16 elements
-
-        #             page = 2
-        #             s = 256
-        #             [2,2,2,...,2], # 16 elements
-        #             s = 257
-        #             [2,2,2,...,2], # 16 elements
-        #             ...
-        #             s = 383
-        #             [2,2,2,...,2], # 16 elements
-
-        #             page = 3
-        #             s = 384
-        #             [1,1,1,...,1], # 16 elements
-        #             s = 385
-        #             [1,1,1,...,1], # 16 elements
-        #             ...
-        #             s = 511
-        #             [1,1,1,...,1], # 16 elements
-        #         ],
-        #     ]
-        # ]
-        # """
-
-        # # Get new block mask with convert_logical_block_mask
-        # new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
-
-        # # Compute paged_out, paged_q_grad, paged_k_grad, paged_v_grad based on the new block mask & page table
-        # # TODO: something goes run when we use compiled_flex_attention
-        # paged_out = compiled_flex_attention(
-        #     q_ref, k_cache, v_cache, block_mask=new_block_mask
-        # )
-        # breakpoint()
-        # self.assertEqual(out, paged_out)
-
-    """
-    without paged attention:
-    Q: b, h, Q_LEN, d
-    K: b, h, K_LEN, d
-    V: b, h, K_LEN, d
-
-    Q@K: b, h, Q_LEN, K_LEN
-    (Q@K)V: b, h, Q_LEN, d
-
-    with paged attention:
-    Q: b, h, Q_LEN, d
-    K: 1, h, MAX_LEN, d
-    V: 1, h, MAX_LEN, d
-
-    Q@K: b, h, Q_LEN, MAX_LEN
-    (Q@K)V: b, h, Q_LEN, d
-    """
-
-    @supported_platform
-    def test_flex_attention_causal_mask(self):
-        # flex_attention(q, k, v, block_mask=causal_mask) works with paged cache
-        n_pages, page_size, max_batch_size, max_seq_len = 16, 128, 4, 512
-        n_heads, head_dim = 4, 16
-
-        paged_cache = PagedCache(n_pages, page_size, max_batch_size, max_seq_len)
-
-        paged_cache.allocate_until_length(
-            torch.tensor([100, 200, 50, 300], device="cuda")
-        )
-        paged_cache.allocate_until_length(
-            torch.tensor([100, 512, 300, 300], device="cuda")
-        )
-        paged_cache.allocate_until_length(
-            torch.tensor([512, 512, 300, 300], device="cuda")
-        )
-        paged_cache.allocate_until_length(
-            torch.tensor([512, 512, 512, 300], device="cuda")
-        )
-        paged_cache.allocate_until_length(
-            torch.tensor([512, 512, 512, 512], device="cuda")
-        )
-
-        def causal_mask(b, h, q, kv):
-            return q >= kv
-
-        block_mask = create_block_mask(
-            causal_mask, max_batch_size, 1, max_seq_len, max_seq_len
-        )
-        compiled_flex_attention = torch.compile(flex_attention)
-
-        # Get q, k, v. Compute expected out, q_grad, k_grad, v_grad
-        q = torch.ones(
-            max_batch_size,
-            n_heads,
-            max_seq_len,
-            head_dim,
-            device="cuda",
-            dtype=torch.float16,
-            requires_grad=True,
-        )
-        # breakpoint()
-        k = torch.ones(
-            max_batch_size,
-            n_heads,
-            max_seq_len,
-            head_dim,
-            device="cuda",
-            dtype=torch.float16,
-            requires_grad=True,
-        )
-        v = (
-            torch.arange(1, max_batch_size + 1, device="cuda", dtype=torch.float16)
-            .view(max_batch_size, 1, 1, 1)
-            .expand(max_batch_size, n_heads, max_seq_len, head_dim)
-            .clone()
-        )
-
-        q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
-
-        # torch.ones(
-        #     max_batch_size,
-        #     n_heads,
-        #     max_seq_len,
-        #     head_dim,
-        #     device="cuda",
-        #     dtype=torch.float16,
-        #     requires_grad=True,
-        # )
-        out = compiled_flex_attention(q, k, v, block_mask=block_mask)
-        out.sum()
-
-        # write k, v to cache according to the page table
-        k_cache = torch.zeros(
-            1, n_heads, 2048, head_dim, device="cuda", dtype=torch.float16
-        )
-        v_cache = torch.zeros(
-            1, n_heads, 2048, head_dim, device="cuda", dtype=torch.float16
-        )
-        input_pos = torch.tensor(
-            range(0, max_seq_len), device="cuda", dtype=torch.int32
-        )
-
-        paged_cache.update(input_pos, k_ref, k_cache)
-        paged_cache.update(input_pos, v_ref, v_cache)
-
-        # Get new block mask with convert_logical_block_mask
-        new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
-
-        # Compute paged_out, paged_q_grad, paged_k_grad, paged_v_grad based on the new block mask & page table
-        # TODO: something goes run when we use compiled_flex_attention
-        paged_out = compiled_flex_attention(
-            q_ref, k_cache, v_cache, block_mask=new_block_mask
-        )
-        paged_out.sum()
-        breakpoint()
 
     @supported_platform
     def test_flex_attention_score_mod(self):
@@ -3202,6 +2891,7 @@ class TestPagedCache(InductorTestCase):
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
 common_utils.instantiate_parametrized_tests(TestBlockMask)
+common_utils.instantiate_parametrized_tests(TestPagedAttention)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

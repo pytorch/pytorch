@@ -192,7 +192,6 @@ def _math_attention_inner(
     captured_buffers_in_dim = (None,) * len(score_mod_other_buffers)
     from torch.nn.attention.flex_attention import _vmap_for_bhqkv
 
-    # breakpoint()
     # first input is score
     score_mod = _vmap_for_bhqkv(score_mod, prefix=(0,), suffix=captured_buffers_in_dim)
 
@@ -203,9 +202,7 @@ def _math_attention_inner(
     with TransformGetItemToIndex():
         scores = (scores * scale).to(working_precision)
         post_mod_scores = torch.where(
-            mask_mod(
-                b, h, m, n, *mask_mod_other_buffers
-            ),  # TODO: Error here. This does not reflect the page table.
+            mask_mod(b, h, m, n, *mask_mod_other_buffers),
             score_mod(scores, b, h, m, n, *score_mod_other_buffers),
             torch.tensor(-float("inf"), dtype=working_precision, device=scores.device),
         )
@@ -267,7 +264,6 @@ def math_attention(
     logsumexp = torch.where(masked_rows, -float("inf"), logsumexp)
 
     post_mod_scores = torch._safe_softmax(post_mod_scores, dim=-1)
-    # breakpoint()
     return post_mod_scores.to(query.dtype) @ value, logsumexp / math.log(2)
 
 
