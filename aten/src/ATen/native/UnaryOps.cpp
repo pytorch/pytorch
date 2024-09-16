@@ -900,7 +900,7 @@ Tensor mvlgamma(const Tensor& self, int64_t p) {
       self.options().pinned_memory_opt());
   args = args.add(self.unsqueeze(-1));
   const auto p2_sub_p = static_cast<double>(p * (p - 1));
-  return args.lgamma_().sum(-1).add_(p2_sub_p * ::log(c10::pi<double>) * QUARTER);
+  return args.lgamma_().sum(-1).add_(p2_sub_p * std::log(c10::pi<double>) * QUARTER);
 }
 
 Tensor& mvlgamma_(Tensor& self, int64_t p) {
@@ -915,7 +915,7 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
       self.options().pinned_memory_opt());
   args = args.add(self.unsqueeze(-1));
   const auto p2_sub_p = static_cast<double>(p * (p - 1));
-  return self.copy_(args.lgamma_().sum(-1).add_(p2_sub_p * ::log(c10::pi<double>) * QUARTER));
+  return self.copy_(args.lgamma_().sum(-1).add_(p2_sub_p * std::log(c10::pi<double>) * QUARTER));
 }
 
 Tensor& mvlgamma_out(const Tensor& self, int64_t p, Tensor& result) {

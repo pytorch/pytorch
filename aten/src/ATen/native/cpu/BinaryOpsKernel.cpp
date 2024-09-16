@@ -1238,7 +1238,7 @@ void xlogy_kernel(TensorIteratorBase& iter) {
           if (x == 0) {
             return 0;
           }
-          return x * ::log(y);
+          return x * std::log(y);
         });
       });
 }

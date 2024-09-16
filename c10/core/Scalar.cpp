@@ -31,13 +31,13 @@ Scalar Scalar::conj() const {
 Scalar Scalar::log() const {
   if (isComplex()) {
     TORCH_INTERNAL_ASSERT(!isSymbolic());
-    return ::log(v.z);
+    return std::log(v.z);
   } else if (isFloatingPoint()) {
     TORCH_CHECK(!isSymbolic(), "NYI log symbolic float");
-    return ::log(v.d);
+    return std::log(v.d);
   } else if (isIntegral(false)) {
     TORCH_CHECK(!isSymbolic(), "NYI log symbolic int");
-    return ::log(v.i);
+    return std::log(v.i);
   }
   TORCH_INTERNAL_ASSERT(false, "unknown ivalue tag ", static_cast<int>(tag));
 }

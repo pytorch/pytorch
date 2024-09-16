@@ -366,7 +366,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
 
         for (const auto j : c10::irange(nvalues)) {
           if (LogSoftMax) {
-            mx_row[j] += ::log(exp_sums_row[j]);
+            mx_row[j] += std::log(exp_sums_row[j]);
           } else {
             exp_sums_row[j] = 1.0 / exp_sums_row[j];
           }

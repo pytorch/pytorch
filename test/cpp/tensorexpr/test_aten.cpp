@@ -708,7 +708,7 @@ TEST(ATen, logFloat) {
 
   for (const auto i : c10::irange(kTotalSize)) {
     ASSERT_EQ(a_v(i), i + 10);
-    ASSERT_EQ(b_v(i), ::log(a_v(i)));
+    ASSERT_EQ(b_v(i), std::log(a_v(i)));
   }
 }
 
@@ -734,7 +734,7 @@ TEST(ATen, fastLogFloat) {
 
   for (const auto i : c10::irange(kTotalSize)) {
     auto test = b_v(i);
-    auto ref = ::log(a_v(i));
+    auto ref = std::log(a_v(i));
     if (std::isnan(ref)) {
       ASSERT_EQ(std::isnan(test), true);
     } else {

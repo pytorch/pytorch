@@ -745,11 +745,11 @@ public:
     return map(std::log);
   }
   Vectorized<c10::complex<float>> log2() const {
-    const __m512 log2_ = _mm512_set1_ps(::log(2));
+    const __m512 log2_ = _mm512_set1_ps(std::log(2));
     return _mm512_div_ps(log(), log2_);
   }
   Vectorized<c10::complex<float>> log10() const {
-    const __m512 log10_ = _mm512_set1_ps(::log(10));
+    const __m512 log10_ = _mm512_set1_ps(std::log(10));
     return _mm512_div_ps(log(), log10_);
   }
   Vectorized<c10::complex<float>> log1p() const {

@@ -133,7 +133,7 @@ public:
     // TODO(voz) We use std:: below, and thus need a separate impl for CUDA.
     float u1 = 1 - uint32_to_uniform_float(output_[0]); // uint32_to_uniform_float returns [0,1), we need (0,1] to avoid passing 0 to log.
     float u2 = 1 - uint32_to_uniform_float(output_[1]);
-    return static_cast<float>(std::sqrt(-2.0 * ::log(u1)) * std::cos(2.0 * M_PI * u2));
+    return static_cast<float>(std::sqrt(-2.0 * std::log(u1)) * std::cos(2.0 * M_PI * u2));
   }
 
   /**

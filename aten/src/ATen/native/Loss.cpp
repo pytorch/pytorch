@@ -293,7 +293,7 @@ Tensor& binary_cross_entropy_out_cpu(const Tensor& input, const Tensor& target, 
                 return (target_val - scalar_t(1)) *
                     std::max(scalar_t(std::log1p(-input_val)), scalar_t(-100)) -
                     target_val *
-                    std::max(scalar_t(::log(input_val)), scalar_t(-100));
+                    std::max(scalar_t(std::log(input_val)), scalar_t(-100));
               });
         });
 

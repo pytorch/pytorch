@@ -177,11 +177,11 @@ public:
     return map(std::log);
   }
   Vectorized<c10::complex<double>> log2() const {
-    const __m256d log2_ = _mm256_set1_pd(::log(2));
+    const __m256d log2_ = _mm256_set1_pd(std::log(2));
     return _mm256_div_pd(log(), log2_);
   }
   Vectorized<c10::complex<double>> log10() const {
-    const __m256d log10_ = _mm256_set1_pd(::log(10));
+    const __m256d log10_ = _mm256_set1_pd(std::log(10));
     return _mm256_div_pd(log(), log10_);
   }
   Vectorized<c10::complex<double>> log1p() const {

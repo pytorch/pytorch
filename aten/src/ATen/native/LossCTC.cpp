@@ -205,7 +205,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
           if (lamax == neginf) // cannot do neginf-neginf
             lamax = 0;
           // this is the assignment of eq (6)
-          log_alpha_a[t][s] = ::log(std::exp(la1-lamax)+std::exp(la2-lamax)+std::exp(la3-lamax))+lamax + log_probs_a[t][current_target_prime];
+          log_alpha_a[t][s] = std::log(std::exp(la1-lamax)+std::exp(la2-lamax)+std::exp(la3-lamax))+lamax + log_probs_a[t][current_target_prime];
         }
       }
       // the likelihood is the sum of the last two alphas, eq (8), the loss is the negative log likelihood
@@ -217,7 +217,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
         scalar_t l2 = log_alpha_a[input_length-1][target_length*2-1];
         scalar_t m = std::max(l1, l2);
         m = ((m == neginf) ? 0 : m);
-        scalar_t log_likelihood = ::log(std::exp(l1-m)+std::exp(l2-m))+m;
+        scalar_t log_likelihood = std::log(std::exp(l1-m)+std::exp(l2-m))+m;
         neg_log_likelihood_a[b] = -log_likelihood;
       }
     }
@@ -361,7 +361,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
           if (lbmax == neginf)
             lbmax = 0;
 
-          log_beta_a[t][s] = ::log(std::exp(lb1-lbmax)+std::exp(lb2-lbmax)+std::exp(lb3-lbmax))+lbmax + log_probs_a[t][current_target_prime];
+          log_beta_a[t][s] = std::log(std::exp(lb1-lbmax)+std::exp(lb2-lbmax)+std::exp(lb3-lbmax))+lbmax + log_probs_a[t][current_target_prime];
           // one might check whether one can vectorize this better when done after the t-loop...
           // now that we have beta, we fill in the sum of alpha*beta in eq (16)
           // in contrast to the cuda implementation, we only parallelize over the batch, so we don't have a concurrency
@@ -373,7 +373,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
             lcab = log_alpha_beta;
           } else {
             scalar_t max = std::max(lcab, log_alpha_beta);
-            lcab = ::log(std::exp(lcab-max)+std::exp(log_alpha_beta-max))+max;
+            lcab = std::log(std::exp(lcab-max)+std::exp(log_alpha_beta-max))+max;
           }
         }
       }

@@ -786,7 +786,7 @@ void cpu_flash_attention(
       accum_t* lse_ptr = lse_data + i * lStrideB + j * lStrideH + m * lStrideM;
       for (const auto row : c10::irange(qBlockSize)) {
         lse_ptr[row * lStrideM] = qk_max_data[row]
-            + ::log(qk_sum_data[row]);
+            + std::log(qk_sum_data[row]);
       }
       // Move to the next query
       data_index_step(i, batchSize, j, num_head, k, qSlice);
