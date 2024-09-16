@@ -31,8 +31,8 @@ def benchmark_operator(
     num_samples = min(max_samples, len(operator.get_inputs(benchmark_config)))
 
     metric_result = MetricResult()
-    operator_metrics = {}
-    operator_metrics[f"{OperatorClass.name}_{OperatorClass.variant}"] = metric_result
+    metric_result.op_name = operator.name
+    metric_result.op_variantant = operator.variant
     for i in range(num_samples):
         input_target = operator.get_inputs(benchmark_config)[i]
         input = input_target[0]
@@ -59,8 +59,7 @@ def benchmark_operator(
                         )
                     )
         metric_result.execution_time.append(execution_time)
-
-    print(metric_result.execution_time)
+    return metric_result
 
 
 @click.command()
@@ -122,13 +121,20 @@ def run_benchmarks(
         variant.lower().strip() for variant in skip_variants if variant.strip()
     ]
     phase = Phase[phase.upper()]
+    operator_metric_results = {}
     for operator in operators_list:
         if operator.name in desired_op_names:
             if operator.variant.lower().strip() in skip_variants:
                 continue
-            benchmark_operator(
+            metric_result = benchmark_operator(
                 operator, device, dtype, phase, max_samples, repeat, metrics
             )
+            operator_metric_results[
+                f"{operator.name}.{operator.variant}"
+            ] = metric_result
+
+    for metric_result in operator_metric_results.values():
+        print(metric_result)
 
 
 if __name__ == "__main__":
