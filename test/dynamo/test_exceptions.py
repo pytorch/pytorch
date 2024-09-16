@@ -32,7 +32,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             try:
                 x = torch.sin(x)
                 raise NotImplementedError
-            except (NotImplementedError, AttributeError):
+            except (NotImplementedError, AttributeError) as e:
                 x = torch.sigmoid(x)
 
             return x
@@ -89,7 +89,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             try:
                 x = torch.sin(x)
                 raise NotImplementedError("Not implemented")
-            except NotImplementedError:
+            except NotImplementedError as e:
                 x = torch.sigmoid(x)
                 try:
                     x = torch.cos(x)
@@ -131,7 +131,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             try:
                 x = torch.cos(x)
                 raise NotImplementedError("Not implemented")
-            except NotImplementedError:
+            except NotImplementedError as e:
                 x = torch.sigmoid(x)
                 raise
 
@@ -144,10 +144,10 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             return x
 
         x = torch.randn(4)
-        fn(x)
+        ref = fn(x)
         # Cant use fullgraph=True because RERAISE is not supported
         opt_fn = torch.compile(fn, backend="eager")
-        opt_fn(x)
+        res = opt_fn(x)
 
     # TODO(anijain2305) - does not work with fullgraph=True
     def test_exception_with_ctx_manager(self):
@@ -157,7 +157,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 with torch.no_grad():
                     x = torch.sin(x)
                     raise NotImplementedError("Not implemented")
-            except NotImplementedError:
+            except NotImplementedError as e:
                 x = torch.sigmoid(x)
             return x
 

@@ -2783,7 +2783,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             ValueError,
             "ShardedTensor requires_grad property does not match from different ranks!",
         ):
-            sharded_tensor.init_from_local_shards(
+            st = sharded_tensor.init_from_local_shards(
                 wrong_requires_grad_shards, [10, 10], init_rrefs=True
             )
 

@@ -895,6 +895,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             torch._dynamo.utils.clear_compilation_metrics()
 
             # TODO: This should be possible to do inside the function, but
+            device = f"cuda:{self.rank}"
+
             @torch.compile()
             def f(x, y):
                 zx = x.shape

@@ -167,6 +167,7 @@ class DTensorTest(DTensorTestBase):
         # if initialized from a transposed mat
         local_tensor = torch.randn(8, 4, 8)
         local_tensor_t = local_tensor.permute(1, 2, 0)
+        global_shape = torch.Size([4, self.world_size * 8, 8])
         self.assertEqual(local_tensor_t.stride(), (8, 1, 32))
         dist_tensor = DTensor.from_local(local_tensor_t, device_mesh, shard1_spec)
         global_stride = (8 * self.world_size, 1, 32 * self.world_size)

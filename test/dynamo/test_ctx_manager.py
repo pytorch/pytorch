@@ -269,12 +269,14 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             cur_stream.wait_stream(new_stream)
 
             x = torch.add(x, 4)
-            cur_stream.query()
+            is_idle = cur_stream.query()
             cur_stream.synchronize()
 
             with torch.cuda.stream(new_stream):
                 x = torch.add(x, 5)
             new_stream.synchronize()
+
+            is_equal = cur_stream == new_stream
 
             x = torch.relu(x)
             x = torch.cos(x)
@@ -438,7 +440,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.add(x, 3)
 
             event = cur_stream.record_event()
-            event.query()
+            is_idle = event.query()
 
             new_stream.wait_event(event)
             with torch.cuda.stream(new_stream):
@@ -480,7 +482,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.add(x, 3)
 
             event = cur_stream.record_event()
-            event.query()
+            is_idle = event.query()
 
             new_stream.wait_event(event)
             with torch.cuda.stream(new_stream):
@@ -566,7 +568,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -675,7 +677,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -849,7 +851,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -875,7 +877,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -1296,7 +1298,7 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         torch.compile(fn, backend=eager, fullgraph=False)(torch.randn(()))
 
-        def check_graph(actual, expected):  # pylint: disable=unused-variable
+        def check_graph(actual, expected):
             self.assertExpectedInline(actual, expected)
 
         graph = eager.graphs[0]
@@ -1341,7 +1343,7 @@ class GraphModule(torch.nn.Module):
             for i in range(2):
                 torch._dynamo.reset()
 
-                ctx_wrapper, _ = ctx_wrappers[i]
+                ctx_wrapper, mode = ctx_wrappers[i]
                 ctx_wrapper_inverse, mode_inverse = ctx_wrappers[(i + 1) % 2]
 
                 def fn(x):
@@ -1372,7 +1374,7 @@ class GraphModule(torch.nn.Module):
             for i in range(2):
                 torch._dynamo.reset()
 
-                ctx_wrapper, _ = ctx_wrappers[i]
+                ctx_wrapper, mode = ctx_wrappers[i]
                 ctx_wrapper_inverse, mode_inverse = ctx_wrappers[(i + 1) % 2]
 
                 def fn(x):

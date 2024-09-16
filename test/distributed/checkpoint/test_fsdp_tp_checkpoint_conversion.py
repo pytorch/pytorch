@@ -86,7 +86,6 @@ class TestFsdpTpCheckpointConversion(DTensorTestBase):
         tp_model.load_state_dict(tp_state_dict)
 
         # Check parameters are equal after loading.
-        tp_state_dict_after_load = tp_model.state_dict()
         for fsdp_item, tp_item in zip(fsdp_state_dict.items(), tp_state_dict.items()):
             fsdp_k, fsdp_v = fsdp_item
             tp_k, tp_v = tp_item
