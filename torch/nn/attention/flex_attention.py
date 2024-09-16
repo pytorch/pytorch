@@ -892,9 +892,6 @@ class PagedAttention:
         super().__init__()
         self.page_size = page_size
 
-        # cache_shape = (n_heads, n_pages * page_size, head_dim)
-        # self.cache = torch.zeros(cache_shape, dtype=dtype))
-
         # page table: [batch, logical_block_idx] -> physical_page_idx
         max_seq_pages = _cdiv(max_seq_len, page_size)
         page_table_shape = (max_batch_size, max_seq_pages)
@@ -910,7 +907,7 @@ class PagedAttention:
         # index of empty pages that is available for allocation
         self.empty_pages = list(range(n_pages - 1, -1, -1))
 
-        # Mapping from physical page index to logical page index
+        # mapping from physical page index to logical page index
         self.physical_to_logical = -torch.ones(
             (max_batch_size, n_pages), dtype=torch.int64, device=device
         )
@@ -920,6 +917,7 @@ class PagedAttention:
         B, H, S, D = val.shape
         assert H == cache.shape[1]
         assert D == cache.shape[3]
+        device = val.device
 
         # find address
         logical_block_idx = input_pos // self.page_size  # [S]
@@ -927,14 +925,19 @@ class PagedAttention:
         physical_block_idx = self.page_table[:, logical_block_idx]  # [B, S]
 
         addr = (
-            physical_block_idx * self.page_size + logical_block_offset[None, :]
-        )  # [B, S]
-        addr = addr.view(-1)  # [B*S]
+            (physical_block_idx * self.page_size + logical_block_offset[None, :])
+            .unsqueeze(1)
+            .expand(B, H, S)
+        )  # [B, H, S]
+        head_range = (
+            (torch.arange(H, dtype=torch.int, device=device) * cache.shape[2])
+            .view(1, H, 1)
+            .expand(B, H, S)
+        )
+        addr = (addr + head_range).view(-1)
 
         # update
-        # TODO: use view?
-        vt = val.transpose(0, 1).reshape(H, B * S, D)  # [H, B*S, D]
-        cache[0, :, addr] = vt
+        cache.view(-1, D)[addr] = val.view(-1, D)
 
     def convert_logical_block_mask(
         self, block_mask: BlockMask, max_cached_seq_len: int

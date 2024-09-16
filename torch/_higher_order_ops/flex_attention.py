@@ -264,6 +264,7 @@ def math_attention(
     logsumexp = torch.where(masked_rows, -float("inf"), logsumexp)
 
     post_mod_scores = torch._safe_softmax(post_mod_scores, dim=-1)
+
     return post_mod_scores.to(query.dtype) @ value, logsumexp / math.log(2)
 
 
