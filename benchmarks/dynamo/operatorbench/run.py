@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 import click
 import operators
 from operators import BaseOperator
@@ -6,7 +7,7 @@ from utils.metrics import get_execution_time, MetricResult, Metrics
 
 import torch
 
-
+enable_profile = False
 QUANTILES = [0.2, 0.5, 0.8]
 
 
@@ -33,32 +34,58 @@ def benchmark_operator(
     metric_result = MetricResult()
     metric_result.op_name = operator.name
     metric_result.op_variantant = operator.variant
-    for i in range(num_samples):
-        input_target = operator.get_inputs(benchmark_config)[i]
-        input = input_target[0]
-        target = input_target[1]
-        metric_result.input.append(input_target)
-        execution_time = []
-        for _ in range(repeat):
-            if phase == Phase.BACKWARD:
-                grad_to_none = [input]
-            else:
-                grad_to_none = None
+    profiler_context = (
+        torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            record_shapes=False,
+            profile_memory=False,
+            on_trace_ready=torch.profiler.tensorboard_trace_handler(
+                f"./log/operator_{operator.full_name}", use_gzip=True
+            ),
+        )
+        if enable_profile
+        else nullcontext()
+    )
+    with profiler_context:
+        for i in range(num_samples):
+            input_target = operator.get_inputs(benchmark_config)[i]
+            input = input_target[0]
+            target = input_target[1]
+            metric_result.input.append(input_target)
+            execution_time = []
+            record_sample_context = (
+                torch.profiler.record_function(f"sample_{i}")
+                if enable_profile
+                else nullcontext()
+            )
+            with record_sample_context:
+                for repeat_idx in range(repeat):
+                    if phase == Phase.BACKWARD:
+                        grad_to_none = [input]
+                    else:
+                        grad_to_none = None
 
-            def fn():
-                return phase_fn(input, target)
-
-            for metric in metrics:
-                if metric == Metrics.EXECUTION_TIME:
-                    execution_time.append(
-                        get_execution_time(
-                            fn,
-                            quantiles=QUANTILES,
-                            grad_to_none=grad_to_none,
-                            device=device,
-                        )
+                    def fn():
+                        return phase_fn(input, target)
+                    record_repeat_context = (
+                        torch.profiler.record_function(f"repeat_{repeat_idx}")
+                        if enable_profile
+                        else nullcontext()
                     )
-        metric_result.execution_time.append(execution_time)
+                    with record_repeat_context:
+                        if Metrics.EXECUTION_TIME in metrics:
+                            execution_time.append(
+                                get_execution_time(
+                                    fn,
+                                    quantiles=QUANTILES,
+                                    grad_to_none=grad_to_none,
+                                    device=device,
+                                )
+                            )
+            metric_result.execution_time.append(execution_time)
     return metric_result
 
 
@@ -95,9 +122,12 @@ def benchmark_operator(
     help="variants to be skipped, [liger, baseline, inductor]",
     default="",
 )
+@click.option("--profile", help="profile", is_flag=True, default=False)
 def run_benchmarks(
-    op, dtype, max_samples, device, phase, repeat, metrics, skip_variants
+    op, dtype, max_samples, device, phase, repeat, metrics, skip_variants, profile
 ):
+    global enable_profile
+    enable_profile = profile
     # This is a list of classes, not instances
     operators_list: list[BaseOperator] = operators.list_operators()
     desired_op_names = None
