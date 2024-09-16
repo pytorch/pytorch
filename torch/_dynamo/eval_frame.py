@@ -111,7 +111,7 @@ def _maybe_set_eval_frame(callback: DynamoCallback, context_id: int, state: str)
     from torch._C._dynamo.eval_frame import set_eval_frame
 
     if not justknobs_check("pytorch/compiler:enable_compiler_set_eval_frame"):
-        log.warning(
+        torch._dynamo.utils.warn_once(
             "Dynamo disabled by Justknob: enable_compiler_set_eval_frame, skipping set_eval_frame"
         )
         return callback
@@ -1330,7 +1330,6 @@ def export(
 
     def inner(*args, **kwargs):
         combined_args = _combine_args(_f, args, kwargs)
-        _check_dynamic_shapes(combined_args, dynamic_shapes)
         constraints = _process_dynamic_shapes(combined_args, dynamic_shapes)
         f = _f
         assume_static_by_default = _assume_static_by_default
@@ -1472,7 +1471,6 @@ def export(
             and not trace_rules.check(call_to_inspect)
         ):
             dim_constraints.solve()
-            dim_constraints.remove_redundant_dynamic_results()
             forced_specializations = dim_constraints.forced_specializations()
             msg = dim_constraints.prettify_results(
                 original_signature,
@@ -1591,7 +1589,14 @@ def export(
 
         if same_signature:
             flat_args_dynamic_dims = [
-                {c.dim for c in (constraints or ()) if c.t_id == id(x)}
+                {
+                    c.dim
+                    for c in (constraints or ())
+                    if (
+                        c.t_id == id(x)
+                        and c.constraint_range.vr.lower != c.constraint_range.vr.upper
+                    )
+                }
                 for x in flat_args
             ]
             graph = rewrite_signature(
@@ -1606,15 +1611,7 @@ def export(
                 result_traced,  # type: ignore[possibly-undefined]
                 flat_args_dynamic_dims,
             )
-        # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
-        assert graph is not None
-        graph.meta["input_shape_constraints"] = (
-            [constraint.serializable_spec for constraint in constraints]
-            if constraints
-            else []
-        )
-
-        return ExportResult(graph, out_guards)
+        return ExportResult(graph, out_guards) # type: ignore[arg-type]
 
     if extra_args or extra_kwargs:
         warnings.warn(
