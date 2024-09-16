@@ -3449,11 +3449,10 @@ class Scheduler:
                         self.current_device.type
                     ):
                         V.graph.wrapper_code.codegen_device_guard_exit()
+                    self.current_device = device
                     if device_need_guard(device.type):
                         assert device.index is not None, "device should have an index"
                         V.graph.wrapper_code.codegen_device_guard_enter(device.index)
-
-                    self.current_device = device
 
             self.buffer_names_to_free.update(node.last_usage)
 

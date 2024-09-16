@@ -15220,8 +15220,7 @@ op_db: List[OpInfo] = [
            variant_test_name='reflect',
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='reflect'),
            skips=(
                # Doesn't have a corresponding aten operator.
@@ -15235,8 +15234,7 @@ op_db: List[OpInfo] = [
            variant_test_name='replicate',
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='replicate'),
            skips=(
                # Doesn't have a corresponding aten operator.
@@ -15250,8 +15248,7 @@ op_db: List[OpInfo] = [
            variant_test_name='replicate_negative',
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_nn_pad_replicate_negative,
            skips=(
                # Doesn't have a corresponding aten operator.
@@ -16857,6 +16854,19 @@ op_db: List[OpInfo] = [
            supports_varargs=True,
            sample_inputs_func=sample_inputs_permute,
            reference_inputs_func=reference_inputs_permute),
+    OpInfo('permute_copy',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+           supports_out=True,
+           assert_autodiffed=True,
+           assert_jit_shape_analysis=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_varargs=False,  # torch.permute is also not varargs
+           sample_inputs_func=sample_inputs_permute,
+           reference_inputs_func=reference_inputs_permute,
+           skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+           )),
     BinaryUfuncInfo('pow',
                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                     dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf),
@@ -19423,6 +19433,26 @@ op_db: List[OpInfo] = [
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_squeeze_multiple),
+    OpInfo('squeeze_copy',
+           ref=_squeeze_ref,
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+           supports_out=True,
+           assert_autodiffed=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # vmap does not support inplace views
+           check_inplace_batched_forward_grad=False,
+           # https://github.com/pytorch/pytorch/issues/66357
+           check_batched_forward_grad=False,
+           sample_inputs_func=sample_inputs_squeeze,
+           skips=(
+               DecorateInfo(
+                   unittest.expectedFailure,
+                   'TestJit',
+                   'test_variant_consistency_jit',
+                   dtypes=(torch.float32,),
+               ),
+           )),
     UnaryUfuncInfo(
         'fill',
         ref=_fill_np,
@@ -23762,6 +23792,11 @@ python_ref_db = [
         "_refs.permute",
         torch_opinfo_name="permute",
     ),
+    PythonRefInfo(
+        "_refs.permute_copy",
+        torch_opinfo_name="permute_copy",
+        supports_out=True,
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.rad2deg",
         torch_opinfo_name="rad2deg",
@@ -23811,6 +23846,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.squeeze",
         torch_opinfo_name="squeeze",
+    ),
+    PythonRefInfo(
+        "_refs.squeeze_copy",
+        torch_opinfo_name="squeeze_copy",
+        supports_out=True,
     ),
     PythonRefInfo(
         "_refs.squeeze",
