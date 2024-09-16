@@ -405,12 +405,12 @@ def _sympy_from_args(
 
         # we don't support non commutative with sort
         assert is_commutative is True
-        args = list(args)
         if args[0].is_Number:
             rest = args[1:]
             sort_fn(rest)
             return cls._from_args([args[0]] + rest, is_commutative=is_commutative)
         else:
+            args = args.copy()
             sort_fn(args)
             return cls._from_args(args, is_commutative=is_commutative)
     else:
