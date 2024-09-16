@@ -55,11 +55,7 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import justknobs_check, log_export_usage
-from torch.export.dynamic_shapes import (
-    _check_dynamic_shapes,
-    _combine_args,
-    _process_dynamic_shapes,
-)
+from torch.export.dynamic_shapes import _combine_args, _process_dynamic_shapes
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
@@ -1611,7 +1607,7 @@ def export(
                 result_traced,  # type: ignore[possibly-undefined]
                 flat_args_dynamic_dims,
             )
-        return ExportResult(graph, out_guards) # type: ignore[arg-type]
+        return ExportResult(graph, out_guards)  # type: ignore[arg-type]
 
     if extra_args or extra_kwargs:
         warnings.warn(
