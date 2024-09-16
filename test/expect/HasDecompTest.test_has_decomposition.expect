@@ -445,6 +445,7 @@ aten::_nested_from_padded
 aten::_nested_from_padded.out
 aten::_nested_from_padded_and_nested_example
 aten::_nested_from_padded_and_nested_example.out
+aten::_nested_from_padded_tensor
 aten::_nested_get_jagged_dummy
 aten::_nested_get_lengths
 aten::_nested_get_max_seqlen
@@ -1013,8 +1014,6 @@ aten::ones.names_out
 aten::ones.out
 aten::ormqr
 aten::ormqr.out
-aten::permute_copy
-aten::permute_copy.out
 aten::poisson
 aten::poisson.out
 aten::polygamma
@@ -1301,8 +1300,6 @@ aten::to_padded_tensor.out
 aten::topk
 aten::topk.values
 aten::transpose_
-aten::transpose_copy.int
-aten::transpose_copy.int_out
 aten::triangular_solve
 aten::triangular_solve.X
 aten::unbind_copy.int
