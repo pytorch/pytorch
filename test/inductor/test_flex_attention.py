@@ -1667,6 +1667,52 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out.sum().backward()
 
     @supported_platform
+    @common_utils.parametrize("mode", ["eager", "inductor"])
+    @common_utils.parametrize(
+        "permute_order",
+        [
+            (0, 1, 2, 3),  # Default order
+            (1, 0, 2, 3),  # Reverse order
+            (0, 2, 1, 3),  # Mixed order
+            (2, 0, 1, 3),  # Another mixed order
+        ],
+    )
+    @common_utils.parametrize("shape", [(2, 1, 128, 16), (4, 2, 64, 16)])
+    def test_flex_attention_stride_ordering(self, mode, permute_order, shape):
+        from torch._inductor.ir import get_stride_order
+
+        # Setup
+        make_tensor = functools.partial(
+            torch.randn,
+            shape,
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+
+        # Create and permute tensors
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        query = query.permute(permute_order)
+        key = key.permute(permute_order)
+        value = value.permute(permute_order)
+
+        if mode == "inductor":
+            func = torch.compile(flex_attention, backend=mode, fullgraph=True)
+        else:
+            func = flex_attention
+
+        out = func(query, key, value)
+
+        out_stride_order = get_stride_order(out.stride())
+        query_stride_order = get_stride_order(query.stride())
+
+        self.assertEqual(
+            out_stride_order,
+            query_stride_order,
+            f"Stride order mismatch: out {out_stride_order}, query {query_stride_order}",
+        )
+
+    @supported_platform
     @common_utils.parametrize("compile", [True, False])
     def test_fully_masked_out_rows_0_check(self, compile: bool):
         # Ensure fully masked out rows won't cause NaNs.

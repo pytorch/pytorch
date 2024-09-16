@@ -3,7 +3,7 @@
 
 import logging
 import math
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 import sympy
 
@@ -17,9 +17,11 @@ from ..ir import (
     ExternKernel,
     FixedLayout,
     FlexibleLayout,
+    get_stride_order,
     InputBuffer,
     IRNode,
     StorageBox,
+    stride_order2fill_order,
     Subgraph,
     TensorBox,
 )
@@ -29,6 +31,29 @@ from ..select_algorithm import autotune_select_algorithm, realize_inputs, Triton
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+Expr = sympy.Expr
+
+
+def construct_strides(
+    sizes: Sequence[int],
+    fill_order: Sequence[int],
+) -> Sequence[int]:
+    """From a list of sizes and a fill order, construct the strides of the permuted tensor."""
+    # Initialize strides
+    assert len(sizes) == len(
+        fill_order
+    ), "Length of sizes must match the length of the fill order"
+    strides = [0] * len(sizes)
+
+    # Start with stride 1 for the innermost dimension
+    current_stride = 1
+
+    # Iterate through the fill order populating strides
+    for dim in fill_order:
+        strides[dim] = current_stride
+        current_stride *= sizes[dim]
+
+    return strides
 
 
 def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta):
@@ -761,11 +786,18 @@ def flex_attention(
     # This works because only the last dim differs and we check it is contiguous.
     q_strides = query.get_stride()
     assert q_strides[-1] == 1, "Query must be contiguous in the last dimension"
+
+    # Construct output layout with strides matching the query.
+    out_size = [B, Hq, seq_len_q, v_head_dim]
+    stride_order = get_stride_order(query.get_stride())
+    fill_order = stride_order2fill_order(stride_order)
+    out_strides = construct_strides(out_size, fill_order)
+
     layout = FixedLayout(
         query.get_device(),
         query.get_dtype(),
         [B, Hq, seq_len_q, v_head_dim],
-        query.get_stride(),
+        stride=out_strides,
     )
     # see NOTE:[TritonTemplates with multiple outputs]
     logsumexp_shape = [B, Hq, seq_len_q]

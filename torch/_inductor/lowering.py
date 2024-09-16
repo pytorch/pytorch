@@ -343,11 +343,9 @@ def _register_lowering(
             unpacked = True
             args = args[0]
 
-        # kwargs tensors not supported yet unless it's a fallback op
         if not all(
             (fn in fallbacks or in_namespace(fn, "_c10d_functional")) for fn in aten_fn
         ):
-            assert not any(isinstance(x, TensorBox) for x in kwargs.values())
             # explicitly assert for "out=" ops for better error messages
             assert not any(
                 x == "out" for x in kwargs.keys()
@@ -2039,16 +2037,15 @@ def inductor_randint(
     )
 
 
-@register_lowering(
-    inductor_prims._searchsorted_with_positional_sorter, type_promotion_kind=None
-)
-def _searchsorted_with_positional_sorter(
+@register_lowering(aten.searchsorted.Tensor, type_promotion_kind=None)
+def searchsorted(
     sorted_sequence: TensorBox,
-    values: TensorBox,
-    sorter: Optional[TensorBox],
+    self: TensorBox,
+    *,
     out_int32: bool = False,
     right: bool = False,
     side: Optional[str] = None,
+    sorter: Optional[TensorBox] = None,
 ) -> TensorBox:
     validate_bucketize = lambda tb: V.graph.has_feature(  # noqa: E731
         tb, BackendFeature.BUCKETIZE
@@ -2058,7 +2055,7 @@ def _searchsorted_with_positional_sorter(
     # assumptions in ops.bucketize to work.
     if (
         not (validate_strides(sorted_sequence) and validate_bucketize(sorted_sequence))
-        or not validate_bucketize(values)
+        or not validate_bucketize(self)
         or (
             sorter is not None
             and not (validate_strides(sorter) and validate_bucketize(sorter))
@@ -2066,7 +2063,7 @@ def _searchsorted_with_positional_sorter(
     ):
         return fallback_handler(aten.searchsorted.Tensor, add_to_fallback_set=False)(
             sorted_sequence,
-            values,
+            self,
             out_int32=out_int32,
             right=right,
             side=side,
@@ -2080,7 +2077,7 @@ def _searchsorted_with_positional_sorter(
         right = True
 
     index_dtype = torch.int32 if out_int32 else torch.int64
-    values_loader = values.make_loader()
+    values_loader = self.make_loader()
 
     # The entire sorted_sequence tensor needs to be used by ops.bucketize, so we need to
     # realize it into global memory; or in other words, we can't guarantee that
@@ -2132,12 +2129,12 @@ def _searchsorted_with_positional_sorter(
                 sorter_name=sorter.get_name() if sorter is not None else None,
             )
 
-    device = values.get_device()
+    device = self.get_device()
     return Pointwise.create(
         device=device,
         dtype=index_dtype,
         inner_fn=inner_fn,
-        ranges=values.shape,
+        ranges=self.shape,
     )
 
 

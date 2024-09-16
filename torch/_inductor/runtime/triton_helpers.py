@@ -31,6 +31,21 @@ except ImportError:
         raise NotImplementedError
 
 
+def set_driver_to_cpu():
+    if backend := triton.backends.backends.get("cpu", None):
+        triton.runtime.driver.set_active(backend.driver())
+        return
+    raise RuntimeError("Could not find an active CPU backend")
+
+
+def set_driver_to_gpu():
+    for name, backend in triton.backends.backends.items():
+        if backend.driver.is_active() and name != "cpu":
+            triton.runtime.driver.set_active(backend.driver())
+            return
+    raise RuntimeError("Could not find an active GPU backend")
+
+
 @triton.jit
 def promote_to_tensor(x):
     # Addition promotes to tensor for us

@@ -981,51 +981,6 @@ def max_pool2d_with_indices(
     return vals, indices
 
 
-@register_decomposition(aten.searchsorted.Tensor)
-def searchsorted(
-    sorted_sequence: torch.Tensor,
-    self: torch.Tensor,
-    *,
-    out_int32: bool = False,
-    right: bool = False,
-    side: Optional[str] = None,
-    sorter: Optional[torch.Tensor] = None,
-) -> torch.Tensor:
-    # If the sorted_sequence is not one-dimensional, its shape must match that of values
-    # in all but the last dimension.
-    torch._check(
-        len(sorted_sequence.shape) <= 1
-        or sorted_sequence.shape[:-1] == self.shape[:-1],
-        lambda: (
-            "torch.searchsorted(): boundaries tensor should be 1 dimension or the "
-            "first N-1 dimensions of boundaries tensor and input value tensor must "
-            f"match, but we got boundaries tensor {list(sorted_sequence.shape)} and "
-            f"input value tensor {list(self.shape)}"
-        ),
-    )
-
-    # If a sorter array is provided, its dimensions must exactly match sorted_sequence.
-    torch._check(
-        sorter is None or sorted_sequence.shape == sorter.shape,
-        lambda: (
-            "torch.searchsorted(): boundary and sorter must have the same size, but "
-            f"got boundary tensor {list(sorted_sequence.shape)} and got sorter tensor "
-            f"{list(sorter.shape) if sorter is not None else []}"
-        ),
-    )
-
-    # Per the docs, if side == "left" and right is True, we error.
-    torch._check(
-        side != "left" or not right,
-        "torch.searchsorted(): side and right can't be set to opposites, got side of "
-        "left while right was True",
-    )
-
-    return prims._searchsorted_with_positional_sorter(
-        sorted_sequence, self, sorter, out_int32=out_int32, right=right, side=side
-    )
-
-
 @register_decomposition(aten.searchsorted.Scalar)
 def searchsorted_scalar(
     sorted_sequence: torch.Tensor,
@@ -1036,7 +991,7 @@ def searchsorted_scalar(
     side: Optional[str] = None,
     sorter: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    return searchsorted(
+    return aten.searchsorted(
         sorted_sequence,
         torch.tensor([self], device=sorted_sequence.device),
         out_int32=out_int32,
