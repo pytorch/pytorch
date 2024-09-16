@@ -6,8 +6,10 @@ from typing import Optional, Union
 
 import torch
 import torch.nn as nn
+from torch.distributed import get_backend
 from torch.distributed._composable import replicate
 from torch.distributed._composable.fsdp import fully_shard
+from torch.distributed._composable.fsdp._fsdp_api import CPUOffloadPolicy, OffloadPolicy
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -93,23 +95,40 @@ class TestClipGradNormWorldSize2(_TestClipGradNormBase):
     def world_size(self) -> int:
         return min(torch.cuda.device_count(), 2)
 
-    @skip_if_lt_x_gpu(2)
-    def test_clip_grad_norm_1d(self):
+    def _test_clip_grad_norm_1d(self, offload_policy: OffloadPolicy):
         for norm_type in (2, 1, float("inf")):
             torch.manual_seed(42)
             model_args = ModelArgs(dropout_p=0.0)
             model = Transformer(model_args)
             ref_model = replicate(copy.deepcopy(model).cuda())
             ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+
             for module in model.modules():
                 if isinstance(module, TransformerBlock):
-                    fully_shard(module)
-            fully_shard(model)
+                    fully_shard(module, offload_policy=offload_policy)
+            fully_shard(model, offload_policy=offload_policy)
             optim = torch.optim.Adam(model.parameters(), lr=1e-2)
             inp = torch.randint(0, model.model_args.vocab_size, (3, 16), device="cuda")
-            self._test_clip_grad_norm(
-                1, norm_type, ref_model, ref_optim, model, optim, inp
-            )
+
+            if offload_policy == CPUOffloadPolicy() and get_backend() == "nccl":
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "FSDP CPU offloading requires backend supporting cpu tensors.",
+                ):
+                    self._test_clip_grad_norm(
+                        1, norm_type, ref_model, ref_optim, model, optim, inp
+                    )
+            else:
+                self._test_clip_grad_norm(
+                    1, norm_type, ref_model, ref_optim, model, optim, inp
+                )
+
+    @skip_if_lt_x_gpu(2)
+    def test_clip_grad_norm_1d(self):
+        self.run_subtests(
+            {"offload_policy": [OffloadPolicy(), CPUOffloadPolicy()]},
+            self._test_clip_grad_norm_1d,
+        )
 
 
 class TestClipGradNormWorldSize4(_TestClipGradNormBase):

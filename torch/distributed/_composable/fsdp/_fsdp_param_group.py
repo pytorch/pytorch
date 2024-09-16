@@ -210,7 +210,7 @@ class FSDPParamGroup:
                 fsdp_param.reset_sharded_param()
             self._reset_sharded_params = True
         self._validate_no_meta_params()
-        self._validate_cpu_offload_params()
+        self._validate_cpu_offload_params_and_backend()
         # Initialize mixed precision attributes lazily in case the user changes
         # the parameter dtypes after construction time but before forward
         self._init_mp_dtypes()
@@ -585,7 +585,7 @@ class FSDPParamGroup:
                 "call module.reset_parameters() on each module to initialize values."
             )
 
-    def _validate_cpu_offload_params(self):
+    def _validate_cpu_offload_params_and_backend(self):
         if not isinstance(self.offload_policy, CPUOffloadPolicy):
             return
         fsdp_params_not_on_cpu = [
@@ -599,6 +599,12 @@ class FSDPParamGroup:
                 'For example, load a CPU state dict or call module.to_empty(device="cpu"). '
                 "Found following parameters on non-CPU device: "
                 f"{[(fsdp_param._param_fqn, fsdp_param.sharded_param.device) for fsdp_param in fsdp_params_not_on_cpu]}\n"
+            )
+        backend = dist.get_backend()
+        if "cpu" not in dist.Backend.backend_capability[backend]:
+            raise RuntimeError(
+                "FSDP CPU offloading requires backend supporting cpu tensors. "
+                f"Found following backend: {backend}"
             )
 
 
