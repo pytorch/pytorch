@@ -232,14 +232,18 @@ def get_wrapper_codegen_for_device(device: str, cpp_wrapper: bool = False):
 def init_backend_registration():
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
-    from .cpp_wrapper_gpu import CppWrapperGpu
+    from .cpp_wrapper_cuda import CppWrapperGpu
     from .cuda_combined_scheduling import CUDACombinedScheduling
     from .halide import HalideScheduling
     from .triton import TritonScheduling
     from .wrapper import WrapperCodeGen
 
     if get_scheduling_for_device("cpu") is None:
-        cpu_backends = {"cpp": CppScheduling, "halide": HalideScheduling}
+        cpu_backends = {
+            "cpp": CppScheduling,
+            "halide": HalideScheduling,
+            "triton": TritonScheduling,
+        }
         register_backend_for_device(
             "cpu",
             lambda *args, **kwargs: cpu_backends[config.cpu_backend](*args, **kwargs),
@@ -301,6 +305,7 @@ def get_device_op_overrides(device: str):
     assert isinstance(device, str)
 
     if not device_op_overrides_dict.keys():
+        from . import cpu_device_op_overrides  # noqa: F401
         from .cuda import device_op_overrides  # noqa: F401
         from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
@@ -1420,7 +1425,6 @@ class KernelArgs:
             arg_defs.append("ws_ptr")
             call_args.append("workspace")
             precompile_args.append(self.workspace_arg)
-            arg_types.append(torch.uint8)
         return arg_defs, call_args, precompile_args, arg_types
 
     def aliases(self):
@@ -1770,12 +1774,9 @@ class Kernel(CodeGen):
         self,
         values: CSEVariable,
         offsets_name: str,
-        num_bucket_boundaries: sympy.Expr,
         offsets_size: sympy.Expr,
         indexing_dtype: torch.dtype,
         right: bool,
-        offsets_indices: CSEVariable,
-        sorter_name: Optional[str] = None,
     ) -> CSEVariable:
         """
         See [Note: Inductor bucketize op]
@@ -2028,56 +2029,26 @@ class Kernel(CodeGen):
             def bucketize(
                 values: CSEVariable,
                 offsets_name: str,
-                num_bucket_boundaries: sympy.Expr,
                 offsets_size: sympy.Expr,
                 indexing_dtype: torch.dtype,
                 right: bool,
-                offsets_indices: CSEVariable,
-                sorter_name: Optional[str] = None,
             ) -> CSEVariable:
                 """
                 [Note: Inductor bucketize op]
 
-                Given values (tensor) and offsets_name (reference to the name of a
-                tensor), calculate the bucket that each value belongs to.  This works
-                differently in the 1-D and N-D cases.
+                Given values (tensor) and offsets_name (reference to the name of a 1D
+                tensor), calculate the bucket that each value belongs to.
 
-                for values [[-1, 0, 1, 2], [3, 4, 5, 9]], offsets [0, 4, 4, 8], right=True
-                return =   [[ 0, 1, 1, 1], [1, 3, 3, 4]].
-
-                for values [[-1, 0, 1, 2], [3, 4, 5, 9]], offsets [[0, 4], [4, 8]], right=True
-                return =   [[ 0, 1, 1, 1], [0, 1, 1, 2]]
-
-                Note that the dimensionality of values and offsets must match in every
-                dimension _except_ the last in the N-D case, while the 1-D case does not
-                have this restriction.
+                e.g. for values [-1, 0, 1, 2, 3, 4, 5, 9], offsets [0, 4, 4, 8], right=True
+                return =        [ 0, 1, 1, 1, 1, 3, 3, 4].
 
                 When right == False, bucket i refers to range (offsets[i], offsets[i+1]].
                 When right == True,  bucket i refers to range [offsets[i], offsets[i+1]).
 
-                Offsets must be non-decreasing, or a sorter must be provided which
-                would re-index offsets in a non-decreasing order (e.g. the second output
-                of torch.sort(offsets)).  Otherwise, the result is undefined.
-
-                Since the underlying op implementation treats offsets as a flattened
-                tensor, num_bucket_boundaries describes the length of a single,
-                independent set of offsets (4 and 2 in the examples above,
-                respectively).  offsets_size represents torch.numel(offsets).  For a 1-D
-                sequence of offsets, these values are identical.
-
-                offsets_indices is a tensor of the same size as values, containing the
-                index within offsets of the *start* of the set of offsets used for each
-                corresponding value.
+                Offsets must be non-decreasing or the result is undefined.
                 """
                 return self.bucketize(
-                    values,
-                    offsets_name,
-                    num_bucket_boundaries,
-                    offsets_size,
-                    indexing_dtype,
-                    right,
-                    offsets_indices,
-                    sorter_name,
+                    values, offsets_name, offsets_size, indexing_dtype, right
                 )
 
         # Use mypy to check protocol implemented correctly
