@@ -449,9 +449,9 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
             else:
                 pos.append(term)
         # these are already sorted
-        rhs = _sympy_from_args(sympy.Add, pos, sort=False)
+        rhs = _sympy_from_args(sympy.Add, pos, sort=False, is_commutative=True)
         # the terms were changed, so needs a sorting
-        lhs = _sympy_from_args(sympy.Add, neg, sort=True)
+        lhs = _sympy_from_args(sympy.Add, neg, sort=True, is_commutative=True)
     elif is_neg(rhs):
         # lhs == 0
         lhs, rhs = -rhs, 0
@@ -495,7 +495,7 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
         if factor == 1:
             return expr
         atoms = [div_by_factor(x, factor) for x in atoms]
-        return _sympy_from_args(sympy.Add, atoms, sort=True)
+        return _sympy_from_args(sympy.Add, atoms, sort=True, is_commutative=expr.is_commutative)
     elif expr.is_Integer:
         return sympy.One
     elif expr.is_Mul:
