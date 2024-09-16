@@ -554,8 +554,9 @@ class MultiProcessTestCase(TestCase):
         if methodName != "runTest":
             method_name = methodName
         super().__init__(method_name)
-        fn = getattr(self, method_name)
-        setattr(self, method_name, self.join_or_run(fn))
+        if methodName != "runTest":
+            fn = getattr(self, method_name)
+            setattr(self, method_name, self.join_or_run(fn))
 
     def setUp(self) -> None:
         super().setUp()
@@ -1007,8 +1008,9 @@ class MultiThreadedTestCase(TestCase):
         if methodName != "runTest":
             method_name = methodName
         super().__init__(method_name)
-        fn = getattr(self, method_name)
-        setattr(self, method_name, self.join_or_run(fn))
+        if methodName != "runTest":
+            fn = getattr(self, method_name)
+            setattr(self, method_name, self.join_or_run(fn))
 
     def perThreadSetUp(self):
         # super().setUp()  # TestCase.setUp() calls torch.manual_seed()
