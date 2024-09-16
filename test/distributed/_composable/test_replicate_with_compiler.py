@@ -31,7 +31,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     skip_if_rocm,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._triton import has_triton
 from torch.utils.checkpoint import checkpoint
@@ -386,7 +386,7 @@ class DDP_TP_Test(InductorTestCase):
         dist.destroy_process_group()
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_rocm
+    @skipIfRocm
     def test_ddp_tp(self):
         ref_model = Net()
         compiled_replicate_model = deepcopy(ref_model)
