@@ -527,6 +527,10 @@ Available options:
   allocation time of pinned memory. A good value for this option is 8 based on
   benchmarking results.
 
+  `pinned_use_background_threads` option is a boolean flag to enable background thread
+  for processing events. This avoids any slow path associated with querying/processing of
+  events in the fast allocation path. This feature is disabled by default.
+
 .. note::
 
     Some stats reported by the
