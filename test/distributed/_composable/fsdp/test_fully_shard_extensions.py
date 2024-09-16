@@ -204,11 +204,21 @@ class TestFullyShardAllGatherExtensionsMultiThread(
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_all_gather_extensions_monkey_patch(self):
+        from torch.autograd.grad_mode import _unsafe_preserve_version_counter
+
+        tls = threading.local()
+        tls.ran_pre_all_gather = False
+
         # Define a pre/post-all-gather pair that quantizes to bf16 for the
         # all-gather and de-quantizes back to the parameter dtype
-        def fsdp_pre_all_gather(self) -> Tuple[Tuple[torch.Tensor, ...], Any]:
+        def fsdp_pre_all_gather(
+            self, mesh: DeviceMesh, module: nn.Module, mp_policy: MixedPrecisionPolicy
+        ) -> Tuple[Tuple[torch.Tensor, ...], Any]:
+            nonlocal tls
+            tls.ran_pre_all_gather = True
             return (self.to(torch.bfloat16),), None
 
+        @torch.no_grad()
         def fsdp_post_all_gather(
             self,
             all_gather_outputs: Tuple[torch.Tensor, ...],
@@ -221,7 +231,8 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             assert metadata is None, f"{metadata}"
             assert tensor.dtype == torch.bfloat16, f"{tensor.dtype}"
             if out is not None:
-                out.copy_(tensor)
+                with _unsafe_preserve_version_counter(out):
+                    out.copy_(tensor)
                 return
             return tensor.to(param_dtype), (tensor,)
 
@@ -238,11 +249,16 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         self.assertGreater(sum("weight" in n for n, _ in model.named_parameters()), 0)
         for param_name, param in model.named_parameters():
             if "weight" in param_name:
-                local_param = param.to_local()
-                # Monkey patch on the `torch.Tensor` to show that the extension
-                # can work even without a subclass
-                local_param.fsdp_pre_all_gather = fsdp_pre_all_gather
-                local_param.fsdp_post_all_gather = fsdp_post_all_gather
+                # Need to use `_local_tensor` to patch the tensor object
+                local_param = param._local_tensor
+                # Monkey patch on the `torch.Tensor` as instance methods to
+                # show that the extension can work even without a subclass
+                local_param.fsdp_pre_all_gather = fsdp_pre_all_gather.__get__(
+                    local_param
+                )
+                local_param.fsdp_post_all_gather = fsdp_post_all_gather.__get__(
+                    local_param
+                )
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
 
         # Run a few iterations to check for errors
@@ -252,6 +268,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             model(inp).sum().backward()
             optim.step()
             optim.zero_grad()
+        assert tls.ran_pre_all_gather
 
 
 if __name__ == "__main__":
