@@ -84,7 +84,6 @@ class BlockingAsyncStager(AsyncStager):
         self,
         cache_staged_state_dict: bool = False,
         type_check: bool = False,
-        **kwargs,
     ):
         """
         Initializes the BlockingAsyncStager.
@@ -95,7 +94,6 @@ class BlockingAsyncStager(AsyncStager):
                 that the stager is maintained and re-used for multiple dcp.async_save calls. Default to False.
             type_check: Whether to perform a type check during cpu_offload. Defaults to False.
 
-            **kwargs: added to support this class being used as a mixin.
         """
         self.cache_staged_state_dict = cache_staged_state_dict
         self.type_check = type_check
