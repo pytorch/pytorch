@@ -555,44 +555,58 @@ const SparseTensor expand_sparce_cpu(const SparseTensor& t, const std::vector<in
   c10::IntArrayRef t_sizes = t.sizes();
   Tensor t_values = t._values().to(commonDtype);
   Tensor t_indices = t._indices();
+  const int64_t dense_dim = t.dense_dim();
+  const int64_t expanded_sparse_dim = expanded_sizes.size() - dense_dim;
+  const c10::IntArrayRef expanded_sparse_sizes(expanded_sizes.data(), expanded_sparse_dim) ;
+  const c10::IntArrayRef expanded_dense_sizes(expanded_sizes.data() + expanded_sparse_dim, dense_dim);
 
   // expand t to match expanded_sizes if needed
   if(t_sizes != expanded_sizes){
-    // dimensions matching: create new indices tensor matching expanded_sizes dimension
-    int64_t max_dim = expanded_sizes.size();
-    int64_t diff_dim = max_dim - t.sparse_dim();
+    Tensor new_values;
+    // dense sizes matching: create new values and expand values if needed
     int64_t t_nnz = t._nnz();
-    Tensor new_indices = at::empty({max_dim, t_nnz}, t_indices.options());
-    Tensor new_values = at::empty({t_nnz}, t_values.options());
-    new_values.copy_(t_values);
-    for (int64_t dim = 0 ; dim < diff_dim ; dim++){
+    std::vector<int64_t> new_values_sizes;
+    new_values_sizes.push_back(t_nnz);
+    new_values_sizes.insert(new_values_sizes.end(), expanded_dense_sizes.begin(), expanded_dense_sizes.end());
+    new_values = at::empty(new_values_sizes, t_values.options());
+    if(t_values.sizes() != new_values_sizes){
+      for (int64_t value_idx = 0 ; value_idx < t_nnz ; value_idx++){
+        new_values[value_idx] = t_values[value_idx].expand(expanded_dense_sizes);
+      }
+    }else{
+      new_values.copy_(t_values);
+    }
+    // dimensions matching: create new indices tensor matching expanded_sizes dimension
+    int64_t diff_sparse_dim = expanded_sparse_dim - t.sparse_dim();
+    Tensor new_indices = at::empty({expanded_sparse_dim, t_nnz}, t_indices.options());
+    for (int64_t dim = 0 ; dim < diff_sparse_dim ; dim++){
       for (int64_t idx = 0 ; idx < new_indices[dim].size(0) ; idx++){
         new_indices[dim][idx] = 0;
       }
     }
-    for (int64_t dim = diff_dim ; dim < max_dim ; dim++){
+    for (int64_t dim = diff_sparse_dim ; dim < expanded_sparse_dim ; dim++){
       for (int64_t idx = 0 ; idx < new_indices[dim].size(0) ; idx++){
-        new_indices[dim][idx] = t_indices[dim - diff_dim][idx];
+        new_indices[dim][idx] = t_indices[dim - diff_sparse_dim][idx];
       }
     }
-    std::vector<int64_t> new_sizes(max_dim);
-    for (int64_t dim = 0 ; dim < diff_dim ; dim++){
+    std::vector<int64_t> new_sizes(expanded_sparse_dim);
+    for (int64_t dim = 0 ; dim < diff_sparse_dim ; dim++){
       new_sizes[dim] = 1;
     }
-    for (int64_t dim = diff_dim ; dim < max_dim ; dim++){
-      new_sizes[dim] = t_sizes[dim - diff_dim];
+    for (int64_t dim = diff_sparse_dim ; dim < expanded_sparse_dim ; dim++){
+      new_sizes[dim] = t_sizes[dim - diff_sparse_dim];
     }
 
-    // sizes matching: expanding singleton dimensions to larger sizes
-    for (int64_t dim = 0 ; dim < max_dim ; dim++){
-      if(new_sizes[dim] == 1 && new_sizes[dim] < expanded_sizes[dim]){
-        Tensor* seq_indices = new Tensor[expanded_sizes[dim]];
-        Tensor* seq_values = new Tensor[expanded_sizes[dim]];
+    // sparse sizes matching: expanding singleton dimensions to larger sizes
+    for (int64_t dim = 0 ; dim < expanded_sparse_dim ; dim++){
+      if(new_sizes[dim] == 1 && new_sizes[dim] < expanded_sparse_sizes[dim]){
+        Tensor* seq_indices = new Tensor[expanded_sparse_sizes[dim]];
+        Tensor* seq_values = new Tensor[expanded_sparse_sizes[dim]];
 
         seq_indices[0] = new_indices.clone();
         seq_values[0] = new_values;
 
-        for(int64_t i = 1 ; i < expanded_sizes[dim] ; i++){
+        for(int64_t i = 1 ; i < expanded_sparse_sizes[dim] ; i++){
           for(int64_t k = 0 ; k < (new_indices[dim]).size(0) ; k++){
             new_indices[dim][k] = i;
           }
@@ -601,8 +615,8 @@ const SparseTensor expand_sparce_cpu(const SparseTensor& t, const std::vector<in
           seq_values[i] = new_values;
 
         }
-        TensorList arrayref_indices = c10::ArrayRef<Tensor>(seq_indices, expanded_sizes[dim]);
-        TensorList arrayref_values = c10::ArrayRef<Tensor>(seq_values, expanded_sizes[dim]);
+        TensorList arrayref_indices = c10::ArrayRef<Tensor>(seq_indices, expanded_sparse_sizes[dim]);
+        TensorList arrayref_values = c10::ArrayRef<Tensor>(seq_values, expanded_sparse_sizes[dim]);
 
         new_indices = at::cat(arrayref_indices, 1);
         new_values = at::cat(arrayref_values, 0).to(t.scalar_type());
@@ -612,8 +626,7 @@ const SparseTensor expand_sparce_cpu(const SparseTensor& t, const std::vector<in
       }
     }
     bool is_coalesced = false;
-    SparseTensor new_t = at::_sparse_coo_tensor_with_dims_and_tensors(max_dim, t.dense_dim(), expanded_sizes, new_indices, new_values, t.options(), is_coalesced);
-    new_t = new_t.coalesce();
+    SparseTensor new_t = at::_sparse_coo_tensor_with_dims_and_tensors(expanded_sparse_dim, dense_dim, expanded_sizes, new_indices, new_values, t.options(), is_coalesced);
     const SparseTensor const_t = new_t;
     return const_t;
   }
@@ -639,16 +652,27 @@ SparseTensor& add_out_sparse_cpu(const SparseTensor& t, const SparseTensor& src,
   // get the result size using broadcasting rules
   const std::vector<int64_t>& res_shape = infer_size(t.sizes(), src.sizes());
 
+  // deal with empty sparse tensors
+  if (src._nnz() == 0 && t._nnz() == 0) {
+    return copy_sparse_to_sparse_(r, t);
+  }
+  if (src._nnz() == 0) {
+    const SparseTensor& broadcasted_t = expand_sparce_cpu(t, res_shape, commonDtype);
+    return copy_sparse_to_sparse_(r, broadcasted_t);
+  }
+  if (t._nnz() == 0) {
+    const SparseTensor& broadcasted_src = expand_sparce_cpu(src, res_shape, commonDtype);
+    return mul_out_sparse_scalar(r, broadcasted_src, value);
+  }
+
+  //TODO: should we make the two tensors have the same dense dimension instead? If yes, which dense dimension to choose?
+  bool is_same_dense_dim = (t.dense_dim() == src.dense_dim());
+  TORCH_CHECK(is_same_dense_dim, "add: expected 'self' and 'other' to have same dense dimensions, but 'self' has ", t.dense_dim(), " dense dimensions while 'other' has ", src.dense_dim(), " dense dimensions");
+
   // expand the two tensors if necessary using broadcasting rules
   const SparseTensor& broadcasted_t = expand_sparce_cpu(t, res_shape, commonDtype);
   const SparseTensor& broadcasted_src = expand_sparce_cpu(src, res_shape, commonDtype);
 
-  if (src._nnz() == 0) {
-    return copy_sparse_to_sparse_(r, broadcasted_t);
-  }
-  if (t._nnz() == 0) {
-    return mul_out_sparse_scalar(r, broadcasted_src, value);
-  }
   r.resize_as_(broadcasted_src);
   if (r.is_meta()) {
     return r;
