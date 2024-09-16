@@ -1900,8 +1900,6 @@ class FakeTensorMode(TorchDispatchMode):
             import sympy
             log.debug("maybe_propagate_real_tensors %s", func)
 
-            log.debug("maybe_propagate_real_tensors %s", func)
-
             def go(t: object, real_t: Tensor) -> None:
                 if isinstance(t, FakeTensor):
                     # NB: unconditionally overwrite

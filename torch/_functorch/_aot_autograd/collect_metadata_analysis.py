@@ -172,6 +172,8 @@ def run_functionalized_fw_and_collect_metadata(
             # unbacked symbols, they will just disappear into the ether.
             # Also, prevent memoization from applying.
             if fake_mode:
+                if (shape_env := fake_mode.shape_env):
+                    shape_env.pending_fresh_unbacked_symbols.clear()
                 fake_mode.epoch += 1
                 fake_mode.reset_nt_tensor_id_counter()
 
