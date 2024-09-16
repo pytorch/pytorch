@@ -2578,6 +2578,7 @@ class TestPagedAttention(InductorTestCase):
     def test_convert_logical_block_mask(self):
         n_pages, page_size, max_batch_size, max_seq_len = 16, 128, 2, 512
         paged_cache = PagedAttention(n_pages, page_size, max_batch_size, max_seq_len)
+        MAX_CACHED_SEQ_LEN = n_pages * page_size
 
         paged_cache.allocate_until_length(torch.tensor([100, 200], device="cuda"))
         paged_cache.allocate_until_length(torch.tensor([150, 300], device="cuda"))
@@ -2601,7 +2602,9 @@ class TestPagedAttention(InductorTestCase):
         block_mask = create_block_mask(
             causal_mask, max_batch_size, 1, max_seq_len, max_seq_len
         )
-        new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
+        new_block_mask = paged_cache.convert_logical_block_mask(
+            block_mask, MAX_CACHED_SEQ_LEN
+        )
 
         # Check that the new block mask is correct
         expected_kv_num_blocks = torch.tensor(
@@ -2812,10 +2815,11 @@ class TestPagedAttention(InductorTestCase):
         golden_out = sdpa_partial(q_gold, k_gold, v_gold)
         ref_out = sdpa_partial(q_ref, k_ref, v_ref)
 
+        MAX_CACHED_SEQ_LEN = n_pages * page_size
         k_cache = torch.zeros(
             1,
             n_heads,
-            n_pages * page_size,
+            MAX_CACHED_SEQ_LEN,
             head_dim,
             device="cuda",
             dtype=torch.float16,
@@ -2823,7 +2827,7 @@ class TestPagedAttention(InductorTestCase):
         v_cache = torch.zeros(
             1,
             n_heads,
-            n_pages * page_size,
+            MAX_CACHED_SEQ_LEN,
             head_dim,
             device="cuda",
             dtype=torch.float16,
@@ -2853,7 +2857,9 @@ class TestPagedAttention(InductorTestCase):
         paged_cache.update(input_pos, k, k_cache)
         paged_cache.update(input_pos, v, v_cache)
 
-        new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
+        new_block_mask = paged_cache.convert_logical_block_mask(
+            block_mask, MAX_CACHED_SEQ_LEN
+        )
         paged_out = compiled_sdpa(q, k_cache, v_cache, block_mask=new_block_mask)
 
         with torch.no_grad():

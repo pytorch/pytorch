@@ -28,6 +28,7 @@ from torch.utils._pytree import tree_map_only
 
 __all__ = [
     "BlockMask",
+    "PagedAttention",
     "flex_attention",
     "create_block_mask",
     "create_mask",
@@ -146,15 +147,12 @@ _LARGE_SPARSE_BLOCK_SIZE = 1 << 30
 
 def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor):
     num_rows = col_indices.shape[-2]
-    num_cols = col_indices.shape[-1]  # TODO: update here
+    num_cols = col_indices.shape[-1]
     batch_dims = num_blocks_in_row.shape[:-1]
     device = num_blocks_in_row.device
 
     def create_dense_one(kv_num_blocks, kv_indices):
-        extended_num_cols = 16  # TODO: a good way to specify the value here
-        dense_mask = kv_indices.new_zeros(
-            num_rows, extended_num_cols + 1, dtype=torch.int32
-        )
+        dense_mask = kv_indices.new_zeros(num_rows, num_cols + 1, dtype=torch.int32)
 
         row_indices = torch.arange(num_rows, dtype=torch.int, device=device).unsqueeze(
             -1
@@ -167,7 +165,7 @@ def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor):
 
         # set the values in 'a' to 1 where the indices are valid
         dense_mask[row_indices, valid_indices] = 1
-        return dense_mask[:, :extended_num_cols].contiguous()
+        return dense_mask[:, :num_cols].contiguous()
 
     create_dense_batched = create_dense_one
     for _ in range(len(batch_dims)):
@@ -878,7 +876,11 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
     )
 
 
-class PagedCache:
+class PagedAttention:
+    r"""
+    TODO: Add docs
+    """
+
     def __init__(
         self,
         n_pages: int,
@@ -934,13 +936,21 @@ class PagedCache:
         vt = val.transpose(0, 1).reshape(H, B * S, D)  # [H, B*S, D]
         cache[0, :, addr] = vt
 
-    def convert_logical_block_mask(self, block_mask: BlockMask) -> BlockMask:
+    def convert_logical_block_mask(
+        self, block_mask: BlockMask, max_cached_seq_len: int
+    ) -> BlockMask:
         B, H, ROWS, MAX_BLOCKS_IN_COL = block_mask.kv_indices.shape
         assert block_mask.BLOCK_SIZE[1] == self.page_size
         assert B == self.page_table.size(0)
+        MAX_CACHED_BLOCKS_IN_COL = _cdiv(max_cached_seq_len, self.page_size)
+        device = block_mask.kv_num_blocks.device
 
         new_kv_num_blocks = block_mask.kv_num_blocks.clone()
-        new_kv_indices = (
+
+        new_kv_indices = torch.empty(
+            (B, H, ROWS, MAX_CACHED_BLOCKS_IN_COL), dtype=torch.int32, device=device
+        )
+        new_kv_indices[:, :, :, :MAX_BLOCKS_IN_COL] = (
             torch.gather(
                 self.page_table, 1, block_mask.kv_indices.view(B, -1).to(torch.int64)
             )
@@ -952,7 +962,10 @@ class PagedCache:
         if block_mask.full_kv_num_blocks is not None:
             assert block_mask.full_kv_indices is not None
             new_full_kv_num_blocks = block_mask.full_kv_num_blocks.clone()
-            new_full_kv_indices = (
+            new_full_kv_indices = torch.empty(
+                (B, H, ROWS, MAX_CACHED_BLOCKS_IN_COL), dtype=torch.int32, device=device
+            )
+            new_full_kv_indices[:, :, :, :MAX_BLOCKS_IN_COL] = (
                 torch.gather(
                     self.page_table,
                     1,
