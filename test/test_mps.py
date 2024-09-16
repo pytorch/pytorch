@@ -95,6 +95,7 @@ def mps_ops_grad_modifier(ops):
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
         'linalg.lu_factor': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
         'aminmax': [torch.float32, torch.float16],
+        'nn.functional.interpolatebicubic': None,
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -739,7 +740,7 @@ def mps_ops_modifier(ops):
         'nn.functional.adaptive_avg_pool3d': None,
         'nn.functional.adaptive_max_pool3d': None,
         'nn.functional.interpolatearea': None,
-        'nn.functional.interpolatebicubic': None,
+        'nn.functional.interpolatebicubic': [torch.uint8],
         'nn.functional.interpolatetrilinear': None,
         'nn.functional.max_unpool1dgrad': None,
         'nn.functional.max_unpool2dgrad': None,
