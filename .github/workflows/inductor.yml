@@ -118,6 +118,28 @@ jobs:
       docker-image: ${{ needs.linux-jammy-cpu-py3_12-inductor-halide-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_12-inductor-halide-build.outputs.test-matrix }}
 
+  linux-jammy-cpu-py3_12-inductor-triton-cpu-build:
+    name: linux-jammy-cpu-py3.12-gcc11-inductor-triton-cpu
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      build-environment: linux-jammy-py3.12-gcc11
+      docker-image-name: pytorch-linux-jammy-py3.12-triton-cpu
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      test-matrix: |
+        { include: [
+          { config: "inductor-triton-cpu", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+        ]}
+
+  linux-jammy-cpu-py3_12-inductor-triton-cpu-test:
+    name: linux-jammy-cpu-py3.12-gcc11-inductor-triton-cpu
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-cpu-py3_12-inductor-triton-cpu-build
+    with:
+      build-environment: linux-jammy-py3.12-gcc11
+      docker-image: ${{ needs.linux-jammy-cpu-py3_12-inductor-triton-cpu-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cpu-py3_12-inductor-triton-cpu-build.outputs.test-matrix }}
+
   linux-focal-cuda12_4-py3_10-gcc9-inductor-build:
     # Should be synced with the one in inductor-periodic.yml but this only runs inductor_timm
     name: cuda12.4-py3.10-gcc9-sm86
