@@ -389,6 +389,18 @@ class TestFlexDecoding(InductorTestCase):
             )
             block_mask = create_block_mask(mod, max_batch_size, 1, 1, S)
 
+        if block_mask is None:
+            def generate_causal_offset(offset: torch.Tensor):
+                def causal_offset_mask(b, h, q_idx, kv_idx):
+                    return (offset + q_idx) >= kv_idx
+
+                return causal_offset_mask
+
+            mod = generate_causal_offset(
+                torch.tensor(192, device="cuda", dtype=torch.int32)
+            )
+            block_mask = create_block_mask(mod, max_batch_size, 1, 1, S)
+
         # allocate cache
         MAX_CACHED_SEQ_LEN = n_pages * page_size
         k_cache = torch.zeros(
@@ -968,6 +980,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(score_mod_scale, dtype)
         self.run_test_with_paged_attention(score_mod_scale, dtype)
 
+    # TODO: Fix error
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_recompile_changed_score_mod(self, dtype):
@@ -998,6 +1011,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test(score_mod_scale, dtype)
 
+    # TODO: Think about how to support this case
     @supported_platform
     def test_multiple_score_mod_calls(self):
         query = torch.randn((1, 8, 4, 64), dtype=torch.float32, device="cuda")
@@ -1025,6 +1039,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         tolerance = Tolerances(atol=2e-1, rtol=2e-1)
         torch.testing.assert_close(out, out2, atol=tolerance.atol, rtol=tolerance.rtol)
 
+    # TODO: Think about how to support this case
     @supported_platform
     def test_multiple_score_mod_calls2(self):
         query = torch.randn((1, 8, 4, 64), dtype=torch.float32, device="cuda")
@@ -1442,6 +1457,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             rtol=tolerance.rtol,
         )
 
+    # TODO: Add a similar test
     @supported_platform
     def test_logsumexp_only_return(self):
         make_q = functools.partial(
@@ -1473,6 +1489,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             code[0]
         )
 
+    # TODO: revisit after support max_batch_size != actual_batch_size
     @supported_platform
     def test_non_sparse_mulitple_block_size(self):
         def generate_causal_offset(offset: torch.Tensor):
@@ -1516,6 +1533,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             V_D=16,
         )
 
+    # TODO: Add a similar test
     @supported_platform
     def test_do_not_trigger_dynamic_shapes_on_empty_block_mask(self):
         torch._dynamo.reset()
