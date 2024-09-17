@@ -274,6 +274,7 @@ __all__ = [
     "native_group_norm",
     "native_layer_norm",
     "permute",
+    "permute_copy",
     "ravel",
     "repeat",
     "reshape",
@@ -284,12 +285,14 @@ __all__ = [
     "stack",
     "swap_axes",  # alias for transpose
     "squeeze",
+    "squeeze_copy",
     "t",
     "t_copy",
     "T",
     "take_along_dim",
     "tensor_split",
     "transpose",
+    "transpose_copy",
     "unfold",
     "unfold_copy",
     "unsqueeze",
@@ -3549,12 +3552,6 @@ def istft(
     y = y.narrow(dim=1, start=start, length=length)
     window_envelop = window_envelop.narrow(dim=1, start=start, length=length)
 
-    window_envelop_lowest = window_envelop.abs().min().lt(1e-11)
-    torch._check(
-        not window_envelop_lowest.item(),
-        lambda: "window overlap add min less than 1e-11",
-    )
-
     y = y / window_envelop
     if original_ndim == 2:
         y = y.squeeze(0)
@@ -6340,7 +6337,10 @@ expand_copy = _make_copy_from_view(aten.expand)
 # TODO: This must return a sparse tensor if the input is sparse, but refs have
 # no sparse support. See narrow_copy_sparse in core.
 narrow_copy = _make_copy_from_view(aten.narrow)
+permute_copy = _make_copy_from_view(aten.permute)
+squeeze_copy = _make_copy_from_view(aten.squeeze)
 t_copy = _make_copy_from_view(aten.t)
+transpose_copy = _make_copy_from_view(aten.transpose)
 unsqueeze_copy = _make_copy_from_view(aten.unsqueeze)
 view_copy = _make_copy_from_view(aten.view)
 

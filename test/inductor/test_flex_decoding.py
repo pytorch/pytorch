@@ -4,7 +4,7 @@
 import functools
 from collections import namedtuple
 from contextlib import nullcontext
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 from unittest import expectedFailure, skipUnless
 from unittest.mock import patch
 
@@ -21,6 +21,7 @@ from torch.nn.attention.flex_attention import (
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
+from torch.testing._internal.common_utils import skipIfRocm, TEST_WITH_ROCM
 from torch.utils._triton import has_triton
 
 
@@ -186,6 +187,13 @@ test_Hq_Hkv = [
     (16, 16),
 ]
 
+test_Bq_Bkv = [
+    (3, 1),
+    (5, 1),
+    (8, 1),
+    (16, 1),
+]
+
 (Hq, Hkv) = (16, 8)
 
 
@@ -270,6 +278,8 @@ class TestFlexDecoding(InductorTestCase):
             score_mod is not None or block_mask is not None
         ), "Must provide score_mod or block_mask"
         assert Q_H % KV_H == 0
+        if TEST_WITH_ROCM and Q_H != KV_H:
+            self.skipTest("enable_gqa=True is unsupported on ROCM, for now")
         q = torch.randn(
             (Q_B, Q_H, Q_S, Q_D),
             dtype=dtype,
@@ -447,6 +457,37 @@ class TestFlexDecoding(InductorTestCase):
         tolerance = Tolerances(atol=2e-1, rtol=2e-1)
         torch.testing.assert_close(
             ref_out, compiled_out, atol=tolerance.atol, rtol=tolerance.rtol
+        )
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("head_dims", test_Hq_Hkv)
+    @common_utils.parametrize("batch_dims", test_Bq_Bkv)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_kv_batch_broadcast(
+        self,
+        dtype: torch.dtype,
+        head_dims: Tuple[int, int],
+        batch_dims: Tuple[int, int],
+        score_mod: Callable,
+    ):
+        Hq, Hkv = head_dims
+        assert Hq % Hkv == 0
+
+        Bq, Bkv = batch_dims
+        assert Bq > 1 and Bkv == 1
+
+        self.run_test(
+            score_mod,
+            dtype,
+            Bq,
+            Hq,
+            1,
+            D,
+            Bkv,
+            Hkv,
+            S,
+            D,
         )
 
     @supported_platform
@@ -784,6 +825,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test(bias_mod)
 
+    @skipIfRocm
     @supported_platform
     def test_fully_masked_out_rows_0_check_gqa(self):
         # Ensure fully masked out rows won't cause NaNs.

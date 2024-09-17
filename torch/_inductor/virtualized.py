@@ -76,7 +76,7 @@ if TYPE_CHECKING:
     from torch._inductor.codegen.cpp_utils import LocalBufferContext
     from torch._inductor.debug import DebugContext
     from torch._inductor.graph import GraphLowering
-    from torch._inductor.ir import InterpreterShim
+    from torch._inductor.loop_body import InterpreterShim
     from torch._subclasses import FakeTensorMode
 
 threadlocal = local()

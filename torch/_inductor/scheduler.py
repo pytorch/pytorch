@@ -13,6 +13,7 @@ import pprint
 import textwrap
 import traceback
 import typing
+from collections import defaultdict
 from typing import (
     Any,
     Callable,
@@ -46,6 +47,7 @@ from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
+from .loop_body import LoopBody
 from .runtime.runtime_utils import green_text, red_text
 from .sizevars import SimplifyIndexing
 from .utils import (
@@ -158,27 +160,27 @@ class BaseSchedulerNode:
     group: Tuple[torch.device, Tuple[Tuple[sympy.Expr, ...], ...]]
     read_writes: dependencies.ReadWrites
     unmet_dependencies: OrderedSet[Dep]
+    # .min_order and .max_order are only relevant for "grouped" nodes such as FusedSchedulerNode.
+    # e.g. if the FusedSchedulerNode includes nodes (op_1, op_2, op_3), and op_X is X-th node
+    # in `self.scheduler.nodes`, then for this FusedSchedulerNode, .min_order is 1 and .max_order is 3.
+    # For non-"grouped" nodes (i.e. regular SchedulerNode),
+    # .min_order = .max_order = X if this node is X-th node in `self.scheduler.nodes`.
+    min_order: int
+    max_order: int
 
-    def __init__(self, scheduler: Scheduler, node: ir.Operation) -> None:
+    def __init__(self, scheduler: Scheduler) -> None:
         self.scheduler: Scheduler = scheduler
+
+    def _init_from_node(self, node: ir.Operation) -> None:
         self.node: Optional[ir.Operation] = node
-        self.set_read_writes(node.get_read_writes())
         self.ancestors: OrderedSet[str] = OrderedSet()
-        # .min_order and .max_order are only relevant for "grouped" nodes such as FusedSchedulerNode.
-        # e.g. if the FusedSchedulerNode includes nodes (op_1, op_2, op_3), and op_X is X-th node
-        # in `self.scheduler.nodes`, then for this FusedSchedulerNode, .min_order is 1 and .max_order is 3.
-        # For non-"grouped" nodes (i.e. regular SchedulerNode),
-        # .min_order = .max_order = X if this node is X-th node in `self.scheduler.nodes`.
-        self.min_order: int
-        self.max_order: int
         self.last_usage: OrderedSet[
             str
         ] = OrderedSet()  # buffers that won't be used after this kernel
         self.written = False
-
         self.outputs: List[SchedulerBuffer] = [
             SchedulerBuffer(
-                scheduler=scheduler,
+                scheduler=self.scheduler,
                 node=output,
                 defining_op=self,
             )
@@ -274,9 +276,6 @@ class BaseSchedulerNode:
         for buf in self.outputs:
             buf.allocate()
 
-    def op_counts(self) -> Counter[str]:
-        return self.read_writes.op_counts
-
     def used_buffer_names(self) -> OrderedSet[str]:
         return OrderedSet(
             dep.name
@@ -331,11 +330,13 @@ class BaseSchedulerNode:
     def get_first_name(self) -> str:
         return self.get_name()
 
+    @cache_on_self
     def get_operation_names(self) -> OrderedSet[str]:
-        return OrderedSet(node.get_name() for node in self.get_nodes())
+        return OrderedSet([node.get_name() for node in self.get_nodes()])
 
+    @cache_on_self
     def get_buffer_names(self) -> OrderedSet[str]:
-        return OrderedSet(out.get_name() for out in self.outputs)
+        return OrderedSet([out.get_name() for out in self.outputs])
 
     def get_nodes(self) -> Sequence[BaseSchedulerNode]:
         return [self]
@@ -504,6 +505,7 @@ class BaseSchedulerNode:
         buffer.writelines(out_lines)
         self.written = True
 
+    @cache_on_self
     def get_read_write_buffers_sizes(self) -> int:
         """
         Counting the number of bytes accessed for a kernel is
@@ -609,6 +611,7 @@ class BaseSchedulerNode:
 
         return node_bytes
 
+    @cache_on_self
     def get_estimated_runtime(self) -> float:
         """
         Returns estimated op runtime in nanoseconds (ns)
@@ -801,6 +804,11 @@ kernel_name_to_op = {
 
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
+    def __init__(self, scheduler: Scheduler, node: ir.Operation) -> None:
+        super().__init__(scheduler)
+        self._init_from_node(node)
+        self.set_read_writes(node.get_read_writes())
+
     def debug_str_extra(self) -> str:
         return f"{self.get_name()}.node.kernel = {getattr(self.node, 'python_kernel_name', None)}"
 
@@ -813,7 +821,10 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
 
 
 class NopKernelSchedulerNode(BaseSchedulerNode):
-    pass
+    def __init__(self, scheduler: Scheduler, node: ir.Operation) -> None:
+        super().__init__(scheduler)
+        self._init_from_node(node)
+        self.set_read_writes(node.get_read_writes())
 
 
 class SchedulerNode(BaseSchedulerNode):
@@ -822,7 +833,8 @@ class SchedulerNode(BaseSchedulerNode):
         scheduler: Scheduler,
         node: Union[ir.ComputedBuffer, ir.TemplateBuffer],
     ) -> None:
-        super().__init__(scheduler, node)
+        super().__init__(scheduler)
+        self._init_from_node(node)
         self._compute_attrs()
 
     def _compute_attrs(
@@ -922,7 +934,7 @@ class SchedulerNode(BaseSchedulerNode):
                 buf_name = dep.name
                 buf = V.graph.get_buffer(buf_name)
                 lines.append(f"{buf_name}_layout = {pformat(buf.layout)}")
-        if isinstance(self._body, ir.LoopBody):
+        if isinstance(self._body, LoopBody):
             lines.append(f"class {name}_loop_body:")
             lines.append(textwrap.indent(self._body.debug_str(), "    "))
 
@@ -984,16 +996,15 @@ class SchedulerNode(BaseSchedulerNode):
             log.fatal("Error in codegen for %s", self.node)
             raise
 
+    @cache_on_self
     def pointwise_read_writes(self) -> dependencies.ReadWrites:
         """
         Get the memory dependencies in the non-reduction axis.
         """
         sizes, reduction_sizes = self._sizes
-
-        def fn(index: Sequence[sympy.Symbol]) -> str:
-            return self._body(index, [sympy.Integer(0) for _ in reduction_sizes])
-
-        return dependencies.extract_read_writes(fn, sizes)
+        return dependencies.extract_read_writes(
+            self._body, sizes, hidden_args=[[sympy.Integer(0)] * len(reduction_sizes)]
+        )
 
     def can_inplace(self, read_dep: dependencies.Dep) -> bool:
         if self.is_template():
@@ -1011,7 +1022,7 @@ class SchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def _get_atomic_add_buffers(self) -> OrderedSet[str]:
         buffers_store_as_atomic_add: OrderedSet[str] = OrderedSet()
-        if isinstance(self._body, ir.LoopBody):
+        if isinstance(self._body, LoopBody):
             for node in self._body.get_nodes():
                 if (
                     node.op == "call_method"
@@ -1124,7 +1135,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         refresh_group_node_dependencies(self)
 
     def __init__(self, scheduler: Scheduler, snodes: List[BaseSchedulerNode]) -> None:
-        # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
+        super().__init__(scheduler)
         init_group_node(self, scheduler, snodes)
         self.users: List[NodeUser] = []
         self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
@@ -1217,13 +1228,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def has_aliasing_or_mutation(self) -> bool:
         return any(x.has_aliasing_or_mutation() for x in self.snodes)
-
-    @cache_on_self
-    def op_counts(self) -> Counter[str]:
-        op_counts: Counter[str] = collections.Counter()
-        for node in self.snodes:
-            op_counts.update(node.op_counts())
-        return op_counts
 
     # None of these need to be implemented, as a FusedSchedulerNode is just an
     # abstraction for scheduling purposes
@@ -1600,7 +1604,7 @@ class GroupedSchedulerNode(BaseSchedulerNode):
         return grouped_snode
 
     def __init__(self, scheduler: Scheduler, snodes: List[BaseSchedulerNode]) -> None:
-        # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
+        super().__init__(scheduler)
         init_group_node(self, scheduler, snodes)
 
     def unpack(self) -> List[BaseSchedulerNode]:
@@ -2853,9 +2857,7 @@ class Scheduler:
             return False
 
         # Pick the largest buffer to guide the loop reordering
-        numel, lhs_dep, rhs_dep = sorted(candidates, reverse=True, key=lambda x: x[0])[
-            0
-        ]
+        numel, lhs_dep, rhs_dep = max(candidates, key=lambda x: x[0])
 
         if lhs_dep.num_vars != rhs_dep.num_vars:
             # this can happen due to we don't merge loops.
@@ -3005,24 +3007,35 @@ class Scheduler:
         be scheduled before the fusion of node1 and node2.
         """
         node1_buf_names = node1.get_buffer_names()
-        node1_op_names = node1.get_operation_names()
-        computed_deps: OrderedSet[Dep] = OrderedSet()
         why = WhyNoFuse(node1, node2)
+        remaining_deps_by_name: Dict[str, List[Dep]] = defaultdict(list)
+
+        for dep in node2.unmet_dependencies:
+            name = self.mutation_renames.get(dep.name, dep.name)
+            if isinstance(dep, WeakDep) and self.fusable_weak_dep(dep, node1, node2):
+                continue
+            remaining_deps_by_name[name].append(dep)
 
         for cd in node1.read_writes.writes:
             if not isinstance(cd, MemoryDep):
                 continue
-            for rd in node2.unmet_dependencies:
-                if self.fusable_read_and_write(rd, cd):
-                    computed_deps.add(rd)
-
-        for dep in node2.unmet_dependencies:
-            if isinstance(dep, WeakDep) and self.fusable_weak_dep(dep, node1, node2):
-                computed_deps.add(dep)
+            remaining = remaining_deps_by_name.get(
+                self.mutation_renames.get(cd.name, cd.name)
+            )
+            if remaining:
+                for rd in remaining:
+                    if self.fusable_read_and_write(rd, cd):
+                        remaining.remove(rd)
 
         remaining_deps = OrderedSet(
-            dep.name for dep in node2.unmet_dependencies - computed_deps
+            [
+                dep.name
+                for dep in itertools.chain.from_iterable(
+                    remaining_deps_by_name.values()
+                )
+            ]
         )
+
         if remaining_deps & node1_buf_names:
             # MemoryDeps didn't match and read different locations of the same buffer.
             # Examples here include:
@@ -3030,6 +3043,8 @@ class Scheduler:
             #   - MemoryDep("foo", x) != StarDep("foo")
             why("memory deps did not match")
             return False
+
+        node1_op_names = node1.get_operation_names()
         for name in remaining_deps:
             op_name = self.name_to_buf[name].defining_op.get_name()
             if node1_op_names & self.name_to_fused_node[op_name].ancestors:
@@ -3077,8 +3092,6 @@ class Scheduler:
     # if there's indirect indexing, don't match it
     def fusable_read_and_write(self, read: Dep, write: MemoryDep) -> bool:
         if isinstance(read, MemoryDep):
-            if read.mode == write.mode and write.mode is not None:
-                return True
             read_name = self.mutation_renames.get(read.name, read.name)
 
             if (
@@ -3405,17 +3418,18 @@ class Scheduler:
                 seen.add(key)
 
         for node in self.nodes:
-            try:
-                log.debug(
-                    "Generating code for node %s with estimated runtime %f",
-                    node.get_name(),
-                    node.get_estimated_runtime(),
-                )
-            except Exception as e:
-                log.debug(
-                    "Generating code for node %s with estimated runtime 0.0",
-                    node.get_name(),
-                )
+            if log.isEnabledFor(logging.DEBUG):
+                try:
+                    log.debug(
+                        "Generating code for node %s with estimated runtime %f",
+                        node.get_name(),
+                        node.get_estimated_runtime(),
+                    )
+                except Exception as e:
+                    log.debug(
+                        "Generating code for node %s with estimated runtime 0.0",
+                        node.get_name(),
+                    )
 
             self.enter_context(node)
 
