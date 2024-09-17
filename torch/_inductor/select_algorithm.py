@@ -15,7 +15,7 @@ import textwrap
 import time
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from unittest.mock import patch
 
 import sympy
@@ -28,7 +28,12 @@ from torch._dynamo.utils import counters, identity, preserve_rng_state
 from torch.utils._ordered_set import OrderedSet
 
 from . import config, ir
-from .autotune_process import TensorMeta, TritonBenchmarkRequest
+from .autotune_process import (
+    TensorMeta,
+    TritonBenchmarkRequest,
+    TritonCPUBenchmarkRequest,
+    TritonGPUBenchmarkRequest,
+)
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import IndentedBuffer, KernelTemplate
 from .codegen.triton import (
@@ -252,13 +257,15 @@ class TritonTemplateKernel(TritonKernel):
 
         argdefs, _, signature, _ = self.args.python_argdefs()
         triton_meta = {
-            "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
+            "signature": signature_to_meta(
+                signature, size_dtype=self.index_dtype, argdefs=argdefs
+            ),
             "device": DeviceProperties.create(self.output_node.get_device()),
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
         for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
-            triton_meta["constants"][arg_num] = 1  # type: ignore[index]
+            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index]
         matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", 0)
         if matrix_instr_nonkdim != 0:
             triton_meta["matrix_instr_nonkdim"] = matrix_instr_nonkdim
@@ -505,7 +512,7 @@ class TritonTemplateKernel(TritonKernel):
             self.range_trees[0].lookup(
                 sympy.Integer(1), sympy_product(lengths)
             ).set_name("xindex")
-            self.template_mask = mask
+            self.template_mask = mask if mask is not None else "None"
             self.template_out = "xindex"
             self.template_indices = indices
             self.named_input_nodes[input_name].data.freeze_layout()
@@ -728,6 +735,7 @@ class TritonTemplateKernel(TritonKernel):
                 grid_fn=f"{self.grid_fn.__module__}.{self.grid_fn.__name__}",
                 arg_types=arg_types,
                 triton_meta=self.triton_meta,
+                gpu="cpu" not in V.graph.device_types,
             )
 
 
@@ -897,7 +905,12 @@ class TritonTemplate(KernelTemplate):
             ),
             kwargs,
         )
-        bmreq = TritonBenchmarkRequest(
+        bmreq_cls: Type[TritonBenchmarkRequest]
+        if layout.device.type == "cpu":
+            bmreq_cls = TritonCPUBenchmarkRequest
+        else:
+            bmreq_cls = TritonGPUBenchmarkRequest
+        bmreq = bmreq_cls(
             module_path=mod.__file__,
             module_cache_key=mod.key,
             kernel_name=kernel_name,
@@ -1417,6 +1430,11 @@ class AlgorithmSelectorCache(PersistentCache):
             )
 
             if timings:
+                return no_op
+
+            if config.search_autotune_cache and not (
+                config.max_autotune or config.max_autotune_gemm
+            ):
                 return no_op
 
             precompile_key = create_precompile_key(name, inputs_key, choices)

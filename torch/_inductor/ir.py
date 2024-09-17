@@ -72,7 +72,7 @@ from .dependencies import (
     var_builder,
 )
 from .loop_body import LoopBody
-from .ops_handler import OpCounterCSE
+from .ops_handler import OpCounterCSE, OpCountResult
 from .runtime.benchmarking import benchmarker
 from .runtime.hints import ReductionHint
 from .utils import (
@@ -412,6 +412,7 @@ class IRNode:
     dtype: torch.dtype
     get_name: Callable[[], str]
     get_reads: Callable[[], Any]
+    num_reads: Callable[[], int]
     get_stride: Callable[[], Any]
     get_storage_numel: Callable[[], Any]
     has_exceeded_max_reads: Callable[[], bool]
@@ -555,25 +556,25 @@ class Loops(IRNode):
         ]
 
     @cache_on_self
-    def inner_fn_opcount(self):
+    def inner_fn_opcount(self) -> OpCountResult:
         opcounter = OpCounterCSE(V.MockHandler())
-
         with V.set_ops_handler(opcounter), patch.object(
             FlexibleLayout, "allow_indexing", True
         ):
             self.inner_fn(*self.inner_fn_args())
-            return opcounter.op_count
+            return opcounter.getvalue()
 
     def inner_fn_args(self):
         return (self._index(self.ranges),)
 
+    @cache_on_self
     def inner_fn_str(self):
         return V.KernelFormatterHandler.ir_to_string(
             self.inner_fn, *self.inner_fn_args()
         )
 
     def has_large_inner_fn(self):
-        return self.inner_fn_opcount() > config.realize_opcount_threshold
+        return self.inner_fn_opcount().num_ops > config.realize_opcount_threshold
 
     def inner_fn_free_unbacked_symbols(self):
         index = self._index(self.ranges)
@@ -594,7 +595,10 @@ class Loops(IRNode):
                 ).reads
 
     def get_read_names(self) -> OrderedSet[str]:
-        return OrderedSet(dep.name for dep in self.get_reads())
+        return OrderedSet(self.inner_fn_opcount().read_buffers)
+
+    def num_reads(self):
+        return len(self.inner_fn_opcount().read_buffers)
 
     def get_reduction_size(self):
         raise NotImplementedError(
@@ -2682,6 +2686,9 @@ class ReinterpretView(BaseView):
             dtype=self.layout.dtype,
         )
 
+    def num_reads(self):
+        return 1
+
 
 @dataclasses.dataclass
 class DtypeView(BaseView):
@@ -3509,7 +3516,8 @@ class OperationBuffer(Buffer, Operation):
 
 
 class InputBuffer(Buffer):
-    pass
+    def num_reads(self):
+        return 1
 
 
 class ConstantBuffer(InputBuffer):
@@ -3570,9 +3578,11 @@ class ComputedBuffer(OperationBuffer):
             return self.data.name
         return None
 
-    @cache_on_self
     def num_reads(self):
-        return len(self.get_read_writes().reads)
+        return self.data.num_reads()
+
+    def get_read_names(self) -> OrderedSet[str]:
+        return self.data.get_read_names()
 
     def get_read_writes(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
@@ -3645,12 +3655,6 @@ class ComputedBuffer(OperationBuffer):
                 self.data.get_pointwise_size(), self.data.get_reduction_size()
             )
             reads = self.get_read_writes().reads
-            reads_bufs = [
-                V.graph.name_to_buffer[r.name]
-                if r.name in V.graph.name_to_buffer.keys()
-                else None
-                for r in reads
-            ]
             # only consider reads to buffer of same size
             # ignore StarDeps because they don't contribute stride information
             assert all(
@@ -3773,9 +3777,9 @@ class ComputedBuffer(OperationBuffer):
             ]
             index_formulas += extra_indexing_expr
 
-        memory_addrs = [*body.writes_name2expr.values()]
+        memory_addrs = [*body.get_write_exprs()]
         if not V.graph.has_feature(self, BackendFeature.PREFER_STORE_LOOP_ORDER):
-            memory_addrs.extend(body.reads_name2expr.values())
+            memory_addrs.extend(body.get_read_exprs())
 
         def simplify_and_reorder(x_vars, support_vars, sizes, simplify_loops):
             sizes, reindex0, reindex1 = self._apply_loop_reordering(
@@ -4181,6 +4185,9 @@ class InputsKernel(OperationBuffer):
 
     def is_extern(self):
         return True
+
+    def num_reads(self):
+        return 1
 
 
 class NopKernel(InputsKernel):
@@ -6399,8 +6406,7 @@ class StorageBox(MutableBox):
         """
         if (
             isinstance(self.data, (Pointwise, Reduction))
-            and self.num_reads() > 1
-            and self.is_pointwise_non_scalar_tensor_num_reads_larger_than_one()
+            and self.data.inner_fn_opcount().nontrivial_read_count > 1
         ):
             self.realize()
 
@@ -6410,63 +6416,30 @@ class StorageBox(MutableBox):
             or self.has_large_inner_fn()
         )
 
-    def mark_reuse(self, users):
+    def should_realize_on_reuse(self, users):
         """
         A heuristic to decide if we should realize a tensor
         that is used multiple times.
         """
-
-        def should_realize_on_cpu(loops: Union[Pointwise, Reduction]):
-            """
-            The heuristic for realizing reused result of heavy ops on cpu
-            """
-            heavy_ops = ["exp", "sigmoid"]  # a list of heavy ops
-            fn_str = loops.inner_fn_str()
-            return any((op + "(") in fn_str for op in heavy_ops)
-
-        if (
-            users > 1
-            and isinstance(self.data, (Pointwise, Reduction))
-            and (
+        if users > 1 and isinstance(self.data, (Pointwise, Reduction)):
+            if is_cpu(self.data):
+                # Heuristic for realizing reused result of heavy ops on cpu
+                opcount = self.data.inner_fn_opcount()
+                heavy_ops = ["exp", "sigmoid"]  # a list of heavy ops
+                if any(x in opcount.used_ops for x in heavy_ops):
+                    return True
+            return (
                 self.num_reads() > config.realize_reads_threshold
                 or self.has_large_inner_fn()
-                or (is_cpu(self.data) and should_realize_on_cpu(self.data))
             )
-        ):
+        return False
+
+    def mark_reuse(self, users):
+        if self.should_realize_on_reuse(users):
             self.realize()
 
-    @cache_on_self
     def num_reads(self):
-        data = self.data
-        if isinstance(data, (InputsKernel, InputBuffer, ReinterpretView)):
-            return 1
-        if isinstance(data, ComputedBuffer):
-            read_writes = data.get_read_writes()
-        else:
-            assert isinstance(data, (Pointwise, Reduction)), type(data)
-            read_writes = ComputedBuffer(
-                name=None,
-                layout=FlexibleLayout(
-                    device=data.get_device(),
-                    dtype=data.get_dtype(),
-                    size=data.get_size(),
-                ),
-                data=data,
-            ).get_read_writes()
-        return len(read_writes.reads)
-
-    @cache_on_self
-    def is_pointwise_non_scalar_tensor_num_reads_larger_than_one(self):
-        # Skip the check for non Pointwise instances
-        return (
-            (sum(read.index != 0 for read in self.data.get_reads()) > 1)
-            if isinstance(self.data, Pointwise)
-            and all(
-                not isinstance(read, dependencies.StarDep)
-                for read in self.data.get_reads()
-            )
-            else True
-        )
+        return self.data.num_reads()
 
 
 @dataclasses.dataclass

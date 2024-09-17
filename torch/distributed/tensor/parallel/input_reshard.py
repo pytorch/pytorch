@@ -3,7 +3,7 @@ from functools import partial
 from typing import Any, Optional, Tuple
 
 import torch
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
+from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard
 
 
 __all__ = [
@@ -42,6 +42,7 @@ def input_reshard(
     cx: Optional[torch.autograd.graph.saved_tensors_hooks] = None
 
     def input_reshard_forward_pre_hook(_: torch.nn.Module, _i: Tuple[Any, ...]) -> None:
+        assert input_reshard_dim is not None
         saved_tensor_hooks = torch.autograd.graph.saved_tensors_hooks(
             partial(_pack_hook_tp, tp_device_mesh, input_reshard_dim),
             partial(_unpack_hook_tp, tp_device_mesh, input_reshard_dim),

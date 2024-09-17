@@ -53,7 +53,12 @@ from typing_extensions import TypeAlias
 import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
-from torch._dynamo.utils import counters, dynamo_timed, get_chromium_event_logger
+from torch._dynamo.utils import (
+    add_remote_cache_time_saved,
+    counters,
+    dynamo_timed,
+    get_chromium_event_logger,
+)
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.codegen.rocm.compile_command import (
@@ -83,7 +88,7 @@ from torch._inductor.cpp_builder import (
     _transform_cuda_paths,
     CppBuilder,
     CppOptions,
-    CppTorchCudaOptions,
+    CppTorchDeviceOptions,
     get_compiler_version_info,
     get_cpp_compiler,
     get_name_and_dir_from_output_file_path,
@@ -533,7 +538,7 @@ def _reduce_tensor(
         # TODO: These tensors don't currently pickle, so we can't cache a
         # compiled graph containing them. Just fail now. If mkldnn tensors
         # get pickling support, we can remove this.
-        raise BypassFxGraphCache("mkldnn tensors unpickleable.")
+        raise BypassFxGraphCache("mkldnn tensors unpickleable")
 
     # Very large tensors could be expensive to copy to cpu and hash. Let's
     # at least report if we find slowness.
@@ -564,7 +569,7 @@ def _reduce_unsupported(s: Any) -> NoReturn:
     See FxGraphCachePickler. Custom reducer to handle any objects that we don't
     support and therefore raise to bypass caching.
     """
-    raise BypassFxGraphCache("Reduce unsupported.")
+    raise BypassFxGraphCache("Reduce unsupported")
 
 
 class FxGraphCachePickler(pickle.Pickler):
@@ -602,7 +607,7 @@ class FxGraphCachePickler(pickle.Pickler):
                 # Some configs options are callables, e.g., post_grad_custom_pre_pass,
                 # and may not pickle.
                 log.warning("Can't pickle", exc_info=True)
-                raise BypassFxGraphCache("Config options may be unpickleable.") from e
+                raise BypassFxGraphCache("Config options may be unpickleable") from e
             return stream.getvalue()
 
     @classmethod
@@ -1254,25 +1259,27 @@ class FxGraphCache:
         # Freezing can embed constants that wouldn't be static across runs.
         if config.freezing or config.aot_inductor.use_runtime_constant_folding:
             raise BypassFxGraphCache(
-                "Freezing may introduce constants that aren't static across runs."
+                "Freezing may introduce constants that aren't static across runs"
             )
 
         # The treatment of guards in the caching implementation requires that
         # we have a shape env.
         if FxGraphCache._get_shape_env() is None:
             log.debug("fx graph cache no shape env")
-            raise BypassFxGraphCache("No shape env.")
+            raise BypassFxGraphCache("No shape env")
 
         # HigherOrderOperators should be handled on a case-by-case basis.
         # Currently, we just skip caching if we have any.
         # We also skip if there are any torchbind objects.
         for node in gm.graph.nodes:
             if isinstance(node.target, torch._ops.HigherOrderOperator):
-                raise BypassFxGraphCache("Can't cache HigherOrderOperators.")
+                raise BypassFxGraphCache(
+                    f"Can't cache HigherOrderOperator: {node.target.name()}"
+                )
             if node.op == "getattr" and isinstance(
                 getattr(gm, node.target), torch._C.ScriptObject
             ):
-                raise BypassFxGraphCache("Can't cache torchbind objects.")
+                raise BypassFxGraphCache("Can't cache torchbind objects")
 
     @staticmethod
     def load(  # type: ignore[no-untyped-def]
@@ -1350,6 +1357,7 @@ class FxGraphCache:
                 cache_event_time = time_ns()
                 if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
                     cache_info["time_saved_ns"] = time_saved_ns
+                    add_remote_cache_time_saved(time_saved_ns, fx_kwargs["is_backward"])
                     if (
                         ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
                             time_saved_ns
@@ -1512,7 +1520,6 @@ class CudaKernelParamCache:
                 config.aot_inductor.output_path
             )[0],
         )
-
         params[get_cpp_wrapper_cubin_path_name()] = path
 
         cls.cache[key] = params
@@ -1533,7 +1540,7 @@ class AotCodeCompiler:
         graph: GraphLowering,
         source_code: str,
         serialized_extern_kernel_nodes: Optional[str],
-        cuda: bool,
+        device_type: str,
     ) -> str:
         if sys.platform == "win32":
             raise RuntimeError("AotCodeCompiler not yet supported for inductor")
@@ -1544,9 +1551,9 @@ class AotCodeCompiler:
         vec_isa_cmd_gen = CppBuilder(
             name="o",
             sources="i",
-            BuildOption=CppTorchCudaOptions(
+            BuildOption=CppTorchDeviceOptions(
                 vec_isa=picked_vec_isa,
-                cuda=cuda,
+                device_type=device_type,
                 aot_mode=graph.aot_mode,
             ),
         )
@@ -1561,7 +1568,7 @@ class AotCodeCompiler:
         use_absolute_path = False
         if config.is_fbcode():
             ld_command = build_paths.ld()
-            if not cuda and graph.aot_mode:  # Meta internal AOTInductor CPU
+            if device_type == "cpu" and graph.aot_mode:  # Meta internal AOTInductor CPU
                 objcopy_command = build_paths.objcopy_fallback()
                 fbcode_aot_cpu_re = True
                 use_absolute_path = True
@@ -1720,9 +1727,22 @@ class AotCodeCompiler:
             # Currently, this only support serializing extern nodes in fbcode
             # Eventually, we should also have a serializer for OSS.
             if serialized_extern_kernel_nodes:
-                output_json = os.path.splitext(input_path)[0] + ".json"
-                with open(output_json, "w") as f:
+                extern_kernel_nodes_json = os.path.splitext(input_path)[0] + ".json"
+                with open(extern_kernel_nodes_json, "w") as f:
                     f.write(serialized_extern_kernel_nodes)
+
+            metadata = config.aot_inductor.metadata
+            metadata["AOTI_DEVICE_KEY"] = device_type
+
+            # Save user provided metadata
+            meta_json = os.path.splitext(input_path)[0] + "_metadata.json"
+            for k, v in config.aot_inductor.metadata.items():
+                assert isinstance(k, str) and isinstance(
+                    v, (str)
+                ), "Metadata must only contain strings"
+
+            with open(meta_json, "w") as f:
+                f.write(json.dumps(config.aot_inductor.metadata))
 
             output_so = (
                 config.aot_inductor.output_path
@@ -1756,60 +1776,39 @@ class AotCodeCompiler:
             if config.aot_inductor.force_mmap_weights:
                 use_mmap_weights = True
 
-            if config.aot_inductor.package:
-                (
-                    object_output_name,
-                    object_output_dir,
-                ) = get_name_and_dir_from_output_file_path(input_path)
-                object_build_options = CppTorchCudaOptions(
-                    vec_isa=picked_vec_isa,
-                    cuda=cuda,
-                    aot_mode=graph.aot_mode,
-                    compile_only=True,
-                    use_absolute_path=use_absolute_path,
-                    use_mmap_weights=use_mmap_weights,
-                )
-                object_builder = CppBuilder(
-                    name=object_output_name,
-                    sources=input_path,
-                    output_dir=object_output_dir,
-                    BuildOption=object_build_options,
-                )
-                compile_cmd = object_builder.get_command_line()
-                output_o = object_builder.get_target_file_path()
+            (
+                object_output_name,
+                object_output_dir,
+            ) = get_name_and_dir_from_output_file_path(input_path)
+            object_build_options = CppTorchDeviceOptions(
+                vec_isa=picked_vec_isa,
+                device_type=device_type,
+                aot_mode=graph.aot_mode,
+                compile_only=True,
+                use_absolute_path=use_absolute_path,
+                use_mmap_weights=use_mmap_weights,
+            )
+            object_builder = CppBuilder(
+                name=object_output_name,
+                sources=input_path,
+                output_dir=object_output_dir,
+                BuildOption=object_build_options,
+            )
+            compile_cmd = object_builder.get_command_line()
+            output_o = object_builder.get_target_file_path()
 
-                compile_flags = os.path.splitext(input_path)[0] + "_compile_flags.json"
-                object_build_options.save_flags_to_file(compile_flags)
-
-            else:
-                (
-                    object_output_name,
-                    object_output_dir,
-                ) = get_name_and_dir_from_output_file_path(input_path)
-                object_build_options = CppTorchCudaOptions(
-                    vec_isa=picked_vec_isa,
-                    cuda=cuda,
-                    aot_mode=graph.aot_mode,
-                    compile_only=True,
-                    use_absolute_path=use_absolute_path,
-                    use_mmap_weights=use_mmap_weights,
-                )
-                object_builder = CppBuilder(
-                    name=object_output_name,
-                    sources=input_path,
-                    output_dir=object_output_dir,
-                    BuildOption=object_build_options,
-                )
-                compile_cmd = object_builder.get_command_line()
-                output_o = object_builder.get_target_file_path()
-
-                log.debug("aot compilation command: %s", compile_cmd)
+            log.debug("aot compilation command: %s", compile_cmd)
+            if not config.aot_inductor.package_cpp_only:
                 if fbcode_aot_cpu_re:
                     output_o = os.path.splitext(input_path)[0] + ".o"
                     compile_file(input_path, output_o, compile_cmd.split())
                     os.chmod(output_o, 0o644)
                 else:
                     run_command_and_check(compile_cmd)
+
+            if config.aot_inductor.package:
+                compile_flags = os.path.splitext(input_path)[0] + "_compile_flags.json"
+                object_build_options.save_flags_to_file(compile_flags)
 
             def _to_bytes(t: torch.Tensor, all_cuda: bool) -> bytes:
                 def _pad_to_alignment(raw_bytes: bytes) -> bytes:
@@ -1860,29 +1859,37 @@ class AotCodeCompiler:
                 "darwin": _compile_consts_darwin,
             }[sys.platform](aot_constants)
 
-            if config.aot_inductor.package:
-                output_name, output_dir = get_name_and_dir_from_output_file_path(
-                    output_so
-                )
-                so_build_options = CppTorchCudaOptions(
-                    vec_isa=picked_vec_isa,
-                    cuda=cuda,
-                    aot_mode=graph.aot_mode,
-                    use_absolute_path=use_absolute_path,
-                )
-                so_builder = CppBuilder(
-                    name=output_name,
-                    sources=[output_o, consts_o],
-                    output_dir=output_dir,
-                    BuildOption=so_build_options,
-                )
-                link_cmd = so_builder.get_command_line()
-                output_so = so_builder.get_target_file_path()
+            output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
+            so_build_options = CppTorchDeviceOptions(
+                vec_isa=picked_vec_isa,
+                device_type=device_type,
+                aot_mode=graph.aot_mode,
+                use_absolute_path=use_absolute_path,
+            )
+            so_builder = CppBuilder(
+                name=output_name,
+                sources=[output_o, consts_o],
+                output_dir=output_dir,
+                BuildOption=so_build_options,
+            )
+            link_cmd = so_builder.get_command_line()
+            output_so = so_builder.get_target_file_path()
 
+            log.debug("aot linkage command: %s", link_cmd)
+
+            # Append cmds to the end of codegen-ed wrapper file
+            with open(input_path, "a") as f:
+                f.write("\n")
+                f.write(f"// Compile cmd\n// {compile_cmd}\n")
+                f.write(f"// Link cmd\n// {link_cmd}\n")
+
+            if config.aot_inductor.package:
                 linker_flags = os.path.splitext(input_path)[0] + "_linker_flags.json"
                 so_build_options.save_flags_to_file(linker_flags)
 
-                from torch._inductor.package import package_aoti
+            if config.aot_inductor.package_cpp_only:
+                # If we only want to package the cpp, then we need to save the
+                # weights separately into a bin, and we also need to prevent compiling the so
 
                 if use_mmap_weights:
                     weight_file = (
@@ -1892,28 +1899,7 @@ class AotCodeCompiler:
                         f_weights.write(serialized_weights)
                         f_weights.write(struct.pack("q", magic_number))
 
-                archive_path = package_aoti(os.path.split(input_path)[0])
-                return archive_path
             else:
-                output_name, output_dir = get_name_and_dir_from_output_file_path(
-                    output_so
-                )
-                so_build_options = CppTorchCudaOptions(
-                    vec_isa=picked_vec_isa,
-                    cuda=cuda,
-                    aot_mode=graph.aot_mode,
-                    use_absolute_path=use_absolute_path,
-                )
-                so_builder = CppBuilder(
-                    name=output_name,
-                    sources=[output_o, consts_o],
-                    output_dir=output_dir,
-                    BuildOption=so_build_options,
-                )
-                link_cmd = so_builder.get_command_line()
-                output_so = so_builder.get_target_file_path()
-
-                log.debug("aot linkage command: %s", link_cmd)
                 if fbcode_aot_cpu_re:
                     output_so = (
                         config.aot_inductor.output_path
@@ -1938,11 +1924,10 @@ class AotCodeCompiler:
                         f_so.write(serialized_weights)
                         f_so.write(struct.pack("q", magic_number))
 
-                # Append cmds to the end of codegen-ed wrapper file
-                with open(input_path, "a") as f:
-                    f.write("\n")
-                    f.write(f"// Compile cmd\n// {compile_cmd}\n")
-                    f.write(f"// Link cmd\n// {link_cmd}\n")
+        if config.aot_inductor.package:
+            # We want to return the directory that contains all the AOTI
+            # generated files, not just the so
+            return os.path.split(output_so)[0]
 
         return output_so
 
@@ -2066,7 +2051,9 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
     assert callable(func), op + " can not be loaded through custom_op_wrapper"
     result = func(*converted_args)
     if isinstance(result, (list, tuple)):
-        for r in result:
+        # unsafe_alloc_void_ptrs_from_tensors expects result contains tensor only
+        result = [torch.tensor([]) if r is None else r for r in result]
+        for i, r in enumerate(result):
             assert isinstance(r, torch.Tensor), op + " returns a list of non-tensors"
         return torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(result)  # type: ignore[arg-type]
     else:
@@ -2111,13 +2098,13 @@ class CppCodeCache:
     def load_async(
         cls,
         source_code: str,
-        cuda: bool = False,
+        device_type: str = "cpu",
         submit_fn: Any = None,
         extra_flags: Sequence[str] = (),
     ) -> Any:
         compile_command = {
             **cls.cpp_compile_command_flags,
-            "cuda": cuda,
+            "device_type": device_type,
             "vec_isa": pick_vec_isa(),
             "extra_flags": extra_flags,
         }
@@ -2125,7 +2112,7 @@ class CppCodeCache:
         _set_gpu_runtime_env()  # cpp_extension consults the env
 
         command_gen = CppBuilder(
-            name="o", sources="i", BuildOption=CppTorchCudaOptions(**compile_command)
+            name="o", sources="i", BuildOption=CppTorchDeviceOptions(**compile_command)
         )
         # write function will calc source_code hash, the same source code with different
         # ISA level should be generate different hash.
@@ -2148,7 +2135,7 @@ class CppCodeCache:
             future: Optional[Future[Any]] = None
             lib = None
 
-            cpp_build_option = CppTorchCudaOptions(**compile_command)
+            cpp_build_option = CppTorchDeviceOptions(**compile_command)
             cpp_builder = CppBuilder(
                 name=output_name,
                 sources=input_path,
@@ -2191,8 +2178,8 @@ class CppCodeCache:
         return cls.cache[key]
 
     @classmethod
-    def load(cls, source_code: str, cuda: bool = False) -> Any:
-        return cls.load_async(source_code, cuda)()
+    def load(cls, source_code: str, device_type: str = "cpu") -> Any:
+        return cls.load_async(source_code, device_type)()
 
 
 def _worker_compile_cpp(
@@ -2335,7 +2322,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         cls,
         argtypes: List[str],
         source_code: str,
-        cuda: bool = False,
+        device_type: str = "cpu",
         num_outputs: int = -1,
         submit_fn: Any = None,
         extra_flags: Sequence[str] = (),
@@ -2367,7 +2354,10 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             cls.entry_function,
         )
         get_result = cls.load_async(
-            source_code + suffix, cuda, submit_fn=submit_fn, extra_flags=extra_flags
+            source_code + suffix,
+            device_type,
+            submit_fn=submit_fn,
+            extra_flags=extra_flags,
         )
         result = None
 
@@ -2718,7 +2708,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
             cls._codegen_glue(meta, headerfile),
             extra_flags=(libfile, cls.build_standalone_runtime()),
             submit_fn=jobs.append if need_compile else None,
-            cuda=meta.is_cuda(),
+            device_type="cuda" if meta.is_cuda() else "cpu",
         )
 
         if need_compile:
@@ -2746,9 +2736,9 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
             cls._standalone_runtime_path
         ):
             return cls._standalone_runtime_path
-        is_cuda = torch.cuda.is_available()
+        device_type = "cuda" if torch.cuda.is_available() else "cpu"
         libname = "libStandaloneHalideRuntime.so"
-        target = "host-cuda" if is_cuda else "host"
+        target = "host-cuda" if device_type == "cuda" else "host"
         if cls._standalone_runtime_path:
             assert not os.path.exists(cls._standalone_runtime_path)
             # We hit this case in unittests when we run with fresh_inductor_cache()
@@ -2772,7 +2762,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
             with filelock.FileLock(lockfile, LOCK_TIMEOUT):
                 if not os.path.exists(donefile):
                     with open(hookfile, "w") as f:
-                        if is_cuda:
+                        if device_type == "cuda":
                             f.write(
                                 cls.standalone_runtime_cuda_init.format(
                                     cls.find_header("HalideRuntimeCuda.h")
@@ -2785,8 +2775,8 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                         name=name,
                         sources=[hookfile, afile],
                         output_dir=output_dir,
-                        BuildOption=CppTorchCudaOptions(
-                            cuda=is_cuda,
+                        BuildOption=CppTorchDeviceOptions(
+                            device_type=device_type,
                         ),
                     )
 
@@ -2958,7 +2948,7 @@ def _cuda_lib_options() -> List[str]:
     _set_gpu_runtime_env()  # cpp_extension consults the env
     from torch.utils import cpp_extension
 
-    lpaths = cpp_extension.library_paths(cuda=True) + [
+    lpaths = cpp_extension.library_paths(device_type="cuda") + [
         sysconfig.get_config_var("LIBDIR")
     ]
     extra_ldflags: List[str] = []
