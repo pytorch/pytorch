@@ -6,6 +6,7 @@
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/mps/MPSStream.h>
+#include <ATen/native/mps/MPSGraphSequoiaOps.h>
 
 namespace at::mps {
 
@@ -29,8 +30,14 @@ id<MTLLibrary> MPSDevice::getMetalIndexingLibrary() {
   NSError* error = nil;
   if (!_mtl_indexing_library) {
     MTLCompileOptions* options = [MTLCompileOptions new];
+
     [options setLanguageVersion:getMetalLanguageVersion(_mtl_device)];
-    [options setFastMathEnabled:YES];
+
+    if (isMacOS13Plus(MacOSVersion::MACOS_VER_15_0_PLUS)) {
+      options.mathMode = MTLMathModeFast;
+    } else {
+      [options setFastMathEnabled:YES];
+    }
     _mtl_indexing_library = [_mtl_device newLibraryWithSource:[NSString stringWithCString:mps::indexing_metal_shaders
                                                                                  encoding:NSASCIIStringEncoding]
                                                       options:options

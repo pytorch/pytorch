@@ -247,8 +247,7 @@ class LRScheduler:
         for i, data in enumerate(zip(self.optimizer.param_groups, values)):
             param_group, lr = data
             if isinstance(param_group["lr"], Tensor):
-                lr_val = lr.item() if isinstance(lr, Tensor) else lr  # type: ignore[attr-defined]
-                param_group["lr"].fill_(lr_val)
+                param_group["lr"].fill_(lr)
             else:
                 param_group["lr"] = lr
 
@@ -911,7 +910,7 @@ class SequentialLR(LRScheduler):
 
         self._last_lr = schedulers[0].get_last_lr()
 
-    def step(self):
+    def step(self):  # type: ignore[override]
         """Perform a step."""
         self.last_epoch += 1
         idx = bisect_right(self._milestones, self.last_epoch)
@@ -1180,7 +1179,7 @@ class ChainedScheduler(LRScheduler):
             group["lr"] for group in self._schedulers[-1].optimizer.param_groups
         ]
 
-    def step(self):
+    def step(self):  # type: ignore[override]
         """Perform a step."""
         for scheduler in self._schedulers:
             scheduler.step()

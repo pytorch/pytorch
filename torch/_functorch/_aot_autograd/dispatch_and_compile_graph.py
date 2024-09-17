@@ -46,7 +46,10 @@ def _create_graph(f, args, *, aot_config: AOTConfig) -> torch.fx.GraphModule:
     # FunctionalTensorMode must be enabled here.
     # See Note [Accessing .grad_fn on FunctionalTensor]
     with enable_python_dispatcher(), FunctionalTensorMode(
-        pre_dispatch=aot_config.pre_dispatch, export=aot_config.is_export
+        pre_dispatch=aot_config.pre_dispatch,
+        export=aot_config.is_export,
+        # Allow token discovery for joint fn tracing as tokens can be used in backward.
+        _allow_token_discovery=True,
     ):
         fx_g = make_fx(
             f,
@@ -181,7 +184,6 @@ def aot_dispatch_base_graph(
     # As long as we opted to remove input mutations, then
     # there should be *NO* mutating ops in the graph at this point.
     copy_count = assert_functional_graph(fw_module.graph)
-
     fw_module.graph.eliminate_dead_code()
     fw_module.recompile()
 
@@ -191,7 +193,7 @@ def aot_dispatch_base_graph(
     # See Note [Side-Effectful Tokens in AOTAutograd]
     num_tokens = len(fw_metadata.tokens)
     if num_tokens != 0 and config.unlift_effect_tokens:
-        unlift_tokens(fw_module, fw_metadata)
+        unlift_tokens(fw_module, fw_metadata, aot_config)
         saved_updated_flat_args_subclasses_desugared = (
             saved_updated_flat_args_subclasses_desugared[num_tokens:]
         )

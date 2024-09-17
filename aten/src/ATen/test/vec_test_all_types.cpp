@@ -1660,40 +1660,84 @@ namespace {
     }
     TYPED_TEST(VecMaskTests, MaskedLoad) {
       using vec = TypeParam;
-      using VT = ValueType<TypeParam>;
-      constexpr auto N = vec::size();
-      CACHE_ALIGN VT x[N];
-      CACHE_ALIGN VT y[N];
-      CACHE_ALIGN VT ref[N];
-      auto seed = TestSeed();
-      ValueGen<VT> generator(VT(-100), VT(100), seed);
-      for (const auto i : c10::irange(N)) {
-        x[i] = generator.get();
-      }
-      auto vec_mask = generate_vec_mask<VT>(seed);
-      auto x_vec = vec_mask.template loadu<VT, 1>(x);
-      x_vec.store(y);
-      for (const auto i : c10::irange(N)) {
-        if (vec_mask.is_masked(i)) {
-          ref[i] = x[i];
-        } else {
-          ref[i] = 0;
-        }
-      }
-      for (const auto i : c10::irange(N)) {
-        ASSERT_EQ(y[i], ref[i])
-            << "Failure Details:\nTest Seed to reproduce: " << seed;
-      }
+      using src_t = ValueType<TypeParam>;
+      constexpr auto size = vec::size();
+
+    #define TEST_MASK_LOAD(dst_t, mask_t, mask_n)                           \
+      do {                                                                  \
+        CACHE_ALIGN dst_t x[mask_n * size];                                 \
+        CACHE_ALIGN dst_t y[mask_n * size];                                 \
+        CACHE_ALIGN dst_t ref[mask_n * size];                               \
+        auto seed = TestSeed();                                             \
+        ValueGen<dst_t> generator(dst_t(-100), dst_t(100), seed);           \
+        for (const auto i : c10::irange(mask_n * size)) {                   \
+          x[i] = generator.get();                                           \
+        }                                                                   \
+        auto vec_mask = generate_vec_mask<mask_t, mask_n>(seed);            \
+        constexpr int dst_size = at::vec::Vectorized<dst_t>::size();        \
+        constexpr int dst_n = mask_n * size / dst_size;                     \
+        constexpr int rnd_n = (mask_n * size + dst_size - 1) / dst_size;    \
+        if constexpr(dst_n * dst_size >= mask_n * size) {                   \
+            auto x_vec = vec_mask.template loadu<dst_t, rnd_n>(x);          \
+            x_vec.store(y);                                                 \
+            for (const auto i : c10::irange(mask_n * size)) {               \
+                if (vec_mask.is_masked(i)) {                                \
+                    ref[i] = x[i];                                          \
+                } else {                                                    \
+                    ref[i] = 0;                                             \
+                }                                                           \
+            }                                                               \
+            for (const auto i : c10::irange(mask_n * size)) {               \
+            ASSERT_EQ(y[i], ref[i])                                         \
+                << "Failure Details:\nTest Seed to reproduce: " << seed;    \
+            }                                                               \
+        }                                                                   \
+      } while (0)
+
+
+    #define TEST_MASK_LOAD_N(N)                                      \
+      TEST_MASK_LOAD(int8_t, src_t, N);                              \
+      TEST_MASK_LOAD(uint8_t, src_t, N);                             \
+      TEST_MASK_LOAD(int16_t, src_t, N);                             \
+      TEST_MASK_LOAD(uint16_t, src_t, N);                            \
+      TEST_MASK_LOAD(int32_t, src_t, N);                             \
+      TEST_MASK_LOAD(uint32_t, src_t, N);                            \
+      TEST_MASK_LOAD(int64_t, src_t, N);                             \
+      TEST_MASK_LOAD(uint64_t, src_t, N);                            \
+      TEST_MASK_LOAD(c10::BFloat16, src_t, N);                       \
+      TEST_MASK_LOAD(c10::Half, src_t, N);                           \
+      TEST_MASK_LOAD(float, src_t, N);                               \
+      TEST_MASK_LOAD(double, src_t, N);
+
+      TEST_MASK_LOAD_N(1)
+      TEST_MASK_LOAD_N(2)
+      TEST_MASK_LOAD_N(4)
+
+    #undef TEST_MASK_LOAD
+    #undef TEST_MASK_LOAD_N
     }
     TYPED_TEST(VecMaskTests, MaskedCheck) {
       using VT = ValueType<TypeParam>;
-      auto vec_mask = create_vec_mask<VT>(0);
-      ASSERT_TRUE(vec_mask.all_zero()) << "all_zero check failed";
-      vec_mask = create_vec_mask<VT>(-1);
-      ASSERT_TRUE(vec_mask.all_masked()) << "all_masked check failed";
-      vec_mask = create_vec_mask<VT>(2);
-      ASSERT_TRUE(vec_mask.is_masked(1)) << "is_masked(1) check failed";
-      ASSERT_TRUE(!vec_mask.is_masked(0)) << "!is_masked(0) check failed";
+      using vec = TypeParam;
+      constexpr auto size = vec::size();
+    #define TEST_MASK_CHECK_N(N)                                                           \
+      do {                                                                                 \
+        auto vec_mask = create_vec_mask<VT, N>(0);                                         \
+        ASSERT_TRUE(vec_mask.all_zero()) << "all_zero check failed";                       \
+        vec_mask = create_vec_mask<VT, N>(-1);                                             \
+        ASSERT_TRUE(vec_mask.all_masked()) << "all_masked check failed";                   \
+        vec_mask = create_vec_mask<VT, N>(2);                                              \
+        for (int i = 0; i < N; i ++) {                                                     \
+          ASSERT_TRUE(vec_mask.is_masked(1 + i * size)) << "is_masked(1) check failed";    \
+          ASSERT_TRUE(!vec_mask.is_masked(0 + i * size)) << "!is_masked(0) check failed";  \
+        }                                                                                  \
+      } while (0)
+
+      TEST_MASK_CHECK_N(1);
+      TEST_MASK_CHECK_N(2);
+      TEST_MASK_CHECK_N(4);
+
+    #undef TEST_MASK_CHECK_N
     }
     TYPED_TEST(VecMaskTests, ToFrom) {
       using vec = TypeParam;
@@ -1723,37 +1767,46 @@ namespace {
     TYPED_TEST(VecMaskTests, Cast) {
       using vec = TypeParam;
       using src_t = ValueType<TypeParam>;
-      constexpr auto N = vec::size();
-    #define TEST_MASK_CAST(dst_t)                                      \
+      constexpr auto size = vec::size();
+
+    #define TEST_MASK_CAST(dst_t, mask_t, mask_n)                      \
       do {                                                             \
-        CACHE_ALIGN src_t x[N];                                        \
-        CACHE_ALIGN dst_t y[N];                                        \
+        CACHE_ALIGN mask_t x[mask_n * size];                           \
+        CACHE_ALIGN dst_t y[mask_n * size];                            \
         auto seed = TestSeed();                                        \
-        auto vec_mask = generate_vec_mask<src_t>(seed);                \
+        auto vec_mask = generate_vec_mask<mask_t, mask_n>(seed);       \
         constexpr int num_dst_elements =                               \
-            std::min(N, at::vec::Vectorized<dst_t>::size());           \
-        constexpr int dst_n = N / num_dst_elements;                    \
+            std::min(size, at::vec::Vectorized<dst_t>::size());        \
+        constexpr int dst_n = mask_n * size / num_dst_elements;        \
         auto vec_mask_new = vec_mask.template cast<dst_t, dst_n>();    \
-        vec_mask.template to<src_t, 1>().store(x);                     \
-        vec_mask_new.template to<dst_t, dst_n>().store(y, N);          \
-        for (const auto i : c10::irange(N)) {                          \
+        vec_mask.template to<mask_t, mask_n>().store(x);               \
+        vec_mask_new.template to<dst_t, dst_n>().store(y);             \
+        for (const auto i : c10::irange(mask_n * size)) {              \
           ASSERT_EQ(y[i], x[i])                                        \
               << "Failure Details:\nTest Seed to reproduce: " << seed; \
         }                                                              \
       } while (0)
-      TEST_MASK_CAST(int8_t);
-      TEST_MASK_CAST(uint8_t);
-      TEST_MASK_CAST(int16_t);
-      TEST_MASK_CAST(uint16_t);
-      TEST_MASK_CAST(int32_t);
-      TEST_MASK_CAST(uint32_t);
-      TEST_MASK_CAST(int64_t);
-      TEST_MASK_CAST(uint64_t);
-      TEST_MASK_CAST(c10::BFloat16);
-      TEST_MASK_CAST(c10::Half);
-      TEST_MASK_CAST(float);
-      TEST_MASK_CAST(double);
+
+    #define TEST_MASK_CAST_N(N)                                      \
+      TEST_MASK_CAST(int8_t, src_t, N);                              \
+      TEST_MASK_CAST(uint8_t, src_t, N);                             \
+      TEST_MASK_CAST(int16_t, src_t, N);                             \
+      TEST_MASK_CAST(uint16_t, src_t, N);                            \
+      TEST_MASK_CAST(int32_t, src_t, N);                             \
+      TEST_MASK_CAST(uint32_t, src_t, N);                            \
+      TEST_MASK_CAST(int64_t, src_t, N);                             \
+      TEST_MASK_CAST(uint64_t, src_t, N);                            \
+      TEST_MASK_CAST(c10::BFloat16, src_t, N);                       \
+      TEST_MASK_CAST(c10::Half, src_t, N);                           \
+      TEST_MASK_CAST(float, src_t, N);                               \
+      TEST_MASK_CAST(double, src_t, N);
+
+      TEST_MASK_CAST_N(1)
+      TEST_MASK_CAST_N(2)
+      TEST_MASK_CAST_N(4)
+
     #undef TEST_MASK_CAST
+    #undef TEST_MASK_CAST_N
     }
 #else
 #error GTEST does not have TYPED_TEST

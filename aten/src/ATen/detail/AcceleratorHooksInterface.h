@@ -53,4 +53,4 @@ struct TORCH_API AcceleratorHooksInterface {
 };
 
 } // namespace at
-C10_CLANG_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()
