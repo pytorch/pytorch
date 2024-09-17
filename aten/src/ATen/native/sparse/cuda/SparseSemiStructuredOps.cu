@@ -818,37 +818,35 @@ Tensor _sparse_semi_structured_addmm(
 // Following is just for testing purposes.
 namespace at::native {
 //TODO : Remove this function after testing, use hip to cuda mapping
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
-template <typename Element, typename LayoutDest, typename LayoutSrc>
-static void reorder_meta(ck::Tensor<Element, LayoutDest> dest,
-                         ck::Tensor<Element, LayoutSrc> src,
-                         const int problem_size_m, const int problem_size_k) {
-#ifndef USE_ROCM
-  AT_ERROR(__func__, " : CK not supported");
-#endif
+#if defined(USE_ROCM)
+template <typename Element>
+void reorder_meta(Element* dest, const Element* src,
+                  const int problem_size_m, const int problem_size_k) {
+  const int group = (sizeof(Element) == 2) ? 32 : 16;
+  const int interweave = (sizeof(Element) == 2) ? 4 : 2;
+
   for (int m = 0; m < problem_size_m; m++) {
     for (int k = 0; k < problem_size_k; k++) {
-      // First reorder the rows.
-      int group = (sizeof(Element) == 2) ? 32 : 16;
-      int interweave = (sizeof(Element) == 2) ? 4 : 2;
-
-      int dest_row = m / group * group + (m % 8) * interweave + (m % group) / 8;
+      // First reorder the rows
+      int dest_row = (m / group) * group + (m % 8) * interweave + (m % group) / 8;
       int dest_col = k;
 
-      // Next swizzle the 2x2 blocks from Z to N.
-      if (((dest_row % 2) == 0) && ((dest_col % 2) == 1)) {
+      // Next swizzle the 2x2 blocks from Z to N
+      if ((dest_row % 2 == 0) && (dest_col % 2 == 1)) {
         ++dest_row;
         --dest_col;
-      } else if (((dest_row % 2) == 1) && ((dest_col % 2) == 0)) {
+      } else if ((dest_row % 2 == 1) && (dest_col % 2 == 0)) {
         --dest_row;
         ++dest_col;
       }
 
-      dest.at({dest_row, dest_col}) = src.at({m, k});
+      dest[dest_row * problem_size_k + dest_col] = src[m * problem_size_k + k];
     }
   }
 }
-
+#elif defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+ AT_ERROR(__func__, " : CUTLASS not supported");
+    return Tensor{};
 #else
 // Copied from tools/util/include/host_reorder.h, from CUTLASS source
 // tree.  This is for simplicity - namely, this file is not under
@@ -1015,7 +1013,13 @@ _to_sparse_semi_structured(const Tensor& dense) {
 #endif
 
 //TODO: add ROCm support/CK tensor support
+#if defined(USE_ROCM)
+    reorder_meta(meta_reordered_cpu.data_ptr<int16_t>(),
+               meta_cpu.data_ptr<int16_t>(),
+               meta_nrows, meta_ncols);
+#else
     reorder_meta(meta_reordered_cpu_ref, meta_cpu_ref, meta_nrows, meta_ncols);
+#endif
   } else if (meta_dtype == at::kInt) {
     using MetaElement = int32_t;
 #ifdef USE_ROCM
@@ -1033,7 +1037,14 @@ _to_sparse_semi_structured(const Tensor& dense) {
           meta_reordered_cpu.data_ptr<MetaElement>(),
           MetaReorderedLayout::packed({meta_nrows, meta_ncols}));
 #endif
+//TODO: add ROCm support/CK tensor support
+#if defined(USE_ROCM)
+    reorder_meta(meta_reordered_cpu.data_ptr<int32_t>(),
+               meta_cpu.data_ptr<int32_t>(),
+               meta_nrows, meta_ncols);
+#else
     reorder_meta(meta_reordered_cpu_ref, meta_cpu_ref, meta_nrows, meta_ncols);
+#endif
   }
 
   return std::make_tuple(sparse_cpu.to(dense.device()),
