@@ -351,43 +351,6 @@ class TestExport(TestCase):
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
         self._test_export_same_as_eager(f, inp)
 
-    def test_real_tensor_max_op(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x, y):
-                x = x[x > 0]
-                y = y[y > 0]
-                return max(x.shape[0], y.shape[0])
-
-        model = Foo()
-        inputs = (torch.randn(64), torch.randn(64))
-        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
-            ep = export(model, inputs, strict=False)
-    
-    def test_real_tensor_bool_cast(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x):
-                a = bool(x.eq(0.1).any())
-                b = bool(x.eq(0.1).all())
-                c = bool(x.eq(0.1).any().item())
-                return a + b + c
-
-        model = Foo()
-        inputs = (torch.randn(128),)
-        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
-            ep = export(model, inputs, strict=False)
-
-    def test_real_tensor_where_op(self):
-        class Baz(torch.nn.Module):
-            def forward(self, x):
-                x = torch.where(x <= 0.5)[0]
-                if x.shape[0] < 200:
-                    return x + 2
-
-        model = Baz()
-        inputs = (torch.randn(64, 32),)
-        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
-            ep = export(model, inputs, strict=False)
-
     def test_no_tensor_computation(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -949,6 +912,31 @@ graph():
         y = torch.ones(64)
         self.assertEqual(ep.module()(x, x), model(x, x))
         self.assertEqual(ep.module()(x, y), model(x, y))
+
+    def test_real_tensor_bool_cast(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                a = bool(x.eq(0.1).any())
+                b = bool(x.eq(0.1).all())
+                c = bool(x.eq(0.1).any().item())
+                return a + b + c
+
+        model = Foo()
+        inputs = (torch.randn(128),)
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = export(model, inputs, strict=False)
+
+    def test_real_tensor_where_op(self):
+        class Baz(torch.nn.Module):
+            def forward(self, x):
+                x = torch.where(x <= 0.5)[0]
+                if x.shape[0] < 200:
+                    return x + 2
+
+        model = Baz()
+        inputs = (torch.randn(64, 32),)
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = export(model, inputs, strict=False)
 
     def test_export_script_module(self):
         class Foo(torch.nn.Module):

@@ -1898,6 +1898,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         def maybe_propagate_real_tensors(fake_out: T) -> T:
             import sympy
+
             log.debug("maybe_propagate_real_tensors %s", func)
 
             def go(t: object, real_t: Tensor) -> None:
