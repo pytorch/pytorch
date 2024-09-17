@@ -354,12 +354,10 @@ def foreach_reduce(
 
     for i, (fsdp_param, unsharded_grad) in enumerate(zip(fsdp_params, unsharded_grads)):
         shard_dim = fsdp_param.fsdp_placement.dim
-        if shard_dim == 0:
-            continue
-        chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
-        new_unsharded_grad = torch.cat(chunks, dim=0)
-        unsharded_grads[i] = new_unsharded_grad
-
+        if shard_dim != 0:
+            chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
+            new_unsharded_grad = torch.cat(chunks, dim=0)
+            unsharded_grads[i] = new_unsharded_grad
     foreach_reduce_scatter_copy_in(unsharded_grads, reduce_scatter_input, world_size)
     current_stream = torch.cuda.current_stream()
     # Only after the copy-in finishes can we free the gradients
