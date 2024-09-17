@@ -594,13 +594,10 @@ def disable():
         torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
 
 
-def maybe_disable_compiled_autograd():
-    return disable() if in_compiled_autograd_region else contextlib.nullcontext()
-
-
 # return to starting state of a new process
 def reset() -> None:
     compiled_autograd_enable = False
     assert not in_compiled_autograd_region
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
     torch._C._dynamo.compiled_autograd.set_verbose_logger(None)
+    torch._C._dynamo.compiled_autograd.clear_cache()
