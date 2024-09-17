@@ -122,8 +122,6 @@ def _maybe_set_eval_frame(callback: DynamoCallback, context_id: str, state: str)
                 # NOTE: Compiled Autograd graph cannot be executed in eager mode and must be Dynamo traced through
                 return set_eval_frame(callback)
             else:
-                if context_id not in context_id_to_warmup_count:
-                    context_id_to_warmup_count[context_id] = 0
                 if state == "enter":
                     if context_id_to_warmup_count[context_id] < config.warmup_runs:
                         # TODO: insert eager profiling start event here
