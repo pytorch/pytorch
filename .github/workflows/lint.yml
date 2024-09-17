@@ -77,7 +77,7 @@ jobs:
     needs: lintrunner-autoformat
     uses: parkerbxyz/suggest-changes@v1
     with:
-      comment: 'Please commit the suggested changes from pytorch's linter.'
+      comment: "Please commit the suggested changes from pytorch's linter."
 
   quick-checks:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
