@@ -574,7 +574,7 @@ class TestBenchmarkRequest(BenchmarkRequest):
         return self.value
 
 
-class GPUDeviceBenchmarkMixin:
+class GPUDeviceBenchmarkRequest(BenchmarkRequest):
     def do_bench(
         self,
         fn,
@@ -601,17 +601,7 @@ class GPUDeviceBenchmarkMixin:
         return out
 
 
-class CPUDeviceBenchmarkMixin:
-    def do_bench(
-        self,
-        fn,
-        *input_tensors: torch.Tensor,
-        output_tensor: Optional[torch.Tensor] = None,
-    ) -> float:
-        return benchmarker.benchmark_cpu(fn)
-
-
-class TritonBenchmarkRequest(BenchmarkRequest):
+class TritonBenchmarkRequest(GPUDeviceBenchmarkRequest):
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put CUDA Tensors in here!
     def __init__(
@@ -656,22 +646,28 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         if "warmup" in inspect.signature(run_method).parameters:
             warmup_arg["warmup"] = False
 
-        if output_tensor.device.type == "cpu":
-            stream = 0
+        from torch._C import _cuda_getCurrentRawStream as get_raw_stream
+
+        if torch.version.hip and self.matrix_instr_nonkdim != 0:
+            return functools.partial(
+                run_method,
+                *input_tensors,
+                output_tensor,
+                *self.extra_args,
+                grid=self.grid,
+                **warmup_arg,
+                stream=get_raw_stream(self.output_tensor_meta.device.index),
+            )
         else:
-            from torch._C import _cuda_getCurrentRawStream as get_raw_stream
-
-            stream = get_raw_stream(self.output_tensor_meta.device.index)
-
-        return functools.partial(
-            run_method,
-            *input_tensors,
-            output_tensor,
-            *self.extra_args,
-            grid=self.grid,
-            **warmup_arg,
-            stream=stream,
-        )
+            return functools.partial(
+                run_method,
+                *input_tensors,
+                output_tensor,
+                *self.extra_args,
+                grid=self.grid,
+                **warmup_arg,
+                stream=get_raw_stream(self.output_tensor_meta.device.index),
+            )
 
     def precompile(self):
         mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
@@ -681,15 +677,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         return f"{self.kernel_name=}, {self.module_path=}, {self.module_cache_key=}"
 
 
-class TritonGPUBenchmarkRequest(GPUDeviceBenchmarkMixin, TritonBenchmarkRequest):
-    pass
-
-
-class TritonCPUBenchmarkRequest(CPUDeviceBenchmarkMixin, TritonBenchmarkRequest):
-    pass
-
-
-class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
+class CUDABenchmarkRequest(GPUDeviceBenchmarkRequest):
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put CUDA Tensors in here!
 
@@ -806,7 +794,17 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         return f"{self.kernel_name=}, {self.source_file=}, {self.hash_key=}"
 
 
-class CppBenchmarkRequest(CPUDeviceBenchmarkMixin, BenchmarkRequest):
+class CPUDeviceBenchmarkRequest(BenchmarkRequest):
+    def do_bench(
+        self,
+        fn,
+        *input_tensors: torch.Tensor,
+        output_tensor: Optional[torch.Tensor] = None,
+    ) -> float:
+        return benchmarker.benchmark_cpu(fn)
+
+
+class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put Tensors in here!
 

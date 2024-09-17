@@ -433,11 +433,7 @@ class CudaReproTests(TestCase):
                 triton.Config({"XBLOCK": 2}),
             ],
             meta={
-                "signature": {
-                    "in_out_ptr0": "*fp32",
-                    "in_ptr0": "*fp32",
-                    "xnumel": "i32",
-                },
+                "signature": {0: "*fp32", 1: "*fp32", 2: "i32"},
                 "device": DeviceProperties.create(torch.device("cuda")),
                 "configs": [instance_descriptor(divisible_by_16=(0, 1), equal_to_1=())],
                 "constants": {},
@@ -1319,9 +1315,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(expect, actual)
 
         # Expect the code iterates in contiguous order, and is not tiled
-        lines = code[0].split("\n")
-        start = lines.index("@triton.jit")
-        kernel_code = "\n".join(lines[start : start + 14])
+        kernel_code = "\n".join(code[0].split("\n")[60:74])
         self.assertExpectedInline(
             kernel_code,
             """\
