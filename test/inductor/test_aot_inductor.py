@@ -45,7 +45,7 @@ from torch.utils import _pytree as pytree
 
 
 if HAS_CUDA:
-    import triton
+    import triton  # @manual
 
     from torch.testing._internal.triton_utils import (
         add_kernel,
@@ -76,14 +76,20 @@ try:
         )
         from .test_torchinductor import copy_tests, requires_multigpu, TestFailure
     except ImportError:
-        from test_aot_inductor_utils import AOTIRunnerUtil
-        from test_control_flow import (
+        from test_aot_inductor_utils import (
+            AOTIRunnerUtil,  # @manual=fbcode//caffe2/test/inductor:aot_inductor_utils-library
+        )
+        from test_control_flow import (  # @manual=fbcode//caffe2/test/inductor:control_flow-library
             CondModels,
             prepend_counters,
             prepend_predicates,
             WhileLoopModels,
         )
-        from test_torchinductor import copy_tests, requires_multigpu, TestFailure
+        from test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+            copy_tests,
+            requires_multigpu,
+            TestFailure,
+        )
 except (unittest.SkipTest, ImportError) as e:
     if __name__ == "__main__":
         sys.exit(0)
@@ -1336,15 +1342,19 @@ class AOTInductorTestsTemplate:
                 return x + b
 
         example_inputs = (
-            x := torch.randn((3, 2), device=self.device),
+            torch.randn((3, 2), device=self.device),
             torch.randn((1, 2), device=self.device),
         )
-        torch._dynamo.mark_dynamic(x, index=0)  # Create dynamic symbol
+        dynamic_shapes = {
+            "x": {0: Dim("dx"), 1: Dim.STATIC},
+            "b": None,
+        }
 
         # Compile & run model where dynamic dim size > 0.
         so_path: str = AOTIRunnerUtil.compile(
             Repro(),
             example_inputs,
+            dynamic_shapes=dynamic_shapes,
         )
         aot_inductor_module = AOTIRunnerUtil.load("cuda", so_path)
         aot_inductor_module(*example_inputs)
@@ -1745,7 +1755,7 @@ class AOTInductorTestsTemplate:
             torch._export.aot_compile(Model(), example_inputs)
 
         supported_dtype_of_cpp_wrapper_mock.assert_called_once_with(
-            torch.float32, self.device == "cuda"
+            torch.float32, self.device
         )
 
     def test_consecutive_compiles(self):
@@ -2958,29 +2968,24 @@ class AOTInductorTestsTemplate:
             def __init__(self) -> None:
                 super().__init__()
 
-            def forward(self, x0, x1, x2, x3):
-                t = (
-                    x0.to(torch.float)
-                    + x1.to(torch.float)
-                    + x2.to(torch.float)
-                    + x3.to(torch.float)
-                )
+            def forward(self, x0, x1):
+                t = x0.to(torch.float) + x1.to(torch.float)
                 return t
 
         inputs = []
         for dtype in (
             torch.float8_e4m3fn,
             torch.float8_e5m2,
-            torch.float8_e4m3fnuz,
-            torch.float8_e5m2fnuz,
+            # FP8 funz are for AMD
+            # see https://github.com/pytorch/pytorch/issues/126734
+            # torch.float8_e4m3fnuz,
+            # torch.float8_e5m2fnuz,
         ):
             inputs.append(torch.ones(8, 8, 8, dtype=dtype, device=self.device))
         dim0 = Dim("s0", min=2, max=1024)
         dynamic_shapes = {
             "x0": {0: dim0},
             "x1": {0: dim0},
-            "x2": {0: dim0},
-            "x3": {0: dim0},
         }
         with torch.no_grad(), config.patch(
             {
@@ -3265,7 +3270,9 @@ class AOTInductorTestsTemplate:
             model, example_inputs_list, dynamic_shapes=dynamic_shapes
         )
 
-    @common_utils.parametrize("max_autotune", [False, True])
+    # max_autotune is disabled due to https://github.com/pytorch/pytorch/issues/135106
+    # @common_utils.parametrize("max_autotune", [False, True])
+    @common_utils.parametrize("max_autotune", [False])
     def test_misc_1(self, max_autotune):
         if self.device == "cpu" and IS_MACOS and max_autotune:
             raise unittest.SkipTest("max_autotune not supported on macos")
@@ -3293,6 +3300,40 @@ class AOTInductorTestsTemplate:
         self.check_model(
             Model(), example_inputs, options=dict(max_autotune=max_autotune)
         )
+
+    @skip_if_no_torchvision
+    def test_torchvision_transforms_functional_tensor_resize(self):
+        import torchvision
+
+        # https://fb.workplace.com/groups/1075192433118967/permalink/1501860707118802/
+        class A(torch.nn.Module):
+            def forward(self, image: torch.Tensor, target_size: torch.Tensor):
+                target_h, target_w = target_size.tolist()
+                torch._check(target_h > 0)
+                torch._check(target_w > 0)
+                torch._check(target_h <= 4000)
+                torch._check(target_w <= 4000)
+
+                return torchvision.transforms._functional_tensor.resize(
+                    image,
+                    size=[target_h, target_w],
+                    interpolation="bilinear",
+                    antialias=False,
+                )
+
+        model = A()
+        example_inputs = (
+            torch.ones([3, 800, 600], device=self.device),
+            torch.tensor([448, 336], device=self.device),
+        )
+        dynamic_shapes = {
+            "image": {
+                1: torch.export.Dim("height", min=1, max=4000),
+                2: torch.export.Dim("width", min=1, max=4000),
+            },
+            "target_size": None,
+        }
+        self.check_model(model, example_inputs, dynamic_shapes=dynamic_shapes)
 
     def test_aoti_debug_printer_codegen(self):
         # basic addmm model to test codegen for aoti intermediate debug printer
@@ -3620,6 +3661,7 @@ CPU_TEST_FAILURES = {
         is_skip=True
     ),
     "test_size_from_multi_output": fail_stack_allocation(is_skip=True),
+    "test_torchvision_transforms_functional_tensor_resize": fail_minimal_arrayref_interface(),
 }
 
 # test_failures, xfail by default, set is_skip=True to skip
