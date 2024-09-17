@@ -692,6 +692,7 @@ class AutogradFunctionVariable(VariableTracker):
                 )
 
             val = AutogradFunctionApplyVariable(
+                self.fn_cls,
                 forward_fn,
                 self.fn_cls.backward,
                 source,

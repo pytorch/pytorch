@@ -766,6 +766,38 @@ def proxy_args_kwargs(args, kwargs):
         )
 
 
+def fakeify(vt):
+    from .variables import BaseListVariable, TensorVariable, UserDefinedObjectVariable
+
+    if isinstance(vt, UserDefinedObjectVariable):
+        return vt.value
+    elif isinstance(vt, TensorVariable):
+        return _get_fake_tensor(vt)
+    elif vt.is_python_constant():
+        return vt.as_python_constant()
+    elif isinstance(vt, BaseListVariable) and all(
+        isinstance(x, TensorVariable) for x in vt.items
+    ):
+        return vt.python_type()([_get_fake_tensor(x) for x in vt.items])
+    else:
+        raise AssertionError(f"can't fakeify {vt}")
+
+
+def fake_args_kwargs(args, kwargs):
+    try:
+        fake_args = tuple(fakeify(arg) for arg in args)
+        fake_kwargs = {key: fakeify(arg) for key, arg in kwargs.items()}
+        return fake_args, fake_kwargs
+    except NotImplementedError as e:
+        from .exc import unimplemented
+        from .variables.base import typestr
+
+        unimplemented(
+            f"can't fakeify call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}",
+            from_exc=e,
+        )
+
+
 @dataclasses.dataclass
 class CompilationMetrics:
     compile_id: str

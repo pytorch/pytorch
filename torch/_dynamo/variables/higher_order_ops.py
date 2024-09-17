@@ -7,12 +7,13 @@ import itertools
 import logging
 import types
 from typing import Dict, List, Optional, TYPE_CHECKING
+from unittest import mock
 
 import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-from torch._dynamo.utils import get_fake_value
+from torch._dynamo.utils import fake_args_kwargs, get_fake_value
 from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.builtin import BuiltinVariable
@@ -2156,8 +2157,9 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class AutogradFunctionApplyVariable(VariableTracker):
-    def __init__(self, fwd_graph, bwd_graph, parent_source, **kwargs) -> None:
+    def __init__(self, fn_cls, fwd_graph, bwd_graph, parent_source, **kwargs) -> None:
         super().__init__(**kwargs)
+        self.fn_cls = fn_cls
         self.fwd_graph = fwd_graph
         self.bwd_graph = bwd_graph
         self.parent_source = parent_source
@@ -2257,26 +2259,10 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # Since we speculate the fwd graph always under no grad mode, we need to
         # set the correct grad mode (and other attributes) for the fwd output, so
         # we do fake tensor prop on the fwd graph again.
-        args2, kwargs2 = proxy_args_kwargs(args, kwargs)
-        args2 = (ctx.proxy, *args2)
-        from .builder import wrap_fx_proxy_cls
-
-        fwd_out_from_fake = wrap_fx_proxy_cls(
-            target_cls=variables.TensorVariable,
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                self.fwd_graph,
-                args2,
-                kwargs2,
-            ),
-            example_value=None,
-        )
-        example_value = pytree.tree_map_only(
-            torch.fx.Proxy,
-            lambda a: a.node.meta["example_value"],
-            fwd_out_from_fake.as_proxy(),
-        )
+        fake_mode = tx.output.fake_mode
+        with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
+            fake_args, fake_kwargs = fake_args_kwargs(args, kwargs)
+            example_value = self.fn_cls.apply(*fake_args, **fake_kwargs)
 
         # Speculate subgraph on the backward. We make the
         # bwd tracer a child of the fwd tracer, because backward may rely on
