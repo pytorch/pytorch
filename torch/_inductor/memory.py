@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 import heapq
 import logging
-from typing import Dict, List, Set, Tuple, TYPE_CHECKING, Union
+from typing import Callable, Dict, List, Set, Tuple, TYPE_CHECKING, Union
 
 from torch.utils._ordered_set import OrderedSet
 
@@ -12,19 +12,39 @@ if TYPE_CHECKING:
     from .dependencies import Dep
 
 from .ir import MultiOutputLayout
-from .scheduler import (
-    BaseSchedulerNode,
-    MemoryPlanningInfoForBuffer,
-    MemoryPlanningInfoForNode,
-    NodeUser,
-    OutputNode,
-    SchedulerBuffer,
-)
+
+if TYPE_CHECKING:
+    from .scheduler import BaseSchedulerNode, SchedulerBuffer
+
 from .utils import get_dtype_size
 from .virtualized import V
 
 
-torch_log = logging.getLogger("torch")
+torch_log = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass
+class MemoryPlanningInfoForBuffer:
+    size_alloc: int = 0
+    size_free: int = 0
+    outdegree: int = 0
+    succ_nodes: OrderedSet[BaseSchedulerNode] = dataclasses.field(
+        default_factory=OrderedSet
+    )
+
+
+@dataclasses.dataclass
+class MemoryPlanningInfoForNode:
+    pred_buffers: List[Union[SchedulerBuffer, InputBuffer]] = dataclasses.field(
+        default_factory=list
+    )
+    pred_nodes: List[BaseSchedulerNode] = dataclasses.field(default_factory=list)
+    succ_nodes: List[BaseSchedulerNode] = dataclasses.field(default_factory=list)
+    indegree: int = 0
+    index: int = 0
+    memory_to_free: int = 0
+    size: int = 0
+    measure: int = 0
 
 
 @dataclasses.dataclass
@@ -36,16 +56,6 @@ class InputBuffer:
 
     def get_name(self) -> str:
         return self.dep.name
-
-    def set_users(self, users: List[NodeUser]) -> None:
-        # deduplicate
-        result: Dict[int, NodeUser] = {}
-        for use in users:
-            if id(use.node) in result:
-                result[id(use.node)] = use.merge(result[id(use.node)])
-            else:
-                result[id(use.node)] = use
-        self.users = list(result.values())
 
     def __hash__(self) -> int:
         return hash(self.dep.name)
@@ -66,7 +76,6 @@ def dep_size_hint(dep: Dep) -> int:
 
 def get_freeable_input_buf(
     nodes: List[BaseSchedulerNode],
-    name_to_users: Dict[str, List[NodeUser]],
     graph_inputs: Set[str],
 ) -> Dict[str, InputBuffer]:
     """
@@ -82,9 +91,6 @@ def get_freeable_input_buf(
             ):
                 name_to_input_buf[dep.name] = InputBuffer(dep)
                 name_to_input_buf[dep.name].mpi.size_free = dep_size_hint(dep)
-    # copy user information onto freeable input buffers
-    for input_buf_name, input_buf in name_to_input_buf.items():
-        input_buf.set_users(name_to_users[input_buf_name])
 
     return name_to_input_buf
 
@@ -104,9 +110,12 @@ def compute_size_for_scheduler_buffer(name_to_buf: Dict[str, SchedulerBuffer]) -
         buf1: at creation, 0 bytes allocated, when deleted, 10 bytes freed
         buf2: at creation, 0 bytes allocated, when deleted, 20 bytes freed
     """
+    from .scheduler import BaseSchedulerNode, OutputNode
+
     # compute the size of SchedulerBuffer without MultiOutputLayout layout
     for sched_buf in name_to_buf.values():
         if not isinstance(sched_buf.node.layout, MultiOutputLayout):
+            sched_buf.mpi = MemoryPlanningInfoForBuffer()
             sched_buf.mpi.size_alloc = V.graph.sizevars.size_hint(
                 sched_buf.node.get_numel(), fallback=0
             ) * get_dtype_size(sched_buf.node.get_dtype())
@@ -115,6 +124,7 @@ def compute_size_for_scheduler_buffer(name_to_buf: Dict[str, SchedulerBuffer]) -
     # compute the size of SchedulerBuffer with MultiOutputLayout layout
     for sched_buf in name_to_buf.values():
         if isinstance(sched_buf.node.layout, MultiOutputLayout):
+            sched_buf.mpi = MemoryPlanningInfoForBuffer()
             for user in sched_buf.users:
                 if isinstance(user.node, OutputNode):
                     continue
@@ -240,6 +250,8 @@ def assign_predcessor_and_successor_nodes_to_nodes(
     """
     Assign to each scheduler node its predecessor and successor nodes.
     """
+    from .scheduler import SchedulerBuffer
+
     for node in nodes:
         node.mpi.pred_nodes = list(
             {
@@ -454,11 +466,15 @@ def topological_sort_dfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNo
 
 def reorder_for_peak_memory(
     nodes: List[BaseSchedulerNode],
-    name_to_users: Dict[str, List[NodeUser]],
     name_to_buf: Dict[str, SchedulerBuffer],
     name_to_fused_node: Dict[str, BaseSchedulerNode],
     graph_inputs: Set[str],
     graph_outputs: Set[str],
+    methods: List[Callable[..., List[BaseSchedulerNode]]] = [  # noqa: B006
+        topological_sort_lpmf,
+        topological_sort_bfs,
+        topological_sort_dfs,
+    ],
 ) -> List[BaseSchedulerNode]:
     """
     Try a few heuristics based topological sort algorithms, and pick the one whose
@@ -475,7 +491,7 @@ def reorder_for_peak_memory(
     # preparation --  as nodes are scheduled one at a time, these help
     # keep track of when a buffer can be freed, and when a node can be scheduled
     name_to_input_buf: Dict[str, InputBuffer] = get_freeable_input_buf(
-        nodes, name_to_users, graph_inputs
+        nodes, graph_inputs
     )
     compute_size_for_scheduler_buffer(name_to_buf)
     map_successor_nodes_with_predecessor_buffers(nodes, name_to_input_buf, name_to_buf)
@@ -491,34 +507,21 @@ def reorder_for_peak_memory(
     peak_memory_diff_methods.append(PeakMemoryResult(nodes, estimated_peak_memory))
     torch_log.info("Baseline peak memory: %d", estimated_peak_memory)
 
-    # lpmf based method
-    order_lpmf = topological_sort_lpmf(
-        nodes, name_to_input_buf, name_to_buf, graph_outputs
-    )
-    assert len(order_lpmf) == len(nodes)
-    peak_memory_lpmf, _ = estimate_peak_memory(
-        order_lpmf, name_to_input_buf, graph_outputs
-    )
-    peak_memory_diff_methods.append(PeakMemoryResult(order_lpmf, peak_memory_lpmf))
-    torch_log.info("LPMF peak memory: %d", peak_memory_lpmf)
-
-    # bfs based method
-    order_bfs = topological_sort_bfs(nodes)
-    assert len(order_bfs) == len(nodes)
-    peak_memory_bfs, _ = estimate_peak_memory(
-        order_bfs, name_to_input_buf, graph_outputs
-    )
-    peak_memory_diff_methods.append(PeakMemoryResult(order_bfs, peak_memory_bfs))
-    torch_log.info("BFS peak memory: %d", peak_memory_bfs)
-
-    # dfs based method
-    order_dfs = topological_sort_dfs(nodes)
-    assert len(order_dfs) == len(nodes)
-    peak_memory_dfs, _ = estimate_peak_memory(
-        order_dfs, name_to_input_buf, graph_outputs
-    )
-    peak_memory_diff_methods.append(PeakMemoryResult(order_dfs, peak_memory_dfs))
-    torch_log.info("DFS peak memory: %d", peak_memory_dfs)
+    # other methods
+    for method in methods:
+        try:
+            if method == topological_sort_lpmf:
+                order = method(nodes, name_to_input_buf, name_to_buf, graph_outputs)
+            else:
+                order = method(nodes)
+            assert len(order) == len(nodes)
+            peak_memory, _ = estimate_peak_memory(
+                order, name_to_input_buf, graph_outputs
+            )
+            peak_memory_diff_methods.append(PeakMemoryResult(order, peak_memory))
+            torch_log.info("%s peak memory: %d", method.__name__, peak_memory)
+        except Exception as e:
+            torch_log.error("Failed to reorder for %s: %s", method.__name__, e)
 
     # get the optimal one
     best_result = min(peak_memory_diff_methods, key=lambda x: x.peak_memory)

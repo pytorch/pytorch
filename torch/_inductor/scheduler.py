@@ -26,7 +26,6 @@ from typing import (
     Sequence,
     Set,
     Tuple,
-    TYPE_CHECKING,
     TypeVar,
     Union,
 )
@@ -49,6 +48,7 @@ from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
 from .loop_body import LoopBody
+from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
 from .runtime.runtime_utils import green_text, red_text
 from .sizevars import SimplifyIndexing
 from .utils import (
@@ -67,36 +67,9 @@ from .utils import (
 from .virtualized import V
 
 
-if TYPE_CHECKING:
-    from .memory import InputBuffer
-
 log = logging.getLogger(__name__)
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
-
-
-@dataclasses.dataclass
-class MemoryPlanningInfoForBuffer:
-    size_alloc: int = 0
-    size_free: int = 0
-    outdegree: int = 0
-    succ_nodes: OrderedSet[BaseSchedulerNode] = dataclasses.field(
-        default_factory=OrderedSet
-    )
-
-
-@dataclasses.dataclass
-class MemoryPlanningInfoForNode:
-    pred_buffers: List[Union[SchedulerBuffer, InputBuffer]] = dataclasses.field(
-        default_factory=list
-    )
-    pred_nodes: List[BaseSchedulerNode] = dataclasses.field(default_factory=list)
-    succ_nodes: List[BaseSchedulerNode] = dataclasses.field(default_factory=list)
-    indegree: int = 0
-    index: int = 0
-    memory_to_free: int = 0
-    size: int = 0
-    measure: int = 0
 
 
 @dataclasses.dataclass
@@ -1815,7 +1788,7 @@ class Scheduler:
         # in codegen we only use buf0, never buf1
         self.mutation_renames: Dict[str, str] = {}
 
-        name_to_users = self.compute_dependencies()
+        self.compute_dependencies()
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.dead_node_elimination()
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
@@ -1841,7 +1814,6 @@ class Scheduler:
 
             self.nodes = reorder_for_peak_memory(
                 self.nodes,
-                name_to_users,
                 self.name_to_buf,
                 self.name_to_fused_node,
                 set(V.graph.graph_inputs.keys()),
@@ -1943,7 +1915,7 @@ class Scheduler:
             node for node in self.nodes if node.get_name() not in removed_node_names
         ] + list(fe_nodes)
 
-    def compute_dependencies(self) -> Dict[str, List[NodeUser]]:
+    def compute_dependencies(self) -> None:
         """
         Create dependency edges between nodes, handling aliasing and
         mutation properly.
@@ -2148,8 +2120,6 @@ class Scheduler:
         for node in self.nodes:
             for buf in node.get_outputs():
                 buf.set_users(name_to_users[buf.get_name()].items)
-
-        return {k: v.items for k, v in name_to_users.items()}
 
     def dead_node_elimination(self) -> None:
         """
