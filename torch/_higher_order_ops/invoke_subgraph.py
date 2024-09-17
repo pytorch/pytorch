@@ -23,17 +23,37 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.fx.graph_module import GraphModule
 
 
-# Problems
-# 1) Functionalization needs to happen before partitioning - so probably
-# Autograd key. But also need support for inference, so probably functional
-# tensor as well
-# 2) Decomps are not picked up by the time Autograd key is run. make_renter_fx
-# is not doing the right thing.
-# 3) We need to pass on the partitioner info from the top level to the subgraph.
-# 4) Unclear to me - how is input and output mutation handled? It seems to me,
-# we might need to raise an exception which tells Dynamo to restart and retrace
-# without any invoke_subgraph ops. It might be possible to do this at global
-# level.
+"""
+Problems
+
+- Functionalization needs to happen before partitioning - so probably
+Autograd key. But also need support for inference, so probably functional
+tensor as well
+
+- Do we need DispatchKey.CompositeExplicitAutograd for invoke_subgraph?
+
+- Decomps are not picked up by the time Autograd key is run. make_renter_fx
+is not doing the right thing.
+
+- We need to pass on the partitioner info from the top level to the subgraph.
+
+- Unclear to me - how is input and output mutation handled? It seems to me,
+we might need to raise an exception which tells Dynamo to restart and retrace
+without any invoke_subgraph ops. It might be possible to do this at global
+level.
+
+- How to cache or de-dupe the invoke_subgraph such that it is traced only
+once? It seems that we need some kind of fx-graph cache, at both Dynamo and
+AOTDispatcher level. For AOTDispatcher, this key will be Dynamo subgraph and
+we have to check if this subgraph has already been traced, if yes, use the
+same lifted (must be present as an attr) graph module. For Dynamo, its unclear
+to me. I am not sure if we require this in Dynamo, but I would definitely
+prefer to de-dupe in Dynamo for cleanliness (and possibly ease of
+implementation)
+
+- What happens in inductor? And same de-dupe logic is required in inductor as
+well.
+"""
 
 
 class InvokeSubgraphHOP(HigherOrderOperator):
