@@ -4338,12 +4338,14 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             out_expected = torch.cat(
                 [func(t, dim=(reduce_dim[0] - 1)).unsqueeze(0) for t in nt.unbind()]
             )
+            if keepdim:
+                out_expected = out_expected.unsqueeze(reduce_dim[0])
 
             self.assertFalse(
                 out_actual.is_nested,
                 f"{op_name}(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
             )  # output is a dense tensor
-            self.assertTrue(torch.allclose(out_actual, out_expected))
+            self.assertEqual(out_actual, out_expected)
 
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
@@ -4603,12 +4605,14 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                         for t in nt_transposed.unbind()
                     ]
                 )
+                if keepdim:
+                    out_expected = out_expected.unsqueeze(reduce_dim[0])
 
                 self.assertFalse(
                     out_actual.is_nested,
                     f"{op_name}(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
                 )  # output is a dense tensor
-                self.assertTrue(torch.allclose(out_actual, out_expected, rtol=1e-4))
+                self.assertEqual(out_actual, out_expected)
 
     @dtypes(torch.float32)
     @parametrize(
@@ -7419,8 +7423,6 @@ FORWARD_FAILURES = {
     "jiterator_binary",
     "jiterator_binary_return_by_ref",
     "jiterator_unary",
-    # Bug found: sum() with keepdim=True returns invalid shape
-    "sum",
     # RuntimeError: prod(): keepdim=True must be set for NestedTensor
     "prod",
     # RuntimeError: "jagged_to_padded_dense" not implemented for 'Bool'
@@ -7454,6 +7456,8 @@ BACKWARD_FAILURES = {
     "clone",
     # Calling into torch.ops.aten.size directly
     "masked_select",
+    # NotImplementedError: aten._nested_sum_backward.default. Need to fix the backward pass.
+    "sum",
 }
 
 COMPILE_FORWARD_FAILURES = {
@@ -7461,6 +7465,9 @@ COMPILE_FORWARD_FAILURES = {
     # clone() on non-contiguous with holes NJTs currently use unbind(), leading to
     # data-dependent error in torch.compile
     "clone",
+    # torch._dynamo.exc.Unsupported: data dependent operator: aten._local_scalar_dense.default
+    # for inputs where min / max seqlen are not cached
+    "sum",
 }
 
 COMPARE_TENSOR_COMPONENT_EQUALITY = {
