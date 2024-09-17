@@ -353,7 +353,6 @@ class FSDPParam:
         chunks = _chunk_with_empty(param_data, shard_world_size, dim=shard_dim)
         sharded_param = chunks[shard_rank]
         self.sharded_size = _get_dim0_chunked_size(sharded_param, param_data.size())
-        # TODO: probably need to revisit this stride
         self.contiguous_sharded_stride = make_contiguous_strides_for(self.sharded_size)
         padded_sharded_size = chunks[0].size()  # 0th always padded
         padded_sharded_param = param_data.new_zeros(padded_sharded_size)
@@ -679,8 +678,6 @@ class FSDPParam:
                 sharded_param_data = sharded_param_data.to(
                     self.device, non_blocking=True
                 )
-            # if torch.distributed.get_rank() == 0 and self.fsdp_placement.dim == 1 and "embeddings" in self._param_fqn:
-            #     print(f"{self._param_fqn} {sharded_param_data=}")
             return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             if not ca.compiled_autograd_enabled and hasattr(
