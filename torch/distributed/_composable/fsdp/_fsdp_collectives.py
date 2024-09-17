@@ -1,11 +1,12 @@
 # mypy: allow-untyped-decorators
-from typing import cast, List, NamedTuple, Optional, Tuple, Union
+from typing import Any, cast, List, NamedTuple, Optional, Tuple, Union
 
 import torch
 import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 from torch.distributed.distributed_c10d import ReduceOp
 from torch.distributed.tensor import DTensor
+from torch.utils._contextlib import _DecoratorContextManager
 
 from ._fsdp_common import (
     _get_dim0_padded_size,
@@ -265,9 +266,23 @@ def foreach_all_gather_copy_out(
             fsdp_param.init_all_gather_outputs(
                 all_gather_input_numels, all_gather_input_dtypes, world_size, device
             )  # no-op after 1st call
+            # TODO: Can defer this for params that do not shard on dim-0 to
+            # reduce impact to peak memory.
             fsdp_param.alloc_all_gather_outputs()
     all_gather_output = all_gather_output.view(world_size, -1)
-    gen = (t for fsdp_param in fsdp_params for t in fsdp_param.all_gather_outputs)
+
+    gen: List[torch.Tensor] = []
+    copy_infos: List[Tuple[FSDPParam, List[torch.Tensor]]] = []
+    for fsdp_param in fsdp_params:
+        if fsdp_param.fsdp_placement.dim == 0:
+            gen.extend(fsdp_param.all_gather_outputs)
+        else:
+            param_all_gather_outputs = [
+                torch.empty_like(t) for t in fsdp_param.all_gather_outputs
+            ]
+            gen.extend(param_all_gather_outputs)
+            copy_infos.append((fsdp_param, param_all_gather_outputs))
+
     if all_gather_output.dtype == torch.uint8:
         out = [t.view(world_size, -1).view(torch.uint8) for t in gen]
     else:
@@ -275,6 +290,28 @@ def foreach_all_gather_copy_out(
     torch.ops.fsdp.split_with_sizes_copy(
         all_gather_output, all_gather_input_split_sizes, dim=1, out=out
     )
+    # TODO: In the current implementation, we do not free the
+    # `all_gather_output` buffer until after we do the extra copies, which can
+    # use more peak memory than required. Fixing this is intrusive though.
+    for fsdp_param, param_all_gather_outputs in copy_infos:
+        # TODO: Can share context manager for all tensors.
+        with _unsafe_preserve_version_counters(fsdp_param.all_gather_outputs):
+            for param_all_gather_output, target_all_gather_output in zip(
+                param_all_gather_outputs, fsdp_param.all_gather_outputs
+            ):
+                shard_dim = fsdp_param.fsdp_placement.dim
+                pre_param_size = list(fsdp_param.padded_sharded_param_size)
+                pre_param_size[0] *= world_size
+                chunks = torch.chunk(
+                    param_all_gather_output.view(pre_param_size), world_size, dim=0
+                )
+                post_param_size = list(fsdp_param.padded_sharded_param_size)
+                post_param_size[shard_dim] *= world_size
+                torch.cat(
+                    chunks,
+                    dim=shard_dim,
+                    out=target_all_gather_output.view(post_param_size),
+                )
 
 
 @torch.no_grad()
@@ -317,6 +354,15 @@ def foreach_reduce(
     reduce_scatter_input = torch.empty(
         (reduce_scatter_input_numel,), dtype=reduce_dtype, device=device
     )
+
+    for i, (fsdp_param, unsharded_grad) in enumerate(zip(fsdp_params, unsharded_grads)):
+        shard_dim = fsdp_param.fsdp_placement.dim
+        if shard_dim == 0:
+            continue
+        chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
+        new_unsharded_grad = torch.cat(chunks, dim=0)
+        unsharded_grads[i] = new_unsharded_grad
+
     foreach_reduce_scatter_copy_in(unsharded_grads, reduce_scatter_input, world_size)
     current_stream = torch.cuda.current_stream()
     # Only after the copy-in finishes can we free the gradients
@@ -475,3 +521,16 @@ def _get_gradient_divide_factors(
 def _div_if_needed(tensor: torch.Tensor, div_factor: Optional[float]) -> None:
     if div_factor is not None and div_factor > 1:
         tensor.div_(div_factor)
+
+
+class _unsafe_preserve_version_counters(_DecoratorContextManager):
+    def __init__(self, tensors: List[torch.Tensor]):
+        self.tensors = tensors
+        self.prev_versions = [tensor._version for tensor in tensors]
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(self, *args: Any) -> None:
+        for tensor, prev_version in zip(self.tensors, self.prev_versions):
+            torch._C._autograd._unsafe_set_version_counter(tensor, prev_version)

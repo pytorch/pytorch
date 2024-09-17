@@ -6,7 +6,7 @@ import functools
 import itertools
 import unittest
 from collections import defaultdict
-from typing import Iterable, List, Tuple, Union
+from typing import Iterable, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -19,12 +19,12 @@ from torch.distributed._composable.fsdp import (
     OffloadPolicy,
     register_fsdp_forward_method,
 )
-from torch.distributed._tensor import DTensor, init_device_mesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
     apply_activation_checkpointing,
 )
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -703,6 +703,60 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                 check_sharded_parity(
                     self, ref_model, model, prefixes_to_ignore=prefixes_to_ignore
                 )
+
+
+class TestFullyShardShardPlacementFn(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(8, torch.cuda.device_count())
+
+    @skip_if_lt_x_gpu(2)
+    def test_train_parity_shard_placement_fn_shard_largest_dim(self):
+        torch.manual_seed(42)
+        model_args = ModelArgs(n_layers=3, dropout_p=0.0)
+        model = Transformer(model_args)
+        ref_model = copy.deepcopy(model).cuda()
+        ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
+
+        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+            largest_dim = -1
+            largest_dim_size = -1
+            for dim, dim_size in enumerate(param.shape):
+                if dim_size > largest_dim_size:
+                    largest_dim = dim
+                    largest_dim_size = dim_size
+            return Shard(largest_dim)
+
+        for layer in model.layers:
+            fully_shard(layer, shard_placement_fn=shard_placement_fn)
+        fully_shard(model, shard_placement_fn=shard_placement_fn)
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
+
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            full_param = param.full_tensor()
+            self.assertEqual(full_param, ref_param)
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        for iter_idx in range(5):
+            ref_loss = ref_model(inp).sum()
+            loss = model(inp).sum()
+            self.assertEqual(ref_loss, loss)
+
+            ref_loss.backward()
+            loss.backward()
+            for param in ref_model.parameters():
+                if param.grad is not None:
+                    dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
+
+            ref_optim.step()
+            optim.step()
+            ref_optim.zero_grad()
+            optim.zero_grad()
+
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            full_param = param.full_tensor()
+            self.assertEqual(full_param, ref_param)
 
 
 class TestFullyShardSharedParams(FSDPTest):

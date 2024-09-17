@@ -1,13 +1,14 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, Callable, cast, Dict, List, NamedTuple, Optional, Set, Tuple
 
 import torch
 import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
+from torch.distributed.tensor import Shard
 from torch.profiler import record_function
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
@@ -109,6 +110,7 @@ class FSDPParamGroup:
         mesh_info: FSDPMeshInfo,
         post_forward_mesh_info: Optional[FSDPMeshInfo],
         device: torch.device,
+        shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]],
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
     ):
@@ -121,6 +123,7 @@ class FSDPParamGroup:
                 mesh_info,
                 post_forward_mesh_info,
                 device,
+                shard_placement_fn,
                 mp_policy,
                 offload_policy,
             )

@@ -3,7 +3,7 @@
 import copy
 import itertools
 import unittest
-from typing import List
+from typing import List, Optional
 
 import torch
 import torch.distributed as dist
@@ -991,6 +991,106 @@ class TestFullyShardHSDPBroadcast(FSDPTestMultiThread):
         # Check that we can run an iteration without erroring
         inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
         model(inp).sum().backward()
+
+
+class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    def _init_models(self):
+        torch.manual_seed(42)
+        model_args = ModelArgs(n_layers=3, dropout_p=0.0)
+        model = Transformer(model_args)
+        for param in model.parameters():
+            dist.broadcast(param.detach(), src=0)
+        ref_model = copy.deepcopy(model)
+        return model, ref_model
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_init_1d_shard_placement_fn_shard_largest_dim(self):
+        model, ref_model = self._init_models()
+
+        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+            largest_dim = -1
+            largest_dim_size = -1
+            for dim, dim_size in enumerate(param.shape):
+                if dim_size > largest_dim_size:
+                    largest_dim = dim
+                    largest_dim_size = dim_size
+            assert largest_dim >= 0, f"{param.shape}"
+            return Shard(largest_dim)
+
+        for layer in model.layers:
+            fully_shard(layer, shard_placement_fn=shard_placement_fn)
+        fully_shard(model, shard_placement_fn=shard_placement_fn)
+
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            full_param = param.full_tensor()
+            self.assertEqual(full_param, ref_param)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_init_2d_shard_placement_fn_shard_largest_dim(self):
+        model, ref_model = self._init_models()
+
+        dp_size, tp_size = self.world_size // 2, 2
+        global_mesh = init_device_mesh(
+            "cuda", (dp_size, tp_size), mesh_dim_names=("dp", "tp")
+        )
+        model = Transformer.parallelize(model, global_mesh["tp"], use_seq_parallel=True)
+
+        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+            largest_dim = -1
+            largest_dim_size = -1
+            for dim, dim_size in enumerate(param.shape):
+                if dim_size > largest_dim_size:
+                    largest_dim = dim
+                    largest_dim_size = dim_size
+            assert largest_dim >= 0, f"{param.shape}"
+            return Shard(largest_dim)
+
+        for layer in model.layers:
+            fully_shard(
+                layer, mesh=global_mesh["dp"], shard_placement_fn=shard_placement_fn
+            )
+        fully_shard(
+            model, mesh=global_mesh["dp"], shard_placement_fn=shard_placement_fn
+        )
+
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            full_param = param.full_tensor()
+            self.assertEqual(full_param, ref_param)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_init_2d_shard_placement_fn_shard_diff_dim(self):
+        model, ref_model = self._init_models()
+
+        dp_size, tp_size = self.world_size // 2, 2
+        global_mesh = init_device_mesh(
+            "cuda", (dp_size, tp_size), mesh_dim_names=("dp", "tp")
+        )
+        model = Transformer.parallelize(model, global_mesh["tp"], use_seq_parallel=True)
+
+        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+            if isinstance(param, DTensor):
+                for placement in param.placements:
+                    if isinstance(placement, Shard):
+                        shard_dim = param.ndim - 1 - placement.dim
+                        assert shard_dim >= 0, f"{param.shape}"
+                        return Shard(shard_dim)
+            return Shard(0)
+
+        for layer in model.layers:
+            fully_shard(
+                layer, mesh=global_mesh["dp"], shard_placement_fn=shard_placement_fn
+            )
+        fully_shard(
+            model, mesh=global_mesh["dp"], shard_placement_fn=shard_placement_fn
+        )
+
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            full_param = param.full_tensor()
+            self.assertEqual(full_param, ref_param)
 
 
 if __name__ == "__main__":

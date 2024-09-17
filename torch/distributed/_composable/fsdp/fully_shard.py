@@ -1,12 +1,23 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
-from typing import Any, cast, Dict, Iterable, List, NoReturn, Optional, Type, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Iterable,
+    List,
+    NoReturn,
+    Optional,
+    Type,
+    Union,
+)
 
 import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
-from torch.distributed.tensor import DeviceMesh
+from torch.distributed.tensor import DeviceMesh, Shard
 from torch.distributed.utils import _get_root_modules
 
 from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
@@ -34,6 +45,7 @@ def fully_shard(
     *,
     mesh: Optional[DeviceMesh] = None,
     reshard_after_forward: Union[bool, int] = True,
+    shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]] = None,
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
     offload_policy: OffloadPolicy = OffloadPolicy(),
 ):
@@ -95,6 +107,11 @@ def fully_shard(
             between forward and backward, the registered parameters must be the
             sharded parameters. For ``False`` or an ``int``, this can be done
             by manually resharding via :meth:`reshard`.
+        shard_placement_fn (Optional[Callable[[nn.Parameter], Optional[Shard]]]):
+            This callable can be used to override the sharding placement for a
+            parameter to shard a parameter on a dimension other than dim-0. If
+            this callable returns a ``Shard`` placement (not ``None``), then
+            we will respect that placement (e.g. ``Shard(1)``).
         mp_policy (MixedPrecisionPolicy): This controls the mixed precision
             policy, which offers parameter/reduction mixed precision for this
             module. See :class:`MixedPrecisionPolicy` for details.
@@ -135,6 +152,7 @@ def fully_shard(
             mesh_info,
             post_forward_mesh_info,
             device,
+            shard_placement_fn,
             mp_policy,
             offload_policy,
         )
