@@ -57,26 +57,27 @@ jobs:
         .github/scripts/lintrunner.sh
 
   lintrunner-autoformat:
-    runs-on: ubuntu-latest
-    needs: get-label-type
     if: github.event_name == 'pull_request'
-    steps:
-      - uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-        with:
-          submodules: false
-          fetch-depth: -1
-      - uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
-        with:
-          runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
-          docker-image: pytorch-linux-focal-linter
-          fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha }}
-          script: |
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    needs: get-label-type
+    with:
+      timeout: 120
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      docker-image: pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter
+      # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
+      # to run git rev-parse HEAD~:.ci/docker when a new image is needed
+      fetch-depth: 0
+      submodules: true
+      ref: ${{ github.event.pull_request.head.sha }}
+      script: |
             export ADDITIONAL_LINTRUNNER_ARGS="format"
             .github/scripts/lintrunner.sh
-      - uses: parkerbxyz/suggest-changes@v1
-        with:
-          comment: "Please commit the suggested changes from pytorch's format linter."
+            
+  suggest-autoformat-changes:
+    needs: lintrunner-autoformat
+    uses: parkerbxyz/suggest-changes@v1
+    with:
+      comment: 'Please commit the suggested changes from pytorch's linter.'
 
   quick-checks:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
