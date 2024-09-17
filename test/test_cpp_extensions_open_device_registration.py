@@ -28,10 +28,6 @@ TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
 TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
 
 
-def remove_build_path():
-    torch.utils.cpp_extension.remove_default_build_root()
-
-
 def generate_faked_module():
     def device_count() -> int:
         return 1
@@ -91,7 +87,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        remove_build_path()
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
 
         cls.module = torch.utils.cpp_extension.load(
             name="custom_device_extension",

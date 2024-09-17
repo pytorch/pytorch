@@ -8,10 +8,6 @@ import torch.utils.cpp_extension
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 
 
-def remove_build_path():
-    torch.utils.cpp_extension.remove_default_build_root()
-
-
 def is_fbcode():
     return not hasattr(torch.version, "git_version")
 
@@ -87,7 +83,7 @@ class CppThreadTest(TestCase):
     @classmethod
     def tearDownClass(cls):
         if not is_fbcode():
-            remove_build_path()
+            torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
 
     def setUp(self) -> None:
         if not torch.cuda.is_available():

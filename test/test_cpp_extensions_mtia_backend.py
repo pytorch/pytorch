@@ -23,10 +23,6 @@ TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not Non
 TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
 
 
-def remove_build_path():
-    torch.utils.cpp_extension.remove_default_build_root()
-
-
 @unittest.skipIf(
     IS_ARM64 or not IS_LINUX or TEST_CUDA or TEST_PRIVATEUSE1 or TEST_ROCM or TEST_XPU,
     "Only on linux platform and mutual exclusive to other backends",
@@ -51,11 +47,11 @@ class TestCppExtensionMTIABackend(common.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        remove_build_path()
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
 
     @classmethod
     def setUpClass(cls):
-        remove_build_path()
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
         build_dir = tempfile.mkdtemp()
         # Load the fake device guard impl.
         cls.module = torch.utils.cpp_extension.load(

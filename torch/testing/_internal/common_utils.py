@@ -5312,3 +5312,17 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
         s = re.sub(r"Cannot export model.+\n\n", "", s)
     s = re.sub(r" +$", "", s, flags=re.MULTILINE)
     return s
+
+def remove_cpp_extensions_build_root():
+    """
+    Removes the default root folder under which extensions are built.
+    """
+    torch.utils.cpp_extensions.get_default_build_root()
+    default_build_root = get_default_build_root()
+    if os.path.exists(default_build_root):
+        if IS_WINDOWS:
+            # rmtree returns permission error: [WinError 5] Access is denied
+            # on Windows, this is a workaround
+            subprocess.run(["rm", "-rf", default_build_root], stdout=subprocess.PIPE)
+        else:
+            shutil.rmtree(default_build_root, ignore_errors=True)

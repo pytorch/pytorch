@@ -74,7 +74,7 @@ CUDA_CLANG_VERSIONS: VersionMap = {
     '11.7': (MINIMUM_CLANG_VERSION, (14, 0)),
 }
 
-__all__ = ["get_default_build_root", "remove_default_build_root", "check_compiler_ok_for_platform", "get_compiler_abi_compatibility_and_version", "BuildExtension",
+__all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_compiler_abi_compatibility_and_version", "BuildExtension",
            "CppExtension", "CUDAExtension", "include_paths", "library_paths", "load", "load_inline", "is_ninja_available",
            "verify_ninja_availability", "remove_extension_h_precompiler_headers", "get_cxx_compiler", "check_compiler_is_gcc"]
 # Taken directly from python stdlib < 3.9
@@ -324,19 +324,6 @@ def get_default_build_root() -> str:
     machine won't meet permission issues.
     """
     return os.path.realpath(torch._appdirs.user_cache_dir(appname='torch_extensions'))
-
-def remove_default_build_root():
-    """
-    Removes the default root folder under which extensions are built.
-    """
-    default_build_root = get_default_build_root()
-    if os.path.exists(default_build_root):
-        if IS_WINDOWS:
-            # rmtree returns permission error: [WinError 5] Access is denied
-            # on Windows, this is a workaround
-            subprocess.run(["rm", "-rf", default_build_root], stdout=subprocess.PIPE)
-        else:
-            shutil.rmtree(default_build_root, ignore_errors=True)
 
 def check_compiler_ok_for_platform(compiler: str) -> bool:
     """

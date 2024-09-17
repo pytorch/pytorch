@@ -35,10 +35,6 @@ IS_WINDOWS = sys.platform == "win32"
 IS_LINUX = sys.platform.startswith("linux")
 
 
-def remove_build_path():
-    torch.utils.cpp_extension.remove_default_build_root()
-
-
 # There's only one test that runs gradcheck, run slow mode manually
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionJIT(common.TestCase):
@@ -60,11 +56,11 @@ class TestCppExtensionJIT(common.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        remove_build_path()
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
 
     @classmethod
     def tearDownClass(cls):
-        remove_build_path()
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
 
     def test_jit_compile_extension(self):
         module = torch.utils.cpp_extension.load(

@@ -24,10 +24,6 @@ TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not Non
 TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
 
 
-def remove_build_path():
-    torch.utils.cpp_extension.remove_default_build_root()
-
-
 # Since we use a fake MTIA device backend to test generic Stream/Event, device backends are mutual exclusive to each other.
 # The test will be skipped if any of the following conditions are met:
 @unittest.skipIf(
@@ -60,11 +56,11 @@ class TestCppExtensionStreamAndEvent(common.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        remove_build_path()
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
 
     @classmethod
     def setUpClass(cls):
-        remove_build_path()
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
         build_dir = tempfile.mkdtemp()
         # Load the fake device guard impl.
         src = f"{os.path.abspath(os.path.dirname(__file__))}/cpp_extensions/mtia_extension.cpp"

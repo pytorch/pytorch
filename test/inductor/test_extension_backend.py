@@ -48,10 +48,6 @@ run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 TestCase = test_torchinductor.TestCase
 
 
-def remove_build_path():
-    torch.utils.cpp_extension.remove_default_build_root()
-
-
 @unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
 class ExtensionBackendTests(TestCase):
     module = None
@@ -61,7 +57,7 @@ class ExtensionBackendTests(TestCase):
         super().setUpClass()
 
         # Build Extension
-        remove_build_path()
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
         source_file_path = os.path.dirname(os.path.abspath(__file__))
         source_file = os.path.join(
             source_file_path, "extension_backends/cpp/extension_device.cpp"
@@ -80,7 +76,7 @@ class ExtensionBackendTests(TestCase):
         cls._stack.close()
         super().tearDownClass()
 
-        remove_build_path()
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
 
     def setUp(self):
         torch._dynamo.reset()
