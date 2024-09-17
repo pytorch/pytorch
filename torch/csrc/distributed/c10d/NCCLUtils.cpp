@@ -85,7 +85,7 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
   ++source->ncclCommSplitCounter_;
   comm->rank_ = rank;
   if (!nccl_use_nonblocking()) {
-      comm->initialized_ = true;
+    comm->initialized_ = true;
   }
   return comm;
 }
