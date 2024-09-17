@@ -21,7 +21,7 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._utils import (
-    compute_local_shape,
+    compute_local_shape_and_global_offset,
     compute_local_stride,
     try_find_mesh_from_args,
 )
@@ -484,7 +484,7 @@ class ShardingPropagator:
         expected_input_schema = list(schema.args_schema)
         # adjust shape to be the same as that of the _local_tensor
         # of the DTensor input arg at index 0, which is inferred
-        expected_input_schema[shape_idx] = compute_local_shape(
+        expected_input_schema[shape_idx], _ = compute_local_shape_and_global_offset(
             out_tensor_meta.shape, mesh, spec.placements
         )
 
