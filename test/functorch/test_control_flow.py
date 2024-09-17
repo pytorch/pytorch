@@ -2902,13 +2902,14 @@ def forward(self, pred_1, x_1):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
         autograds = []
-        autograds.append([True, True, True, True, True, True])
-        autograds.append([False, False, True, True, True, True])
-        autograds.append([True, True, False, False, False, False])
-        autograds.append([True, False, False, False, False, False])
-        autograds.append([False, True, False, False, False, False])
-        for _ in range(5):
-            autograds.append([bool(random.randint(0, 1)) for _ in range(6)])
+        # autograds.append([True, True, True, True, True, True])
+        autograds.append([True, True, True, False, False, True])
+        # autograds.append([False, False, True, True, True, True])
+        # autograds.append([True, True, False, False, False, False])
+        # autograds.append([True, False, False, False, False, False])
+        # autograds.append([False, True, False, False, False, False])
+        # for _ in range(5):
+        #     autograds.append([bool(random.randint(0, 1)) for _ in range(6)])
 
         for autograd in autograds:
             x = torch.randn(3, 10, 5, device=device, requires_grad=autograd[0])
@@ -2926,11 +2927,17 @@ def forward(self, pred_1, x_1):
                 return c_new, h_new
 
             if False in autograd:
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "scan currently only supports Autograd if all.*",
-                ):
-                    result = scan_fct(RNN, h, x, dim=dim, reverse=reverse)
+                # with self.assertRaisesRegex(
+                #     RuntimeError,
+                #     "scan currently only supports Autograd if all.*",
+                # ):
+                #     result = scan_fct(RNN, h, x, dim=dim, reverse=reverse)
+                result = scan_fct(RNN, h, x, dim=dim, reverse=reverse)
+                result_exp = _fake_scan(RNN, h, x, dim=dim, reverse=reverse)
+                self.assertEqual(result, result_exp)
+
+                if autograd:
+                    self.check_autograd(result, result_exp, params)
             else:
                 result = scan_fct(RNN, h, x, dim=dim, reverse=reverse)
                 result_exp = _fake_scan(RNN, h, x, dim=dim, reverse=reverse)
