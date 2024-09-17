@@ -46,12 +46,11 @@ jobs:
           { config: "mps_perf_all", shard: 1, num_shards: 1, runner: "macos-m1-14" },
         ]}
 
-  macos-py3-arm64-mps-test:
+  macos-perf-py3-arm64-test:
     name: macos-perf-py3-arm64-mps
-    uses: ./.github/workflows/_mac-test-mps.yml
+    uses: ./.github/workflows/_mac-test.yml
     needs: macos-perf-py3-arm64-build
     with:
-      sync-tag: macos-perf-py3-arm64-test
       build-environment: macos-py3-arm64
       # Same as the build job
       python-version: 3.9.12
