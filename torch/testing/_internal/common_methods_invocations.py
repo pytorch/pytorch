@@ -24439,6 +24439,10 @@ python_ref_db = [
         "_refs.view_as_complex",
         torch_opinfo_name="view_as_complex",
     ),
+    PythonRefInfo(
+        "_refs.split_with_sizes",
+        torch_opinfo_name="split_with_sizes",
+    ),
 ]
 python_ref_db += opinfo.definitions.python_ref_db
 
