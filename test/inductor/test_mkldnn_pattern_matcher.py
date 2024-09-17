@@ -1802,12 +1802,17 @@ class TestPatternMatcher(TestPatternMatcherBase):
                         mod,
                         (v,),
                         [
+                            "torch.ops.onednn.qlinear_pointwise.tensor",
+                            "torch.ops.onednn.qlinear_pointwise.binary",
+                        ]
+                        if config.abi_compatible
+                        else [
                             "op_onednn_qlinear_pointwise_tensor.call",
                             "op_onednn_qlinear_pointwise_binary_tensor.call",
                         ],
                         [],
                         check_quantization=True,
-                        num_include_ops=[2, 2],
+                        num_include_ops=[4, 4] if config.abi_compatible else [2, 2],
                     )
                 else:
                     # For python wrapper

@@ -596,6 +596,9 @@ test_single_dynamo_benchmark() {
 
 test_inductor_micro_benchmark() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  if [[ "${TEST_CONFIG}" == *cpu* ]]; then
+    test_inductor_set_cpu_affinity
+  fi
   python benchmarks/gpt_fast/benchmark.py --output "${TEST_REPORTS_DIR}/gpt_fast_benchmark.csv"
 }
 

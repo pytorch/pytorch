@@ -106,7 +106,13 @@ class SuperVariable(VariableTracker):
         resolved_class = None
         resolved_attr = None
         search_mro = type_to_use.__mro__
-        start_index = search_mro.index(search_type) + 1
+
+        try:
+            start_index = search_mro.index(search_type) + 1
+        except ValueError:
+            # Corner case where the typevar is not in the mro of the objvar
+            # https://github.com/python/cpython/blob/3.11/Objects/typeobject.c#L8843-L8844
+            return getattr(super(search_type, type_to_use), name), None
         # Implemented based on https://github.com/python/cpython/blob/3.11/Objects/typeobject.c#L8812
         # super has its getattro implementation. The key point is that instead of calling getattr, it checks the
         # attribute in the class __dict__
@@ -1189,9 +1195,6 @@ class TypingVariable(VariableTracker):
             )
         unimplemented("typing")
 
-    def python_type(self):
-        return type(self.value)
-
     def as_python_constant(self):
         return self.value
 
@@ -1308,9 +1311,6 @@ class NumpyVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         unimplemented("numpy")
-
-    def python_type(self):
-        return type(self.value)
 
     def as_python_constant(self):
         return self.value
@@ -1485,9 +1485,6 @@ class ConstantLikeVariable(VariableTracker):
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
-
-    def python_type(self):
-        return type(self.value)
 
     def as_python_constant(self):
         return self.value

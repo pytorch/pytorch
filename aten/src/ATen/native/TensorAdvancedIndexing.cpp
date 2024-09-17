@@ -590,9 +590,9 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
     }
   }
 
-  // For CUDA/MPS tensors, force all index tensors to have the same striding to
-  // simplify the CUDA/MPS kernel.
-  if (indices.size() >= 2 && (this->src.device().type() == kCUDA || this->src.device().type() == kMPS)) {
+  // For CUDA/MPS/XPU tensors, force all index tensors to have the same striding to
+  // simplify the CUDA/MPS/XPU kernel.
+  if (indices.size() >= 2 && (this->src.device().type() == kCUDA || this->src.device().type() == kMPS || this->src.device().type() == kXPU)) {
     if (!all_strides_match(indices)) {
       for (auto & indice : indices) {
         indice = indice.contiguous();
@@ -1808,7 +1808,7 @@ void scatter_impl(
   if (index.numel() == 0) return;
 
   auto op = ReductionType::SUM;
-  bool deterministic = globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA;
+  bool deterministic = globalContext().deterministicAlgorithms() && (self.device().type() == DeviceType::CUDA || self.device().type() == DeviceType::XPU);
 
   if (reduce.has_value()) {
     op = get_operator_enum(reduce.value(), use_new_options);
