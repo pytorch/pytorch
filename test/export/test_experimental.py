@@ -327,6 +327,40 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
         )
         joint_ep = _export_forward_backward(ep)
 
+    def test_joint_cifar10_backwards(self) -> None:
+        import torch.nn as nn
+        import torch.nn.functional as F
+
+        # From Pytorch's CIFAR10 example:
+        # https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html
+        class Net(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = nn.Conv2d(3, 6, 5)
+                self.pool = nn.MaxPool2d(2, 2)
+                self.conv2 = nn.Conv2d(6, 16, 5)
+                self.fc1 = nn.Linear(16 * 5 * 5, 120)
+                self.fc2 = nn.Linear(120, 84)
+                self.fc3 = nn.Linear(84, 10)
+                self.loss = nn.CrossEntropyLoss()
+
+            def forward(self, x, labels):
+                x = self.pool(F.relu(self.conv1(x)))
+                x = self.pool(F.relu(self.conv2(x)))
+                x = torch.flatten(x, 1)  # flatten all dimensions except batch
+                x = F.relu(self.fc1(x))
+                x = F.relu(self.fc2(x))
+                x = self.fc3(x)
+                return self.loss(x, labels)
+
+        net = Net()
+        x = torch.randn(4, 3, 32, 32)
+        labels = torch.ones(4, dtype=torch.int64)
+        inputs = (x, labels)
+
+        ep = export(net, inputs)
+        _export_forward_backward(ep)
+
 
 if __name__ == "__main__":
     run_tests()

@@ -1295,7 +1295,8 @@ https://github.com/pytorch/pytorch/issues/101192
                     assert grad is None
             return *fw_outs, *output_gradients
 
-        fx_g = make_fx(flattened_joint)(*full_args)
+        flattened_joint._orig_mod = fx_g
+        fx_g = make_fx(flattened_joint, record_module_stack=True)(*full_args)
 
     user_args_flat = pytree.arg_tree_leaves(*args, **kwargs)
     return fx_g, create_graph_signature(
