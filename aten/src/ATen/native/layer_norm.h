@@ -112,12 +112,6 @@ Tensor rms_norm_symint(
     const std::optional<Tensor>& weight_opt /* optional */,
     std::optional<double> eps);
 
-Tensor rms_norm(
-    const Tensor& input,
-    IntArrayRef normalized_shape,
-    const std::optional<Tensor>& weight_opt /* optional */,
-    std::optional<double> eps);
-
 using forward_fn = void (*)(
     const Tensor& /* X */,
     const Tensor& /* gamma */,
