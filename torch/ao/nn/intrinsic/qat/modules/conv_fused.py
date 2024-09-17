@@ -203,7 +203,21 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         bias_shape = [1] * len(self.weight.shape)
         bias_shape[1] = -1
 
-        if self.bn.training:
+        if not self.bn.training:
+            # fused conv + bn without bias using bn running statistics
+            running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
+            scale_factor = self.bn.weight / running_std
+            scaled_weight = self.weight_fake_quant(
+                self.weight * scale_factor.reshape(weight_shape)
+            )
+            # fused conv without bias for inference: (r * W / running_std) * X
+            conv_bn = self._conv_forward(input, scaled_weight, zero_bias)
+
+            fused_mean = self.bn.running_mean - (
+                self.bias if self.bias is not None else 0
+            )
+            fused_std = running_std
+        else:
             # needed to compute batch mean/std
             conv_out = self._conv_forward(input, self.weight, zero_bias)
             # update bn statistics
@@ -215,16 +229,15 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
                 )
                 self.bn(conv_out_bias)
 
-        # fused conv + bn without bias using bn running statistics
-        running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
-        scale_factor = self.bn.weight / running_std
-        scaled_weight = self.weight_fake_quant(
-            self.weight * scale_factor.reshape(weight_shape)
-        )
-        # fused conv without bias for inference: (r * W / running_std) * X
-        conv_bn = self._conv_forward(input, scaled_weight, zero_bias)
+            # fused conv + bn without bias using bn running statistics
+            running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
+            scale_factor = self.bn.weight / running_std
+            scaled_weight = self.weight_fake_quant(
+                self.weight * scale_factor.reshape(weight_shape)
+            )
+            # fused conv without bias for inference: (r * W / running_std) * X
+            conv_bn = self._conv_forward(input, scaled_weight, zero_bias)
 
-        if self.bn.training:
             avg_dims = [0] + list(range(2, len(self.weight.shape)))
             batch_mean = conv_out.mean(avg_dims)  # type: ignore[possibly-undefined]
             batch_var = torch.square(conv_out - batch_mean.reshape(bias_shape)).mean(
@@ -239,11 +252,6 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
 
             fused_mean = batch_mean
             fused_std = batch_std
-        else:
-            fused_mean = self.bn.running_mean - (
-                self.bias if self.bias is not None else 0
-            )
-            fused_std = running_std
 
         # fused bias = beta - r * mean / std
         fused_bias = self.bn.bias - self.bn.weight * fused_mean / fused_std
@@ -563,7 +571,7 @@ class ConvBnReLU1d(ConvBn1d):
         )
 
     def forward(self, input):
-        return F.relu(ConvBn1d._forward(self, input))
+        return F.relu(self._forward(input))
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
@@ -760,7 +768,7 @@ class ConvBnReLU2d(ConvBn2d):
         )
 
     def forward(self, input):
-        return F.relu(ConvBn2d._forward(self, input))
+        return F.relu(self._forward(input))
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
