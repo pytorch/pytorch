@@ -163,7 +163,6 @@ def run_functionalized_fw_and_collect_metadata(
         # It doesn't matter if we run this under predispatch or not because it is
         # only for figuring out metadata
         mode = FunctionalTensorMode(_allow_token_discovery=True)
-        fake_mode = detect_fake_mode()
         with disable_above, mode:
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
@@ -171,9 +170,8 @@ def run_functionalized_fw_and_collect_metadata(
             # We didn't do any tracing, so we don't need to process the
             # unbacked symbols, they will just disappear into the ether.
             # Also, prevent memoization from applying.
-            if fake_mode:
-                if (shape_env := fake_mode.shape_env):
-                    shape_env.pending_fresh_unbacked_symbols.clear()
+            if (fake_mode := detect_fake_mode()) and (shape_env := fake_mode.shape_env):
+                shape_env.pending_fresh_unbacked_symbols.clear()
                 fake_mode.epoch += 1
                 fake_mode.reset_nt_tensor_id_counter()
 

@@ -3439,7 +3439,6 @@ class ShapeEnv:
     def create_unbacked_symbool(self):
         """Create a symbolic boolean without a hint value
         """
-        breakpoint()
         symbol: sympy.Symbol = make_symbol(SymT.UNBACKED_INT, next(self.unbacked_symint_counter), integer=True)
         if not self._ignore_fresh_unbacked_symbols_tls():
             self.pending_fresh_unbacked_symbols.append(symbol)

@@ -234,8 +234,15 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         isinstance(o, torch.Tensor) for o in operands
     ), "Cond operands must be a list of tensors"
 
-    true_graph = reenter_make_fx(true_fn)(*operands)
-    false_graph = reenter_make_fx(false_fn)(*operands)
+    suppress_pending = contextlib.nullcontext()
+    if (
+        fake_mode := detect_fake_mode()
+        and shape_env := fake_mode.shape_env
+    ):
+        suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
+    with suppress_pending:
+        true_graph = reenter_make_fx(true_fn)(*operands)
+        false_graph = reenter_make_fx(false_fn)(*operands)
 
     true_outs = []
     false_outs = []
@@ -392,6 +399,16 @@ class CondAutogradOp(torch.autograd.Function):
 
 @cond_op.py_impl(DispatchKey.Autograd)
 def cond_autograd(pred, true_fn, false_fn, operands):
+    suppress_pending = contextlib.nullcontext()
+    if (
+        fake_mode := detect_fake_mode()
+        and shape_env := fake_mode.shape_env
+    ):
+        # I guess we should clear unbacked symbols before the 1st make_fx call for cond,
+        # not sure where to put it.
+        shape_env.pending_fresh_unbacked_symbols.clear()
+        suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
+
     # A shortcut for the case where all inputs don't require gradient,
     # we skip tracing the forward and backward graph.
     if pytree.tree_all_only(
@@ -399,15 +416,16 @@ def cond_autograd(pred, true_fn, false_fn, operands):
         lambda t: not t.requires_grad,  # type: ignore[union-attr]
         (pred, operands),
     ):
-        with torch._C._AutoDispatchBelowAutograd():
+        with suppress_pending, torch._C._AutoDispatchBelowAutograd():
             return cond_op(pred, true_fn, false_fn, operands)
 
-    (
-        fw_true_graph,
-        fw_false_graph,
-        joint_true_graph,
-        joint_false_graph,
-    ) = create_fw_bw_graph_branches(true_fn, false_fn, *operands)
+    with suppress_pending:
+        (
+            fw_true_graph,
+            fw_false_graph,
+            joint_true_graph,
+            joint_false_graph,
+        ) = create_fw_bw_graph_branches(true_fn, false_fn, *operands)
     flat_out = CondAutogradOp.apply(
         pred,
         fw_true_graph,
@@ -457,6 +475,7 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
 def cond_func(ctx, pred, true_fn, false_fn, inputs):
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_pred = ctx.unwrap_tensors(pred)
+
     with ctx.redispatch_to_next() as m:
         functional_true = ctx.functionalize(_maybe_run_with_interpreter(true_fn))
         functional_false = ctx.functionalize(_maybe_run_with_interpreter(false_fn))

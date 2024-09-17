@@ -367,10 +367,9 @@ class TestExport(TestCase):
         class Foo(torch.nn.Module):
             def forward(self, x):
                 a = bool(x.eq(0.1).any())
-                # b = bool(x.eq(0.1).all())
-                # c = bool(x.eq(0.1).any().item())
-                # return a + b + c
-                return a
+                b = bool(x.eq(0.1).all())
+                c = bool(x.eq(0.1).any().item())
+                return a + b + c
 
         model = Foo()
         inputs = (torch.randn(128),)
