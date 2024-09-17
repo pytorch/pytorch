@@ -835,12 +835,11 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_inductor_fullgraph_True(self):
-        fullgraph = True
-        for all_requires_grad, activation_checkpoint in itertools.product(
-            [True, False], [True, False]
+        for fullgraph, all_requires_grad, activation_checkpoint in itertools.product(
+            [True], [True, False], [True, False]
         ):
             log.warning(
-                f"all_requires_grad={all_requires_grad}, activation_checkpoint={activation_checkpoint}"  # noqa: G004, G001
+                f"fullgraph={fullgraph}, all_requires_grad={all_requires_grad}, activation_checkpoint={activation_checkpoint}"  # noqa: G004, G001
             )
             with self._reinplace_all_gather_with_optional_checks(
                 fullgraph
@@ -944,7 +943,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             [True, False], [False]
         ):
             log.warning(
-                f"all_requires_grad={all_requires_grad}, activation_checkpoint={activation_checkpoint}"  # noqa: G004, G001
+                f"fullgraph={fullgraph}, all_requires_grad={all_requires_grad}, activation_checkpoint={activation_checkpoint}"  # noqa: G004, G001
             )
             with self._maybe_add_graph_break_to_sdpa(fullgraph):
                 _, triton_codes = run_and_get_code(
