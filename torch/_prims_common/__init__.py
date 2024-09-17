@@ -921,7 +921,31 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
         # Convert to list to produce a compatible error message with core
         # PyTorch, which prints sequences in square brackets.
         shape = list(shape)
+
+        from torch.fx.experimental.sym_node import SymNode
+        from torch.utils._sympy.functions import CleanDiv
+
         shape[dim] = numel // newsize
+        if isinstance(newsize, torch.SymInt):
+            # we now know that every component of the newsize multiplication must be >= 1
+            if newsize.node.shape_env is not None:
+                newsize.node.shape_env._constrain_range_for_size(
+                    newsize.node.expr, min=1, max=None
+                )
+                for s in newsize.node.expr.args:
+                    newsize.node.shape_env._constrain_range_for_size(s, min=1, max=None)
+
+            # Specify that this is a CleanDiv and not just a FloorDiv
+            old_node = shape[dim].node
+            shape[dim].node = SymNode(
+                expr=CleanDiv(*old_node.expr.args),
+                shape_env=old_node.shape_env,
+                pytype=old_node.pytype,
+                hint=old_node.hint,
+                constant=old_node.constant,
+                fx_node=old_node.fx_node,
+            )
+
         # NB: This is pretty important when you have unbacked SymInts.
         # Suppose you have (i0, 12) resizing into (2, -1, 12).  The old
         # range for i0 is typically [2, inf], which means if you divide

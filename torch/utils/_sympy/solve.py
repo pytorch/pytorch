@@ -3,7 +3,7 @@ from typing import Dict, Optional, Tuple, Type
 
 import sympy
 
-from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.functions import CleanDiv, FloorDiv
 
 
 log = logging.getLogger(__name__)
@@ -117,8 +117,12 @@ def _try_isolate_lhs(
         # That is because we don't know whether we have mirror the operation or not.
         if not (isinstance(e, INEQUALITY_TYPES) and other.is_negative is None):
             # Divide both sides by 'other'.
-            lhs = lhs / other
-            rhs = rhs / other
+            if lhs.is_integer and rhs.is_integer and other.is_integer:
+                lhs = CleanDiv(lhs, other)
+                rhs = CleanDiv(rhs, other)
+            else:
+                lhs = lhs / other
+                rhs = rhs / other
 
             # If 'e' is an inequality and 'other' is negative, we have to
             # mirror the expression.
@@ -127,6 +131,26 @@ def _try_isolate_lhs(
 
             assert op is not None
             e = op(lhs, rhs)
+
+    ################################################################################
+    # left-hand side is CleanDiv
+    ################################################################################
+    if (
+        isinstance(e, sympy.Eq)
+        and isinstance(e.lhs, CleanDiv)
+        and e.lhs.is_integer
+        and e.rhs.is_integer
+        and e.lhs.has(thing)
+    ):
+        numer, denom = e.lhs.args
+        thing_in_numer = numer.has(thing)
+        thing_in_denom = denom.has(thing)
+
+        # only support thing in denominator for now
+        if thing_in_denom and thing_in_numer != thing_in_denom:
+            return _try_isolate_lhs(
+                sympy.Eq(denom, CleanDiv(numer, e.rhs)), thing, floordiv_inequality
+            )
 
     ################################################################################
     # left-hand side is FloorDiv

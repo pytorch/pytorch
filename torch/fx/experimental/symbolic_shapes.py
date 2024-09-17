@@ -4933,7 +4933,11 @@ class ShapeEnv:
         if not expr.has(Mod):
             try:
                 floor_div_atoms = lhs.atoms(FloorDiv).union(rhs.atoms(FloorDiv))
-                if len(floor_div_atoms) > 0 and any(a.divisor != 1 for a in floor_div_atoms):
+                if (
+                    len(floor_div_atoms) > 0 and
+                    # NB: CleanDivs are supported but not non-trivial FloorDivs
+                    any(not isinstance(a, CleanDiv) and a.divisor != 1 for a in floor_div_atoms)
+                ):
                     raise NotImplementedError
 
                 # Never replace unbacked symbols with other unbacked symbols.
@@ -4967,20 +4971,7 @@ class ShapeEnv:
                     self._set_replacement(rhs, self._find(lhs), "trivial_rhs")
                 else:
                     r = try_solve(expr, free[0], floordiv_inequality=False)
-
-                    def _sym_ok(t):
-                        is_reciprocal = (
-                            isinstance(t, sympy.Pow) and
-                            t.args[1] == -1
-                        )
-                        is_mul_w_reciprocal = (
-                            isinstance(t, sympy.Mul) and
-                            isinstance(t.args[1], sympy.Pow) and
-                            t.args[1].args[1] == -1
-                        )
-                        return t.is_integer or is_reciprocal or is_mul_w_reciprocal
-
-                    if r is not None and all(_sym_ok(t) for t in sympy.preorder_traversal(r[1])):
+                    if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
                         new_var = self._find(r[1])
                         ok = len(free_unbacked_symbols(new_var)) == 0
                         if ok:

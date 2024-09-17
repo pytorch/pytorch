@@ -23,6 +23,7 @@ from torch.nested._internal.nested_tensor import (
     nested_view_from_values_offsets,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     NestedTensorTestCase,
     parametrize,
@@ -1799,8 +1800,10 @@ class GraphModule(torch.nn.Module):
 
         fn(torch.ones(4), x, torch.ones(4))
 
-    def test_ephemeral_source_symbol_evaporates_with_slice_view(self):
-        @torch.compile(backend="eager", dynamic=True)
+    @parametrize("dynamic", [False, True])
+    def test_ephemeral_source_symbol_evaporates_with_slice_view(self, dynamic):
+        # See https://github.com/pytorch/pytorch/pull/133337#issuecomment-2302417084
+        @torch.compile(backend="eager", dynamic=dynamic)
         def f(t):
             return t._base + 1
 
@@ -1808,6 +1811,32 @@ class GraphModule(torch.nn.Module):
         x = TwoTensor(x_a, x_a.clone())
         out = f(x[3])
         self.assertEqual(out.shape, x_a.shape)
+
+    # TODO: Investigate why this fails for view(-1) when dynamic=True!
+    # AssertionError: s0 (could be from ["L['x']._base.size()[0]",
+    # "L['x']._base.a.size()[0]", "L['x']._base.b.size()[0]"]) not in {}.
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: params["dynamic"] and params["infer_all"],
+    )
+    @parametrize("dynamic", [False, True])
+    @parametrize("infer_all", [False, True])
+    def test_ephemeral_source_symbol_evaporates_with_inferred_size_view(
+        self, dynamic, infer_all
+    ):
+        # See https://github.com/pytorch/pytorch/issues/128649
+        def f(x):
+            return x * 2
+
+        f_compiled = torch.compile(f, backend="aot_eager", dynamic=dynamic)
+
+        a, b = (torch.randn(4, 15) for _ in range(2))
+        t = TwoTensor(a, b)
+
+        t_view = t.view(-1) if infer_all else t.view(-1, 3, 5)
+        out_ref = f(t_view)
+        out_test = f_compiled(t_view)
+        self.assertEqual(out_ref, out_test)
 
 
 instantiate_parametrized_tests(SubclassTests)
