@@ -18,12 +18,7 @@ from torch._jit_internal import (
 from torch._torch_docs import reproducibility_notes, sparse_support_notes, tf32_notes
 from torch.nn import _reduction as _Reduction, grad  # noqa: F401
 from torch.nn.modules.utils import _list_with_default, _pair, _single, _triple
-from torch.overrides import (
-    handle_torch_function,
-    has_torch_function,
-    has_torch_function_unary,
-    has_torch_function_variadic,
-)
+from torch.overrides import handle_torch_function, has_torch_function, has_torch_function_unary, has_torch_function_variadic
 
 
 if TYPE_CHECKING:

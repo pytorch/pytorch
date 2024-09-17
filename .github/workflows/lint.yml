@@ -56,6 +56,49 @@ jobs:
         export ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT"
         .github/scripts/lintrunner.sh
 
+
+
+  
+
+  lintrunner-autoformat:
+    runs-on: "linux.2xlarge"
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Clean workspace
+        run: |
+          set -euxo pipefail
+          if [[ "${NO_SUDO}" == "false" ]]; then
+            echo "::group::Cleanup with-sudo debug output"
+            sudo rm -rfv "${GITHUB_WORKSPACE}"
+          else
+            echo "::group::Cleanup no-sudo debug output"
+            rm -rfv "${GITHUB_WORKSPACE}"
+          fi
+
+          mkdir -p "${GITHUB_WORKSPACE}"
+          echo "::endgroup::"
+
+      - name: Checkout pytorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Setup Linux
+        uses: ./test-infra/.github/actions/setup-linux
+      - name: Setup miniconda
+        # You could potentially lock this down to a specific hash as well
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        with:
+          python_version: "3.10"
+      - name: Run lintrunner-clang (nonretryable)
+        run: |
+          export ADDITIONAL_LINTRUNNER_ARGS="format"
+          .github/scripts/lintrunner.sh
+      - name: Suggest changes
+        uses: parkerbxyz/suggest-changes@v1
+        with:
+          comment: "Please commit the suggested changes from pytorch's linter."
+
   quick-checks:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     needs: get-label-type
