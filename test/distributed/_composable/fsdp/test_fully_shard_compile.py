@@ -489,18 +489,18 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             ],
         ):
             losses_compiled = test_compiled()
-        # losses_eager = test_eager()
-        # if not self.fake_pg:
-        #     for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
-        #         self.assertTrue(
-        #             torch.allclose(
-        #                 torch.tensor(loss_compiled),
-        #                 torch.tensor(loss_eager),
-        #                 rtol=1e-5,
-        #                 atol=1e-8,
-        #             ),
-        #             f"{loss_compiled} vs {loss_eager}",
-        #         )
+        losses_eager = test_eager()
+        if not self.fake_pg:
+            for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
+                self.assertTrue(
+                    torch.allclose(
+                        torch.tensor(loss_compiled),
+                        torch.tensor(loss_eager),
+                        rtol=1e-5,
+                        atol=1e-8,
+                    ),
+                    f"{loss_compiled} vs {loss_eager}",
+                )
 
     def _create_simple_mlp_factory_fns(self):
         hidden_dim = 16

@@ -127,7 +127,6 @@ def _maybe_set_eval_frame(callback: DynamoCallback, context_id: str, state: str)
                     if context_id_to_warmup_count[context_id] < config.warmup_runs:
                         return set_eval_frame(None)
                     else:
-                        # raise Exception()
                         return set_eval_frame(callback)
                 elif state == "exit":
                     if context_id_to_warmup_count[context_id] < config.warmup_runs:
