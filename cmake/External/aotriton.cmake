@@ -41,16 +41,31 @@ if(NOT __AOTRITON_INCLUDED)
     file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/.ci/docker/aotriton_version.txt" __AOTRITON_CI_INFO)
     list(GET __AOTRITON_CI_INFO 0 __AOTRITON_VER)
     list(GET __AOTRITON_CI_INFO 1 __AOTRITON_MANY)
-    list(GET __AOTRITON_CI_INFO 2 __AOTRITON_ROCM)
+    list(GET __AOTRITON_CI_INFO 2 __AOTRITON_ROCM_RANGE)
     list(GET __AOTRITON_CI_INFO 3 __AOTRITON_COMMIT)
     list(GET __AOTRITON_CI_INFO 4 __AOTRITON_SHA256)
     list(GET __AOTRITON_CI_INFO 5 __AOTRITON_Z)
-    set(__AOTRITON_ROCM "rocm${ROCM_VERSION_DEV_MAJOR}.${ROCM_VERSION_DEV_MINOR}")
+    string(FIND ${__AOTRITON_ROCM_RANGE} "-" __AOTRITON_ROCM_SEP)
+    # len("rocm") == 4
+    math(EXPR __AOTRITON_ROCM_LOW_LEN "${__AOTRITON_ROCM_SEP} - 4")
+    # len("-rocm") == 5
+    math(EXPR __AOTRITON_ROCM_HIGH_POS "${__AOTRITON_ROCM_SEP} + 5")
+    string(SUBSTRING ${__AOTRITON_ROCM_RANGE} 4 ${__AOTRITON_ROCM_LOW_LEN} __AOTRITON_ROCM_LOW)
+    string(SUBSTRING ${__AOTRITON_ROCM_RANGE} ${__AOTRITON_ROCM_HIGH_POS} -1 __AOTRITON_ROCM_HIGH)
+    set(__AOTRITON_SYSTEM_ROCM "${ROCM_VERSION_DEV_MAJOR}.${ROCM_VERSION_DEV_MINOR}")
+    if(__AOTRITON_SYSTEM_ROCM VERSION_LESS __AOTRITON_ROCM_LOW)
+      set(__AOTRITON_ROCM ${__AOTRITON_ROCM_LOW})
+    elseif(__AOTRITON_SYSTEM_ROCM VERSION_GREATER __AOTRITON_ROCM_HIGH)
+      set(__AOTRITON_ROCM ${__AOTRITON_ROCM_HIGH})
+    else()
+      set(__AOTRITON_ROCM ${__AOTRITON_SYSTEM_ROCM})
+    endif()
+    message("use: ${__AOTRITON_ROCM}")
     set(__AOTRITON_ARCH "x86_64")
     string(CONCAT __AOTRITON_URL "https://github.com/ROCm/aotriton/releases/download/"
                                  "${__AOTRITON_VER}/aotriton-"
                                  "${__AOTRITON_VER}-${__AOTRITON_MANY}"
-                                 "_${__AOTRITON_ARCH}-${__AOTRITON_ROCM}"
+                                 "_${__AOTRITON_ARCH}-rocm${__AOTRITON_ROCM}"
                                  "-shared.tar.${__AOTRITON_Z}")
     ExternalProject_Add(aotriton_external
       URL "${__AOTRITON_URL}"
