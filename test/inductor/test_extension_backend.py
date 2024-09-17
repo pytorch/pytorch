@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import os
+import shutil
 import sys
 import unittest
 
@@ -49,7 +50,12 @@ TestCase = test_torchinductor.TestCase
 
 
 def remove_build_path():
-    torch.utils.cpp_extension.remove_default_build_root()
+    if sys.platform == "win32":
+        # Not wiping extensions build folder because Windows
+        return
+    default_build_root = torch.utils.cpp_extension.get_default_build_root()
+    if os.path.exists(default_build_root):
+        shutil.rmtree(default_build_root, ignore_errors=True)
 
 
 @unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
