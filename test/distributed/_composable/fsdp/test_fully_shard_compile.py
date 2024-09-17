@@ -659,8 +659,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     )
                 )
             if fullgraph:
-                self.assertTrue(
-                    len(triton_codes) == 2,
+                self.assertEqual(
+                    len(triton_codes),
+                    2,
                     "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
                 )
                 fwd_code = triton_codes[0]
@@ -737,8 +738,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         )
         # TODO: when fullgraph=False and there is graph break in FWD graph,
         # there are several recompiles, need to figure out why.
-        self.assertTrue(
-            len(triton_codes) > 2,
+        self.assertGreater(
+            len(triton_codes),
+            2,
             "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
         )
 
@@ -875,8 +877,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     )
                 )
             if fullgraph:
-                self.assertTrue(
-                    len(triton_codes) == 2,
+                self.assertEqual(
+                    len(triton_codes),
+                    2,
                     "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
                 )
                 fwd_code = triton_codes[0]
@@ -963,8 +966,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 )
             # TODO: when fullgraph=False and there is graph break in FWD graph,
             # there are several recompiles, need to figure out why.
-            self.assertTrue(
-                len(triton_codes) > 2,
+            self.assertGreater(
+                len(triton_codes),
+                2,
                 "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
             )
 
