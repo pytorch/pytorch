@@ -473,6 +473,11 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         torch._dynamo.reset()
         torch._dynamo.compiled_autograd.reset()
         with torch._dynamo.config.patch(
+            # NOTE: Setting fullgraph=False for forward (to allow graph-breaks) is a common scenario
+            # and in that case we need a standalone Compiled Autograd ctx that has fullgraph=True for backward.
+            # Hence here we explicitly set compiled_autograd=False and use the standalone Compiled Autograd ctx
+            # `maybe_compiled_autograd_ctx` created in `run_iters()`.
+            compiled_autograd=False,
             inline_inbuilt_nn_modules=True,
             skip_fsdp_hooks=False,
             warmup_runs=1,

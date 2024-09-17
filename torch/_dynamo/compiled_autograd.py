@@ -9,6 +9,7 @@ from torch._dynamo.external_utils import (
     call_hook,
     FakeCompiledAutogradEngine,
 )
+import logging
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import counters, lazy_format_graph_code, set_locals_to_steal
 from torch._logging import getArtifactLogger, trace_structured
@@ -36,6 +37,7 @@ if TYPE_CHECKING:
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
+log = logging.getLogger(__name__)
 
 
 def snapshot_verbose_logging_enabled():
@@ -502,6 +504,7 @@ class _EnableContext:
         self.set_multithreading_enabled_ctx_mgr = None
 
     def __enter__(self):
+        log.warn(f"enter: self.warmup_count: {self.warmup_count}, torch._dynamo.config.warmup_runs: {torch._dynamo.config.warmup_runs}")
         if self.warmup_count >= torch._dynamo.config.warmup_runs:
             self.prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
                 functools.partial(AutogradCompilerInstance, self.compiler_fn)
@@ -520,6 +523,7 @@ class _EnableContext:
             pass
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        log.warn(f"exit: self.warmup_count: {self.warmup_count}, torch._dynamo.config.warmup_runs: {torch._dynamo.config.warmup_runs}")
         if self.warmup_count < torch._dynamo.config.warmup_runs:  # type: ignore[attr-defined]
             self.warmup_count += 1  # type: ignore[attr-defined]
         else:
