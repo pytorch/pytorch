@@ -193,8 +193,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif isinstance(obj, types.ClassMethodDescriptorType):
             # e.g.: inspect.getattr_static(dict, "fromkeys")
             #       inspect.getattr_static(itertools.chain, "from_iterable")
-            value = obj.__get__(None, self.value)
-            return VariableTracker.create(tx, value, source)
+            func = obj.__get__(None, self.value)
+            return VariableTracker.create(tx, func, source)
         elif source:
             # __mro__ is a member in < 3.12, an attribute in >= 3.12
             if inspect.ismemberdescriptor(obj) or (
@@ -1201,11 +1201,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             else key.as_python_constant()
         )
 
-        value = collections.OrderedDict.__getitem__(
-            self.value, key.as_python_constant()
+        return VariableTracker.create(
+            tx,
+            collections.OrderedDict.__getitem__(self.value, key.as_python_constant()),
+            self.source and ODictGetItemSource(self.source, index),
         )
-        source = ODictGetItemSource(self.source, index)
-        return VariableTracker.create(tx, value, source)
 
 
 class FrozenDataClassVariable(UserDefinedObjectVariable):
@@ -1219,7 +1219,9 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         for field in fields(value):
             if hasattr(value, field.name):
                 field_map[field.name] = VariableTracker.create(
-                    tx, getattr(value, field.name), AttrSource(source, field.name)
+                    tx,
+                    getattr(value, field.name),
+                    source and AttrSource(source, field.name),
                 )
 
         return FrozenDataClassVariable(value, fields=field_map, source=source)
