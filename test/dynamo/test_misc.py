@@ -3380,6 +3380,21 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(same(obj41.y, obj42.y))
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_thread_local_setattr(self):
+        from threading import local
+
+        loc = local()
+
+        @torch.compile(fullgraph=True)
+        def fn(x, l):
+            l.x = x
+            return x + 1
+
+        x = torch.ones(2, 2)
+        fn(x, loc)
+
+        self.assertTrue(loc.x is x)
+
     def test_user_defined_class_name(self):
         class MyClassFoo:
             pass
@@ -10430,6 +10445,21 @@ fn
         c2 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c2), 0)
 
+    def test_guard_size_oblivious_simplification(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            u0, u1 = x.tolist()
+            torch._check_is_size(u0)
+            torch._check_is_size(u1)
+            torch._check((2 * u0) % (u0 + u1) == 0)
+            torch._check((2 * u0) // (u0 + u1) != 0)
+            if guard_size_oblivious((2 * u0) // (u0 + u1) == 0):
+                return torch.tensor(True)
+            else:
+                return torch.tensor(False)
+
+        fn(torch.tensor([3, 3]))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_guard_size_oblivious(self):
         # This code, in fact, does NOT work in eager
@@ -11302,6 +11332,40 @@ fn
         self.assertEqual(r.x, torch.ones(2, 2))
         self.assertEqual(r.y, torch.ones(2, 2) + 1)
         self.assertEqual(cnts.frame_count, 1)
+
+    def test_getattrvariable_as_python_constant(self):
+        from torch._dynamo.variables.misc import GetAttrVariable
+
+        @torch.compile(backend="eager")
+        def fn(x, rand1):
+            random.Random().setstate(rand1.getstate())
+            return x + rand1.random()
+
+        def get_rng(x):
+            rand1 = random.Random(1)
+            orig_random = rand1.random
+            rand1.random = lambda: orig_random()
+            return rand1
+
+        as_python_constant = GetAttrVariable.as_python_constant
+        calls = []
+        x = torch.randn(3, 3)
+
+        def as_python_constant_append(self):
+            x = as_python_constant(self)
+            calls.append(x)
+            return x
+
+        GetAttrVariable.as_python_constant = as_python_constant_append
+        try:
+            actual = fn(x, get_rng())
+        finally:
+            GetAttrVariable.as_python_constant = as_python_constant
+
+        expected = fn.__wrapped__(x, get_rng())
+        self.assertEqual(actual, expected)
+        self.assertTrue(calls)
+        self.assertTrue(all(c.__name__ == "setstate" for c in calls))
 
 
 class TestTracer(JitTestCase):
