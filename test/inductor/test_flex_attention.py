@@ -2634,8 +2634,6 @@ class TestPagedAttention(InductorTestCase):
         self.assertEqual(new_block_mask.full_kv_num_blocks, expected_full_kv_num_blocks)
         self.assertEqual(new_block_mask.full_kv_indices, expected_full_kv_indices)
 
-        # TODO: check q_indices
-
     @supported_platform
     def test_convert_mask_mod(self):
         n_pages, page_size, max_batch_size, max_seq_len = 9, 128, 2, 512
@@ -2858,7 +2856,11 @@ class TestPagedAttention(InductorTestCase):
             block_mask, MAX_CACHED_SEQ_LEN
         )
 
-        compiled_sdpa = torch.compile(create_attention(paged_cache.get_score_mod(score_mod), block_mask, enable_gqa=False))
+        compiled_sdpa = torch.compile(
+            create_attention(
+                paged_cache.get_score_mod(score_mod), block_mask, enable_gqa=False
+            )
+        )
         paged_out = compiled_sdpa(q, k_cache, v_cache, block_mask=new_block_mask)
 
         with torch.no_grad():
@@ -2875,7 +2877,6 @@ class TestPagedAttention(InductorTestCase):
     def test_flex_attention_gqa(self):
         # flex_attention(q, k, v, block_mask=causal_mask, enable_gqa=True) works with paged cache
         return
-
 
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)

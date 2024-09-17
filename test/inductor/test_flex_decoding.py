@@ -357,6 +357,149 @@ class TestFlexDecoding(InductorTestCase):
             compiled_out,
         )
 
+    # TODO: support computation with batch size < max_batch_size
+
+    def run_paged_attention(
+        self,
+        score_mod: Optional[Callable],
+        q: Tensor,
+        k: Tensor,
+        v: Tensor,
+        dtype: torch.dtype = torch.float16,
+        block_mask: Optional[BlockMask] = None,
+    ):
+        _, Q_H, _, _ = q.shape
+        KV_B, KV_H, KV_S, QK_D = k.shape
+        _, _, _, V_D = v.shape
+
+        # TODO: change max_batch_size to 5
+        n_pages, page_size, max_batch_size = 64, 128, 4
+
+        # allocate cache
+        MAX_CACHED_SEQ_LEN = n_pages * page_size
+        k_cache = torch.zeros(
+            1,
+            KV_H,
+            MAX_CACHED_SEQ_LEN,
+            QK_D,
+            device="cuda",
+            dtype=dtype,
+        )
+        v_cache = torch.zeros(
+            1,
+            KV_H,
+            MAX_CACHED_SEQ_LEN,
+            V_D,
+            device="cuda",
+            dtype=dtype,
+        )
+
+        # "randomly" initialize the page table
+        paged_cache = PagedAttention(
+            n_pages, page_size, max_batch_size, MAX_CACHED_SEQ_LEN
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([100, 200, 50, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([100, 512, 300, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([512, 512, 300, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([512, 512, 512, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([512, 512, 512, 512], device="cuda")
+        )
+
+        # update cache with k and v
+        input_pos = torch.tensor(range(0, KV_S), device="cuda", dtype=torch.int32)
+        paged_cache.update(input_pos, k, k_cache)
+        paged_cache.update(input_pos, v, v_cache)
+
+        # convert block mask and score mod
+        new_block_mask = paged_cache.convert_logical_block_mask(
+            block_mask, MAX_CACHED_SEQ_LEN
+        )
+        compiled_sdpa = torch.compile(
+            create_attention(
+                paged_cache.get_score_mod(score_mod),
+                block_mask,
+                enable_gqa=(not Q_H == KV_H),
+            )
+        )
+
+        # compute
+        compiled_out, compiled_lse = compiled_sdpa(
+            q, k_cache, v_cache, return_lse=True, block_mask=new_block_mask
+        )
+        return compiled_out, compiled_lse
+
+    def run_test_with_paged_attention(
+        self,
+        score_mod: Optional[Callable],
+        dtype: torch.dtype = torch.float16,
+        Q_B: int = B,
+        Q_H: int = Hq,
+        Q_S: int = 1,
+        QK_D: int = D,
+        KV_B: int = B,
+        KV_H: int = Hkv,
+        KV_S: int = S,
+        V_D: int = D,
+        block_mask: Optional[BlockMask] = None,
+    ):
+        assert (
+            score_mod is not None or block_mask is not None
+        ), "Must provide score_mod or block_mask"
+        assert Q_H % KV_H == 0
+        if TEST_WITH_ROCM and Q_H != KV_H:
+            self.skipTest("enable_gqa=True is unsupported on ROCM, for now")
+
+        q = torch.randn(
+            (Q_B, Q_H, Q_S, QK_D),
+            dtype=dtype,
+            device="cuda",
+            requires_grad=False,
+        )
+        k = torch.randn(
+            (KV_B, KV_H, KV_S, QK_D),
+            dtype=dtype,
+            device="cuda",
+            requires_grad=False,
+        )
+        v = torch.randn(
+            (KV_B, KV_H, KV_S, V_D),
+            dtype=dtype,
+            device="cuda",
+            requires_grad=False,
+        )
+        q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
+
+        sdpa_partial = create_attention(
+            score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
+        )
+        golden_out, gold_lse = sdpa_partial(q_gold, k_gold, v_gold, return_lse=True)
+        ref_out, ref_lse = sdpa_partial(q_ref, k_ref, v_ref, return_lse=True)
+
+        compiled_out, compiled_lse = self.run_paged_attention(
+            score_mod, q, k, v, dtype, block_mask
+        )
+
+        self._check_out(
+            golden_out,
+            ref_out,
+            compiled_out,
+        )
+        self._check_out(
+            gold_lse,
+            ref_lse,
+            compiled_lse,
+        )
+
     @supported_platform
     @expectedFailure
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -409,96 +552,13 @@ class TestFlexDecoding(InductorTestCase):
             torch.tensor(192, device="cuda", dtype=torch.int32)
         )
         block_mask = create_block_mask(mod, max_batch_size, 1, 1, max_seq_len)
-
-        q = torch.randn(
-            (max_batch_size, n_heads, 1, head_dim),
-            dtype=dtype,
-            device="cuda",
-            requires_grad=False,
-        )
-        k = torch.randn(
-            (max_batch_size, n_heads, max_seq_len, head_dim), dtype=dtype, device="cuda", requires_grad=False
-        )
-        v = torch.randn(
-            (max_batch_size, n_heads, max_seq_len, head_dim), dtype=dtype, device="cuda", requires_grad=False
-        )
-        q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
-        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
-
-        sdpa_partial = create_attention(
-            score_mod, block_mask, enable_gqa=False
-        )
-        golden_out, gold_lse = sdpa_partial(q_gold, k_gold, v_gold, return_lse=True)
-        ref_out, ref_lse = sdpa_partial(q_ref, k_ref, v_ref, return_lse=True)
-
-        MAX_CACHED_SEQ_LEN = n_pages * page_size
-        k_cache = torch.zeros(
-            1,
-            n_heads,
-            MAX_CACHED_SEQ_LEN,
-            head_dim,
-            device="cuda",
-            dtype=dtype,
-        )
-        v_cache = torch.zeros(
-            1,
-            n_heads,
-            MAX_CACHED_SEQ_LEN,
-            head_dim,
-            device="cuda",
-            dtype=dtype,
-        )
-
-        paged_cache = PagedAttention(n_pages, page_size, max_batch_size, max_seq_len)
-
-        paged_cache.allocate_until_length(
-            torch.tensor([100, 200, 50, 300], device="cuda")
-        )
-        paged_cache.allocate_until_length(
-            torch.tensor([100, 512, 300, 300], device="cuda")
-        )
-        paged_cache.allocate_until_length(
-            torch.tensor([512, 512, 300, 300], device="cuda")
-        )
-        paged_cache.allocate_until_length(
-            torch.tensor([512, 512, 512, 300], device="cuda")
-        )
-        paged_cache.allocate_until_length(
-            torch.tensor([512, 512, 512, 512], device="cuda")
-        )
-
-        input_pos = torch.tensor(
-            range(0, max_seq_len), device="cuda", dtype=torch.int32
-        )
-        paged_cache.update(input_pos, k, k_cache)
-        paged_cache.update(input_pos, v, v_cache)
-
-        new_block_mask = paged_cache.convert_logical_block_mask(
-            block_mask, MAX_CACHED_SEQ_LEN
-        )
-        compiled_sdpa = torch.compile(create_attention(
-            paged_cache.get_score_mod(score_mod), block_mask, enable_gqa=False
-        ))
-
-
-        compiled_out, compiled_lse = compiled_sdpa(q, k_cache, v_cache, return_lse=True, block_mask=new_block_mask)
-
-        self._check_out(
-            golden_out,
-            ref_out,
-            compiled_out,
-        )
-        self._check_out(
-            gold_lse,
-            ref_lse,
-            compiled_lse,
-        )
+        self.run_test_with_paged_attention(score_mod, dtype, block_mask=block_mask)
 
     @supported_platform
     def test_flex_decoding_masks(self):
         # TODO: Add test for different block masks
         return
-    
+
     @supported_platform
     def test_flex_decoding_gqa(self):
         # TODO
@@ -1165,3 +1225,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     run_tests()
+
+# TODO: add tests for deallocate 1 specific batch index, re-allocate it, and then call flex attention + paged attention.
