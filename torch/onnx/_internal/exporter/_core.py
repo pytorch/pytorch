@@ -114,7 +114,10 @@ class TorchTensor(ir.Tensor):
             return self.raw.view(torch.uint8).numpy(force=True)
         return self.raw.numpy(force=True)
 
-    def __array__(self, dtype: Any = None) -> np.ndarray:
+    def __array__(self, dtype: Any = None, copy: bool | None = None) -> np.ndarray:
+        del copy  # Unused, but needed for the signature
+        if dtype is None:
+            return self.numpy()
         return self.numpy().__array__(dtype)
 
     def tobytes(self) -> bytes:
