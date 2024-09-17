@@ -15,7 +15,7 @@ import time
 from collections import namedtuple
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
 
 import sympy
@@ -27,12 +27,7 @@ from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity, preserve_rng_state
 
 from . import config, ir
-from .autotune_process import (
-    TensorMeta,
-    TritonBenchmarkRequest,
-    TritonCPUBenchmarkRequest,
-    TritonGPUBenchmarkRequest,
-)
+from .autotune_process import TensorMeta, TritonBenchmarkRequest
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import IndentedBuffer, KernelTemplate
 from .codegen.triton import (
@@ -219,15 +214,13 @@ class TritonTemplateKernel(TritonKernel):
 
         argdefs, _, signature, _ = self.args.python_argdefs()
         triton_meta = {
-            "signature": signature_to_meta(
-                signature, size_dtype=self.index_dtype, argdefs=argdefs
-            ),
+            "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
             "device": DeviceProperties.create(self.output_node.get_device()),
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
         for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
-            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index]
+            triton_meta["constants"][arg_num] = 1  # type: ignore[index]
         matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", 0)
         if matrix_instr_nonkdim != 0:
             triton_meta["matrix_instr_nonkdim"] = matrix_instr_nonkdim
@@ -580,7 +573,6 @@ class TritonTemplateKernel(TritonKernel):
                 grid_fn=f"{self.grid_fn.__module__}.{self.grid_fn.__name__}",
                 arg_types=arg_types,
                 triton_meta=self.triton_meta,
-                gpu="cpu" not in V.graph.device_types,
             )
 
 
@@ -750,12 +742,7 @@ class TritonTemplate(KernelTemplate):
             ),
             kwargs,
         )
-        bmreq_cls: Type[TritonBenchmarkRequest]
-        if layout.device.type == "cpu":
-            bmreq_cls = TritonCPUBenchmarkRequest
-        else:
-            bmreq_cls = TritonGPUBenchmarkRequest
-        bmreq = bmreq_cls(
+        bmreq = TritonBenchmarkRequest(
             module_path=mod.__file__,
             module_cache_key=mod.key,
             kernel_name=kernel_name,
