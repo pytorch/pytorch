@@ -263,11 +263,11 @@ def foreach_all_gather_copy_out(
                 force_recreate=True,
             )
         else:
+            # TODO: May need to defer this for parameters not sharded on dim-0
+            # until after initial copy-out since we will hold extra memory.
             fsdp_param.init_all_gather_outputs(
                 all_gather_input_numels, all_gather_input_dtypes, world_size, device
             )  # no-op after 1st call
-            # TODO: Can defer this for params that do not shard on dim-0 to
-            # reduce impact to peak memory.
             fsdp_param.alloc_all_gather_outputs()
     all_gather_output = all_gather_output.view(world_size, -1)
 
@@ -290,28 +290,26 @@ def foreach_all_gather_copy_out(
     torch.ops.fsdp.split_with_sizes_copy(
         all_gather_output, all_gather_input_split_sizes, dim=1, out=out
     )
-    # TODO: In the current implementation, we do not free the
-    # `all_gather_output` buffer until after we do the extra copies, which can
-    # use more peak memory than required. Fixing this is intrusive though.
     for fsdp_param, param_all_gather_outputs in copy_infos:
-        # TODO: Can share context manager for all tensors.
-        with _unsafe_preserve_version_counters(fsdp_param.all_gather_outputs):
-            for param_all_gather_output, target_all_gather_output in zip(
-                param_all_gather_outputs, fsdp_param.all_gather_outputs
-            ):
-                shard_dim = fsdp_param.fsdp_placement.dim
-                pre_param_size = list(fsdp_param.padded_sharded_param_size)
-                pre_param_size[0] *= world_size
-                chunks = torch.chunk(
-                    param_all_gather_output.view(pre_param_size), world_size, dim=0
-                )
-                post_param_size = list(fsdp_param.padded_sharded_param_size)
-                post_param_size[shard_dim] *= world_size
-                torch.cat(
-                    chunks,
-                    dim=shard_dim,
-                    out=target_all_gather_output.view(post_param_size),
-                )
+        shard_dim = fsdp_param.fsdp_placement.dim
+        for param_all_gather_output, target_all_gather_output in zip(
+            param_all_gather_outputs, fsdp_param.all_gather_outputs
+        ):
+            pre_param_size = list(fsdp_param.padded_sharded_param_size)
+            pre_param_size[0] *= world_size
+            chunks = torch.chunk(
+                param_all_gather_output.view(pre_param_size), world_size, dim=0
+            )
+            post_param_size = list(fsdp_param.padded_sharded_param_size)
+            post_param_size[shard_dim] *= world_size
+            torch.cat(
+                chunks,
+                dim=shard_dim,
+                out=target_all_gather_output.view(post_param_size),
+            )
+            torch._C._autograd._unsafe_set_version_counter(
+                target_all_gather_output, target_all_gather_output._version - 1
+            )
 
 
 @torch.no_grad()
