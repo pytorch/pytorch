@@ -352,7 +352,7 @@ class LoopBody:
     def add_indirect(self, size):
         var = sympy_index_symbol_with_prefix(SymT.INDIRECT, len(self.indirect_vars))
         assert var not in self.indirect_var_ranges
-        self.indirect_vars.append(var)
+        self.indirect_vars.append(var)  # type: ignore[arg-type]
         self.indirect_var_ranges[var] = size
         return var
 

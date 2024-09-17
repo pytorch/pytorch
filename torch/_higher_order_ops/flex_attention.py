@@ -64,7 +64,7 @@ def _permute_strides(out: torch.Tensor, query_strides: Tuple[int, ...]) -> torch
     stride_order = get_stride_order(query_strides)
     fill_order = stride_order2fill_order(stride_order)
     assert out.storage_offset() == 0, "Only support storage_offset == 0"
-    out_strides = _construct_strides(out.shape, fill_order)
+    out_strides = _construct_strides(out.shape, fill_order)  # type: ignore[arg-type]
     new_out = out.new_empty(out.shape).as_strided(out.shape, out_strides)
     new_out.copy_(out)
     return new_out
