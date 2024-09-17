@@ -1,0 +1,42 @@
+name: Apply Lintrunner Format
+
+on:
+    workflow_dispatch:
+        inputs:
+            pr_number:
+                description: 'Pull Request number'
+                required: true
+            commit_message:
+                description: 'Commit message'
+                required: true
+                default: 'Auto-generated changes'
+jobs:
+
+  run_lint:
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    with:
+      timeout: 120
+      runner: "linux.2xlarge"
+      docker-image: pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter
+      # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
+      # to run git rev-parse HEAD~:.ci/docker when a new image is needed
+      fetch-depth: 0
+      submodules: true
+      script: |
+        export CLANG=1
+        export ADDITIONAL_LINTRUNNER_ARGS="format"
+        gh pr checkout ${{ inputs.pr_number }}
+        # check that branch does not contain "gh/"
+        if [[ $(git branch --contains) != "gh/"* ]]; then
+          echo "Auto generating lint changes is not allowed on PRs that use ghstack"
+          exit 1
+        fi
+        .github/scripts/lintrunner.sh 
+        # submit a commit to the pr
+        git add .
+        git commit -m ${{ inputs.commit_message }}
+        git push
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
