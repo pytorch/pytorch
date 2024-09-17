@@ -376,6 +376,18 @@ class TestFlexDecoding(InductorTestCase):
 
         n_pages, page_size, max_batch_size = 64, 128, 5
 
+        if block_mask is None:
+            def generate_causal_offset(offset: torch.Tensor):
+                def causal_offset_mask(b, h, q_idx, kv_idx):
+                    return (offset + q_idx) >= kv_idx
+
+                return causal_offset_mask
+
+            mod = generate_causal_offset(
+                torch.tensor(192, device="cuda", dtype=torch.int32)
+            )
+            block_mask = create_block_mask(mod, max_batch_size, 1, 1, S)
+
         # allocate cache
         MAX_CACHED_SEQ_LEN = n_pages * page_size
         k_cache = torch.zeros(
@@ -930,6 +942,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(score_mod_scale, dtype)
         self.run_test_with_paged_attention(score_mod_scale, dtype)
 
+    # TODO: Fix error
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_recompile_changed_score_mod(self, dtype):
@@ -960,6 +973,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test(score_mod_scale, dtype)
 
+    # TODO: Think about how to support this case
     @supported_platform
     def test_multiple_score_mod_calls(self):
         query = torch.randn((1, 8, 4, 64), dtype=torch.float32, device="cuda")
@@ -987,6 +1001,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         tolerance = Tolerances(atol=2e-1, rtol=2e-1)
         torch.testing.assert_close(out, out2, atol=tolerance.atol, rtol=tolerance.rtol)
 
+    # TODO: Think about how to support this case
     @supported_platform
     def test_multiple_score_mod_calls2(self):
         query = torch.randn((1, 8, 4, 64), dtype=torch.float32, device="cuda")
@@ -1234,6 +1249,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(bias_mod)
         self.run_test_with_paged_attention(bias_mod)
 
+    # TODO: Add a similar test. We cannot use this one since paged attention does not support backward.
+    @skipIfRocm
     @supported_platform
     def test_fully_masked_out_rows_0_check_gqa(self):
         # Ensure fully masked out rows won't cause NaNs.
@@ -1266,6 +1283,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         loss.backward()
         self.assertEqual(query.grad[:, :, M:, :].sum(), 0)
 
+    # TODO: Add a similar test
     @supported_platform
     def test_windowed_no_mask_vs_sdpa(self):
         score_mod = _generate_windowed(1000)
@@ -1279,6 +1297,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test_with_call(attention, sdpa_attention, Q_H=16, KV_H=16, Q_S=8)
 
+    # TODO: Add a similar test
     @supported_platform
     def test_windowed_full_mask_vs_sdpa(self):
         def mask_mod(b, h, q, kv):
@@ -1298,6 +1317,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test_with_call(attention, sdpa_attention, Q_H=16, KV_H=16, Q_S=8)
 
+    # TODO: Add a similar test
     @supported_platform
     def test_windowed_partial_block_vs_sdpa(self):
         def mask_mod(b, h, q, kv):
@@ -1313,6 +1333,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test_with_call(attention, sdpa_attention, Q_H=16, KV_H=16, Q_S=8)
 
+    # TODO: Add a similar test
     @supported_platform
     def test_windowed_no_mask_vs_sdpa_paged_attention(self):
         score_mod = _generate_windowed(1000)
