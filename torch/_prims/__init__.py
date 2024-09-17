@@ -2161,13 +2161,22 @@ _item_doc = """
     Converts a tensor with one element to a Python number.
 """
 
+
+# We can't call into python dispatcher for item again
+# because the current prim decomp calls into python dispatcher
+# again. https://github.com/pytorch/pytorch/issues/136050
+def _item_aten_no_python_dispatcher(*args, **kwargs):
+    with torch._dispatch.python.no_python_dispatcher():
+        return torch.Tensor.item(*args, **kwargs)
+
+
 # TODO: create a new return type for scalars?
 # FIXME: currently returns integers for boolean tensors
 # https://github.com/pytorch/pytorch/issues/78071
 item = _make_prim(
     schema="item(Tensor a) -> Scalar",
     meta=_item_meta,
-    impl_aten=torch.Tensor.item,
+    impl_aten=_item_aten_no_python_dispatcher,
     return_type=RETURN_TYPE.NEW,
     doc=_item_doc,
 )

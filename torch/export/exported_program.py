@@ -27,6 +27,7 @@ from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._library.fake_class_registry import FakeScriptObject
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
@@ -226,7 +227,23 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
 
 
 def _special_op_to_preserve_cia(*args, **kwargs):
-    "This is an special marker that tells our infra that we shouldn't decompose this op"
+    """
+    This is an special marker that tells our infra that we shouldn't decompose this op.
+    When we are running through real tensors, we do need to dispatch to C++ as the CPU
+    key now will hit the Python CIA which we are overriding to return NotIMplemented. 
+    """
+    kernel = kwargs["kernel"]
+    del kwargs["kernel"]
+
+    def _safe_to_be_delegated_to_cpp_dispatcher(x):
+        if not isinstance(x, torch.Tensor):
+            return True 
+        return isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor)
+
+    if all(map(_safe_to_be_delegated_to_cpp_dispatcher, pytree.tree_flatten((args, kwargs))[0])):
+        with torch._dispatch.python.no_python_dispatcher():
+            return kernel(*args, **kwargs)
+
     return NotImplemented
 
 
@@ -237,8 +254,8 @@ def _override_decomp_aten_to_variants():
     # We will later replace them with aten._to_copy when functionalizing.
     with _override_composite_implicit_decomp(
         {
-            torch.ops.aten.to.dtype_layout: _special_op_to_preserve_cia,
-            torch.ops.aten.to.dtype: _special_op_to_preserve_cia,
+            torch.ops.aten.to.dtype_layout: functools.partial(_special_op_to_preserve_cia, kernel=torch.ops.aten.to.dtype_layout),
+            torch.ops.aten.to.dtype: functools.partial(_special_op_to_preserve_cia, kernel=torch.ops.aten.to.dtype),
         },
         safe=False,
     ):
@@ -275,17 +292,14 @@ def _split_decomp_table_to_cia_and_python_decomp(
             # TODO this is annpying case where aten.item has
             # prim decomposition which later calls into aten.item
             # and recurses infinitely. (https://github.com/pytorch/pytorch/issues/136050)
-            if op == torch.ops.aten.item.default:
-                cia_ops_to_callable[op] = _get_decomp_for_cia(op)
-            else:
-                cia_ops_to_callable[op] = decomp_table[op]
+            cia_ops_to_callable[op] = decomp_table[op]
             all_preservable_cia_ops.remove(op)
             del decomp_table[op]
 
     # If we reached here, it means user intentionally deleted these CIA ops from
     # decomp table.
     for k in all_preservable_cia_ops:
-        cia_ops_to_callable[k] = _special_op_to_preserve_cia
+        cia_ops_to_callable[k] = functools.partial(_special_op_to_preserve_cia, kernel=k)
 
     return cia_ops_to_callable, decomp_table
 
@@ -309,7 +323,6 @@ def _decompose_and_get_gm_with_new_signature_constants(
     joint_loss_index: Optional[int],
 ):
     from torch._functorch.aot_autograd import aot_export_module
-    from torch._subclasses.fake_tensor import FakeTensorMode
     from torch.export._trace import (
         _export_to_aten_ir,
         _fakify_params_buffers,

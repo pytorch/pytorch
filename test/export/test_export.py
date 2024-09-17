@@ -3887,6 +3887,73 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(torch._dynamo.exc.UserError, "to be a tuple"):
             # Intentionally not wrapping `inp` in a tuple to trigger the error
             _ = export(M(), inp)
+    
+    def test_decomp_item_in_prim_before_decomposition(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                torch.ops.aten._assert_async.msg(torch.tensor(True), "Fail")
+                return x 
+
+        ep = export(M(), (torch.randn(2, 2),))
+        
+        # The difference seems fine because export_for_training catches const tensor little differently.
+        if is_training_ir_test(self._testMethodName):
+            self.assertExpectedInline(
+                str(ep.graph_module.code).strip(), """\
+def forward(self, c_lifted_tensor_0, x):
+    lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(c_lifted_tensor_0);  c_lifted_tensor_0 = None
+    _assert_async = torch.ops.aten._assert_async.msg(lift_fresh_copy, 'Fail');  lift_fresh_copy = _assert_async = None
+    return (x,)"""
+            )
+        elif is_retracebility_test(self._testMethodName):
+            self.assertExpectedInline(
+                str(ep.graph_module.code).strip(), """\
+def forward(self, c_lifted_tensor_0, x):
+    clone = torch.ops.aten.clone.default(c_lifted_tensor_0);  c_lifted_tensor_0 = None
+    detach = torch.ops.aten.detach.default(clone);  clone = None
+    _assert_async = torch.ops.aten._assert_async.msg(detach, 'Fail');  detach = _assert_async = None
+    return (x,)"""
+            )
+        else:
+            self.assertExpectedInline(
+                str(ep.graph_module.code).strip(), """\
+def forward(self, c_lifted_tensor_0, x):
+    lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(c_lifted_tensor_0);  c_lifted_tensor_0 = None
+    detach = torch.ops.aten.detach.default(lift_fresh_copy);  lift_fresh_copy = None
+    _assert_async_msg = torch.ops.aten._assert_async.msg(detach, 'Fail');  detach = _assert_async_msg = None
+    return (x,)"""
+            )
+
+    def test_decomp_item_in_prim_after_decomposition(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                torch.ops.aten._assert_async.msg(torch.tensor(True), "Fail")
+                return x 
+
+        from torch._decomp import decomposition_table
+
+        ep = export(M(), (torch.randn(2, 2),)).run_decompositions(decomposition_table)
+        
+        # The difference seems fine because export_for_training catches const tensor little differently.
+        if is_training_ir_test(self._testMethodName):
+            self.assertExpectedInline(
+                str(ep.graph_module.code).strip(), """\
+def forward(self, c_lifted_tensor_0, x):
+    clone = torch.ops.prims.clone.default(c_lifted_tensor_0, memory_format = torch.preserve_format);  c_lifted_tensor_0 = None
+    _assert_async = torch.ops.aten._assert_async.msg(clone, 'Fail');  clone = _assert_async = None
+    return (x,)"""
+            )
+        else:
+            self.assertExpectedInline(
+                str(ep.graph_module.code).strip(), """\
+def forward(self, c_lifted_tensor_0, x):
+    clone = torch.ops.prims.clone.default(c_lifted_tensor_0, memory_format = torch.preserve_format);  c_lifted_tensor_0 = None
+    view_of = torch.ops.prims.view_of.default(clone);  clone = None
+    view_of_1 = torch.ops.prims.view_of.default(view_of);  view_of = None
+    view_of_2 = torch.ops.prims.view_of.default(view_of_1);  view_of_1 = None
+    _assert_async = torch.ops.aten._assert_async.msg(view_of_2, 'Fail');  view_of_2 = _assert_async = None
+    return (x,)"""
+            )
 
     def test_decomp_batch_norm_functional_predispatch(self):
         class ConvBatchnorm(torch.nn.Module):
