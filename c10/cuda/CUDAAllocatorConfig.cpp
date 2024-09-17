@@ -12,6 +12,7 @@ constexpr size_t kRoundUpPowerOfTwoIntervals = 16;
 
 CUDAAllocatorConfig::CUDAAllocatorConfig()
     : m_max_split_size(std::numeric_limits<size_t>::max()),
+      m_max_non_split_rounding_size(kLargeBuffer),
       m_garbage_collection_threshold(0),
       m_pinned_num_register_threads(1),
       m_expandable_segments(false),
@@ -90,6 +91,27 @@ size_t CUDAAllocatorConfig::parseMaxSplitSize(
     m_max_split_size = val1 * 1024 * 1024;
   } else {
     TORCH_CHECK(false, "Error, expecting max_split_size_mb value", "");
+  }
+  return i;
+}
+
+size_t CUDAAllocatorConfig::parseMaxNonSplitRoundingSize(
+    const std::vector<std::string>& config,
+    size_t i) {
+  consumeToken(config, ++i, ':');
+  constexpr int mb = 1024 * 1024;
+  if (++i < config.size()) {
+    size_t val1 = stoi(config[i]);
+    TORCH_CHECK(
+        val1 > kLargeBuffer / mb,
+        "CachingAllocator option max_non_split_rounding_mb too small, must be > ",
+        kLargeBuffer / mb,
+        "");
+    val1 = std::max(val1, kLargeBuffer / mb);
+    val1 = std::min(val1, (std::numeric_limits<size_t>::max() / mb));
+    m_max_non_split_rounding_size = val1 * 1024 * 1024;
+  } else {
+    TORCH_CHECK(false, "Error, expecting max_non_split_rounding_mb value", "");
   }
   return i;
 }
@@ -257,6 +279,9 @@ void CUDAAllocatorConfig::parseArgs(const char* env) {
     std::string_view config_item_view(config[i]);
     if (config_item_view == "max_split_size_mb") {
       i = parseMaxSplitSize(config, i);
+      used_native_specific_option = true;
+    } else if (config_item_view == "max_non_split_rounding_mb") {
+      i = parseMaxNonSplitRoundingSize(config, i);
       used_native_specific_option = true;
     } else if (config_item_view == "garbage_collection_threshold") {
       i = parseGarbageCollectionThreshold(config, i);

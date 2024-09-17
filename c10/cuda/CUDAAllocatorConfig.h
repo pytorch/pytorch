@@ -63,6 +63,10 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return instance().m_roundup_power2_divisions;
   }
 
+  static size_t max_non_split_rounding_size() {
+    return instance().m_max_non_split_rounding_size;
+  }
+
   static std::string last_allocator_settings() {
     std::lock_guard<std::mutex> lock(
         instance().m_last_allocator_settings_mutex);
@@ -90,6 +94,9 @@ class C10_CUDA_API CUDAAllocatorConfig {
       size_t i,
       const char c);
   size_t parseMaxSplitSize(const std::vector<std::string>& config, size_t i);
+  size_t parseMaxNonSplitRoundingSize(
+      const std::vector<std::string>& config,
+      size_t i);
   size_t parseGarbageCollectionThreshold(
       const std::vector<std::string>& config,
       size_t i);
@@ -108,6 +115,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
       size_t i);
 
   std::atomic<size_t> m_max_split_size;
+  std::atomic<size_t> m_max_non_split_rounding_size;
   std::vector<size_t> m_roundup_power2_divisions;
   std::atomic<double> m_garbage_collection_threshold;
   std::atomic<size_t> m_pinned_num_register_threads;
