@@ -162,7 +162,8 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                     if (
                         src_node is not None
                         and src_node.op == "call_function"
-                        and src_node.target is torch.ops.aten_local_scalar_dense.default
+                        and src_node.target
+                        is torch.ops.aten._local_scalar_dense.default
                     ):
                         # TODO: dtype conversion, so that we don't keep at too
                         # low precision
