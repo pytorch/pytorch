@@ -6257,7 +6257,7 @@ def _sink_tokens(tokens):
     return None
 
 
-@register_lowering(torch.ops.higher_order.with_effects)
+@register_lowering(torch.ops.higher_order.with_effects, type_promotion_kind=None)
 def with_effects(token, op, *args, **kwargs):
     result = ir.EffectfulKernel.create(op, *args, **kwargs)
 
