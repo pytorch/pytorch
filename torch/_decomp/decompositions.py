@@ -1403,7 +1403,7 @@ def split_with_sizes_copy(
     dim: int = 0,
     out: Optional[List[Tensor]] = None,
 ) -> Optional[List[Tensor]]:
-    splits = split_with_sizes(self, split_sizes, dim=dim)
+    splits = aten.split_with_sizes(self, split_sizes, dim=dim)
     if out is None:
         return [s.clone(memory_format=torch.contiguous_format) for s in splits]
     else:
