@@ -983,16 +983,18 @@ class TestStandaloneCPPJIT(TestCase):
             )
             env = os.environ.copy()
             if IS_WINDOWS:
-                cudaPath = "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v" + os.environ.get('CUDA_VERSION', "")
+                cudaPath = (
+                    "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v"
+                    + os.environ.get("CUDA_VERSION", "")
+                )
                 cuptiPath = cudaPath + "/extras/CUPTI/lib64"
                 cudaPathBin = cudaPath + "/bin"
-                env['PATH'] = cuptiPath + os.pathsep + cudaPathBin + os.pathsep + env['PATH']
+                env["PATH"] = (
+                    cuptiPath + os.pathsep + cudaPathBin + os.pathsep + env["PATH"]
+                )
             for shell in [True, False]:
                 r = subprocess.run(
-                    [exec_path],
-                    shell=shell,
-                    stdout=subprocess.PIPE,
-                    env=env
+                    [exec_path], shell=shell, stdout=subprocess.PIPE, env=env
                 )
                 self.assertEqual(r.returncode, 0)
                 self.assertEqual(

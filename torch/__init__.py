@@ -198,10 +198,12 @@ if sys.platform == "win32":
                 pfiles_path, "NVIDIA GPU Computing Toolkit", "CUDA", f"v{cuda_version}"
             )
             cuda_path = os.path.join(os.getenv(cuda_path_var, default_path), "bin")
-            cupti_path = os.path.join(os.getenv(cuda_path_var, default_path), 'extras', 'CUPTI', 'lib64')
+            cupti_path = os.path.join(
+                os.getenv(cuda_path_var, default_path), "extras", "CUPTI", "lib64"
+            )
         else:
             cuda_path = ""
-            cupti_path = ''
+            cupti_path = ""
 
         dll_paths.extend(
             p for p in (nvtoolsext_dll_path, cuda_path, cupti_path) if os.path.exists(p)
