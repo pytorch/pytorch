@@ -2,17 +2,13 @@
 
 import unittest
 from contextlib import contextmanager
+from importlib import import_module
 
 import torch
 import torch._prims_common as utils
-import torch.nn.functional as F
-from importlib import import_module
-from torch import nn
-from torch._decomp import decomposition_table
 from torch._dynamo.test_case import TestCase
 from torch._inductor import config
 from torch._inductor.bisect_helper import BisectionManager
-from torch._prims_common.wrappers import elementwise_type_promotion_wrapper, out_wrapper
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -28,7 +24,6 @@ i32 = torch.int32
 @requires_cuda
 class TestCompilerBisector(TestCase):
     def test_bad_decomp(self):
-
         mod = import_module("torch._inductor.compile_fx")
 
         def bad_exp_decomp(self, rate=1, generator=None):
@@ -44,7 +39,7 @@ class TestCompilerBisector(TestCase):
                 rate > 0.0,
                 lambda: f"exponential_ expects lambda > 0.0, but found lambda={rate}",
             )
-            return (torch.rand_like(self) * float('nan'))
+            return torch.rand_like(self) * float("nan")
 
         @contextmanager
         def patch_exp_decomp():
@@ -65,7 +60,6 @@ class TestCompilerBisector(TestCase):
 
         def vq(x):
             return (x + 3).exponential_() * 10.5
-
 
         def test_fn():
             torch._dynamo.reset()
@@ -90,7 +84,7 @@ class TestCompilerBisector(TestCase):
             with config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"):
 
                 def my_func(x):
-                    return ((x * -1) - .01).relu()
+                    return ((x * -1) - 0.01).relu()
 
                 inp = torch.rand([100], device="cuda")
 
