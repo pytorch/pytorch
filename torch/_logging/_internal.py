@@ -6,7 +6,9 @@ import json
 import logging
 import os
 import os.path
+import pathlib
 import re
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from importlib import __import__
@@ -747,6 +749,26 @@ def _has_registered_parent(log_qname):
     return False
 
 
+def make_module_path_relative(abs_path):
+    """
+    Given an absolute filepath corresponding to a Python module which was
+    loaded via normal import mechanisms using sys.path, convert it into
+    a relative path relative to one of the Python search paths.
+    """
+
+    abs_path = pathlib.Path(abs_path).resolve()
+
+    for path in sys.path:
+        try:
+            rel_path = abs_path.relative_to(path)
+        except ValueError:
+            continue
+        else:
+            return str(rel_path)
+
+    return str(abs_path)
+
+
 # apply custom formats to artifacts when necessary
 class TorchLogsFormatter(logging.Formatter):
     def __init__(self, *, trace: bool = False):
@@ -807,9 +829,11 @@ class TorchLogsFormatter(logging.Formatter):
         if artifact_name is not None:
             record.artifactprefix = f" [__{artifact_name}]"
 
+        filepath = make_module_path_relative(record.pathname)
+
         prefix = (
             f"{record.rankprefix}{shortlevel}{record.asctime}.{int(record.msecs*1000):06d} {record.process} "
-            f"{os.path.relpath(record.pathname, os.path.dirname(os.path.dirname(torch.__file__)))}:"
+            f"{filepath}:"
             f"{record.lineno}]{record.traceid}{record.artifactprefix}"
         )
         if self._is_trace:

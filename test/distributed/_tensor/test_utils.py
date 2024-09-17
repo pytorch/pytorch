@@ -4,19 +4,11 @@ import itertools
 
 import torch
 from torch.distributed._tensor import distribute_tensor, DTensor
-from torch.distributed._tensor._utils import (
-    compute_local_shape,
-    compute_local_shape_and_global_offset,
-)
-from torch.distributed._tensor.debug import CommDebugMode
-from torch.distributed._tensor.placement_types import (
-    _StridedShard,
-    DTensorSpec,
-    Replicate,
-    Shard,
-    TensorMeta,
-)
-from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
+from torch.distributed._tensor._utils import compute_local_shape_and_global_offset
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.placement_types import _StridedShard, Replicate, Shard
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -33,47 +25,16 @@ class UtilTest(DTensorTestBase):
         return 8
 
     @with_comms
-    def test_compute_local_shape_2d_uneven(self):
-        # mesh: 4 * 2
-        mesh_tensor = torch.arange(self.world_size).reshape(4, 2)
-        mesh = DeviceMesh(self.device_type, mesh_tensor)
-        size = torch.Size([7, 7])
-        rank_coordinates = mesh.get_coordinate()
-
-        # replicate, shard
-        placements2 = [Replicate(), Shard(0)]
-        local_size2 = compute_local_shape(size, mesh, placements2)
-        if rank_coordinates[1] < 1:
-            self.assertEqual(local_size2, torch.Size([4, 7]))
-        else:
-            self.assertEqual(local_size2, torch.Size([3, 7]))
-
-        # shard, shard
-        placements3 = [Shard(0), Shard(1)]
-        local_size3 = compute_local_shape(size, mesh, placements3)
-        # first dim
-        if rank_coordinates[0] < 3:
-            self.assertEqual(local_size3[0], 2)
-        else:
-            self.assertEqual(local_size3[0], 1)
-        # second dim
-        if rank_coordinates[1] < 1:
-            self.assertEqual(local_size3[1], 4)
-        else:
-            self.assertEqual(local_size3[1], 3)
-
-    @with_comms
     def test_compute_local_shape_and_global_offset_1D(self):
         one_d_placements = [[Shard(0)], [Replicate()]]
 
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
         for placements in one_d_placements:
             # When the placements is [Shard(0)], we test for three different scenarios:
             # 1) sharding resulting in empty shards on all or some of the ranks
             # 2) sharding resulting in shards of different size across different ranks
             # 3) sharding resulting in non-empty shards of same size across all ranks
             for size in range(self.world_size * 2 + 1):
-                mesh_tensor = torch.arange(self.world_size)
-                device_mesh = DeviceMesh(self.device_type, mesh_tensor)
                 global_tensor = torch.arange(size)
                 global_shape = global_tensor.size()
 
@@ -101,12 +62,12 @@ class UtilTest(DTensorTestBase):
             itertools.combinations_with_replacement(two_d_placements_options, 2)
         )
 
+        # mesh: 2 * 4
+        device_mesh = init_device_mesh(self.device_type, (2, 4))
         for placements in two_d_placements:
-            for dim_0_size in (1, 2, 4, 8):
-                # mesh: 2 * 4
-                mesh_tensor = torch.arange(self.world_size).reshape(2, 4)
-                device_mesh = DeviceMesh(self.device_type, mesh_tensor)
-                global_tensor = torch.arange(64).view(dim_0_size, -1)
+            for dim_0_size in range(1, 9):
+                nelem = 64 // dim_0_size * dim_0_size
+                global_tensor = torch.arange(nelem).view(dim_0_size, -1)
                 global_shape = global_tensor.size()
 
                 dtensor = distribute_tensor(global_tensor, device_mesh, placements)

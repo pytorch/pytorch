@@ -44,18 +44,6 @@ def _get_example_value(node: fx.Node) -> Optional[str]:
         return None
 
 
-def _get_example_value_key(node: fx.Node) -> Optional[str]:
-    """
-    actually just run this once at start of pass, based on first node, and constantly use that.
-    """
-    if "example_value" in node.meta:
-        return "example_value"
-    elif "val" in node.meta:
-        return "val"
-    else:
-        return None
-
-
 def _get_sym_val(node: fx.Node) -> Optional["sympy.Expr"]:
     val = _get_example_value(node)
     if isinstance(val, py_sym_types):
@@ -177,7 +165,13 @@ def insert_deferred_runtime_asserts(
             _get_example_value(arg) if isinstance(arg, torch.fx.Node) else arg
             for arg in node.args
         ]
-        node.meta[val_key] = node.target(*fake_args)  # type: ignore[operator]
+        try:
+            node.meta[val_key] = node.target(*fake_args)  # type: ignore[operator]
+        except NotImplementedError:
+            # This can happen when attempting to reify a symbol with an unsupported call_function node,
+            # e.g. with NestedTensors + sym_size.int via match_symbol().
+            # This seems to be fine, as the node gets CSE'd and deleted later in favor of a SymInt graph input.
+            pass
         if stack_trace is not None:
             node.meta["stack_trace"] = stack_trace
         if nn_module_stack is not None:
@@ -249,16 +243,17 @@ def insert_deferred_runtime_asserts(
             else:
                 # Convert the sympy expression into a sequence of FX
                 # nodes
-                res = _sympy_interp(expr_to_proxy, ra.expr).node
-                graph.call_function(
-                    torch.ops.aten._assert_scalar.default,
-                    # TODO: use ra.msg here, but it's pretty
-                    # useless right now
-                    (
-                        res,
-                        f"Runtime assertion failed for expression {ra.expr} on node '{res}'",
-                    ),
-                )
+                with _set_node_metadata_hook(gm, _node_metadata_hook):
+                    res = _sympy_interp(expr_to_proxy, ra.expr).node
+                    graph.call_function(
+                        torch.ops.aten._assert_scalar.default,
+                        # TODO: use ra.msg here, but it's pretty
+                        # useless right now
+                        (
+                            res,
+                            f"Runtime assertion failed for expression {ra.expr} on node '{res}'",
+                        ),
+                    )
                 added_asserts.add(ra.expr)
 
     nodes = list(graph.nodes)
