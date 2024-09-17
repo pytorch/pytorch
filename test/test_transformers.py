@@ -1,4 +1,5 @@
 # Owner(s): ["module: multi-headed-attention"]
+# pylint: disable=unused-variable
 
 import contextlib
 from functools import partial

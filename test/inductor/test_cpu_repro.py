@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: cpu inductor"]
+# pylint: disable=unused-variable
 import contextlib
 import copy
 import functools

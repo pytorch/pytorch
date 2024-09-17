@@ -1,5 +1,5 @@
 # Owner(s): ["module: inductor"]
-# mypy: ignore-errors
+# pylint: disable=unused-variable
 # flake8: noqa
 import collections
 import collections.abc

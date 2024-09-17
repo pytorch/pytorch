@@ -1912,7 +1912,6 @@ class TestDistributions(DistributionsTestCase):
     @set_default_dtype(torch.double)
     def test_one_hot_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
-        probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
         p = torch.tensor(probabilities, requires_grad=True)
         s = torch.tensor(probabilities_1, requires_grad=True)
         self.assertEqual(OneHotCategorical(p).sample().size(), (2, 3))
@@ -2074,7 +2073,6 @@ class TestDistributions(DistributionsTestCase):
     @set_default_dtype(torch.double)
     def test_relaxed_one_hot_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
-        probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
         temp = torch.tensor([3.0], requires_grad=True)
         # The lower the temperature, the more unstable the log_prob gradcheck is
         # w.r.t. the sample. Values below 0.25 empirically fail the default tol.
@@ -6635,7 +6633,7 @@ class TestValidation(DistributionsTestCase):
                     val = torch.full(d_val.batch_shape + d_val.event_shape, v)
                     # check samples with incorrect support
                     try:
-                        log_prob = d_val.log_prob(val)
+                        d_val.log_prob(val)
                     except ValueError as e:
                         if e.args and "must be within the support" in e.args[0]:
                             try:

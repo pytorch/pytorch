@@ -1,4 +1,5 @@
 # Owner(s): ["module: cuda"]
+# pylint: disable=unused-variable
 
 import contextlib
 import ctypes

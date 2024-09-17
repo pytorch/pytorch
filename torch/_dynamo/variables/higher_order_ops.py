@@ -1224,7 +1224,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ]
         sub_args = sub_args_init + sub_args_inp
         (
-            (combine_result, combine_treespec),
+            (combine_result, _),
             combine_graph,
             combine_lifted_freevars,
         ) = speculate_subgraph(

@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: quantization"]
+# pylint: disable=unused-variable
 
 # Torch
 import torch

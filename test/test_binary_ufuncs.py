@@ -1,4 +1,5 @@
 # Owner(s): ["module: tests"]
+# pylint: disable=unused-variable
 
 import itertools
 import math

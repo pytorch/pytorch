@@ -1,4 +1,5 @@
 # mypy: allow-untyped-decorators
+# pylint: disable=unused-variable
 # mypy: allow-untyped-defs
 # Owner(s): ["module: tests"]
 

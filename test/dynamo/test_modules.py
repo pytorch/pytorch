@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+# pylint: disable=unused-variable
 
 import collections
 import contextlib

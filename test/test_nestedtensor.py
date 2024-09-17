@@ -1,5 +1,5 @@
 # Owner(s): ["module: nestedtensor"]
-
+# pylint: disable=unused-variable
 import ast
 import io
 import itertools

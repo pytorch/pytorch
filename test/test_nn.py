@@ -1,4 +1,5 @@
 # Owner(s): ["module: nn"]
+# pylint: disable=unused-variable
 
 import contextlib
 import math

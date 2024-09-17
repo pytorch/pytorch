@@ -1,4 +1,5 @@
 # Owner(s): ["module: meta tensors"]
+# pylint: disable=unused-variable
 
 
 import contextlib

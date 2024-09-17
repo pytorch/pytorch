@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+# pylint: disable=unused-variable
 # flake8: noqa: B950
 
 import functools

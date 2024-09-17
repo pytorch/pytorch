@@ -1,4 +1,5 @@
 # Owner(s): ["module: fft"]
+# pylint: disable=unused-variable
 
 import torch
 import unittest

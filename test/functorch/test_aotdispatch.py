@@ -1,4 +1,6 @@
 # Owner(s): ["oncall: pt2"]
+# pylint: disable=unused-variable
+# pylint: disable=unused-variable
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.

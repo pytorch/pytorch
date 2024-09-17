@@ -1,4 +1,5 @@
 # Owner(s): ["module: serialization"]
+# pylint: disable=unused-variable
 
 import contextlib
 import copy

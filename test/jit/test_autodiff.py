@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: jit"]
+# pylint: disable=unused-variable
 
 from typing import List
 

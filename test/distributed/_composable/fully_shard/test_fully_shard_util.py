@@ -44,7 +44,7 @@ class TestUtils(FSDPTest):
             policy=ModuleWrapPolicy({UnitModule}),
         )
         (
-            _,
+            sharded_tree_info,
             sharded_module_name_to_fqns,
         ) = _get_sharded_module_tree_with_module_name_to_fqns(model)
         self.assertEqual(

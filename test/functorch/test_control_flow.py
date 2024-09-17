@@ -1,4 +1,5 @@
 # Owner(s): ["module: functorch"]
+# pylint: disable=unused-variable
 import contextlib
 import functools
 import unittest

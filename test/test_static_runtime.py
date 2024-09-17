@@ -1,4 +1,5 @@
 # Owner(s): ["module: unknown"]
+# pylint: disable=unused-variable
 
 import unittest
 from typing import Dict, Optional

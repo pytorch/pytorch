@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: profiler"]
+# pylint: disable=unused-variable
 
 import collections
 import gc

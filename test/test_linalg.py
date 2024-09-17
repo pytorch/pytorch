@@ -1,4 +1,5 @@
 # Owner(s): ["module: linear algebra"]
+# pylint: disable=unused-variable
 
 import torch
 import numpy as np

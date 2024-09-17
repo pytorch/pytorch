@@ -608,7 +608,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return x.sin().cos()
 
-        def fn2(x):
+        def fn2(x):  # pylint: disable=unused-variable
             y = x.sin()
             z = y.cos()
             return z

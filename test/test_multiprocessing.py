@@ -1,5 +1,5 @@
 # Owner(s): ["module: multiprocessing"]
-
+# pylint: disable=unused-variable
 import contextlib
 import copy
 import gc

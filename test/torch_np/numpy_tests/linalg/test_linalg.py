@@ -1,5 +1,5 @@
 # Owner(s): ["module: dynamo"]
-
+# pylint: disable=unused-variable
 """ Test functions for linalg module
 
 """

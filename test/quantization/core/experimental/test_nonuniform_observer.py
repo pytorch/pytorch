@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: quantization"]
+# pylint: disable=unused-variable
 
 from torch.ao.quantization.experimental.observer import APoTObserver
 import unittest

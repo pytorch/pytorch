@@ -1,4 +1,5 @@
 # Owner(s): ["module: functorch"]
+# pylint: disable=unused-variable
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.

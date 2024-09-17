@@ -1,4 +1,6 @@
 # Owner(s): ["module: inductor"]
+# pylint: disable=unused-variable
+# pylint: disable=unused-variable
 import copy
 import itertools
 import os

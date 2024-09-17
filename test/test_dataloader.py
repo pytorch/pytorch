@@ -1,4 +1,5 @@
 # Owner(s): ["module: dataloader"]
+# pylint: disable=unused-variable
 
 import ctypes
 import errno

@@ -1,4 +1,5 @@
 # Owner(s): ["module: codegen"]
+# pylint: disable=unused-variable
 
 import unittest
 from contextlib import nullcontext

@@ -2632,7 +2632,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(2, 2)
         fn2 = torch._dynamo.optimize(cnts, nopython=True)(fn2)
-        dynamo_result = fn2(lambda0, lambda1, [x])
+        fn2(lambda0, lambda1, [x])
         self.assertEqual(cnts.frame_count, 1)  # start over
 
         lambda4 = functools.partial(multiply, y=3, x=torch.randn(3, 3))
@@ -2807,7 +2807,7 @@ class GraphModule(torch.nn.Module):
         opt_fn_info = torch._dynamo.optimize(cnts_2)(func_info)
         info_args = [info_func(dt) for dt in dt_args]
         for arg in info_args:
-            r = opt_fn_info(a, arg)
+            opt_fn_info(a, arg)
 
         # each should produce an identical arg
         self.assertEqual(cnts_2.frame_count, 1)

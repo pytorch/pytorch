@@ -8768,7 +8768,7 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
         causal_options = [False]  # FIXME: Large errors with causal+fp32
     else:
         causal_options = [True, False]
-    for qkv_shape, is_causal, dropout_p, enable_gqa in product(
+    for qkv_shape, is_causal, dropout_p, _ in product(
             qkv_shapes, causal_options, [0.0, 0.5], gqa_options):
         shape_q, shape_kv = qkv_shape
         samples.append(SampleInput(

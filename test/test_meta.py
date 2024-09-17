@@ -1,4 +1,5 @@
 # Owner(s): ["module: decompositions"]
+# pylint: disable=unused-variable
 
 import itertools
 import torch

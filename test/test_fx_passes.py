@@ -1,4 +1,5 @@
 # Owner(s): ["module: fx.passes"]
+# pylint: disable=unused-variable
 
 from dataclasses import dataclass
 import operator

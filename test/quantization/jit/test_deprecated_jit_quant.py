@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: quantization"]
+# pylint: disable=unused-variable
 
 import torch
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM

@@ -1,4 +1,5 @@
 # Owner(s): ["module: autograd"]
+# pylint: disable=unused-variable
 
 import collections
 import contextlib

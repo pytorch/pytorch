@@ -1,4 +1,5 @@
 # Owner(s): ["module: optimizer", "module: LrScheduler" ]
+# pylint: disable=unused-variable
 import copy
 import math
 import pickle

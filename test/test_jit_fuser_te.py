@@ -1,4 +1,5 @@
 # Owner(s): ["NNC"]
+# pylint: disable=unused-variable
 
 import contextlib
 import math

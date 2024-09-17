@@ -1,5 +1,5 @@
 # Owner(s): ["module: mta"]
-
+# pylint: disable=unused-variable
 import itertools
 import os
 import random

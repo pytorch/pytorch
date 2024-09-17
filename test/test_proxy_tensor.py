@@ -1,4 +1,5 @@
 # Owner(s): ["module: ProxyTensor"]
+# pylint: disable=unused-variable
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch

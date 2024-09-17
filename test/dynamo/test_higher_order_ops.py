@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+# pylint: disable=unused-variable
 import enum
 import functools
 import pprint
@@ -401,7 +402,7 @@ class GraphModule(torch.nn.Module):
     def test_wrap_pytree_kwargs(self):
         def f(x, y, z):
             def fn(*, x, y, z):
-                z1, z2 = z
+                z1, _ = z
                 return (x * 2) + y + z1
 
             return wrap(fn, x=x, y=y, z=z)
@@ -434,7 +435,6 @@ class GraphModule(torch.nn.Module):
 
     def test_capture_constants(self):
         x = torch.randn(3, 3)
-        y = 4.0
 
         def fn(x, y, z):
             if z:
@@ -1165,9 +1165,6 @@ class GraphModule(torch.nn.Module):
         self._test_wrap_simple(f, default_args_generator((x, y, 8)), 2)
 
     def test_map_subgraph_name_is_valid(self):
-        backend = EagerAndRecordGraphs()
-        cnt = CompileCounterWithBackend(backend)
-
         xs = torch.randn(2, 3, 3)
         y = torch.randn(3)
 
@@ -1206,8 +1203,6 @@ def forward(self, child, l_y_):
             )
 
     def test_map_multi_return(self):
-        cnt = CompileCounter()
-
         def f(x):
             return control_flow.map(lambda x: (x.sin(), x.sin()), x)
 
@@ -1236,8 +1231,6 @@ def forward(self, child):
             )
 
     def test_map_pytree_return(self):
-        cnt = CompileCounter()
-
         def _construct_pytree(a):
             return (a, [[[a]]], a, (a, (a,), a), {"a": a})
 
@@ -1286,9 +1279,6 @@ def forward(self, child):
         self.assertEqual(cnt.frame_count, 0)
 
     def test_map_symint_input(self):
-        backend = EagerAndRecordGraphs()
-        cnt = CompileCounterWithBackend(backend)
-
         def fn(x, y):
             def inner(x, y):
                 return torch.sin(x + y)
@@ -1320,9 +1310,6 @@ def forward(self, child, const_unused):
             )
 
     def test_map_lowers_to_graph(self):
-        backend = EagerAndRecordGraphs()
-        cnt = CompileCounterWithBackend(backend)
-
         def fn(x, y):
             def inner(x, y):
                 return torch.sin(x + y)

@@ -1,4 +1,5 @@
 # Owner(s): ["module: vmap"]
+# pylint: disable=unused-variable
 
 import functools
 import itertools

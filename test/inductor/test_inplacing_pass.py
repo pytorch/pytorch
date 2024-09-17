@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+# pylint: disable=unused-variable
 
 from typing import List
 

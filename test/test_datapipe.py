@@ -1,4 +1,5 @@
 # mypy: ignore-errors
+# pylint: disable=unused-variable
 
 # Owner(s): ["module: dataloader"]
 

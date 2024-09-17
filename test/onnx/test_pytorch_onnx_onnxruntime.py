@@ -1,4 +1,5 @@
 # Owner(s): ["module: onnx"]
+# pylint: disable=unused-variable
 
 from __future__ import annotations
 

@@ -1,4 +1,5 @@
 # Owner(s): ["module: sparse"]
+# pylint: disable=unused-variable
 import itertools
 import random
 import unittest

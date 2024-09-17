@@ -181,6 +181,7 @@ def _extract_arch_version(arch_string: str):
 
 
 def _check_capability():
+    # pylint: disable-next=unused-variable
     incorrect_binary_warn = """
     Found GPU%d %s which requires CUDA_VERSION >= %d to
      work properly, but your PyTorch was compiled
@@ -195,6 +196,7 @@ def _check_capability():
     """
 
     if torch.version.cuda is not None:  # on ROCm we don't want this check
+        # pylint: disable-next=unused-variable
         CUDA_VERSION = torch._C._cuda_getCompiledVersion()
         for d in range(device_count()):
             capability = get_device_capability(d)

@@ -1,4 +1,5 @@
 # Owner(s): ["module: __torch_dispatch__"]
+# pylint: disable=unused-variable
 
 import logging
 import sys

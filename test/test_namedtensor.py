@@ -1,5 +1,5 @@
 # Owner(s): ["module: named tensor"]
-
+# pylint: disable=unused-variable
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_NUMPY
 from torch.testing._internal.common_utils import skipIfTorchDynamo

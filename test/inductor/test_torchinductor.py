@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+# pylint: disable=unused-variable
 import contextlib
 import copy
 import dataclasses

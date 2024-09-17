@@ -1,4 +1,5 @@
 # Owner(s): ["module: custom-operators"]
+# pylint: disable=unused-variable
 
 import collections
 import itertools

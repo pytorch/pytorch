@@ -1,4 +1,5 @@
 # Owner(s): ["module: functorch"]
+# pylint: disable=unused-variable
 # flake8: noqa: B950
 import unittest
 from collections import deque

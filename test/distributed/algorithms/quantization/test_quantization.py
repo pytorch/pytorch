@@ -84,16 +84,12 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             dist.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="gloo"
             )
-            with torch.device(f"cuda:{self.rank}"):
-                group = list(range(0, self.world_size))
-                group_id = dist.group.WORLD
-                self._test_all_gather(
-                    group,
-                    group_id,
-                    self.rank,
-                    dtype=torch.float32,
-                    qtype=DQuantType.FP16,
-                )
+            device = torch.device(f"cuda:{self.rank}")
+            group = list(range(0, self.world_size))
+            group_id = dist.group.WORLD
+            self._test_all_gather(
+                group, group_id, self.rank, dtype=torch.float32, qtype=DQuantType.FP16
+            )
 
         @requires_gloo()
         @skip_but_pass_in_sandcastle_if(
@@ -104,16 +100,12 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             dist.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="gloo"
             )
-            with torch.device(f"cuda:{self.rank}"):
-                group = list(range(0, self.world_size))
-                group_id = dist.group.WORLD
-                self._test_all_gather(
-                    group,
-                    group_id,
-                    self.rank,
-                    dtype=torch.float32,
-                    qtype=DQuantType.BFP16,
-                )
+            device = torch.device(f"cuda:{self.rank}")
+            group = list(range(0, self.world_size))
+            group_id = dist.group.WORLD
+            self._test_all_gather(
+                group, group_id, self.rank, dtype=torch.float32, qtype=DQuantType.BFP16
+            )
 
         @requires_nccl()
         @skip_but_pass_in_sandcastle_if(
@@ -126,19 +118,19 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             dist.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
             )
-            with torch.device(f"cuda:{self.rank}"):
-                group = list(range(0, self.world_size))
-                group_id = dist.new_group(range(self.world_size))
-                rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
-                self._test_all_to_all(
-                    group,
-                    group_id,
-                    self.rank,
-                    cuda=True,
-                    rank_to_GPU=rank_to_GPU,
-                    dtype=torch.float32,
-                    qtype=DQuantType.FP16,
-                )
+            device = torch.device(f"cuda:{self.rank}")
+            group = list(range(0, self.world_size))
+            group_id = dist.new_group(range(self.world_size))
+            rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
+            self._test_all_to_all(
+                group,
+                group_id,
+                self.rank,
+                cuda=True,
+                rank_to_GPU=rank_to_GPU,
+                dtype=torch.float32,
+                qtype=DQuantType.FP16,
+            )
 
         @requires_nccl()
         @skip_but_pass_in_sandcastle_if(
@@ -151,19 +143,19 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             dist.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
             )
-            with torch.device(f"cuda:{self.rank}"):
-                group = list(range(0, self.world_size))
-                group_id = dist.new_group(range(self.world_size))
-                rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
-                self._test_all_to_all(
-                    group,
-                    group_id,
-                    self.rank,
-                    cuda=True,
-                    rank_to_GPU=rank_to_GPU,
-                    dtype=torch.float32,
-                    qtype=DQuantType.BFP16,
-                )
+            device = torch.device(f"cuda:{self.rank}")
+            group = list(range(0, self.world_size))
+            group_id = dist.new_group(range(self.world_size))
+            rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
+            self._test_all_to_all(
+                group,
+                group_id,
+                self.rank,
+                cuda=True,
+                rank_to_GPU=rank_to_GPU,
+                dtype=torch.float32,
+                qtype=DQuantType.BFP16,
+            )
 
         @requires_nccl()
         @skip_but_pass_in_sandcastle_if(
@@ -175,19 +167,19 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             dist.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
             )
-            with torch.device(f"cuda:{self.rank}"):
-                group = list(range(0, self.world_size))
-                group_id = dist.new_group(range(self.world_size))
-                rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
-                self._test_all_to_all_single(
-                    group,
-                    group_id,
-                    self.rank,
-                    cuda=True,
-                    rank_to_GPU=rank_to_GPU,
-                    dtype=torch.float32,
-                    qtype=DQuantType.FP16,
-                )
+            device = torch.device(f"cuda:{self.rank}")
+            group = list(range(0, self.world_size))
+            group_id = dist.new_group(range(self.world_size))
+            rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
+            self._test_all_to_all_single(
+                group,
+                group_id,
+                self.rank,
+                cuda=True,
+                rank_to_GPU=rank_to_GPU,
+                dtype=torch.float32,
+                qtype=DQuantType.FP16,
+            )
 
         @requires_nccl()
         @skip_but_pass_in_sandcastle_if(
@@ -199,19 +191,19 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             dist.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
             )
-            with torch.device(f"cuda:{self.rank}"):
-                group = list(range(0, self.world_size))
-                group_id = dist.new_group(range(self.world_size))
-                rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
-                self._test_all_to_all_single(
-                    group,
-                    group_id,
-                    self.rank,
-                    cuda=True,
-                    rank_to_GPU=rank_to_GPU,
-                    dtype=torch.float32,
-                    qtype=DQuantType.BFP16,
-                )
+            device = torch.device(f"cuda:{self.rank}")
+            group = list(range(0, self.world_size))
+            group_id = dist.new_group(range(self.world_size))
+            rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
+            self._test_all_to_all_single(
+                group,
+                group_id,
+                self.rank,
+                cuda=True,
+                rank_to_GPU=rank_to_GPU,
+                dtype=torch.float32,
+                qtype=DQuantType.BFP16,
+            )
 
         def _test_all_gather(
             self,
@@ -234,6 +226,10 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
                     tensors = [t.cuda(rank_to_GPU[rank][0]) for t in tensors]
+                if tensors[0].dtype == torch.complex64:
+                    tensor_shapes = [torch.view_as_real(tensors[0]).shape]
+                else:
+                    tensor_shapes = [tensors[0].shape]
                 allgather = quant.auto_quantize(dist.all_gather, qtype, quant_loss=None)
                 allgather(tensors, tensor, group=group_id, async_op=False)
 

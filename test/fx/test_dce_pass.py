@@ -1,4 +1,5 @@
 # Owner(s): ["module: fx"]
+# pylint: disable=unused-variable
 
 import copy
 import unittest
