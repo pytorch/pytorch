@@ -12,10 +12,10 @@ from torch._inductor.runtime.triton_heuristics import grid as default_grid
 
 from .. import config
 from ..codecache import CudaKernelParamCache
-from ..utils import DeferredLineBase
+from ..utils import DeferredLineBase, get_gpu_type
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
-from .codegen_device_driver import cuda_kernel_driver, cuda_kernel_header
+from .common import get_device_op_overrides
 from .cpp_utils import cexpr, DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import SymbolicCallArg, WrapperCodeGen
@@ -25,9 +25,9 @@ if TYPE_CHECKING:
     from ..graph import GraphLowering
 
 
-class DeferredCudaKernelLine(DeferredLineBase):
+class DeferredGpuKernelLine(DeferredLineBase):
     """
-    When using cpp wrapper, CUDA kernel load and launch needs to wait for Triton kernels
+    When using cpp wrapper, GPU kernel load and launch needs to wait for Triton kernels
     to be tuned and stored as cubin files, so use a deferred line to backfill those information
     """
 
@@ -58,12 +58,12 @@ class DeferredCudaKernelLine(DeferredLineBase):
         return self.line_template % tuple(params[key] for key in self.keys)
 
     def _new_line(self, line):
-        return DeferredCudaKernelLine(self.kernel_name, line, self.keys)
+        return DeferredGpuKernelLine(self.kernel_name, line, self.keys)
 
 
-class DeferredCudaDefaultGrid:
+class DeferredGpuDefaultGrid:
     """
-    A container for the default grid, which may be used by DeferredCudaGridLine
+    A container for the default grid, which may be used by DeferredGpuGridLine
     """
 
     def __init__(
@@ -79,7 +79,7 @@ class DeferredCudaDefaultGrid:
         self.grid_extra_kwargs = grid_extra_kwargs
 
     def __iter__(self):
-        # DeferredCudaDefaultGrid can be passed to the base class, WrapperCodeGen,
+        # DeferredGpuDefaultGrid can be passed to the base class, WrapperCodeGen,
         # to generate the autotune code block, and thus we need this iterator
         return iter(self.grid)
 
@@ -111,9 +111,9 @@ class DeferredCudaDefaultGrid:
         return grid_fn(block_cfg)
 
 
-class DeferredCudaGridLine(DeferredLineBase):
+class DeferredGpuGridLine(DeferredLineBase):
     """
-    When using cpp wrapper, CUDA kernel load and launch needs to wait for Triton kernels
+    When using cpp wrapper, GPU kernel load and launch needs to wait for Triton kernels
     to be tuned and stored as cubin files, so use a deferred line to backfill those information
     """
 
@@ -147,7 +147,7 @@ class DeferredCudaGridLine(DeferredLineBase):
                         grid = self.grid[i]
                         break
             assert grid is not None
-        elif isinstance(self.grid, DeferredCudaDefaultGrid):
+        elif isinstance(self.grid, DeferredGpuDefaultGrid):
             grid = self.grid()
         else:
             grid = self.grid
@@ -159,21 +159,21 @@ class DeferredCudaGridLine(DeferredLineBase):
         return f"    Grid {self.grid_var} = Grid({grid_args_str});"
 
     def _new_line(self, line):
-        return DeferredCudaGridLine(
+        return DeferredGpuGridLine(
             self.kernel_name, self.grid_var, self.grid, self.autotune_configs
         )
 
 
-class CppWrapperCuda(CppWrapperCpu):
+class CppWrapperGpu(CppWrapperCpu):
     """
     Generates cpp wrapper for running on GPU and calls CUDA kernels
     """
 
     def __init__(self) -> None:
-        self.device = "cuda"
+        self.device = get_gpu_type()
+        self.device_codegen = get_device_op_overrides(self.device)
         super().__init__()
         self.grid_id = count()
-        self.cuda = True
 
     def write_header(self):
         if V.graph.is_const_graph:
@@ -184,19 +184,25 @@ class CppWrapperCuda(CppWrapperCpu):
 
         self.header.splice("#include <filesystem>")
         if config.abi_compatible:
-            self.header.splice(
-                "#include <torch/csrc/inductor/aoti_runtime/utils_cuda.h>"
-            )
+            self.header.splice(self.device_codegen.abi_compatible_header())
         else:
-            self.header.splice(maybe_hipify_code_wrapper(cuda_kernel_header()))
-        self.header.splice(maybe_hipify_code_wrapper(cuda_kernel_driver()))
+            self.header.splice(
+                maybe_hipify_code_wrapper(self.device_codegen.kernel_header())
+            )
+        self.header.splice(
+            maybe_hipify_code_wrapper(self.device_codegen.kernel_driver())
+        )
 
     @functools.lru_cache(None)  # noqa: B019
     def write_get_raw_stream(self, index: int, graph=None) -> str:
         name = f"stream{index}"
-        self.writeline(maybe_hipify_code_wrapper(f"cudaStream_t {name};"))
         self.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_current_cuda_stream({index}, (void**)&{name}));"
+            maybe_hipify_code_wrapper(
+                f"{self.device_codegen.cpp_stream_type()} {name};"
+            )
+        )
+        self.writeline(
+            f"AOTI_TORCH_ERROR_CODE_CHECK({self.device_codegen.aoti_get_stream()}({index}, (void**)&{name}));"
         )
         return name
 
@@ -205,13 +211,13 @@ class CppWrapperCuda(CppWrapperCpu):
         kernel_name: str,
         kernel_body: str,
         metadata: Optional[str] = None,
-        cuda=True,
+        gpu=True,
     ):
-        if cuda:
+        if gpu:
             # Call WrapperCodeGen to create the autotune code block
-            WrapperCodeGen.define_kernel(self, kernel_name, kernel_body, metadata, cuda)
+            WrapperCodeGen.define_kernel(self, kernel_name, kernel_body, metadata, gpu)
         else:
-            super().define_kernel(kernel_name, kernel_body, metadata, cuda)
+            super().define_kernel(kernel_name, kernel_body, metadata, gpu)
 
     def generate(self, is_inference):
         self.prefix.writeline("\n")
@@ -221,7 +227,9 @@ class CppWrapperCuda(CppWrapperCpu):
                 sorted([entry[0] for entry in self.user_defined_kernel_cache.values()]),
             ):
                 self.prefix.writeline(
-                    maybe_hipify_code_wrapper(f"static CUfunction {kernel} = nullptr;")
+                    maybe_hipify_code_wrapper(
+                        f"static {self.device_codegen.cpp_kernel_type()} {kernel} = nullptr;"
+                    )
                 )
             self.prefix.writeline("\n")
         return super().generate(is_inference)
@@ -264,7 +272,7 @@ class CppWrapperCuda(CppWrapperCpu):
             arg_types=arg_types,
             raw_args=raw_args,
             grid=grid,
-            cuda=True,
+            gpu=True,
             triton=True,
             triton_meta=triton_meta,
             autotune_configs=configs,
@@ -280,15 +288,17 @@ class CppWrapperCuda(CppWrapperCpu):
         kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
         self.writeline(f"if ({kernel_var_name} == nullptr) {{")
         self.writeline(
-            DeferredCudaKernelLine(
+            DeferredGpuKernelLine(
                 kernel_name,
-                """    """
-                + kernel_var_name
-                + """ = loadKernel("%s", "%s", %s, this->cubin_dir_);"""
-                if V.graph.aot_mode
-                else """    """
-                + kernel_var_name
-                + """ = loadKernel("%s", "%s", %s);""",
+                (
+                    """    """
+                    + kernel_var_name
+                    + """ = loadKernel("%s", "%s", %s, this->cubin_dir_);"""
+                    if V.graph.aot_mode
+                    else """    """
+                    + kernel_var_name
+                    + """ = loadKernel("%s", "%s", %s);"""
+                ),
                 keys,
             )
         )
@@ -326,7 +336,9 @@ class CppWrapperCuda(CppWrapperCpu):
                 else:
                     if config.abi_compatible:
                         self.writeline(
-                            maybe_hipify_code_wrapper(f"CUdeviceptr {var_name};")
+                            maybe_hipify_code_wrapper(
+                                f"{self.device_codegen.cpp_device_ptr()} {var_name};"
+                            )
                         )
                         self.writeline(
                             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr({arg}, reinterpret_cast<void**>(&{var_name})));"
@@ -334,7 +346,8 @@ class CppWrapperCuda(CppWrapperCpu):
                     else:
                         self.writeline(
                             maybe_hipify_code_wrapper(
-                                f"CUdeviceptr {var_name} = reinterpret_cast<CUdeviceptr>({arg}.data_ptr());"
+                                f"{self.device_codegen.cpp_device_ptr()} {var_name} = \
+                                    reinterpret_cast<{self.device_codegen.cpp_device_ptr()}>({arg}.data_ptr());"
                             )
                         )
             elif arg_type in (sympy.Integer, int):
@@ -351,7 +364,7 @@ class CppWrapperCuda(CppWrapperCpu):
         self,
         kernel_name: str,
         grid_args: List[Any],
-        cuda: bool = True,
+        gpu: bool = True,
         grid_callable: Optional[Callable[..., Any]] = None,
         **grid_extra_kwargs,
     ):
@@ -359,12 +372,10 @@ class CppWrapperCuda(CppWrapperCpu):
         Generate grid configs for launching a CUDA kernel using the grid
         function from triton_heuristics. Because its computation needs
         to read kernel config after autotune, it is done in a deferred way
-        using DeferredCudaDefaultGrid.
+        using DeferredGpuDefaultGrid.
         """
-        # Call parent class to create the default grid
-        if not cuda:
-            return grid_args
-        return DeferredCudaDefaultGrid(
+        assert gpu, "CppWrapperGpu.generate_default_grid does not support non-GPU"
+        return DeferredGpuDefaultGrid(
             kernel_name, grid_args, grid_callable, **grid_extra_kwargs
         )
 
@@ -374,7 +385,7 @@ class CppWrapperCuda(CppWrapperCpu):
         call_args,
         grid=None,
         device_index=None,
-        cuda=True,
+        gpu=True,
         triton=True,
         arg_types=None,
         raw_args=None,
@@ -384,17 +395,17 @@ class CppWrapperCuda(CppWrapperCpu):
         grid_extra_kwargs="",
     ):
         """
-        Override the default value of argument 'cuda' to True here. generate_kernel_call can still be
-        called with cuda=False because of a mix of cpu kernels and triton kernels.
+        Override the default value of argument 'gpu' to True here. generate_kernel_call can still be
+        called with gpu=False because of a mix of cpu kernels and gpu kernels.
         """
-        if not cuda:
-            # Even in CppWrapperCuda, we may see cpp kernels
+        if not gpu:
+            # Even in CppWrapperGpu, we may see cpu kernels
             return super().generate_kernel_call(
                 kernel_name,
                 call_args,
                 grid,
                 device_index,
-                cuda,
+                gpu,
                 triton,
                 arg_types,
                 raw_args,
@@ -411,7 +422,7 @@ class CppWrapperCuda(CppWrapperCpu):
             call_args,
             grid,
             device_index,
-            cuda,
+            gpu,
             triton,
             arg_types,
             raw_args,
@@ -446,10 +457,9 @@ class CppWrapperCuda(CppWrapperCpu):
             if V.graph.aot_mode
             else self.write_get_raw_stream(device_index, V.graph)
         )
-
         grid_var = f"{kernel_name}_grid_{next(self.grid_id)}"
         self.writeline(
-            DeferredCudaGridLine(kernel_name, grid_var, grid, autotune_configs)
+            DeferredGpuGridLine(kernel_name, grid_var, grid, autotune_configs)
         )
 
         kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
@@ -459,7 +469,7 @@ class CppWrapperCuda(CppWrapperCpu):
         with debug_printer_manager:
             self.writeline(f"if ({grid_var}.is_non_zero()) {{")
             self.writeline(
-                DeferredCudaKernelLine(
+                DeferredGpuKernelLine(
                     kernel_name,
                     r"    launchKernel({}, {}, {}, {}, %s, %s, {}, {});".format(
                         kernel_var_name,

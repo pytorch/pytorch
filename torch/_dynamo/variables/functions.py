@@ -152,6 +152,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         assert isinstance(
             fn, (types.FunctionType, torch.jit.ScriptFunction)
         ), f"expected FunctionType found {typestr(fn)} {fn}"
+        # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
+        # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
         # unpack @torch._dynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
         self.fn: types.FunctionType = fn
@@ -320,7 +322,20 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), args, kwargs
             )
-
+        if (
+            tx.output.current_tracer.under_activation_checkpoint
+            and not tx.output.current_tracer.allow_side_effects_under_checkpoint
+        ):
+            try:
+                from torch.distributed._composable.fsdp._fsdp_state import FSDPState
+            except Exception:
+                FSDPState = None
+            if FSDPState is not None and self.fn in [
+                FSDPState._pre_forward,
+                FSDPState._post_forward,
+            ]:
+                with torch._dynamo.side_effects.allow_side_effects_under_checkpoint(tx):
+                    return super().call_function(tx, args, kwargs)
         return super().call_function(tx, args, kwargs)
 
 
