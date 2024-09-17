@@ -67,7 +67,7 @@ def capture_pre_autograd_graph_warning():
     log.warning("capture_pre_autograd_graph() is deprecated and doesn't provide any function guarantee moving forward.")
     log.warning("Please switch to use torch.export.export_for_training instead.")
     if config.is_fbcode():
-        log.warning("Unless the unittest is in the blocklist, capture_pre_autograd_graph() will fallback to torch.export.export_for_training.")  # noqa: B950
+        log.warning("For unittest, capture_pre_autograd_graph() will fallback to torch.export.export_for_training.")  # noqa: B950
 
 
 @compatibility(is_backward_compatible=False)

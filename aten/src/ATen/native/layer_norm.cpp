@@ -6,6 +6,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/cpu/mixed_data_type.h>
 #include <c10/util/irange.h>
+#include <ATen/OpMathType.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -263,18 +264,15 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   return std::make_tuple(out, mean, rstd);
 }
 
-Tensor rms_norm(
+Tensor rms_norm_symint(
     const Tensor& input,
-    IntArrayRef normalized_shape,
+    c10::SymIntArrayRef normalized_shape,
     const std::optional<Tensor>& weight_opt /* optional */,
     std::optional<double> eps) {
-
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  auto bias_opt = std::optional<Tensor>();
-  const Tensor& bias = *at::borrow_from_optional_tensor(bias_opt);
-  (void) _check_layer_norm_inputs(input, normalized_shape, weight, bias);
+  _check_rms_norm_inputs_symint(input, normalized_shape, weight);
 
   std::vector<int64_t> dims_to_reduce;
   for (const auto i : c10::irange(normalized_shape.size())) {
@@ -295,7 +293,12 @@ Tensor rms_norm(
       eps_val = eps.value();
     }
 
-    auto result = input.mul(at::rsqrt(at::pow(input, 2).mean(dims_to_reduce_ref, /*keep_dim=*/true).add_(eps_val)));
+    // upcast is needed for fp16 and bf16
+    c10::ScalarType opmath_t = toOpMathType(input.scalar_type());
+    Tensor upcasted_input = input.to(opmath_t);
+
+    Tensor rqrst_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keep_dim=*/true).add_(eps_val));
+    Tensor result = upcasted_input.mul(rqrst_input).type_as(input);
 
     if (weight_opt.has_value()) {
       result = result.mul(weight_opt.value());

@@ -6,9 +6,9 @@ from torch.testing._internal.common_utils import IS_FBCODE
 try:
     from . import test_export, testing
 except ImportError:
-    import test_export
+    import test_export  # @manual=fbcode//caffe2/test:test_export-library
 
-    import testing
+    import testing  # @manual=fbcode//caffe2/test:test_export-library
 
 
 test_classes = {}

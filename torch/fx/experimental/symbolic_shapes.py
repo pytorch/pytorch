@@ -447,14 +447,20 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
         if x.is_Integer:
             return x / factor
         elif x.is_Mul:
-            return sympy.Mul._from_args((x.args[0] / factor, *x.args[1:]), is_commutative=x.is_commutative)
+            if x.args[0] != factor:
+                args = (x.args[0] / factor, *x.args[1:])
+            else:
+                # Mul._from_args require a canonical list of args
+                # so we remove the first arg (x.args[0] / factor) if it was 1
+                args = x.args[1:]
+            return sympy.Mul._from_args(args, is_commutative=x.is_commutative)
 
     if expr.is_Add:
         atoms = expr.args
         factor = functools.reduce(math.gcd, map(integer_coefficient, atoms))
         if factor == 1:
             return expr
-        atoms = [x / factor for x in atoms]
+        atoms = [div_by_factor(x, factor) for x in atoms]
         return sympy.Add._from_args(atoms)
     elif expr.is_Integer:
         return sympy.One
@@ -1408,13 +1414,64 @@ def is_symbolic(val: Union[int, SymInt, float, SymFloat, bool, SymBool]) -> bool
 
 IndicatorTypes = (IsNonOverlappingAndDenseIndicator,)
 
+
+def _expandsums(args: List[sympy.Expr]) -> Tuple[sympy.Expr, bool]:
+    adds, other = [], []
+    for arg in args:
+        if arg.is_Add:
+            adds.append(arg)
+        else:
+            other.append(arg)
+
+    result = [sympy.Mul(*other)]
+    for add in adds:
+        result = [a * b for a, b in itertools.product(result, add.args)]
+
+    result = sympy.Add(*result)
+    return result, len(adds) > 1 or (len(adds) > 0 and len(other) > 0)
+
+
+def _fast_expand(expr: sympy.Expr) -> sympy.Expr:
+    # The expand algorithm in sympy is slow due to all the features is supports
+    # For eg: e^(-x)*(x-1)/(x+1) is expanded to (x-1)/(e^x + e^x*x) if x is
+    # positive and (e^(-x)*x-e^(-x))/(x+1) if x is negative. We do not implement
+    # such features here to avoid expensive checks. We also make sure that we
+    # only re-create the objects if any of the args changed to avoid expensive
+    # checks when re-creating objects.
+    new_args = [_fast_expand(arg) for arg in expr.args]
+    if any(arg is not new_arg for arg, new_arg in zip(expr.args, new_args)):
+        return _fast_expand(expr.func(*new_args))
+
+    if expr.is_Pow:
+        base, exp = expr.args
+        if exp.is_Integer:
+            if exp > 1:
+                return sympy.expand_multinomial(expr, deep=False)
+            elif exp < 0:
+                return 1 / sympy.expand_multinomial(1 / expr, deep=False)
+    elif expr.is_Mul:
+        num, den = [], []
+        for arg in expr.args:
+            if arg.is_Pow and arg.args[1] == -1:
+                den.append(1 / arg)
+            else:
+                num.append(arg)
+
+        num, num_changed = _expandsums(num)
+        den, den_changed = _expandsums(den)
+        if num_changed or den_changed:
+            return num / den
+
+    return expr
+
+
 @lru_cache(256)
 def safe_expand(r):
     if hasattr(r, 'expand'):
         try:
-            return sympy.expand(r)
+            return _fast_expand(r)
         except RecursionError:
-            log.warning("RecursionError in sympy.expand(%s)", r)
+            log.warning("RecursionError in _fast_expand(%s)", r)
             return r
     else:
         return r
@@ -2726,6 +2783,7 @@ class ShapeEnv:
     def set_unbacked_var_to_val(self, k: sympy.Symbol, v: int) -> None:
         """Used only when propagate_real_tensors; registers a value for an
         unbacked symbol, which can be used last resort to resolve hints."""
+        log.info("set_unbacked_var_to_val %s = %s", k, v)
         self.unbacked_var_to_val[k] = sympy.sympify(v)
 
     # Unlike set_replacement, this records a shapeenv event
@@ -4477,7 +4535,7 @@ class ShapeEnv:
         subst = {}
         for e in axioms:
             if e.free_symbols.issubset(expr.free_symbols):
-                subst.update(dict(self.get_implications(e)))
+                subst.update(dict(self.get_implications(self.simplify(e))))
 
         expr = expr.xreplace(subst)
 
@@ -4592,7 +4650,10 @@ class ShapeEnv:
             # assumption queries if expr has a relational node.
             if not r.is_Symbol or r != s:
                 replacements[s] = r
-        return safe_expand(expr.xreplace(replacements))
+        if replacements:
+            return safe_expand(expr.xreplace(replacements))
+        else:
+            return expr
 
     @_lru_cache
     def _update_divisible(self):
@@ -4626,8 +4687,9 @@ class ShapeEnv:
                     if self.replace(Mod(base, divisor)) in self.divisible and \
                             base == base1 and self.replace(Mod(base1, divisor1)) in self.divisible:
                         div_replacements[atom] = divisor1
-            expr = expr.xreplace(div_replacements)
-            expr = safe_expand(expr)
+            if div_replacements:
+                expr = expr.xreplace(div_replacements)
+                expr = safe_expand(expr)
         if expr.has(FloorDiv):
             div_replacements = {}
             pows = expr.atoms(sympy.Pow)
@@ -4636,13 +4698,14 @@ class ShapeEnv:
                 base, divisor = fd.args
                 if self.replace(Mod(base, divisor)) in self.divisible:
                     div_replacements[fd] = CleanDiv(base, divisor)
-            new_expr = expr.xreplace(div_replacements)
-            new_expr = safe_expand(new_expr)
-            new_pows = new_expr.atoms(sympy.Pow)
-            new_rationals = new_expr.atoms(sympy.Rational).difference(new_expr.atoms(sympy.Integer))
-            # divisions simplified away
-            if new_pows.issubset(pows) and new_rationals.issubset(rationals):
-                expr = new_expr
+            if div_replacements:
+                new_expr = expr.xreplace(div_replacements)
+                new_expr = safe_expand(new_expr)
+                new_pows = new_expr.atoms(sympy.Pow)
+                new_rationals = new_expr.atoms(sympy.Rational).difference(new_expr.atoms(sympy.Integer))
+                # divisions simplified away
+                if new_pows.issubset(pows) and new_rationals.issubset(rationals):
+                    expr = new_expr
         return expr
 
     @lru_cache(256)
