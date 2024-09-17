@@ -91,7 +91,7 @@ outputs_msg = (
 
 def _test_aot_autograd_forwards_backwards_helper(
         f, compiled_f, args, assert_raises_regex_fn, assert_equals_fn,
-        try_check_data_specialization, skip_correctness_check):
+        try_check_data_specialization, skip_correctness_check=False):
     # Verify grads are equal between compiled and non-compiled versions of f.
 
     def call_forwards_backwards(f, args):

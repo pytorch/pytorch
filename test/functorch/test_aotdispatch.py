@@ -6133,7 +6133,7 @@ def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
                 self.assertEqual,
                 check_gradients=True,
                 try_check_data_specialization=try_check_data_specialization,
-                skip_correctness_check=op.is_randomized_result,
+                skip_correctness_check=op.skip_correctness_check_compile_vs_eager,
             )
         except DynamicOutputShapeException:
             self.skipTest("Dynamic output shape operation in trace")
