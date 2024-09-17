@@ -29,6 +29,7 @@ Problems
 - Functionalization needs to happen before partitioning - so probably
 Autograd key. But also need support for inference, so probably functional
 tensor as well
+Somehow call aot_autograd
 
 - Do we need DispatchKey.CompositeExplicitAutograd for invoke_subgraph?
 
@@ -41,6 +42,7 @@ is not doing the right thing.
 we might need to raise an exception which tells Dynamo to restart and retrace
 without any invoke_subgraph ops. It might be possible to do this at global
 level.
+--- Needs Dynamo work
 
 - How to cache or de-dupe the invoke_subgraph such that it is traced only
 once? It seems that we need some kind of fx-graph cache, at both Dynamo and
@@ -53,6 +55,39 @@ implementation)
 
 - What happens in inductor? And same de-dupe logic is required in inductor as
 well.
+"""
+
+"""
+Functional tensor holding a fake tensor
+
+The order is
+- Autograd
+- Functionalize
+- Decomps + ProxyTensorDispatchMode
+- Fake propagation
+
+
+torch.compile
+- Parititioning - After everything has been done
+
+With invoke_subgraph
+
+- Autograd Key - its not functionalized, its not decomposed (because of renter_make_fx not expected) - and then I partition
+This is a problem because of dce.
+
+This was not a problem for flex and cond because they do not parition.
+- Autograd - They create joint graph, no partioning - so no dec problem
+- Funcitnoalize - they do this
+- Decomps in ProxyTensorDispatchMode
+- Fake tensor
+
+For invoke
+- Autograd - we need to functioanlize, decompose, decomps, fake (everything needs to happen here)
+
+(Everything else is for inference mode)
+- Functionalize - for inference, it needs to functionalize
+- Decomps in ProxyTensorDispatchMode -
+- Fake tensor
 """
 
 
@@ -114,10 +149,8 @@ def create_fw_bw_graph(
     return fw_graph, bw_graph
 
 
-# TODO(anijain2305) - Just for testing - We can remove this .. I think
-@invoke_subgraph.py_impl(DispatchKey.CPU)
-def invoke_subgraph_cpu(subgraph, *args):
-    # print(subgraph)
+@invoke_subgraph.py_impl(DispatchKey.CompositeExplicitAutograd)
+def invoke_subgraph_composite_explicit_autograd(subgraph, *args):
     return subgraph(*args)
 
 
