@@ -779,6 +779,28 @@ std::tuple<Tensor, std::optional<int64_t>> scatter_reduce_batch_rule(
                             self, self_bdim, dim, index, index_bdim, src, src_bdim, reduce);
 }
 
+std::tuple<Tensor, std::optional<int64_t>> scatter_reduce_two_batch_rule(
+    const Tensor& self, std::optional<int64_t> self_bdim,
+    int64_t dim,
+    const Tensor& index, std::optional<int64_t> index_bdim,
+    const Tensor& src, std::optional<int64_t> src_bdim,
+    const c10::string_view reduce,
+    bool include_self) {
+  return scatter_batch_rule(ATEN_FN2(scatter_reduce, two),
+                            self, self_bdim, dim, index, index_bdim, src, src_bdim, reduce, include_self);
+}
+
+std::tuple<Tensor, std::optional<int64_t>> scatter_reduce__two_batch_rule(
+    const Tensor& self, std::optional<int64_t> self_bdim,
+    int64_t dim,
+    const Tensor& index, std::optional<int64_t> index_bdim,
+    const Tensor& src, std::optional<int64_t> src_bdim,
+    const c10::string_view reduce,
+    bool include_self) {
+  return scatter_batch_rule(ATEN_FN2(scatter_reduce_, two),
+                            self, self_bdim, dim, index, index_bdim, src, src_bdim, reduce, include_self);
+}
+
 std::tuple<Tensor, std::optional<int64_t>> scatter_value_reduce_batch_rule(
     const Tensor& self, std::optional<int64_t> self_bdim,
     int64_t dim,
@@ -1250,6 +1272,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(scatter_add, scatter_add_batch_rule);
   VMAP_SUPPORT2(scatter, reduce, scatter_reduce_batch_rule);
   VMAP_SUPPORT2(scatter, value_reduce, scatter_value_reduce_batch_rule);
+  VMAP_SUPPORT2(scatter_reduce, two, scatter_reduce_two_batch_rule);
+  VMAP_SUPPORT2(scatter_reduce_, two, scatter_reduce__two_batch_rule);
   // as_strided_scatter does not work with the for-loop fallback today,
   // because as_strided_scatter will return an output that matches
   // the strides/storage_offset of its input.

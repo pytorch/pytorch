@@ -5927,6 +5927,22 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         res = compile_outer(x)
         self.assertEqual(ref, res)
 
+    # https://github.com/pytorch/pytorch/issues/119162
+    def test_inductor_rng_default_dtype(self) -> None:
+        @torch.compile
+        def fn():
+            tmp = torch.randn(4, 4, dtype=torch.bfloat16)
+            return tmp
+
+        try:
+            old = torch.get_default_dtype()
+            torch.set_default_dtype(torch.bfloat16)
+            out = fn()
+        finally:
+            torch.set_default_dtype(old)
+        # output dtype should be float32
+        self.assertEqual(out.dtype, torch.bfloat16)
+
 
 instantiate_parametrized_tests(ReproTests)
 

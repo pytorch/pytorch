@@ -52,6 +52,10 @@ from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
 )
 
 
+TEST_PORT = 54321
+TEST_ADDR = "host"
+
+
 class CustomAssertMixin:
     assertDictEqual: Callable
 
@@ -1141,7 +1145,7 @@ class TestRendezvousKeepAliveOp(AbstractTestRendezvousOp, TestCase):
 class DummyStore(Store):
     @property
     def port(self) -> int:
-        return 54321
+        return TEST_PORT
 
 
 class DynamicRendezvousHandlerTest(TestCase):
@@ -1206,11 +1210,11 @@ class DynamicRendezvousHandlerTest(TestCase):
     def test_share_store_creates_tcp_store(self):
         handler = self._create_handler()
 
-        shared_store_info = RendezvousStoreInfo("host", 54321)
+        shared_store_info = RendezvousStoreInfo(TEST_ADDR, TEST_PORT)
         with patch.object(RendezvousStoreInfo, "build", return_value=shared_store_info):
             rdzv_info = handler.next_rendezvous()
-            self.assertEqual(rdzv_info.bootstrap_store_info.master_addr, "host")
-            self.assertEqual(rdzv_info.bootstrap_store_info.master_port, 54321)
+            self.assertEqual(rdzv_info.bootstrap_store_info.master_addr, TEST_ADDR)
+            self.assertEqual(rdzv_info.bootstrap_store_info.master_port, TEST_PORT)
         self.assertEqual(handler._shared_tcp_store_server, self._tcp_store_mock)
 
         rdzv_info = handler.next_rendezvous()
@@ -1221,23 +1225,27 @@ class DynamicRendezvousHandlerTest(TestCase):
 
         class CustomPrefixStore(Mock):
             def get(self, key):
-                return b"host" if key == "MASTER_ADDR" else b"54321"
+                return (
+                    TEST_ADDR.encode("utf-8")
+                    if key == "MASTER_ADDR"
+                    else bytes(str(TEST_PORT), "utf-8")
+                )
 
             def set(self, key, value):
                 pass
 
         with patch.object(dist, "PrefixStore", new=CustomPrefixStore):
             handler._store = Mock(spec=dist.TCPStore)
-            type(handler._store).host = PropertyMock(return_value="host")
+            type(handler._store).host = PropertyMock(return_value=TEST_ADDR)
             type(handler._store).port = PropertyMock(return_value=54320)
             rdzv_info = handler.next_rendezvous()
-            self.assertEqual(rdzv_info.bootstrap_store_info.master_addr, "host")
-            self.assertEqual(rdzv_info.bootstrap_store_info.master_port, 54321)
+            self.assertEqual(rdzv_info.bootstrap_store_info.master_addr, TEST_ADDR)
+            self.assertEqual(rdzv_info.bootstrap_store_info.master_port, TEST_PORT)
             self.assertNotEqual(handler._shared_tcp_store_server, handler._store)
 
             rdzv_info = handler.next_rendezvous()
-            self.assertEqual(rdzv_info.bootstrap_store_info.master_addr, "host")
-            self.assertEqual(rdzv_info.bootstrap_store_info.master_port, 54321)
+            self.assertEqual(rdzv_info.bootstrap_store_info.master_addr, TEST_ADDR)
+            self.assertEqual(rdzv_info.bootstrap_store_info.master_port, TEST_PORT)
             self.assertNotEqual(handler._shared_tcp_store_server, handler._store)
 
     @patch("torch.distributed.elastic.rendezvous.dynamic_rendezvous._delay")
@@ -1822,7 +1830,7 @@ class IntegrationTest(TestCase):
         prefix_store_class_mock.return_value = prefix_store
         tcp_store = Mock(spec=dist.TCPStore)
         original_addr = "original_addr"
-        original_port = 54321
+        original_port = TEST_PORT
         type(tcp_store).host = PropertyMock(return_value=original_addr)
         type(tcp_store).port = PropertyMock(return_value=original_port)
         # this will be injected

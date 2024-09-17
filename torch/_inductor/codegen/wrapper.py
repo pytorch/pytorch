@@ -545,6 +545,9 @@ class WrapperCodeGen(CodeGen):
         aot_config_comment = ""
         if context is not None and context.aot_graph_name is not None:
             aot_config_comment = f"# AOT ID: {context.aot_graph_name}"
+        aot_inductor_debug_utils = ""
+        if int(config.aot_inductor.debug_intermediate_value_printer) > 0:
+            aot_inductor_debug_utils = "from torch._inductor.codegen.debug_utils import _print_debugging_tensor_value_info"
         self.imports.splice(
             f"""
                 {aot_config_comment}
@@ -562,6 +565,7 @@ class WrapperCodeGen(CodeGen):
                 from {async_compile.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
                 from torch._inductor.codegen.multi_kernel import MultiKernelCall
+                {aot_inductor_debug_utils}
             """,
             strip=True,
         )
