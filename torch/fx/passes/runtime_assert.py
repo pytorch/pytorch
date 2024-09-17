@@ -169,7 +169,7 @@ def insert_deferred_runtime_asserts(
             node.meta[val_key] = (
                 None
                 if node.target == torch.ops.aten._assert_scalar.default
-                node.target(*fake_args)  # type: ignore[operator]
+                else node.target(*fake_args)  # type: ignore[operator]
             )
         except NotImplementedError:
             # This can happen when attempting to reify a symbol with an unsupported call_function node,
