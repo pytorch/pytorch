@@ -894,7 +894,6 @@ graph():
             torch.allclose(ep.module()(torch.zeros(2, 3)), torch.ones(2, 3) * 21)
         )
 
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # TODO(pianpwk): user_output signature
     def test_real_tensor_for_max_op(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -912,6 +911,85 @@ graph():
         y = torch.ones(64)
         self.assertEqual(ep.module()(x, x), model(x, x))
         self.assertEqual(ep.module()(x, y), model(x, y))
+
+    def test_real_tensor_bool_cast(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                a = bool(x.eq(0.1).any())
+                b = bool(x.eq(0.1).all())
+                c = bool(x.eq(0.1).any().item())
+                return a + b + c
+
+        model = Foo()
+        inputs = (torch.randn(128),)
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            export(model, inputs, strict=False)
+
+    def test_real_tensor_where_op(self):
+        class Baz(torch.nn.Module):
+            def forward(self, x):
+                x = torch.where(x <= 0.5)[0]
+                if x.shape[0] < 200:
+                    return x + 2
+
+        model = Baz()
+        inputs = (torch.randn(64, 32),)
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            export(model, inputs, strict=False)
+
+    def test_dist_normal(self):
+        import torch.nn as nn
+        import torch.nn.functional as F
+        from torch import distributions as pyd
+
+        class SquashedNormal(pyd.transformed_distribution.TransformedDistribution):
+            def __init__(self, loc, scale, tanh_transform_clamp=(-0.99, 0.99)):
+                self.loc = loc
+                self.scale = scale
+                self.tanh_transform_clamp = tanh_transform_clamp
+                self.base_dist = pyd.Normal(loc, scale)
+                super().__init__(self.base_dist, [])
+
+            @property
+            def mean(self):
+                mu = self.loc
+                for tr in self.transforms:
+                    mu = tr(mu)
+                return mu
+
+        def _squashed_normal_flatten(t: SquashedNormal):
+            return [t.loc, t.scale], t.tanh_transform_clamp
+
+        def _squashed_normal_unflatten(values, context):
+            return SquashedNormal(*values, context)
+
+        torch.utils._pytree.register_pytree_node(
+            SquashedNormal,
+            _squashed_normal_flatten,
+            _squashed_normal_unflatten,
+            serialized_type_name=f"{SquashedNormal.__module__}.{SquashedNormal.__name__}",
+        )
+
+        class StochasticActor(nn.Module):
+            def __init__(
+                self,
+                state_space_size=4,
+                act_space_size=2,
+            ):
+                super().__init__()
+                self.fc = nn.Linear(state_space_size, act_space_size)
+
+            def forward(self, state):
+                out = F.relu(self.fc(state))
+                mu, log_std = out.chunk(2, dim=1)
+                log_std = torch.tanh(log_std)
+                std = (-10 + 6 * (log_std + 1)).exp()
+                dist = SquashedNormal(mu, std)
+                return dist
+
+        model = StochasticActor()
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            export(model, (torch.randn(1, 4),), strict=False)
 
     def test_export_script_module(self):
         class Foo(torch.nn.Module):
