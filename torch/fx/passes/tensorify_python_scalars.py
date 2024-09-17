@@ -143,7 +143,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
             nodes[i + 1] if node not in placeholders else first_non_placeholder
         ):
             # Look for tensor.item() calls on placeholders
-            if unbacked_bindings := node.meta.get("unacked_bindings"):
+            if unbacked_bindings := node.meta.get("unbacked_bindings"):
                 for s, keypath in unbacked_bindings.items():
 
                     def go(
