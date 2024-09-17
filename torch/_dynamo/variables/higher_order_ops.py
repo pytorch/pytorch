@@ -2254,6 +2254,30 @@ class AutogradFunctionApplyVariable(VariableTracker):
             source_target="autograd.Function",
         )
 
+        # Since we speculate the fwd graph always under no grad mode, we need to
+        # set the correct grad mode (and other attributes) for the fwd output, so
+        # we do fake tensor prop on the fwd graph again.
+        args2, kwargs2 = proxy_args_kwargs(args, kwargs)
+        args2 = (ctx.proxy, *args2)
+        from .builder import wrap_fx_proxy_cls
+
+        fwd_out_from_fake = wrap_fx_proxy_cls(
+            target_cls=variables.TensorVariable,
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.fwd_graph,
+                args2,
+                kwargs2,
+            ),
+            example_value=None,
+        )
+        example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            fwd_out_from_fake.as_proxy(),
+        )
+
         # Speculate subgraph on the backward. We make the
         # bwd tracer a child of the fwd tracer, because backward may rely on
         # tensors/attrs created in the fwd tracer.
@@ -2424,11 +2448,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
             fwd_node,
             bwd_node,
             *([arg.as_proxy() for arg in filtered_args] + list(fwd_freevars.keys())),
-        )
-        example_value = pytree.tree_map_only(
-            torch.fx.Proxy,
-            lambda a: a.node.meta["example_value"],
-            fwd_out.as_proxy(),
         )
 
         # Store the invocation as a call
