@@ -49,7 +49,9 @@ class Benchmark(BenchmarkBase):
         torch._dynamo.reset()
 
     def _work(self):
-        with fresh_inductor_cache():
+        with fresh_inductor_cache(), torch._inductor.config.patch(
+            force_shape_pad=self._force_shape_pad
+        ):
             opt_m = torch.compile(backend=self.backend, dynamic=self._dynamic)(
                 self.m.cuda() if self._is_gpu else self.m
             )
