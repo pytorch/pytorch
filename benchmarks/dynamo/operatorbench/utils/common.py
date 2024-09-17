@@ -1,9 +1,9 @@
-
-from typing import Optional, List, Dict
-import pathlib
 import dataclasses
-import torch
+import pathlib
 from enum import Enum
+from typing import Dict, List, Optional
+
+import torch
 
 
 @dataclasses.dataclass
