@@ -653,9 +653,6 @@ SparseTensor& add_out_sparse_cpu(const SparseTensor& t, const SparseTensor& src,
   const std::vector<int64_t>& res_shape = infer_size(t.sizes(), src.sizes());
 
   // deal with empty sparse tensors
-  if (src._nnz() == 0 && t._nnz() == 0) {
-    return copy_sparse_to_sparse_(r, t);
-  }
   if (src._nnz() == 0) {
     const SparseTensor& broadcasted_t = expand_sparce_cpu(t, res_shape, commonDtype);
     return copy_sparse_to_sparse_(r, broadcasted_t);
