@@ -1322,7 +1322,7 @@ def _insert_call_module(
     return module_node
 
 
-def _destruct_outputs(
+def _deconstruct_outputs(
     gm: torch.fx.GraphModule,
     signature: ModuleCallSignature,
     module_node: torch.fx.Node,
@@ -1412,12 +1412,27 @@ def _try_remove_connecting_pytrees(curr_module_node: torch.fx.Node) -> None:
         )
         return
 
-    for arg in unflatten_node.args[0]:  # type: ignore[union-attr]
+    for i, arg in enumerate(unflatten_node.args[0]):  # type: ignore[union-attr,arg-type]
         if arg not in flatten_node.users:
             log.debug(
                 "Module %s's outputs are not all directly used as inputs to "
                 "the subsequent module. Unable to fuse the connecting "
                 "flatten/unflatten. The inputs to the subsequent module are: %s. ",
+                curr_module_node,
+                unflatten_node.args[0],
+            )
+            return
+
+        if not (
+            arg.op == "call_function"
+            and arg.target == operator.getitem
+            and arg.args[0] == i
+        ):
+            log.debug(
+                "Module %s's outputs are not all directly used in the same "
+                "order as outputted. Unable to fuse the connecting "
+                "flatten/unflatten. The inputs to the "
+                "subsequent module are: %s. ",
                 curr_module_node,
                 unflatten_node.args[0],
             )
@@ -1534,7 +1549,7 @@ def _swap_module_helper(
         The `tree_unflatten` call will construct tensor inputs into the input
         format needed by the swapped eager module.
         The `call_module` node should now reference the swapped torch.nn.Module.
-        The `tree_flatten_spec` call will destruct the eager outputs of the
+        The `tree_flatten_spec` call will deconstruct the eager outputs of the
         swapped module into tensors.
         """  # noqa: B950
 
@@ -1552,7 +1567,7 @@ def _swap_module_helper(
         module_node = _insert_call_module(
             gm, args_nodes, kwargs_nodes, modules_to_swap[name], name
         )
-        _destruct_outputs(gm, signature, module_node, node_name_map, orig_outputs)
+        _deconstruct_outputs(gm, signature, module_node, node_name_map, orig_outputs)
 
         erase_nodes(gm, nodes)
 
