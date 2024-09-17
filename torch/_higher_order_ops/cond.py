@@ -402,7 +402,7 @@ def cond_autograd(pred, true_fn, false_fn, operands):
     suppress_pending = contextlib.nullcontext()
     if (
         fake_mode := detect_fake_mode()
-        and shape_env := fake_mode.shape_env
+        and (shape_env := fake_mode.shape_env)
     ):
         # I guess we should clear unbacked symbols before the 1st make_fx call for cond,
         # not sure where to put it.
