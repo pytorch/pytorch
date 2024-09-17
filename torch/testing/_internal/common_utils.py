@@ -5317,8 +5317,7 @@ def remove_cpp_extensions_build_root():
     """
     Removes the default root folder under which extensions are built.
     """
-    torch.utils.cpp_extensions.get_default_build_root()
-    default_build_root = get_default_build_root()
+    default_build_root = torch.utils.cpp_extensions.get_default_build_root()
     if os.path.exists(default_build_root):
         if IS_WINDOWS:
             # rmtree returns permission error: [WinError 5] Access is denied
