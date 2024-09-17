@@ -381,7 +381,7 @@ def topological_sort_lpmf(
 
 def topological_sort_bfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
     """
-    A BFS topological sort that selects nodes whose depednecies are executed
+    A BFS topological sort that selects nodes whose dependencies are executed
     the earliest. This follows a FIFO idea.
     """
 
