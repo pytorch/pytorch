@@ -41,11 +41,13 @@ if(NOT __AOTRITON_INCLUDED)
     list(GET __AOTRITON_CI_INFO 3 __AOTRITON_COMMIT)
     list(GET __AOTRITON_CI_INFO 4 __AOTRITON_SHA256)
     list(GET __AOTRITON_CI_INFO 5 __AOTRITON_Z)
-    set(__AOTRITON_URL "https://github.com/ROCm/aotriton/releases/download/\
-    ${__AOTRITON_VER}/aotriton-\
-    ${__AOTRITON_VER}-${__AOTRITON_MANY}\
-    _${__AOTRITON_ARCH}-${__AOTRITON_ROCM}-shared.tar.${__AOTRITON_Z}")
-    set(__AOTRITON_ARCH "x86_64"
+    set(__AOTRITON_ROCM "rocm${ROCM_VERSION_DEV_MAJOR}.${ROCM_VERSION_MINOR}")
+    set(__AOTRITON_ARCH "x86_64")
+    string(CONCAT __AOTRITON_URL "https://github.com/ROCm/aotriton/releases/download/"
+                                 "${__AOTRITON_VER}/aotriton-"
+                                 "${__AOTRITON_VER}-${__AOTRITON_MANY}"
+                                 "_${__AOTRITON_ARCH}-${__AOTRITON_ROCM}"
+                                 "-shared.tar.${__AOTRITON_Z}")
     ExternalProject_Add(aotriton_external
       URL "${__AOTRITON_URL}"
       URL_HASH SHA256=${__AOTRITON_SHA256}
