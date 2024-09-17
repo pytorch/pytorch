@@ -2146,9 +2146,7 @@ class CppKernel(Kernel):
 
     @property
     def assert_function(self) -> str:
-        if V.graph.aot_mode:
-            # TODO: Using AOTI_TORCH_CHECK is causing performance drop for some models
-            # compared with JIT Inductor which uses TORCH_CHECK
+        if config.abi_compatible:
             return "AOTI_TORCH_CHECK"
         else:
             return "TORCH_CHECK"
@@ -3649,17 +3647,8 @@ class CppKernelProxy(CppKernel):
         for _node in nodes:
             assert isinstance(_node, SchedulerNode)
             assert isinstance(_node._body, LoopBody)
-            node: SchedulerNode = _node
-
-            def is_memory_copy_scheduler_node(node: SchedulerNode):
-                op_counts = node.read_writes.op_counts
-                return (
-                    len(op_counts) == 2 and "load" in op_counts and "store" in op_counts
-                )
-
-            should_legalize = not is_memory_copy_scheduler_node(node)
-            if should_legalize:
-                body: LoopBody = node._body
+            body: LoopBody = _node._body
+            if not body.is_memory_copy():
                 self.legalize_lowp_fp_dtype_loopbody(body)
 
     def codegen_functions(self, fn_list, var_sizes_list):
@@ -4346,9 +4335,9 @@ class CppScheduling(BaseScheduling):
                             ):
                                 contiguous_index_expr += stride * var
                                 stride *= range
-                            write_index_expr = scheduler_node._body.writes_name2expr[
+                            write_index_expr = scheduler_node._body.get_write_expr(
                                 scheduler_buffer.get_name()
-                            ]
+                            )
 
                             def is_contiguous_index(x):
                                 return x == contiguous_index_expr
@@ -4356,9 +4345,9 @@ class CppScheduling(BaseScheduling):
                             return is_contiguous_index(write_index_expr) and all(
                                 isinstance(user.node, SchedulerNode)
                                 and is_contiguous_index(
-                                    user.node._body.reads_name2expr[
+                                    user.node._body.get_read_expr(
                                         scheduler_buffer.get_name()
-                                    ],
+                                    ),
                                 )
                                 for user in scheduler_buffer.users
                             )
@@ -4573,7 +4562,7 @@ class CppScheduling(BaseScheduling):
         compile_wrapper.splice(src_code, strip=True)
         if not V.graph.cpp_wrapper:
             compile_wrapper.writeline("''')")
-        wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), cuda=False)
+        wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), gpu=False)
         return kernel_name
 
     def flush(self):
@@ -4654,7 +4643,7 @@ class KernelGroup:
     def call_kernel(self, wrapper, kernel_name):
         _, call_args, arg_types = self.args.cpp_argdefs()
         wrapper.generate_kernel_call(
-            kernel_name, call_args, cuda=False, arg_types=arg_types
+            kernel_name, call_args, gpu=False, triton=False, arg_types=arg_types
         )
 
 
