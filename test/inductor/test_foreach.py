@@ -21,7 +21,10 @@ try:
     try:
         from .test_torchinductor import check_model, check_model_cuda
     except ImportError:
-        from test_torchinductor import check_model, check_model_cuda
+        from test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+            check_model,
+            check_model_cuda,
+        )
 except (unittest.SkipTest, ImportError) as e:
     sys.stderr.write(f"{type(e)}: {e}\n")
     if __name__ == "__main__":

@@ -7,7 +7,6 @@ import torch
 from torch._dynamo.external_utils import (
     call_backward,
     call_hook,
-    call_lambda,
     FakeCompiledAutogradEngine,
 )
 from torch._dynamo.source import GetItemSource, LocalSource
@@ -59,7 +58,6 @@ def maybe_clone(x):
     return x
 
 
-saved_scalars = []
 next_op = 0
 
 
@@ -171,18 +169,21 @@ class AutogradCompilerInstance:
                 )
 
             tagged_tensor = torch.tensor(0)
-            tagged_tensor._compiled_autograd_is_none = True
+            tagged_tensor._compiled_autograd_is_none = True  # type: ignore[attr-defined]
             global next_op
 
-            @torch.library.custom_op(
+            @torch.library.custom_op(  # type: ignore[misc]
                 f"compiled_autograd::cpp_node_op_{next_op}", mutates_args=()
             )
             def cpp_node_op_i(
                 inputs: List[torch.Tensor], idx: int
             ) -> List[torch.Tensor]:
                 outs = torch._C._dynamo.compiled_autograd.call_lambda(inputs, idx)
+                # gradient layout contract doesn't enforce output strides to match input strides
                 return [
-                    out.clone() if out is not None else tagged_tensor.clone()
+                    out.clone().contiguous()
+                    if out is not None
+                    else tagged_tensor.clone()
                     for out in outs
                 ]
 
@@ -205,16 +206,6 @@ class AutogradCompilerInstance:
 
             next_op += 1
 
-        # register a call to that idx
-        # proxies = self.fx_tracer.create_proxy(
-        #     kind="call_function",
-        #     target=call_lambda,
-        #     args=(
-        #         self.to_proxy(inputs),
-        #         self.scalars_proxy[idx], # idx here is wrong?
-        #     ),
-        #     kwargs={},
-        # )
         proxies = cpp_node_op_i(self.to_proxy(inputs), self.scalars_proxy[idx])
 
         with disable_proxy_modes_tracing():
@@ -609,3 +600,4 @@ def reset() -> None:
     assert not in_compiled_autograd_region
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
     torch._C._dynamo.compiled_autograd.set_verbose_logger(None)
+    torch._C._dynamo.compiled_autograd.clear_cache()

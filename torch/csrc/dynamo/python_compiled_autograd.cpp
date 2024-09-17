@@ -319,9 +319,29 @@ struct InputBuffers : public std::unordered_map<Node*, InputBuffer> {
 static PyObject* the_autograd_compiler = nullptr;
 static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args);
 
+// refactor and simplify this into some struct
+static std::vector<std::function<variable_list(variable_list)>> lambdas;
+static std::vector<at::IValue> lambda_idxs;
+static std::vector<std::vector<std::optional<VariableInfo>>>
+    lambda_output_infos;
+static size_t next_lambdas_idx = 0;
+static size_t offset_lambdas_idx = 0;
+static std::unordered_map<size_t, std::shared_ptr<Node>>
+    lifted_nodes; // deferred free
+static std::unordered_map<std::shared_ptr<Node>, size_t>
+    reverse_lifted_nodes; // deferred free
+
 static PyObject* clear_cache(PyObject* dummy, PyObject* args) {
   HANDLE_TH_ERRORS;
   CacheNode::root()->clear();
+  // fix this
+  lambdas.clear();
+  lambda_idxs.clear();
+  lambda_output_infos.clear();
+  next_lambdas_idx = 0;
+  offset_lambdas_idx = 0;
+  lifted_nodes.clear();
+  reverse_lifted_nodes.clear();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS;
 }
@@ -366,16 +386,6 @@ struct ClosingTHPObjectPtr : public THPObjectPtr {
   }
 };
 
-// refactor and simplify this into some struct
-static std::vector<std::function<variable_list(variable_list)>> lambdas;
-static std::vector<at::IValue> lambda_idxs;
-static std::vector<std::vector<std::optional<VariableInfo>>>
-    lambda_output_infos;
-static size_t next_lambdas_idx = 0;
-static size_t offset_lambdas_idx = 0;
-static std::unordered_map<size_t, std::shared_ptr<Node>> lifted_nodes; // deferred free
-static std::unordered_map<std::shared_ptr<Node>, size_t> reverse_lifted_nodes; // deferred free
-
 static at::IValue* lambda_collect(
     CompiledNodeArgs& args,
     Node* fn,
@@ -396,9 +406,10 @@ static at::IValue* lambda_collect(
   std::shared_ptr<Node> node = args.get_node_call()->node;
   TORCH_INTERNAL_ASSERT(lifted_nodes.find(idx) == lifted_nodes.end())
   lifted_nodes[idx] = node;
-  TORCH_INTERNAL_ASSERT(reverse_lifted_nodes.find(node) == reverse_lifted_nodes.end())
+  TORCH_INTERNAL_ASSERT(
+      reverse_lifted_nodes.find(node) == reverse_lifted_nodes.end())
   reverse_lifted_nodes[node] = idx;
-  lambda_idxs.emplace_back(at::IValue(static_cast<int64_t>(idx)));
+  lambda_idxs.emplace_back(static_cast<int64_t>(idx));
   for (auto i : c10::irange(output_info.size())) {
     if (is_variable_input[i]) {
       args.collect(output_info[i].layout);
@@ -434,10 +445,8 @@ static variable_list lambda_lift(
     SwapSavedVariables& ssv,
     PyObject* py_compiler,
     variable_list&& inputs) {
-  // c10::SymInt idx = lambda_idxs[next_lambdas_idx++].toSymInt();
-  // need to before(at::IValue) but with the proper next_proxy idx.
   at::IValue& idx = lambda_idxs[next_lambdas_idx++];
-  int hackidx = idx.toInt();
+  int64_t hackidx = idx.toInt();
   ssv.before(idx);
   static PyObject* method_name =
       PyUnicode_InternFromString("proxy_call_lambda");
@@ -463,7 +472,7 @@ static variable_list lambda_lift(
   THPObjectPtr pyresult(check(PyObject_CallMethodObjArgs(
       py_compiler,
       method_name,
-      PyLong_FromSsize_t(
+      PyLong_FromUnsignedLong(
           hackidx - offset_lambdas_idx), // doesnt work when there's 2 lifted in
                                          // same graph
       pyinputs.get(),
@@ -488,6 +497,8 @@ static PyObject* call_lambda(PyObject* dummy, PyObject* args) {
   variable_list cppinputs = THPVariable_UnpackList(inputs);
   TORCH_INTERNAL_ASSERT(PyLong_Check(idx));
   size_t cppidx = PyLong_AsSize_t(idx);
+  std::cout << lambdas.size() << std::endl;
+  std::cout << "RUNTIME call_lambda idx=" << cppidx << std::endl;
   variable_list outs = lambdas[cppidx](std::move(cppinputs));
   auto it = lifted_nodes.find(cppidx);
   TORCH_INTERNAL_ASSERT(it != lifted_nodes.end());

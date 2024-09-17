@@ -191,63 +191,23 @@ struct CppNode : public Node {
   void compiled_args(CompiledNodeArgs& args) override {
     static_assert(
         std::is_same_v<std::remove_cv_t<decltype(T::is_traceable)>, bool>);
-    if (!T::is_traceable) {
-      // TODO: pass some things by copy
-      std::function<variable_list(variable_list)> lambda =
-          [&](variable_list&& inputs) { return apply(std::move(inputs)); };
-      args.collect(this, std::move(lambda), is_variable_input_, input_info_);
-      // TODO: when guards?
-      return;
-    }
-    TORCH_INTERNAL_ASSERT(false, "found node marked as traceable");
-
     // although neither of the 2 methods below have uniqueness guarantees
     // it is unlikely for them to collide at the same time
     args.collect(static_cast<uint64_t>(typeid(T).hash_code()));
     args.collect(std::string(typeid(T).name()));
 
-    args.collect(ctx_.saved_data);
-    TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
-    TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
-    args.collect(
-        ctx_.saved_variables_, true); // always unpacked as output in eager
-    TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
-    args.collect(ctx_.materialize_grads_);
-    args.collect(ctx_.has_freed_buffers_);
-    args.collect(is_variable_input_);
-    args.collect(input_info_);
-    args.collect(output_info_);
+    // TODO: pass some things by copy
+    std::function<variable_list(variable_list)> lambda =
+        [&](variable_list&& inputs) { return apply(std::move(inputs)); };
+    args.collect(this, std::move(lambda), is_variable_input_, input_info_);
+    // TODO: when guards?
+    return;
   }
 
   variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) override {
-    if (!T::is_traceable) {
-      auto res = saved.lift(variable_list(inputs));
-      return res;
-    }
-
-    TORCH_INTERNAL_ASSERT(false);
-    saved.before(ctx_.saved_data);
-    TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
-    TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
-    saved.before(ctx_.saved_variables_);
-    TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
-    saved.before(ctx_.materialize_grads_);
-    saved.before(ctx_.has_freed_buffers_);
-    saved.before(input_info_);
-    saved.before(output_info_);
-    auto results = apply(variable_list(inputs));
-    saved.after(ctx_.saved_data);
-    TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
-    TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
-    saved.after(ctx_.saved_variables_);
-    TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
-    saved.after(ctx_.materialize_grads_);
-    saved.after(ctx_.has_freed_buffers_);
-    saved.after(input_info_);
-    saved.after(output_info_);
-    return results;
+    return saved.lift(variable_list(inputs));
   }
 };
 
@@ -342,6 +302,11 @@ auto Function<T>::apply(Args&&... args)
   node->is_variable_input_.reserve(num_inputs);
   // TODO Add tracing here
   extract_vars(node->is_variable_input_, input_vars, args...);
+  std::cout << "Function<T>::apply with " << input_vars.size() << " inputs"
+            << std::endl;
+  for (const auto& var : node->is_variable_input_) {
+    std::cout << "is_variable_input: " << var << std::endl;
+  }
 
   bool is_executable =
       GradMode::is_enabled() && any_variable_requires_grad(input_vars);
@@ -413,10 +378,15 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
   auto num_inputs = inputs.size();
   variable_list backward_inputs;
   backward_inputs.reserve(num_inputs);
+  std::cout << "CppNode<T>::apply with " << inputs.size() << " inputs"
+            << std::endl;
   for (const auto i : c10::irange(num_inputs)) {
     if (inputs[i].defined() || !ctx_.materialize_grads_) {
+      std::cout << "inputs[" << i << "] is defined, or not materialize grads"
+                << std::endl;
       backward_inputs.emplace_back(std::move(inputs[i]));
     } else {
+      std::cout << "inputs[" << i << "] is not defined" << std::endl;
       backward_inputs.emplace_back(output_info_[i].zeros(_device_guard));
     }
   }
@@ -431,7 +401,11 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
 
   const auto num_forward_inputs =
       static_cast<int64_t>(is_variable_input_.size());
+  std::cout << "CppNode<T>::apply num_forward_inputs: " << num_forward_inputs
+            << std::endl;
   auto num_outputs = static_cast<int64_t>(outputs.size());
+  std::cout << "CppNode<T>::apply with " << num_outputs << " outputs"
+            << std::endl;
   // Returning too many results is ok, but only as long as they're all
   // undefined. Truncate the result vector in that case.
   if (num_outputs > num_forward_inputs) {
@@ -457,6 +431,8 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
   results.reserve(num_outputs);
   for (const auto i : c10::irange(num_outputs)) {
     if (!is_variable_input_[i]) {
+      std::cout << "skipping input " << i << " since it is not a variable"
+                << std::endl;
       if (outputs[i].defined()) {
         std::string msg("function ");
         msg += name() +
