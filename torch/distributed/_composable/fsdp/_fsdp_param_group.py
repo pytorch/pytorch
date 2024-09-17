@@ -601,7 +601,10 @@ class FSDPParamGroup:
                 f"{[(fsdp_param._param_fqn, fsdp_param.sharded_param.device) for fsdp_param in fsdp_params_not_on_cpu]}\n"
             )
         backend = dist.get_backend()
-        if "cpu" not in dist.Backend.backend_capability[backend]:
+        backend_capability = dist.Backend.backend_capability.get(backend)
+        if (
+            backend_capability and "cpu" not in backend_capability
+        ) or "cpu" not in backend:
             raise RuntimeError(
                 "FSDP CPU offloading requires backend supporting cpu tensors. "
                 f"Found following backend: {backend}"

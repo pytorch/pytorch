@@ -234,6 +234,14 @@ class TestFullyShardCastAfterInit(FSDPTestMultiThread):
 
 class TestFullyShard1DTrainingCore(FSDPTest):
     @property
+    def backend(self):
+        # need to include backend for cpu tensors when running cpu_offload tests
+        if torch.cuda.is_available():
+            return "cuda:nccl,cpu:gloo"
+        else:
+            return "gloo"
+
+    @property
     def world_size(self) -> int:
         return min(8, torch.cuda.device_count())
 

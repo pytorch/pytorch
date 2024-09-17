@@ -1107,6 +1107,11 @@ class FSDPTestMultiThread(MultiThreadedTestCase):
         torch._dynamo.reset()
 
 
+# Specify gloo backend to make 'init_process_group()' succeed,
+# Actual tests will be skipped if there is no enough GPUs.
+PG_BACKEND = "nccl" if torch.cuda.is_available() else "gloo"
+
+
 class FSDPTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
@@ -1127,6 +1132,10 @@ class FSDPTest(MultiProcessTestCase):
     @property
     def init_method(self):
         return f"{FILE_SCHEMA}{self.file_name}"
+
+    @property
+    def backend(self):
+        return PG_BACKEND
 
     def _check_cpu_offload(self, fsdp_model, cpu_offload):
         self.assertEqual(cpu_offload, fsdp_model.cpu_offload)
@@ -1149,10 +1158,6 @@ class FSDPTest(MultiProcessTestCase):
 
         print(f"dist init r={self.rank}, world={self.world_size}")
 
-        # Specify gloo backend to make 'init_process_group()' succeed,
-        # Actual tests will be skipped if there is no enough GPUs.
-        backend = "nccl" if torch.cuda.is_available() else "gloo"
-
         try:
             if fake_pg:
                 store = torch.testing._internal.distributed.fake_pg.FakeStore()
@@ -1165,7 +1170,7 @@ class FSDPTest(MultiProcessTestCase):
             else:
                 dist.init_process_group(
                     init_method=self.init_method,
-                    backend=backend,
+                    backend=self.backend,
                     world_size=int(self.world_size),
                     rank=self.rank,
                 )
