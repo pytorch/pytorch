@@ -373,6 +373,9 @@ def topological_sort_lpmf(
                 for succ_node in buf.mpi.succ_nodes:
                     succ_node.mpi.memory_to_free += buf.mpi.size_free
 
+    if num_iters > len(nodes):
+        raise RuntimeError("Failed to schedule, while loop ran too long for lpmf")
+
     return schedule
 
 
@@ -428,6 +431,8 @@ def topological_sort_bfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNo
                     nodes_to_schedule,
                     HeapElement(_node_priority(succ_node), succ_node),
                 )
+    if num_iters > len(nodes):
+        raise RuntimeError("Failed to schedule, while loop ran too long for bfs")
     return schedule
 
 
