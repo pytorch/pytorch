@@ -7,17 +7,14 @@ from typing import Callable, Dict, List, Set, Tuple, TYPE_CHECKING, Union
 
 from torch.utils._ordered_set import OrderedSet
 
+from .ir import MultiOutputLayout
+from .utils import get_dtype_size
+from .virtualized import V
+
 
 if TYPE_CHECKING:
     from .dependencies import Dep
-
-from .ir import MultiOutputLayout
-
-if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
-
-from .utils import get_dtype_size
-from .virtualized import V
 
 
 torch_log = logging.getLogger(__name__)
@@ -341,7 +338,8 @@ def topological_sort_lpmf(
 
     # schedule nodes one at a time
     schedule: List[BaseSchedulerNode] = []
-    while nodes_to_schedule:
+    num_iters: int = 0
+    while num_iters < len(nodes) and nodes_to_schedule:
         # select a node to schedule:
         selected_node = min(
             nodes_to_schedule,
@@ -353,6 +351,7 @@ def topological_sort_lpmf(
         )
         nodes_to_schedule.remove(selected_node)
         schedule.append(selected_node)
+        num_iters += 1
 
         # update memory usage
         live_memory += selected_node.mpi.size
@@ -412,11 +411,13 @@ def topological_sort_bfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNo
 
     # schedule nodes one at a time
     schedule: List[BaseSchedulerNode] = []
-    while nodes_to_schedule:
+    num_iters: int = 0
+    while num_iters < len(nodes) and nodes_to_schedule:
         # select a node to schedule
         selected_node = heapq.heappop(nodes_to_schedule).node
         selected_node.mpi.index = len(schedule)
         schedule.append(selected_node)
+        num_iters += 1
 
         # update successor nodes and nodes_to_schedule
         for succ_node in selected_node.mpi.succ_nodes:
