@@ -5,7 +5,13 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._higher_order_ops.utils import _from_fun, create_fw_bw_graph, reenter_make_fx
+from torch._higher_order_ops.utils import (
+    _from_fun,
+    _maybe_reenter_make_fx,
+    clone_outputs_aliasing_inputs,
+    prepare_fw_with_masks,
+    reenter_make_fx,
+)
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
@@ -15,6 +21,19 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.graph_module import GraphModule
+
+
+# Problems
+# 1) Functionalization needs to happen before partitioning - so probably
+# Autograd key. But also need support for inference, so probably functional
+# tensor as well
+# 2) Decomps are not picked up by the time Autograd key is run. make_renter_fx
+# is not doing the right thing.
+# 3) We need to pass on the partitioner info from the top level to the subgraph.
+# 4) Unclear to me - how is input and output mutation handled? It seems to me,
+# we might need to raise an exception which tells Dynamo to restart and retrace
+# without any invoke_subgraph ops. It might be possible to do this at global
+# level.
 
 
 class InvokeSubgraphHOP(HigherOrderOperator):
@@ -27,6 +46,52 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 
 
 invoke_subgraph = InvokeSubgraphHOP()
+
+
+def create_fw_bw_graph(
+    fn, use_output_and_grad_bw, fw_inputs, fw_outputs, partition_fn=None
+):
+    from torch._functorch.aot_autograd import AOTConfig, create_joint
+
+    dummy_aot_config = AOTConfig(
+        fw_compiler=None,  # type: ignore[arg-type]
+        bw_compiler=None,  # type: ignore[arg-type]
+        partition_fn=None,  # type: ignore[arg-type]
+        decompositions={},
+        num_params_buffers=0,
+        aot_id=0,
+        keep_inference_input_mutations=False,
+    )
+
+    # TODO(anijain2305, bdhirsh) - This needs to be updated when we have aot
+    # autograd respecting strides for grad outs
+    example_grad = [_from_fun(out) for out in fw_outputs]
+    num_grads = len(example_grad)
+
+    # Partitioner needs primals and tangents. So, dont change the input signature.
+    def joint_fn(primals, tangents):
+        joint = create_joint(prepare_fw_with_masks(fn), aot_config=dummy_aot_config)
+        outs, grads = joint(
+            list(primals),
+            [grad for grad in tangents if grad is not None and grad.requires_grad],
+        )
+
+        # In order to keep map functional for backward graph,
+        # we clone outputs that are aliasing inputs
+        # TODO(anijain2305) - What is this?
+        maybe_clone = clone_outputs_aliasing_inputs(primals + tangents)
+
+        return pytree.tree_map(maybe_clone, list(outs) + list(grads))
+
+    example_xs_out = list(fw_inputs)
+    joint_graph = _maybe_reenter_make_fx(joint_fn)(list(fw_inputs), list(example_grad))
+
+    fw_graph, bw_graph = partition_fn(
+        joint_graph,
+        list(fw_inputs) + list(example_grad),
+        num_fwd_outputs=len(fw_outputs),
+    )
+    return fw_graph, bw_graph
 
 
 # TODO(anijain2305) - Just for testing - We can remove this .. I think
@@ -43,37 +108,40 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(ctx, fw_graph, bw_graph, *args):
+    def forward(ctx, fw_graph, bw_graph, num_fwd_outputs, *args):
+        """
+        num_fwd_outputs is the number of outputs of the forward graph. Rest of
+        the outputs are saved for the backward graph.
+        """
         ctx._fw_graph = fw_graph
         ctx._bw_graph = bw_graph
 
-        # Save the args for the backward graph.
-        # TODO(anijain2305) - Is this the right thing to do?
-        ctx.save_for_backward(*args)
-
         # TODO(anijain2305) - Learn what is this ctx manager
         with torch._C._AutoDispatchBelowAutograd():
-            return invoke_subgraph(
+            out = invoke_subgraph(
                 fw_graph,
                 *args,
             )
 
+        ctx.save_for_backward(*out[num_fwd_outputs:])
+        return out[:num_fwd_outputs]
+
     @staticmethod
     def backward(ctx, *grad_outs):
         bw_graph = ctx._bw_graph
-        # print(bw_graph)
-        args = ctx.saved_tensors
-        grads = invoke_subgraph(bw_graph, *(grad_outs + args))
-        return None, None, *grads
+        saved_tensors = ctx.saved_tensors
+        grads = invoke_subgraph(bw_graph, *(saved_tensors + grad_outs))
+        return None, None, None, *grads
 
 
 def create_fw_bw_graph_local(subgraph, *args):
     """
     This needs to call make_fx with functionalization, partitioner and decomps.
     """
+    # TODO(anijain2305) - Need to get this from the top - min_cut_rematerialization_partition
+    from functorch.compile import min_cut_rematerialization_partition
 
     # See Note [HOP create fw_bw graph] in create_fw_bw_graph in utils.py
-
     # TODO(anijain2305) - Not sure if we should disable functionalization
     with suspend_functionalization(), disable_functional_mode():
         with disable_proxy_modes_tracing():
@@ -91,17 +159,22 @@ def create_fw_bw_graph_local(subgraph, *args):
                     f"Got types {[type(out) for out in fw_outputs]}."
                 )
 
-            fw_graph, joint_graph = create_fw_bw_graph(
-                subgraph, False, fw_inputs, fw_outputs
+            # TODO(anijain2305) - Need to get this from the top - min_cut_rematerialization_partition
+            fw_graph, bw_graph = create_fw_bw_graph(
+                subgraph,
+                False,
+                fw_inputs,
+                fw_outputs,
+                partition_fn=min_cut_rematerialization_partition,
             )
-            return fw_graph, joint_graph
+            return fw_graph, bw_graph, len(fw_outputs)
 
 
 @invoke_subgraph.py_impl(DispatchKey.Autograd)
 def invoke_subgraph_autograd(subgraph, *args):
-    fw_graph, bw_graph = create_fw_bw_graph_local(subgraph, *args)
+    fw_graph, bw_graph, num_fwd_outputs = create_fw_bw_graph_local(subgraph, *args)
 
-    return InvokeSubgraphAutogradOp.apply(fw_graph, bw_graph, *args)
+    return InvokeSubgraphAutogradOp.apply(fw_graph, bw_graph, num_fwd_outputs, *args)
 
 
 @invoke_subgraph.py_functionalize_impl
