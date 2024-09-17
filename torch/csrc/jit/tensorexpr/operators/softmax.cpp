@@ -1,8 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/operators/softmax.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 using namespace torch::jit::tensorexpr;
 
@@ -103,7 +101,7 @@ Tensor computeSoftmax(
   auto max = Reduce(
       "aten_softmax_max",
       non_softmax_dims,
-      c10::nullopt,
+      std::nullopt,
       Maximum(dtype),
       [&](ParameterList& indices) {
         return tensorOrConstant(
@@ -113,7 +111,7 @@ Tensor computeSoftmax(
   auto e = Compute(
       "aten_softmax_exp",
       outputShape,
-      c10::nullopt,
+      std::nullopt,
       [&](ParameterList& indices) {
         auto inp = tensorOrConstant(
             inputs[0], convert_indices_to_expr_handle(indices));
@@ -122,7 +120,7 @@ Tensor computeSoftmax(
   auto sum = Reduce(
       "aten_softmax_sum",
       non_softmax_dims,
-      c10::nullopt,
+      std::nullopt,
       Sum(),
       [&](ParameterList& indices) {
         return e.load(move_softmax_dim_index_to_pos(indices));
@@ -130,7 +128,7 @@ Tensor computeSoftmax(
       {outputShape[softmax_dim]});
   if (!log_softmax) {
     auto result = Compute(
-        "aten_softmax", outputShape, c10::nullopt, [&](ParameterList& indices) {
+        "aten_softmax", outputShape, std::nullopt, [&](ParameterList& indices) {
           return e.load(indices) / sum.load(remove_softmax_dim_index(indices));
         });
     return Tensor(
@@ -142,12 +140,12 @@ Tensor computeSoftmax(
   auto log_sum = Compute(
       "aten_softmax_log_sum",
       non_softmax_dims,
-      c10::nullopt,
+      std::nullopt,
       [&](ParameterList& indices) { return log(sum.load(indices)); });
   auto result = Compute(
       "aten_log_softmax",
       outputShape,
-      c10::nullopt,
+      std::nullopt,
       [&](ParameterList& indices) {
         auto inp = tensorOrConstant(
             inputs[0], convert_indices_to_expr_handle(indices));
@@ -161,6 +159,4 @@ Tensor computeSoftmax(
           {max.stmt(), e.stmt(), sum.stmt(), log_sum.stmt(), result.stmt()})));
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

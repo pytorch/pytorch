@@ -1,7 +1,6 @@
 import sys
 
 import torch
-
 from torch.testing._internal.inductor_utils import GPU_TYPE
 
 

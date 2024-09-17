@@ -1,0 +1,94 @@
+FROM quay.io/pypa/manylinux2014_aarch64 as base
+
+
+# Graviton needs GCC 10 for the build
+ARG DEVTOOLSET_VERSION=10
+
+# Language variabes
+ENV LC_ALL=en_US.UTF-8
+ENV LANG=en_US.UTF-8
+ENV LANGUAGE=en_US.UTF-8
+
+# Installed needed OS packages. This is to support all
+# the binary builds (torch, vision, audio, text, data)
+RUN yum -y install epel-release
+RUN yum -y update
+RUN yum install -y \
+  autoconf \
+  automake \
+  bison \
+  bzip2 \
+  curl \
+  diffutils \
+  file \
+  git \
+  make \
+  patch \
+  perl \
+  unzip \
+  util-linux \
+  wget \
+  which \
+  xz \
+  yasm \
+  less \
+  zstd \
+  libgomp \
+  sudo \
+  devtoolset-${DEVTOOLSET_VERSION}-gcc \
+  devtoolset-${DEVTOOLSET_VERSION}-gcc-c++ \
+  devtoolset-${DEVTOOLSET_VERSION}-gcc-gfortran \
+  devtoolset-${DEVTOOLSET_VERSION}-binutils
+
+# Ensure the expected devtoolset is used
+ENV PATH=/opt/rh/devtoolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
+ENV LD_LIBRARY_PATH=/opt/rh/devtoolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/devtoolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
+
+
+# git236+ would refuse to run git commands in repos owned by other users
+# Which causes version check to fail, as pytorch repo is bind-mounted into the image
+# Override this behaviour by treating every folder as safe
+# For more details see https://github.com/pytorch/pytorch/issues/78659#issuecomment-1144107327
+RUN git config --global --add safe.directory "*"
+
+
+###############################################################################
+# libglfortran.a hack
+#
+# libgfortran.a from quay.io/pypa/manylinux2014_aarch64 is not compiled with -fPIC.
+# This causes __stack_chk_guard@@GLIBC_2.17 on pytorch build. To solve, get
+# ubuntu's libgfortran.a which is compiled with -fPIC
+# NOTE: Need a better way to get this library as Ubuntu's package can be removed by the vender, or changed
+###############################################################################
+RUN cd ~/ \
+  && curl -L -o ~/libgfortran-10-dev.deb http://ports.ubuntu.com/ubuntu-ports/pool/universe/g/gcc-10/libgfortran-10-dev_10.5.0-1ubuntu1_arm64.deb \
+  && ar x ~/libgfortran-10-dev.deb \
+  && tar --use-compress-program=unzstd -xvf data.tar.zst -C ~/ \
+  && cp -f ~/usr/lib/gcc/aarch64-linux-gnu/10/libgfortran.a /opt/rh/devtoolset-10/root/usr/lib/gcc/aarch64-redhat-linux/10/
+
+# install cmake
+RUN yum install -y cmake3 && \
+    ln -s /usr/bin/cmake3 /usr/bin/cmake
+
+FROM base as openssl
+# Install openssl (this must precede `build python` step)
+# (In order to have a proper SSL module, Python is compiled
+# against a recent openssl [see env vars above], which is linked
+# statically. We delete openssl afterwards.)
+ADD ./common/install_openssl.sh install_openssl.sh
+RUN bash ./install_openssl.sh && rm install_openssl.sh
+ENV SSL_CERT_FILE=/opt/_internal/certs.pem
+
+FROM base as openblas
+# Install openblas
+ADD ./common/install_openblas.sh install_openblas.sh
+RUN bash ./install_openblas.sh && rm install_openblas.sh
+
+FROM openssl as final
+# remove unncessary python versions
+RUN rm -rf /opt/python/cp26-cp26m /opt/_internal/cpython-2.6.9-ucs2
+RUN rm -rf /opt/python/cp26-cp26mu /opt/_internal/cpython-2.6.9-ucs4
+RUN rm -rf /opt/python/cp33-cp33m /opt/_internal/cpython-3.3.6
+RUN rm -rf /opt/python/cp34-cp34m /opt/_internal/cpython-3.4.6
+COPY --from=openblas     /opt/OpenBLAS/  /opt/OpenBLAS/
+ENV LD_LIBRARY_PATH=/opt/OpenBLAS/lib:$LD_LIBRARY_PATH

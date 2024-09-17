@@ -1,7 +1,11 @@
 # mypy: allow-untyped-defs
+import contextlib
+import functools
 import inspect
 import warnings
-from typing import Any, Dict, List, Optional, Union
+import weakref
+from collections.abc import MutableMapping
+from typing import Any, Dict, List, Optional, Type, Union
 
 import torch.nn
 
@@ -11,18 +15,18 @@ from .bytecode_transformation import (
     create_call_function,
     create_call_method,
     create_instruction,
-    create_load_method,
 )
 from .codegen import PyCodegen
 from .exc import unimplemented
 from .source import GlobalSource, LocalSource, Source
-from .utils import nn_module_new, object_new
+from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
     is_side_effect_safe,
     MutableLocalBase,
     MutableLocalSource,
     VariableTracker,
 )
+from .variables.user_defined import FrozenDataClassVariable
 
 
 class MutableSideEffects(MutableLocalBase):
@@ -77,6 +81,7 @@ class SideEffects:
 
     def __init__(
         self,
+        output_graph,
         id_to_variable=None,
         store_attr_mutations=None,
         keepalive=None,
@@ -84,6 +89,7 @@ class SideEffects:
         tensor_hooks=None,
     ):
         super().__init__()
+        self.output_graph_weakref = weakref.ref(output_graph)
         self.id_to_variable = id_to_variable or {}
         self.store_attr_mutations = store_attr_mutations or {}
         self.keepalive = keepalive or []
@@ -128,6 +134,7 @@ class SideEffects:
     def clone(self):
         """Create a shallow copy"""
         return self.__class__(
+            output_graph=self.output_graph_weakref(),
             id_to_variable=dict(self.id_to_variable),
             store_attr_mutations={
                 k: dict(v) for k, v in self.store_attr_mutations.items()
@@ -143,12 +150,22 @@ class SideEffects:
     def __getitem__(self, item):
         return self.id_to_variable[id(item)]
 
+    def should_allow_side_effects_under_checkpoint(self):
+        output_graph = self.output_graph_weakref()
+        return (
+            output_graph
+            and output_graph.current_tx.output.current_tracer.under_activation_checkpoint
+            and output_graph.current_tx.output.current_tracer.allow_side_effects_under_checkpoint
+        )
+
     def check_allowed_side_effect(self, item):
         from torch._dynamo.variables.misc import AutogradFunctionContextVariable
 
         # People do things like self.dim = dim inside autograd.Function.
         # These are benign.
         if isinstance(item, AutogradFunctionContextVariable):
+            return True
+        if self.should_allow_side_effects_under_checkpoint():
             return True
         if not is_side_effect_safe(item.mutable_local):
             unimplemented(
@@ -225,9 +242,11 @@ class SideEffects:
 
         if id(item) in self.id_to_variable:
             raise AssertionError(
-                "Variable is already tracked for mutation. This could be "
+                f"{variable} is already tracked for mutation. This could be "
                 "because you are not using VariableBuilder to construct "
-                "the variable tracker."
+                "the variable tracker. "
+                f"Source of new object: {variable.source}. "
+                f"Source of previously tracked object: {self.id_to_variable[id(item)].source}."
             )
 
         variable.mutable_local = mutable_cls(variable.source)
@@ -266,6 +285,32 @@ class SideEffects:
         self.id_to_variable[id(obj)] = variable
         self.keepalive.append(obj)
         return variable
+
+    def track_object_new_from_user_defined_class(
+        self,
+        cls_variable: "variables.UserDefinedClassVariable",
+    ):
+        cls_source = cls_variable.source
+        user_cls = cls_variable.value
+
+        # Find the variable class
+        variable_cls: Type[
+            variables.UserDefinedObjectVariable
+        ] = variables.UserDefinedObjectVariable
+        if issubclass(user_cls, torch.nn.Module):
+            variable_cls = variables.UnspecializedNNModuleVariable
+        elif issubclass(user_cls, MutableMapping):
+            variable_cls = variables.MutableMappingVariable
+        elif is_frozen_dataclass(user_cls):
+            variable_cls = FrozenDataClassVariable
+        else:
+            variable_cls = variables.UserDefinedObjectVariable
+
+        assert issubclass(variable_cls, variables.UserDefinedObjectVariable)
+
+        variable_cls = functools.partial(variable_cls, cls_source=cls_source)
+
+        return self.track_object_new(cls_source, user_cls, variable_cls, {})
 
     def track_cell_new(
         self,
@@ -379,17 +424,21 @@ class SideEffects:
             if isinstance(
                 var.mutable_local, (AttributeMutationExisting, AttributeMutationNew)
             ) and isinstance(var, variables.NewCellVariable):
-                cg.load_import_from(utils.__name__, "make_cell")
-                cg.extend_output(create_call_function(0, True))
+                cg.add_push_null(
+                    lambda: cg.load_import_from(utils.__name__, "make_cell")
+                )
+                cg.extend_output(create_call_function(0, False))
                 cg.add_cache(var)
                 if isinstance(var.mutable_local, AttributeMutationNew):
                     var.mutable_local.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
             elif isinstance(var.mutable_local, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
-                cg.load_import_from(utils.__name__, "object_new")
+                cg.add_push_null(
+                    lambda: cg.load_import_from(utils.__name__, "object_new")
+                )
                 cg(var.mutable_local.cls_source)
-                cg.extend_output(create_call_function(1, True))
+                cg.extend_output(create_call_function(1, False))
                 cg.add_cache(var)
                 var.mutable_local.source = LocalSource(cg.tempvars[var])
             elif var in cg.tempvars:
@@ -470,10 +519,14 @@ class SideEffects:
             #    - We then manually insert the call function above into the graph.
             # - The handle's exact user-specified name, "user_code_variable_name", is discerned and associated during STORE_FAST.
             assert tensor.source, "Hooks on non input tensors NYI - should not get here"
-            cg(tensor)
-            cg.extend_output([cg.create_load_attr(name)])
+
+            def gen_fn():
+                cg(tensor)
+                cg.extend_output([cg.create_load_attr(name)])
+
+            cg.add_push_null(gen_fn)
             cg(hook)
-            cg.extend_output(create_call_function(1, True))
+            cg.extend_output(create_call_function(1, False))
 
             # Adding the handle to the cache means RemovableHandleVariable().reconstruct() will
             # be associated with the return value of register_hook().  This consumes the top of stack.
@@ -520,7 +573,7 @@ class SideEffects:
                 )
 
                 cg(var.mutable_local.source)  # type: ignore[attr-defined]
-                cg.extend_output([create_load_method("clear")])
+                cg.load_method("clear")
 
                 # unfortunately can't just use DICT_MERGE due to possible custom behaviors
                 dict_update_insts = bytecode_from_template(
@@ -537,24 +590,61 @@ class SideEffects:
                 )
 
             elif isinstance(var, variables.ConstDictVariable):
-                cg.tx.output.update_co_names("clear")
-                cg.tx.output.update_co_names("update")
+                # Reconstruct works as follow:
+                # (1) codegen(...) each pair of key/value
+                # (2) create a new dictionary with the pairs of key/values above
+                # (3) clear the original dictionary
+                #   + only if a key was removed from the input dict
+                # (4) update the original dictionary with the dict created in (2)
 
                 cg(var.mutable_local.source)  # type: ignore[attr-defined]
-                cg.extend_output([create_load_method("update")])
+                cg.load_method("update")
                 cg(var, allow_cache=False)
 
-                cg(var.mutable_local.source)  # type: ignore[attr-defined]
-                cg.extend_output([create_load_method("clear")])
+                if var.should_reconstruct_all:
+                    cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                    cg.load_method("clear")
 
                 suffixes.append(
                     [
-                        *create_call_method(0),  # clear
-                        create_instruction("POP_TOP"),
                         *create_call_method(1),  # update
                         create_instruction("POP_TOP"),
                     ]
                 )
+
+                if var.should_reconstruct_all:
+                    suffixes.append(
+                        [
+                            *create_call_method(0),  # clear
+                            create_instruction("POP_TOP"),
+                        ]
+                    )
+
+            elif isinstance(
+                var, variables.torch_function.TorchFunctionModeStackVariable
+            ):
+                # Needed in the finally block for stack restoration
+                cg.add_push_null(
+                    lambda: cg.load_import_from(
+                        utils.__name__, "get_torch_function_mode_stack"
+                    )
+                )
+                cg.call_function(0, False)
+                name = variables.torch_function.get_prev_stack_var_name()
+                cg.code_options["co_varnames"] += (name,)
+                cg.append_output(create_instruction("STORE_FAST", argval=name))
+                cg.add_push_null(
+                    lambda: cg.load_import_from(
+                        utils.__name__, "set_torch_function_mode_stack"
+                    )
+                )
+
+                cg.foreach(var.symbolic_stack)
+                cg.append_output(
+                    create_instruction("BUILD_LIST", arg=len(var.symbolic_stack))
+                )
+                cg.call_function(1, False)
+                cg.append_output(create_instruction("POP_TOP"))
             elif self.is_attribute_mutation(var):
                 # Applying mutations involves two steps: 1) Push all
                 # reconstructed objects onto the stack.  2) Call STORE_ATTR to
@@ -611,10 +701,27 @@ class SideEffects:
                         suffixes.append([create_instruction("STORE_ATTR", argval=name)])
             elif isinstance(var, variables.TupleIteratorVariable):
                 for _ in range(var.index):
-                    cg.load_import_from(utils.__name__, "iter_next")
+                    cg.add_push_null(
+                        lambda: cg.load_import_from(utils.__name__, "iter_next")
+                    )
                     cg(var.mutable_local.source)  # type: ignore[attr-defined]
-                    cg.call_function(1, True)
+                    cg.call_function(1, False)
                     cg.pop_top()
+            elif isinstance(var, variables.RandomVariable):
+                # set correct random seed state
+                def gen_fn():
+                    cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                    cg.load_attr("setstate")
+
+                cg.add_push_null(gen_fn)
+                cg(var.wrap_state(var.random.getstate()))
+
+                suffixes.append(
+                    [
+                        *create_call_function(1, False),  # setstate
+                        create_instruction("POP_TOP"),
+                    ]
+                )
             else:
                 raise AssertionError(type(var))
 
@@ -633,3 +740,14 @@ class SideEffects:
     def clear(self):
         self.keepalive.clear()
         self.id_to_variable.clear()
+
+
+@contextlib.contextmanager
+def allow_side_effects_under_checkpoint(tx: "InstructionTranslator"):  # type: ignore[name-defined]  # noqa: F821
+    assert tx.output.current_tracer.under_activation_checkpoint
+    orig_val = tx.output.current_tracer.allow_side_effects_under_checkpoint
+    try:
+        tx.output.current_tracer.allow_side_effects_under_checkpoint = True
+        yield
+    finally:
+        tx.output.current_tracer.allow_side_effects_under_checkpoint = orig_val

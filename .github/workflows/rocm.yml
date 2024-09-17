@@ -27,7 +27,7 @@ jobs:
 
   linux-focal-rocm6_1-py3_8-build:
     name: linux-focal-rocm6.1-py3.8
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-rocm6.1-py3.8
       docker-image-name: pytorch-linux-focal-rocm-n-py3

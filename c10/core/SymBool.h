@@ -3,9 +3,9 @@
 #include <c10/core/SymNodeImpl.h>
 #include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 #include <cstdint>
+#include <optional>
 #include <ostream>
 #include <utility>
 
@@ -68,7 +68,7 @@ class C10_API SymBool {
 
   std::optional<bool> maybe_as_bool() const {
     if (!is_heap_allocated()) {
-      return c10::make_optional(data_);
+      return std::make_optional(data_);
     }
     return toSymNodeImplUnowned()->constant_bool();
   }
@@ -90,7 +90,10 @@ C10_API std::ostream& operator<<(std::ostream& os, const SymBool& s);
 #define TORCH_SYM_INTERNAL_ASSERT(cond, ...) \
   TORCH_INTERNAL_ASSERT((cond).expect_true(__FILE__, __LINE__), __VA_ARGS__)
 
-inline bool guard_size_oblivious(bool b, const char* file, int64_t line) {
+inline bool guard_size_oblivious(
+    bool b,
+    const char* file [[maybe_unused]],
+    int64_t line [[maybe_unused]]) {
   return b;
 }
 

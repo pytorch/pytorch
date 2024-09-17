@@ -199,6 +199,7 @@ ReduceFunc toFunction(const ReduceOp& r) {
       TORCH_CHECK(false, "Cannot use ReduceOp.PREMUL_SUM with Gloo");
       break;
     case ReduceOp::UNUSED:
+    default:
       break;
   }
 
@@ -262,6 +263,7 @@ ReduceFunc toFunction(const ReduceOp& r) {
       TORCH_CHECK(false, "Cannot use ReduceOp.PREMUL_SUM with Gloo");
       break;
     case ReduceOp::UNUSED:
+    default:
       break;
   }
 
@@ -498,7 +500,8 @@ inline void ProcessGroupGloo::AsyncWork::recordAsyncWorkProfilingInfo(
               profilingTitle,
               c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
         };
-    recordFunctionBeforeCallback_ = at::wrapPropagateTLSState(before_handler);
+    recordFunctionBeforeCallback_ =
+        at::wrapPropagateTLSState(std::move(before_handler));
     std::function<void()> end_handler = [recordingFunction]() {
       recordingFunction->end();
     };
@@ -2425,7 +2428,7 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
             seq,
             "gloo:scatter",
             !inputs.empty() ? std::optional<std::vector<at::Tensor>>(inputs[0])
-                            : c10::nullopt),
+                            : std::nullopt),
         context(context),
         outputs(outputs),
         inputs(inputs),
@@ -2888,7 +2891,7 @@ class AsyncBarrierWork : public ProcessGroupGloo::AsyncWork {
             OpType::BARRIER,
             seq,
             "gloo:barrier",
-            c10::nullopt),
+            std::nullopt),
         context(context),
         priorWork(std::move(priorWork)),
         tag(tag) {}

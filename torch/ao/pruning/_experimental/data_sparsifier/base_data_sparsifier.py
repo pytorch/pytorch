@@ -1,21 +1,22 @@
 # mypy: allow-untyped-defs
 import abc
-import torch
-from typing import Optional, Tuple, List, Any, Dict
-from ...sparsifier import base_sparsifier
-from collections import defaultdict
-from torch import nn
 import copy
-from ...sparsifier import utils
-from torch.nn.utils import parametrize
 import sys
 import warnings
+from collections import defaultdict
+from typing import Any, Dict, List, Optional, Tuple
+
+import torch
+from torch import nn
+from torch.ao.pruning.sparsifier import base_sparsifier, utils
+from torch.nn.utils import parametrize
+
 
 if not sys.warnoptions:
     # to suppress repeated warnings when being used in a training loop.
     warnings.simplefilter("once")
 
-__all__ = ['BaseDataSparsifier']
+__all__ = ["BaseDataSparsifier"]
 
 EMBEDDING_TYPES = {
     nn.Embedding,
@@ -59,6 +60,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
         >>> sparsifier.add_data(**new_tensor_to_add)
         >>> # tensor_1 and tensor_2 will have sparsity_level of 0.7 but tensor_3 will have sparsity_level=0.3
     """
+
     def __init__(self, data_list: Optional[List[Tuple[str, Any]]] = None, **defaults):
         super().__init__(defaults=defaults)
 
@@ -69,7 +71,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
             # add data with default config here
             [self.add_data(name, data, **self.defaults) for name, data in data_list]
 
-    def prepare(self):
+    def prepare(self, model, config):
         raise NotImplementedError("this function is undefined for this class")
 
     def _extract_weight(self, data):
@@ -80,7 +82,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
             return data.weight
 
     def add_data(self, name: str, data, reuse_mask=True, **config):
-        r""" Configures and parametrizes the internal container model with name and data.
+        r"""Configures and parametrizes the internal container model with name and data.
 
         **Note**:
             1. If the data with name already exists, it replaces the data.
@@ -89,19 +91,22 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
             4. By default, the config of the replaced data is used as config for the replacing data, unless something
                is specified in the config dictionary.
         """
-        assert type(data) in SUPPORTED_TYPES, \
-            "specified data type not supported at the moment"
+        assert (
+            type(data) in SUPPORTED_TYPES
+        ), "specified data type not supported at the moment"
         local_args = copy.deepcopy(self.defaults)
         local_args.update(config)
         weight = self._extract_weight(data)
 
         # Bookkeeping in the container class
-        mask = local_args.get('mask', torch.ones_like(weight))
-        param_class = local_args.get('parametrization', utils.FakeSparsity)
+        mask = local_args.get("mask", torch.ones_like(weight))
+        param_class = local_args.get("parametrization", utils.FakeSparsity)
 
         if name in self.state:
             # If the named data already exists - replace
-            warnings.warn("Replacing existing data of the same name. - Did you mean a different name?")
+            warnings.warn(
+                "Replacing existing data of the same name. - Did you mean a different name?"
+            )
 
             # reuse old config
             old_args = self.data_groups[name]
@@ -110,16 +115,19 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
 
             if reuse_mask:
                 current_data = self.get_data(name=name)
-                assert weight.shape == current_data.shape, \
-                    "to retain the old mask, the shape of the new data must be the same as the previous one"
-                mask = self.get_mask(name=name)  # reuse mask instead of creating a new one
+                assert (
+                    weight.shape == current_data.shape
+                ), "to retain the old mask, the shape of the new data must be the same as the previous one"
+                mask = self.get_mask(
+                    name=name
+                )  # reuse mask instead of creating a new one
 
             self._delete_data(name=name)
 
         # parameter creates a deepcopy of the weight inside, so create a buffer
         self._container.register_buffer(name=name, tensor=weight)
         parametrize.register_parametrization(self._container, name, param_class(mask))
-        self.state[name]['mask'] = mask
+        self.state[name]["mask"] = mask
         self.data_groups[name] = local_args
         return getattr(self._container, name)
 
@@ -142,14 +150,13 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
             return getattr(self._container, name)
 
     def _convert_mask(self, states, sparse_coo=True):
-        r"""Converts the mask to sparse coo or dense tensors depending on the `sparse_coo` argument.
-        """
+        r"""Converts the mask to sparse coo or dense tensors depending on the `sparse_coo` argument."""
         states = copy.deepcopy(states)
         for state in states.values():
             if sparse_coo:
-                state['mask'] = state['mask'].to_sparse_coo()
+                state["mask"] = state["mask"].to_sparse_coo()
             else:
-                state['mask'] = state['mask'].to_dense()
+                state["mask"] = state["mask"].to_dense()
 
         return states
 
@@ -165,9 +172,9 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
         """
         state = self._convert_mask(self.state)
         return {
-            'state': state,
-            'data_groups': self.data_groups,
-            '_container': self._container.state_dict()
+            "state": state,
+            "data_groups": self.data_groups,
+            "_container": self._container.state_dict(),
         }
 
     def _load_container_from_state(self, states, data_groups, container_state_dict):
@@ -182,7 +189,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
 
             # check if the data with such a name was parametrized, if so parametrize
             # otherwise just set the attribute and continue
-            parametrized_name = f'parametrizations.{name}.original'
+            parametrized_name = f"parametrizations.{name}.original"
             parametrized = False
             data = container_state_dict.get(name, None)
             if name in container_state_dict:
@@ -201,9 +208,13 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
 
             if parametrized:
                 # register parameter if parametrized
-                mask = state.get('mask', torch.ones_like(data))
-                param_class = data_groups.get('parametrization', utils.FakeSparsity)  # change once public_api for utils is fixed!
-                parametrize.register_parametrization(self._container, name, param_class(mask))
+                mask = state.get("mask", torch.ones_like(data))
+                param_class = data_groups.get(
+                    "parametrization", utils.FakeSparsity
+                )  # change once public_api for utils is fixed!
+                parametrize.register_parametrization(
+                    self._container, name, param_class(mask)
+                )
 
     def load_state_dict(self, state_dict, strict=True):
         r"""The load_state_dict() restores the state of the sparsifier based on the state_dict
@@ -214,11 +225,13 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
             If False - the current sparsifier is not reset before loading the state_dict i.e. data added
             before loading the state_dict is not erased.
         """
-        states = copy.deepcopy(state_dict['state'])
-        data_groups = copy.deepcopy(state_dict['data_groups'])
-        container_state_dict = copy.deepcopy(state_dict['_container'])
+        states = copy.deepcopy(state_dict["state"])
+        data_groups = copy.deepcopy(state_dict["data_groups"])
+        container_state_dict = copy.deepcopy(state_dict["_container"])
 
-        states = self._convert_mask(states, sparse_coo=False)  # convert sparse coo mask to dense
+        states = self._convert_mask(
+            states, sparse_coo=False
+        )  # convert sparse coo mask to dense
         if strict:
             # if strict load -> then reset container
             self._container = _Container()
@@ -229,43 +242,47 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
             states.update(self.state)
             data_groups.update(self.data_groups)
 
-        self.__setstate__({'state': states, 'data_groups': data_groups})
+        self.__setstate__({"state": states, "data_groups": data_groups})
 
     def __setstate__(self, state):
-        if '_container' in state:  # If container object is in state then load model
-            container_dict = state.pop('_container')
+        if "_container" in state:  # If container object is in state then load model
+            container_dict = state.pop("_container")
             self._container = _Container()
-            state['state'] = self._convert_mask(state['state'], sparse_coo=False)  # convert sparse coo mask to dense
-            self._load_container_from_state(state['state'], state['data_groups'], container_dict)
+            state["state"] = self._convert_mask(
+                state["state"], sparse_coo=False
+            )  # convert sparse coo mask to dense
+            self._load_container_from_state(
+                state["state"], state["data_groups"], container_dict
+            )
 
         self.__dict__.update(state)
 
     def __getstate__(self):
         state = self._convert_mask(self.state)
         return {
-            'defaults': self.defaults,
-            'state': state,
-            'data_groups': self.data_groups,
-            '_container': self._container.state_dict()
+            "defaults": self.defaults,
+            "state": state,
+            "data_groups": self.data_groups,
+            "_container": self._container.state_dict(),
         }
 
-    def __repr__(self):
-        format_string = self.__class__.__name__ + ' ('
+    def __repr__(self):  # type:ignore[override]
+        format_string = self.__class__.__name__ + " ("
         for name, sparse_args in self.data_groups.items():
-            format_string += '\n'
-            format_string += '\tData Group\n'
-            format_string += f'\t    name: {name}\n'
+            format_string += "\n"
+            format_string += "\tData Group\n"
+            format_string += f"\t    name: {name}\n"
             for key in sorted(sparse_args.keys()):
-                if key == 'data':
+                if key == "data":
                     continue
-                format_string += f'\t    {key}: {sparse_args[key]}\n'
-        format_string += ')'
+                format_string += f"\t    {key}: {sparse_args[key]}\n"
+        format_string += ")"
         return format_string
 
     def get_mask(self, name: str):
         if name not in self.state:
             raise ValueError("data with specified name does not exist")
-        return self.state[name]['mask']
+        return self.state[name]["mask"]
 
     def squash_mask(self, *args, leave_parametrized=True, names=None, **kwargs):
         r"""Squashes the sparse masks into the appropriate tensors. Also, accepts list of strings
@@ -278,9 +295,11 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
         if names is None:
             names = list(self.data_groups.keys())
         for name in names:
-            parametrize.remove_parametrizations(self._container, name, leave_parametrized=leave_parametrized)
+            parametrize.remove_parametrizations(
+                self._container, name, leave_parametrized=leave_parametrized
+            )
 
-    def step(self):
+    def step(self):  # type:ignore[override]
         if not self.enable_mask_update:
             return
         with torch.no_grad():
@@ -304,7 +323,9 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
         Note:
             Currently private. Kind of used as a helper function when replacing data of the same name
         """
-        self.squash_mask(names=[name], leave_parametrized=False)  # do not apply the mask while deleting
+        self.squash_mask(
+            names=[name], leave_parametrized=False
+        )  # do not apply the mask while deleting
         delattr(self._container, name)
         self.state.pop(name)
         self.data_groups.pop(name)

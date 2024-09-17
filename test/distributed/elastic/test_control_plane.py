@@ -7,6 +7,7 @@ import pickle
 import socket
 import tempfile
 from contextlib import contextmanager
+from typing import Dict
 
 from urllib3.connection import HTTPConnection
 from urllib3.connectionpool import HTTPConnectionPool
@@ -118,6 +119,39 @@ class WorkerServerTest(TestCase):
             )
             self.assertEqual(resp.status, 200)
 
+    @requires_cuda
+    def test_dump_nccl_trace_pickle_with_json(self) -> None:
+        with local_worker_server() as pool:
+            # bad key - not lower case
+            resp = pool.request(
+                "POST", "/handler/dump_nccl_trace_json?includeCollectives=true"
+            )
+            self.assertEqual(resp.status, 400)
+            # unknown key
+            resp = pool.request("POST", "/handler/dump_nccl_trace_json?unknownkey=true")
+            self.assertEqual(resp.status, 400)
+            # bad value - not a bool
+            resp = pool.request(
+                "POST", "/handler/dump_nccl_trace_json?includecollectives=notabool"
+            )
+            self.assertEqual(resp.status, 400)
+            # bad value - value not lowercase
+            resp = pool.request(
+                "POST", "/handler/dump_nccl_trace_json?includecollectives=True"
+            )
+            self.assertEqual(resp.status, 400)
+            # good key and value
+            resp = pool.request(
+                "POST", "/handler/dump_nccl_trace_json?includecollectives=true"
+            )
+            self.assertEqual(resp.status, 200)
+            # multiple good keys and values
+            resp = pool.request(
+                "POST",
+                "/handler/dump_nccl_trace_json?includecollectives=true&onlyactive=true",
+            )
+            self.assertEqual(resp.status, 200)
+
     def test_tcp(self) -> None:
         import requests
 
@@ -134,6 +168,53 @@ class WorkerServerTest(TestCase):
             resp = pool.request("POST", "/handler/dump_traceback")
             self.assertEqual(resp.status, 200)
             self.assertIn(b"in test_dump_traceback\n", resp.data)
+
+    def test_run_handler(self) -> None:
+        from torch._C._distributed_c10d import _get_handler, _Request, _Response
+
+        handler = _get_handler("ping")
+
+        class Request(_Request):
+            def __init__(self) -> None:
+                _Request.__init__(self)
+
+            def body(self) -> bytes:
+                return b"dummy"
+
+            def params(self) -> Dict[str, str]:
+                return {}
+
+        class Response(_Response):
+            def __init__(self) -> None:
+                _Response.__init__(self)
+
+            def set_content(self, content: str, content_type: str) -> None:
+                self.content = content
+                self.content_type = content_type
+
+            def set_status(self, status: int) -> None:
+                self.status = status
+
+        req = Request()
+        resp = Response()
+
+        handler(req, resp)
+
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(resp.content, "pong")
+        self.assertEqual(resp.content_type, "text/plain")
+
+    def test_get_handler_nonexistant(self) -> None:
+        from torch._C._distributed_c10d import _get_handler
+
+        with self.assertRaisesRegex(ValueError, "Failed to find handler nonexistant"):
+            _get_handler("nonexistant")
+
+    def test_get_handler_names(self) -> None:
+        from torch._C._distributed_c10d import _get_handler_names
+
+        names = _get_handler_names()
+        self.assertIn("ping", names)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import operator
 from functools import reduce
 from typing import Callable, Optional, Tuple, Union
 
@@ -6,14 +7,16 @@ import torch
 import torch.nn.functional as F
 
 from .base_sparsifier import BaseSparsifier
-import operator
+
 
 __all__ = ["WeightNormSparsifier"]
+
 
 def _flat_idx_to_2d(idx, shape):
     rows = idx // shape[1]
     cols = idx % shape[1]
     return rows, cols
+
 
 class WeightNormSparsifier(BaseSparsifier):
     r"""Weight-Norm Sparsifier
@@ -52,11 +55,14 @@ class WeightNormSparsifier(BaseSparsifier):
         arguments and could be overriden by the configuration provided in the
         `prepare` step.
     """
-    def __init__(self,
-                 sparsity_level: float = 0.5,
-                 sparse_block_shape: Tuple[int, int] = (1, 4),
-                 zeros_per_block: Optional[int] = None,
-                 norm: Optional[Union[Callable, int]] = None):
+
+    def __init__(
+        self,
+        sparsity_level: float = 0.5,
+        sparse_block_shape: Tuple[int, int] = (1, 4),
+        zeros_per_block: Optional[int] = None,
+        norm: Optional[Union[Callable, int]] = None,
+    ):
         if zeros_per_block is None:
             zeros_per_block = reduce(operator.mul, sparse_block_shape)
         defaults = {
@@ -76,17 +82,29 @@ class WeightNormSparsifier(BaseSparsifier):
             raise NotImplementedError(f"L-{norm} is not yet implemented.")
         super().__init__(defaults=defaults)
 
-    def _scatter_fold_block_mask(self, output_shape, dim, indices, block_shape,
-                                 mask=None, input_shape=None, device=None):
+    def _scatter_fold_block_mask(
+        self,
+        output_shape,
+        dim,
+        indices,
+        block_shape,
+        mask=None,
+        input_shape=None,
+        device=None,
+    ):
         r"""Creates patches of size `block_shape` after scattering the indices."""
         if mask is None:
             assert input_shape is not None
             mask = torch.ones(input_shape, device=device)
         mask.scatter_(dim=dim, index=indices, value=0)
-        mask.data = F.fold(mask, output_size=output_shape, kernel_size=block_shape, stride=block_shape)
+        mask.data = F.fold(
+            mask, output_size=output_shape, kernel_size=block_shape, stride=block_shape
+        )
         return mask
 
-    def _make_tensor_mask(self, data, input_shape, sparsity_level, sparse_block_shape, mask=None):
+    def _make_tensor_mask(
+        self, data, input_shape, sparsity_level, sparse_block_shape, mask=None
+    ):
         r"""Creates a tensor-level mask.
 
         Tensor-level mask is described as a mask, where the granularity of sparsification of the
@@ -114,7 +132,10 @@ class WeightNormSparsifier(BaseSparsifier):
         if values_per_block > 1:
             # Reduce the data
             data = F.avg_pool2d(
-                data[None, None, :], kernel_size=sparse_block_shape, stride=sparse_block_shape, ceil_mode=True
+                data[None, None, :],
+                kernel_size=sparse_block_shape,
+                stride=sparse_block_shape,
+                ceil_mode=True,
             )
         data = data.flatten()
         num_blocks = len(data)
@@ -128,8 +149,11 @@ class WeightNormSparsifier(BaseSparsifier):
         # Temp reshape for mask
         mask_reshape = mask.reshape(data.shape)  # data might be reshaped
         self._scatter_fold_block_mask(
-            dim=2, output_shape=(h + dh, w + dw),
-            indices=sorted_idx, block_shape=sparse_block_shape, mask=mask_reshape
+            dim=2,
+            output_shape=(h + dh, w + dw),
+            indices=sorted_idx,
+            block_shape=sparse_block_shape,
+            mask=mask_reshape,
         )
         mask.data = mask_reshape.squeeze().reshape(mask.shape)[:h, :w].contiguous()
         return mask
@@ -161,21 +185,38 @@ class WeightNormSparsifier(BaseSparsifier):
         padded_data = torch.ones(h + dh, w + dw, dtype=data.dtype, device=data.device)
         padded_data.fill_(torch.nan)
         padded_data[:h, :w] = data
-        unfolded_data = F.unfold(padded_data[None, None, :], kernel_size=sparse_block_shape, stride=sparse_block_shape)
+        unfolded_data = F.unfold(
+            padded_data[None, None, :],
+            kernel_size=sparse_block_shape,
+            stride=sparse_block_shape,
+        )
 
         # Temp reshape for mask
         mask_reshape = mask.reshape(unfolded_data.shape)
-        _, sorted_idx = torch.topk(unfolded_data, k=zeros_per_block, dim=1, largest=False)
+        _, sorted_idx = torch.topk(
+            unfolded_data, k=zeros_per_block, dim=1, largest=False
+        )
 
         self._scatter_fold_block_mask(
-            dim=1, indices=sorted_idx, output_shape=padded_data.shape, block_shape=sparse_block_shape, mask=mask_reshape
+            dim=1,
+            indices=sorted_idx,
+            output_shape=padded_data.shape,
+            block_shape=sparse_block_shape,
+            mask=mask_reshape,
         )
 
         mask.data = mask_reshape.squeeze().reshape(mask.shape).contiguous()
         return mask
 
-    def update_mask(self, module, tensor_name, sparsity_level, sparse_block_shape,
-                    zeros_per_block, **kwargs):
+    def update_mask(  # type: ignore[call-override, override]
+        self,
+        module,
+        tensor_name,
+        sparsity_level,
+        sparse_block_shape,
+        zeros_per_block,
+        **kwargs,
+    ):
         values_per_block = reduce(operator.mul, sparse_block_shape)
         if zeros_per_block > values_per_block:
             raise ValueError(
@@ -192,10 +233,16 @@ class WeightNormSparsifier(BaseSparsifier):
         else:
             ww = self.norm_fn(getattr(module, tensor_name))
             tensor_mask = self._make_tensor_mask(
-                data=ww, input_shape=ww.shape, sparsity_level=sparsity_level, sparse_block_shape=sparse_block_shape
+                data=ww,
+                input_shape=ww.shape,
+                sparsity_level=sparsity_level,
+                sparse_block_shape=sparse_block_shape,
             )
             if values_per_block != zeros_per_block:
-                block_mask = self._make_block_mask(data=ww, sparse_block_shape=sparse_block_shape,
-                                                   zeros_per_block=zeros_per_block)
+                block_mask = self._make_block_mask(
+                    data=ww,
+                    sparse_block_shape=sparse_block_shape,
+                    zeros_per_block=zeros_per_block,
+                )
                 tensor_mask = torch.logical_or(tensor_mask, block_mask)
             mask.data = tensor_mask

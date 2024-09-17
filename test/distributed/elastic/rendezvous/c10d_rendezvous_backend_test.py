@@ -8,7 +8,6 @@
 
 import os
 import tempfile
-
 from base64 import b64encode
 from datetime import timedelta
 from typing import Callable, cast, ClassVar
@@ -17,7 +16,6 @@ from unittest import mock, TestCase
 from rendezvous_backend_test import RendezvousBackendTestMixin
 
 from torch.distributed import FileStore, TCPStore
-
 from torch.distributed.elastic.rendezvous import (
     RendezvousConnectionError,
     RendezvousError,
@@ -27,6 +25,7 @@ from torch.distributed.elastic.rendezvous.c10d_rendezvous_backend import (
     C10dRendezvousBackend,
     create_backend,
 )
+from torch.distributed.elastic.utils.distributed import get_free_port
 
 
 class TCPStoreBackendTest(TestCase, RendezvousBackendTestMixin):
@@ -71,9 +70,11 @@ class CreateBackendTest(TestCase):
         # For testing, the default parameters used are for tcp. If a test
         # uses parameters for file store, we set the self._params to
         # self._params_filestore.
+
+        port = get_free_port()
         self._params = RendezvousParameters(
             backend="dummy_backend",
-            endpoint="localhost:29300",
+            endpoint=f"localhost:{port}",
             run_id="dummy_run_id",
             min_nodes=1,
             max_nodes=1,
@@ -97,7 +98,7 @@ class CreateBackendTest(TestCase):
         self._expected_temp_dir = tempfile.gettempdir()
 
         self._expected_endpoint_host = "localhost"
-        self._expected_endpoint_port = 29300
+        self._expected_endpoint_port = port
         self._expected_store_type = TCPStore
         self._expected_read_timeout = timedelta(seconds=10)
 
@@ -175,11 +176,14 @@ class CreateBackendTest(TestCase):
     def test_create_backend_returns_backend_if_endpoint_port_is_not_specified(
         self,
     ) -> None:
-        self._params.endpoint = self._expected_endpoint_host
+        # patch default port and pass endpoint with no port specified
+        with mock.patch(
+            "torch.distributed.elastic.rendezvous.c10d_rendezvous_backend.DEFAULT_PORT",
+            self._expected_endpoint_port,
+        ):
+            self._params.endpoint = self._expected_endpoint_host
 
-        self._expected_endpoint_port = 29400
-
-        self._assert_create_backend_returns_backend()
+            self._assert_create_backend_returns_backend()
 
     def test_create_backend_returns_backend_if_endpoint_file_is_not_specified(
         self,
@@ -205,16 +209,6 @@ class CreateBackendTest(TestCase):
         del self._params.config["read_timeout"]
 
         self._expected_read_timeout = timedelta(seconds=60)
-
-        self._assert_create_backend_returns_backend()
-
-    def test_create_backend_returns_backend_with_libuv(self) -> None:
-        self._params.config["use_libuv"] = "true"
-
-        self._assert_create_backend_returns_backend()
-
-    def test_create_backend_returns_backend_without_libuv(self) -> None:
-        self._params.config["use_libuv"] = "false"
 
         self._assert_create_backend_returns_backend()
 

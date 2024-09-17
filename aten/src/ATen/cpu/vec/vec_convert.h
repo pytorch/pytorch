@@ -28,13 +28,13 @@ struct VecConvert {
 };
 
 template <typename dst_t, typename src_t>
-inline typename std::enable_if<std::is_same<dst_t, src_t>::value, Vectorized<src_t>>::type
+inline std::enable_if_t<std::is_same_v<dst_t, src_t>, Vectorized<src_t>>
 convert(const Vectorized<src_t>& src) {
   return src;
 }
 
 template <typename dst_t, typename src_t>
-inline typename std::enable_if<!std::is_same<dst_t, src_t>::value, Vectorized<dst_t>>::type
+inline std::enable_if_t<!std::is_same_v<dst_t, src_t>, Vectorized<dst_t>>
 convert(const Vectorized<src_t>& src) {
   return VecConvert<dst_t, 1, src_t, 1>::apply(src);
 }
@@ -56,7 +56,7 @@ template <
     int src_n,
     bool keep = false,
     std::enable_if_t<dst_n == 1, int> = 0>
-inline typename std::conditional<keep, VectorizedN<dst_t, 1>, Vectorized<dst_t>>::type
+inline std::conditional_t<keep, VectorizedN<dst_t, 1>, Vectorized<dst_t>>
 convert(const VectorizedN<src_t, src_n>& src) {
   return VecConvert<dst_t, dst_n, src_t, src_n>::apply(src);
 }

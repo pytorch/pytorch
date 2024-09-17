@@ -8,9 +8,12 @@ import torch
 import torch._dynamo
 import torch.utils.cpp_extension
 
+
 try:
-    from extension_backends.triton.device_interface import DeviceInterface
-    from extension_backends.triton.extension_codegen_backend import (
+    from extension_backends.triton.device_interface import (
+        DeviceInterface,  # @manual=fbcode//caffe2/test/inductor/extension_backends:extension_codegen_backend
+    )
+    from extension_backends.triton.extension_codegen_backend import (  # @manual=fbcode//caffe2/test/inductor/extension_backends:extension_codegen_backend  # noqa: B950
         CPUDeviceOpOverrides,
         ExtensionScheduling,
         ExtensionWrapperCodegen,
@@ -35,11 +38,12 @@ from torch._inductor.codegen.common import (
 from torch._inductor.utils import get_triton_code
 from torch.testing._internal.common_utils import IS_MACOS
 
+
 try:
     try:
         from . import test_torchinductor
     except ImportError:
-        import test_torchinductor
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)

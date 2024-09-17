@@ -194,7 +194,7 @@ static PyObject* THPIInfo_min(THPIInfo* self, void*) {
 
 static PyObject* THPIInfo_dtype(THPIInfo* self, void*) {
   HANDLE_TH_ERRORS
-  auto primary_name = torch::utils::getDtypeNames(self->type).first;
+  auto primary_name = c10::getDtypeNames(self->type).first;
   return AT_DISPATCH_IINFO_TYPES(self->type, "dtype", [&primary_name] {
     return PyUnicode_FromString(primary_name.data());
   });
@@ -227,7 +227,7 @@ static PyObject* THPFInfo_resolution(THPFInfo* self, void*) {
 
 static PyObject* THPFInfo_dtype(THPFInfo* self, void*) {
   HANDLE_TH_ERRORS
-  auto primary_name = torch::utils::getDtypeNames(self->type).first;
+  auto primary_name = c10::getDtypeNames(self->type).first;
   return _AT_DISPATCH_FINFO_TYPES(self->type, "dtype", [&primary_name] {
     return PyUnicode_FromString(primary_name.data());
   });

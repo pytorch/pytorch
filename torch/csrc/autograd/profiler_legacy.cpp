@@ -122,7 +122,7 @@ using torch::profiler::impl::ProfilerStateBase;
 struct ProfilerLegacyThreadLocalState : public ProfilerStateBase {
   explicit ProfilerLegacyThreadLocalState(
       const torch::profiler::impl::ProfilerConfig& config)
-      : ProfilerStateBase(config), remoteProfiledEvents_{c10::nullopt} {}
+      : ProfilerStateBase(config), remoteProfiledEvents_{std::nullopt} {}
   ~ProfilerLegacyThreadLocalState() override = default;
 
   static ProfilerLegacyThreadLocalState* getTLS() {
@@ -645,7 +645,7 @@ RecordProfile::RecordProfile(std::ostream& out) : out_(out) {
 }
 
 RecordProfile::RecordProfile(const std::string& filename)
-    : file_(new std::ofstream(filename)), out_(*file_) {
+    : file_(std::make_unique<std::ofstream>(filename)), out_(*file_) {
   init();
 }
 

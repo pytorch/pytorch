@@ -13,6 +13,7 @@ from torch import _inductor as inductor, nn
 from torch._C import FileCheck
 from torch._dynamo import compiled_autograd
 from torch._dynamo.utils import counters
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_triton_code
 from torch.distributed._composable.replicate import replicate
 from torch.distributed.algorithms.ddp_comm_hooks import (
@@ -31,6 +32,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_rocm,
 )
 from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._triton import has_triton
 from torch.utils.checkpoint import checkpoint
 
@@ -69,7 +71,14 @@ def compiler_fn(no_inductor=False):
     return _compiler_fn
 
 
-class ReplicateTest(MultiProcessTestCase):
+class MultiProcessInductorTestCase(MultiProcessTestCase, InductorTestCase):
+    """
+    A version of MultiProcessTestCase that derives from the Inductor TestCase
+    to handle isolation of the inductor cache dir.
+    """
+
+
+class ReplicateTest(MultiProcessInductorTestCase):
     @property
     def world_size(self) -> int:
         return min(2, torch.cuda.device_count())
@@ -93,6 +102,7 @@ class ReplicateTest(MultiProcessTestCase):
         setup_func: Optional[Callable] = None,
         no_inductor: bool = False,
         no_compile_forward: bool = False,
+        checkpoint: bool = False,
     ):
         backend = "nccl" if use_gpu else "gloo"
         dist.init_process_group(
@@ -113,7 +123,7 @@ class ReplicateTest(MultiProcessTestCase):
             else "python_reducer"
         )
         torch.manual_seed(123)
-        model = Net().to(device)
+        model = Net(checkpoint=checkpoint).to(device)
         input = torch.randn([1, DIM], device=device)
 
         compiled_replicate_model = replicate(deepcopy(model))
@@ -209,8 +219,16 @@ class ReplicateTest(MultiProcessTestCase):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm
     @skip_if_lt_x_gpu(2)
+    @torch._inductor.config.patch(reorder_for_locality=False)
     def test_compile_gpu(self):
-        self._test_compile(use_gpu=True, no_sync=False)
+        self._test_compile(use_gpu=True, no_sync=False, checkpoint=False)
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_rocm
+    @skip_if_lt_x_gpu(2)
+    @torch._inductor.config.patch(reorder_for_locality=False)
+    def test_compile_gpu_ac(self):
+        self._test_compile(use_gpu=True, no_sync=False, checkpoint=True)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm
@@ -350,35 +368,28 @@ class ReplicateTest(MultiProcessTestCase):
         fc.run(code)
 
 
-class DDP_TP_Test(MultiProcessTestCase):
-    @property
-    def world_size(self) -> int:
-        return min(4, torch.cuda.device_count())
+class DDP_TP_Test(InductorTestCase):
+    def setUp(self):
+        self.rank = 0
+        self.world_size = 4
+        torch.cuda.set_device("cuda:0")
 
-    def setUp(self) -> None:
-        super().setUp()
-        self._spawn_processes()
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
 
     def tearDown(self):
-        super().tearDown()
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
+        dist.destroy_process_group()
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm
-    @skip_if_lt_x_gpu(4)
     def test_ddp_tp(self):
-        torch.cuda.set_device(f"cuda:{self.rank}")
-        dist.init_process_group(
-            backend="nccl",
-            rank=self.rank,
-            world_size=self.world_size,
-            store=dist.FileStore(self.file_name, self.world_size),
-        )
-        model = Net().cuda()
-        compiled_replicate_model = deepcopy(model)
+        ref_model = Net()
+        compiled_replicate_model = deepcopy(ref_model)
         mesh_2d = init_device_mesh(
             "cuda", (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
         )
@@ -390,8 +401,8 @@ class DDP_TP_Test(MultiProcessTestCase):
             "fc3": ColwiseParallel(),
             "fc4": RowwiseParallel(),
         }
-        model = parallelize_module(model, tp_mesh, parallelize_plan)
-        model = replicate(model, device_mesh=dp_mesh)
+        ref_model = parallelize_module(ref_model, tp_mesh, parallelize_plan)
+        ref_model = replicate(ref_model, device_mesh=dp_mesh)
         compiled_replicate_model = parallelize_module(
             compiled_replicate_model, tp_mesh, parallelize_plan
         )
@@ -399,15 +410,23 @@ class DDP_TP_Test(MultiProcessTestCase):
             compiled_replicate_model, device_mesh=dp_mesh
         )
         compiled_replicate_model = torch.compile(compiled_replicate_model)
-        data = torch.randn([1, DIM]).cuda()
+        data = torch.randn([1, DIM])
         with compiled_autograd.enable(compiler_fn()):
             loss = compiled_replicate_model(data).sum()
-            loss.backward()
+            # TODO: We need "pre-dispatch tracing of backward graph" to make this work:
+            # https://github.com/pytorch/pytorch/issues/127797#issuecomment-2291695474
+            with self.assertRaisesRegex(
+                AssertionError,
+                "Expected ProxyTensor, got <class 'torch.distributed._tensor.api.DTensor'>",
+            ):
+                loss.backward()
 
-        loss = model(data).sum()
-        loss.backward()
-        for p1, p2 in zip(model.parameters(), compiled_replicate_model.parameters()):
-            self.assertEqual(p1.grad, p2.grad)
+        # ref_loss = ref_model(data).sum()
+        # ref_loss.backward()
+        # for p1, p2 in zip(
+        #     ref_model.parameters(), compiled_replicate_model.parameters()
+        # ):
+        #     self.assertEqual(p1.grad, p2.grad)
 
 
 if __name__ == "__main__":

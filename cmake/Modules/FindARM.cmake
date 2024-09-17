@@ -2,10 +2,10 @@
 # the project is compiled.
 
 IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
-   EXEC_PROGRAM(cat ARGS "/proc/cpuinfo" OUTPUT_VARIABLE CPUINFO)
+   EXECUTE_PROCESS(COMMAND cat /proc/cpuinfo OUTPUT_VARIABLE CPUINFO)
 
    #neon instruction can be found on the majority part of modern ARM processor
-   STRING(REGEX REPLACE "^.*(neon).*$" "\\1" NEON_THERE ${CPUINFO})
+   STRING(REGEX REPLACE "^.*(neon).*$" "\\1" NEON_THERE "${CPUINFO}")
    STRING(COMPARE EQUAL "neon" "${NEON_THERE}" NEON_TRUE)
    IF (NEON_TRUE)
       set(NEON_FOUND true CACHE BOOL "NEON available on host")
@@ -14,7 +14,7 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
    ENDIF (NEON_TRUE)
 
    # on ARMv8, neon is inherit and instead listed as 'asimd' in /proc/cpuinfo
-   STRING(REGEX REPLACE "^.*(asimd).*$" "\\1" ASIMD_THERE ${CPUINFO})
+   STRING(REGEX REPLACE "^.*(asimd).*$" "\\1" ASIMD_THERE "${CPUINFO}")
    STRING(COMPARE EQUAL "asimd" "${ASIMD_THERE}" ASIMD_TRUE)
    IF (ASIMD_TRUE)
       set(ASIMD_FOUND true CACHE BOOL "ASIMD/NEON available on host")
@@ -23,7 +23,7 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
    ENDIF (ASIMD_TRUE)
 
    #Find the processor type (for now OMAP3 or OMAP4)
-   STRING(REGEX REPLACE "^.*(OMAP3).*$" "\\1" OMAP3_THERE ${CPUINFO})
+   STRING(REGEX REPLACE "^.*(OMAP3).*$" "\\1" OMAP3_THERE "${CPUINFO}")
    STRING(COMPARE EQUAL "OMAP3" "${OMAP3_THERE}" OMAP3_TRUE)
    IF (OMAP3_TRUE)
       set(CORTEXA8_FOUND true CACHE BOOL "OMAP3 available on host")
@@ -32,7 +32,7 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
    ENDIF (OMAP3_TRUE)
 
    #Find the processor type (for now OMAP3 or OMAP4)
-   STRING(REGEX REPLACE "^.*(OMAP4).*$" "\\1" OMAP4_THERE ${CPUINFO})
+   STRING(REGEX REPLACE "^.*(OMAP4).*$" "\\1" OMAP4_THERE "${CPUINFO}")
    STRING(COMPARE EQUAL "OMAP4" "${OMAP4_THERE}" OMAP4_TRUE)
    IF (OMAP4_TRUE)
       set(CORTEXA9_FOUND true CACHE BOOL "OMAP4 available on host")
@@ -44,12 +44,12 @@ ELSEIF(CMAKE_SYSTEM_NAME MATCHES "Darwin")
    IF(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" AND NOT CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
       set(NEON_FOUND true CACHE BOOL "NEON available on ARM64")
    ENDIF()
-   EXEC_PROGRAM("/usr/sbin/sysctl -n machdep.cpu.features" OUTPUT_VARIABLE
+   EXECUTE_PROCESS(COMMAND /usr/sbin/sysctl -n machdep.cpu.features OUTPUT_VARIABLE
       CPUINFO)
 
    IF(NOT CPUINFO STREQUAL "")
        #neon instruction can be found on the majority part of modern ARM processor
-       STRING(REGEX REPLACE "^.*(neon).*$" "\\1" NEON_THERE ${CPUINFO})
+       STRING(REGEX REPLACE "^.*(neon).*$" "\\1" NEON_THERE "${CPUINFO}")
        STRING(COMPARE EQUAL "neon" "${NEON_THERE}" NEON_TRUE)
        IF (NEON_TRUE)
           set(NEON_FOUND true CACHE BOOL "NEON available on host")

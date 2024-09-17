@@ -8,6 +8,7 @@ import torch
 import inspect
 import operator
 import collections
+import logging
 
 from dataclasses import is_dataclass, fields
 
@@ -25,6 +26,9 @@ __all__ = ['TracerBase', 'GraphAppendingTracer', 'TraceError',
            'ScopeContextManager']
 
 
+log = logging.getLogger(__name__)
+
+
 @compatibility(is_backward_compatible=False)
 class Scope:
     """ Scope object that records the module path and the module type
@@ -38,7 +42,7 @@ class Scope:
                 return x.transpose(1, 2)
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 self.sub = Sub()
 
             def forward(self, x):
@@ -92,8 +96,13 @@ _COPY_META_FIELDS = [
     "source_fn_stack",
     "original_aten",
     "recompute",
+    "ac_graph_id",
+    "has_backward_hook",
     "from_node",
-    "quantization_tag",
+    "quantization_tag",  # TODO deprecated
+    "_numeric_debug_handle",  # TODO deprecated
+    "custom",
+    "partitioner_tag"
 ]
 
 
@@ -133,6 +142,7 @@ class TracerBase:
         modification of values used in node creation. For example, one might
         want to disallow in-place operations from being recorded.
         """
+
         if kind == 'call_function' and self.check_mutable_operations:
             check_for_mutable_operation(target, args, kwargs)
 
@@ -143,6 +153,7 @@ class TracerBase:
             self.scope.module_path,
             self.scope.module_type,
         )
+
         # Optionally set stack trace on the created Node for debugging purposes
         if fx_traceback.has_preserved_node_meta():
             current_meta: Dict[str, Any] = fx_traceback.get_current_meta()
@@ -172,6 +183,8 @@ class TracerBase:
 
         elif self.module_stack:
             node.meta['nn_module_stack'] = copy.copy(self.module_stack)
+
+        log.debug("create_node %s", node)
         return node
 
     @compatibility(is_backward_compatible=True)
@@ -249,29 +262,33 @@ class TracerBase:
 
         Can be override to support more trace-specific types.
         """
-        if not isinstance(a, Proxy) and hasattr(a, '__fx_create_arg__'):
+        if isinstance(a, Proxy):
+            return a.node  # most common arg type goes first
+        elif hasattr(a, '__fx_create_arg__'):
             return a.__fx_create_arg__(self)
         # aggregates
-        elif isinstance(a, tuple) and hasattr(a, '_fields'):
-            # NamedTuple constructors don't seem to like getting a generator
-            # expression as an argument to their constructor, so build this
-            # intermediate tuple and unpack it into the NamedTuple constructor
-            args = tuple(self.create_arg(elem) for elem in a)
-            return type(a)(*args)  # type: ignore[arg-type]
-        elif isinstance(a, (tuple, list)):
-            return type(a)(self.create_arg(elem) for elem in a)
+        elif isinstance(a, tuple):
+            if hasattr(a, '_fields'):
+                # NamedTuple constructors don't seem to like getting a generator
+                # expression as an argument to their constructor, so build this
+                # intermediate tuple and unpack it into the NamedTuple constructor
+                args = [self.create_arg(elem) for elem in a]
+                return type(a)(*args)  # type: ignore[arg-type]
+            return type(a)([self.create_arg(elem) for elem in a])
+        elif isinstance(a, list):
+            return [self.create_arg(elem) for elem in a]
         elif isinstance(a, dict):
+            def no_node(arg):
+                if isinstance(arg, Node):
+                    raise RuntimeError("Keys for dictionaries used as an argument cannot contain a "
+                                       f"Node. Got key: {k}")
+
             r = {}
             for k, v in a.items():
                 # Check for invalid dict keys. We do not want a Proxy to appear
                 # anywhere within the key. Since keys can be collection types,
                 # we iterate through the key with map_aggregate
                 k = self.create_arg(k)
-
-                def no_node(arg):
-                    if isinstance(arg, Node):
-                        raise RuntimeError("Keys for dictionaries used as an argument cannot contain a "
-                                           f"Node. Got key: {k}")
                 map_aggregate(k, no_node)
 
                 r[k] = self.create_arg(v)
@@ -285,16 +302,13 @@ class TracerBase:
         elif isinstance(a, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
             return a
 
-        if isinstance(a, Proxy):
-            # base case: we unwrap the Proxy object
-            return a.node
-
-        if is_dataclass(a):
+        elif is_dataclass(a):
             kwargs = {field.name: self.create_arg(getattr(a, field.name)) for field in fields(a)}
             return self.create_node("call_function", a.__class__, (), kwargs)
 
         elif isinstance(a, (*base_types, enum.Enum)) or a is None or a is ...:
             return a
+
         raise NotImplementedError(f"argument of type: {type(a)}")
 
     @compatibility(is_backward_compatible=True)
@@ -394,6 +408,35 @@ class Proxy:
         # note: not added to the graph yet, if this is a method call
         # we peephole optimize to the method invocation
         return Attribute(self, k)
+
+    def __getstate__(self) -> Dict:
+        return self.__dict__
+
+    def __deepcopy__(self, memo) -> Dict:
+        # We have to explicitly override this method, because otherwise deepcopy
+        # will go to __getattr__(self, "__deepcopy__") and return a
+        # Attribute(__deepcopy__), and may go into an infinite loop in some cases.
+        import copy
+        new_dict = {}
+        for k, v in self.__dict__.items():
+            try:
+                new_obj = copy.deepcopy(v, memo)
+            except Exception:
+                log.warning(
+                    "Shallow copy %s of Proxy because it cannot be deepcopied. "
+                    "Proxy is created for node %s", k, self.node.name)
+                new_obj = copy.copy(v)
+            new_dict[k] = new_obj
+        assert "node" in new_dict
+        assert "tracer" in new_dict
+        new_proxy = Proxy(new_dict["node"], new_dict["tracer"])
+        for k, v in new_dict.items():
+            new_proxy.__dict__[k] = v
+        return new_proxy
+
+    def __setstate__(self, d):
+        # This is called when being unpickled/loaded.
+        self.__dict__ = d
 
     def __call__(self, *args, **kwargs) -> 'Proxy':
         return self.tracer.create_proxy('call_method', '__call__', (self,) + args, kwargs)

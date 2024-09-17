@@ -2,17 +2,11 @@
 import importlib
 import os
 import sys
-import unittest
 
 import torch
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import (
-    IS_CI,
-    IS_WINDOWS,
-    TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
-)
+from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
     GPU_TYPE,
@@ -20,27 +14,20 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
 )
 
-if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "Windows CI does not have necessary dependencies for test_torchinductor_codegen_dynamic_shapes yet\n"
-    )
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 importlib.import_module("filelock")
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from inductor.test_torchinductor import (
+from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
     CommonTemplate,
     copy_tests,
     run_and_get_cpp_code,
     run_and_get_triton_code,
     TestFailure,
 )
-from inductor.test_torchinductor_dynamic_shapes import (
+from inductor.test_torchinductor_dynamic_shapes import (  # @manual
     make_dynamic_cls,
     test_failures as dynamic_shapes_test_failures,
 )
@@ -121,7 +108,9 @@ test_failures = {
     "test_arange6_dynamic_shapes": TestFailure(("cpu",)),
     "test_clamp_type_promotion_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv2d_channels_last_dynamic_shapes": TestFailure(("cpu",)),
+    "test_conv3d_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv3d_channels_last_dynamic_shapes": TestFailure(("cpu",)),
+    "test_mutable_custom_op_fixed_layout2_dynamic_shapes": TestFailure(("cpu",)),
     "test_expand_dynamic_shapes": TestFailure(("cpu",)),
     "test_full_boolean_dynamic_shapes": TestFailure(("cpu",)),
     "test_glu_dynamic_shapes": TestFailure(("cpu",)),
@@ -139,6 +128,8 @@ test_failures = {
     "test_uint_dynamic_shapes": TestFailure(("cpu",)),
     "test_issue102546_dynamic_shapes": TestFailure(("cpu",)),
     "test_repeat_as_strided_dynamic_shapes": TestFailure(("cpu",)),
+    "test_mul_index_expr_dynamic_shapes": TestFailure(("cpu",)),
+    "test_flip_cat_dynamic_shapes": TestFailure(("cpu",)),
     #
     # Failed to find for loop/triton kernel:
     #
@@ -243,6 +234,8 @@ test_failures = {
     "test_single_elem_dynamic_shapes": TestFailure(("cpu",)),
     "test_single_elem_indirect_dynamic_shapes": TestFailure(("cpu",)),
     "test_sort_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_sort_stable_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_sort_transpose_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_split_cumsum_dynamic_shapes": TestFailure(("cpu",)),
     "test_split_cumsum_low_prec_dynamic_shapes": TestFailure(("cpu",)),
     "test_split_cumprod_dynamic_shapes": TestFailure(("cpu",)),
@@ -317,6 +310,9 @@ test_failures = {
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
     "test_list_clearing_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
+    "test_dropout_trivial_1_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
     "test_dropout2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu"), is_skip=True),

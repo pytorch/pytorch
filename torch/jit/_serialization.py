@@ -12,6 +12,7 @@ functionalities in `torch.jit`.
 import os
 
 import torch
+from torch._jit_internal import _get_model_id
 from torch._utils_internal import log_torchscript_usage
 from torch.jit._recursive import wrap_cpp_module
 from torch.serialization import validate_cuda_device
@@ -76,7 +77,7 @@ def save(m, f, _extra_files=None):
         extra_files = {'foo.txt': b'bar'}
         torch.jit.save(m, 'scriptmodule.pt', _extra_files=extra_files)
     """
-    log_torchscript_usage("save")
+    log_torchscript_usage("save", model_id=_get_model_id(m))
     if _extra_files is None:
         _extra_files = {}
     if isinstance(f, (str, os.PathLike)):
@@ -147,7 +148,6 @@ def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
         import os
         os.remove("scriptmodule.pt")
     """
-    log_torchscript_usage("load")
     if isinstance(f, (str, os.PathLike)):
         if not os.path.exists(f):  # type: ignore[type-var]
             raise ValueError(f"The provided filename {f} does not exist")  # type: ignore[str-bytes-safe]
@@ -167,7 +167,9 @@ def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
         )  # type: ignore[call-arg]
 
     # TODO: Pretty sure this approach loses ConstSequential status and such
-    return wrap_cpp_module(cpp_module)
+    ret = wrap_cpp_module(cpp_module)
+    log_torchscript_usage("load", model_id=_get_model_id(ret))
+    return ret
 
 
 def validate_map_location(map_location=None):

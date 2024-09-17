@@ -11,12 +11,12 @@ import torch.distributed.checkpoint as dcp
 import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributed._tensor.device_mesh import init_device_mesh
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.tensor.device_mesh import init_device_mesh
 
 
 DEVICE = "cuda"
@@ -31,7 +31,7 @@ class InjectedException(Exception):
 
 
 class Model(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.net1 = nn.Linear(8, 32)
         self.net2 = nn.Linear(32, 128)

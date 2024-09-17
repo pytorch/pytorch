@@ -27,6 +27,7 @@ namespace {
 #endif
   }
 
+#ifndef STRIP_ERROR_MESSAGES
   const char* toString(Library::Kind kind) {
     switch (kind) {
       case Library::DEF:
@@ -38,6 +39,7 @@ namespace {
     }
     return "(unknown)";
   }
+#endif
 
   constexpr auto CatchAll = c10::DispatchKey::CatchAll;
 } // anonymous namespace
@@ -59,7 +61,7 @@ void Library::reset() {
 
 Library::Library(Kind kind, std::string ns, std::optional<c10::DispatchKey> k, const char* file, uint32_t line)
   : kind_(kind)
-  , ns_(ns == "_" ? c10::nullopt : c10::make_optional(std::move(ns)))
+  , ns_(ns == "_" ? std::nullopt : std::make_optional(std::move(ns)))
   , dispatch_key_(k.value_or(CatchAll) == CatchAll ? std::optional<c10::DispatchKey>() : k)
   , file_(file)
   , line_(line)

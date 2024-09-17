@@ -98,7 +98,7 @@ void CPUGeneratorImpl::set_current_seed(uint64_t seed) {
  * Sets the offset of RNG state.
  * See Note [Acquire lock when using random generators]
  */
-void CPUGeneratorImpl::set_offset(uint64_t offset) {
+void CPUGeneratorImpl::set_offset(uint64_t offset [[maybe_unused]]) {
   TORCH_CHECK(false, "CPU Generator does not use offset");
 }
 
@@ -222,7 +222,7 @@ c10::intrusive_ptr<c10::TensorImpl> CPUGeneratorImpl::get_state() const {
   static const size_t size = sizeof(CPUGeneratorImplState);
   static_assert(std::is_standard_layout_v<CPUGeneratorImplState>, "CPUGeneratorImplState is not a PODType");
 
-  auto state_tensor = at::detail::empty_cpu({(int64_t)size}, ScalarType::Byte, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
+  auto state_tensor = at::detail::empty_cpu({(int64_t)size}, ScalarType::Byte, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
   auto rng_state = state_tensor.data_ptr();
 
   // accumulate generator data to be copied into byte tensor

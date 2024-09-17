@@ -441,7 +441,7 @@ void foreach_tensor_zero_slow_(TensorList tensors) {
 std::vector<Tensor> foreach_tensor_norm_slow(
     TensorList tensors,
     const Scalar& ord,
-    c10::optional<ScalarType> dtype) {
+    std::optional<ScalarType> dtype) {
   check_foreach_api_restrictions(tensors);
   std::vector<Tensor> result;
   for (const auto& t : tensors) {

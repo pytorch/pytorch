@@ -287,12 +287,12 @@ void listAdd(Stack& stack) {
   c10::List<IValue> ret = make_result_list<IValue>(a.elementType());
 
   if (a.use_count() == 1) {
-    ret = std::move(a);
+    ret = a;
   } else {
     ret = a.copy();
   }
 
-  ret.append(std::move(b));
+  ret.append(b);
 
   push(stack, std::move(ret));
 }
@@ -300,7 +300,7 @@ void listAdd(Stack& stack) {
 void listInplaceAdd(Stack& stack) {
   c10::List<IValue> b = pop(stack).to<c10::List<IValue>>();
   c10::List<IValue> a = pop(stack).to<c10::List<IValue>>();
-  a.append(std::move(b));
+  a.append(b);
   push(stack, std::move(a));
 }
 

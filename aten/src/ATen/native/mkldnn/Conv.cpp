@@ -222,7 +222,7 @@ static Tensor _mkldnn_convolution(
     c10::string_view attr = "none",
     torch::List<std::optional<at::Scalar>> scalars =
         torch::List<std::optional<at::Scalar>>(),
-    std::optional<c10::string_view> algorithm = c10::nullopt) {
+    std::optional<c10::string_view> algorithm = std::nullopt) {
   ideep::attr_t op_attr = ideep::attr_t();
   if (attr != "none") {
     auto it = fusion_unary_attr_map().find(attr);
@@ -628,7 +628,7 @@ Tensor _mkldnn_convolution_transpose(
     c10::string_view attr = "none",
     torch::List<std::optional<at::Scalar>> scalars =
         torch::List<std::optional<at::Scalar>>(),
-    std::optional<c10::string_view> algorithm = c10::nullopt) {
+    std::optional<c10::string_view> algorithm = std::nullopt) {
   ideep::attr_t op_attr = ideep::attr_t();
   if (attr != "none") {
     auto it = fusion_unary_attr_map().find(attr);

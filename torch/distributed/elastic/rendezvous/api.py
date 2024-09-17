@@ -68,14 +68,21 @@ class RendezvousStoreInfo:
     master_port: int
 
     @staticmethod
-    def build(rank: int, store: Store) -> "RendezvousStoreInfo":
+    def build(
+        rank: int, store: Store, local_addr: Optional[str]
+    ) -> "RendezvousStoreInfo":
         """Factory method, finds unused new port on rank0 host and addr/port info with all ranks.
 
         If master_addr/master_port is knowns (useful when sharing existing tcp store server) use the constructor.
+
+        Args:
+            rank: rank of the current node
+            store: store to use for rendezvous
+            local_addr: address of the current node, if not provided will be resolved from hostname
         """
         # TODO swap to collectives comms API
         if rank == 0:
-            addr = socket.getfqdn()
+            addr = local_addr or socket.getfqdn()
             port = _get_free_port()
             store.set(RendezvousStoreInfo.MASTER_ADDR_KEY, addr.encode(encoding="UTF-8"))  # type: ignore[arg-type]
             store.set(RendezvousStoreInfo.MASTER_PORT_KEY, str(port).encode(encoding="UTF-8"))  # type: ignore[arg-type]

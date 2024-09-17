@@ -2,10 +2,10 @@
 from typing import Callable, Dict, List, NamedTuple, Optional
 
 import torch
-
 import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter, same
+
 
 """
 This is an example of a pure-python version of autograd implemented by

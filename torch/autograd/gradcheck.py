@@ -12,6 +12,7 @@ from torch._vmap_internals import _vmap, vmap
 from torch.overrides import is_tensor_like
 from torch.types import _TensorOrTensors
 
+
 # Note: `get_*_jacobian` functions are added here even though we didn't intend to make them public
 # since they have been exposed from before we added `__all__`  and we already maintain BC for them
 # We should eventually deprecate them and remove them from `__all__`
@@ -27,8 +28,6 @@ __all__ = [
 
 class GradcheckError(RuntimeError):
     r"""Error raised by :func:`gradcheck` and :func:`gradgradcheck`."""
-
-    pass
 
 
 def _is_sparse_compressed_tensor(obj: torch.Tensor):

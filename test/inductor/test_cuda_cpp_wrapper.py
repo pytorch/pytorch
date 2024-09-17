@@ -16,6 +16,7 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 try:
     try:
         from . import (
+            test_combo_kernels,
             test_foreach,
             test_pattern_matcher,
             test_select_algorithm,
@@ -23,11 +24,13 @@ try:
             test_torchinductor_dynamic_shapes,
         )
     except ImportError:
-        import test_foreach
-        import test_pattern_matcher
-        import test_select_algorithm
-        import test_torchinductor
-        import test_torchinductor_dynamic_shapes
+        import test_combo_kernels
+
+        import test_foreach  # @manual=fbcode//caffe2/test/inductor:foreach-library
+        import test_pattern_matcher  # @manual=fbcode//caffe2/test/inductor:pattern_matcher-library
+        import test_select_algorithm  # @manual=fbcode//caffe2/test/inductor:select_algorithm-library
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+        import test_torchinductor_dynamic_shapes  # @manual=fbcode//caffe2/test/inductor:test_inductor-library_dynamic_shapes
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -62,9 +65,7 @@ test_failures_cuda_wrapper = {
 
 
 if config.abi_compatible:
-    xfail_list = [
-        "test_profiler_mark_wrapper_call_cuda",
-    ]
+    xfail_list = []
     for test_name in xfail_list:
         test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
             ("cuda_wrapper",), is_skip=False
@@ -147,6 +148,7 @@ if RUN_CUDA:
         BaseTest("test_add_complex"),
         BaseTest("test_add_complex4"),
         BaseTest("test_as_strided"),  # buffer reuse
+        BaseTest("test_avg_pool2d_backward3"),
         BaseTest("test_batch_norm_2d_2"),
         BaseTest("test_bernoulli1"),
         BaseTest("test_bitwise"),  # int32
@@ -186,10 +188,21 @@ if RUN_CUDA:
         BaseTest("test_sum_dtype"),  # float64
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
+        BaseTest("test_unspec_inputs"),
+        BaseTest("test_pointwise_hermite_polynomial_he"),
+        BaseTest("test_pointwise_hermite_polynomial_h"),
         BaseTest(
             "test_foreach_cpp_wrapper",
             tests=test_foreach.ForeachTests(),
         ),  # test foreach
+        BaseTest(
+            "test_enable_dynamic_shapes_cpp_wrapper",
+            tests=test_foreach.ForeachTests(),
+        ),
+        BaseTest(
+            "test_dynamic_shapes_persistent_reduction_mixed_x_dim",
+            tests=test_combo_kernels.ComboKernelDynamicShapesTests(),
+        ),
         BaseTest(
             "test_cat_slice_cat",
             tests=test_pattern_matcher.TestPatternMatcher(),
@@ -203,18 +216,18 @@ if RUN_CUDA:
         #     device=None,
         #     tests=test_select_algorithm.TestSelectAlgorithm(),
         # ),
-        # TODO: Re-enable this test after fixing cpp wrapper for mm_plus_mm2.
-        # This test is unstable: it succeeds when an Triton kernel is used, and fails when a Aten kernel is used.
-        # The current state is that it's unstable, depending on the autotune result.
-        # The failing code generates aoti_torch_cuda__mm_plus_mm (likely some bug when generating ExternKernel)
-        # More information check:
-        # https://hud.pytorch.org/pytorch/pytorch/commit/b6982bf2b25d2d3ba5d82488a39721d6013a838f?fbclid=IwAR23OCV2rCALsGQk6kmkOqT8DfgQedYDt_Gs2R-t9ejSJNjRskkS1rzncDE
-        # BaseTest(
-        #     "test_mm_plus_mm2",
-        #     tests=test_select_algorithm.TestSelectAlgorithm(),
-        # ),
+        BaseTest(
+            "test_mm_plus_mm2",
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
+        BaseTest(
+            "test_mm_plus_mm3",
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
         BaseTest("test_fft_real_input"),
         BaseTest("test_fft_real_input_real_output"),
+        BaseTest("test_dtypeview"),
+        BaseTest("test_dtypeview_fusion"),
     ]:
         make_test_case(item.name, item.device, item.tests)
 
@@ -246,10 +259,12 @@ if RUN_CUDA:
         DynamicShapesCudaWrapperCudaTests,
         "cuda_wrapper",
         test_failures_cuda_wrapper,
+        xfail_prop="_expected_failure_dynamic_wrapper",
     )
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
+    print(f"FS: run_cuda {RUN_CUDA}")
     if RUN_CUDA:
         run_tests(needs="filelock")

@@ -87,7 +87,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
         std::vector<at::Tensor> outputTensors,
         const char* profilingTitle = nullptr,
         const std::optional<std::vector<at::Tensor>>& inputTensors =
-            c10::nullopt)
+            std::nullopt)
         : Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
           outputTensors_(std::move(outputTensors)),
           future_(c10::make_intrusive<at::ivalue::Future>(
@@ -115,7 +115,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
         std::vector<at::Tensor> outputTensors,
         const char* profilingTitle = nullptr,
         const std::optional<std::vector<at::Tensor>>& inputTensors =
-            c10::nullopt);
+            std::nullopt);
 
     ~AsyncWork() override;
 
@@ -244,7 +244,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
       std::unique_ptr<WorkEntry> entry,
       const char* profilingTitle = nullptr,
       const std::optional<std::vector<at::Tensor>>& inputTensors =
-          c10::nullopt);
+          std::nullopt);
 
   bool stop_;
 

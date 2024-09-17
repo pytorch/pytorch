@@ -2,6 +2,7 @@ from setuptools import setup
 
 from torch.utils.cpp_extension import BuildExtension, CppExtension
 
+
 setup(
     name="no_python_abi_suffix_test",
     ext_modules=[

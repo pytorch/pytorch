@@ -6,7 +6,7 @@ namespace at {
 static std::mutex _generator_mutex_lock;
 
 std::optional<GeneratorFuncType>& GetGeneratorPrivate() {
-  static std::optional<GeneratorFuncType> generator_privateuse1 = c10::nullopt;
+  static std::optional<GeneratorFuncType> generator_privateuse1 = std::nullopt;
   return generator_privateuse1;
 }
 

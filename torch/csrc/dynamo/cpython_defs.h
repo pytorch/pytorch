@@ -6,19 +6,9 @@
 // should go in cpython_defs.c. Copying is required when, e.g.,
 // we need to call internal CPython functions that are not exposed.
 
-#if IS_PYTHON_3_13_PLUS
-#define F_CODE(x) ((PyCodeObject*)(x)->f_executable)
-#define PREV_INSTR(x) (x)->instr_ptr
-#else
-#define F_CODE(x) ((PyCodeObject*)(x)->f_code)
-#define PREV_INSTR(x) (x)->prev_instr
-#endif
-
 #if IS_PYTHON_3_11_PLUS
 
-#define Py_BUILD_CORE
-#include <internal/pycore_frame.h>
-#undef Py_BUILD_CORE
+typedef struct _PyInterpreterFrame _PyInterpreterFrame;
 
 int THP_PyFrame_FastToLocalsWithError(
     _PyInterpreterFrame* frame,

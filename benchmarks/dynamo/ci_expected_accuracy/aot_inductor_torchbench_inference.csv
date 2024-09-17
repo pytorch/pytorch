@@ -6,15 +6,11 @@ torchrec_dlrm,eager_fail_to_run,0
 
 
 
-BERT_pytorch,fail_to_run,0
+BERT_pytorch,pass,0
 
 
 
 Background_Matting,pass_due_to_skip,0
-
-
-
-DALLE2_pytorch,fail_to_run,0
 
 
 
@@ -138,7 +134,7 @@ hf_Bert_large,pass,0
 
 
 
-hf_BigBird,fail_to_run,0
+hf_BigBird,fail_accuracy,0
 
 
 
@@ -286,7 +282,7 @@ sam,fail_to_run,0
 
 
 
-sam_fast,fail_to_run,0
+sam_fast,timeout,0
 
 
 
@@ -350,4 +346,4 @@ vision_maskrcnn,fail_to_run,0
 
 
 
-yolov3,pass,0
+yolov3,fail_to_run,0

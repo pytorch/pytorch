@@ -56,8 +56,12 @@ static llvm::JITTargetAddress toAddress(T* Ptr) {
 // Get subtarget features for the host.
 static llvm::SubtargetFeatures getHostSubtargetFeatures() {
   llvm::SubtargetFeatures subtargetFeatures;
+#if LLVM_VERSION_MAJOR >= 19
+  const auto featureMap = llvm::sys::getHostCPUFeatures();
+#else
   llvm::StringMap<bool> featureMap;
   llvm::sys::getHostCPUFeatures(featureMap);
+#endif
   for (auto& feature : featureMap) {
     subtargetFeatures.AddFeature(feature.first(), feature.second);
   }
@@ -193,6 +197,30 @@ class TORCH_API PytorchLLVMJITImpl {
 
     // Register implementations of intrinsics
     registerIntrinsics(JD, Mangle, intrinsics);
+
+    // Work around UBSAN crashes which reads 8 byte in front of every function.
+    // Placing a dummy variable with 8 bytes first ensures there is readable
+    // memory before code for the first function is emitted. See also:
+    // - https://reviews.llvm.org/D148665
+    // - https://github.com/llvm/llvm-project/issues/65253
+    {
+      std::unique_ptr<llvm::LLVMContext> ctx =
+          std::make_unique<llvm::LLVMContext>();
+      std::unique_ptr<llvm::Module> module_ =
+          std::make_unique<llvm::Module>("__asan_workaround_fill", *ctx);
+      llvm::Type* type = llvm::ArrayType::get(llvm::Type::getInt8Ty(*ctx), 8);
+      module_->getOrInsertGlobal("__asan_workaround_fill", type, [&]() {
+        return new llvm::GlobalVariable(
+            *module_,
+            type,
+            true,
+            llvm::GlobalVariable::InternalLinkage,
+            llvm::Constant::getNullValue(type),
+            "__asan_workaround_fill");
+      });
+      assertSuccess(LLJ->addIRModule(
+          ThreadSafeModule(std::move(module_), std::move(ctx))));
+    }
   }
 
   void addModule(std::unique_ptr<Module> M, std::unique_ptr<LLVMContext> C) {
