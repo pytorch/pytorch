@@ -392,8 +392,8 @@ class PythonMod(sympy.Function):
         #   1. p == 0
         #   2. p is either q or -q
         #   3. p is integer and q == 1
-        if p is sympy.S.Zero or p in (q, -q) or q == 1:
-            return sympy.S.Zero
+        if p is S.Zero or p in (q, -q) or q == 1:
+            return S.Zero
 
         # Evaluate if they are both literals.
         if q.is_Number and p.is_Number:
@@ -402,14 +402,14 @@ class PythonMod(sympy.Function):
         # If q == 2, it's a matter of whether p is odd or even.
         if q.is_Number and q == 2:
             if p.is_even:
-                return sympy.S.Zero
+                return S.Zero
             if p.is_odd:
-                return sympy.S.One
+                return S.One
 
         # If p is a multiple of q.
         r = p / q
         if r.is_integer:
-            return sympy.S.Zero
+            return S.Zero
 
         # If p < q and its ratio is positive, then:
         #   - floor(p / q) = 0
@@ -419,7 +419,7 @@ class PythonMod(sympy.Function):
             return p
 
         if sympy.Mod(p, q) == 0:
-            return sympy.S.Zero
+            return S.Zero
 
         return None
 
