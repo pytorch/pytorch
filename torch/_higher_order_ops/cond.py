@@ -236,7 +236,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
 
     suppress_pending = contextlib.nullcontext()
     if (
-        fake_mode := detect_fake_mode()
+        (fake_mode := detect_fake_mode())
         and (shape_env := fake_mode.shape_env)
     ):
         suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
@@ -401,11 +401,9 @@ class CondAutogradOp(torch.autograd.Function):
 def cond_autograd(pred, true_fn, false_fn, operands):
     suppress_pending = contextlib.nullcontext()
     if (
-        fake_mode := detect_fake_mode()
+        (fake_mode := detect_fake_mode())
         and (shape_env := fake_mode.shape_env)
     ):
-        # I guess we should clear unbacked symbols before the 1st make_fx call for cond,
-        # not sure where to put it.
         shape_env.pending_fresh_unbacked_symbols.clear()
         suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
 
