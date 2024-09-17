@@ -1,12 +1,11 @@
 # mypy: allow-untyped-decorators
-from typing import Any, cast, List, NamedTuple, Optional, Tuple, Union
+from typing import cast, List, NamedTuple, Optional, Tuple, Union
 
 import torch
 import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 from torch.distributed.distributed_c10d import ReduceOp
 from torch.distributed.tensor import DTensor
-from torch.utils._contextlib import _DecoratorContextManager
 
 from ._fsdp_common import (
     _get_dim0_padded_size,
@@ -519,16 +518,3 @@ def _get_gradient_divide_factors(
 def _div_if_needed(tensor: torch.Tensor, div_factor: Optional[float]) -> None:
     if div_factor is not None and div_factor > 1:
         tensor.div_(div_factor)
-
-
-class _unsafe_preserve_version_counters(_DecoratorContextManager):
-    def __init__(self, tensors: List[torch.Tensor]):
-        self.tensors = tensors
-        self.prev_versions = [tensor._version for tensor in tensors]
-
-    def __enter__(self) -> None:
-        pass
-
-    def __exit__(self, *args: Any) -> None:
-        for tensor, prev_version in zip(self.tensors, self.prev_versions):
-            torch._C._autograd._unsafe_set_version_counter(tensor, prev_version)
