@@ -19,6 +19,7 @@ from torch._higher_order_ops.flex_attention import (
 )
 from torch._higher_order_ops.utils import _set_compilation_env
 from torch.fx.experimental.proxy_tensor import (
+    _temp_remove_metadata_torch_function_mode,
     _temp_remove_pre_dispatch_torch_function_mode,
 )
 from torch.nn.attention._utils import _supported_head_dim, _validate_sdpa_input
@@ -846,10 +847,7 @@ def create_block_mask(
     KV_LEN = _round_up_to_multiple(KV_LEN, KV_BLOCK_SIZE)
     if _compile:
         inner_func = torch.compile(
-            inner_func,
-            fullgraph=True,
-            dynamic=False,
-            force=True,
+            torch.compiler.enable(inner_func), fullgraph=True, dynamic=False
         )
     with TransformGetItemToIndex():
         partial_block_mask, full_block_mask = inner_func(
@@ -1008,6 +1006,12 @@ def flex_attention(
     if scale is None:
         scale = 1.0 / math.sqrt(query.size(-1))
 
+    if query.device != block_mask.kv_num_blocks.device:
+        raise RuntimeError(
+            f"Expect q/k/v and block_mask to be on the same device "
+            f"but got {query.device} and {block_mask.kv_num_blocks.device}."
+        )
+
     kernel_options = _apply_kernel_options(
         query,
         key,
@@ -1032,29 +1036,38 @@ def flex_attention(
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("flex_attention requires dynamo support")
 
+    from torch._dynamo.backends.debugging import (
+        make_eager_backend_with_torch_function_mode,
+    )
+
     # Dynamo is expecting a callable with "__code__" attribute.
     # We cannot directly pass hop to it. So we wrap it in a dummy function.
+    @torch.compiler.enable
     def _flex_attention_hop_wrapper(*args, **kwargs):
         return flex_attention_hop(*args, **kwargs)
 
     with _set_compilation_env():
         with torch._dynamo.utils.disable_cache_limit():
             with _temp_remove_pre_dispatch_torch_function_mode():
-                out, lse = torch.compile(
-                    _flex_attention_hop_wrapper,
-                    backend="eager",
-                    fullgraph=True,
-                    force=True,
-                )(
-                    query,
-                    key,
-                    value,
-                    score_mod,
-                    block_mask.as_tuple(),
-                    scale,
-                    kernel_options,
-                )
-                if return_lse:
-                    return out, lse * math.log(2)
-                else:
-                    return out
+                with _temp_remove_metadata_torch_function_mode() as metadata_mode:
+                    if metadata_mode:
+                        backend = make_eager_backend_with_torch_function_mode(
+                            metadata_mode
+                        )
+                    else:
+                        backend = "eager"
+                    out, lse = torch.compile(
+                        _flex_attention_hop_wrapper, backend=backend, fullgraph=True
+                    )(
+                        query,
+                        key,
+                        value,
+                        score_mod,
+                        block_mask.as_tuple(),
+                        scale,
+                        kernel_options,
+                    )
+                    if return_lse:
+                        return out, lse * math.log(2)
+                    else:
+                        return out

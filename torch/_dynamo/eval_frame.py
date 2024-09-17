@@ -72,7 +72,7 @@ from .code_context import code_context
 from .exc import CondOpArgsMismatchError, UserError, UserErrorType
 from .hooks import Hooks
 from .mutation_guard import install_generation_tagging_init
-from .utils import common_constant_types, compile_times, DuplicateWarningChecker
+from .utils import common_constant_types, compile_times
 
 
 if TYPE_CHECKING:
@@ -293,9 +293,6 @@ def make_set_enable_dynamic(enable: bool):
         )
 
 
-_compile_disable_dup_warning_checker = DuplicateWarningChecker()
-
-
 class _TorchDynamoContext:
     def __init__(
         self,
@@ -308,7 +305,6 @@ class _TorchDynamoContext:
         export=False,
         dynamic=None,
         compiler_config=None,
-        force=False,
     ) -> None:
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -321,7 +317,6 @@ class _TorchDynamoContext:
         self.compiler_config = compiler_config
         self.cleanup_fns: List[Callable[[], Any]] = []
         self.enter_exit_hooks = []
-        self.force = force
         patch_fn()
 
         # Save the backends so that we can reset them during torch._dynamo.reset
@@ -435,21 +430,6 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            from torch._C._dynamo.eval_frame import (
-                is_eval_frame_callback_enabled,
-                set_eval_frame_callback_enabled,
-            )
-
-            # TODO eventually remove this check/warning
-            if not is_eval_frame_callback_enabled() and not self.force:
-                compile_disable_warning = f"""Detected a `torch.compile` call in a `torch.compiler.disable` region!
-Your code will not be compiled unless there is a `torch.compiler.enable` call.
-If you need a forced `torch.compile` call, use `torch.compile(fn, force=True)`
-Current traceback:
-{"".join(traceback.format_stack())}"""
-                if _compile_disable_dup_warning_checker.add(compile_disable_warning):
-                    log.warning(compile_disable_warning)
-
             if is_fx_tracing():
                 if config.error_on_nested_fx_trace:
                     raise RuntimeError(
@@ -470,9 +450,6 @@ Current traceback:
 
             cleanups = [enter() for enter in self.enter_exit_hooks]
             prior = _maybe_set_eval_frame(callback)
-            prior_eval_frame_enabled = True
-            if self.force:
-                prior_eval_frame_enabled = set_eval_frame_callback_enabled(True)
 
             # Ensure that if an assertion occurs after graph pushes
             # something onto the DynamicLayerStack then we pop it off (the
@@ -492,8 +469,6 @@ Current traceback:
                     saved_dynamic_layer_stack_depth
                 )
 
-                if self.force:
-                    set_eval_frame_callback_enabled(prior_eval_frame_enabled)
                 _maybe_set_eval_frame(prior)
                 for cleanup in cleanups:
                     cleanup()
@@ -565,7 +540,6 @@ class OptimizeContext(_TorchDynamoContext):
         rebuild_ctx: Optional[
             Callable[[], Union[OptimizeContext, _NullDecorator]]
         ] = None,
-        force=False,
     ) -> None:
         def on_enter():
             install_generation_tagging_init()
@@ -579,7 +553,6 @@ class OptimizeContext(_TorchDynamoContext):
             export=export,
             dynamic=dynamic,
             compiler_config=compiler_config,
-            force=force,
         )
 
         if config.compiled_autograd:
@@ -732,7 +705,6 @@ def _optimize_catch_errors(
     dynamic=None,
     compiler_config=None,
     rebuild_ctx=None,
-    force=False,
 ):
     return OptimizeContext(
         convert_frame.catch_errors_wrapper(compile_fn, hooks),
@@ -742,7 +714,6 @@ def _optimize_catch_errors(
         dynamic=dynamic,
         compiler_config=compiler_config,
         rebuild_ctx=rebuild_ctx,
-        force=force,
     )
 
 
@@ -806,7 +777,6 @@ def _optimize(
     guard_fail_fn=None,
     disable=False,
     dynamic=None,
-    force=False,
 ) -> Union[OptimizeContext, _NullDecorator]:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -842,10 +812,6 @@ def _optimize(
     # easier to understand UX at the cost of a little more plumbing on our end.
     hooks = Hooks(guard_export_fn=guard_export_fn, guard_fail_fn=guard_fail_fn)
     torch._C._log_api_usage_once("torch._dynamo.optimize")
-    if disable and force:
-        raise RuntimeError(
-            "Cannot have both `disable=True` and `force=True` in torch.compile call."
-        )
     if (
         disable
         or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1"
@@ -864,7 +830,6 @@ def _optimize(
             dynamic=dynamic,
             hooks=hooks,
             rebuild_ctx=rebuild_ctx,
-            force=force,
         )
     # The backend function is stashed in the callable returned by
     # _optimize_catch_errors in the field _torchdynamo_orig_callable. This can
@@ -878,7 +843,6 @@ def _optimize(
         if hasattr(backend, "get_compiler_config")
         else None,
         rebuild_ctx=rebuild_ctx,
-        force=force,
     )
 
 
@@ -1695,7 +1659,6 @@ def optimize_assert(
     export_constraints=None,
     dynamic=None,
     rebuild_ctx=None,
-    force=False,
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
@@ -1714,7 +1677,6 @@ def optimize_assert(
         export=export,
         dynamic=dynamic,
         rebuild_ctx=rebuild_ctx,
-        force=force,
     )
 
 

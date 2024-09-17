@@ -641,42 +641,6 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(c(torch.ones(3, 3)), torch.ones(3, 3) + 4)
         self.assertEqual(d(torch.ones(3, 3)), torch.ones(3, 3) + 4)
 
-    # NOTE remove test when warning is removed
-    def test_disable_compile_warning(self):
-        import logging
-
-        @torch.compile(backend="eager")
-        def a(x):
-            return x + 1
-
-        @torch._dynamo.disable
-        def b(x):
-            return a(x) + 1
-
-        with self.assertLogs("torch._dynamo.eval_frame", logging.WARNING) as cm:
-            b(torch.ones(3, 3))
-
-        self.assertTrue(any("torch.compiler.enable" in output for output in cm.output))
-
-    # NOTE no need to test logging when warning is removed
-    def test_forced_compile(self):
-        import logging
-
-        @torch.compile(backend="eager", force=True)
-        def a(x):
-            if torch._dynamo.is_compiling():
-                return x + 1
-            return x + 2
-
-        @torch._dynamo.disable
-        def b(x):
-            return a(x) + 1
-
-        with self.assertNoLogs("torch._dynamo.eval_frame", logging.WARNING):
-            result = b(torch.ones(3, 3))
-
-        self.assertEqual(result, torch.ones(3, 3) + 2)
-
     def _test_mark_static_address(self, guarded):
         # This test verifies that dynamo properly marks inputs as static
         # when using the mark_static_address API.

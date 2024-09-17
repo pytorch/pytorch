@@ -20,6 +20,7 @@ from torch._higher_order_ops.utils import (
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
+    _temp_remove_metadata_torch_function_mode,
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
@@ -114,14 +115,24 @@ def scan(
 
     # Dynamo is expecting a callable with "__code__" attribute.
     # We cannot directly pass cond_op to it. So we wrap it in a dummy function.
+    @torch._dynamo.enable
     def _scan_op_wrapper(*args, **kwargs):
         return scan(*args, **kwargs)
 
     if not torch._dynamo.is_compiling():
+        from torch._dynamo.backends.debugging import (
+            make_eager_backend_with_torch_function_mode,
+        )
+
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-            return torch.compile(
-                _scan_op_wrapper, backend="eager", fullgraph=True, force=True
-            )(combine_fn, init, xs, dim=dim, reverse=reverse)
+            with _temp_remove_metadata_torch_function_mode() as metadata_mode:
+                if metadata_mode:
+                    backend = make_eager_backend_with_torch_function_mode(metadata_mode)
+                else:
+                    backend = "eager"
+                return torch.compile(_scan_op_wrapper, backend=backend, fullgraph=True)(
+                    combine_fn, init, xs, dim=dim, reverse=reverse
+                )
 
     leaves_init, spec_init = pytree.tree_flatten(init)
     leaves_xs, spec_xs = pytree.tree_flatten(xs)
