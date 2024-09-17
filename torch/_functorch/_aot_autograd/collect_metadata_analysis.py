@@ -9,7 +9,6 @@ a functionalized version of the graph under compilation.
 """
 
 import collections
-import contextlib
 import logging
 from functools import wraps
 from typing import Callable, DefaultDict, Dict, List, Optional

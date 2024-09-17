@@ -235,10 +235,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     ), "Cond operands must be a list of tensors"
 
     suppress_pending = contextlib.nullcontext()
-    if (
-        (fake_mode := detect_fake_mode())
-        and (shape_env := fake_mode.shape_env)
-    ):
+    if (fake_mode := detect_fake_mode()) and (shape_env := fake_mode.shape_env):
         suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
     with suppress_pending:
         true_graph = reenter_make_fx(true_fn)(*operands)
@@ -400,10 +397,7 @@ class CondAutogradOp(torch.autograd.Function):
 @cond_op.py_impl(DispatchKey.Autograd)
 def cond_autograd(pred, true_fn, false_fn, operands):
     suppress_pending = contextlib.nullcontext()
-    if (
-        (fake_mode := detect_fake_mode())
-        and (shape_env := fake_mode.shape_env)
-    ):
+    if (fake_mode := detect_fake_mode()) and (shape_env := fake_mode.shape_env):
         shape_env.pending_fresh_unbacked_symbols.clear()
         suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
 

@@ -1937,7 +1937,9 @@ class FakeTensorMode(TorchDispatchMode):
                 # If a data-dependent op is used in a decomposition, we
                 # may need to get the unbacked settings "early"
                 # TODO: Is this really needed?
-                compute_unbacked_bindings(self.shape_env, fake_out, peek=False, real_value=real_out)
+                compute_unbacked_bindings(
+                    self.shape_env, fake_out, peek=False, real_value=real_out
+                )
 
             return fake_out
 

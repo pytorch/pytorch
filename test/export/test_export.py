@@ -894,7 +894,6 @@ graph():
             torch.allclose(ep.module()(torch.zeros(2, 3)), torch.ones(2, 3) * 21)
         )
 
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # TODO(pianpwk): user_output signature
     def test_real_tensor_for_max_op(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -984,13 +983,13 @@ graph():
                 out = F.relu(self.fc(state))
                 mu, log_std = out.chunk(2, dim=1)
                 log_std = torch.tanh(log_std)
-                std = (-10 + 6*(log_std+1)).exp()
+                std = (-10 + 6 * (log_std + 1)).exp()
                 dist = SquashedNormal(mu, std)
                 return dist
 
         model = StochasticActor()
         with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
-            export(model, (torch.randn(1,4),), strict=False)
+            export(model, (torch.randn(1, 4),), strict=False)
 
     def test_export_script_module(self):
         class Foo(torch.nn.Module):

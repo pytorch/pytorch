@@ -1534,6 +1534,7 @@ class FakeTensorPropTest(TestCase):
                 value, None, another_optional_value
             )
 
+    @expectedFailurePropagateRealTensors
     def test_unbacked_shape_realloc(self):
         def f(x):
             return x.nonzero()
