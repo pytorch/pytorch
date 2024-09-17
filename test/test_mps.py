@@ -5729,7 +5729,7 @@ class TestMPS(TestCaseMPS):
         helper(2, 8, 4, 5, dtype=torch.int64)
         helper(2, 8, 4, 5, dtype=torch.bool)
         # Regression test for https://github.com/pytorch/pytorch/issues/136132
-        x = torch.ones(2,4,1,30,1, device='mps').sum(dim=-2)
+        x = torch.ones(2, 4, 1, 30, 1, device='mps').sum(dim=-2)
         self.assertEqual(x.numel(), 8)
         self.assertEqual(x.max().item(), 30.0)
 
