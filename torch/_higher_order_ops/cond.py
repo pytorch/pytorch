@@ -237,7 +237,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     suppress_pending = contextlib.nullcontext()
     if (
         fake_mode := detect_fake_mode()
-        and shape_env := fake_mode.shape_env
+        and (shape_env := fake_mode.shape_env)
     ):
         suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
     with suppress_pending:
