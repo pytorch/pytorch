@@ -3,7 +3,17 @@ import functools
 import math
 import operator
 import sys
-from typing import Any, Callable, Iterable, List, Optional, Tuple, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Iterable,
+    List,
+    Optional,
+    SupportsFloat,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 import sympy
 from sympy import S
@@ -20,7 +30,7 @@ from sympy.utilities.iterables import sift
 from .numbers import int_oo
 
 
-T = TypeVar("T")
+T = TypeVar("T", bound=SupportsFloat)
 
 # Portions of this file are adapted from the Sympy codebase, which was
 # licensed as follows:
@@ -81,21 +91,18 @@ __all__ = [
 
 def _keep_float(f: Callable[..., T]) -> Callable[..., Union[T, sympy.Float]]:
     @functools.wraps(f)
-    def inner(*args: Any) -> T:
+    def inner(*args: Any) -> Union[T, sympy.Float]:
         r = f(*args)
         if any(isinstance(a, sympy.Float) for a in args) and not isinstance(
             r, sympy.Float
         ):
-            try:
-                r = sympy.Float(r)
-            except TypeError:
-                pass
+            r = sympy.Float(float(r))
         return r
 
     return inner
 
 
-def fuzzy_eq(x: Any, y: Any) -> Optional[bool]:
+def fuzzy_eq(x: Optional[bool], y: Optional[bool]) -> Optional[bool]:
     if None in (x, y):
         return None
     return x == y
@@ -184,7 +191,7 @@ class FloorDiv(sympy.Function):
     def divisor(self) -> sympy.Basic:
         return self.args[1]
 
-    def _sympystr(self, printer: Any) -> str:
+    def _sympystr(self, printer: sympy.printing.printer.Printer) -> str:
         base = printer.parenthesize(self.base, self.precedence)
         divisor = printer.parenthesize(self.divisor, self.precedence)
         return f"({base}//{divisor})"
@@ -372,7 +379,7 @@ class PythonMod(sympy.Function):
     is_integer: bool = True
 
     @classmethod
-    def eval(cls, p: sympy.Basic, q: sympy.Basic) -> Optional[sympy.Basic]:
+    def eval(cls, p: sympy.Expr, q: sympy.Expr) -> Optional[sympy.Expr]:
         # python test/dynamo/test_export.py -k ExportTests.test_trivial_constraint
         # Triggered by sympy.solvers.inequalities.reduce_inequalities
         # assert p.is_integer, p
