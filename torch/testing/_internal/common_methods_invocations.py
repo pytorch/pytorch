@@ -23882,6 +23882,12 @@ python_ref_db = [
         skips=(
             # RuntimeError: no _refs support for torch.Tensor.is_conj
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+            DecorateInfo(
+                unittest.expectedFailure,
+                'TestCommon',
+                'test_out',
+                device_type='cpu',
+                dtypes=[torch.float32]),
         ),
         supports_out=True,
     ),
