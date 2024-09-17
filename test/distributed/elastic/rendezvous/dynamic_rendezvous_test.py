@@ -1139,7 +1139,9 @@ class TestRendezvousKeepAliveOp(AbstractTestRendezvousOp, TestCase):
 
 
 class DummyStore(Store):
-    pass
+    @property
+    def port(self) -> int:
+        return 54321
 
 
 class DynamicRendezvousHandlerTest(TestCase):
@@ -1217,19 +1219,26 @@ class DynamicRendezvousHandlerTest(TestCase):
     def test_share_store_when_tcp_store(self):
         handler = self._create_handler()
 
-        with patch.object(dist, "PrefixStore", new=Mock):
+        class CustomPrefixStore(Mock):
+            def get(self, key):
+                return b"host" if key == "MASTER_ADDR" else b"54321"
+
+            def set(self, key, value):
+                pass
+
+        with patch.object(dist, "PrefixStore", new=CustomPrefixStore):
             handler._store = Mock(spec=dist.TCPStore)
             type(handler._store).host = PropertyMock(return_value="host")
-            type(handler._store).port = PropertyMock(return_value=54321)
+            type(handler._store).port = PropertyMock(return_value=54320)
             rdzv_info = handler.next_rendezvous()
             self.assertEqual(rdzv_info.bootstrap_store_info.master_addr, "host")
             self.assertEqual(rdzv_info.bootstrap_store_info.master_port, 54321)
-            self.assertEqual(handler._shared_tcp_store_server, handler._store)
+            self.assertNotEqual(handler._shared_tcp_store_server, handler._store)
 
             rdzv_info = handler.next_rendezvous()
             self.assertEqual(rdzv_info.bootstrap_store_info.master_addr, "host")
             self.assertEqual(rdzv_info.bootstrap_store_info.master_port, 54321)
-            self.assertEqual(handler._shared_tcp_store_server, handler._store)
+            self.assertNotEqual(handler._shared_tcp_store_server, handler._store)
 
     @patch("torch.distributed.elastic.rendezvous.dynamic_rendezvous._delay")
     def test_next_rendezvous_skews_the_first_join_attempt(self, mock_delay) -> None:
@@ -1795,14 +1804,27 @@ class IntegrationTest(TestCase):
 
     @patch.object(dist, "PrefixStore")
     def test_share_tcp_store_from_backend(self, prefix_store_class_mock):
-        prefix_store = Mock(spec=dist.PrefixStore)
-        prefix_store_class_mock.return_value = prefix_store
-
-        tcp_store = Mock(spec=dist.TCPStore)
         expected_addr = "expected_address"
-        expected_port = 54321
-        type(tcp_store).host = PropertyMock(return_value=expected_addr)
-        type(tcp_store).port = PropertyMock(return_value=expected_port)
+        expected_port = 54231
+
+        class CustomPrefixStore(Mock):
+            def get(self, key):
+                return (
+                    expected_addr.encode("utf-8")
+                    if key == "MASTER_ADDR"
+                    else bytes(str(expected_port), "utf-8")
+                )
+
+            def set(self, key, value):
+                pass
+
+        prefix_store = CustomPrefixStore(spec=dist.PrefixStore)
+        prefix_store_class_mock.return_value = prefix_store
+        tcp_store = Mock(spec=dist.TCPStore)
+        original_addr = "original_addr"
+        original_port = 54321
+        type(tcp_store).host = PropertyMock(return_value=original_addr)
+        type(tcp_store).port = PropertyMock(return_value=original_port)
         # this will be injected
         self._store = tcp_store
 
