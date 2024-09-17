@@ -791,7 +791,7 @@ def flex_attention(
     out_size = [B, Hq, seq_len_q, v_head_dim]
     stride_order = get_stride_order(query.get_stride())
     fill_order = stride_order2fill_order(stride_order)
-    out_strides = construct_strides(out_size, fill_order)
+    out_strides = construct_strides(out_size, fill_order)  # type: ignore[arg-type]
 
     layout = FixedLayout(
         query.get_device(),

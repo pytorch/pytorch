@@ -99,7 +99,7 @@ class BoundVars:
             elif "set_indirect" in key:
                 idx = int(key[len("set_indirect") :])
                 var = self.loop_body.indirect_vars[idx]
-                indirect = partial(self.set_indirect, var)
+                indirect = partial(self.set_indirect, var)  # type: ignore[arg-type]
                 result[key] = indirect
             else:
                 assert "scan" in key
@@ -129,7 +129,7 @@ class BoundVars:
         return new
 
     def get_index(self, name: Expr) -> ValueRanges[Expr]:
-        expr = self.loop_body.indexing_exprs[name]
+        expr = self.loop_body.indexing_exprs[name]  # type: ignore[index]
         bound = self.replacement_vals.get(expr)
         if bound is None:
             bound = bound_sympy(expr, self.replacement_vals)

@@ -3,7 +3,7 @@ from typing_extensions import TypeAlias
 
 
 try:
-    from fbscribelogger import make_scribe_logger  # type: ignore[import-untyped]
+    from fbscribelogger import make_scribe_logger  # type: ignore[import-untyped, import-not-found]
 except ImportError:
     TAtom: TypeAlias = Union[int, float, bool, str]
     TField: TypeAlias = Union[TAtom, List[TAtom]]
