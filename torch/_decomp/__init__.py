@@ -636,6 +636,7 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.threshold_backward,
             aten.trace,
             aten.transpose.int,
+            aten.transpose_copy,
             aten.tril,
             aten.tril_,
             aten.triu,
