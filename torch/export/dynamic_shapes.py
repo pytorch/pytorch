@@ -846,21 +846,15 @@ def _transform_shapes_for_default_dynamic(
         combined_args = type(dynamic_shapes)(combined_args.values())  # type: ignore[assignment, misc]
 
     def transform_shapes(path, tensor, shape):
-        def _marked_dynamic(tensor, i):
-            # TODO(pianpwk): deprecate mark_dynamic() usage for export
-            return i in getattr(tensor, "_dynamo_dynamic_indices", set())
-
         out: Union[None, List[Any], Dict[int, Any]] = None
         if isinstance(shape, dict):
             out = {}
             for i, val in enumerate(tensor.shape):
                 dim = shape.get(i, _DimHint.STATIC)
-                if _marked_dynamic(tensor, i) or dim == _DimHint.AUTO:
+                if dim == _DimHint.AUTO:
                     # don't have to specify anything if dynamic
                     # None also works, since assume_static_by_default=False
-                    if dim == _DimHint.AUTO:
-                        torch._dynamo.maybe_mark_dynamic(tensor, i)  # avoid duck sizing
-                    continue
+                    torch._dynamo.maybe_mark_dynamic(tensor, i)  # avoid duck sizing
                 elif isinstance(dim, _Dim):
                     out[i] = dim
                 elif isinstance(dim, int):
@@ -878,9 +872,8 @@ def _transform_shapes_for_default_dynamic(
             out = []
             for i, val in enumerate(tensor.shape):
                 dim = shape[i]
-                if _marked_dynamic(tensor, i) or dim == _DimHint.AUTO:
-                    if dim == _DimHint.AUTO:
-                        torch._dynamo.maybe_mark_dynamic(tensor, i)  # avoid duck sizing
+                if dim == _DimHint.AUTO:
+                    torch._dynamo.maybe_mark_dynamic(tensor, i)  # avoid duck sizing
                     out.append(None)
                 elif isinstance(dim, _Dim):
                     out.append(dim)
@@ -896,10 +889,7 @@ def _transform_shapes_for_default_dynamic(
         else:
             assert shape is None
             if isinstance(tensor, torch.Tensor):
-                out = []
-                for i, val in enumerate(tensor.shape):
-                    out.append(None if _marked_dynamic(tensor, i) else val)
-                out = out or None
+                out = list(tensor.shape) or None
             else:
                 out = None
         return out

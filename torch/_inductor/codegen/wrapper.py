@@ -310,13 +310,13 @@ class EnterDeviceContextManagerLine(WrapperLine):
                 if self.last_seen_device_guard_index is None:
                     if config.abi_compatible:
                         code.writeline(
-                            "AOTICudaStreamGuard stream_guard(stream, this->device_idx_);"
+                            f"{V.graph.device_ops.cpp_aoti_stream_guard()} stream_guard(stream, this->device_idx_);"
                         )
                     else:
                         code.writeline(
                             maybe_hipify_code_wrapper(
-                                "at::cuda::CUDAStreamGuard stream_guard("
-                                + "at::cuda::getStreamFromExternal(stream, this->device_idx_));"
+                                f"{V.graph.device_ops.cpp_stream_guard()} stream_guard("
+                                + f"{V.graph.device_ops.cpp_getStreamFromExternal()}(stream, this->device_idx_));"
                             )
                         )
                 else:
@@ -326,10 +326,10 @@ class EnterDeviceContextManagerLine(WrapperLine):
             else:
                 if self.last_seen_device_guard_index is None:
                     code.writeline(
-                        f"AOTICudaGuard device_guard({self.device_idx});"
+                        f"{V.graph.device_ops.cpp_aoti_device_guard()} device_guard({self.device_idx});"
                         if config.abi_compatible
                         else maybe_hipify_code_wrapper(
-                            f"at::cuda::CUDAGuard device_guard({self.device_idx});"
+                            f"{V.graph.device_ops.cpp_device_guard()} device_guard({self.device_idx});"
                         )
                     )
                 else:
@@ -481,7 +481,7 @@ class WrapperCodeGen(CodeGen):
         self.ending = ""
         self.open_bracket = "["
         self.closed_bracket = "]"
-        self.comment = " #"
+        self.comment = "#"
         self.namespace = ""
         self.none_str = "None"
         self.size = "size()"
@@ -491,7 +491,7 @@ class WrapperCodeGen(CodeGen):
         self.expr_printer: Callable[[Any], str] = pexpr
         self.user_defined_kernel_cache: Dict[Tuple[Any, ...], Tuple[str, Any]] = {}
         self.unbacked_symbol_decls: Set[str] = set()  # str of sympy.Symbol
-        self.allow_stack_allocation: Optional[bool] = None
+        self.allow_stack_allocation: Optional[bool] = config.allow_stack_allocation
         self.stack_allocated_buffers: Dict[BufferName, ir.Buffer] = {}
         self.computed_sizes: Set[sympy.Symbol] = set()
 
@@ -545,6 +545,9 @@ class WrapperCodeGen(CodeGen):
         aot_config_comment = ""
         if context is not None and context.aot_graph_name is not None:
             aot_config_comment = f"# AOT ID: {context.aot_graph_name}"
+        aot_inductor_debug_utils = ""
+        if int(config.aot_inductor.debug_intermediate_value_printer) > 0:
+            aot_inductor_debug_utils = "from torch._inductor.codegen.debug_utils import _print_debugging_tensor_value_info"
         self.imports.splice(
             f"""
                 {aot_config_comment}
@@ -562,6 +565,7 @@ class WrapperCodeGen(CodeGen):
                 from {async_compile.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
                 from torch._inductor.codegen.multi_kernel import MultiKernelCall
+                {aot_inductor_debug_utils}
             """,
             strip=True,
         )
@@ -580,6 +584,9 @@ class WrapperCodeGen(CodeGen):
             """,
             strip=True,
         )
+
+    def include_extra_header(self, header: str):
+        pass
 
     def write_kernel_autotune_defs_header(self) -> None:
         self.kernel_autotune_defs.splice(
@@ -784,8 +791,12 @@ class WrapperCodeGen(CodeGen):
     def generate_extern_kernel_out(
         self, kernel: str, out: str, out_view: Optional[str], args: List[str]
     ):
+        # add debug printer code for triton kernel calls at (jit) inductor level
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
         args.append(f"out={out_view if out_view else out}")
-        self.writeline(f"{kernel}({', '.join(args)})")
+        with debug_printer_manager:
+            self.writeline(f"{kernel}({', '.join(args)})")
 
     def generate_user_defined_triton_kernel(
         self,
@@ -1249,7 +1260,7 @@ class WrapperCodeGen(CodeGen):
             )
 
     def define_kernel(
-        self, name: str, kernel: str, metadata: Optional[str] = None, cuda=True
+        self, name: str, kernel: str, metadata: Optional[str] = None, gpu=True
     ):
         metadata_comment = f"{metadata}\n" if metadata else ""
         body = f"\n\n{metadata_comment}{name} = {kernel}"
@@ -1551,7 +1562,7 @@ class WrapperCodeGen(CodeGen):
         self,
         kernel_name: str,
         grid: List[Any],
-        cuda: bool = True,
+        gpu: bool = True,
         grid_callable: Optional[Callable[..., Any]] = None,
         **grid_extra_kwags,
     ):
@@ -1643,7 +1654,7 @@ class WrapperCodeGen(CodeGen):
         call_args,
         grid=None,
         device_index=None,
-        cuda=True,
+        gpu=True,
         triton=True,
         arg_types=None,
         raw_args=None,
@@ -1655,13 +1666,13 @@ class WrapperCodeGen(CodeGen):
         """
         Generates kernel call code.
 
-        cuda: Defines whether the backend is GPU. Otherwise the backend is CPU.
+        gpu: Defines whether the backend is GPU. Otherwise the backend is CPU.
 
         triton: Defines whether the GPU backend uses Triton for codegen.
                 Otherwise it uses the CUDA language for codegen.
-                Only valid when cuda == True.
+                Only valid when gpu == True.
         """
-        if cuda:
+        if gpu:
             device_index, call_args_str = self.prepare_triton_kernel_call(
                 device_index, call_args
             )
@@ -1676,9 +1687,15 @@ class WrapperCodeGen(CodeGen):
                     if grid_extra_kwargs:
                         grid_str = f"{grid_str}, {grid_extra_kwargs}"
                     grid_str = f"{grid_fn}({grid_str})"
-                self.writeline(
-                    f"{kernel_name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
+                # add debug printer code for triton kernel calls at (jit) inductor level
+                debug_printer_manager = V.graph.wrapper_code.debug_printer
+                debug_printer_manager.set_printer_args(
+                    call_args, kernel_name, arg_types, None
                 )
+                with debug_printer_manager:
+                    self.writeline(
+                        f"{kernel_name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
+                    )
                 if (
                     config.triton.autotune_at_compile_time
                     and kernel_name not in self.kernel_autotune_names
@@ -1810,7 +1827,7 @@ class WrapperCodeGen(CodeGen):
         )
 
     def make_tensor_alias(self, new_name, old_name, comment=""):
-        return f"{self.declare}{new_name} = {old_name}{self.ending}{self.comment} {comment}"
+        return f"{self.declare}{new_name} = {old_name}{self.ending}  {self.comment} {comment}"
 
     def make_buffer_free(self, buffer):
         return f"del {buffer.get_name()}"
@@ -1819,7 +1836,7 @@ class WrapperCodeGen(CodeGen):
         return f"del {', '.join(name for name in names_to_del)}"
 
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
-        return f"{self.declare_maybe_reference}{new_name} = {old_name}{del_line}{self.ending}{self.comment} reuse"
+        return f"{self.declare_maybe_reference}{new_name} = {old_name}{del_line}{self.ending}  {self.comment} reuse"
 
     def make_buffer_reuse(self, old: ir.Buffer, new: ir.Buffer, delete_old: bool):
         assert old.get_dtype() == new.get_dtype()
@@ -1839,18 +1856,25 @@ class WrapperCodeGen(CodeGen):
         )
         if reinterpret_view in self.stack_allocated_buffers:
             self.stack_allocated_buffers[new_name] = new
-        move_begin = "std::move(" if V.graph.cpp_wrapper else ""
-        move_end = ")" if V.graph.cpp_wrapper else ""
-        return f"{self.declare_maybe_reference}{new_name} = {move_begin}{reinterpret_view}{move_end}{del_line}{self.comment} reuse"
+        move_begin = (
+            "std::move(" if V.graph.cpp_wrapper and config.abi_compatible else ""
+        )
+        move_end = ")" if V.graph.cpp_wrapper and config.abi_compatible else ""
+        return (
+            f"{self.declare_maybe_reference}{new_name} = {move_begin}{reinterpret_view}{move_end}{del_line}"
+            f"  {self.comment} reuse"
+        )
 
     def codegen_deferred_allocation(self, name, layout):
-        move_begin = "std::move(" if V.graph.cpp_wrapper else ""
-        move_end = ")" if V.graph.cpp_wrapper else ""
+        move_begin = (
+            "std::move(" if V.graph.cpp_wrapper and config.abi_compatible else ""
+        )
+        move_end = ")" if V.graph.cpp_wrapper and config.abi_compatible else ""
         self.writeline(
             DeferredLine(
                 name,
                 f"{self.declare_maybe_reference}{name} = {move_begin}{layout.view.codegen_reference()}{move_end}{self.ending}"
-                f"{self.comment} alias",
+                f"  {self.comment} alias",
             )
         )
 
