@@ -1426,7 +1426,7 @@ def _try_remove_connecting_pytrees(curr_module_node: torch.fx.Node) -> None:
         if not (
             arg.op == "call_function"
             and arg.target == operator.getitem
-            and arg.args[0] == i
+            and arg.args[1] == i
         ):
             log.debug(
                 "Module %s's outputs are not all directly used in the same "
