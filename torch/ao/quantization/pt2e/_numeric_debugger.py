@@ -1,10 +1,11 @@
 import copy
 import logging
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch.ao.ns.fx.utils import compute_sqnr
+from torch.export import ExportedProgram
 from torch.fx import GraphModule, Node
 from torch.nn import functional as F
 
@@ -15,7 +16,7 @@ CUSTOM_KEY = "custom"
 log = logging.getLogger(__name__)
 
 
-def generate_numeric_debug_handle(graph_module: GraphModule) -> None:
+def generate_numeric_debug_handle(graph_module: Union[GraphModule, ExportedProgram]) -> None:
     """Attach numeric_debug_handle_id for all nodes in the model except for placeholder node
     The graph nodes of input model is modified inplace.
     """

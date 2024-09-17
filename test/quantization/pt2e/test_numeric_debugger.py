@@ -2,8 +2,8 @@
 
 import copy
 import unittest
-from collections import Counter
-from typing import Dict
+from collections import Counter, defaultdict
+from typing import Dict, Union
 
 import torch
 from torch._export import capture_pre_autograd_graph
@@ -20,13 +20,14 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
     XNNPACKQuantizer,
 )
-from torch.export import export_for_training
+from torch.export import _trace as export_trace, export_for_training, ExportedProgram
+from torch.fx import GraphModule
 from torch.testing._internal.common_quantization import TestHelperModules
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfCrossRef, TestCase
 
 
-def _extract_debug_handles(model) -> Dict[torch.fx.Node, int]:
-    debug_handle_map: Dict[torch.fx.Node, int] = {}
+def _extract_debug_handles(model: Union[ExportedProgram, GraphModule]) -> Dict[str, int]:
+    debug_handle_map: Dict[str, int] = {}
 
     for node in model.graph.nodes:
         if (
@@ -187,3 +188,47 @@ class TestNumericDebugger(TestCase):
         for node_summary in comparison_results.values():
             if len(node_summary.results) > 0:
                 self.assertGreaterEqual(node_summary.results[0].sqnr, 35)
+
+    def test_export_retains_debug_handles(self):
+        class LinearAndRelu(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Sequential(
+                    torch.nn.Linear(
+                        in_features=8,
+                        out_features=8,
+                    ),
+                    torch.nn.ReLU(),
+                )
+
+            def forward(self, x):
+                return self.conv(x)
+
+        m = LinearAndRelu()
+        example_inputs = (torch.randn(1, 8),)
+        ref_exported = export_trace._export(m, example_inputs, pre_dispatch=True)
+        generate_numeric_debug_handle(ref_exported)
+        ref_handle_to_nodes = _extract_debug_handles(ref_exported)
+
+        # Re-exporting should not affect the debug handles.
+        m = ref_exported.module()
+        re_exported = export_trace._export(m, example_inputs, pre_dispatch=True)
+        quant_name_to_handle = _extract_debug_handles(re_exported)
+        self.assertEqual(quant_name_to_handle, ref_handle_to_nodes)
+        self.assertEqual(quant_name_to_handle["linear"], 0)
+        self.assertEqual(quant_name_to_handle["relu"], 1)
+
+        # Quantizing may affect debug handles, but only for specific nodes.
+        # In this case it doesn't affect the debug handles for the linear and relu nodes.
+        quantizer = XNNPACKQuantizer().set_global(
+            get_symmetric_quantization_config(is_per_channel=False)
+        )
+        m = prepare_pt2e(m, quantizer)
+        m(*example_inputs)
+        m = convert_pt2e(m)
+        quant_exported = export_trace._export(m, example_inputs, pre_dispatch=True)
+        quant_name_to_handle = _extract_debug_handles(quant_exported)
+
+        self.assertEqual(quant_name_to_handle, ref_handle_to_nodes)
+        self.assertEqual(quant_name_to_handle["linear"], 0)
+        self.assertEqual(quant_name_to_handle["relu"], 1)
