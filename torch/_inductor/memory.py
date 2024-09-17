@@ -391,7 +391,6 @@ def topological_sort_bfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNo
         def __lt__(self, other: HeapElement) -> bool:
             if self.priority == other.priority:
                 return self.node.mpi.index < other.node.mpi.index
-            return self.priority > other.priority
             return self.priority < other.priority
 
     def _node_priority(node: BaseSchedulerNode) -> List[int]:
