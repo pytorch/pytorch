@@ -25,9 +25,9 @@ from typing import (
 
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
-from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
@@ -230,17 +230,22 @@ def _special_op_to_preserve_cia(*args, **kwargs):
     """
     This is an special marker that tells our infra that we shouldn't decompose this op.
     When we are running through real tensors, we do need to dispatch to C++ as the CPU
-    key now will hit the Python CIA which we are overriding to return NotIMplemented. 
+    key now will hit the Python CIA which we are overriding to return NotIMplemented.
     """
     kernel = kwargs["kernel"]
     del kwargs["kernel"]
 
     def _safe_to_be_delegated_to_cpp_dispatcher(x):
         if not isinstance(x, torch.Tensor):
-            return True 
+            return True
         return isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor)
 
-    if all(map(_safe_to_be_delegated_to_cpp_dispatcher, pytree.tree_flatten((args, kwargs))[0])):
+    if all(
+        map(
+            _safe_to_be_delegated_to_cpp_dispatcher,
+            pytree.tree_flatten((args, kwargs))[0],
+        )
+    ):
         with torch._dispatch.python.no_python_dispatcher():
             return kernel(*args, **kwargs)
 
@@ -254,8 +259,12 @@ def _override_decomp_aten_to_variants():
     # We will later replace them with aten._to_copy when functionalizing.
     with _override_composite_implicit_decomp(
         {
-            torch.ops.aten.to.dtype_layout: functools.partial(_special_op_to_preserve_cia, kernel=torch.ops.aten.to.dtype_layout),
-            torch.ops.aten.to.dtype: functools.partial(_special_op_to_preserve_cia, kernel=torch.ops.aten.to.dtype),
+            torch.ops.aten.to.dtype_layout: functools.partial(
+                _special_op_to_preserve_cia, kernel=torch.ops.aten.to.dtype_layout
+            ),
+            torch.ops.aten.to.dtype: functools.partial(
+                _special_op_to_preserve_cia, kernel=torch.ops.aten.to.dtype
+            ),
         },
         safe=False,
     ):
@@ -265,7 +274,7 @@ def _override_decomp_aten_to_variants():
 def _split_decomp_table_to_cia_and_python_decomp(
     decomp_table: Dict[torch._ops.OperatorBase, Callable]
 ) -> Tuple[Dict[torch._ops.OperatorBase, Callable], ...]:
-    from torch._decomp import _collect_all_valid_cia_ops, _get_decomp_for_cia
+    from torch._decomp import _collect_all_valid_cia_ops
 
     all_preservable_cia_ops = set(_collect_all_valid_cia_ops())
     cia_ops_to_callable = {}
@@ -299,7 +308,9 @@ def _split_decomp_table_to_cia_and_python_decomp(
     # If we reached here, it means user intentionally deleted these CIA ops from
     # decomp table.
     for k in all_preservable_cia_ops:
-        cia_ops_to_callable[k] = functools.partial(_special_op_to_preserve_cia, kernel=k)
+        cia_ops_to_callable[k] = functools.partial(
+            _special_op_to_preserve_cia, kernel=k
+        )
 
     return cia_ops_to_callable, decomp_table
 
