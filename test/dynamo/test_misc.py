@@ -3380,6 +3380,21 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(same(obj41.y, obj42.y))
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_thread_local_setattr(self):
+        from threading import local
+
+        loc = local()
+
+        @torch.compile(fullgraph=True)
+        def fn(x, l):
+            l.x = x
+            return x + 1
+
+        x = torch.ones(2, 2)
+        fn(x, loc)
+
+        self.assertTrue(loc.x is x)
+
     def test_user_defined_class_name(self):
         class MyClassFoo:
             pass
@@ -10429,6 +10444,21 @@ fn
         torch._dynamo.reset()
         c2 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c2), 0)
+
+    def test_guard_size_oblivious_simplification(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            u0, u1 = x.tolist()
+            torch._check_is_size(u0)
+            torch._check_is_size(u1)
+            torch._check((2 * u0) % (u0 + u1) == 0)
+            torch._check((2 * u0) // (u0 + u1) != 0)
+            if guard_size_oblivious((2 * u0) // (u0 + u1) == 0):
+                return torch.tensor(True)
+            else:
+                return torch.tensor(False)
+
+        fn(torch.tensor([3, 3]))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_guard_size_oblivious(self):

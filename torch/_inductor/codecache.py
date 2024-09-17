@@ -53,7 +53,12 @@ from typing_extensions import TypeAlias
 import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
-from torch._dynamo.utils import counters, dynamo_timed, get_chromium_event_logger
+from torch._dynamo.utils import (
+    add_remote_cache_time_saved,
+    counters,
+    dynamo_timed,
+    get_chromium_event_logger,
+)
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.codegen.rocm.compile_command import (
@@ -533,7 +538,7 @@ def _reduce_tensor(
         # TODO: These tensors don't currently pickle, so we can't cache a
         # compiled graph containing them. Just fail now. If mkldnn tensors
         # get pickling support, we can remove this.
-        raise BypassFxGraphCache("mkldnn tensors unpickleable.")
+        raise BypassFxGraphCache("mkldnn tensors unpickleable")
 
     # Very large tensors could be expensive to copy to cpu and hash. Let's
     # at least report if we find slowness.
@@ -564,7 +569,7 @@ def _reduce_unsupported(s: Any) -> NoReturn:
     See FxGraphCachePickler. Custom reducer to handle any objects that we don't
     support and therefore raise to bypass caching.
     """
-    raise BypassFxGraphCache("Reduce unsupported.")
+    raise BypassFxGraphCache("Reduce unsupported")
 
 
 class FxGraphCachePickler(pickle.Pickler):
@@ -602,7 +607,7 @@ class FxGraphCachePickler(pickle.Pickler):
                 # Some configs options are callables, e.g., post_grad_custom_pre_pass,
                 # and may not pickle.
                 log.warning("Can't pickle", exc_info=True)
-                raise BypassFxGraphCache("Config options may be unpickleable.") from e
+                raise BypassFxGraphCache("Config options may be unpickleable") from e
             return stream.getvalue()
 
     @classmethod
@@ -1254,25 +1259,132 @@ class FxGraphCache:
         # Freezing can embed constants that wouldn't be static across runs.
         if config.freezing or config.aot_inductor.use_runtime_constant_folding:
             raise BypassFxGraphCache(
-                "Freezing may introduce constants that aren't static across runs."
+                "Freezing may introduce constants that aren't static across runs"
             )
 
         # The treatment of guards in the caching implementation requires that
         # we have a shape env.
         if FxGraphCache._get_shape_env() is None:
             log.debug("fx graph cache no shape env")
-            raise BypassFxGraphCache("No shape env.")
+            raise BypassFxGraphCache("No shape env")
 
         # HigherOrderOperators should be handled on a case-by-case basis.
         # Currently, we just skip caching if we have any.
         # We also skip if there are any torchbind objects.
         for node in gm.graph.nodes:
             if isinstance(node.target, torch._ops.HigherOrderOperator):
-                raise BypassFxGraphCache("Can't cache HigherOrderOperators.")
+                raise BypassFxGraphCache(
+                    f"Can't cache HigherOrderOperator: {node.target.name()}"
+                )
             if node.op == "getattr" and isinstance(
                 getattr(gm, node.target), torch._C.ScriptObject
             ):
-                raise BypassFxGraphCache("Can't cache torchbind objects.")
+                raise BypassFxGraphCache("Can't cache torchbind objects")
+
+    @staticmethod
+    def prepare_key(
+        gm: torch.fx.GraphModule,
+        example_inputs: List[torch.Tensor],
+        fx_kwargs: Dict[str, Any],
+        inputs_to_check: Sequence[int],
+        remote: bool,
+    ) -> Tuple[Optional[Tuple[str, List[str]]], Dict[str, Any]]:
+        """
+        Checks that the inductor input is cacheable, then computes
+        and returns the cache key for the input.
+        Returns (key_info, cache_info) where:
+        - key_info is (hash_key, debug_lines), and
+        - cache_info will contain debug info in the event of BypassFxGraphCache.
+
+        NB: It is possible to have this function return a union instead. But
+        I personally believe it is more annoying/difficult to read in that format.
+        """
+        try:
+            FxGraphCache._check_can_cache(gm)
+            key, debug_lines = compiled_fx_graph_hash(
+                gm, example_inputs, fx_kwargs, inputs_to_check
+            )
+        except BypassFxGraphCache as e:
+            counters["inductor"]["fxgraph_cache_bypass"] += 1
+            log.info("Bypassing FX Graph Cache because '%s'", e)
+            if remote:
+                log_cache_bypass("bypass_fx_graph", str(e))
+            cache_info = {
+                "cache_state": "bypass",
+                "cache_bypass_reason": str(e),
+                "cache_event_time": time_ns(),
+            }
+            return None, cache_info
+        # If key exists, then cache_info will come from load_with_key
+        return (key, debug_lines), {}
+
+    @staticmethod
+    def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
+        """
+        Attempts to load the remote cache, returns None on error.
+        """
+        remote_cache = None
+        cache_id = "fx-graph-v1"
+        try:
+            if config.is_fbcode():
+                from torch._inductor.fb.remote_cache import FbRemoteFxGraphCache
+
+                remote_cache = FbRemoteFxGraphCache(cache_id)
+            else:
+                from torch._inductor.remote_cache import RemoteFxGraphCache
+
+                remote_cache = RemoteFxGraphCache(cache_id)
+        except ModuleNotFoundError as e:
+            # No need for a stack trace on this error
+            remote_cache = None
+            log.warning("Unable to create a remote cache: %s", e)
+        except Exception:
+            remote_cache = None
+            log.warning("Unable to create a remote cache", exc_info=True)
+        return remote_cache
+
+    @staticmethod
+    def load_with_key(
+        key: str,
+        debug_lines: List[str],
+        example_inputs: List[torch.Tensor],
+        local: bool,
+        remote_cache: Optional[RemoteCache[JsonDataTy]],
+        is_backward: bool,
+    ) -> Tuple[Optional[CompiledFxGraph], Dict[str, Any]]:
+        """
+        Lookup the graph with the given key, and return results and metadata.
+        Doesn't do any logging on its own, because AOTAutograd handles a cache miss
+        differently from FXGraphCache.
+        """
+        compiled_graph = FxGraphCache._lookup_graph(
+            key, example_inputs, local, remote_cache
+        )
+        cache_info = {
+            "key": key,
+            "components": debug_lines,
+            "cache_event_time": time_ns(),
+        }
+        if compiled_graph is not None:
+            log.debug("fx graph cache miss for key %s", key)
+            counters["inductor"]["fxgraph_cache_hit"] += 1
+            cache_info["cache_state"] = "hit"
+
+            if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
+                cache_info["time_saved_ns"] = time_saved_ns
+                add_remote_cache_time_saved(time_saved_ns, is_backward)
+                if (
+                    ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
+                        time_saved_ns
+                    )
+                ) != 0:
+                    cache_info["ephemeral_timeout_increase"] = ephemeral_increase
+        else:
+            log.debug("fx graph cache hit for key %s", key)
+            counters["inductor"]["fxgraph_cache_miss"] += 1
+            cache_info["cache_state"] = "miss"
+
+        return compiled_graph, cache_info
 
     @staticmethod
     def load(  # type: ignore[no-untyped-def]
@@ -1290,91 +1402,70 @@ class FxGraphCache:
         """
         assert local or remote, "at least one of them needs to be enabled"
         compiled_graph = None
-        cache_state = None
-        cache_event_time = None
-        cache_info: Dict[str, Any] = {}
-        try:
-            FxGraphCache._check_can_cache(gm)
-            key, debug_lines = compiled_fx_graph_hash(
-                gm, example_inputs, fx_kwargs, inputs_to_check
-            )
-            cache_info["key"] = key
-            cache_info["components"] = debug_lines
-
-            remote_cache: Optional[RemoteCache[JsonDataTy]] = None
+        remote_cache = None
+        (key_info, cache_info) = FxGraphCache.prepare_key(
+            gm, example_inputs, fx_kwargs, inputs_to_check, remote
+        )
+        if key_info is not None:
+            key, debug_lines = key_info
             if remote:
-                cache_id = "fx-graph-v1"
-                try:
-                    if config.is_fbcode():
-                        from torch._inductor.fb.remote_cache import FbRemoteFxGraphCache
-
-                        remote_cache = FbRemoteFxGraphCache(cache_id)
-                    else:
-                        from torch._inductor.remote_cache import RemoteFxGraphCache
-
-                        remote_cache = RemoteFxGraphCache(cache_id)
-                except ModuleNotFoundError as e:
-                    # No need for a stack trace on this error
-                    remote_cache = None
-                    log.warning("Unable to create a remote cache: %s", e)
-                except Exception:
-                    remote_cache = None
-                    log.warning("Unable to create a remote cache", exc_info=True)
-
-            compiled_graph = FxGraphCache._lookup_graph(
-                key, example_inputs, local, remote_cache
+                remote_cache = FxGraphCache.get_remote_cache()
+            compiled_graph, cache_info = FxGraphCache.load_with_key(
+                key,
+                debug_lines,
+                example_inputs,
+                local,
+                remote_cache,
+                is_backward=fx_kwargs.get("is_backward", False),
             )
 
-            if compiled_graph is None:
-                log.debug("fx graph cache miss for key %s", key)
-                counters["inductor"]["fxgraph_cache_miss"] += 1
-                cache_state = "miss"
-                start_time = time_ns()
-                cache_event_time = start_time
-                compiled_graph = compile_fx_fn(
-                    gm, example_inputs, inputs_to_check, fx_kwargs
-                )
-                compiled_graph._time_taken_ns = time_ns() - start_time
-                cache_info["time_taken_ns"] = compiled_graph._time_taken_ns
-                FxGraphCache._save_graph(
-                    key,
-                    compiled_graph,
-                    example_inputs,
-                    local,
-                    remote_cache,
-                )
-            else:
-                log.debug("fx graph cache hit for key %s", key)
-                counters["inductor"]["fxgraph_cache_hit"] += 1
-                cache_state = "hit"
-                cache_event_time = time_ns()
-                if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
-                    cache_info["time_saved_ns"] = time_saved_ns
-                    if (
-                        ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
-                            time_saved_ns
-                        )
-                    ) != 0:
-                        cache_info["ephemeral_timeout_increase"] = ephemeral_increase
-            compiled_graph._fx_graph_cache_key = key
-        except BypassFxGraphCache as e:
-            counters["inductor"]["fxgraph_cache_bypass"] += 1
-            cache_state = "bypass"
-            log.info("Bypassing FX Graph Cache because '%s'", e)
-            cache_info["cache_bypass_reason"] = str(e)
-            if remote:
-                log_cache_bypass("bypass_fx_graph", str(e))
-            cache_event_time = time_ns()
-
-        if not compiled_graph:
+        # CACHE BYPASS: Compile the graph, don't save it to the cache
+        if cache_info["cache_state"] == "bypass":
+            assert compiled_graph is None
             compiled_graph = compile_fx_fn(
                 gm, example_inputs, inputs_to_check, fx_kwargs
             )
+
+        # CACHE MISS: Compile the graph and save to cache
+        elif cache_info["cache_state"] == "miss":
+            assert compiled_graph is None
+            assert key_info is not None
+            start_time = cache_info["cache_event_time"]
+            compiled_graph = compile_fx_fn(
+                gm, example_inputs, inputs_to_check, fx_kwargs
+            )
+            compiled_graph._time_taken_ns = time_ns() - start_time
+            cache_key = key_info[0]
+            compiled_graph._fx_graph_cache_key = cache_key
+            cache_info["time_taken_ns"] = compiled_graph._time_taken_ns
+            FxGraphCache._save_graph(
+                cache_key,
+                compiled_graph,
+                example_inputs,
+                local,
+                remote_cache,
+            )
+        # CACHE HIT: not much to really do, just make sure the cache key
+        # is recorded on the graph
+        else:
+            assert cache_info["cache_state"] == "hit"
+            assert compiled_graph is not None
+            assert key_info is not None
+            cache_key = key_info[0]
+            compiled_graph._fx_graph_cache_key = cache_key
+
         assert compiled_graph is not None
-        cache_info["cache_state"] = cache_state
+
+        # Logging and observability: we log a single chromium event
+        # and a tlparse log for every cache action.
+        # In the event of a bypass, we also logged to the remote table earlier
+        # with log_cache_bypass.
         chromium_log = get_chromium_event_logger()
+        cache_state = cache_info["cache_state"]
         chromium_log.log_instant_event(
-            f"fx_graph_cache_{cache_state}", cache_event_time, metadata=cache_info
+            f"fx_graph_cache_{cache_state}",
+            cache_info["cache_event_time"],
+            metadata=cache_info,
         )
         torch._logging.trace_structured(
             "artifact",
@@ -1719,9 +1810,22 @@ class AotCodeCompiler:
             # Currently, this only support serializing extern nodes in fbcode
             # Eventually, we should also have a serializer for OSS.
             if serialized_extern_kernel_nodes:
-                output_json = os.path.splitext(input_path)[0] + ".json"
-                with open(output_json, "w") as f:
+                extern_kernel_nodes_json = os.path.splitext(input_path)[0] + ".json"
+                with open(extern_kernel_nodes_json, "w") as f:
                     f.write(serialized_extern_kernel_nodes)
+
+            metadata = config.aot_inductor.metadata
+            metadata["AOTI_DEVICE_KEY"] = device_type
+
+            # Save user provided metadata
+            meta_json = os.path.splitext(input_path)[0] + "_metadata.json"
+            for k, v in config.aot_inductor.metadata.items():
+                assert isinstance(k, str) and isinstance(
+                    v, (str)
+                ), "Metadata must only contain strings"
+
+            with open(meta_json, "w") as f:
+                f.write(json.dumps(config.aot_inductor.metadata))
 
             output_so = (
                 config.aot_inductor.output_path
@@ -1755,60 +1859,39 @@ class AotCodeCompiler:
             if config.aot_inductor.force_mmap_weights:
                 use_mmap_weights = True
 
-            if config.aot_inductor.package:
-                (
-                    object_output_name,
-                    object_output_dir,
-                ) = get_name_and_dir_from_output_file_path(input_path)
-                object_build_options = CppTorchDeviceOptions(
-                    vec_isa=picked_vec_isa,
-                    device_type=device_type,
-                    aot_mode=graph.aot_mode,
-                    compile_only=True,
-                    use_absolute_path=use_absolute_path,
-                    use_mmap_weights=use_mmap_weights,
-                )
-                object_builder = CppBuilder(
-                    name=object_output_name,
-                    sources=input_path,
-                    output_dir=object_output_dir,
-                    BuildOption=object_build_options,
-                )
-                compile_cmd = object_builder.get_command_line()
-                output_o = object_builder.get_target_file_path()
+            (
+                object_output_name,
+                object_output_dir,
+            ) = get_name_and_dir_from_output_file_path(input_path)
+            object_build_options = CppTorchDeviceOptions(
+                vec_isa=picked_vec_isa,
+                device_type=device_type,
+                aot_mode=graph.aot_mode,
+                compile_only=True,
+                use_absolute_path=use_absolute_path,
+                use_mmap_weights=use_mmap_weights,
+            )
+            object_builder = CppBuilder(
+                name=object_output_name,
+                sources=input_path,
+                output_dir=object_output_dir,
+                BuildOption=object_build_options,
+            )
+            compile_cmd = object_builder.get_command_line()
+            output_o = object_builder.get_target_file_path()
 
-                compile_flags = os.path.splitext(input_path)[0] + "_compile_flags.json"
-                object_build_options.save_flags_to_file(compile_flags)
-
-            else:
-                (
-                    object_output_name,
-                    object_output_dir,
-                ) = get_name_and_dir_from_output_file_path(input_path)
-                object_build_options = CppTorchDeviceOptions(
-                    vec_isa=picked_vec_isa,
-                    device_type=device_type,
-                    aot_mode=graph.aot_mode,
-                    compile_only=True,
-                    use_absolute_path=use_absolute_path,
-                    use_mmap_weights=use_mmap_weights,
-                )
-                object_builder = CppBuilder(
-                    name=object_output_name,
-                    sources=input_path,
-                    output_dir=object_output_dir,
-                    BuildOption=object_build_options,
-                )
-                compile_cmd = object_builder.get_command_line()
-                output_o = object_builder.get_target_file_path()
-
-                log.debug("aot compilation command: %s", compile_cmd)
+            log.debug("aot compilation command: %s", compile_cmd)
+            if not config.aot_inductor.package_cpp_only:
                 if fbcode_aot_cpu_re:
                     output_o = os.path.splitext(input_path)[0] + ".o"
                     compile_file(input_path, output_o, compile_cmd.split())
                     os.chmod(output_o, 0o644)
                 else:
                     run_command_and_check(compile_cmd)
+
+            if config.aot_inductor.package:
+                compile_flags = os.path.splitext(input_path)[0] + "_compile_flags.json"
+                object_build_options.save_flags_to_file(compile_flags)
 
             def _to_bytes(t: torch.Tensor, all_cuda: bool) -> bytes:
                 def _pad_to_alignment(raw_bytes: bytes) -> bytes:
@@ -1859,29 +1942,37 @@ class AotCodeCompiler:
                 "darwin": _compile_consts_darwin,
             }[sys.platform](aot_constants)
 
-            if config.aot_inductor.package:
-                output_name, output_dir = get_name_and_dir_from_output_file_path(
-                    output_so
-                )
-                so_build_options = CppTorchDeviceOptions(
-                    vec_isa=picked_vec_isa,
-                    device_type=device_type,
-                    aot_mode=graph.aot_mode,
-                    use_absolute_path=use_absolute_path,
-                )
-                so_builder = CppBuilder(
-                    name=output_name,
-                    sources=[output_o, consts_o],
-                    output_dir=output_dir,
-                    BuildOption=so_build_options,
-                )
-                link_cmd = so_builder.get_command_line()
-                output_so = so_builder.get_target_file_path()
+            output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
+            so_build_options = CppTorchDeviceOptions(
+                vec_isa=picked_vec_isa,
+                device_type=device_type,
+                aot_mode=graph.aot_mode,
+                use_absolute_path=use_absolute_path,
+            )
+            so_builder = CppBuilder(
+                name=output_name,
+                sources=[output_o, consts_o],
+                output_dir=output_dir,
+                BuildOption=so_build_options,
+            )
+            link_cmd = so_builder.get_command_line()
+            output_so = so_builder.get_target_file_path()
 
+            log.debug("aot linkage command: %s", link_cmd)
+
+            # Append cmds to the end of codegen-ed wrapper file
+            with open(input_path, "a") as f:
+                f.write("\n")
+                f.write(f"// Compile cmd\n// {compile_cmd}\n")
+                f.write(f"// Link cmd\n// {link_cmd}\n")
+
+            if config.aot_inductor.package:
                 linker_flags = os.path.splitext(input_path)[0] + "_linker_flags.json"
                 so_build_options.save_flags_to_file(linker_flags)
 
-                from torch._inductor.package import package_aoti
+            if config.aot_inductor.package_cpp_only:
+                # If we only want to package the cpp, then we need to save the
+                # weights separately into a bin, and we also need to prevent compiling the so
 
                 if use_mmap_weights:
                     weight_file = (
@@ -1891,28 +1982,7 @@ class AotCodeCompiler:
                         f_weights.write(serialized_weights)
                         f_weights.write(struct.pack("q", magic_number))
 
-                archive_path = package_aoti(os.path.split(input_path)[0])
-                return archive_path
             else:
-                output_name, output_dir = get_name_and_dir_from_output_file_path(
-                    output_so
-                )
-                so_build_options = CppTorchDeviceOptions(
-                    vec_isa=picked_vec_isa,
-                    device_type=device_type,
-                    aot_mode=graph.aot_mode,
-                    use_absolute_path=use_absolute_path,
-                )
-                so_builder = CppBuilder(
-                    name=output_name,
-                    sources=[output_o, consts_o],
-                    output_dir=output_dir,
-                    BuildOption=so_build_options,
-                )
-                link_cmd = so_builder.get_command_line()
-                output_so = so_builder.get_target_file_path()
-
-                log.debug("aot linkage command: %s", link_cmd)
                 if fbcode_aot_cpu_re:
                     output_so = (
                         config.aot_inductor.output_path
@@ -1937,11 +2007,10 @@ class AotCodeCompiler:
                         f_so.write(serialized_weights)
                         f_so.write(struct.pack("q", magic_number))
 
-                # Append cmds to the end of codegen-ed wrapper file
-                with open(input_path, "a") as f:
-                    f.write("\n")
-                    f.write(f"// Compile cmd\n// {compile_cmd}\n")
-                    f.write(f"// Link cmd\n// {link_cmd}\n")
+        if config.aot_inductor.package:
+            # We want to return the directory that contains all the AOTI
+            # generated files, not just the so
+            return os.path.split(output_so)[0]
 
         return output_so
 
@@ -2065,7 +2134,9 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
     assert callable(func), op + " can not be loaded through custom_op_wrapper"
     result = func(*converted_args)
     if isinstance(result, (list, tuple)):
-        for r in result:
+        # unsafe_alloc_void_ptrs_from_tensors expects result contains tensor only
+        result = [torch.tensor([]) if r is None else r for r in result]
+        for i, r in enumerate(result):
             assert isinstance(r, torch.Tensor), op + " returns a list of non-tensors"
         return torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors(result)  # type: ignore[arg-type]
     else:

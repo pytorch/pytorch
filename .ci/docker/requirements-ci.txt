@@ -90,7 +90,7 @@ librosa>=0.6.2 ; python_version < "3.11"
 #Pinned versions:
 #test that import:
 
-mypy==1.10.0
+mypy==1.11.2
 # Pin MyPy version because new errors are likely to appear with each release
 #Description: linter
 #Pinned versions: 1.10.0
@@ -335,5 +335,10 @@ onnx==1.16.1
 
 onnxscript==0.1.0.dev20240817
 #Description: Required by mypy and test_public_bindings.py when checking torch.onnx._internal
+#Pinned versions:
+#test that import:
+
+parameterized==0.8.1
+#Description: Parameterizes unittests, both the tests themselves and the entire testing class
 #Pinned versions:
 #test that import:
