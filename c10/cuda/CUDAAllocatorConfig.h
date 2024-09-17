@@ -46,6 +46,10 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return instance().m_pinned_num_register_threads;
   }
 
+  static bool pinned_use_background_threads() {
+    return instance().m_pinned_use_background_threads;
+  }
+
   static size_t pinned_max_register_threads() {
     // Based on the benchmark results, we see better allocation performance
     // with 8 threads. However on future systems, we may need more threads
@@ -113,6 +117,9 @@ class C10_CUDA_API CUDAAllocatorConfig {
   size_t parsePinnedNumRegisterThreads(
       const std::vector<std::string>& config,
       size_t i);
+  size_t parsePinnedUseBackgroundThreads(
+      const std::vector<std::string>& config,
+      size_t i);
 
   std::atomic<size_t> m_max_split_size;
   std::atomic<size_t> m_max_non_split_rounding_size;
@@ -122,6 +129,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
   std::atomic<bool> m_expandable_segments;
   std::atomic<bool> m_release_lock_on_cudamalloc;
   std::atomic<bool> m_pinned_use_cuda_host_register;
+  std::atomic<bool> m_pinned_use_background_threads;
   std::string m_last_allocator_settings;
   std::mutex m_last_allocator_settings_mutex;
 };
