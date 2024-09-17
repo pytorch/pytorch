@@ -253,6 +253,7 @@ class UniformQuantizationObserverBase(ObserverBase):
             torch.int32,
             torch.float8_e5m2,
             torch.float8_e4m3fn,
+            torch.uint16,
         )
 
         assert (
