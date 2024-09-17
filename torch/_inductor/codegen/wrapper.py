@@ -26,10 +26,10 @@ from typing import (
 )
 
 import sympy
+from sympy import Expr
 
 import torch
 import torch._ops
-from sympy import Expr
 from torch import dtype as torch_dtype
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codegen.debug_utils import DebugPrinterManager
@@ -251,9 +251,9 @@ MAX_STACK_ALLOCATION_SIZE = 1024 * 100
 class MemoryPlanningState:
     def __init__(self):
         super().__init__()
-        self.reuse_pool: Dict[ReuseKey, List[FreeIfNotReusedLine]] = (
-            collections.defaultdict(list)
-        )
+        self.reuse_pool: Dict[
+            ReuseKey, List[FreeIfNotReusedLine]
+        ] = collections.defaultdict(list)
         self.total_allocated_buffer_size: int = 0
 
     def __contains__(self, key: ReuseKey) -> bool:
@@ -1810,6 +1810,8 @@ class WrapperCodeGen(CodeGen):
                 self.writeline(
                     f"{kernel_name}.{kernel_name}({call_args_str}, {stream_ptr})"
                 )
+        else:
+            self.writeline(self.wrap_kernel_call(kernel_name, call_args))
 
     def writeline(self, line):
         self.lines.append(line)
