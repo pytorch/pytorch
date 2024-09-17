@@ -2681,7 +2681,7 @@ def embedding_bag(
             f"weight has to be a 2D Tensor, but got Tensor of dimension {weight.dim()}"
         )
 
-    if input.dim() == 2 and input.is_nested:
+    if not torch.jit.is_scripting() and input.dim() == 2 and input.is_nested:
         include_last_offset = True
         offsets = input.offsets()
         input = input.values().reshape(-1)
