@@ -41,7 +41,7 @@ class MemoryDelta(ContextDecorator):
 
 
 class ToyModel(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.l1 = nn.Linear(100, 100)
         self.seq = nn.Sequential(
@@ -55,7 +55,7 @@ class ToyModel(nn.Module):
 
 
 class RandomModel(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.p = nn.Parameter(torch.randn(100, 100))
 

@@ -42,19 +42,19 @@ static void adaptive_avg_pool3d_out_frame(
     for (const auto d : c10::irange(start, end)) {
       /* loop over output */
       for (const auto ot : c10::irange(osizeT)) {
-        int istartT = start_index(ot, osizeT, isizeT);
-        int iendT = end_index(ot, osizeT, isizeT);
-        int kT = iendT - istartT;
+        auto istartT = start_index(ot, osizeT, isizeT);
+        auto iendT = end_index(ot, osizeT, isizeT);
+        auto kT = iendT - istartT;
 
         for (const auto oh : c10::irange(osizeH)) {
-          int istartH = start_index(oh, osizeH, isizeH);
-          int iendH = end_index(oh, osizeH, isizeH);
-          int kH = iendH - istartH;
+          auto istartH = start_index(oh, osizeH, isizeH);
+          auto iendH = end_index(oh, osizeH, isizeH);
+          auto kH = iendH - istartH;
 
           for (const auto ow : c10::irange(osizeW)) {
-            int istartW = start_index(ow, osizeW, isizeW);
-            int iendW = end_index(ow, osizeW, isizeW);
-            int kW = iendW - istartW;
+            auto istartW = start_index(ow, osizeW, isizeW);
+            auto iendW = end_index(ow, osizeW, isizeW);
+            auto kW = iendW - istartW;
 
             /* local pointers */
             const scalar_t* ip = input_p + d * istrideD + istartT * istrideT +
@@ -193,19 +193,19 @@ static void adaptive_avg_pool3d_backward_out_frame(
 
       /* calculate average */
       for (const auto ot : c10::irange(osizeT)) {
-        int istartT = start_index(ot, osizeT, isizeT);
-        int iendT = end_index(ot, osizeT, isizeT);
-        int kT = iendT - istartT;
+        auto istartT = start_index(ot, osizeT, isizeT);
+        auto iendT = end_index(ot, osizeT, isizeT);
+        auto kT = iendT - istartT;
 
         for (const auto oh : c10::irange(osizeH)) {
-          int istartH = start_index(oh, osizeH, isizeH);
-          int iendH = end_index(oh, osizeH, isizeH);
-          int kH = iendH - istartH;
+          auto istartH = start_index(oh, osizeH, isizeH);
+          auto iendH = end_index(oh, osizeH, isizeH);
+          auto kH = iendH - istartH;
 
           for (const auto ow : c10::irange(osizeW)) {
-            int istartW = start_index(ow, osizeW, isizeW);
-            int iendW = end_index(ow, osizeW, isizeW);
-            int kW = iendW - istartW;
+            auto istartW = start_index(ow, osizeW, isizeW);
+            auto iendW = end_index(ow, osizeW, isizeW);
+            auto kW = iendW - istartW;
 
             scalar_t grad_delta =
                 gradOutput_p_d[ot * osizeH * osizeW + oh * osizeW + ow] / kT /
@@ -313,7 +313,7 @@ Tensor adaptive_avg_pool3d_symint(Tensor const& input, SymIntArrayRef output_siz
         "adaptive_avg_pool3d: elements of output_size must be greater than or equal to 0 ",
         "but received {", output_size[0], ", ", output_size[1], ",", output_size[2], "}");
 
-  if (output_size[0] == 1 && output_size[1] == 1 && output_size[2] == 1 && !input.is_xpu()) {
+  if (output_size[0] == 1 && output_size[1] == 1 && output_size[2] == 1) {
     // in this case, adaptive pooling is just computing mean over hw
     // dimensions, which can be done more efficiently
     Tensor out = input.mean({-1, -2, -3}, /* keepdim = */ true);

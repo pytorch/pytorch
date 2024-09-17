@@ -8,9 +8,14 @@ import sys
 import time
 import unittest
 
-from torch.testing._internal.common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN)
 import torch.multiprocessing as mp
 
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    NO_MULTIPROCESSING_SPAWN,
+    run_tests,
+    TestCase,
+)
 
 def _test_success_func(i):
     pass
@@ -218,6 +223,73 @@ class SpawnTest(TestCase, _TestMultiProcessing):
 )
 class ForkTest(TestCase, _TestMultiProcessing):
     start_method = 'fork'
+
+
+@unittest.skipIf(
+    IS_WINDOWS,
+    "Fork is only available on Unix",
+)
+class ParallelForkServerShouldWorkTest(TestCase, _TestMultiProcessing):
+    orig_paralell_env_val = None
+
+    def setUp(self):
+        super().setUp()
+        self.orig_paralell_env_val = os.environ.get(mp.ENV_VAR_PARALLEL_START)
+        os.environ[mp.ENV_VAR_PARALLEL_START] = "1"
+
+    def tearDown(self):
+        super().tearDown()
+        if self.orig_paralell_env_val is None:
+            del os.environ[mp.ENV_VAR_PARALLEL_START]
+        else:
+            os.environ[mp.ENV_VAR_PARALLEL_START] = self.orig_paralell_env_val
+
+
+@unittest.skipIf(
+    IS_WINDOWS,
+    "Fork is only available on Unix",
+)
+class ParallelForkServerPerfTest(TestCase):
+
+    def test_forkserver_perf(self):
+
+        start_method = 'forkserver'
+        expensive = Expensive()
+        nprocs = 4
+        orig_paralell_env_val = os.environ.get(mp.ENV_VAR_PARALLEL_START)
+
+        # test the non parallel case
+        os.environ[mp.ENV_VAR_PARALLEL_START] = "0"
+        start = time.perf_counter()
+        mp.start_processes(expensive.my_call, nprocs=nprocs, start_method=start_method)
+        elapsed = time.perf_counter() - start
+        # the elapsed time should be at least {nprocs}x the sleep time
+        self.assertGreaterEqual(elapsed, Expensive.SLEEP_SECS * nprocs)
+
+        # test the parallel case
+        os.environ[mp.ENV_VAR_PARALLEL_START] = "1"
+        start = time.perf_counter()
+        mp.start_processes(expensive.my_call, nprocs=nprocs, start_method=start_method)
+        elapsed = time.perf_counter() - start
+        # the elapsed time should be less than {nprocs}x the sleep time
+        self.assertLess(elapsed, Expensive.SLEEP_SECS * nprocs)
+
+        if orig_paralell_env_val is None:
+            del os.environ[mp.ENV_VAR_PARALLEL_START]
+        else:
+            os.environ[mp.ENV_VAR_PARALLEL_START] = orig_paralell_env_val
+
+
+class Expensive:
+    SLEEP_SECS = 5
+    # Simulate startup overhead such as large imports
+    time.sleep(SLEEP_SECS)
+
+    def __init__(self):
+        self.config: str = "*" * 1000000
+
+    def my_call(self, *args):
+        pass
 
 
 class ErrorTest(TestCase):

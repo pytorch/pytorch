@@ -1,9 +1,9 @@
 #include <torch/csrc/jit/operator_upgraders/utils.h>
 
-#include <c10/util/Optional.h>
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <iostream>
+#include <optional>
 #include <regex>
 #include <string>
 #include <vector>
@@ -27,7 +27,7 @@ std::optional<UpgraderEntry> findUpgrader(
   if (pos != upgraders_for_schema.end()) {
     return *pos;
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 bool isOpCurrentBasedOnUpgraderEntries(

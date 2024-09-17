@@ -21,7 +21,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 class DummyModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def forward(self, x):

@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Union
 
 # NOTE: if these fail asserts submit a PR to increase them
 TRITON_MAX_BLOCK = {
-    "X": 2048,
+    "X": 4096,
     "Y": 1024,
     "Z": 1024,
     "R": 4096 * 16,  # * 16 is multi-kernel only
@@ -68,7 +68,7 @@ else:
     instance_descriptor = collections.namedtuple(  # type: ignore[no-redef]
         "instance_descriptor",
         ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
-        defaults=[tuple(), tuple(), tuple(), tuple()],
+        defaults=[(), (), (), ()],
     )
 
 
@@ -104,24 +104,32 @@ class DeviceProperties(typing.NamedTuple):
     regs_per_multiprocessor: Optional[int] = None
     max_threads_per_multi_processor: Optional[int] = None
     multi_processor_count: Optional[int] = None
+    warp_size: Optional[int] = None
 
     @classmethod
     def create(cls, device):
         import torch
         from torch._dynamo.device_interface import get_interface_for_device
 
-        device_type = device.type if torch.version.hip is None else "hip"
+        device_type = device.type
+
+        if torch.version.hip and device_type == "cuda":
+            device_type = "hip"
+
         device_interface = get_interface_for_device(device)
-        if device_type == "cuda":
+        if device_type in ["cuda", "hip"]:
             props = device_interface.get_device_properties(device)
             return cls(
                 type=device_type,
                 index=device.index,
                 cc=device_interface.get_compute_capability(device),
                 major=props.major,
-                regs_per_multiprocessor=props.regs_per_multiprocessor,
+                regs_per_multiprocessor=props.regs_per_multiprocessor
+                if hasattr(props, "regs_per_multiprocessor")
+                else None,
                 max_threads_per_multi_processor=props.max_threads_per_multi_processor,
                 multi_processor_count=props.multi_processor_count,
+                warp_size=props.warp_size,
             )
         return cls(
             type=device_type,
@@ -133,28 +141,47 @@ class DeviceProperties(typing.NamedTuple):
 class HalideInputSpec(typing.NamedTuple):
     ctype: str
     name: str
-    numel: Optional[str] = None
+    shape: Optional[List[str]] = None
+    stride: Optional[List[str]] = None
+    offset: Optional[str] = None
+    alias_of: Optional[str] = None
 
     def bindings_type(self):
-        if self.ctype == "half*":
-            return "void*"  # half not defined
+        if self.ctype in ("half*", "bfloat16*"):
+            return "uint16_t*"  # half not defined
         return self.ctype
 
     def halide_type(self):
         if self.ctype == "half*":
             return "halide_type_t(halide_type_float, 16)"  # half not defined
+        if self.ctype == "bfloat16*":
+            return "halide_type_t(halide_type_bfloat, 16)"  # half not defined
         return f"halide_type_of<{self.ctype.replace('*', '')}>()"
+
+    def is_scalar(self):
+        return self.shape is None
+
+    def is_buffer(self):
+        return self.shape is not None
 
 
 class HalideMeta(typing.NamedTuple):
     argtypes: List[HalideInputSpec]
     target: str
-    scheduler: str
-    scheduler_flags: Dict[str, Union[int, str]]
+    scheduler: Optional[str] = None
+    scheduler_flags: Optional[Dict[str, Union[int, str]]] = None
+    cuda_device: Optional[int] = None
 
     def args(self):
         """Command line args to pass to halide generator"""
-        args = [f"target={self.target}", f"autoscheduler={self.scheduler}"]
-        for k, v in self.scheduler_flags.items():
-            args.append(f"autoscheduler.{k}={v}")
+        args = [f"target={self.target}"]
+        if self.scheduler:
+            args.append(f"autoscheduler={self.scheduler}")
+        if self.scheduler_flags:
+            assert self.scheduler
+            for k, v in self.scheduler_flags.items():
+                args.append(f"autoscheduler.{k}={v}")
         return args
+
+    def is_cuda(self):
+        return self.cuda_device is not None

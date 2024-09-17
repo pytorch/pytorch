@@ -8,13 +8,12 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.testing._internal.jit_utils
-
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from torch import jit
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import freeze_rng_state
-
 from torch.testing._internal.jit_utils import JitTestCase, make_global, RUN_CUDA_HALF
+
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -279,7 +278,7 @@ class TestMisc(JitTestCase):
         class M(nn.Module):
             sub: OneTwoModule
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.sub = BarMod()
 

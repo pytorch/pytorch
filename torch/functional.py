@@ -153,7 +153,9 @@ def broadcast_shapes(*shapes):
 
 
 def split(
-    tensor: Tensor, split_size_or_sections: Union[int, List[int]], dim: int = 0
+    tensor: Tensor,
+    split_size_or_sections: Union[int, List[int]],
+    dim: int = 0,
 ) -> Tuple[Tensor, ...]:
     r"""Splits the tensor into chunks. Each chunk is a view of the original tensor.
 
@@ -1043,7 +1045,11 @@ def _unique_consecutive_impl(
 
 
 def _return_counts(
-    input, sorted=True, return_inverse=False, return_counts=False, dim=None
+    input,
+    sorted=True,
+    return_inverse=False,
+    return_counts=False,
+    dim=None,
 ):
     # type: (Tensor, bool, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
 
@@ -1055,7 +1061,11 @@ def _return_counts(
 
 
 def _return_output(
-    input, sorted=True, return_inverse=False, return_counts=False, dim=None
+    input,
+    sorted=True,
+    return_inverse=False,
+    return_counts=False,
+    dim=None,
 ):
     # type: (Tensor, bool, bool, bool, Optional[int]) -> Tensor
 
@@ -1067,7 +1077,11 @@ def _return_output(
 
 
 def _return_inverse(
-    input, sorted=True, return_inverse=False, return_counts=False, dim=None
+    input,
+    sorted=True,
+    return_inverse=False,
+    return_counts=False,
+    dim=None,
 ):
     # type: (Tensor, bool, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
 
@@ -1116,7 +1130,10 @@ unique.__doc__ = _unique_impl.__doc__
 
 
 def _consecutive_return_counts(
-    input, return_inverse=False, return_counts=False, dim=None
+    input,
+    return_inverse=False,
+    return_counts=False,
+    dim=None,
 ):
     # type: (Tensor, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
 
@@ -1130,7 +1147,10 @@ def _consecutive_return_counts(
 
 
 def _consecutive_return_output(
-    input, return_inverse=False, return_counts=False, dim=None
+    input,
+    return_inverse=False,
+    return_counts=False,
+    dim=None,
 ):
     # type: (Tensor, bool, bool, Optional[int]) -> Tensor
 
@@ -1142,7 +1162,10 @@ def _consecutive_return_output(
 
 
 def _consecutive_return_inverse(
-    input, return_inverse=False, return_counts=False, dim=None
+    input,
+    return_inverse=False,
+    return_counts=False,
+    dim=None,
 ):
     # type: (Tensor, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
 
@@ -1433,12 +1456,12 @@ def cdist(x1, x2, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"):
 
     Example:
 
-        >>> a = torch.tensor([[0.9041,  0.0196], [-0.3108, -2.4423], [-0.4821,  1.059]])
+        >>> a = torch.tensor([[0.9041, 0.0196], [-0.3108, -2.4423], [-0.4821, 1.059]])
         >>> a
         tensor([[ 0.9041,  0.0196],
                 [-0.3108, -2.4423],
                 [-0.4821,  1.0590]])
-        >>> b = torch.tensor([[-2.1763, -0.4713], [-0.6986,  1.3702]])
+        >>> b = torch.tensor([[-2.1763, -0.4713], [-0.6986, 1.3702]])
         >>> b
         tensor([[-2.1763, -0.4713],
                 [-0.6986,  1.3702]])
@@ -1569,7 +1592,7 @@ def atleast_3d(*tensors):
         >>> torch.atleast_3d(x)
         tensor([[[1]]])
         >>> x = torch.tensor(0.5)
-        >>> y = torch.tensor(1.)
+        >>> y = torch.tensor(1.0)
         >>> torch.atleast_3d((x, y))
         (tensor([[[0.5000]]]), tensor([[[1.]]]))
     """
@@ -1866,7 +1889,8 @@ def norm(  # noqa: F811
 
 
 def unravel_index(
-    indices: Tensor, shape: Union[int, Sequence[int], torch.Size]
+    indices: Tensor,
+    shape: Union[int, Sequence[int], torch.Size],
 ) -> Tuple[Tensor, ...]:
     r"""Converts a tensor of flat indices into a tuple of coordinate tensors that
     index into an arbitrary tensor of the specified shape.

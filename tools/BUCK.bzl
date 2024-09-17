@@ -26,7 +26,6 @@ def define_tools_targets(
 
     python_library(
         name = "jit",
-        # @lint-ignore BUCKRESTRICTEDSYNTAX
         srcs = glob([
             "jit/*.py",
             "jit/templates/*",
@@ -110,10 +109,7 @@ def define_tools_targets(
 
     python_library(
         name = "autograd",
-        # @lint-ignore BUCKRESTRICTEDSYNTAX
-        srcs = glob(
-            ["autograd/*.py"],
-        ),
+        srcs = glob(["autograd/*.py"]),
         base_module = "tools",
         resources = [
             "autograd/deprecated.yaml",

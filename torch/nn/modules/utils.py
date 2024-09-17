@@ -1,9 +1,10 @@
 # mypy: allow-untyped-defs
 import collections
 from itertools import repeat
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
-__all__ = ['consume_prefix_in_state_dict_if_present']
+
+__all__ = ["consume_prefix_in_state_dict_if_present"]
 
 
 def _ntuple(n, name="parse"):
@@ -33,19 +34,19 @@ def _reverse_repeat_tuple(t, n):
 
 def _list_with_default(out_size: List[int], defaults: List[int]) -> List[int]:
     import torch
+
     if isinstance(out_size, (int, torch.SymInt)):
         return out_size
     if len(defaults) <= len(out_size):
-        raise ValueError(
-            f"Input dimension should be at least {len(out_size) + 1}"
-        )
+        raise ValueError(f"Input dimension should be at least {len(out_size) + 1}")
     return [
         v if v is not None else d for v, d in zip(out_size, defaults[-len(out_size) :])
     ]
 
 
 def consume_prefix_in_state_dict_if_present(
-    state_dict: Dict[str, Any], prefix: str
+    state_dict: Dict[str, Any],
+    prefix: str,
 ) -> None:
     r"""Strip the prefix in state_dict in place, if any.
 
@@ -75,6 +76,6 @@ def consume_prefix_in_state_dict_if_present(
             if len(key) == 0:
                 continue
             # handling both, 'module' case and  'module.' cases
-            if key == prefix.replace('.', '') or key.startswith(prefix):
+            if key == prefix.replace(".", "") or key.startswith(prefix):
                 newkey = key[len(prefix) :]
                 state_dict._metadata[newkey] = state_dict._metadata.pop(key)

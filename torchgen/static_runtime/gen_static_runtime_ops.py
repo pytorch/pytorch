@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import itertools
 import os
@@ -28,7 +30,7 @@ def group_functions_by_op_name(
         return []
     groups = []
 
-    def is_supported(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bool:
+    def is_supported(g: NativeFunctionsGroup | NativeFunctionsViewGroup) -> bool:
         with native_function_manager(g):
             return generator.is_supported(g)
 

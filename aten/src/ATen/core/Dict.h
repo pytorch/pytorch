@@ -6,7 +6,7 @@
 #include <c10/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/order_preserving_flat_hash_map.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/jit_type_base.h>
 
@@ -364,7 +364,7 @@ public:
   bool is(const Dict& rhs) const;
 
   // private API for now because the return type will change to TypePtr
-  // instead of optional<TypePtr> once types are mandatory.
+  // instead of std::optional<TypePtr> once types are mandatory.
   TypePtr keyType() const;
   TypePtr valueType() const;
 

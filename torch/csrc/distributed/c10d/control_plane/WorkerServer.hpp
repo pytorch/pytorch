@@ -2,20 +2,20 @@
 
 #include <string>
 #include <thread>
-#include <unordered_map>
-
-#include <httplib.h>
 
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 
-namespace c10d {
-namespace control_plane {
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-literal-operator")
+#include <httplib.h>
+C10_DIAGNOSTIC_POP()
+
+namespace c10d::control_plane {
 
 class TORCH_API WorkerServer : public c10::intrusive_ptr_target {
  public:
   WorkerServer(const std::string& hostOrFile, int port = -1);
-  ~WorkerServer();
+  ~WorkerServer() override;
 
   void shutdown();
 
@@ -24,5 +24,4 @@ class TORCH_API WorkerServer : public c10::intrusive_ptr_target {
   std::thread serverThread_;
 };
 
-} // namespace control_plane
-} // namespace c10d
+} // namespace c10d::control_plane

@@ -244,12 +244,12 @@ class CustomMmaMultistage : public CustomMmaBase<Shape_, Policy_, Stages> {
             lane_idx) {}
 
   CUTLASS_DEVICE
-  bool set_prologue_done(bool value) {
+  void set_prologue_done(bool value) {
     prologue_done_ = value;
   }
 
   CUTLASS_DEVICE
-  bool set_zero_outside_bounds(bool value) {
+  void set_zero_outside_bounds(bool value) {
     zero_outside_bounds_ = value;
   }
 

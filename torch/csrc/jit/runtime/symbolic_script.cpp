@@ -1556,12 +1556,12 @@ static void loadModule(const CompilationUnit& module) {
     Node* forward_tuple = pair.forward->outputs().at(0)->node();
 
     if (forward_tuple->kind() != prim::TupleConstruct) {
-      throw ErrorReport(forward_tuple->sourceRange())
-          << "gradient must return literal a tuple";
+      throw(
+          ErrorReport(forward_tuple->sourceRange())
+          << "gradient must return literal a tuple");
     }
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Value* context;
+    Value* context = nullptr;
     std::tie(pair.backward, context) =
         extractClosure(forward_tuple->inputs().back());
 
@@ -1609,7 +1609,7 @@ static void loadModule(const CompilationUnit& module) {
 
 static void loadFunctions() {
   for (const std::string& str : functions) {
-    compilation_unit.define(c10::nullopt, str, nativeResolver(), nullptr);
+    compilation_unit.define(std::nullopt, str, nativeResolver(), nullptr);
   }
   loadModule(compilation_unit);
 }
@@ -1635,7 +1635,7 @@ std::optional<GradientPair> gradientInfoForSchema(
       return sym_script_it->second;
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 bool hasGradientInfoForSchema(const FunctionSchema& schema) {

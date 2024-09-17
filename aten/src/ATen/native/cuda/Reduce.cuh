@@ -313,7 +313,7 @@ struct ReduceJitOp {
       OutputCalculator output_calc,
       const void* src,
       char* dst0,
-      optional<char*> dst1,
+      std::optional<char*> dst1,
       void* acc_buf,
       void* cta_buf,
       int* semaphores,
@@ -376,7 +376,7 @@ struct ReduceOp {
       OutputCalculator output_calc,
       const void* src,
       char* dst0,
-      optional<char*> dst1,
+      std::optional<char*> dst1,
       void* acc_buf,
       void* cta_buf,
       int* semaphores,
@@ -1092,7 +1092,11 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
   }
 
   constexpr int min_values_per_thread = 16;
+#ifndef USE_ROCM
   constexpr int max_values_per_thread = 256;
+#else
+  constexpr int max_values_per_thread = 1024;
+#endif
 
   if (config.values_per_thread() >= block_height * 16 || config.values_per_thread() >= max_values_per_thread) {
     // Divide the input across warps in a thread-block, if that leaves at least
@@ -1190,11 +1194,11 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   const char* in_data = (char*)iter.data_ptr(iter.ntensors() - 1);
   char* out_data = (char*)iter.data_ptr(0);
   const auto noutputs = iter.noutputs();
-  optional<char*> out_data_extra;
+  std::optional<char*> out_data_extra;
   if (noutputs > 1) {
     out_data_extra = (char*)iter.data_ptr(1);
   } else {
-    out_data_extra = nullopt;
+    out_data_extra = std::nullopt;
   }
   char* acc_data = acc_buf_ptr->get_acc_slice(out_data);
 
@@ -1299,11 +1303,11 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
   const char* in_data = (char*)iter.data_ptr(iter.ntensors() - 1);
   char* out_data = (char*)iter.data_ptr(0);
   const auto noutputs = iter.noutputs();
-  optional<char*> out_data_extra;
+  std::optional<char*> out_data_extra;
   if (noutputs > 1) {
     out_data_extra = (char*)iter.data_ptr(1);
   } else {
-    out_data_extra = nullopt;
+    out_data_extra = std::nullopt;
   }
   char* acc_data = acc_buf_ptr->get_acc_slice(out_data);
 

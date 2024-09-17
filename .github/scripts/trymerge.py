@@ -36,6 +36,7 @@ from warnings import warn
 
 import yaml
 from github_utils import (
+    gh_close_pr,
     gh_fetch_json_list,
     gh_fetch_merge_base,
     gh_fetch_url,
@@ -45,7 +46,6 @@ from github_utils import (
     gh_update_pr_state,
     GitHubComment,
 )
-
 from gitutils import (
     are_ghstack_branches_in_sync,
     get_git_remote_name,
@@ -61,6 +61,7 @@ from label_utils import (
     LABEL_ERR_MSG,
 )
 from trymerge_explainer import get_revert_message, TryMergeExplainer
+
 
 # labels
 MERGE_IN_PROGRESS_LABEL = "merging"
@@ -81,9 +82,10 @@ JobNameToStateDict = Dict[str, JobCheckState]
 
 
 class WorkflowCheckState:
-    def __init__(self, name: str, url: str, status: Optional[str]):
+    def __init__(self, name: str, url: str, run_id: int, status: Optional[str]):
         self.name: str = name
         self.url: str = url
+        self.run_id: int = run_id
         self.status: Optional[str] = status
         self.jobs: JobNameToStateDict = {}
 
@@ -122,6 +124,7 @@ fragment PRCheckSuites on CheckSuiteConnection {
       workflowRun {
         workflow {
           name
+          databaseId
         }
         databaseId
         url
@@ -512,7 +515,7 @@ def add_workflow_conclusions(
     workflows: Dict[str, WorkflowCheckState] = {}
 
     # for the jobs that don't have a workflow
-    no_workflow_obj: WorkflowCheckState = WorkflowCheckState("", "", None)
+    no_workflow_obj: WorkflowCheckState = WorkflowCheckState("", "", 0, None)
 
     def add_conclusions(edges: Any) -> None:
         for edge_idx, edge in enumerate(edges):
@@ -523,18 +526,30 @@ def add_workflow_conclusions(
             workflow_obj: WorkflowCheckState = no_workflow_obj
 
             if workflow_run is not None:
+                # This is the usual workflow run ID we see on GitHub
+                workflow_run_id = workflow_run["databaseId"]
+                # While this is the metadata name and ID of the workflow itself
                 workflow_name = workflow_run["workflow"]["name"]
+                workflow_id = workflow_run["workflow"]["databaseId"]
+
                 workflow_conclusion = node["conclusion"]
                 # Do not override existing status with cancelled
                 if workflow_conclusion == "CANCELLED" and workflow_name in workflows:
                     continue
-                if workflow_name not in workflows:
-                    workflows[workflow_name] = WorkflowCheckState(
+
+                # Only keep the latest workflow run for each workflow, heuristically,
+                # it's the run with largest run ID
+                if (
+                    workflow_id not in workflows
+                    or workflows[workflow_id].run_id < workflow_run_id
+                ):
+                    workflows[workflow_id] = WorkflowCheckState(
                         name=workflow_name,
                         status=workflow_conclusion,
                         url=workflow_run["url"],
+                        run_id=workflow_run_id,
                     )
-                workflow_obj = workflows[workflow_name]
+                workflow_obj = workflows[workflow_id]
 
             while checkruns is not None:
                 for checkrun_node in checkruns["nodes"]:
@@ -572,12 +587,12 @@ def add_workflow_conclusions(
     # the jobs in but don't put the workflow in.  We care more about the jobs in
     # the workflow that ran than the container workflow.
     res: JobNameToStateDict = {}
-    for workflow_name, workflow in workflows.items():
+    for workflow in workflows.values():
         if len(workflow.jobs) > 0:
             for job_name, job in workflow.jobs.items():
                 res[job_name] = job
         else:
-            res[workflow_name] = JobCheckState(
+            res[workflow.name] = JobCheckState(
                 workflow.name,
                 workflow.url,
                 workflow.status,
@@ -1102,15 +1117,20 @@ class GitHubPR:
         msg = self.get_title() + f" (#{self.pr_num})\n\n"
         msg += msg_body
 
-        # Mention PR co-authors
-        for author_login, author_name in self.get_authors().items():
-            if author_login != self.get_pr_creator_login():
-                msg += f"\nCo-authored-by: {author_name}"
-
         msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
         msg += f"Approved by: {approved_by_urls}\n"
         if ghstack_deps:
             msg += f"ghstack dependencies: {', '.join([f'#{pr.pr_num}' for pr in ghstack_deps])}\n"
+
+        # Mention PR co-authors, which should be at the end of the message
+        # And separated from the body by two newlines
+        first_coauthor = True
+        for author_login, author_name in self.get_authors().items():
+            if author_login != self.get_pr_creator_login():
+                if first_coauthor:
+                    msg, first_coauthor = (msg + "\n", False)
+                msg += f"\nCo-authored-by: {author_name}"
+
         return msg
 
     def add_numbered_label(self, label_base: str, dry_run: bool) -> None:
@@ -1155,15 +1175,14 @@ class GitHubPR:
             for pr in additional_merged_prs:
                 pr.add_numbered_label(MERGE_COMPLETE_LABEL, dry_run)
 
-        if comment_id and self.pr_num:
-            # When the merge process reaches this part, we can assume that the commit
-            # has been successfully pushed to trunk
-            merge_commit_sha = repo.rev_parse(name=REMOTE_MAIN_BRANCH)
+        # When the merge process reaches this part, we can assume that the commit
+        # has been successfully pushed to trunk
+        merge_commit_sha = repo.rev_parse(name=self.default_branch())
 
+        if comment_id and self.pr_num:
             # Finally, upload the record to Rockset. The list of pending and failed
             # checks are at the time of the merge
             save_merge_record(
-                collection=ROCKSET_MERGES_COLLECTION,
                 comment_id=comment_id,
                 pr_num=self.pr_num,
                 owner=self.org,
@@ -1179,13 +1198,22 @@ class GitHubPR:
                 merge_base_sha=self.get_merge_base(),
                 merge_commit_sha=merge_commit_sha,
                 is_failed=False,
-                dry_run=dry_run,
                 skip_mandatory_checks=skip_mandatory_checks,
                 ignore_current=bool(ignore_current_checks),
-                workspace=ROCKSET_MERGES_WORKSPACE,
             )
         else:
             print("Missing comment ID or PR number, couldn't upload to Rockset")
+
+        # Usually Github will see that the commit has "resolves <pr_num>" in the
+        # commit message and close the PR, but sometimes it doesn't, leading to
+        # confusion.  When it doesn't, we close it manually.
+        time.sleep(60)  # Give Github some time to close the PR
+        manually_close_merged_pr(
+            pr=self,
+            additional_merged_prs=additional_merged_prs,
+            merge_commit_sha=merge_commit_sha,
+            dry_run=dry_run,
+        )
 
     def merge_changes(
         self,
@@ -1448,7 +1476,7 @@ def find_matching_merge_rule(
 
         if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError(
-                "This PR has internal changes and must be landed via Phabricator"
+                "This PR has internal changes and must be landed via Phabricator! Please try reimporting/rexporting the PR!"
             )
 
         # Categorize all checks when skip_mandatory_checks (force merge) is set. Do it here
@@ -1487,9 +1515,36 @@ def checks_to_markdown_bullets(
     ]
 
 
+def manually_close_merged_pr(
+    pr: GitHubPR,
+    additional_merged_prs: List[GitHubPR],
+    merge_commit_sha: str,
+    dry_run: bool,
+) -> None:
+    def _comment_and_close(pr: GitHubPR, comment: str) -> None:
+        pr = GitHubPR(pr.org, pr.project, pr.pr_num)  # Refresh the PR
+        if not pr.is_closed():
+            gh_post_pr_comment(pr.org, pr.project, pr.pr_num, comment, dry_run)
+            gh_close_pr(pr.org, pr.project, pr.pr_num, dry_run)
+
+    message = (
+        f"This PR (#{pr.pr_num}) was merged in {merge_commit_sha} but it is still open, likely due to a Github bug, "
+        "so mergebot is closing it manually.  If you think this is a mistake, please feel free to reopen and contact Dev Infra."
+    )
+    _comment_and_close(pr, message)
+    for additional_pr in additional_merged_prs:
+        message = (
+            f"This PR (#{additional_pr.pr_num}) was merged as part of PR #{pr.pr_num} in the stack under {merge_commit_sha} "
+            "but it is still open, likely due to a Github bug, so mergebot is closing it manually. "
+            "If you think this is a mistake, please feel free to reopen and contact Dev Infra."
+        )
+        _comment_and_close(additional_pr, message)
+
+    print(f"PR {pr.pr_num} and all additional PRs in the stack have been closed.")
+
+
 @retries_decorator()
 def save_merge_record(
-    collection: str,
     comment_id: int,
     pr_num: int,
     owner: str,
@@ -1505,59 +1560,44 @@ def save_merge_record(
     merge_base_sha: str,
     merge_commit_sha: str = "",
     is_failed: bool = False,
-    dry_run: bool = False,
     skip_mandatory_checks: bool = False,
     ignore_current: bool = False,
     error: str = "",
-    workspace: str = "commons",
 ) -> None:
     """
-    This saves the merge records into Rockset, so we can query them (for fun and profit)
+    This saves the merge records as a json, which can later be uploaded to s3
     """
-    if dry_run:
-        # Decide not to save the record to Rockset if dry-run is set to not pollute
-        # the collection
-        return
 
-    try:
-        import rockset  # type: ignore[import]
+    # Prepare the record to be written into Rockset
+    data = [
+        {
+            "comment_id": comment_id,
+            "pr_num": pr_num,
+            "owner": owner,
+            "project": project,
+            "author": author,
+            "pending_checks": pending_checks,
+            "failed_checks": failed_checks,
+            "ignore_current_checks": ignore_current_checks,
+            "broken_trunk_checks": broken_trunk_checks,
+            "flaky_checks": flaky_checks,
+            "unstable_checks": unstable_checks,
+            "last_commit_sha": last_commit_sha,
+            "merge_base_sha": merge_base_sha,
+            "merge_commit_sha": merge_commit_sha,
+            "is_failed": is_failed,
+            "skip_mandatory_checks": skip_mandatory_checks,
+            "ignore_current": ignore_current,
+            "error": error,
+            # This is a unique identifier for the record for deduping purposes
+            # in rockset.  Any unique string would work
+            "_id": f"{project}-{pr_num}-{comment_id}-{os.environ.get('GITHUB_RUN_ID')}",
+        }
+    ]
+    repo_root = Path(__file__).resolve().parent.parent.parent
 
-        # Prepare the record to be written into Rockset
-        data = [
-            {
-                "comment_id": comment_id,
-                "pr_num": pr_num,
-                "owner": owner,
-                "project": project,
-                "author": author,
-                "pending_checks": pending_checks,
-                "failed_checks": failed_checks,
-                "ignore_current_checks": ignore_current_checks,
-                "broken_trunk_checks": broken_trunk_checks,
-                "flaky_checks": flaky_checks,
-                "unstable_checks": unstable_checks,
-                "last_commit_sha": last_commit_sha,
-                "merge_base_sha": merge_base_sha,
-                "merge_commit_sha": merge_commit_sha,
-                "is_failed": is_failed,
-                "skip_mandatory_checks": skip_mandatory_checks,
-                "ignore_current": ignore_current,
-                "error": error,
-            }
-        ]
-
-        client = rockset.RocksetClient(
-            host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
-        )
-        client.Documents.add_documents(
-            collection=collection,
-            data=data,
-            workspace=workspace,
-        )
-
-    except ModuleNotFoundError:
-        print("Rockset is missing, no record will be saved")
-        return
+    with open(repo_root / "merge_record.json", "w") as f:
+        json.dump(data, f)
 
 
 @retries_decorator(rc=[])
@@ -2374,7 +2414,6 @@ def main() -> None:
             # list of pending and failed checks here, but they are not really
             # needed at the moment
             save_merge_record(
-                collection=ROCKSET_MERGES_COLLECTION,
                 comment_id=args.comment_id,
                 pr_num=args.pr_num,
                 owner=org,
@@ -2389,11 +2428,9 @@ def main() -> None:
                 last_commit_sha=pr.last_commit().get("oid", ""),
                 merge_base_sha=pr.get_merge_base(),
                 is_failed=True,
-                dry_run=args.dry_run,
                 skip_mandatory_checks=args.force,
                 ignore_current=args.ignore_current,
                 error=str(e),
-                workspace=ROCKSET_MERGES_WORKSPACE,
             )
         else:
             print("Missing comment ID or PR number, couldn't upload to Rockset")

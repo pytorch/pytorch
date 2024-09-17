@@ -7,7 +7,7 @@
 #include <ATen/Tensor.h>
 #include <c10/macros/Export.h>
 #include <c10/util/Deprecated.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 namespace c10 {
 struct Device;

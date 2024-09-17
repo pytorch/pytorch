@@ -38,7 +38,7 @@ class ShardingPlan:
 
         >>> # xdoctest: +REQUIRES(module:torch._C._distributed_c10d)
         >>> class MyModule(nn.Module):
-        >>>     def __init__(self):
+        >>>     def __init__(self) -> None:
         >>>        super().__init__()
         >>>        self.fc1 = nn.Linear()
         >>>        self.gelu = nn.GELU()
@@ -85,4 +85,3 @@ class ShardingPlanner(abc.ABC):
             A :class:`torch.distributed._shard.sharding_plan.ShardingPlan` object that
             represents how to shard the module.
         """
-        pass

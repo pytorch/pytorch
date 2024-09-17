@@ -14,10 +14,6 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,eager_fail_to_run,0
-
-
-
 LearningToPaint,pass,6
 
 
@@ -98,7 +94,7 @@ hf_Bert_large,pass,6
 
 
 
-hf_BigBird,pass,19
+hf_BigBird,fail_to_run,3
 
 
 
@@ -114,7 +110,7 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
-hf_Reformer,pass,25
+hf_Reformer,pass,23
 
 
 
@@ -278,7 +274,7 @@ vgg16,pass,6
 
 
 
-vision_maskrcnn,pass,33
+vision_maskrcnn,pass,35
 
 
 

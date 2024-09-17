@@ -346,7 +346,7 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
   } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
     abcType = CUDA_R_16BF;
   } else {
-    AT_ERROR("at::cuda::blas::bgemm_internal_cublaslt: not implemented for ", typeid(Dtype).name());
+    static_assert(false && sizeof(Dtype), "at::cuda::blas::bgemm_internal_cublaslt: not implemented");
   }
 
   globalContext().alertCuBLASConfigNotDeterministic();
@@ -456,7 +456,7 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
 
 template <typename Dtype>
 inline void bgemm_internal_cublas(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
-  AT_ERROR("at::cuda::blas::bgemm_internal_cublas: not implemented for ", typeid(Dtype).name());
+  static_assert(false && sizeof(Dtype), "at::cuda::blas::bgemm_internal_cublas: not implemented");
 }
 
 template <>
@@ -789,7 +789,7 @@ inline void gemm_internal_cublaslt(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
 
 template <typename Dtype>
 inline void gemm_internal_cublas(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
-  AT_ERROR("at::cuda::blas::gemm_internal_cublas: not implemented for ", typeid(Dtype).name());
+  static_assert(false && sizeof(Dtype), "at::cuda::blas::gemm_internal_cublas: not implemented");
 }
 
 template <>
@@ -1408,7 +1408,6 @@ void scaled_gemm(
     const void *result_scale_ptr,
     int64_t result_ld,
     ScalarType result_dtype,
-    void* amax_ptr,
     bool use_fast_accum) {
 #if CUDA_VERSION >= 11080 || defined(USE_ROCM)
   const auto computeType = CUBLAS_COMPUTE_32F;
@@ -1421,13 +1420,9 @@ void scaled_gemm(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, _cublasOpFromChar(transb));
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
-  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
-#if !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 60200)
-  // Amax support in ROCm as of 6.2
-  if (isFloat8Type(result_dtype)) {
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_AMAX_D_POINTER, amax_ptr);
+  if (result_scale_ptr != nullptr) {
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
   }
-#endif
 #ifndef USE_ROCM
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fastAccuMode);
 #endif

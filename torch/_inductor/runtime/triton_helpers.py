@@ -1,18 +1,7 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-try:
-    import triton
-    import triton.language as tl
-except ImportError:
-
-    class triton:  # type: ignore[no-redef]
-        @staticmethod
-        def jit(x):
-            return x
-
-    class tl:  # type: ignore[no-redef]
-        constexpr = None  # type: ignore[var-annotated]
-        math = None  # type: ignore[var-annotated]
-        extra = None  # type: ignore[var-annotated]
+import triton
+import triton.language as tl
 
 
 # In the latest triton, math functions were shuffled around into different modules:
@@ -34,10 +23,35 @@ except ImportError:
         math = tl
 
 
+try:
+    from triton.language.standard import _log2
+except ImportError:
+
+    def _log2(x):
+        raise NotImplementedError
+
+
 @triton.jit
 def promote_to_tensor(x):
     # Addition promotes to tensor for us
     return x + tl.zeros((1,), tl.int1)
+
+
+@triton.jit
+def div_floor_integer(a, b):
+    # NOTE: a // b is C division, but we want floor division
+    # Based on c10::div_floor_integer
+    quot = a // b
+    remainder = a % b
+    fixed = tl.where(remainder != 0, quot - 1, quot)
+    return tl.where((a < 0) != (b < 0), fixed, quot)
+
+
+@triton.jit
+def remainder_integer(a, b):
+    # NOTE: a % b matches C division, not floor division
+    remainder = a % b
+    return tl.where(remainder != 0 and ((a < 0) != (b < 0)), remainder + b, remainder)
 
 
 @triton.jit
@@ -384,3 +398,145 @@ def frexp(x):
     exponent = tl.where(x == 0, 0, y)
     mantissa = tl.where(x == 0, 0, libdevice.ldexp(x, -y))
     return mantissa, exponent
+
+
+@triton.jit
+def _compare_and_swap_with_index(
+    x,
+    idxs,
+    rnumel,
+    flip,
+    i: tl.constexpr,
+    n_dims: tl.constexpr,
+    stable: tl.constexpr,
+    descending: tl.constexpr,
+):
+    n_outer: tl.constexpr = x.numel >> n_dims
+    shape: tl.constexpr = [n_outer * 2**i, 2, 2 ** (n_dims - i - 1)]
+
+    idtype = tl.core.get_int_dtype(bitwidth=x.dtype.primitive_bitwidth, signed=True)
+
+    y = tl.reshape(x, shape)
+    iy = y.to(idtype, bitcast=True)
+    # slice left/right with 'stride' 2**(n_dims - i - 1)
+    right_mask = tl.arange(0, 2)[None, :, None].to(idtype)
+    left_mask = (1 - right_mask).to(idtype)
+    ileft = tl.broadcast_to(tl.sum(iy * left_mask, 1)[:, None, :], shape)
+    iright = tl.broadcast_to(tl.sum(iy * right_mask, 1)[:, None, :], shape)
+    ileft = tl.reshape(ileft, x.shape)
+    iright = tl.reshape(iright, x.shape)
+    left = ileft.to(x.dtype, bitcast=True)
+    right = iright.to(x.dtype, bitcast=True)
+
+    # idx
+    y_idx = tl.reshape(idxs, shape)
+    left_idx = tl.broadcast_to(
+        tl.sum(y_idx * left_mask.to(y_idx.dtype), 1)[:, None, :], shape
+    )
+    right_idx = tl.broadcast_to(
+        tl.sum(y_idx * right_mask.to(y_idx.dtype), 1)[:, None, :], shape
+    )
+    left_idx = tl.reshape(left_idx, x.shape)
+    right_idx = tl.reshape(right_idx, x.shape)
+
+    # valid
+    if rnumel is None:
+        left_valid_mask = tl.full(x.shape, True, tl.int1)
+        right_valid_mask = tl.full(x.shape, True, tl.int1)
+    else:
+        left_valid_mask = left_idx < rnumel
+        right_valid_mask = right_idx < rnumel
+
+    # actual compare-and-swap
+    ix = x.to(idtype, bitcast=True)
+
+    if descending:
+        cond = left < right
+    else:
+        cond = left > right
+
+    if stable:
+        # When stable sorting, tie break by index
+        cond = cond | ((left == right) & (left_idx > right_idx))
+
+    cond = (right_valid_mask > left_valid_mask) | (
+        (right_valid_mask == left_valid_mask) & cond
+    )
+    cond = cond ^ flip
+    ret = ix ^ tl.where(cond, ileft ^ iright, tl.zeros_like(ix))
+    new_idxs = idxs ^ tl.where(cond, left_idx ^ right_idx, tl.zeros_like(idxs))
+
+    return ret.to(x.dtype, bitcast=True), new_idxs
+
+
+@triton.jit
+def _bitonic_merge_with_index(
+    x,
+    idxs,
+    rnumel,
+    stage: tl.constexpr,
+    alternating: tl.constexpr,
+    n_dims: tl.constexpr,
+    stable: tl.constexpr,
+    descending: tl.constexpr,
+):
+    n_outer: tl.constexpr = x.numel >> n_dims
+    tl.static_assert(stage <= n_dims)
+    # flip denotes whether to re-arrange sub-sequences of elements in ascending or
+    # descending order.
+    # if flip = 00000000... then all elements will be re-arranged ascendingly at this stage
+    # if flip = 00110011... then all the elements will be re-arranged alternatingly (with
+    # a stride of 2) at this stage
+    if alternating:
+        shape: tl.constexpr = [n_outer * 2 ** (n_dims - 1 - stage), 2, 2**stage]
+        flip = tl.reshape(
+            tl.broadcast_to(tl.arange(0, 2)[None, :, None], shape), x.shape
+        )
+    else:
+        flip = False
+    # perform `stage` rounds of `compare-and-swap`
+    for i in tl.static_range(stage):
+        x, idxs = _compare_and_swap_with_index(
+            x, idxs, rnumel, flip, i + (n_dims - stage), n_dims, stable, descending
+        )
+    return x, idxs
+
+
+@triton.jit
+def sort_with_index(
+    x,  # value
+    idxs,  # index
+    rnumel,  # number of elements
+    dim: tl.constexpr = None,
+    stable: tl.constexpr = tl.constexpr(False),
+    descending: tl.constexpr = tl.constexpr(False),
+):
+    x, idxs = tl.broadcast(x, idxs)
+    # handle default dimension or check that it is the most minor dim
+    _dim: tl.constexpr = len(x.shape) - 1 if dim is None else dim
+    tl.static_assert(
+        _dim == len(x.shape) - 1, "only minor dimension is currently supported"
+    )
+    # iteratively run bitonic merge-sort steps
+    n_dims: tl.constexpr = _log2(x.shape[_dim])
+
+    for i in tl.static_range(1, n_dims + 1):
+        x, idxs = _bitonic_merge_with_index(
+            x,
+            idxs,
+            rnumel,
+            i,
+            alternating=i < n_dims,
+            n_dims=n_dims,
+            stable=stable,
+            descending=descending,
+        )
+    return x, idxs
+
+
+@triton.jit
+def select_one(x, mask, dim, keep_dims=False):
+    idtype = tl.core.get_int_dtype(x.dtype.primitive_bitwidth, signed=False)
+    ix = x.to(idtype, bitcast=True)
+    iy = tl.sum(ix * mask, dim, keep_dims=keep_dims)
+    return iy.to(x.dtype, bitcast=True)

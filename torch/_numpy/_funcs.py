@@ -6,6 +6,7 @@ import itertools
 from . import _funcs_impl, _reductions_impl
 from ._normalizations import normalizer
 
+
 # _funcs_impl.py contains functions which mimic NumPy's eponymous equivalents,
 # and consume/return PyTorch tensors/dtypes.
 # They are also type annotated.

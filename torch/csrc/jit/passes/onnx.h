@@ -4,8 +4,7 @@
 #include <torch/csrc/onnx/onnx.h>
 #include <torch/csrc/utils/pybind.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 TORCH_API std::shared_ptr<Graph> ToONNX(
     std::shared_ptr<Graph>& state,
@@ -26,5 +25,4 @@ TORCH_API void NodeToONNX(
 TORCH_API void RemovePrintOps(std::shared_ptr<Graph>& graph);
 TORCH_API void PreprocessCaffe2Ops(std::shared_ptr<Graph>& graph);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

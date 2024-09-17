@@ -77,7 +77,7 @@ class InlinedCallStackDeserializer {
 class TORCH_API CallStackDebugInfoUnpickler {
  public:
   ska::flat_hash_map<int64_t, DebugInfoTuple> unpickle(
-      at::DataPtr&& data,
+      const at::DataPtr& data,
       size_t size,
       const ska::flat_hash_map<int64_t, SourceRange>& source_range_map,
       const std::shared_ptr<CompilationUnit>& cu);

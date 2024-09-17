@@ -60,6 +60,6 @@ void _spdiags_kernel_cpu(
 
 } // namespace
 
-REGISTER_DISPATCH(spdiags_kernel_stub, &_spdiags_kernel_cpu)
+REGISTER_DISPATCH(spdiags_kernel_stub, &_spdiags_kernel_cpu);
 
 } // namespace at::native
