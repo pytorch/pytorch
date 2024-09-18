@@ -960,6 +960,7 @@ class ScanTests(TestCase):
         result_compiled_exp = compiled_model(_fake_scan, *cloned_inputs)
 
         self.assertEqual(result, result_exp)
+        self.assertEqual(result, result_compiled)
         self.assertEqual(result_compiled, result_compiled_exp)
 
     def _compare_result(
