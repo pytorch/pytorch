@@ -316,4 +316,4 @@ def tune_gemm_in_file(filename: str) -> None:
                     matB = matB.transpose(1, 2) if transA else matB
                     torch.bmm(matA, matB)
                 else:
-                    print("error: unkown op")
+                    warnings.warn(f"error: unkown op {op_sig}")
