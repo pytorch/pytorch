@@ -1,4 +1,3 @@
-import operator_benchmark as op_bench
 from pt import (  # noqa: F401
     qactivation_test,
     qarithmetic_test,
@@ -21,6 +20,8 @@ from pt import (  # noqa: F401
     quantization_test,
     qunary_test,
 )
+
+import operator_benchmark as op_bench
 
 
 if __name__ == "__main__":

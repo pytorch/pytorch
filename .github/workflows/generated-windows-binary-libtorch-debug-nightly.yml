@@ -32,9 +32,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  get-label-type:
+    name: get-label-type
+    uses: ./.github/workflows/_runner-determinator.yml
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
   libtorch-cpu-shared-with-deps-debug-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -49,7 +58,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -127,7 +136,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: libtorch-cpu-shared-with-deps-debug
@@ -149,8 +158,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   libtorch-cpu-shared-with-deps-debug-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-shared-with-deps-debug-build
-    runs-on: windows.4xlarge.nonephemeral
+    needs:
+      - libtorch-cpu-shared-with-deps-debug-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -165,7 +176,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -210,7 +221,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: libtorch-cpu-shared-with-deps-debug
@@ -279,7 +290,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
       build_name: libtorch-cpu-shared-with-deps-debug
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -288,7 +299,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda11_8-shared-with-deps-debug-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -304,7 +316,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -382,7 +394,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: libtorch-cuda11_8-shared-with-deps-debug
@@ -404,8 +416,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   libtorch-cuda11_8-shared-with-deps-debug-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_8-shared-with-deps-debug-build
-    runs-on: windows.8xlarge.nvidia.gpu
+    needs:
+      - libtorch-cuda11_8-shared-with-deps-debug-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -421,7 +435,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -466,7 +480,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: libtorch-cuda11_8-shared-with-deps-debug
@@ -536,7 +550,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
       build_name: libtorch-cuda11_8-shared-with-deps-debug
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -545,7 +559,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda12_1-shared-with-deps-debug-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -561,7 +576,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -639,7 +654,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: libtorch-cuda12_1-shared-with-deps-debug
@@ -661,8 +676,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   libtorch-cuda12_1-shared-with-deps-debug-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda12_1-shared-with-deps-debug-build
-    runs-on: windows.8xlarge.nvidia.gpu
+    needs:
+      - libtorch-cuda12_1-shared-with-deps-debug-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -678,7 +695,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -723,7 +740,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: libtorch-cuda12_1-shared-with-deps-debug
@@ -793,7 +810,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
       build_name: libtorch-cuda12_1-shared-with-deps-debug
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -802,7 +819,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda12_4-shared-with-deps-debug-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -818,7 +836,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -896,7 +914,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: libtorch-cuda12_4-shared-with-deps-debug
@@ -918,8 +936,10 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
   libtorch-cuda12_4-shared-with-deps-debug-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda12_4-shared-with-deps-debug-build
-    runs-on: windows.8xlarge.nvidia.gpu
+    needs:
+      - libtorch-cuda12_4-shared-with-deps-debug-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -935,7 +955,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
     steps:
       - name: Display EC2 information
         shell: bash
@@ -980,7 +1000,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: libtorch-cuda12_4-shared-with-deps-debug
@@ -1050,7 +1070,7 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.8"
+      DESIRED_PYTHON: "3.9"
       build_name: libtorch-cuda12_4-shared-with-deps-debug
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}

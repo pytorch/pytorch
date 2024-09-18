@@ -5,8 +5,6 @@ import logging
 from typing import List, Optional
 from unittest.mock import patch
 
-import sympy
-
 from ...autotune_process import TensorMeta
 from ...ir import Buffer, IRNode, Layout
 from ...utils import IndentedBuffer, unique
@@ -90,15 +88,18 @@ class ROCmTemplate(KernelTemplate):
             call_args,
             expected_args,
         )
-        extra_args = V.graph.sizevars.size_hints(
-            map(sympy.expand, call_args[len(expected_args) :])
-        )
-        # create the BenchmarkRequest
+
+        size_args = (
+            self.size_args() if hasattr(self, "size_args") else ()
+        )  # subclass should define def size_args()
+        size_args_ints = [
+            V.graph.sizevars.size_hint(arg) for arg in size_args
+        ]  # resolve to ints for benchmarking
         bmreq = ROCmBenchmarkRequest(
             kernel_name=kernel_name,
             input_tensor_meta=TensorMeta.from_irnodes(self.input_nodes),
             output_tensor_meta=TensorMeta.from_irnodes(self.output_node),
-            extra_args=extra_args,
+            extra_args=size_args_ints,
             source_code=code,
         )
 

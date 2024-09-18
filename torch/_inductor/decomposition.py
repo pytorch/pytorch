@@ -42,11 +42,13 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
 quantized = torch.ops.quantized
+_quantized = torch.ops._quantized
 quantized_decomposed = torch.ops.quantized_decomposed
 
 inductor_decompositions = get_decompositions(
     [
         aten._adaptive_avg_pool2d_backward,
+        aten.addmv,
         aten.arange,
         aten.bitwise_and_,
         aten.bitwise_or_,
@@ -82,6 +84,7 @@ inductor_decompositions = get_decompositions(
         aten.triu_indices,
         aten.upsample_bilinear2d.vec,
         quantized.linear_dynamic_fp16_unpacked_weight,
+        _quantized.wrapped_quantized_linear,
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
@@ -632,6 +635,33 @@ def linear_dynamic_fp16_unpacked_weight(
     packed_weight = torch.ops._quantized.wrapped_fbgemm_pack_gemm_matrix_fp16(weight)
     return torch.ops._quantized.wrapped_fbgemm_linear_fp16_weight(
         input, packed_weight, bias, weight.size()[0]
+    )
+
+
+@register_decomposition(_quantized.wrapped_quantized_linear.default)
+def wrapped_quantized_linear(
+    input: torch.Tensor,
+    input_scale: torch.Tensor,
+    input_zero_point: torch.Tensor,
+    weight: torch.Tensor,
+    weight_scale: torch.Tensor,
+    weight_zero_point: torch.Tensor,
+    bias: torch.Tensor,
+    out_scale: torch.Tensor,
+    out_zero_point: torch.Tensor,
+    out_channel: int,
+) -> torch.Tensor:
+    packed_weight = torch.ops._quantized._wrapped_linear_prepack(
+        weight, weight_scale, weight_zero_point, bias
+    )
+    return torch.ops._quantized._wrapped_quantized_linear_prepacked(
+        input,
+        input_scale,
+        input_zero_point,
+        packed_weight,
+        out_scale,
+        out_zero_point,
+        out_channel,
     )
 
 

@@ -1263,7 +1263,7 @@ class TestSerializeCustomClass(TestCase):
         ep = deserialize(serialized_vals)
         self.assertTrue(isinstance(ep.constants["custom_obj"].get(), FakeTensor))
 
-    def test_quantization_tag_metadata(self):
+    def test_custom_tag_metadata_serialization(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
                 return x + x
@@ -1273,16 +1273,126 @@ class TestSerializeCustomClass(TestCase):
         inputs = (torch.zeros(4, 4),)
         ep = export(f, inputs)
 
-        for node in ep.graph.nodes:
-            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
-                node.meta["quantization_tag"] = "foo"
+        new_gm = copy.deepcopy(ep.graph_module)
+        new_gm.meta["custom"] = {}
+        new_gm.meta["custom"]["f"] = "bar"
 
-        serialized_vals = serialize(ep)
-        ep = deserialize(serialized_vals)
-
-        for node in ep.graph.nodes:
+        for node in new_gm.graph.nodes:
             if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
-                self.assertTrue(node.meta["quantization_tag"] == "foo")
+                node.meta["custom"] = {}
+                node.meta["custom"]["quantization_tag"] = "foo"
+
+        new_ep = ep._update(new_gm, ep.graph_signature)
+        serialized_vals = serialize(new_ep)
+        new_ep = deserialize(serialized_vals)
+
+        self.assertEqual(new_ep.graph_module.meta["custom"]["f"], "bar")
+        counter = 0
+        for node in new_ep.graph.nodes:
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
+                counter += 1
+                self.assertTrue(node.meta["custom"]["quantization_tag"] == "foo")
+        self.assertEqual(counter, 1)
+
+    def test_custom_tag_metadata_decomp(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        f = Foo()
+
+        inputs = (torch.ones(2, 2),)
+        ep = export(f, inputs)
+
+        new_gm = copy.deepcopy(ep.graph_module)
+        new_gm.meta["custom"] = {}
+        new_gm.meta["custom"]["f"] = "bar"
+
+        counter = 0
+        for node in new_gm.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target == torch.ops.aten.linear.default
+            ):
+                counter += 1
+                node.meta["custom"] = {}
+                node.meta["custom"]["quantization_tag"] = "foo"
+        self.assertEqual(counter, 1)
+
+        new_ep = ep._update(new_gm, ep.graph_signature)
+        new_ep = new_ep.run_decompositions()
+
+        self.assertEqual(new_ep.graph_module.meta["custom"]["f"], "bar")
+        counter = 0
+        for node in new_ep.graph.nodes:
+            if node.op == "call_function":
+                counter += 1
+                self.assertTrue(node.meta["custom"]["quantization_tag"] == "foo")
+        self.assertTrue(counter > 1)
+
+    # TODO For some reason, this doesn't work on Windows ONLY.
+    # def test_custom_tag_metadata_reexport(self):
+    #     class Foo(torch.nn.Module):
+    #         def forward(self, x):
+    #             return x + x
+    #
+    #     f = Foo()
+    #
+    #     inputs = (torch.zeros(4, 4),)
+    #     ep = export(f, inputs)
+    #
+    #     new_gm = copy.deepcopy(ep.graph_module)
+    #     new_gm.meta["custom"] = {}
+    #     new_gm.meta["custom"]["f"] = "bar"
+    #
+    #     for node in new_gm.graph.nodes:
+    #         if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
+    #             node.meta["custom"] = {}
+    #             node.meta["custom"]["quantization_tag"] = "foo"
+    #
+    #     new_ep = ep._update(new_gm, ep.graph_signature)
+    #     new_ep = torch.export.export(new_ep.module(), inputs)
+    #
+    #     self.assertEqual(new_ep.graph_module.meta["custom"]["f"], "bar")
+    #     counter = 0
+    #     for node in new_ep.graph.nodes:
+    #         if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
+    #             counter += 1
+    #             self.assertTrue(node.meta["custom"]["quantization_tag"] == "foo")
+    #     self.assertEqual(counter, 1)
+
+    def test_custom_tag_metadata_copy(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + x
+
+        f = Foo()
+
+        inputs = (torch.zeros(4, 4),)
+        ep = export(f, inputs)
+
+        new_gm = copy.deepcopy(ep.graph_module)
+        new_gm.meta["custom"] = {}
+        new_gm.meta["custom"]["f"] = "bar"
+
+        for node in new_gm.graph.nodes:
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
+                node.meta["custom"] = {}
+                node.meta["custom"]["quantization_tag"] = "foo"
+
+        new_gm = copy.deepcopy(new_gm)
+
+        self.assertEqual(new_gm.meta["custom"]["f"], "bar")
+        counter = 0
+        for node in new_gm.graph.nodes:
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
+                counter += 1
+                self.assertTrue(node.meta["custom"]["quantization_tag"] == "foo")
+        self.assertEqual(counter, 1)
 
 
 if __name__ == "__main__":
