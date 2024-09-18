@@ -120,7 +120,7 @@ def _maybe_set_eval_frame(callback: DynamoCallback, context_id: str, state: str)
         else:
             assert state in ["enter", "exit"]
             if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-                # Compiled Autograd Dynamo warmup is handled in compiled_autograd.py _EnableContext.
+                # Compiled Autograd Dynamo warmup is handled within `torch._dynamo.compiled_autograd.enable()`.
                 return set_eval_frame(callback)
             else:
                 if state == "enter":

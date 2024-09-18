@@ -463,19 +463,22 @@ main()
             torch._dynamo.reset()
             torch._dynamo.compiled_autograd.reset()
             torch.manual_seed(123)
+            inductor_invoke_count_forward = 0
+            inductor_invoke_count_backward = 0
+
             model = torch.nn.Sequential(
                 torch.nn.Linear(4, 4),
                 torch.nn.Sigmoid(),
             )
             optim = torch.optim.SGD(model.parameters(), lr=1e-4)
             x = torch.randn([1, 4])
-            inductor_invoke_count_forward = 0
-            inductor_invoke_count_backward = 0
-            res = []
+
             if compiled and not enable_ca_via_config:
                 ctx = compiled_autograd.enable(torch.compile)
             else:
                 ctx = contextlib.nullcontext()
+
+            res = []
             for i in range(n_iters):
                 with ctx:
                     res += iter_fn(model, x)
