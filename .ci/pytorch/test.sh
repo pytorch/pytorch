@@ -1384,10 +1384,9 @@ test_executorch() {
 }
 
 test_linux_aarch64() {
-  if [[ "$SHARD_NUMBER" == 1 ]]; then
-      python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
-           test_transformers test_multiprocessing test_numpy_interop --verbose
-  fi
+  python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
+        test_transformers test_multiprocessing test_numpy_interop \
+        --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 
   # Dynamo tests
   python test/run_test.py --include dynamo/test_compile dynamo/test_backends dynamo/test_comptime dynamo/test_config \
