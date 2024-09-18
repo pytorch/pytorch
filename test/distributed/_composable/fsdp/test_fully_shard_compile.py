@@ -468,6 +468,8 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             res = run_iters(model, optim)
             return res
 
+        torch._dynamo.reset()
+        torch._dynamo.compiled_autograd.reset()
         with torch._dynamo.config.patch(
             # NOTE: Setting fullgraph=False for forward (to allow graph-breaks) is a common scenario
             # and in that case we need a standalone Compiled Autograd ctx that has fullgraph=True for backward.
