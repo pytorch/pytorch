@@ -88,6 +88,8 @@ TORCH_CUDA_CPP_API cublasLtHandle_t getCurrentCUDABlasLtHandle();
 
 TORCH_CUDA_CPP_API void clearCublasWorkspaces();
 
+TORCH_CUDA_CPP_API bool eraseCublasWorkspace(const std::tuple<void *, void *>& workspace_key);
+
 #if defined(CUDART_VERSION) || defined(USE_ROCM)
 TORCH_CUDA_CPP_API cusolverDnHandle_t getCurrentCUDASolverDnHandle();
 #endif
