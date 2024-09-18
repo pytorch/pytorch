@@ -482,8 +482,7 @@ bool TuningContext::IsRecordUntunedEnabled() const {
 }
 
 std::ofstream& TuningContext::GetUntunedFile(){
-  if (!untuned_file_.is_open())
-  {
+  if (!untuned_file_.is_open()) {
     const char *env = std::getenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME");
     std::string filename = (env == nullptr) ? "tunableop_untuned.csv" : env;
 
