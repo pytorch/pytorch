@@ -56,10 +56,6 @@ jobs:
         export ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT"
         .github/scripts/lintrunner.sh
 
-
-
-  
-
   lintrunner-autoformat:
     runs-on: "linux.2xlarge"
     if: github.event_name == 'pull_request'
