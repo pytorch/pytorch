@@ -345,8 +345,6 @@ __global__ void reflection_pad2d_backward_det_out_kernel(
       const int64_t border_right_out_row = border_right_row + pad_t;
       const int64_t border_right_out_col = border_right_col + pad_l;
 
-      // we are d_f_r cols to its left, now we wnat to be to its right.
-      // so after it.
       const int64_t dist_from_right = ::abs(inp_col - border_right_col);
 
       const int64_t reflect_right_out_row = border_right_out_row;
@@ -362,9 +360,6 @@ __global__ void reflection_pad2d_backward_det_out_kernel(
     }
     const int64_t out_row = inp_row + pad_t;
     const int64_t out_col = inp_col + pad_l;
-
-    const int64_t write = b * (channels * width * height) +
-        c * (width * height) + out_row * width + out_col;
 
     partial += grad_output
         [b * (channels * width * height) + c * (width * height) +
@@ -604,11 +599,6 @@ void reflection_pad2d_backward_out_template(
   int input_h = input.size(dim_h);
   int input_w = input.size(dim_w);
 
-  std::cout << " from: " << "input.size(" << plane_dim << ") nplane:" << nplane
-            << std::endl;
-  std::cout << " from: " << "input.size(" << nbatch << ") idk:" << nbatch
-            << std::endl;
-
   int output_h = input_h + pad_t + pad_b;
   int output_w = input_w + pad_l + pad_r;
 
@@ -642,10 +632,6 @@ void reflection_pad2d_backward_out_template(
       "reflection_pad2d_backward_out_template",
       [&] {
         if (at::globalContext().deterministicAlgorithms()) {
-          int64_t total_output_elements = nbatch * nplane * output_h * output_w;
-          std::cout << "Deterministic Iteration:" << nbatch
-                    << ", plane: " << plane_dim << std::endl;
-          input.print();
 
           reflection_pad2d_backward_det_out_kernel<<<
               1024,
@@ -676,7 +662,6 @@ void reflection_pad2d_backward_out_template(
                   block_y_size,
                   block_z_size);
 
-              std::cout << "Running iter: " << std::endl;
               reflection_pad2d_backward_out_kernel<<<
                   grid_size,
                   block_size,
