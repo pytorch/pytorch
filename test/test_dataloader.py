@@ -1382,6 +1382,8 @@ except RuntimeError as e:
             del loader1_it
             del loader2_it
 
+    # https://github.com/pytorch/pytorch/issues/128551
+    @unittest.expectedFailure
     def test_segfault(self):
         p = ErrorTrackingProcess(target=_test_segfault)
         p.start()
