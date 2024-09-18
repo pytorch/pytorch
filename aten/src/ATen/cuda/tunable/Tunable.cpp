@@ -460,8 +460,7 @@ void TuningContext::EnableRecordUntuned(bool value) {
   record_untuned_enable_ = value;
   if (value) {
     TUNABLE_LOG1("Enable Record Untuned for TunableOp");
-  }
-  else {
+  } else {
     TUNABLE_LOG1("Disable Record Untuned for TunableOp");
   }
 }
