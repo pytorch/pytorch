@@ -761,6 +761,14 @@ class TestFullyShardSharedParams(FSDPTest):
 
 class TestFullyShardGradientAccumulation(FSDPTest):
     @property
+    def backend(self):
+        # need to include backend for cpu tensors when running cpu_offload tests
+        if torch.cuda.is_available():
+            return "cuda:nccl,cpu:gloo"
+        else:
+            return "gloo"
+
+    @property
     def world_size(self) -> int:
         return min(4, torch.cuda.device_count())
 
