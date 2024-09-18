@@ -123,6 +123,7 @@ class AutogradCompilerInstance:
         for idx, val in enumerate(scalars):
             source = self.source("scalars", idx)
             if isinstance(val, int):
+                print(f"begin_capture found int: {val}")
                 scalars[idx] = self.shape_env.create_unspecified_symint_and_symbol(
                     val,
                     source,
@@ -211,9 +212,6 @@ class AutogradCompilerInstance:
         with disable_proxy_modes_tracing():
             self.bind_tensors_to_proxies(grad_ins, proxies)
 
-        # with disable_proxy_modes_tracing():
-        # create fake Tensors
-        # return list(grad_ins)
         return list(grad_ins)
 
     def proxy_call_backward(

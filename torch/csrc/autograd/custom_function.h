@@ -197,6 +197,7 @@ struct CppNode : public Node {
     args.collect(std::string(typeid(T).name()));
 
     // TODO: pass some things by copy
+    std::cout << "COLLECT FROM CPPNODE" << std::endl;
     std::function<variable_list(variable_list)> lambda =
         [&](variable_list&& inputs) { return apply(std::move(inputs)); };
     args.collect(this, std::move(lambda), is_variable_input_, input_info_);

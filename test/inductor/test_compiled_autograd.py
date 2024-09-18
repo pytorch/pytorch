@@ -1601,7 +1601,10 @@ TORCH_LIBRARY(test_non_traceable_autograd_cpp_node, m) {
             out = torch.ops.test_non_traceable_autograd_cpp_node.custom_op_backed_by_autograd_fn(
                 x
             )
-            loss = out.sum()
+            out2 = torch.ops.test_non_traceable_autograd_cpp_node.custom_op_backed_by_autograd_fn(
+                out
+            )
+            loss = out2.sum()
             loss.backward()
             yield x.grad
 
