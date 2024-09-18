@@ -242,12 +242,19 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         """Tests train parity with DDP for a single FSDP group."""
         self.run_subtests(
             {
-                "lin_shapes": [[(16, 15), (15, 8)], [(7, 15), (15, 3)]],
+                "lin_shapes": [
+                    [(16, 15), (15, 8)],
+                    [(7, 15), (15, 3)],
+                    [(16, 17), (17, 8)],
+                ],
+                "use_shard_placement_fn": [False, True],
             },
             self._test_train_parity_single_group,
         )
 
-    def _test_train_parity_single_group(self, lin_shapes: List[Tuple[int, int]]):
+    def _test_train_parity_single_group(
+        self, lin_shapes: List[Tuple[int, int]], use_shard_placement_fn: bool
+    ):
         torch.manual_seed(42)
         model = nn.Sequential(
             nn.Linear(*lin_shapes[0]), nn.ReLU(), nn.Linear(*lin_shapes[1])
@@ -255,7 +262,20 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         ref_model = copy.deepcopy(model).cuda()
         replicate(ref_model, device_ids=[self.rank])
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-        fully_shard(model)
+
+        def _shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+            largest_dim = -1
+            largest_dim_size = -1
+            for dim, dim_size in enumerate(param.shape):
+                if dim_size > largest_dim_size:
+                    largest_dim = dim
+                    largest_dim_size = dim_size
+            assert largest_dim >= 0, f"{param.shape}"
+            assert largest_dim < param.ndim, f"{largest_dim=} {param.shape}"
+            return Shard(largest_dim)
+
+        shard_placement_fn = _shard_placement_fn if use_shard_placement_fn else None
+        fully_shard(model, shard_placement_fn=shard_placement_fn)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         torch.manual_seed(42 + self.rank + 1)
         inp = (torch.randn((4, lin_shapes[0][0]), device="cuda"),)

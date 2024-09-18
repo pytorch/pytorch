@@ -98,13 +98,15 @@ def _chunk_with_empty(
     return chunks
 
 
-def _get_dim0_chunked_size(
-    chunk: torch.Tensor, unchunked_size: torch.Size
+def _get_dim_chunked_size(
+    chunk: torch.Tensor, unchunked_size: torch.Size, dim: int
 ) -> torch.Size:
     if chunk.numel() > 0:
         return chunk.size()
     # For 0 numel, we need to preserve trailing dims for DTensor APIs
-    return cast(torch.Size, torch.Size([0]) + unchunked_size[1:])
+    return cast(
+        torch.Size, unchunked_size[:dim] + torch.Size([0]) + unchunked_size[dim + 1 :]
+    )
 
 
 def _from_local_no_grad(

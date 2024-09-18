@@ -996,7 +996,7 @@ class TestFullyShardHSDPBroadcast(FSDPTestMultiThread):
 class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
     @property
     def world_size(self) -> int:
-        return 4
+        return 8
 
     def _init_models(self):
         torch.manual_seed(42)
@@ -1008,7 +1008,7 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
         return model, ref_model
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
-    def test_init_1d_shard_placement_fn_shard_largest_dim(self):
+    def test_init_1d_transformer_shard_largest_dim(self):
         model, ref_model = self._init_models()
 
         def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
@@ -1037,7 +1037,7 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
             self.assertEqual(full_param, ref_param)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
-    def test_init_2d_shard_placement_fn_shard_diff_dim(self):
+    def test_init_2d_transformer_shard_diff_dim(self):
         model, ref_model = self._init_models()
 
         dp_size, tp_size = self.world_size // 2, 2
@@ -1081,6 +1081,38 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
                 self.assertTrue(
                     any(isinstance(placement, Shard) for placement in param.placements)
                 )
+
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            full_param = param.full_tensor()
+            self.assertEqual(full_param, ref_param)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_init_1d_uneven_shard_largest_dim(self):
+        torch.manual_seed(42)
+        model = nn.Sequential(nn.Linear(16, 17), nn.Linear(17, 8))
+        for param in model.parameters():
+            dist.broadcast(param.detach(), src=0)
+        ref_model = copy.deepcopy(model).cuda()
+
+        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+            largest_dim = -1
+            largest_dim_size = -1
+            for dim, dim_size in enumerate(param.shape):
+                if dim_size > largest_dim_size:
+                    largest_dim = dim
+                    largest_dim_size = dim_size
+            assert largest_dim >= 0, f"{param.shape}"
+            assert largest_dim < param.ndim, f"{largest_dim=} {param.shape}"
+            return Shard(largest_dim)
+
+        fully_shard(model, shard_placement_fn=shard_placement_fn)
+
+        any_shard_dim1 = False
+        for param in model.parameters():
+            self.assertEqual(len(param.placements), 1)
+            self.assertIsInstance(param.placements[0], Shard)
+            any_shard_dim1 |= param.placements[0].dim == 1
+        self.assertTrue(any_shard_dim1)
 
         for param, ref_param in zip(model.parameters(), ref_model.parameters()):
             full_param = param.full_tensor()
