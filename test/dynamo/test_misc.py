@@ -11334,38 +11334,35 @@ fn
         self.assertEqual(cnts.frame_count, 1)
 
     def test_getattrvariable_as_python_constant(self):
-        from torch._dynamo.variables.misc import GetAttrVariable
-
         @torch.compile(backend="eager")
         def fn(x, rand1):
             random.Random().setstate(rand1.getstate())
             return x + rand1.random()
 
-        def get_rng(x):
+        def get_rng():
             rand1 = random.Random(1)
             orig_random = rand1.random
             rand1.random = lambda: orig_random()
             return rand1
 
-        as_python_constant = GetAttrVariable.as_python_constant
         calls = []
-        x = torch.randn(3, 3)
+        attr_path = "torch._dynamo.variables.misc.GetAttrVariable.as_python_constant"
 
-        def as_python_constant_append(self):
-            x = as_python_constant(self)
+        def appender(self):
+            x = patch.temp_original(self)
             calls.append(x)
             return x
 
-        GetAttrVariable.as_python_constant = as_python_constant_append
-        try:
+        patch = mock.patch(attr_path, appender)
+        with patch:
+            x = torch.randn(3, 3)
             actual = fn(x, get_rng())
-        finally:
-            GetAttrVariable.as_python_constant = as_python_constant
+            expected = fn.__wrapped__(x, get_rng())
 
-        expected = fn.__wrapped__(x, get_rng())
         self.assertEqual(actual, expected)
         self.assertTrue(calls)
         self.assertTrue(all(c.__name__ == "setstate" for c in calls))
+        self.assertTrue(all(callable(c) for c in calls))
 
 
 class TestTracer(JitTestCase):
