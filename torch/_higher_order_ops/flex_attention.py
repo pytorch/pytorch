@@ -77,7 +77,7 @@ class TransformGetItemToIndex(TorchFunctionMode):
     # scalar and create a view. We do not want that behavior in this case, so we
     # use this torchfunctionmode to override that behavior for score_mod
     # wherever we're running it.
-    def __torch_function__(self, func, types, args, kwargs=None):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
         if func == torch.Tensor.__getitem__:
             index_args = pytree.tree_leaves(args[1])
             if all(isinstance(x, torch.Tensor) for x in index_args):

@@ -2857,7 +2857,7 @@ class Scheduler:
             return False
 
         # Pick the largest buffer to guide the loop reordering
-        _, lhs_dep, rhs_dep = sorted(candidates, reverse=True, key=lambda x: x[0])[0]
+        _, lhs_dep, rhs_dep = max(candidates, key=lambda x: x[0])
 
         if lhs_dep.num_vars != rhs_dep.num_vars:
             # this can happen due to we don't merge loops.

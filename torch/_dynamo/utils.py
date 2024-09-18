@@ -2915,6 +2915,8 @@ def is_frozen_dataclass(value):
         not object_has_getattribute(value)
         and not class_has_getattribute(value)
         and is_dataclass(value)
+        and hasattr(value, "__dataclass_params__")
+        and hasattr(value.__dataclass_params__, "frozen")
         and value.__dataclass_params__.frozen
     )
 
@@ -3103,7 +3105,7 @@ def set_torch_function_mode_stack(stack):
 
 
 def clear_torch_function_mode_stack():
-    for i in range(_len_torch_function_stack()):
+    for _ in range(_len_torch_function_stack()):
         _pop_torch_function_stack()
 
 

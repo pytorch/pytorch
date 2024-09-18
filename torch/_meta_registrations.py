@@ -5638,7 +5638,7 @@ def meta_scaled_mm(
             scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32,
             lambda: "Both scale_a and scale_b must be float (fp32) tensors.",
         )
-        m, k = self.shape
+        m, _ = self.shape
         n = mat2.size(1)
         if scale_a.numel() == 1 and scale_b.numel() == 1:
             # tensorwise scaling
@@ -6334,7 +6334,7 @@ def meta_searchsorted(
 
 def _check_for_unsupported_isin_dtype(dtype):
     torch._check(
-        dtype not in [torch.bool, torch.bfloat16, torch.complex128, torch.complex64],
+        dtype not in (torch.bool, torch.complex128, torch.complex64),
         lambda: f"Unsupported input type encountered for isin(): {dtype}",
     )
 

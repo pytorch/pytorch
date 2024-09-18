@@ -9058,7 +9058,7 @@ class DistributedTest:
             fqn_to_param_index = {}
             index = 0
             for module_name, module in model.named_modules():
-                for parameter_name, param in module.named_parameters(recurse=False):
+                for parameter_name, _ in module.named_parameters(recurse=False):
                     fqn = f"{module_name}.{parameter_name}"
                     fqn_to_param_index[fqn] = index
                     if fqn not in sparse_embedding_fqns:
@@ -9213,7 +9213,7 @@ class DistributedTest:
             if self.rank == 0:
                 model_inference.eval()
                 with torch.autograd.profiler.profile() as prof:
-                    for i in range(6):
+                    for _ in range(6):
                         inp = torch.randn(10, 2, 4, 4).cuda(rank)
                         out = model_inference(inp)
                         loss = out.sum()

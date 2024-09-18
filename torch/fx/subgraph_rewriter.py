@@ -279,7 +279,7 @@ def _replace_pattern(
     match_changed_node: Dict[Node, Node] = {}
 
     match_and_replacements = []
-    for i, match in enumerate(_matches):
+    for match in _matches:
         if replacement_callback is not None:
             replacement_graph = replacement_callback(match, original_graph, pattern_graph)
         else:

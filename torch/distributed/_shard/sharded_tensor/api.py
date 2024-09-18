@@ -1200,7 +1200,7 @@ class ShardedTensor(ShardedTensorBase):
     def __hash__(self):
         return id(self)
 
-    def __repr__(self):
+    def __repr__(self) -> str:  # type: ignore[override]
         return f"ShardedTensor({self._metadata})"
 
     @dataclass

@@ -1602,7 +1602,7 @@ def _export(
                 (
                     proto,
                     export_map,
-                    val_use_external_data_format,
+                    _,
                     _,
                 ) = graph._export_onnx(  # type: ignore[attr-defined]
                     params_dict,
@@ -1621,7 +1621,7 @@ def _export(
                 (
                     proto,
                     export_map,
-                    val_use_external_data_format,
+                    _,
                     _,
                 ) = graph._export_onnx(  # type: ignore[attr-defined]
                     {},
