@@ -92,13 +92,13 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
             # be sliced to pass to the reference
             if isinstance(t, torch.Tensor) and _raggedness_matches(t, inp):
                 return t[i]
-            elif isinstance(t, torch.Tensor) and t.dim() > 0:
-                if t.shape[0] == inp.shape[0]:
-                    return t[i]
-                elif t.shape[0] == 1:
+            # allow the SampleInput to tell us how to slice it for ref calculation
+            elif isinstance(t, torch.Tensor) and hasattr(t, "_batch_dim"):
+                bdim = t._batch_dim  # type: ignore[attr]
+                if t.shape[bdim] == 1:
                     return t[0]
                 else:
-                    return t
+                    return t.select(t._batch_dim, i)
             else:
                 return t
 
@@ -182,6 +182,8 @@ def sample_inputs_elementwise_njt_binary(
             dtype=dtype,
             requires_grad=requires_grad,
         )
+        # used for slicing in unbind_reference()
+        t._batch_dim = 0
         # (NT, T)
         yield SampleInput(njt1, args=(t,), kwargs=dict(op_kwargs))
         # (T, NT)
@@ -194,6 +196,8 @@ def sample_inputs_elementwise_njt_binary(
             dtype=dtype,
             requires_grad=requires_grad,
         )
+        # used for slicing in unbind_reference()
+        t._batch_dim = 0
         # (NT, T)
         yield SampleInput(njt1, args=(t,), kwargs=dict(op_kwargs))
         # (T, NT)
@@ -226,6 +230,8 @@ def sample_inputs_elementwise_njt_binary(
         layout=torch.jagged,
     )
     t = torch.randn(B, 1, D, device=device, dtype=dtype, requires_grad=requires_grad)
+    # used for slicing in unbind_reference()
+    t._batch_dim = 0
 
     # (NT, T)
     yield SampleInput(njt, args=(t,), kwargs=dict(op_kwargs))
@@ -366,8 +372,7 @@ def reference_nn_functional_embedding_bag(op, sample):
     # run reference on a single bag at a time
     new_kwargs = dict(sample.kwargs)
     new_kwargs.update(
-        # NB: unbind_reference() will slice offsets on first dim so make it shape (1, 1)
-        {"offsets": torch.tensor([[0]], dtype=torch.int64, device=sample.input.device)}
+        {"offsets": torch.tensor([0], dtype=torch.int64, device=sample.input.device)}
     )
     # flip input / weight back to what unbind_reference() expects
     sample = SampleInput(sample.args[0], args=(sample.input,), kwargs=new_kwargs)
@@ -383,7 +388,7 @@ def sample_inputs_nn_functional_rms_norm(
     op_info, device, dtype, requires_grad, **kwargs
 ):
     for njt in _sample_njts(
-        device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[3, 4]
     ):
         # normalize over non-ragged dims
         for start_dim in range(2, njt.dim()):
