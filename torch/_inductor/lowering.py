@@ -6248,12 +6248,6 @@ def scan(combine_subgraph, init, inputs, dim, reverse, additional_inputs):
     num_additional_inputs = len(additional_inputs)
     specialized_dim = int(dim)
 
-    if any(map(is_triton, [init, inputs, *additional_inputs])):
-        msg = "control flow operator: torch.scan."
-        if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
-            msg = f"{msg} Found from : \n {stack_trace}"
-        V.graph.disable_cudagraphs_reason = msg
-
     def extract_scan_args(combine_subgraph, init, xs, dim, reverse, additional_inputs):
         return combine_subgraph, init, xs, dim, reverse, additional_inputs
 
