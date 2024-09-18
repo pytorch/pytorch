@@ -13,7 +13,6 @@ import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from unittest import mock
-import copy
 
 import torch
 import torch.nn as nn
@@ -435,66 +434,81 @@ main()
 
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
-    def test_warmup_run(self):
-        # TODO(yf225): also add warmup test for forward Dynamo
+    def test_warmup_runs(self):
         warmup_runs = 2
         n_iters = 5
-        ca_invoke_count = 0
-        def increment_ca_invoke_count(gm):
-            nonlocal ca_invoke_count
+        inductor_invoke_count_forward = 0
+        inductor_invoke_count_backward = 0
+
+        def increment_inductor_invoke_count(gm):
+            nonlocal inductor_invoke_count_forward, inductor_invoke_count_backward
             if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-                ca_invoke_count += 1
-        
-        def run_iters(model, x):
+                inductor_invoke_count_backward += 1
+            else:
+                inductor_invoke_count_forward += 1
+
+        def iter_fn(model, x):
             res = []
-            for _ in range(n_iters):
-                result = model(x).sum()
-                result.backward()
-                res.append(model.weight.grad)
-                res.append(model.bias.grad)
-                model.zero_grad()
+            result = model(x).sum()
+            result.backward()
+            res.append(result)
+            res.append(model[0].weight)
+            res.append(model[0].bias)
+            res.append(model[0].weight.grad)
+            res.append(model[0].bias.grad)
             return res
 
-        ref_model = torch.nn.Linear(4, 4)
-        compiled_model = copy.deepcopy(ref_model)
-        x = torch.randn([1, 4])
-        expected_out = run_iters(ref_model, x)
-        with config.patch(compiled_autograd=True, warmup_runs=warmup_runs), torch._inductor.config.patch(
-            post_grad_custom_post_pass=increment_ca_invoke_count
-        ):
-            compiled_model = torch.compile(compiled_model, fullgraph=True)
-            actual_out = run_iters(compiled_model, x)
-        self.assertEqual(expected_out, actual_out)
-        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
-        self.assertEqual(ca_invoke_count, n_iters - warmup_runs)
+        def run_iters(iter_fn, compiled=False, enable_ca_via_config=False):
+            nonlocal inductor_invoke_count_forward, inductor_invoke_count_backward
+            torch._dynamo.reset()
+            torch._dynamo.compiled_autograd.reset()
+            torch.manual_seed(123)
+            model = torch.nn.Sequential(
+                torch.nn.Linear(4, 4),
+                torch.nn.Sigmoid(),
+            )
+            optim = torch.optim.SGD(model.parameters(), lr=1e-4)
+            x = torch.randn([1, 4])
+            inductor_invoke_count_forward = 0
+            inductor_invoke_count_backward = 0
+            res = []
+            if compiled and not enable_ca_via_config:
+                ctx = compiled_autograd.enable(torch.compile)
+            else:
+                ctx = contextlib.nullcontext()
+            for i in range(n_iters):
+                with ctx:
+                    res += iter_fn(model, x)
+                optim.step()
+                optim.zero_grad(set_to_none=True)
+                if compiled:
+                    if i < warmup_runs:
+                        self.assertEqual(inductor_invoke_count_forward, 0)
+                        self.assertEqual(inductor_invoke_count_backward, 0)
+                    else:
+                        self.assertEqual(inductor_invoke_count_forward, 1)
+                        self.assertEqual(inductor_invoke_count_backward, 1)
+            return res
 
-        # def fn():
-        #     torch.manual_seed(123)
-        #     model = torch.nn.Sequential(
-        #         torch.nn.Linear(4, 4),
-        #         torch.nn.Sigmoid(),
-        #     )
+        def _run_test(enable_ca_via_config):
+            expected = run_iters(iter_fn, compiled=False)
+            counters["compiled_autograd"]["captures"] = 0
+            with config.patch(
+                compiled_autograd=enable_ca_via_config, warmup_runs=warmup_runs
+            ), torch._inductor.config.patch(
+                post_grad_custom_pre_pass=increment_inductor_invoke_count
+            ):
+                compiled_fn = torch.compile(iter_fn)
+                actual = run_iters(
+                    compiled_fn,
+                    compiled=True,
+                    enable_ca_via_config=enable_ca_via_config,
+                )
+            self.assertEqual(expected, actual)
+            self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
-        #     res = []
-        #     for i in range(3):
-        #         print(f"iter: {i}")
-        #         x = torch.randn([1, 4])
-
-        #         result = model(x).sum()
-        #         result.backward()
-        #         res.append(model[0].weight.grad)
-        #         res.append(model[0].bias.grad)
-        #         model.zero_grad()
-        #     return res
-
-        # expected = fn()
-        # with config.patch(compiled_autograd=True, warmup_runs=1), torch._inductor.config.patch(
-        #     post_grad_custom_pre_pass=increment_ca_invoke_count
-        # ):
-        #     compiled_fn = torch.compile(fn)
-        #     actual = compiled_fn()
-        # self.assertEqual(expected, actual)
-        # self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        _run_test(enable_ca_via_config=True)
+        _run_test(enable_ca_via_config=False)
 
     def test_dynamo_boxed(self):
         def get_placeholders(gm_):
