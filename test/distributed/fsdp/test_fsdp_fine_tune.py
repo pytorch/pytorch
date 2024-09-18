@@ -364,9 +364,8 @@ class TestFSDPFineTune(FSDPTest):
         )
         torch.manual_seed(self.rank + 1)
         losses = []
-        for idx in range(6):
+        for _ in range(6):
             frozen_input = torch.randn((4, 4), device="cuda", requires_grad=False)
-            learnable_input = torch.randn((4, 4), device="cuda", requires_grad=True)
             for _model, _optim in ((model, model_optim), (ref_model, ref_model_optim)):
                 loss = _model(frozen_input, frozen_input).sum()
                 losses.append(loss)

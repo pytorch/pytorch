@@ -819,6 +819,7 @@ class ONNXProgram:
         else:
             if isinstance(destination, str):
                 with open(destination, "wb") as f:  # pylint: disable=unused-variable
+
                     if self.model_proto.ByteSize() < _PROTOBUF_SIZE_MAX_LIMIT:
                         onnx.save_model(self.model_proto, destination)  # type: ignore[attr-defined]
                     else:

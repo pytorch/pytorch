@@ -1011,7 +1011,8 @@ class TestCudaMultiGPU(TestCase):
             torch.cuda.synchronize()
             before_free_bytes, before_available_bytes = torch.cuda.mem_get_info(device)
             # increasing to 8MB to force acquiring a new block and overcome blocksize differences across platforms
-            t = torch.randn(1024 * 1024 * 8, device=device)
+            t = torch.randn(1024 * 1024 * 8, device=device)  # pylint: disable=unused-variable
+
             if IS_JETSON:
                 # w/o syncing, mem_get_info will run before memory allocated has actually increased.
                 # This race condition causes consistent failure

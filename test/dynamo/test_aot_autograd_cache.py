@@ -159,6 +159,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         def fn(a, b):
             out = a.cos() + b
             loss = out.sum()
+            # pylint: disable-next=unused-variable
             ga, gb = torch.autograd.grad(loss, inputs=[a, b])
 
         a = torch.randn(25, requires_grad=True)

@@ -213,8 +213,8 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
                 requires_grad=x.requires_grad,
             )
 
-        out = fn(x)
-        out2 = torch.compile(fn, backend="eager")(x)
+        fn(x)
+        torch.compile(fn, backend="eager")(x)
 
     def test_dtensor_constructor_w_dynamo_disable(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -557,6 +557,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
         @torch.compile(backend=cnt)
         def fn(x):
+            # pylint: disable-next=unused-variable
             dt = DTensor.from_local(x, mesh, [placement], run_check=False)
 
         x = torch.ones(4, 4, requires_grad=True)
@@ -614,7 +615,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         x_dt = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
         x2 = x_dt.redistribute(mesh, [Replicate()], async_op=True)
         x2 = x2.to_local()
-        out = opt_fn(x2)
+        opt_fn(x2)
         # The important part: we get a wait_tensor() in the graph.
         # At runtime, the input to the graph is an AsyncCollectiveTensor,
         # and inside the graph we need to issue a wait() to synchronize.
@@ -801,8 +802,6 @@ class TestDTensorCompileE2E(DTensorTestBase):
             (data_parallel_size, self.world_size // data_parallel_size),
             mesh_dim_names=["dp", "tp"],
         )
-
-        fsdp_pg = twod_mesh.get_group(mesh_dim=0)
 
         inp = torch.rand(20, 10, device=self.device_type)
         parallelize_plan = {

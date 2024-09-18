@@ -598,6 +598,8 @@ def tune_bsr_dense_addmm(
     *,
     beta=1,
     alpha=1,
+    left_alpha=None,
+    right_alpha=None,
     out=None,
     store=False,
     verbose=False,
@@ -657,7 +659,15 @@ def tune_bsr_dense_addmm(
     def bench(meta, input=input, bsr=bsr, dense=dense, alpha=alpha, out=out):
         def test_func():
             return bsr_dense_addmm(
-                input, bsr, dense, beta=beta, alpha=alpha, meta=meta, out=out
+                input,
+                bsr,
+                dense,
+                beta=beta,
+                alpha=alpha,
+                left_alpha=left_alpha,
+                right_alpha=right_alpha,
+                meta=meta,
+                out=out,
             )
 
         return triton.testing.do_bench(test_func, warmup=500, rep=100)
@@ -722,6 +732,8 @@ def optimize_bsr_dense_addmm(
     bk,
     beta=1,
     alpha=1,
+    use_left_alpha=False,
+    use_right_alpha=False,
     dtype=torch.float16,
     device="cuda",
     sparsity=0.5,
@@ -735,12 +747,18 @@ def optimize_bsr_dense_addmm(
     ).to_sparse_bsr((bm, bk))
     dense = make_tensor(k, n, dtype=dtype, device=device)
     input = make_tensor(m, n, dtype=dtype, device=device)
+    left_alpha = make_tensor(m, dtype=dtype, device=device) if use_left_alpha else None
+    right_alpha = (
+        make_tensor(n, dtype=dtype, device=device) if use_right_alpha else None
+    )
     tune_bsr_dense_addmm(
         input,
         bsr,
         dense,
         beta=beta,
         alpha=alpha,
+        left_alpha=left_alpha,
+        right_alpha=right_alpha,
         store=True,
         force=force,
         verbose=verbose,
