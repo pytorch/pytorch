@@ -273,27 +273,18 @@ def tune_gemm_in_file(filename: str) -> None:
                 transA = True if layout[0] == "T" else False
                 transB = True if layout[1] == "T" else False
 
-                dtype = torch.half
-                if data_type == "float":
-                    dtype = torch.float32
-                elif data_type == "double":
-                    dtype = torch.float64
-                elif data_type == "BFloat16":
-                    dtype = torch.bfloat16
-                elif data_type == "Half":
-                    dtype = torch.half
-                elif data_type == "Float8_e4m3fn":
-                    dtype = torch.float8_e4m3fn
-                elif data_type == "Float8_e5m2":
-                    dtype = torch.float8_e5m2
-                elif data_type == "Float8_e4m3fnuz":
-                    dtype = torch.float8_e4m3fnuz
-                elif data_type == "Float8_e5m2fnuz":
-                    dtype = torch.float8_e5m2fnuz
-                elif data_type == "c10::complex<double>":
-                    dtype = torch.complex128
-                elif data_type == "c10::complex<float>":
-                    dtype = torch.complex64
+                dtype = {
+                    "float": torch.float32,
+                    "double": torch.float64,
+                    "BFloat16": torch.bfloat16,
+                    "Half": torch.half,
+                    "c10::complex<double>": torch.complex128,
+                    "c10::complex<float>": torch.complex64,
+                    "Float8_e4m3fn": torch.float8_e4m3fn,
+                    "Float8_e5m2": torch.float8_e5m2,
+                    "Float8_e4m3fnuz": torch.float8_e4m3fnuz,
+                    "Float8_e5m2fnuz": torch.float8_e5m2fnuz,
+                }.get(data_type, torch.half)
 
                 if op_sig == "GemmTunableOp":
                     [n, m, k] = [int(g) for g in untuned_gemm[1].split("_")[1:]]
