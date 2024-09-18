@@ -69,8 +69,8 @@ jobs:
         # You could potentially lock this down to a specific hash as well
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
-          python_version: "3.10"
-      - name: Run lintrunner-clang (nonretryable)
+          python-version: "3.10"
+      - name: Run lintrunner (nonretryable)
         run: |
           export ADDITIONAL_LINTRUNNER_ARGS="format --all-files"
           .github/scripts/lintrunner.sh
