@@ -20,7 +20,6 @@
 #include <ATen/ops/native_layer_norm_native.h>
 #endif
 
-
 namespace at::native {
 namespace mps {
 static void get_shapes(MPSShape* input_shape_readonly,
