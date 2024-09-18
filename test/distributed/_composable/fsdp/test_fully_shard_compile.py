@@ -446,9 +446,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
         def test_compiled():
             model, optim = model_init_fn()
-            # # FSDP2 does lazy init using 1st run, so run it once to init using eager mode
-            # run_iters(model, optim, n_iter=1)
-
             with self._remove_fsdp2_unsharded_param_graph_input_usage_with_optional_checks(
                 model, fullgraph
             ):
@@ -464,9 +461,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
         def test_eager():
             model, optim = model_init_fn()
-            # # FSDP2 does lazy init using 1st run, so run it once to init using eager mode
-            # run_iters(model, optim, n_iter=1)
-
             res = run_iters(model, optim)
             return res
 

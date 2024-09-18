@@ -290,7 +290,7 @@ main()
             return res
 
         expected = fn()
-        with config.patch(compiled_autograd=True, warmup_runs=1):
+        with config.patch(compiled_autograd=True):
             compiled_fn = torch.compile(fn)
         actual = compiled_fn()
         self.assertEqual(expected, actual)
@@ -490,7 +490,7 @@ main()
                         self.assertEqual(inductor_invoke_count_backward, 1)
             return res
 
-        def _run_test(enable_ca_via_config):
+        def run_test(enable_ca_via_config):
             expected = run_iters(iter_fn, compiled=False)
             counters["compiled_autograd"]["captures"] = 0
             with config.patch(
@@ -507,8 +507,8 @@ main()
             self.assertEqual(expected, actual)
             self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
-        _run_test(enable_ca_via_config=True)
-        _run_test(enable_ca_via_config=False)
+        run_test(enable_ca_via_config=True)
+        run_test(enable_ca_via_config=False)
 
     def test_dynamo_boxed(self):
         def get_placeholders(gm_):

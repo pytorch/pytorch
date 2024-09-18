@@ -597,20 +597,6 @@ class OptimizeContext(_TorchDynamoContext):
 
             self.enter_exit_hooks.append(call_compiled_autograd)
 
-        # self.compiled_autograd_dynamo_context_id = None
-        # if config.compiled_autograd:
-        #     def call_compiled_autograd():
-        #         assert rebuild_ctx is not None
-        #         compiler_fn = rebuild_ctx()
-        #         if self.compiled_autograd_dynamo_context_id is None:
-        #             self.compiled_autograd_dynamo_context_id = compiler_fn.context_id
-        #         compiler_fn.context_id = self.compiled_autograd_dynamo_context_id
-        #         ctx = torch._dynamo.compiled_autograd.enable(compiler_fn)
-        #         ctx.__enter__()
-        #         return functools.partial(ctx.__exit__, None, None, None)
-
-        #     self.enter_exit_hooks.append(call_compiled_autograd)
-
     def __reduce__(self):
         return (
             self.__class__,
