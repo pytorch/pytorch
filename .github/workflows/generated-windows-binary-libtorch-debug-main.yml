@@ -111,7 +111,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: pin_setuptools_72.1.0
           submodules: recursive
           repository: pytorch/builder
           path: builder
