@@ -260,6 +260,24 @@ class TestFlexAttention(InductorTestCase):
             msg = f"{name} Compiled error {compiled_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
             self.assertTrue(False, msg)
 
+    def _check_out(
+        self,
+        golden_out: torch.Tensor,
+        ref_out: torch.Tensor,
+        compiled_out: torch.Tensor,
+    ):
+        dtype = ref_out.dtype
+        with torch.no_grad():
+            # Note, it seems like we really are less accurate than the float32
+            # computation, likely due to the online softmax
+            if dtype == torch.float32:
+                fudge_factor = 10.0
+            else:
+                fudge_factor = 1.1
+
+            # Checkout output
+            self._check_equal(golden_out, ref_out, compiled_out, fudge_factor, "Out")
+
     def _check_out_and_grad(
         self,
         golden_out: torch.Tensor,
@@ -355,6 +373,148 @@ class TestFlexAttention(InductorTestCase):
             v_gold,
             v_ref,
             v,
+        )
+
+    def run_paged_attention(
+        self,
+        score_mod: Optional[Callable],
+        q: Tensor,
+        k: Tensor,
+        v: Tensor,
+        dtype: torch.dtype = torch.float16,
+        block_mask: Optional[BlockMask] = None,
+    ):
+        _, Q_H, Q_S, _ = q.shape
+        KV_B, KV_H, KV_S, QK_D = k.shape
+        _, _, _, V_D = v.shape
+
+        n_pages, page_size, max_batch_size = 32, 128, 5
+
+        if block_mask is None:
+
+            def causal_mask(b, h, q, kv):
+                return q >= kv
+
+            block_mask = create_block_mask(causal_mask, max_batch_size, 1, Q_S, KV_S)
+
+        # allocate cache
+        MAX_CACHED_SEQ_LEN = n_pages * page_size
+        k_cache = torch.zeros(
+            1,
+            KV_H,
+            MAX_CACHED_SEQ_LEN,
+            QK_D,
+            device="cuda",
+            dtype=dtype,
+        )
+        v_cache = torch.zeros(
+            1,
+            KV_H,
+            MAX_CACHED_SEQ_LEN,
+            V_D,
+            device="cuda",
+            dtype=dtype,
+        )
+
+        # "randomly" initialize the page table
+        paged_cache = PagedAttention(
+            n_pages, page_size, max_batch_size, MAX_CACHED_SEQ_LEN
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([100, 200, 50, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([100, 512, 300, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([512, 512, 300, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([512, 512, 512, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([512, 512, 512, 512], device="cuda")
+        )
+
+        # update cache with k and v
+        input_pos = torch.tensor(range(0, KV_S), device="cuda", dtype=torch.int32)
+        paged_cache.update(input_pos, k, k_cache)
+        paged_cache.update(input_pos, v, v_cache)
+
+        # convert block mask and score mod
+        new_block_mask = paged_cache.convert_logical_block_mask(
+            block_mask, MAX_CACHED_SEQ_LEN
+        )
+        compiled_sdpa = torch.compile(
+            create_attention(
+                paged_cache.get_score_mod(score_mod),
+                block_mask,
+                enable_gqa=(not Q_H == KV_H),
+            )
+        )
+
+        # compute
+        compiled_out, compiled_lse = compiled_sdpa(
+            q, k_cache, v_cache, return_lse=True, block_mask=new_block_mask
+        )
+        return compiled_out, compiled_lse
+
+    def run_test_with_paged_attention(
+        self,
+        score_mod: Optional[Callable],
+        dtype: torch.dtype = torch.float16,
+        Q_B: int = B,
+        Q_H: int = H,
+        Q_S: int = S,
+        QK_D: int = D,
+        KV_B: int = B,
+        KV_H: int = H,
+        KV_S: int = S,
+        V_D: int = D,
+        block_mask: Optional[BlockMask] = None,
+    ):
+        if TEST_WITH_ROCM and Q_H != KV_H:
+            self.skipTest("enable_gqa=True is unsupported on ROCM, for now")
+
+        q = torch.randn(
+            (Q_B, Q_H, Q_S, QK_D), dtype=dtype, device="cuda", requires_grad=True
+        )
+        k = torch.randn(
+            (KV_B, KV_H, KV_S, QK_D), dtype=dtype, device="cuda", requires_grad=True
+        )
+        v = torch.randn(
+            (KV_B, KV_H, KV_S, V_D), dtype=dtype, device="cuda", requires_grad=True
+        )
+        q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
+
+        if block_mask is None:
+
+            def causal_mask(b, h, q, kv):
+                return q >= kv
+
+            # TODO: change batch size
+            block_mask = create_block_mask(causal_mask, 4, 1, Q_S, KV_S)
+
+        sdpa_partial = create_attention(
+            score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
+        )
+        golden_out, golden_lse = sdpa_partial(q_gold, k_gold, v_gold, return_lse=True)
+        ref_out, ref_lse = sdpa_partial(q_ref, k_ref, v_ref, return_lse=True)
+
+        compiled_out, compiled_lse = self.run_paged_attention(
+            score_mod, q, k, v, dtype, block_mask
+        )
+
+        self._check_out(
+            golden_out,
+            ref_out,
+            compiled_out,
+        )
+        self._check_out(
+            golden_lse,
+            ref_lse,
+            compiled_lse,
         )
 
     def run_test_with_call(
@@ -2887,3 +3047,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     run_tests()
+
+# TODO: Add test for batch_idx in convert_logical_block_mask

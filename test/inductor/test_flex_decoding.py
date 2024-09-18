@@ -375,10 +375,10 @@ class TestFlexDecoding(InductorTestCase):
         KV_B, KV_H, KV_S, QK_D = k.shape
         _, _, _, V_D = v.shape
 
-        # TODO: change max_batch_size to 5
-        n_pages, page_size, max_batch_size = 64, 128, 4
+        n_pages, page_size, max_batch_size = 64, 128, 5
 
         if block_mask is None:
+
             def generate_causal_offset(offset: torch.Tensor):
                 def causal_offset_mask(b, h, q_idx, kv_idx):
                     return (offset + q_idx) >= kv_idx
@@ -430,9 +430,10 @@ class TestFlexDecoding(InductorTestCase):
         )
 
         # update cache with k and v
-        input_pos = torch.tensor(range(0, KV_S), device="cuda", dtype=torch.int32)
-        paged_cache.update(input_pos, k, k_cache)
-        paged_cache.update(input_pos, v, v_cache)
+        input_pos = torch.arange(KV_S, device="cuda", dtype=torch.int32)
+        batch_idx = torch.arange(KV_B, device="cuda", dtype=torch.int32)
+        paged_cache.update(batch_idx, input_pos, k, k_cache)
+        paged_cache.update(batch_idx, input_pos, v, v_cache)
 
         # convert block mask and score mod
         new_block_mask = paged_cache.convert_logical_block_mask(
@@ -495,6 +496,7 @@ class TestFlexDecoding(InductorTestCase):
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
 
         if block_mask is None:
+
             def generate_causal_offset(offset: torch.Tensor):
                 def causal_offset_mask(b, h, q_idx, kv_idx):
                     return (offset + q_idx) >= kv_idx
@@ -504,7 +506,8 @@ class TestFlexDecoding(InductorTestCase):
             mod = generate_causal_offset(
                 torch.tensor(192, device="cuda", dtype=torch.int32)
             )
-            block_mask = create_block_mask(mod, 4, 1, 1, S)
+
+            block_mask = create_block_mask(mod, Q_B, 1, 1, S)
 
         sdpa_partial = create_attention(
             score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
@@ -817,7 +820,9 @@ class TestFlexDecoding(InductorTestCase):
         context = nullcontext() if qk_d > v_d else self.assertRaises(ValueError)
         with context:
             self.run_test(score_mod, dtype, B, Hq, 1, qk_d, B, Hkv, S, V_D=v_d)
-            self.run_test_with_paged_attention(score_mod, dtype, B, Hq, 1, qk_d, B, Hkv, S, V_D=v_d)
+            self.run_test_with_paged_attention(
+                score_mod, dtype, B, Hq, 1, qk_d, B, Hkv, S, V_D=v_d
+            )
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)

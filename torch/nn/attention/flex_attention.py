@@ -912,23 +912,29 @@ class PagedAttention:
             (max_batch_size, n_pages), dtype=torch.int64, device=device
         )
 
-    def update(self, input_pos: Tensor, val: Tensor, cache: Tensor):
-        # input_pos: [S], val: [B, H, S, D], cache: [1, H, MAX_S, D]
+    def update(self, batch_idx: Tensor, input_pos: Tensor, val: Tensor, cache: Tensor):
+        """
+        Add docs
+        """
+        # batch_idx: [B] input_pos: [S], val: [B, H, S, D], cache: [1, H, MAX_S, D]
         B, H, S, D = val.shape
+        # TODO: Change to runtime error
+        assert B <= batch_idx.shape[0]
         assert H == cache.shape[1]
+        assert S == input_pos.shape[0]
         assert D == cache.shape[3]
         device = val.device
 
         # find address
         logical_block_idx = input_pos // self.page_size  # [S]
         logical_block_offset = input_pos % self.page_size  # [S]
-        physical_block_idx = self.page_table[:, logical_block_idx]  # [B, S]
+        physical_block_idx = self.page_table[batch_idx][:, logical_block_idx]  # [B, S]
 
         addr = (
-            (physical_block_idx * self.page_size + logical_block_offset[None, :])
-            .unsqueeze(1)
-            .expand(B, H, S)
-        )  # [B, H, S]
+            physical_block_idx * self.page_size + logical_block_offset[None, :]
+        )  # [B, S]
+        addr = addr.unsqueeze(1).expand(B, H, S)  # [B, H, S]
+
         head_range = (
             (torch.arange(H, dtype=torch.int, device=device) * cache.shape[2])
             .view(1, H, 1)
@@ -940,13 +946,20 @@ class PagedAttention:
         cache.view(-1, D)[addr] = val.view(-1, D)
 
     def convert_logical_block_mask(
-        self, block_mask: BlockMask, max_cached_seq_len: int
+        self,
+        block_mask: BlockMask,
+        max_cached_seq_len: int,
+        batch_idx: Optional[Tensor] = None,
     ) -> BlockMask:
         B, H, ROWS, MAX_BLOCKS_IN_COL = block_mask.kv_indices.shape
         assert block_mask.BLOCK_SIZE[1] == self.page_size
-        assert B == self.page_table.size(0)
+        assert B <= self.page_table.size(0)
         MAX_CACHED_BLOCKS_IN_COL = _cdiv(max_cached_seq_len, self.page_size)
         device = block_mask.kv_num_blocks.device
+
+        if batch_idx is None:
+            batch_idx = torch.arange(B, device=device)
+        page_table = self.page_table[batch_idx]
 
         new_kv_num_blocks = block_mask.kv_num_blocks.clone()
 
@@ -955,7 +968,7 @@ class PagedAttention:
         )
         new_kv_indices[:, :, :, :MAX_BLOCKS_IN_COL] = (
             torch.gather(
-                self.page_table, 1, block_mask.kv_indices.view(B, -1).to(torch.int64)
+                page_table, 1, block_mask.kv_indices.view(B, -1).to(torch.int64)
             )
             .view(block_mask.kv_indices.shape)
             .to(torch.int32)
@@ -970,7 +983,7 @@ class PagedAttention:
             )
             new_full_kv_indices[:, :, :, :MAX_BLOCKS_IN_COL] = (
                 torch.gather(
-                    self.page_table,
+                    page_table,
                     1,
                     block_mask.full_kv_indices.view(B, -1).to(torch.int64),
                 )
