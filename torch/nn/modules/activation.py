@@ -45,6 +45,19 @@ __all__ = [
 ]
 
 
+class ArglessActivation(Module):
+    r"""Base class for activation functions that don't require arguments.
+
+    This class serves as a foundation for simple activation functions in PyTorch,
+    providing a consistent API across various implementations. It overrides the
+    constructor of the base Module class with a no-argument version.
+
+    Subclasses of ArglessActivation should not define their own __init__ method.
+    """
+    def __init__(self) -> None:
+        super().__init__()
+
+
 class Threshold(Module):
     r"""Thresholds each element of the input Tensor.
 
@@ -303,7 +316,7 @@ class ReLU6(Hardtanh):
         return inplace_str
 
 
-class Sigmoid(Module):
+class Sigmoid(ArglessActivation):
     r"""Applies the Sigmoid function element-wise.
 
     .. math::
@@ -367,7 +380,7 @@ class Hardsigmoid(Module):
         return F.hardsigmoid(input, self.inplace)
 
 
-class Tanh(Module):
+class Tanh(ArglessActivation):
     r"""Applies the Hyperbolic Tangent (Tanh) function element-wise.
 
     Tanh is defined as:
@@ -1515,7 +1528,7 @@ class PReLU(Module):
         return f"num_parameters={self.num_parameters}"
 
 
-class Softsign(Module):
+class Softsign(ArglessActivation):
     r"""Applies the element-wise Softsign function.
 
     .. math::
@@ -1538,7 +1551,7 @@ class Softsign(Module):
         return F.softsign(input)
 
 
-class Tanhshrink(Module):
+class Tanhshrink(ArglessActivation):
     r"""Applies the element-wise Tanhshrink function.
 
     .. math::
@@ -1670,7 +1683,7 @@ class Softmax(Module):
         return f"dim={self.dim}"
 
 
-class Softmax2d(Module):
+class Softmax2d(ArglessActivation):
     r"""Applies SoftMax over features to each spatial location.
 
     When given an image of ``Channels x Height x Width``, it will
