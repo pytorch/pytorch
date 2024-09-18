@@ -6252,9 +6252,6 @@ def scan(combine_subgraph, init, inputs, dim, reverse, additional_inputs):
     num_additional_inputs = len(additional_inputs)
     specialized_dim = int(dim)
 
-    def extract_scan_args(combine_subgraph, init, xs, dim, reverse, additional_inputs):
-        return combine_subgraph, init, xs, dim, reverse, additional_inputs
-
     def _extract_init_xs_additional(flat_args: List[Any]):
         return (
             flat_args[:num_init_leaves],
