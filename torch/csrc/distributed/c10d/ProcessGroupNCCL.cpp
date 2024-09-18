@@ -834,6 +834,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // both timeout and other errors.
   dumpOnTimeoutOrEx_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
+  sleepAfterException_ = getCvarBool(TORCH_NCCL_SLEEP_AFTER_EXCEPTION, false);
   // logging C++ stack isn't safe. Introduce a variable to control it.
   logCppStackOnUncleanShutdown_ =
       getCvarBool(TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN, true);
@@ -1808,12 +1809,14 @@ void ProcessGroupNCCL::watchdogHandler() {
             }
             // signal the monitor thread on PG0 to start dumping
             shouldDump_.store(true);
-            // This sleep is used to give time for dumping before throwing
-            // exception
-            std::this_thread::sleep_for(
-                std::chrono::seconds(heartbeatTimeoutInSec_));
-            LOG(INFO) << logPrefix() << "slept for " << heartbeatTimeoutInSec_
-                      << " giving time for flight recorder dumps to finish.";
+            if (sleepAfterException_) {
+              // This sleep is used to give time for dumping before throwing
+              // exception
+              std::this_thread::sleep_for(
+                  std::chrono::seconds(heartbeatTimeoutInSec_));
+              LOG(INFO) << logPrefix() << "slept for " << heartbeatTimeoutInSec_
+                        << " giving time for flight recorder dumps to finish.";
+            }
           } catch (const std::exception& e) {
             LOG(ERROR) << logPrefix()
                        << "Failed to set dump signal in tcpstore. "
