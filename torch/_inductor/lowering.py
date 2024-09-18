@@ -262,7 +262,7 @@ def transform_args(
     args: List[Any],
     kwargs: Dict[str, Any],
     broadcast: bool,
-    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
+    type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
     convert_input_to_bool: bool,
 ) -> Tuple[List[Any], Dict[str, Any]]:
     args_indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
@@ -285,11 +285,11 @@ def transform_args(
                 *promoting_args, type_promotion_kind=type_promotion_kind
             )
 
-        # sometimes args are an immutable list so we can't mutate them
         device = (
             args[args_indices[0]] if args_indices else kwargs[kwargs_indices[0]]
         ).get_device()
 
+        # sometimes args are an immutable list so we can't mutate them
         def promote(arg):
             if isinstance(arg, TensorBox):
                 return to_dtype(arg, dtype)
@@ -5746,8 +5746,12 @@ def reduce_min(x, dim=None, keepdim=False):
 
 
 register_lowering(prims.xor_sum)(make_reduction("xor_sum"))
-reduce_amax = register_lowering(aten.amax)(make_reduction("max"))
-reduce_amin = register_lowering(aten.amin)(make_reduction("min"))
+reduce_amax = register_lowering(aten.amax, type_promotion_kind=None)(
+    make_reduction("max")
+)
+reduce_amin = register_lowering(aten.amin, type_promotion_kind=None)(
+    make_reduction("min")
+)
 reduce_argmax = register_lowering(aten.argmax)(
     make_reduction("argmax", override_return_dtype=torch.int64)
 )
