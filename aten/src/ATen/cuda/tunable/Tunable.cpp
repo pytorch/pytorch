@@ -116,8 +116,7 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
   std::scoped_lock l{lock_};
   if (!untuned_file.good()) {
     TORCH_WARN_ONCE("failed to open file for writing; untuned gemm will not be saved");
-  }
-  else{
+  } else {
     bool isNew = false;
     auto it = untuned_results_.find(op_signature);
     if (it == untuned_results_.end()) {
