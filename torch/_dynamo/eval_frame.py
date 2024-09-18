@@ -116,23 +116,29 @@ def _maybe_set_eval_frame(callback: DynamoCallback, context_id: str, state: str)
         return callback
     else:
         if config.warmup_runs == 0:
+            log.warn(f"_maybe_set_eval_frame: {context_id}, config.warmup_runs == 0")
             return set_eval_frame(callback)
         else:
             assert state in ["enter", "exit"]
             if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+                log.warn(f"_maybe_set_eval_frame: {context_id}, in_compiled_autograd_region")
                 # Compiled Autograd Dynamo warmup is handled in compiled_autograd.py _EnableContext.
                 return set_eval_frame(callback)
             else:
                 if state == "enter":
                     if context_id_to_warmup_count[context_id] < config.warmup_runs:
+                        log.warn(f"_maybe_set_eval_frame: {context_id}, enter, <, set None")
                         return set_eval_frame(None)
                     else:
+                        log.warn(f"_maybe_set_eval_frame: {context_id}, enter, >=, set callback")
                         return set_eval_frame(callback)
                 elif state == "exit":
                     if context_id_to_warmup_count[context_id] < config.warmup_runs:
+                        log.warn(f"_maybe_set_eval_frame: {context_id}, exit, <, set callback")
                         context_id_to_warmup_count[context_id] += 1
                         return set_eval_frame(callback)
                     else:
+                        log.warn(f"_maybe_set_eval_frame: {context_id}, exit, >=, set callback")
                         return set_eval_frame(callback)
 
 
@@ -583,11 +589,6 @@ class OptimizeContext(_TorchDynamoContext):
         self.compiled_autograd_ctx = None
         if config.compiled_autograd:
             def call_compiled_autograd():
-                # assert rebuild_ctx is not None
-                # compiler_fn = rebuild_ctx()
-                # ctx = torch._dynamo.compiled_autograd.enable(compiler_fn)
-                # ctx.__enter__()
-                # return functools.partial(ctx.__exit__, None, None, None)
                 if self.compiled_autograd_ctx is None:
                     assert rebuild_ctx is not None
                     compiler_fn = rebuild_ctx()

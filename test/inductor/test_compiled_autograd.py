@@ -13,6 +13,7 @@ import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from unittest import mock
+import copy
 
 import torch
 import torch.nn as nn
@@ -290,7 +291,7 @@ main()
             return res
 
         expected = fn()
-        with config.patch(compiled_autograd=True):
+        with config.patch(compiled_autograd=True, warmup_runs=1):
             compiled_fn = torch.compile(fn)
         actual = compiled_fn()
         self.assertEqual(expected, actual)
@@ -433,6 +434,67 @@ main()
             opt_bwd()
 
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+
+    def test_warmup_run(self):
+        # TODO(yf225): also add warmup test for forward Dynamo
+        warmup_runs = 2
+        n_iters = 5
+        ca_invoke_count = 0
+        def increment_ca_invoke_count(gm):
+            nonlocal ca_invoke_count
+            if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+                ca_invoke_count += 1
+        
+        def run_iters(model, x):
+            res = []
+            for _ in range(n_iters):
+                result = model(x).sum()
+                result.backward()
+                res.append(model.weight.grad)
+                res.append(model.bias.grad)
+                model.zero_grad()
+            return res
+
+        ref_model = torch.nn.Linear(4, 4)
+        compiled_model = copy.deepcopy(ref_model)
+        x = torch.randn([1, 4])
+        expected_out = run_iters(ref_model, x)
+        with config.patch(compiled_autograd=True, warmup_runs=warmup_runs), torch._inductor.config.patch(
+            post_grad_custom_post_pass=increment_ca_invoke_count
+        ):
+            compiled_model = torch.compile(compiled_model, fullgraph=True)
+            actual_out = run_iters(compiled_model, x)
+        self.assertEqual(expected_out, actual_out)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        self.assertEqual(ca_invoke_count, n_iters - warmup_runs)
+
+        # def fn():
+        #     torch.manual_seed(123)
+        #     model = torch.nn.Sequential(
+        #         torch.nn.Linear(4, 4),
+        #         torch.nn.Sigmoid(),
+        #     )
+
+        #     res = []
+        #     for i in range(3):
+        #         print(f"iter: {i}")
+        #         x = torch.randn([1, 4])
+
+        #         result = model(x).sum()
+        #         result.backward()
+        #         res.append(model[0].weight.grad)
+        #         res.append(model[0].bias.grad)
+        #         model.zero_grad()
+        #     return res
+
+        # expected = fn()
+        # with config.patch(compiled_autograd=True, warmup_runs=1), torch._inductor.config.patch(
+        #     post_grad_custom_pre_pass=increment_ca_invoke_count
+        # ):
+        #     compiled_fn = torch.compile(fn)
+        #     actual = compiled_fn()
+        # self.assertEqual(expected, actual)
+        # self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
     def test_dynamo_boxed(self):
         def get_placeholders(gm_):
