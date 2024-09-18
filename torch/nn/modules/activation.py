@@ -46,14 +46,15 @@ __all__ = [
 
 
 class ArglessActivation(Module):
-    r"""Base class for activation functions that don't require arguments.
+    r"""Base class for activation functions that don't require constructor arguments.
 
-    This class serves as a foundation for simple activation functions in PyTorch,
-    providing a consistent API across various implementations. It overrides the
-    constructor of the base Module class with a no-argument version.
+    This class standardizes the initialization process for simple activation functions.
+    It provides a parameterless constructor that calls the base Module's __init__
+    method, ensuring a consistent initialization across all subclasses.
 
     Subclasses of ArglessActivation should not define their own __init__ method.
     """
+
     def __init__(self) -> None:
         super().__init__()
 
