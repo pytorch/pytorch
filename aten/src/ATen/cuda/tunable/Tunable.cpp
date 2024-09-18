@@ -125,8 +125,7 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
     }
 
     auto it_kernel_map = it->second.find(params_signature);
-    if (it_kernel_map == it->second.end())
-    {
+    if (it_kernel_map == it->second.end()) {
       it->second.insert(params_signature);
       isNew = true;
     }
