@@ -16,6 +16,7 @@
 #include <ATen/ops/_upsample_nearest_exact2d_backward.h>
 #include <ATen/ops/_upsample_nearest_exact2d_backward_native.h>
 #include <ATen/ops/_upsample_nearest_exact2d_native.h>
+#include <ATen/ops/upsample_bicubic2d_backward_native.h>
 #include <ATen/ops/upsample_bicubic2d_native.h>
 #include <ATen/ops/upsample_bilinear2d.h>
 #include <ATen/ops/upsample_bilinear2d_backward.h>
@@ -221,6 +222,59 @@ static MetalShaderLibrary lib(R"UPSAMPLE_METAL(
 #include <metal_stdlib>
 using namespace metal;
 
+// Atomic operations helper
+template <typename T>
+struct AtomicType {};
+template <typename T>
+using AtomicType_t = typename AtomicType<T>::type;
+
+template <>
+struct AtomicType<float> {
+  using type = atomic<float>;
+  static inline void atomic_add(device type* data, long offset, float value) {
+    atomic_fetch_add_explicit(data + offset, value, memory_order_relaxed);
+  }
+};
+
+// As of Metal3.2 atomic operations are not supported on half-precision floats,
+// so they must be simulated Using atomic compare and exchange over 32-bit
+// atomic type
+template <typename T>
+static inline void atomic_add_helper(
+    device atomic<int>* data,
+    long offset,
+    float value) {
+  auto ptr = data + (offset >> 1);
+  auto old = atomic_load_explicit(ptr, memory_order_relaxed);
+  union {
+    int i;
+    T t[2];
+  } val;
+  do {
+    val.i = old;
+    val.t[offset & 1] += static_cast<T>(value);
+  } while (!atomic_compare_exchange_weak_explicit(
+      ptr, &old, val.i, memory_order_relaxed, memory_order_relaxed));
+}
+
+template <>
+struct AtomicType<half> {
+  using type = atomic<int>;
+  static inline void atomic_add(device type* data, long offset, float value) {
+    atomic_add_helper<half>(data, offset, value);
+  }
+};
+
+#if __METAL_VERSION__ >= 310
+template <>
+struct AtomicType<bfloat> {
+  using type = atomic<int>;
+  static inline void atomic_add(device type* data, long offset, float value) {
+    atomic_add_helper<bfloat>(data, offset, value);
+  }
+};
+#endif
+
 // Based on
 // https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
 template <typename accscalar_t>
@@ -289,7 +343,28 @@ scalar_t upsample_get_value_bounded(
     long x) {
   int access_y = max(min(y, dim.y - 1), 0L);
   int access_x = max(min(x, dim.x - 1), 0L);
-  return data[n * strides.w + c * strides.z + access_y * strides.y + access_x * strides.x];
+  return data
+      [n * strides.w + c * strides.z + access_y * strides.y +
+       access_x * strides.x];
+}
+
+template <typename scalar_t>
+void upsample_increment_value_bounded(
+    device AtomicType_t<scalar_t>* data,
+    long2 dim,
+    ulong4 strides,
+    long n,
+    long c,
+    long y,
+    long x,
+    float value) {
+  int access_y = max(min(y, dim.y - 1), 0L);
+  int access_x = max(min(x, dim.x - 1), 0L);
+  AtomicType<scalar_t>::atomic_add(
+      data,
+      n * strides.w + c * strides.z + access_y * strides.y +
+          access_x * strides.x,
+      value);
 }
 
 template <typename T>
@@ -360,10 +435,63 @@ kernel void upsample_bicubic2d(
           coefficients[3],
           t_y));
       outputData
-          [ n * output_strides.w + c * output_strides.z + output_x * output_strides.x + output_y * output_strides.y] = inp;
+          [n * output_strides.w + c * output_strides.z +
+           output_x * output_strides.x + output_y * output_strides.y] = inp;
     }
   }
 }
+
+template <typename T>
+kernel void upsample_bicubic2d_backward(
+    device AtomicType_t<T>* gradInputData [[buffer(0)]],
+    constant T* gradOutputData [[buffer(1)]],
+    constant ulong4& input_strides [[buffer(2)]],
+    constant ulong4& output_strides [[buffer(3)]],
+    constant long4& input_sizes [[buffer(4)]],
+    constant long4& output_sizes [[buffer(5)]],
+    constant float2& scales [[buffer(6)]],
+    constant bool& align_corners [[buffer(7)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  auto output_x = thread_index % output_sizes.x;
+  auto output_y = thread_index / output_sizes.x;
+  auto real_x = area_pixel_compute_source_index<float>(
+      scales.x, output_x, align_corners, /*cubic=*/true);
+  int input_x = floor(real_x);
+  float t_x = real_x - input_x;
+
+  auto real_y = area_pixel_compute_source_index<float>(
+      scales.y, output_y, align_corners, /*cubic=*/true);
+  int input_y = floor(real_y);
+  float t_y = real_y - input_y;
+
+  float x_coeffs[4];
+  float y_coeffs[4];
+
+  get_cubic_upsampling_coefficients(x_coeffs, t_x);
+  get_cubic_upsampling_coefficients(y_coeffs, t_y);
+
+  for (int n = 0; n < output_sizes.w; n++) {
+    for (int c = 0; c < output_sizes.z; ++c) {
+      auto out_value = gradOutputData
+          [n * output_strides.w + c * output_strides.z +
+           output_x * output_strides.x + output_y * output_strides.y];
+      for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
+          upsample_increment_value_bounded<T>(
+              gradInputData,
+              input_sizes.xy,
+              input_strides,
+              n,
+              c,
+              input_y - 1 + i,
+              input_x - 1 + j,
+              out_value * y_coeffs[i] * x_coeffs[j]);
+        }
+      }
+    }
+  }
+}
+
 #define INSTANTIATE_UPSAMPLE_BICUBIC(DTYPE)                        \
   template [[host_name("upsample_bicubic2d_" #DTYPE)]] kernel void \
   upsample_bicubic2d<DTYPE>(                                       \
@@ -373,14 +501,30 @@ kernel void upsample_bicubic2d(
       constant ulong4 & output_strides [[buffer(3)]],              \
       constant long4 & input_sizes [[buffer(4)]],                  \
       constant long4 & output_sizes [[buffer(5)]],                 \
-      constant float2& scales [[buffer(6)]],                       \
+      constant float2 & scales [[buffer(6)]],                      \
       constant bool& align_corners [[buffer(7)]],                  \
       uint thread_index [[thread_position_in_grid]])
 
+#define INSTANTIATE_UPSAMPLE_BICUBIC_BACKWARD(DTYPE)                        \
+  template [[host_name("upsample_bicubic2d_backward_" #DTYPE)]] kernel void \
+  upsample_bicubic2d_backward<DTYPE>(                                       \
+      device AtomicType_t<DTYPE> * gradInputData [[buffer(0)]],             \
+      constant DTYPE * gradOutputData [[buffer(1)]],                        \
+      constant ulong4 & input_strides [[buffer(2)]],                        \
+      constant ulong4 & output_strides [[buffer(3)]],                       \
+      constant long4 & input_sizes [[buffer(4)]],                           \
+      constant long4 & output_sizes [[buffer(5)]],                          \
+      constant float2 & scales [[buffer(6)]],                               \
+      constant bool& align_corners [[buffer(7)]],                           \
+      uint thread_index [[thread_position_in_grid]])
+
 INSTANTIATE_UPSAMPLE_BICUBIC(float);
+INSTANTIATE_UPSAMPLE_BICUBIC_BACKWARD(float);
 INSTANTIATE_UPSAMPLE_BICUBIC(half);
+INSTANTIATE_UPSAMPLE_BICUBIC_BACKWARD(half);
 #if __METAL_VERSION__ >= 310
 INSTANTIATE_UPSAMPLE_BICUBIC(bfloat);
+INSTANTIATE_UPSAMPLE_BICUBIC_BACKWARD(bfloat);
 #endif
 )UPSAMPLE_METAL");
 
@@ -409,12 +553,12 @@ static accscalar_t area_pixel_compute_scale(int input_size,
   }
 }
 
-static void upsample_bicubic_out_template(const Tensor& input,
-                                          IntArrayRef output_size,
-                                          bool align_corners,
-                                          std::optional<double> scale_h_opt,
-                                          std::optional<double> scale_w_opt,
-                                          const Tensor& output) {
+static void upsample_bicubic2d_out_template(const Tensor& input,
+                                            IntArrayRef output_size,
+                                            bool align_corners,
+                                            std::optional<double> scale_h_opt,
+                                            std::optional<double> scale_w_opt,
+                                            const Tensor& output) {
   if (input.numel() == 0) {
     return;
   }
@@ -443,6 +587,46 @@ static void upsample_bicubic_out_template(const Tensor& input,
     }
   });
 }
+
+static void upsample_bicubic2d_backward_out_template(const Tensor& grad_input,
+                                                     const Tensor& grad_output,
+                                                     IntArrayRef output_size,
+                                                     IntArrayRef input_size,
+                                                     bool align_corners,
+                                                     std::optional<double> scale_h_opt,
+                                                     std::optional<double> scale_w_opt) {
+  grad_input.zero_();
+  std::array<float, 2> scales = {
+      area_pixel_compute_scale<float>(grad_input.size(3), grad_output.size(3), align_corners, scale_w_opt),
+      area_pixel_compute_scale<float>(grad_input.size(2), grad_output.size(2), align_corners, scale_h_opt)};
+  auto upsamplePSO =
+      lib.getPipelineStateForFunc("upsample_bicubic2d_backward_" + mps::scalarToMetalTypeString(grad_input));
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      std::array<int64_t, 4> output_strides = {
+          grad_output.stride(3), grad_output.stride(2), grad_output.stride(1), grad_output.stride(0)};
+      std::array<int64_t, 4> output_sizes = {
+          grad_output.size(3), grad_output.size(2), grad_output.size(1), grad_output.size(0)};
+      std::array<int64_t, 4> input_sizes = {
+          grad_input.size(3), grad_input.size(2), grad_input.size(1), grad_input.size(0)};
+      std::array<int64_t, 4> input_strides = {
+          grad_input.stride(3), grad_input.stride(2), grad_input.stride(1), grad_input.stride(0)};
+      auto computeEncoder = stream->commandEncoder();
+      [computeEncoder setComputePipelineState:upsamplePSO];
+      mtl_setBuffer(computeEncoder, grad_input, 0);
+      mtl_setBuffer(computeEncoder, grad_output, 1);
+      mtl_setBytes(computeEncoder, input_strides, 2);
+      mtl_setBytes(computeEncoder, output_strides, 3);
+      mtl_setBytes(computeEncoder, input_sizes, 4);
+      mtl_setBytes(computeEncoder, output_sizes, 5);
+      mtl_setBytes(computeEncoder, scales, 6);
+      mtl_setBytes(computeEncoder, align_corners, 7);
+      mtl_dispatch1DJob(computeEncoder, upsamplePSO, output_size[0] * output_size[1]);
+    }
+  });
+}
+
 } // namespace mps
 
 TORCH_IMPL_FUNC(upsample_nearest1d_out_mps)
@@ -558,7 +742,19 @@ TORCH_IMPL_FUNC(upsample_bicubic2d_out_mps)
  std::optional<double> scales_h,
  std::optional<double> scales_w,
  const Tensor& output) {
-  mps::upsample_bicubic_out_template(input, output_size, align_corners, scales_h, scales_w, output);
+  mps::upsample_bicubic2d_out_template(input, output_size, align_corners, scales_h, scales_w, output);
+}
+
+TORCH_IMPL_FUNC(upsample_bicubic2d_backward_out_mps)
+(const Tensor& grad_output,
+ IntArrayRef output_size,
+ IntArrayRef input_size,
+ bool align_corners,
+ std::optional<double> scales_h,
+ std::optional<double> scales_w,
+ const Tensor& grad_input) {
+  mps::upsample_bicubic2d_backward_out_template(
+      grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
 }
 
 } // namespace at::native
