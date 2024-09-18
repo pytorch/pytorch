@@ -116,23 +116,23 @@ def _maybe_set_eval_frame(callback: DynamoCallback, context_id: str, state: str)
         )
         return callback
     else:
-        if (
-            config.warmup_runs == 0
-            # Compiled Autograd Dynamo warmup is handled within `torch._dynamo.compiled_autograd.enable()`.
-            or torch._dynamo.compiled_autograd.in_compiled_autograd_region
-        ):
+        if config.warmup_runs == 0:
             return set_eval_frame(callback)
         else:
-            if state == "enter":
-                return set_eval_frame(
-                    None
-                    if context_id_to_warmup_count[context_id] < config.warmup_runs
-                    else callback
-                )
-            elif state == "exit":
-                if context_id_to_warmup_count[context_id] < config.warmup_runs:
-                    context_id_to_warmup_count[context_id] += 1
+            if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+                # Compiled Autograd Dynamo warmup is handled within `torch._dynamo.compiled_autograd.enable()`.
                 return set_eval_frame(callback)
+            else:
+                if state == "enter":
+                    return set_eval_frame(
+                        None
+                        if context_id_to_warmup_count[context_id] < config.warmup_runs
+                        else callback
+                    )
+                elif state == "exit":
+                    if context_id_to_warmup_count[context_id] < config.warmup_runs:
+                        context_id_to_warmup_count[context_id] += 1
+                    return set_eval_frame(callback)
 
 
 def _reset_guarded_backend_cache():
