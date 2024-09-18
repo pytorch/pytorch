@@ -323,15 +323,13 @@ static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args);
 // This class defines the info required to call the C++ autograd function at runtime
 struct CustomOpImpl {
   std::function<variable_list(variable_list)> lambda;
-  at::IValue idx; // is this actually proxied in the graph????
+  std::unique_ptr<at::IValue> idx;
   std::vector<std::optional<VariableInfo>> output_info;
 };
 
 struct CustomOpImpls {
   static std::unique_ptr<CustomOpImpls> create() {
-    auto obj = CustomOpImpls();
-    obj.impls.reserve(1000);  // fix
-    return std::make_unique<CustomOpImpls>(std::move(obj));
+    return std::make_unique<CustomOpImpls>();
   };
 
   std::vector<CustomOpImpl> impls;
@@ -399,22 +397,23 @@ static at::IValue* lambda_collect(
     const std::vector<bool>& is_variable_input,
     const std::vector<VariableInfo>& output_info) {
   std::vector<std::optional<VariableInfo>> output_info_for_vars;
+  size_t next_output_idx = 0;
   for (auto i : c10::irange(is_variable_input.size())) {
     if (!is_variable_input[i]) {
       output_info_for_vars.emplace_back(std::nullopt);
     } else {
-      output_info_for_vars.emplace_back(output_info[i]);
+      // TODO: add a test for this
+      output_info_for_vars.emplace_back(output_info[next_output_idx++]);
     }
   }
   std::cout << "output_info_for_vars size: " << output_info_for_vars.size() << std::endl;
   int64_t idx = custom_op_impls->impls.size();
   custom_op_impls->impls.emplace_back(CustomOpImpl{
     .lambda = std::move(lambda),
-    .idx = idx,
+    .idx = std::make_unique<at::IValue>(idx),
     .output_info = std::move(output_info_for_vars),
   });
   std::cout << "custom_op_impls->impls[i].output_info " << custom_op_impls->impls[idx].output_info.size() << std::endl;
-  TORCH_INTERNAL_ASSERT(custom_op_impls->impls[idx].idx.isInt());
 
   std::shared_ptr<Node> node = args.get_node_call()->node;
   auto& lifted_nodes = custom_op_impls->lifted_nodes;
@@ -434,7 +433,7 @@ static at::IValue* lambda_collect(
       args.collect(output_info[i].size);
     }
   }
-  auto* ptr = &custom_op_impls->impls[idx].idx;
+  auto* ptr = custom_op_impls->impls[idx].idx.get();
   TORCH_INTERNAL_ASSERT(ptr->isInt());
   return ptr;
 }
@@ -464,7 +463,7 @@ static variable_list lambda_lift(
     PyObject* py_compiler,
     variable_list&& inputs) {
   size_t next_lambdas_idx = custom_op_impls->next_idx++;
-  at::IValue& idx = custom_op_impls->impls[next_lambdas_idx].idx;
+  at::IValue& idx = *custom_op_impls->impls[next_lambdas_idx].idx;
   ssv.before(idx);
   THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
   auto& lambda_output_info = custom_op_impls->impls[next_lambdas_idx].output_info;
