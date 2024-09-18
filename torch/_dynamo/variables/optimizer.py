@@ -130,13 +130,13 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # and the state is not initialized
         def safe_to_set_capturable(group):
             all_uninitialized = True
-            all_cuda = True
+            all_gpu = True
 
             for p in group.get("params", []):
-                all_cuda &= p.is_cuda
+                all_gpu &= p.is_cuda or p.is_xpu
                 all_uninitialized &= p not in self.value.state
 
-            return "capturable" in group and all_uninitialized and all_cuda
+            return "capturable" in group and all_uninitialized and all_gpu
 
         # track indices to not set so we don't need to
         # in the variable tracker realize the whole state

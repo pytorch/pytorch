@@ -621,6 +621,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
         ("cub/device/device_reduce.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("cub/device/device_scan.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("cub/device/device_select.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
+        ("nvtx3/nvtx3.hpp", ("roctracer/roctx.h", CONV_INCLUDE, API_ROCTX)),
         ("nvToolsExt.h", ("roctracer/roctx.h", CONV_INCLUDE, API_ROCTX)),
         ("nvml.h", ("rocm_smi/rocm_smi.h", CONV_INCLUDE, API_ROCMSMI)),
     ]
@@ -7913,6 +7914,10 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cub::BLOCK_STORE_WARP_TRANSPOSE", ("hipcub::BLOCK_STORE_WARP_TRANSPOSE", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::BLOCK_LOAD_DIRECT", ("hipcub::BLOCK_LOAD_DIRECT", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::BLOCK_STORE_DIRECT", ("hipcub::BLOCK_STORE_DIRECT", CONV_SPECIAL_FUNC, API_RUNTIME)),
+        (
+            "cub::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY",
+            ("hipcub::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY", CONV_SPECIAL_FUNC, API_RUNTIME)
+        ),
         ("cub::BlockReduce", ("hipcub::BlockReduce", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::BlockScan", ("hipcub::BlockScan", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::BlockLoad", ("hipcub::BlockLoad", CONV_SPECIAL_FUNC, API_RUNTIME)),

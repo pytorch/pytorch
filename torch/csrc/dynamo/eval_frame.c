@@ -10,9 +10,11 @@
 #include <opcode.h>
 #include <stdbool.h>
 
+#define MAX_COMPILE_CONTEXT_SIZE 100
+
 PyObject* guard_error_hook = NULL;
 const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
-
+static char compile_context[MAX_COMPILE_CONTEXT_SIZE];
 static int active_dynamo_threads = 0;
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
@@ -134,7 +136,7 @@ static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {
 
 static PyTypeObject THPPyInterpreterFrameType = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "torch._C.dynamo.eval_frame._PyInterpreterFrame",
+    .tp_name = "torch._C._dynamo.eval_frame._PyInterpreterFrame",
     .tp_basicsize = sizeof(THPPyInterpreterFrame),
     .tp_flags = Py_TPFLAGS_DEFAULT,
     .tp_getset = THPPyInterpreterFrame_properties,
@@ -483,7 +485,8 @@ inline static PyObject* eval_custom_code(
     PyCodeObject* code,
     int throw_flag,
     int free_vars_copied) {
-  _PytorchRecordFunctionState* rf = _pytorch_record_function_enter("Torch-Compiled Region");
+  const char* trace_id = compile_context;
+  _PytorchRecordFunctionState* rf = _pytorch_record_function_enter_with_context("Torch-Compiled Region", trace_id);
   PyObject* result = eval_custom_code_impl(
     tstate,
     frame,
@@ -517,6 +520,8 @@ static PyObject* _custom_eval_frame_shim(
   }
   return result;
 }
+
+static PyObject* skip_code_recursive_flag;
 
 // NOTE: In 3.12+, the frame evaluation function (callee) is responsible for clearing/popping
 // the frame, meaning that unless we default evaluate the original frame,
@@ -576,6 +581,13 @@ static PyObject* _custom_eval_frame(
   if (extra == SKIP_CODE || (callback == Py_False && extra == NULL)) {
     DEBUG_TRACE("skip %s", get_frame_name(frame));
     return eval_frame_default(tstate, frame, throw_flag);
+  }
+  if (extra == SKIP_CODE_RECURSIVE) {
+    DEBUG_TRACE("skip recursive %s", get_frame_name(frame));
+    eval_frame_callback_set(Py_None);
+    PyObject* result = eval_frame_default(tstate, frame, throw_flag);
+    eval_frame_callback_set(callback);
+    return result;
   }
 
   if (extra == NULL) {
@@ -665,6 +677,14 @@ static PyObject* _custom_eval_frame(
     // inside the torch.compile block we won't try to Dynamo anything else.
     *should_clear_frame = 1;
     return NULL;
+  } else if (result == skip_code_recursive_flag) {
+    // Dynamo returned skip_code_recursive_flag, so we should recursively skip code.
+    DEBUG_TRACE("create skip recursive %s", get_frame_name(frame));
+    set_extra_state(F_CODE(frame), SKIP_CODE_RECURSIVE);
+    PyObject* r = eval_frame_default(tstate, frame, throw_flag);
+    // Re-enable custom behavior
+    eval_frame_callback_set(callback);
+    return r;
   } else if (result != Py_None) {
     DEBUG_TRACE("create cache %s", get_frame_name(frame));
 
@@ -709,7 +729,7 @@ static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {NULL};
 
 static PyTypeObject THPPyInterpreterFrameType = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "torch._C.dynamo.eval_frame._PyInterpreterFrame",
+    .tp_name = "torch._C._dynamo.eval_frame._PyInterpreterFrame",
     .tp_basicsize = sizeof(THPPyInterpreterFrame),
     .tp_flags = Py_TPFLAGS_DEFAULT,
     .tp_getset = THPPyInterpreterFrame_properties,
@@ -817,12 +837,27 @@ static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* obj) {
   Py_RETURN_NONE;
 }
 
+static PyObject* set_context_frame(PyObject* dummy, PyObject* obj) {
+    int frame_id, frame_compile_id, attempt;
+    if (!PyArg_ParseTuple(obj, "iii", &frame_id, &frame_compile_id, &attempt)) {
+        PyErr_SetString(PyExc_TypeError, "Expected three integers");
+        return NULL;
+    }
+    if (attempt == 0) {
+      sprintf(compile_context, "%d/%d", frame_id, frame_compile_id);
+    } else {
+      sprintf(compile_context, "%d/%d_%d", frame_id, frame_compile_id, attempt);
+    }
+    Py_RETURN_NONE;
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_O, NULL},
     {"reset_code", reset_code, METH_O, NULL},
     {"unsupported", unsupported, METH_VARARGS, NULL},
     {"skip_code", skip_code, METH_O, NULL},
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
+    {"set_context_frame", set_context_frame, METH_O, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
@@ -864,6 +899,14 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
     return NULL;
   }
 #endif
+
+  skip_code_recursive_flag = PyObject_New(PyObject, &PyBaseObject_Type);
+  if (skip_code_recursive_flag == NULL) {
+    return NULL;
+  }
+  if (PyModule_AddObject(module, "skip_code_recursive_flag", skip_code_recursive_flag) != 0) {
+    return NULL;
+  }
 
   return module;
 }

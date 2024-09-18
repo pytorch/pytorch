@@ -116,14 +116,13 @@ if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   cd /tmp/libtorch
 fi
 
-if [[ "$GPU_ARCH_TYPE" == xpu ]]; then
-  # Workaround for __mkl_tmp_MOD unbound variable issue, refer https://github.com/pytorch/pytorch/issues/130543
-  set +u
-  source /opt/intel/oneapi/pytorch-gpu-dev-0.5/oneapi-vars.sh
-fi
-
 # Test the package
 /builder/check_binary.sh
+
+if [[ "\$GPU_ARCH_TYPE" != *s390x* && "\$GPU_ARCH_TYPE" != *xpu* && "\$GPU_ARCH_TYPE" != *rocm*  && "$PACKAGE_TYPE" != libtorch ]]; then
+  # Exclude s390, xpu, rocm and libtorch builds from smoke testing
+  python /builder/test/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled
+fi
 
 # Clean temp files
 cd /builder && git clean -ffdx
