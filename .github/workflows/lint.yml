@@ -73,6 +73,7 @@ jobs:
       - name: Run lintrunner (nonretryable)
         run: |
           export ADDITIONAL_LINTRUNNER_ARGS="format --all-files"
+          ${CONDA_RUN} python -m pip install lintrunner
           .github/scripts/lintrunner.sh
       - name: Suggest changes
         uses: parkerbxyz/suggest-changes@v1
