@@ -18,9 +18,7 @@
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
 
-namespace torch {
-namespace autograd {
-namespace utils {
+namespace torch::autograd::utils {
 
 inline PyObject* wrap(bool value) {
   if (value) {
@@ -49,7 +47,7 @@ inline PyObject* wrap(c10::complex<double> value) {
 }
 
 inline PyObject* wrap(void* value) {
-  return THPUtils_packInt64(reinterpret_cast<intptr_t>(value));
+  return PyLong_FromVoidPtr(value);
 }
 
 inline PyObject* wrap(THPDtype* dtype) {
@@ -148,6 +146,4 @@ PyObject* wrap(PyTypeObject* type, std::tuple<Ts...> values) {
   return r.release();
 }
 
-} // namespace utils
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd::utils

@@ -835,7 +835,7 @@ if torch._C._has_mkldnn:
             )
             repl.meta.update(add_node.meta)
             add_node.replace_all_uses_with(repl)
-            match.erase_nodes(graph)
+            match.erase_nodes()
 
     def _is_packable_mkldnn_rnn_layer(match):
         lstm_node = match.output_node()

@@ -36,10 +36,10 @@ class Invocation(object):
     environment_variables: Any = dataclasses.field(
         default=None, metadata={"schema_property_name": "environmentVariables"}
     )
-    executable_location: Optional[
-        _artifact_location.ArtifactLocation
-    ] = dataclasses.field(
-        default=None, metadata={"schema_property_name": "executableLocation"}
+    executable_location: Optional[_artifact_location.ArtifactLocation] = (
+        dataclasses.field(
+            default=None, metadata={"schema_property_name": "executableLocation"}
+        )
     )
     exit_code: Optional[int] = dataclasses.field(
         default=None, metadata={"schema_property_name": "exitCode"}
@@ -71,10 +71,10 @@ class Invocation(object):
     properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    response_files: Optional[
-        List[_artifact_location.ArtifactLocation]
-    ] = dataclasses.field(
-        default=None, metadata={"schema_property_name": "responseFiles"}
+    response_files: Optional[List[_artifact_location.ArtifactLocation]] = (
+        dataclasses.field(
+            default=None, metadata={"schema_property_name": "responseFiles"}
+        )
     )
     rule_configuration_overrides: Optional[
         List[_configuration_override.ConfigurationOverride]
@@ -96,21 +96,22 @@ class Invocation(object):
     stdout_stderr: Optional[_artifact_location.ArtifactLocation] = dataclasses.field(
         default=None, metadata={"schema_property_name": "stdoutStderr"}
     )
-    tool_configuration_notifications: Optional[
-        List[_notification.Notification]
-    ] = dataclasses.field(
-        default=None,
-        metadata={"schema_property_name": "toolConfigurationNotifications"},
+    tool_configuration_notifications: Optional[List[_notification.Notification]] = (
+        dataclasses.field(
+            default=None,
+            metadata={"schema_property_name": "toolConfigurationNotifications"},
+        )
     )
-    tool_execution_notifications: Optional[
-        List[_notification.Notification]
-    ] = dataclasses.field(
-        default=None, metadata={"schema_property_name": "toolExecutionNotifications"}
+    tool_execution_notifications: Optional[List[_notification.Notification]] = (
+        dataclasses.field(
+            default=None,
+            metadata={"schema_property_name": "toolExecutionNotifications"},
+        )
     )
-    working_directory: Optional[
-        _artifact_location.ArtifactLocation
-    ] = dataclasses.field(
-        default=None, metadata={"schema_property_name": "workingDirectory"}
+    working_directory: Optional[_artifact_location.ArtifactLocation] = (
+        dataclasses.field(
+            default=None, metadata={"schema_property_name": "workingDirectory"}
+        )
     )
 
 

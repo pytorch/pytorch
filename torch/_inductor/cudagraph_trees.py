@@ -720,7 +720,6 @@ class OutputAliasInfo:
 
 class _UnaliasedStorage(OutputAliasInfo):
     "Singleton to mark that the graph output constructs a new alias or is None"
-    pass
 
 
 UnaliasedStorage = _UnaliasedStorage()
@@ -1546,7 +1545,6 @@ class CUDAGraphNode:
     def clear_path_state(self) -> None:
         "Clear the path state in this current executing node"
         # this doesnt actually do anything right now, leaving it as placeholder
-        pass
 
     @staticmethod
     def _tensor_metadata(
@@ -1580,7 +1578,7 @@ class CUDAGraphNode:
         self, inputs: List[InputType]
     ) -> List[Union[torch.Tensor, int]]:
         """
-        Allocate inputs for non static, non cudagraph managraphed managed tensors in the memory pool
+        Allocate inputs for non static, non cudagraph managed tensors in the memory pool
         and copy over the tensor values.
         """
 
