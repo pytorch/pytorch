@@ -48,6 +48,13 @@ def _extract_carry_and_out(flat_out: List[Any], num_carry: int):
     return flat_out[:num_carry], flat_out[num_carry:]
 
 
+# an empty function that's used for inductor lowering in lowering.py
+# difference is that this function supports tensor idx while select doesn't
+# dst.select(dim, idx).copy_(src)
+def override_slice(dst, src, dim, idx):
+    pass
+
+
 def scan(
     combine_fn: Callable[
         [pytree.PyTree, pytree.PyTree], Tuple[pytree.PyTree, pytree.PyTree]

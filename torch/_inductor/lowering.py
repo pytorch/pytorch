@@ -5395,7 +5395,11 @@ def copy_(dst, src, non_blocking=False):
         return dst
     src = to_device(src, dst.get_device())
     src = to_dtype(src, dst.get_dtype())
-    src = expand(src, dst.get_size())
+    try:
+        src = expand(src, dst.get_size())
+    except Exception as e:
+        breakpoint()
+        raise e
     return mutate_to(dst, src)
 
 
@@ -6224,6 +6228,14 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
     return list(map(TensorBox.create, result))
 
 
+@register_lowering(
+    torch._higher_order_ops.scan.override_slice, type_promotion_kind=None
+)
+def slice_view_tensor(dst, dim, idx):
+    # idx dtype is auto promoted to float32 during register_lowering.
+    return squeeze(slice_(dst, dim, idx, idx + 1, step=1, clamp=False), dim)
+
+
 @register_lowering(scan_op)
 def scan(combine_subgraph, init, inputs, dim, reverse, additional_inputs):
     from torch._higher_order_ops.scan import (
@@ -6232,12 +6244,29 @@ def scan(combine_subgraph, init, inputs, dim, reverse, additional_inputs):
         stack_y,
     )
 
+    # Create a clone of init that act as the first carry to subgraph
+    init = [clone(x) for x in init]
+
     num_init_leaves = len(init)
+    num_xs = len(inputs)
+    num_additional_inputs = len(additional_inputs)
+    specialized_dim = int(dim)
+
     if any(map(is_triton, [init, inputs, *additional_inputs])):
         msg = "control flow operator: torch.scan."
         if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
+
+    def extract_scan_args(combine_subgraph, init, xs, dim, reverse, additional_inputs):
+        return combine_subgraph, init, xs, dim, reverse, additional_inputs
+
+    def _extract_init_xs_additional(flat_args: List[Any]):
+        return (
+            flat_args[:num_init_leaves],
+            flat_args[num_init_leaves : num_init_leaves + num_xs],
+            flat_args[-num_additional_inputs:],
+        )
 
     def _to_out_variant_graph(
         gm: torch.fx.GraphModule,
@@ -6245,58 +6274,89 @@ def scan(combine_subgraph, init, inputs, dim, reverse, additional_inputs):
         ys_outs: List[torch.Tensor],
     ):
         phs = [node for node in gm.graph.nodes if node.op == "placeholder"]
+        _, xs_phs, _ = _extract_init_xs_additional(phs)
         output_node = list(gm.graph.nodes)[-1]
         assert output_node.op == "output"
         assert len(phs) == len(fake_inputs), gm
         with gm.graph.inserting_after(phs[-1]):
             idx_node = gm.graph.placeholder("idx")
+
         ys_out_phs = []
         with gm.graph.inserting_before(idx_node):
             for i, ys in enumerate(ys_outs):
                 ph = gm.graph.placeholder(f"ys_outs{i}")
                 ys_out_phs.append(ph)
 
+        with gm.graph.inserting_after(idx_node):
+            for x_ph in xs_phs:
+                selected_x = gm.graph.call_function(
+                    torch._higher_order_ops.scan.override_slice,
+                    (x_ph, specialized_dim, idx_node),
+                )
+                # x_ph is the original placeholder, which is already a slice
+                selected_x.meta["val"] = x_ph.meta["val"]
+                x_ph.replace_all_uses_with(selected_x)
+                # Overrite the args back
+                selected_x.args = (x_ph, specialized_dim, idx_node)
+                x_ph.users.clear()
+                x_ph.users.setdefault(selected_x)
+
         with gm.graph.inserting_before(output_node):
             inner_last_carry, inner_ys = _extract_carry_and_out(
                 output_node.args[0], num_init_leaves
             )
             for fake_ys, ph, ys in zip(ys_outs, ys_out_phs, inner_ys):
-                idx_put_node = gm.graph.call_function(
-                    torch.ops.aten.index_put_.default, (ph, [idx_node], ys)
+                # Outputs are always stacked along 0-th dimension
+                select_node = gm.graph.call_function(
+                    torch._higher_order_ops.scan.override_slice, (ph, 0, idx_node)
                 )
-                idx_put_node.meta["val"] = fake_ys
+                select_node.meta["val"] = fake_ys.clone()
+                copy__node = gm.graph.call_function(
+                    torch.ops.aten.copy_.default, (select_node, ys)
+                )
+                copy__node.meta["val"] = fake_ys.clone()
         gm.recompile()
         return gm
 
-    if combine_subgraph.graph is None:
-        _, fx_init, fx_xs, _, _, fx_additional_inputs = extract_scan_args(
-            *V.graph.current_node.args
+    assert combine_subgraph.graph is None
+    _, fx_init, fx_xs, _, _, fx_additional_inputs = extract_scan_args(
+        *V.graph.current_node.args
+    )
+
+    # dim could be a SymInt, we cast it to int since it's specialized and guarded.
+    fake_init = [node.meta["val"] for node in fx_init]
+    fake_xs = [node.meta["val"] for node in fx_xs]
+    fake_xs_sliced = [t.select(specialized_dim, 0) for t in fake_xs]
+    fake_additional_inputs = [node.meta["val"] for node in fx_additional_inputs]
+    fake_sliced_inputs = (
+        fake_init + fake_xs_sliced + fake_additional_inputs
+    )  # type: ignore[union-attr]
+
+    with V.graph.fake_mode:
+        fake_last_carry, fake_ys_sliced = _extract_carry_and_out(
+            combine_subgraph.graph_module(*fake_sliced_inputs), num_init_leaves
         )
+        scan_length = fake_xs[0].size()[specialized_dim]
+        fake_ys = [stack_y(y, scan_length) for y in fake_ys_sliced]
+        from torch._dynamo.source import GlobalSource
+        from torch.fx.experimental.symbolic_shapes import DimDynamic
 
-        # dim could be a SymInt, we cast it to int since it's specialized and guarded.
-        specialized_dim = int(dim)
-        fake_xs = [node.meta["val"] for node in fx_xs]
-        fake_xs_sliced = [t.select(specialized_dim, 0) for t in fake_xs]
-        fake_sliced_inputs = (
-            [node.meta["val"] for node in fx_init]
-            + fake_xs_sliced
-            + [node.meta["val"] for node in fx_additional_inputs]
-        )  # type: ignore[union-attr]
-
-        with V.graph.fake_mode:
-            fake_last_carry, fake_ys_sliced = _extract_carry_and_out(
-                combine_subgraph.graph_module(*fake_sliced_inputs), num_init_leaves
-            )
-            fake_ys = [
-                stack_y(y, fake_xs[0].size()[specialized_dim]) for y in fake_ys_sliced
-            ]
-            fake_idx = torch.tensor([0])
+        shape_env = V.graph.fake_mode.shape_env
+        fake_idx = shape_env.create_symintnode(  # type: ignore[union-attr]
+            shape_env.create_unspecified_symbol(  # type: ignore[union-attr]
+                0, source=GlobalSource("scan_idx"), dynamic_dim=DimDynamic.DYNAMIC
+            ),
+            hint=0,
+            source=GlobalSource("scan_idx"),
+        )
 
         combine_subgraph.graph_module = _to_out_variant_graph(
             combine_subgraph.graph_module, fake_sliced_inputs, fake_ys
         )
 
-        example_inputs = fake_sliced_inputs + fake_ys + [fake_idx]
+        example_inputs = (
+            fake_init + fake_xs + fake_additional_inputs + fake_ys + [fake_idx]
+        )
         # create and lower subgraphs
         combine_subgraph.graph = V.graph.make_subgraph(
             gm=combine_subgraph.graph_module,
@@ -6307,7 +6367,7 @@ def scan(combine_subgraph, init, inputs, dim, reverse, additional_inputs):
             combine_subgraph.graph.run(*example_inputs)  # type: ignore[arg-type]
 
     result = ir.SequentialScan.create(
-        combine_subgraph, init, inputs, dim, reverse, additional_inputs
+        combine_subgraph, init, inputs, dim, reverse, additional_inputs, fake_idx
     )
     return list(map(TensorBox.create, result))
 
