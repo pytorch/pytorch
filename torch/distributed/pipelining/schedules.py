@@ -580,12 +580,7 @@ class PipelineScheduleSingle(_PipelineSchedule):
         self._num_stages = stage.num_stages
         # Set the same has_backward flag for stage object
         self._stage.has_backward = self._has_backward
-
-        # TODO: later replace this with lazy shape inference during forward
-        # Prepare forward send/recv infrastructure for stage
-        stage._prepare_forward_infra(n_microbatches)
-        if self._has_backward:
-            stage._prepare_backward_infra(n_microbatches)
+        self._initialized = False
 
     def step(self, *args, target=None, losses: Optional[List] = None, **kwargs):
         """
@@ -598,6 +593,11 @@ class PipelineScheduleSingle(_PipelineSchedule):
         target: target for the loss function.
         losses: a list to store the losses for each microbatch.
         """
+        if not self._initialized:
+            self._stage._prepare_forward_infra(self._n_microbatches, args, kwargs)
+            if self._has_backward:
+                self._stage._prepare_backward_infra(self._n_microbatches)
+            self._initialized = True
 
         # Clean per iteration
         self._stage.clear_runtime_states()

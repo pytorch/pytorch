@@ -1258,23 +1258,13 @@ class PipelineStage(_PipelineStageBase):
         dw_builder: Optional[Callable[[], Callable[..., None]]] = None,
     ):
         super().__init__(submodule, stage_index, num_stages, device, group, dw_builder)
-        self.submod.to(self.device)
-        # When we materialize the model partition on cuda, we call reset_parameters() if it is available
-        self.inputs: List[torch.Tensor] = []
-        self.outputs: List[torch.Tensor] = []
-
-        self.inputs = _create_empty_tensors(input_args, device)
-
-        if output_args is None:
-            logger.info("output_args not provided, performing forward using input_args")
-            self.outputs = self.submod(*self.inputs)
-            # create buffers for the output so that the data is in the correct
-            # shape in order to use in p2p op (send)
-            self.outputs = _create_empty_tensors(self.outputs, device)
-        else:
-            self.outputs = _create_empty_tensors(output_args, device)
-
-        self._configure_outputs_meta(tuple(self.outputs))
+        self.inputs: List[torch.Tensor] = None
+        self.inputs_meta = (
+            (input_args,) if isinstance(input_args, torch.Tensor) else input_args
+        )
+        self._configure_outputs_meta(
+            (output_args,) if isinstance(output_args, torch.Tensor) else output_args
+        )
 
         # these are the buffers used in backwards send/recv, they are allocated later
         self.outputs_grad: List[torch.Tensor] = []
@@ -1292,11 +1282,13 @@ class PipelineStage(_PipelineStageBase):
         logger.debug(
             f"finished pipeline stage init, {self.stage_index=}, {self.is_first=}, "  # noqa: G004
             f"{self.is_last=}, {self.num_stages=}, "
-            f"inputs: {[inp.shape for inp in self.inputs]}, "
-            f"output: {[output.shape for output in self.outputs]}"
+            f"inputs: {[inp.shape for inp in self.inputs_meta]}, "
+            f"output: {[output.shape for output in self.get_outputs_meta()]}"
         )
 
-    def _prepare_forward_infra(self, num_microbatches: int) -> None:
+    def _prepare_forward_infra(self, num_microbatches: int, args, kwargs) -> None:
+        # TODO move self.device to an argument from step API (from its input tensors)?
+
         # Receive info during forward
         # TODO: create args_recv_info lazily? (same needed for PipelineStage)
         for chunk_id in range(num_microbatches):
@@ -1310,20 +1302,23 @@ class PipelineStage(_PipelineStageBase):
                             self.stage_index - 1,
                             _make_tensor_from_meta(inp, self.device),
                         )
-                        for inp in self.inputs
+                        for inp in self.inputs_meta
                     ]
                 )
 
                 self.args_recv_info[chunk_id] = recv_infos
             else:
                 self.args_recv_info[chunk_id] = tuple(
-                    [_RootArgPlaceholder(i) for i in self.inputs]
+                    [_RootArgPlaceholder(i) for i in self.inputs_meta]
                 )
 
         # Send info during forward for each activation
         # only need the rank that is being sent to
         self.act_send_info: Dict[int, List] = {}
-        for idx in range(len(self.outputs)):
+
+        # TODO: we didn't require output args at __init__ before, but now we do. enforce it. until we enable lazy-init
+        # get_outputs_meta will assert for us
+        for idx in range(len(self.get_outputs_meta())):
             # We assume we always send to stage + 1
             if not self.is_last:
                 self.act_send_info[idx] = [self.stage_index + 1]
@@ -1343,7 +1338,9 @@ class PipelineStage(_PipelineStageBase):
                     _RecvInfo(
                         f"recv_grad_for_{self.stage_index}_from_{dst_list[0]}",
                         dst_list[0],
-                        _make_tensor_from_meta(self.outputs[idx], self.device),
+                        _make_tensor_from_meta(
+                            self.get_outputs_meta()[idx], self.device
+                        ),
                     )
                     for idx, dst_list in act_send_info.items()
                 ]
