@@ -13,6 +13,7 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import fake_args_kwargs, get_fake_value
 from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.base import VariableTracker
@@ -2259,10 +2260,11 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # Since we speculate the fwd graph always under no grad mode, we need to
         # set the correct grad mode (and other attributes) for the fwd output, so
         # we do fake tensor prop on the fwd graph again.
-        fake_mode = tx.output.fake_mode
-        with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
-            fake_args, fake_kwargs = fake_args_kwargs(args, kwargs)
-            example_value = self.fn_cls.apply(*fake_args, **fake_kwargs)
+        with enable_python_dispatcher():
+            fake_mode = tx.output.fake_mode
+            with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
+                fake_args, fake_kwargs = fake_args_kwargs(args, kwargs)
+                example_value = self.fn_cls.apply(*fake_args, **fake_kwargs)
 
         # Speculate subgraph on the backward. We make the
         # bwd tracer a child of the fwd tracer, because backward may rely on
