@@ -98,7 +98,7 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
                 if t.shape[bdim] == 1:
                     return t[0]
                 else:
-                    return t.select(t._batch_dim, i)
+                    return t.select(bdim, i)
             else:
                 return t
 
