@@ -129,7 +129,8 @@ def fuse_as_graphmodule(
     assert validate_partition(nodes), "Invalid partition, found dependency cycles"
 
     # if no dict of partition nodes is provided, reconstruct it by nodes list to reduce lookup time
-    partition_lookup_table = dict.fromkeys(nodes) if partition_lookup_table is None else partition_lookup_table
+    if partition_lookup_table is None:
+        partition_lookup_table = dict.fromkeys(nodes)
 
     subgraph = Graph()
 
