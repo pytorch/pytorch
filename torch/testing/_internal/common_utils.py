@@ -1507,6 +1507,10 @@ def xfailIfTorchDynamo(func):
     return unittest.expectedFailure(func) if TEST_WITH_TORCHDYNAMO else func
 
 
+def xfailIfLinux(func):
+    return unittest.expectedFailure(func) if IS_LINUX else func
+
+
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
     """
     Usage:

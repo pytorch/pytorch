@@ -40,6 +40,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TestCase,
+    xfailIfLinux,
 )
 from torch.utils.data import (
     _utils,
@@ -1383,7 +1384,7 @@ except RuntimeError as e:
             del loader2_it
 
     # https://github.com/pytorch/pytorch/issues/128551
-    @unittest.expectedFailure
+    @xfailIfLinux
     def test_segfault(self):
         p = ErrorTrackingProcess(target=_test_segfault)
         p.start()
