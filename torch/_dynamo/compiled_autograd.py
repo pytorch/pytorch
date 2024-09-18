@@ -518,8 +518,6 @@ class _EnableContext:
                 torch.autograd.set_multithreading_enabled(False)
             )
             self.set_multithreading_enabled_ctx_mgr.__enter__()
-        else:
-            pass
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.warmup_count < torch._dynamo.config.warmup_runs:  # type: ignore[attr-defined]

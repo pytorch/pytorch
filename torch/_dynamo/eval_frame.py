@@ -109,31 +109,30 @@ def _maybe_set_eval_frame(callback: DynamoCallback, context_id: str, state: str)
     # Users can disable torchDynamo by setting the JK to False.
     from torch._C._dynamo.eval_frame import set_eval_frame
 
+    assert state in ["enter", "exit"]
     if not justknobs_check("pytorch/compiler:enable_compiler_set_eval_frame"):
         torch._dynamo.utils.warn_once(
             "Dynamo disabled by Justknob: enable_compiler_set_eval_frame, skipping set_eval_frame"
         )
         return callback
     else:
-        if config.warmup_runs == 0:
+        if (
+            config.warmup_runs == 0
+            # Compiled Autograd Dynamo warmup is handled within `torch._dynamo.compiled_autograd.enable()`.
+            or torch._dynamo.compiled_autograd.in_compiled_autograd_region
+        ):
             return set_eval_frame(callback)
         else:
-            assert state in ["enter", "exit"]
-            if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-                # Compiled Autograd Dynamo warmup is handled within `torch._dynamo.compiled_autograd.enable()`.
+            if state == "enter":
+                return set_eval_frame(
+                    None
+                    if context_id_to_warmup_count[context_id] < config.warmup_runs
+                    else callback
+                )
+            elif state == "exit":
+                if context_id_to_warmup_count[context_id] < config.warmup_runs:
+                    context_id_to_warmup_count[context_id] += 1
                 return set_eval_frame(callback)
-            else:
-                if state == "enter":
-                    if context_id_to_warmup_count[context_id] < config.warmup_runs:
-                        return set_eval_frame(None)
-                    else:
-                        return set_eval_frame(callback)
-                elif state == "exit":
-                    if context_id_to_warmup_count[context_id] < config.warmup_runs:
-                        context_id_to_warmup_count[context_id] += 1
-                        return set_eval_frame(callback)
-                    else:
-                        return set_eval_frame(callback)
 
 
 def _reset_guarded_backend_cache():
