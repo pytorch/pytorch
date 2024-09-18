@@ -547,7 +547,101 @@ void reflection_pad2d_out_template(
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16,
     input.scalar_type(), "reflection_pad2d_out_template", [&] {
-      if (at::globalContext().deterministicAlgorithms()) {
+
+      for (int64_t block_y = 0; block_y < size_y; block_y += 65535) {
+        int64_t block_y_size = std::min(size_y - block_y, static_cast<int64_t>(65535));
+        for (int64_t block_z = 0; block_z < size_z; block_z += 65535) {
+          int64_t block_z_size = std::min(size_z - block_z, static_cast<int64_t>(65535));
+
+          dim3 grid_size(at::ceil_div(output_plane_size, static_cast<int64_t>(256)), block_y_size, block_z_size);
+
+          reflection_pad2d_out_kernel<<<
+            grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
+              input.const_data_ptr<scalar_t>(), output.mutable_data_ptr<scalar_t>(),
+              input_w, input_h,
+              pad_t, pad_b, pad_l, pad_r, block_y, block_z, nplane);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+        }
+      }
+    }
+  );
+}
+
+void reflection_pad2d_backward_out_template(
+    Tensor& grad_input,
+    const Tensor& grad_output_,
+    const Tensor& input,
+    IntArrayRef padding) {
+  if (grad_input.numel() == 0) {
+    return;
+  }
+
+  TORCH_CHECK(
+      canUse32BitIndexMath(input),
+      "input tensor must fit into 32-bit index math");
+  TORCH_CHECK(
+      canUse32BitIndexMath(grad_output_),
+      "output gradient tensor must fit into 32-bit index math");
+
+  int plane_dim = 0;
+  int dim_h = 1;
+  int dim_w = 2;
+  int nbatch = 1;
+
+  if (input.ndimension() == 4) {
+    nbatch = input.size(0);
+    plane_dim++;
+    dim_h++;
+    dim_w++;
+  }
+
+  int64_t pad_l = padding[0];
+  int64_t pad_r = padding[1];
+  int64_t pad_t = padding[2];
+  int64_t pad_b = padding[3];
+
+  int nplane = input.size(plane_dim);
+  int input_h = input.size(dim_h);
+  int input_w = input.size(dim_w);
+
+  std::cout << " from: " << "input.size(" << plane_dim << ") nplane:" << nplane
+            << std::endl;
+  std::cout << " from: " << "input.size(" << nbatch << ") idk:" << nbatch
+            << std::endl;
+
+  int output_h = input_h + pad_t + pad_b;
+  int output_w = input_w + pad_l + pad_r;
+
+  TORCH_CHECK(
+      output_w == grad_output_.size(dim_w),
+      "grad_output width "
+      "unexpected. Expected: ",
+      output_w,
+      ", Got: ",
+      grad_output_.size(dim_w));
+  TORCH_CHECK(
+      output_h == grad_output_.size(dim_h),
+      "grad_output height "
+      "unexpected. Expected: ",
+      output_h,
+      ", Got: ",
+      grad_output_.size(dim_h));
+
+  Tensor grad_output = grad_output_.contiguous();
+
+  int64_t output_plane_size = output_h * output_w;
+  dim3 block_size(output_plane_size > 256 ? 256 : output_plane_size);
+
+  int64_t size_y = nplane;
+  int64_t size_z = nbatch;
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      kHalf,
+      kBFloat16,
+      input.scalar_type(),
+      "reflection_pad2d_backward_out_template",
+      [&] {
+        if (at::globalContext().deterministicAlgorithms()) {
           int64_t total_output_elements = nbatch * nplane * output_h * output_w;
           std::cout << "Deterministic Iteration:" << nbatch
                     << ", plane: " << plane_dim << std::endl;
@@ -571,96 +665,40 @@ void reflection_pad2d_out_template(
               0);
         } else {
           for (int64_t block_y = 0; block_y < size_y; block_y += 65535) {
-        int64_t block_y_size = std::min(size_y - block_y, static_cast<int64_t>(65535));
-        for (int64_t block_z = 0; block_z < size_z; block_z += 65535) {
-          int64_t block_z_size = std::min(size_z - block_z, static_cast<int64_t>(65535));
+            int64_t block_y_size =
+                std::min(size_y - block_y, static_cast<int64_t>(65535));
+            for (int64_t block_z = 0; block_z < size_z; block_z += 65535) {
+              int64_t block_z_size =
+                  std::min(size_z - block_z, static_cast<int64_t>(65535));
 
-          dim3 grid_size(at::ceil_div(output_plane_size, static_cast<int64_t>(256)), block_y_size, block_z_size);
+              dim3 grid_size(
+                  at::ceil_div(output_plane_size, static_cast<int64_t>(256)),
+                  block_y_size,
+                  block_z_size);
 
-          reflection_pad2d_out_kernel<<<
-            grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-              input.const_data_ptr<scalar_t>(), output.mutable_data_ptr<scalar_t>(),
-              input_w, input_h,
-              pad_t, pad_b, pad_l, pad_r, block_y, block_z, nplane);
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
+              std::cout << "Running iter: " << std::endl;
+              reflection_pad2d_backward_out_kernel<<<
+                  grid_size,
+                  block_size,
+                  0,
+                  at::cuda::getCurrentCUDAStream()>>>(
+                  grad_input.mutable_data_ptr<scalar_t>(),
+                  grad_output.const_data_ptr<scalar_t>(),
+                  input_w,
+                  input_h,
+                  pad_t,
+                  pad_b,
+                  pad_l,
+                  pad_r,
+                  block_y,
+                  block_z,
+                  nplane);
+
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+            }
+          }
         }
-      }
-        }
-
-    }
-  );
-}
-
-void reflection_pad2d_backward_out_template(
-    Tensor &grad_input, const Tensor &grad_output_,
-    const Tensor &input, IntArrayRef padding) {
-
-  if (grad_input.numel() == 0) {
-    return;
-  }
-
-  TORCH_CHECK(canUse32BitIndexMath(input),
-    "input tensor must fit into 32-bit index math");
-  TORCH_CHECK(canUse32BitIndexMath(grad_output_),
-    "output gradient tensor must fit into 32-bit index math");
-
-  int plane_dim = 0;
-  int dim_h = 1;
-  int dim_w = 2;
-  int nbatch = 1;
-
-  if (input.ndimension() == 4) {
-    nbatch = input.size(0);
-    plane_dim++;
-    dim_h++;
-    dim_w++;
-  }
-
-  int64_t pad_l = padding[0];
-  int64_t pad_r = padding[1];
-  int64_t pad_t = padding[2];
-  int64_t pad_b = padding[3];
-
-  int nplane = input.size(plane_dim);
-  int input_h = input.size(dim_h);
-  int input_w = input.size(dim_w);
-
-  int output_h = input_h + pad_t + pad_b;
-  int output_w  = input_w + pad_l + pad_r;
-
-  TORCH_CHECK(output_w == grad_output_.size(dim_w), "grad_output width "
-    "unexpected. Expected: ", output_w, ", Got: ", grad_output_.size(dim_w));
-  TORCH_CHECK(output_h == grad_output_.size(dim_h), "grad_output height "
-    "unexpected. Expected: ", output_h, ", Got: ", grad_output_.size(dim_h));
-
-  Tensor grad_output = grad_output_.contiguous();
-
-  int64_t output_plane_size = output_h * output_w;
-  dim3 block_size(output_plane_size > 256 ? 256 : output_plane_size);
-
-  int64_t size_y = nplane;
-  int64_t size_z = nbatch;
-
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
-    input.scalar_type(), "reflection_pad2d_backward_out_template", [&] {
-
-      for (int64_t block_y = 0; block_y < size_y; block_y += 65535) {
-        int64_t block_y_size = std::min(size_y - block_y, static_cast<int64_t>(65535));
-        for (int64_t block_z = 0; block_z < size_z; block_z += 65535) {
-          int64_t block_z_size = std::min(size_z - block_z, static_cast<int64_t>(65535));
-
-          dim3 grid_size(at::ceil_div(output_plane_size, static_cast<int64_t>(256)), block_y_size, block_z_size);
-
-          reflection_pad2d_backward_out_kernel<<<
-            grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-              grad_input.mutable_data_ptr<scalar_t>(), grad_output.const_data_ptr<scalar_t>(),
-              input_w, input_h,
-              pad_t, pad_b, pad_l, pad_r, block_y, block_z, nplane);
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
-        }
-      }
-    }
-  );
+      });
 }
 
 } // namespace
