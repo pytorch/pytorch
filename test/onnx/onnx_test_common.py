@@ -423,7 +423,6 @@ def _compare_pytorch_onnx_with_ort(
     # NOTE: `model_with_state_dict=ref_model` is specified to cover runs with FakeTensor support
     ort_outputs = onnx_program(*input_args, **input_kwargs)
     ref_outputs = ref_model(*ref_input_args, **ref_input_kwargs)
-    ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(ref_outputs)
 
     if len(ref_outputs) != len(ort_outputs):
         raise AssertionError(
