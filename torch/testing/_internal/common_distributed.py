@@ -333,9 +333,9 @@ def requires_mpi():
     )
 
 
-def skip_if_rocm(func):
+def skip_if_rocm_multiprocess(func):
     """Skips a test for ROCm"""
-    func.skip_if_rocm = True
+    func.skip_if_rocm_multiprocess = True
 
     @wraps(func)
     def wrapper(*args, **kwargs):
