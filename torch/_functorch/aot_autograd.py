@@ -977,7 +977,9 @@ def aot_module_simplified(
     full_args.extend(params_flat)
 
     if tracing_context := torch._guards.TracingContext.try_get():
-        tracing_context.params_flat = params_flat
+        tracing_context.params_flat = unwrap_tensor_subclasses(
+            params_flat, is_joint_structure=False
+        )
 
     aot_autograd_arg_pos_to_source = None
     # Then, the params 1:1 mapped sources, if relevant.
