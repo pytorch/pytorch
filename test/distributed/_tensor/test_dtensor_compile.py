@@ -181,7 +181,11 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
         # test passing in DTensor as inputs/outputs and run some tensor computation
         def fn(x):
-            return torch.mul(x, x).to_local()[0]
+            return (
+                torch.mul(x, x)
+                .redistribute(device_mesh=x.device_mesh, placements=[Replicate()])
+                .to_local()[0]
+            )
 
         x = DTensor.from_local(torch.rand(4, 4), mesh, [Shard(0)], run_check=False)
         torch._dynamo.mark_dynamic(x, 0)
