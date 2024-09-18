@@ -89,17 +89,20 @@ class Driver:
         self.curr_device_idx = 0
         self.curr_stream = 0
         # Constant properties of our device
-        self.num_devices = 7
+        self.num_devices = 2
+        self.devices = []
 
-        self.req_queue = mp_context.Queue()
-        self.ans_queue = mp_context.Queue()
+        for i in range(self.num_devices):
+            req_queue = mp_context.Queue()
+            ans_queue = mp_context.Queue()
+            runner = mp_context.Process(
+                target=_Executor(i).run_forever,
+                args=(req_queue, ans_queue),
+                daemon=True,
+            )
+            runner.start()
+            self.devices.append((req_queue, ans_queue, runner))
 
-        self.runner = mp_context.Process(
-            target=_Executor().run_forever,
-            args=(self.req_queue, self.ans_queue),
-            daemon=True,
-        )
-        self.runner.start()
         self.is_initialized = True
 
     def exec(self, cmd, *args):
@@ -109,9 +112,10 @@ class Driver:
         if cmd in Driver.registry:
             res = Driver.registry[cmd](self, *args)
         else:
+            req_queue, ans_queue, _ = self.devices[self.curr_device_idx]
             validate_send_queue_args(cmd, args)
-            self.req_queue.put((cmd,) + args)
-            res = self.ans_queue.get()
+            req_queue.put((cmd,) + args)
+            res = ans_queue.get()
 
         log.info("Main process result for %s received: %s", cmd, safe_str(res))
         if res == "ERROR":
@@ -144,7 +148,8 @@ class Driver:
 
 
 class _Executor:
-    def __init__(self):
+    def __init__(self, id):
+        self.id = id
         self.allocator = Allocator()
 
     def run_forever(self, req_queue, ans_queue):
