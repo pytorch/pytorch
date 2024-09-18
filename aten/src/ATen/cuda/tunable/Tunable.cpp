@@ -130,7 +130,7 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
       isNew = true;
     }
 
-    if (isNew){
+    if (isNew) {
       std::string device = c10::str(int(c10::cuda::current_device()));
       untuned_file << op_signature << "," << params_signature << std::endl;
       TUNABLE_LOG3("Untuned,", op_signature, ",", params_signature);
