@@ -476,7 +476,7 @@ def calculate_qmin_qmax(
         elif dtype in [torch.uint16]:
             quant_min, quant_max = 0, 2**16 - 1
         elif dtype in [torch.int16]:
-            quant_min, quant_max = -2**15, 2**15 - 1
+            quant_min, quant_max = -(2**15), 2**15 - 1
         else:
             quant_min, quant_max = 0, 15
     return quant_min, quant_max

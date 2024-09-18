@@ -98,6 +98,7 @@ class TestObserver(QuantizationTestCase):
                                                     reduce_range=reduce_range)]
 
         def _get_ref_params(reduce_range, qscheme, dtype, input_scale, min_val, max_val):
+            assert dtype in _INT_DTYPES, "Not supported dtype: {dtype}, supported dtypes are {_INT_DTYPES}"
             eps = torch.tensor([tolerance])
             if dtype in [torch.qint8, torch.int8]:
                 if reduce_range:
@@ -115,9 +116,6 @@ class TestObserver(QuantizationTestCase):
                 quant_min, quant_max = 0, (2 ** 16) - 1
             elif dtype in [torch.qint32, torch.int32]:
                 quant_min, quant_max = -1 * (2 ** 31), (2 ** 31) - 1
-            else:
-                assert dtype in [torch.float8_e5m2, torch.float8_e4m3fn], f" unexpected dtype: {dtype}"
-                quant_min, quant_max = math.ceil(torch.finfo(dtype).min), math.ceil(torch.finfo(dtype).max)
 
             min_val_neg = torch.tensor([0.])
             max_val_pos = torch.tensor([input_scale * max_val]) if qdtype is torch.qint32 else torch.tensor([max_val])
@@ -130,8 +128,6 @@ class TestObserver(QuantizationTestCase):
                     zero_point = 128
                 if dtype in [torch.uint16]:
                     zero_point = 2 ** 15
-                if dtype in [torch.uint32]:
-                    zero_point = 2 ** 31
             else:
                 scale = torch.max((max_val_pos - min_val_neg) / float(quant_max - quant_min), eps)
                 zero_point = quant_min - torch.round(min_val_neg / scale).to(torch.int)
