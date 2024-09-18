@@ -211,6 +211,9 @@ def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
 
 
 def is_valid_mm_plus_mm(match: Match):
+    if not torch._inductor.utils.use_max_autotune():
+        return False
+
     *b1, m1, k1 = match.kwargs["mat1"].meta.get("tensor_meta").shape
     *b2, k2, n1 = match.kwargs["mat2"].meta.get("tensor_meta").shape
     if k1 != k2:

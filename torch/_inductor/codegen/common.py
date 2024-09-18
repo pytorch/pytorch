@@ -274,7 +274,7 @@ def init_backend_registration():
         try:
             device_scheduling = _get_custom_mod_func("Scheduling")
             wrapper_codegen = _get_custom_mod_func("PythonWrapperCodegen")
-            cpp_wrapper_codegen = _get_custom_mod_func("CppPythonWrapperCodegen")
+            cpp_wrapper_codegen = _get_custom_mod_func("CppWrapperCodegen")
             if device_scheduling and wrapper_codegen and cpp_wrapper_codegen:
                 register_backend_for_device(
                     private_backend,
@@ -1420,7 +1420,6 @@ class KernelArgs:
             arg_defs.append("ws_ptr")
             call_args.append("workspace")
             precompile_args.append(self.workspace_arg)
-            arg_types.append(torch.uint8)
         return arg_defs, call_args, precompile_args, arg_types
 
     def aliases(self):
