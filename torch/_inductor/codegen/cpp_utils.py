@@ -971,5 +971,5 @@ def template_fusion_with_epilogues_supported(template, epilogues):
     template_node = template.get_template_node()
     assert template_node is not None
 
-    epilogue_nodes = [epilogue.node for epilogue in epilogues]
+    epilogue_nodes = [n.node for epilogue in epilogues for n in epilogue.get_nodes()]
     return _template_fusion_supported(template_node, epilogue_nodes)
