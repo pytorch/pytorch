@@ -92,7 +92,7 @@ _UCC_COMMIT=20eae37090a4ce1b32bcce6144ccad0b49943e0b
 # from scratch
 case "$image" in
   pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9)
-    CUDA_VERSION=12.4.0
+    CUDA_VERSION=12.4.1
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
@@ -120,7 +120,7 @@ case "$image" in
     TRITON=yes
     ;;
   pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks)
-    CUDA_VERSION=12.4.0
+    CUDA_VERSION=12.4.1
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
@@ -165,7 +165,7 @@ case "$image" in
     INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-focal-cuda12.4-cudnn9-py3.12-gcc9-inductor-benchmarks)
-    CUDA_VERSION=12.4.0
+    CUDA_VERSION=12.4.1
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=9
@@ -194,7 +194,7 @@ case "$image" in
     TRITON=yes
     ;;
   pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9)
-    CUDA_VERSION=12.4.0
+    CUDA_VERSION=12.4.1
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
@@ -222,7 +222,7 @@ case "$image" in
     TRITON=yes
     ;;
   pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9)
-    CUDA_VERSION=12.4.0
+    CUDA_VERSION=12.4.1
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
@@ -236,7 +236,7 @@ case "$image" in
     TRITON=yes
     ;;
   pytorch-linux-focal-py3-clang10-onnx)
-    ANACONDA_PYTHON_VERSION=3.8
+    ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=10
     PROTOBUF=yes
     DB=yes
@@ -245,7 +245,7 @@ case "$image" in
     ONNX=yes
     ;;
   pytorch-linux-focal-py3-clang9-android-ndk-r21e)
-    ANACONDA_PYTHON_VERSION=3.8
+    ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=9
     LLVMDEV=yes
     PROTOBUF=yes
@@ -254,8 +254,8 @@ case "$image" in
     GRADLE_VERSION=6.8.3
     NINJA_VERSION=1.9.0
     ;;
-  pytorch-linux-focal-py3.8-clang10)
-    ANACONDA_PYTHON_VERSION=3.8
+  pytorch-linux-focal-py3.9-clang10)
+    ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=10
     PROTOBUF=yes
     DB=yes
@@ -276,8 +276,8 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-focal-py3.8-gcc9)
-    ANACONDA_PYTHON_VERSION=3.8
+  pytorch-linux-focal-py3.9-gcc9)
+    ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
@@ -308,7 +308,7 @@ case "$image" in
     TRITON=yes
     ;;
   pytorch-linux-jammy-xpu-2024.0-py3)
-    ANACONDA_PYTHON_VERSION=3.8
+    ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     PROTOBUF=yes
     DB=yes
@@ -318,8 +318,8 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-    pytorch-linux-jammy-py3.8-gcc11-inductor-benchmarks)
-    ANACONDA_PYTHON_VERSION=3.8
+    pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks)
+    ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     PROTOBUF=yes
     DB=yes
@@ -330,8 +330,8 @@ case "$image" in
     DOCS=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-cuda11.8-cudnn9-py3.8-clang12)
-    ANACONDA_PYTHON_VERSION=3.8
+  pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-clang12)
+    ANACONDA_PYTHON_VERSION=3.9
     CUDA_VERSION=11.8
     CUDNN_VERSION=9
     CLANG_VERSION=12
@@ -355,8 +355,8 @@ case "$image" in
     CONDA_CMAKE=yes
     VISION=yes
     ;;
-  pytorch-linux-jammy-py3.8-gcc11)
-    ANACONDA_PYTHON_VERSION=3.8
+  pytorch-linux-jammy-py3.9-gcc11)
+    ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     PROTOBUF=yes
     DB=yes

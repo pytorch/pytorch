@@ -2,6 +2,7 @@
 
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
+#include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
@@ -599,15 +600,19 @@ CacheNode* _compiled_autograd_impl(
         inputs = THPVariable_UnpackList(pyinputs);
       }
 
-      if (python_verbose_logger != nullptr) {
-        std::string _node_name = call.node->name();
-        THPObjectPtr node_name(PyUnicode_FromString(_node_name.data()));
-        TORCH_INTERNAL_ASSERT(node_name != nullptr);
-        THPObjectPtr set_node_origin(
-            PyObject_GetAttrString(py_compiler.get(), "set_node_origin"));
-        check(PyObject_CallFunction(
-            set_node_origin, "OI", node_name.get(), i, nullptr));
+      std::string _node_name = call.node->name();
+      THPObjectPtr node_name(PyUnicode_FromString(_node_name.data()));
+      TORCH_INTERNAL_ASSERT(node_name != nullptr);
+      THPObjectPtr set_node_origin(
+          PyObject_GetAttrString(py_compiler.get(), "set_node_origin"));
+
+      PyObject* pyobj = Py_None;
+      if (auto pynode = std::dynamic_pointer_cast<PyNode>(call.node)) {
+        pyobj = pynode->obj;
       }
+
+      check(PyObject_CallFunction(
+          set_node_origin, "OIO", node_name.get(), i, pyobj, nullptr));
 
       SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
@@ -680,6 +685,24 @@ CacheNode* _compiled_autograd_impl(
   return cache;
 }
 
+struct LockGuardWithErrorLogs {
+  LockGuardWithErrorLogs(std::mutex& mtx) : mtx_(mtx) {
+    // Note: the standard allows try_lock to fail spuriously during races for
+    // performance reasons, but it shouldn't happen here since we:
+    // 1. disable multithreaded autograd
+    // 2. plenty of latency between backward calls
+    TORCH_INTERNAL_ASSERT(
+        mtx_.try_lock(),
+        "Trying to run compiled autograd within another compiled autograd call (e.g. reentrant checkpointing), this is not supported yet.");
+  }
+
+  ~LockGuardWithErrorLogs() {
+    mtx_.unlock();
+  }
+
+  std::mutex& mtx_;
+};
+
 variable_list compiled_autograd(
     const std::shared_ptr<Node>& graph_root,
     GraphTask& graph_task,
@@ -688,8 +711,8 @@ variable_list compiled_autograd(
   TORCH_CHECK(
       c10::impl::TorchDispatchModeTLS::stack_len() == 0,
       "TorchDispatchMode not yet implemented for compiled autograd")
-  static std::mutex lock;
-  std::lock_guard<std::mutex> lock_guard(lock);
+  static std::mutex mtx;
+  LockGuardWithErrorLogs lock_guard(mtx);
   pybind11::gil_scoped_acquire gil;
   at::ThreadLocalStateGuard tls_guard(graph_task.thread_locals_);
 

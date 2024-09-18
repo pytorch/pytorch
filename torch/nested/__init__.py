@@ -5,13 +5,6 @@ import torch
 import torch.nn.functional as F
 from torch import SymInt, Tensor
 from torch._C import _add_docstr, _nested  # type: ignore[attr-defined]
-from torch.nested._internal.nested_tensor import (
-    _nt_view_dummy,
-    jagged_from_list,
-    jagged_from_tensor_and_lengths,
-    nested_view_from_values_offsets,
-    nested_view_from_values_offsets_lengths,
-)
 
 from torch.types import _device as Device, _dtype as DType
 
@@ -21,6 +14,7 @@ __all__ = [
     "nested_tensor",
     "nested_tensor_from_jagged",
     "narrow",
+    "masked_select",
 ]
 
 # Nested Tensor constructor functions
@@ -124,10 +118,13 @@ def as_nested_tensor(
             offsets = torch.arange(0, batch_size * seq_len + 1, seq_len,
                                    device=device, dtype=torch.int64)
 
+            from torch.nested._internal.nested_tensor import nested_view_from_values_offsets
+
             return nested_view_from_values_offsets(
                 values, offsets, min_seqlen=seq_len, max_seqlen=seq_len
             )
         else:
+            from torch.nested._internal.nested_tensor import jagged_from_list
 
             assert isinstance(ts, list)
             nt, _ = jagged_from_list(ts, offsets=None, device=device, dtype=dtype)
@@ -236,6 +233,8 @@ Example::
         # Need to wrap lists of scalars as tensors
         list_of_tensors = [t if isinstance(t, Tensor) else torch.as_tensor(t) for t in tensor_list]
 
+        from torch.nested._internal.nested_tensor import jagged_from_list
+
         with torch.no_grad():
             nt, _ = jagged_from_list(list_of_tensors, offsets=None, device=device, dtype=dtype)
 
@@ -298,6 +297,8 @@ Example::
     elif layout == torch.jagged:
         if dim != 1:
             raise RuntimeError("jagged layout only supports dim=1")
+
+        from torch.nested._internal.nested_tensor import jagged_from_tensor_and_lengths
 
         if isinstance(start, (int, SymInt)):
             start = torch.tensor([start], device=tensor.device, dtype=torch.int64)
@@ -406,13 +407,59 @@ Example::
     if jagged_dim is None:
         jagged_dim = 1
 
+    from torch.nested._internal.nested_tensor import nested_view_from_values_offsets_lengths
+
     return nested_view_from_values_offsets_lengths(
         values, offsets, lengths, ragged_idx=jagged_dim, min_seqlen=min_seqlen, max_seqlen=max_seqlen)
 
+def masked_select(tensor: Tensor, mask: Tensor) -> Tensor:
+    r"""
+    Constructs a nested tensor given a strided tensor input and a strided mask, the resulting jagged layout nested tensor
+    will have values retain values where the mask is equal to True. The dimensionality of the mask is preserved and is
+    represented with the offsets, this is unlike :func:`masked_select` where the output is collapsed to a 1D tensor.
 
-# This library impl is here so pytorch picks it up when initializing, otherwise users had to import
-# torch.nested._internal.ops to get it, which is not ideal. Importing all of ops here results in a
-# fun circular dependency hell, so this is the next best thing
-@torch.library.impl("aten::_nested_get_jagged_dummy", ["default", "NestedTensorCPU", "NestedTensorCUDA"])  # type: ignore[has-type, misc]
-def _aten_nested_get_jagged_dummy(x: Tensor) -> Tensor:
-    return _nt_view_dummy()
+    Args:
+    tensor (:class:`torch.Tensor`): a strided tensor from which the jagged layout nested tensor is constructed from.
+    mask (:class:`torch.Tensor`): a strided mask tensor which is applied to the tensor input
+
+    Example::
+
+    >>> tensor = torch.randn(3, 3)
+    >>> mask = torch.tensor([[False, False, True], [True, False, True], [False, False, True]])
+    >>> nt = torch.nested.masked_select(tensor, mask)
+    >>> nt.shape
+    torch.Size([3, j4])
+    >>> # Length of each item in the batch:
+    >>> nt.offsets().diff()
+    tensor([1, 2, 1])
+
+    >>> tensor = torch.randn(6, 5)
+    >>> mask = torch.tensor([False])
+    >>> nt = torch.nested.masked_select(tensor, mask)
+    >>> nt.shape
+    torch.Size([6, j5])
+    >>> # Length of each item in the batch:
+    >>> nt.offsets().diff()
+    tensor([0, 0, 0, 0, 0, 0])
+    """
+    if tensor.layout != torch.strided:
+        raise RuntimeError(
+            f"torch.nested.masked_select requires a strided tensor, given {tensor.layout}"
+        )
+
+    if mask.layout != torch.strided:
+        raise RuntimeError(
+            f"torch.nested.masked_select requires a strided mask, given: {mask.layout}"
+        )
+    res_values = tensor.masked_select(mask)
+    expanded_mask = mask.expand(tensor.shape)
+    res_lengths = expanded_mask.sum(dim=tensor.ndim - 1).view(-1)
+
+    from torch.nested._internal.nested_tensor import (
+        nested_view_from_values_offsets,
+    )
+
+    return nested_view_from_values_offsets(
+        values=res_values,
+        offsets=F.pad(res_lengths.cumsum(dim=0), (1, 0)),
+    )

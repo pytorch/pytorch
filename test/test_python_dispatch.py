@@ -1204,7 +1204,8 @@ def forward(self, x_a_1, x_b_1, y_1):
             x = LoggingTensor(torch.randperm(3))
             torch.save(x, f)
             f.seek(0)
-            x_loaded = torch.load(f)
+            with torch.serialization.safe_globals([LoggingTensor]):
+                x_loaded = torch.load(f)
             self.assertTrue(type(x_loaded) is type(x))
             self.assertEqual(x, x_loaded)
             self.assertEqual(x.elem, x_loaded.elem)
@@ -1791,6 +1792,23 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             x.numpy()
         with self.assertRaises(AssertionError):
             self.assertEqual(x, None)
+
+    # See https://github.com/pytorch/pytorch/issues/136064
+    def test_view_returns_alias_under_torch_dispatch(self):
+        class MyMode(TorchDispatchMode):
+            def __init__(self, testcase):
+                self.testcase = testcase
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                out = func(*args, **kwargs)
+                if func == torch.ops.aten.view.dtype:
+                    # view should return a fresh TensorImpl
+                    self.testcase.assertTrue(out is not args[0])
+                return out
+
+        with MyMode(self):
+            x = torch.ones(4, dtype=torch.float32)
+            out = x.view(torch.float32)
 
     def test_record_stream(self) -> None:
         class TestMode(TorchDispatchMode):

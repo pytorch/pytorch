@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import copy
 from queue import SimpleQueue
@@ -119,7 +118,7 @@ def fuse_as_graphmodule(gm: GraphModule,
     for node in nodes:
         assert node.graph.owning_module is gm, f"{node} doesn't belong to passed in graph module {gm._get_name()}"
         assert not node._erased, f"{node} has been removed from owning graph"
-        assert node in gm.graph.nodes, f"{node} is not found in graph module {gm._get_name()}"
+        assert node in gm.graph._find_nodes_lookup_table, f"{node} is not found in graph module {gm._get_name()}"
 
     # validates partition doesn't introduce dependency circles in the graph
     assert validate_partition(nodes), "Invalid partition, found dependency cycles"

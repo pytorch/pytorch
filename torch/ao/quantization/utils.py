@@ -39,8 +39,6 @@ class MatchAllNode:
     fusion patterns in FX Graph Mode Quantization
     """
 
-    pass
-
 
 module_type_list = {
     torch.nn.ReLU,
