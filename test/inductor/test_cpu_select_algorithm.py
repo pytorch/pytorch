@@ -1,8 +1,6 @@
 # Owner(s): ["oncall: cpu inductor"]
 import contextlib
 import functools
-import logging
-import os
 import sys
 import unittest
 from typing import Optional
@@ -30,9 +28,6 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     TEST_MKL,
 )
-
-
-log = logging.getLogger(__name__)
 
 
 try:
@@ -274,19 +269,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             def forward(self, x):
                 return self.epilogue(self.linear(x))
 
-        # TODO: debug utils, safe to remove in Oct 2024
-        if inductor_config.is_fbcode():
-            log.warning(
-                f"DEBUG: torch.backends.mkl.is_available() is {torch.backends.mkl.is_available()}, "  # noqa: G004
-                f"torch.ops.mkldnn._is_mkldnn_fp16_supported() is {torch.ops.mkldnn._is_mkldnn_fp16_supported()}, "
-                f"torch.ops.mkldnn._is_mkldnn_bf16_supported() is {torch.ops.mkldnn._is_mkldnn_bf16_supported()}, "
-                f"inductor_config.freezing is {inductor_config.freezing}, "
-                f"mkldnn._is_mkldnn_acl_supported() is {torch.ops.mkldnn._is_mkldnn_acl_supported()}, "
-                f"torch._C.has_mkl is {torch._C.has_mkl}, "
-                f"PYTORCH_TEST_FBCODE is {os.getenv('PYTORCH_TEST_FBCODE')}, "
-                f"PYTORCH_TEST_REMOTE_GPU is {os.getenv('PYTORCH_TEST_REMOTE_GPU')}, "
-            )
-
         counters.clear()
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
         u = torch.randn(batch_size, out_features).to(dtype=dtype)
@@ -296,7 +278,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         if (
             (
-                dtype == torch.bfloat16
+                (
+                    dtype == torch.bfloat16
+                    and torch.ops.mkldnn._is_mkldnn_bf16_supported()
+                )
                 or (
                     dtype == torch.float16
                     and torch.ops.mkldnn._is_mkldnn_fp16_supported()
