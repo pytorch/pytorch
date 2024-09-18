@@ -6692,6 +6692,7 @@ class SequentialScan(ExternKernel):
     reverse: bool = False
     additional_inputs: Optional[List[TensorBox]] = None
     outputs: Optional[List[MultiOutput]] = None
+    iter_idx_expr: Optional[sympy.Expr] = None
 
     def __init__(
         self,
@@ -6702,6 +6703,7 @@ class SequentialScan(ExternKernel):
         reverse: bool,
         additional_inputs: List[TensorBox],
         layout: MultiOutputLayout,
+        iter_idx_expr: Optional[sympy.Symbol],
     ):
         self.combine_subgraph = combine_subgraph
         self.init = init
@@ -6709,6 +6711,7 @@ class SequentialScan(ExternKernel):
         self.dim = dim
         self.reverse = reverse
         self.additional_inputs = additional_inputs
+        self.iter_idx_expr = iter_idx_expr
 
         super().__init__(
             name=None,
@@ -6728,6 +6731,7 @@ class SequentialScan(ExternKernel):
         dim: int,
         reverse: bool,
         additional_inputs: List[TensorBox],
+        iter_idx_expr: Optional[sympy.Symbol] = None,
     ):
         from torch._higher_order_ops.scan import _extract_carry_and_out
 
@@ -6764,6 +6768,7 @@ class SequentialScan(ExternKernel):
             reverse=reverse,
             additional_inputs=additional_inputs,
             layout=MultiOutputLayout(device),
+            iter_idx_expr=iter_idx_expr,
         )
 
         # last_carry should have the same shape and stride as init

@@ -2045,6 +2045,7 @@ class WrapperCodeGen(CodeGen):
         outer_additional_inputs = [
             buf.codegen_reference() for buf in sequential_scan.additional_inputs
         ]
+        iter_idx_expr_str = str(sequential_scan.iter_idx_expr)
         dim = sequential_scan.dim
 
         self.writeline(f"{name} = [None] * {len(sequential_scan.outputs)}")
@@ -2059,7 +2060,7 @@ class WrapperCodeGen(CodeGen):
         for i, init in enumerate(
             _extract_carry_and_out(sequential_scan.outputs, len(outer_init))[0]
         ):
-            self.writeline(f"inner_carry_out[{i}] = {outer_init[i]}.clone()")
+            self.writeline(f"inner_carry_out[{i}] = {outer_init[i]}")
             inner_carry_outs.append(f"inner_carry_out[{i}]")
 
         # Initialize the ys_output to an empty buffer.
@@ -2087,23 +2088,18 @@ class WrapperCodeGen(CodeGen):
         self.writeline("for i in range(scan_length):")
         self.writeline(EnterSubgraphLine(self, sequential_scan.combine_subgraph.graph))
         # set idx to i if not reverse, else to scan_length - i - 1
-        self.writeline("idx = i if not reverse else scan_length - i - 1")
-        self.writeline("idx_tensor = torch.tensor(idx)")
-        # inner_input = outer_input[idx]
-        self.writeline(f"inner_input = [None] * {len(outer_xs)}")
-        inner_xs = []
-        for i, inp in enumerate(outer_xs):
-            # TODO: put the select also in subgraph
-            self.writeline(f"inner_input[{i}] = {inp}.select(dim, idx)")
-            inner_xs.append(f"inner_input[{i}]")
+        # Initialize the symbolic integer expression with the current iter.
+        self.writeline(
+            f"{iter_idx_expr_str} = i if not reverse else scan_length - i - 1"
+        )
 
         self.codegen_subgraph(
             sequential_scan.combine_subgraph,
             inner_carry_outs
-            + inner_xs
+            + outer_xs
             + outer_additional_inputs
             + outer_ys_outs
-            + ["idx_tensor"],
+            + [iter_idx_expr_str],
             inner_carry_outs + ["_"] * len(outer_ys_outs),
         )
 
