@@ -65,8 +65,6 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
-      - name: Setup Linux
-        uses: ./test-infra/.github/actions/setup-linux
       - name: Setup miniconda
         # You could potentially lock this down to a specific hash as well
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
