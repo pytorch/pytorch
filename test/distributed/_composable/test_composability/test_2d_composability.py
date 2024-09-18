@@ -231,6 +231,12 @@ class TestFullyShard2DTraining(FSDPTest):
                         op=dist.ReduceOp.AVG,
                     )
 
+            # Specially check the TP placement for `pos_embeddings.weight` and
+            # its which since the grad naturally has replicate placement,
+            # requiring FSDP to redistribute it to shard placement before FSDP
+            # runs its reduce-scatter
+            self.assertIsInstance(model.pos_embeddings.weight.placements[1], Shard)
+            self.assertIsInstance(model.pos_embeddings.weight.grad.placements[1], Shard)
             for ref_param, (param_name, param) in zip(
                 ref_model.parameters(), model.named_parameters()
             ):
