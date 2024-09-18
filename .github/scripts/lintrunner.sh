@@ -17,6 +17,11 @@ if [[ -d "${CACHE_DIRECTORY}" ]]; then
     cp -r "${CACHE_DIRECTORY}" . || true
 fi
 
+# if lintrunner is not installed, install it
+if ! command -v lintrunner &> /dev/null; then
+    python3 -m pip install lintrunner
+fi
+
 # This has already been cached in the docker image
 lintrunner init 2> /dev/null
 

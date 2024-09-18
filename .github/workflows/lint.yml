@@ -73,11 +73,6 @@ jobs:
       - name: Run lintrunner (nonretryable)
         run: |
           export ADDITIONAL_LINTRUNNER_ARGS="format --all-files"
-          conda init bash
-          conda activate "${CONDA_ENV}"
-          python -m pip install lintrunner
-          # to make composable with lintrunner.sh
-          conda deactivate
           .github/scripts/lintrunner.sh
       - name: Suggest changes
         uses: parkerbxyz/suggest-changes@v1
