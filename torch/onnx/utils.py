@@ -20,13 +20,7 @@ import torch._C._onnx as _C_onnx
 import torch.jit._trace
 import torch.serialization
 from torch import _C
-from torch.onnx import (  # noqa: F401
-    _constants,
-    _deprecation,
-    _exporter_states,
-    errors,
-    symbolic_helper,
-)
+from torch.onnx import _constants, _deprecation, errors, symbolic_helper  # noqa: F401
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import diagnostics, jit_utils, onnx_proto_utils, registration
 
@@ -41,7 +35,6 @@ __all__ = [
     "model_signature",
     "warn_on_static_input_change",
     "unpack_quantized_tensor",
-    "export_to_pretty_string",
     "unconvertible_ops",
     "register_custom_op_symbolic",
     "unregister_custom_op_symbolic",
@@ -183,7 +176,6 @@ def export(
     training: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL,
     input_names: Sequence[str] | None = None,
     output_names: Sequence[str] | None = None,
-    operator_export_type: _C_onnx.OperatorExportTypes = _C_onnx.OperatorExportTypes.ONNX,
     opset_version: int | None = None,
     do_constant_folding: bool = True,
     dynamic_axes: Mapping[str, Mapping[int, str]]
@@ -276,63 +268,6 @@ def export(
             input nodes of the graph, in order.
         output_names (list of str, default empty list): names to assign to the
             output nodes of the graph, in order.
-        operator_export_type (enum, default OperatorExportTypes.ONNX):
-
-            .. warning::
-                This option will be deprecated in a future release. Future exported
-                graphs will always use the default opset domain.
-
-            * ``OperatorExportTypes.ONNX``: Export all ops as regular ONNX ops
-                (in the default opset domain).
-            * ``OperatorExportTypes.ONNX_FALLTHROUGH``: Try to convert all ops
-                to standard ONNX ops in the default opset domain. If unable to do so
-                (e.g. because support has not been added to convert a particular torch op to ONNX),
-                fall back to exporting the op into a custom opset domain without conversion. Applies
-                to `custom ops <https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html>`_
-                as well as ATen ops. For the exported model to be usable, the runtime must support
-                these non-standard ops.
-            * ``OperatorExportTypes.ONNX_ATEN``: All ATen ops (in the TorchScript namespace "aten")
-                are exported as ATen ops (in opset domain "org.pytorch.aten").
-                `ATen <https://pytorch.org/cppdocs/#aten>`_ is PyTorch's built-in tensor library, so
-                this instructs the runtime to use PyTorch's implementation of these ops.
-
-                .. warning::
-
-                    Models exported this way are probably runnable only by Caffe2.
-
-                    This may be useful if the numeric differences in implementations of operators are
-                    causing large differences in behavior between PyTorch and Caffe2 (which is more
-                    common on untrained models).
-
-            * ``OperatorExportTypes.ONNX_ATEN_FALLBACK``: Try to export each ATen op
-                (in the TorchScript namespace "aten") as a regular ONNX op. If we are unable to do so
-                (e.g. because support has not been added to convert a particular torch op to ONNX),
-                fall back to exporting an ATen op. See documentation on OperatorExportTypes.ONNX_ATEN for
-                context.
-                For example::
-
-                    graph(%0 : Float):
-                    %3 : int = prim::Constant[value=0]()
-                    # conversion unsupported
-                    %4 : Float = aten::triu(%0, %3)
-                    # conversion supported
-                    %5 : Float = aten::mul(%4, %0)
-                    return (%5)
-
-                Assuming ``aten::triu`` is not supported in ONNX, this will be exported as::
-
-                    graph(%0 : Float):
-                    %1 : Long() = onnx::Constant[value={0}]()
-                    # not converted
-                    %2 : Float = aten::ATen[operator="triu"](%0, %1)
-                    # converted
-                    %3 : Float = onnx::Mul(%2, %0)
-                    return (%3)
-
-                .. warning::
-
-                    Models exported this way are probably runnable only by Caffe2.
-
         opset_version (int, default 17): The version of the
             `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
             to target. Must be >= 7 and <= 17.
@@ -481,12 +416,6 @@ def export(
         :class:`torch.onnx.errors.OnnxExporterError`: Other errors that can occur during export.
             All errors are subclasses of :class:`errors.OnnxExporterError`.
     """
-    if operator_export_type != _C_onnx.OperatorExportTypes.ONNX:
-        warnings.warn(
-            "Setting `operator_export_type` to something other than default is deprecated. "
-            "The option will be removed in a future release.",
-            category=FutureWarning,
-        )
     if training == _C_onnx.TrainingMode.TRAINING:
         warnings.warn(
             "Setting `training` to something other than default is deprecated. "
@@ -508,7 +437,6 @@ def export(
         training,
         input_names,
         output_names,
-        operator_export_type=operator_export_type,
         opset_version=opset_version,
         do_constant_folding=do_constant_folding,
         dynamic_axes=dynamic_axes,
@@ -559,7 +487,6 @@ def _split_tensor_list_constants(g, block):
 
 def _optimize_graph(
     graph: _C.Graph,
-    operator_export_type: _C_onnx.OperatorExportTypes,
     _disable_torch_constant_prop: bool = False,
     fixed_batch_size: bool = False,
     params_dict=None,
@@ -636,7 +563,7 @@ def _optimize_graph(
         _C._jit_pass_onnx_set_dynamic_input_shape(graph, dynamic_axes, input_names)
     _C._jit_pass_onnx_lint(graph)
 
-    graph = _C._jit_pass_onnx(graph, operator_export_type)
+    graph = _C._jit_pass_onnx(graph, _C_onnx.OperatorExportTypes.ONNX)
     _C._jit_pass_onnx_lint(graph)
     _C._jit_pass_lint(graph)
 
@@ -696,14 +623,8 @@ def warn_on_static_input_change(input_states):
                 warnings.warn(warning)
 
 
-def _resolve_args_by_export_type(arg_name, arg_value, operator_export_type):
-    """Resolves the arguments that are ignored when export_type != operator_export_type.ONNX."""
-    return arg_value
-
-
 def _decide_keep_init_as_input(
     keep_initializers_as_inputs: bool | None,
-    operator_export_type: _C_onnx.OperatorExportTypes,
     opset_version: int,
 ):
     """Decides whether the initializers in the graph should be listed as ONNX graph inputs.
@@ -736,36 +657,9 @@ def _decide_keep_init_as_input(
     val_keep_init_as_ip = (
         True if keep_initializers_as_inputs is None else keep_initializers_as_inputs
     )
-    if (
-        keep_initializers_as_inputs is None
-        and operator_export_type is _C_onnx.OperatorExportTypes.ONNX
-    ):
+    if keep_initializers_as_inputs is None:
         val_keep_init_as_ip = False
     return val_keep_init_as_ip
-
-
-def _decide_add_node_names(add_node_names, operator_export_type):
-    return _resolve_args_by_export_type(
-        "add_node_names", add_node_names, operator_export_type
-    )
-
-
-def _decide_constant_folding(do_constant_folding, operator_export_type, training):
-    do_constant_folding = _resolve_args_by_export_type(
-        "do_constant_folding", do_constant_folding, operator_export_type
-    )
-    if do_constant_folding and (
-        training is not None and training is not _C_onnx.TrainingMode.EVAL
-    ):
-        warnings.warn(
-            "It is recommended that constant folding be turned off ('do_constant_folding=False') "
-            "when exporting the model in training-amenable mode, i.e. with 'training=TrainingMode.TRAIN' "
-            "or 'training=TrainingMode.PRESERVE' (when model is in training mode). Otherwise, some "
-            "learnable model parameters may not translate correctly in the exported ONNX model "
-            "because constant folding mutates model parameters. Please consider "
-            "turning off constant folding or setting the training=TrainingMode.EVAL."
-        )
-    return do_constant_folding
 
 
 def _signature(model) -> inspect.Signature:
@@ -871,7 +765,7 @@ def _from_dynamic_axes_to_dynamic_shapes(
     return dynamic_shapes
 
 
-def _trace(func, args, operator_export_type, return_outs=False):
+def _trace(func, args, return_outs=False):
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
         args = (args,)
@@ -885,7 +779,7 @@ def _trace(func, args, operator_export_type, return_outs=False):
     )
     warn_on_static_input_change(inputs_states)
 
-    trace_graph = _optimize_graph(trace_graph, operator_export_type, params_dict={})
+    trace_graph = _optimize_graph(trace_graph, params_dict={})
     if return_outs:
         return trace_graph, torch_out
     return trace_graph
@@ -1075,10 +969,8 @@ def _pre_trace_quant_model(model, args):
 def _model_to_graph(
     model,
     args,
-    verbose=False,
     input_names=None,
     output_names=None,
-    operator_export_type=_C_onnx.OperatorExportTypes.ONNX,
     do_constant_folding=True,
     _disable_torch_constant_prop=False,
     fixed_batch_size=False,
@@ -1116,7 +1008,6 @@ def _model_to_graph(
     try:
         graph = _optimize_graph(
             graph,
-            operator_export_type,
             _disable_torch_constant_prop=_disable_torch_constant_prop,
             fixed_batch_size=fixed_batch_size,
             params_dict=params_dict,
@@ -1124,7 +1015,7 @@ def _model_to_graph(
             input_names=input_names,
             module=module,
         )
-    except Exception as e:
+    except Exception:
         _C._jit_onnx_log("Torch IR graph at exception: ", graph)
         raise
 
@@ -1202,84 +1093,6 @@ def _model_to_graph(
     _apply_friendly_debug_names(graph, params_dict)
 
     return graph, params_dict, torch_out
-
-
-@torch._disable_dynamo
-@_deprecation.deprecated("2.5", "the future", "use onnx.printer.to_text() instead")
-def export_to_pretty_string(
-    model,
-    args,
-    export_params=True,
-    verbose=False,
-    training=_C_onnx.TrainingMode.EVAL,
-    input_names=None,
-    output_names=None,
-    operator_export_type=_C_onnx.OperatorExportTypes.ONNX,
-    export_type=None,
-    google_printer=False,
-    opset_version=None,
-    keep_initializers_as_inputs=None,
-    custom_opsets=None,
-    add_node_names=True,
-    do_constant_folding=True,
-    dynamic_axes=None,
-):
-    """Similar to :func:`export`, but returns a text representation of the ONNX model.
-
-    Only differences in args listed below. All other args are the same
-    as :func:`export`.
-
-    Args:
-        add_node_names (bool, default True): Whether or not to set
-            NodeProto.name. This makes no difference unless
-            ``google_printer=True``.
-        google_printer (bool, default False): If False, will return a custom,
-            compact representation of the model. If True will return the
-            protobuf's `Message::DebugString()`, which is more verbose.
-
-    Returns:
-        A UTF-8 str containing a human-readable representation of the ONNX model.
-    """
-    if opset_version is None:
-        opset_version = _constants.ONNX_DEFAULT_OPSET
-    if custom_opsets is None:
-        custom_opsets = {}
-    GLOBALS.export_onnx_opset_version = opset_version
-    GLOBALS.operator_export_type = operator_export_type
-
-    with exporter_context(model, training, verbose):
-        val_keep_init_as_ip = _decide_keep_init_as_input(
-            keep_initializers_as_inputs, operator_export_type, opset_version
-        )
-        val_add_node_names = _decide_add_node_names(
-            add_node_names, operator_export_type
-        )
-        val_do_constant_folding = _decide_constant_folding(
-            do_constant_folding, operator_export_type, training
-        )
-        args = _decide_input_format(model, args)
-        graph, params_dict, torch_out = _model_to_graph(
-            model,
-            args,
-            verbose,
-            input_names,
-            output_names,
-            operator_export_type,
-            val_do_constant_folding,
-            training=training,
-            dynamic_axes=dynamic_axes,
-        )
-
-        return graph._pretty_print_onnx(  # type: ignore[attr-defined]
-            params_dict,
-            opset_version,
-            False,
-            operator_export_type,
-            google_printer,
-            val_keep_init_as_ip,
-            custom_opsets,
-            val_add_node_names,
-        )
 
 
 @_deprecation.deprecated("2.5", "the future", "avoid using this function")
@@ -1466,8 +1279,6 @@ def _export(
     training=_C_onnx.TrainingMode.EVAL,
     input_names=None,
     output_names=None,
-    operator_export_type=_C_onnx.OperatorExportTypes.ONNX,
-    export_type=None,
     opset_version=None,
     do_constant_folding=True,
     dynamic_axes=None,
@@ -1478,11 +1289,9 @@ def _export(
     onnx_shape_inference=True,
     export_modules_as_functions: Any = False,
     autograd_inlining=True,
+    **_,
 ):
     assert GLOBALS.in_onnx_export is False
-
-    if export_type is None:
-        export_type = _exporter_states.ExportTypes.PROTOBUF_FILE
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError(
@@ -1515,8 +1324,6 @@ def _export(
             "This is because `opset_version` < 15 implies IR version < 8, which means "
             "no local function support. "
         )
-    if not operator_export_type:
-        operator_export_type = _C_onnx.OperatorExportTypes.ONNX
 
     # By default, training=TrainingMode.EVAL,
     # which is good because running a model in training mode could result in
@@ -1525,7 +1332,6 @@ def _export(
     # training=TrainingMode.TRAINING or training=TrainingMode.PRESERVE,
     # (to preserve whatever the original training mode was.)
     GLOBALS.export_onnx_opset_version = opset_version
-    GLOBALS.operator_export_type = operator_export_type
 
     try:
         GLOBALS.in_onnx_export = True
@@ -1541,14 +1347,7 @@ def _export(
         with exporter_context(model, training, verbose):
             val_keep_init_as_ip = _decide_keep_init_as_input(
                 keep_initializers_as_inputs,
-                operator_export_type,
                 opset_version,
-            )
-            val_add_node_names = _decide_add_node_names(
-                add_node_names, operator_export_type
-            )
-            val_do_constant_folding = _decide_constant_folding(
-                do_constant_folding, operator_export_type, training
             )
             # Normally f can be a file-like object, but for large models, the external data format requires a
             # valid `model_file_location`. Code in export.cpp will enforce this.
@@ -1567,17 +1366,13 @@ def _export(
                 verbose,
                 input_names,
                 output_names,
-                operator_export_type,
-                val_do_constant_folding,
+                do_constant_folding,
                 fixed_batch_size=fixed_batch_size,
                 training=training,
                 dynamic_axes=dynamic_axes,
             )
 
-            # TODO: Don't allocate a in-memory string for the protobuf
-            defer_weight_export = (
-                export_type is not _exporter_states.ExportTypes.PROTOBUF_FILE
-            )
+            defer_weight_export = False
             if custom_opsets is None:
                 custom_opsets = {}
 
@@ -1609,11 +1404,11 @@ def _export(
                     opset_version,
                     dynamic_axes,
                     defer_weight_export,
-                    operator_export_type,
+                    _C_onnx.OperatorExportTypes.ONNX,
                     not verbose,
                     val_keep_init_as_ip,
                     custom_opsets,
-                    val_add_node_names,
+                    add_node_names,
                     model_file_location,
                     node_attr_to_name,
                 )
@@ -1628,11 +1423,11 @@ def _export(
                     opset_version,
                     dynamic_axes,
                     False,
-                    operator_export_type,
+                    _C_onnx.OperatorExportTypes.ONNX,
                     not verbose,
                     val_keep_init_as_ip,
                     custom_opsets,
-                    val_add_node_names,
+                    add_node_names,
                     model_file_location,
                     node_attr_to_name,
                 )
@@ -1643,7 +1438,7 @@ def _export(
             )
             if verbose:
                 _C._jit_onnx_log("Exported graph: ", graph)
-            onnx_proto_utils._export_file(proto, f, export_type, export_map)
+            onnx_proto_utils._export_file(proto, f)
     finally:
         assert GLOBALS.in_onnx_export
         GLOBALS.in_onnx_export = False
@@ -1733,27 +1528,6 @@ def _add_output_to_block(block: _C.Block, value: _C.Value) -> int:
     return block.registerOutput(value)
 
 
-def _should_aten_fallback(
-    name: str, opset_version: int, operator_export_type: _C_onnx.OperatorExportTypes
-):
-    # For all builds, if domain=="aten" and operator_export_type==ONNX_ATEN,
-    #   an aten::ATen operator is created regardless of symbolics existence
-
-    is_exportable_aten_op = registration.registry.is_registered_op(name, opset_version)
-    is_onnx_aten_export = operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN
-    is_aten_fallback_export = (
-        operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
-    )
-
-    if not name.startswith("aten::"):
-        return False
-
-    if is_onnx_aten_export or (is_aten_fallback_export and not is_exportable_aten_op):
-        return True
-
-    return False
-
-
 def _get_aten_op_overload_name(n: _C.Node) -> str:
     # Returns `overload_name` attribute to ATen ops on non-Caffe2 builds
     schema = n.schema()
@@ -1804,21 +1578,6 @@ def _run_symbolic_function(
         new_nodes=new_nodes,
     )
 
-    # Direct ATen export requested
-    if _should_aten_fallback(ns_op_name, opset_version, operator_export_type):
-        attrs = {
-            k + "_" + node.kindOf(k)[0]: symbolic_helper._node_get(node, k)
-            for k in node.attributeNames()
-        }
-        outputs = node.outputsSize()
-        attrs["outputs"] = outputs
-        return graph_context.aten_op(
-            op_name,
-            *inputs,
-            overload_name=_get_aten_op_overload_name(node),
-            **attrs,
-        )
-
     try:
         domain = namespace
         symbolic_function_name = f"{domain}::{op_name}"
@@ -1853,23 +1612,7 @@ def _run_symbolic_function(
             else None,
         )
 
-    except RuntimeError:
-        if operator_export_type == _C_onnx.OperatorExportTypes.ONNX_FALLTHROUGH:
-            return None
-        elif operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-            # Emit ATen op for non-Caffe2 builds when `operator_export_type==ONNX_ATEN_FALLBACK`
-            attrs = {
-                k + "_" + node.kindOf(k)[0]: symbolic_helper._node_get(node, k)
-                for k in node.attributeNames()
-            }
-            return graph_context.aten_op(
-                op_name,
-                *inputs,
-                overload_name=_get_aten_op_overload_name(node),
-                **attrs,
-            )
-        raise
-    except TypeError as e:
+    except Exception as e:
         # Handle the specific case where we didn't successfully dispatch.
         # Otherwise, the backtrace will have the clues you need.
         e.args = (f"{e.args[0]} \n(Occurred when translating {op_name}).",)

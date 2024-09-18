@@ -24,8 +24,6 @@ __all__ = [
     "symbolic_opset19",
     "symbolic_opset20",
     # Enums
-    "ExportTypes",
-    "OperatorExportTypes",
     "TrainingMode",
     "TensorProtoDataType",
     "JitScalarType",
@@ -55,9 +53,8 @@ from typing import Any, Callable, Collection, Mapping, Sequence, TYPE_CHECKING
 import torch
 from torch import _C
 from torch._C import _onnx as _C_onnx
-from torch._C._onnx import OperatorExportTypes, TensorProtoDataType, TrainingMode
+from torch._C._onnx import TensorProtoDataType, TrainingMode
 
-from ._exporter_states import ExportTypes
 from ._internal.onnxruntime import (
     is_onnxrt_backend_supported,
     OrtBackend as _OrtBackend,
@@ -116,7 +113,6 @@ if TYPE_CHECKING:
 # Set namespace for exposed private names
 DiagnosticOptions.__module__ = "torch.onnx"
 ExportOptions.__module__ = "torch.onnx"
-ExportTypes.__module__ = "torch.onnx"
 JitScalarType.__module__ = "torch.onnx"
 ONNXProgram.__module__ = "torch.onnx"
 ONNXRuntimeOptions.__module__ = "torch.onnx"
@@ -162,7 +158,6 @@ def export(
     fallback: bool = False,
     # Deprecated options
     training: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL,
-    operator_export_type: _C_onnx.OperatorExportTypes = _C_onnx.OperatorExportTypes.ONNX,
     do_constant_folding: bool = True,
     custom_opsets: Mapping[str, int] | None = None,
     export_modules_as_functions: bool | Collection[type[torch.nn.Module]] = False,
@@ -295,7 +290,6 @@ def export(
         fallback: Whether to fallback to the TorchScript exporter if the dynamo exporter fails.
 
         training: Deprecated option. Instead, set the training mode of the model before exporting.
-        operator_export_type: Deprecated option. Only ONNX is supported.
         do_constant_folding: Deprecated option. The exported graph is always optimized.
         custom_opsets: Deprecated.
             A dictionary:
@@ -383,7 +377,6 @@ def export(
             dynamic_axes=dynamic_axes,
             keep_initializers_as_inputs=keep_initializers_as_inputs,
             training=training,
-            operator_export_type=operator_export_type,
             do_constant_folding=do_constant_folding,
             custom_opsets=custom_opsets,
             export_modules_as_functions=export_modules_as_functions,

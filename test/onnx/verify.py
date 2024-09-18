@@ -238,7 +238,6 @@ def verify(
     opset_version=None,
     keep_initializers_as_inputs=True,
     add_node_names=False,
-    operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
     input_names=None,
     dynamic_axes=None,
     remained_onnx_input_idx=None,
@@ -284,9 +283,6 @@ def verify(
         opset_version (int, default None): the opset version of the model to
             export. If not specified, the default value in symboli_helper will
             be used in utils._export().
-        operator_export_type (enum, default OperatorExportTypes.ONNX): the operator
-            export type to use when exporting the model. The default value converts
-            all operators to ONNX ops.
         input_names (list of string): list of input names.
         dynamic_axes (dict of (string, list)): dynamic_axes.
         remained_onnx_input_idx (list of int, default None): The remained ONNX input index.
@@ -387,7 +383,6 @@ def verify(
             opset_version=opset_version,
             keep_initializers_as_inputs=keep_initializers_as_inputs,
             add_node_names=add_node_names,
-            operator_export_type=operator_export_type,
             input_names=input_names,
             dynamic_axes=dynamic_axes,
         )
@@ -407,7 +402,6 @@ def verify(
                 opset_version=opset_version,
                 keep_initializers_as_inputs=keep_initializers_as_inputs,
                 add_node_names=add_node_names,
-                operator_export_type=operator_export_type,
                 input_names=input_names,
                 dynamic_axes=dynamic_axes,
             )
