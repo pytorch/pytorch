@@ -1623,17 +1623,17 @@ def forward(self, x_1, output_1):
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
-    @parametrize("config", ["normal", "cpp_wrapper", "cpp_abi"])
-    def test_triton_kernel_dtype_view(self, config):
+    @parametrize("cfg", ["normal", "cpp_wrapper", "cpp_abi"])
+    def test_triton_kernel_dtype_view(self, cfg):
         # https://github.com/pytorch/pytorch/issues/136159
-        if config == "normal":
+        if cfg == "normal":
             config_kwargs = {"cpp_wrapper": False, "abi_compatible": False}
-        elif config == "cpp_wrapper":
+        elif cfg == "cpp_wrapper":
             config_kwargs = {"cpp_wrapper": True, "abi_compatible": False}
-        elif config == "cpp_abi":
+        elif cfg == "cpp_abi":
             config_kwargs = {"cpp_wrapper": True, "abi_compatible": True}
 
-        with config.patch(**config_kwargs):
+        with torch._inductor.config.patch(**config_kwargs):
 
             @triton.jit
             def _triton_kernel(out_ptr, numel, BLOCK_SIZE: tl.constexpr):
