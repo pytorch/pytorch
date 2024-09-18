@@ -180,6 +180,7 @@ __global__ void reflection_pad2d_backward_det_out_kernel(
   const auto N = output_dim_x * output_dim_y;
   const int64_t width = output_dim_x;
   const int64_t height = output_dim_y;
+  const int64_t debug_thread = 9;
   const int64_t stride =
       static_cast<int64_t>(gridDim.x) * static_cast<int64_t>(blockDim.x);
   const int64_t end =
@@ -211,7 +212,16 @@ __global__ void reflection_pad2d_backward_det_out_kernel(
       const int64_t reflected_top_row = border_top_out_row - dist_from_t;
       const int64_t reflected_top_out =
           reflected_top_row * width + border_top_out_col;
-
+      if (input_xy == debug_thread) {
+        printf(
+            "378 b: %ld TOP c: %ld out_row: %ld out_col: %ld lin: %ld write: %ld\n",
+            b,
+            c,
+            reflected_top_row,
+            border_top_out_col,
+            reflected_top_out,
+            b * (channels * width * height) + c * (width * height) + reflected_top_out);
+      }
       if (reflected_top_out < N) {
         partial += grad_output
             [b * (channels * width * height) + c * (width * height) +
@@ -227,7 +237,17 @@ __global__ void reflection_pad2d_backward_det_out_kernel(
         const int64_t reflect_tl_out_col = (corner_tl_out_col - dist_cols);
         const int64_t reflect_tl_out =
             (reflect_tl_out_row * width) + reflect_tl_out_col;
-
+        if (input_xy == debug_thread) {
+          printf(
+              "378 b: %ld TOPLEFT c: %ld out_row: %ld out_col: %ld lin: %ld write: %ld\n",
+              b,
+              c,
+              reflect_tl_out_row,
+              reflect_tl_out_col,
+              reflect_tl_out,
+              b * (channels * width * height) + c * (width * height) +
+                  reflect_tl_out);
+        }
         if (reflect_tl_out >= 0 && reflect_tl_out < N) {
           partial += grad_output
               [b * (channels * width * height) + c * (width * height) +
@@ -246,7 +266,21 @@ __global__ void reflection_pad2d_backward_det_out_kernel(
         const int64_t reflect_tr_out_col = (corner_tr_out_col + dist_cols);
         const int64_t reflect_tr_out =
             (reflect_tr_out_row * width) + reflect_tr_out_col;
-
+        if (input_xy == debug_thread) {
+          printf("value: %f \n", grad_output
+              [b * (channels * width * height) + c * (width * height) +
+               reflect_tr_out]);
+          printf("i: %ld r: %ld c: %ld d_r %ld d_c %ld \n", input_xy, corner_tr_out_row, corner_tr_out_col, dist_rows, dist_cols);
+          printf(
+              "378 b: %ld TOP RIGHT c: %ld out_row: %ld out_col: %ld lin: %ld write: %ld\n",
+              b,
+              c,
+              reflect_tr_out_row,
+              reflect_tr_out_col,
+              reflect_tr_out,
+              b * (channels * width * height) + c * (width * height) +
+                  reflect_tr_out);
+        }
         if (reflect_tr_out >= 0 && reflect_tr_out < N) {
           partial += grad_output
               [b * (channels * width * height) + c * (width * height) +
@@ -267,7 +301,17 @@ __global__ void reflection_pad2d_backward_det_out_kernel(
       const int64_t reflect_bot_row = (border_bot_out_row + dist_from_bot);
       const int64_t reflect_bot_out =
           (reflect_bot_row * width) + border_bot_out_col;
-
+      if (input_xy == debug_thread) {
+        printf(
+            "378 b: %ld BOTTOM: c: %ld out_row: %ld out_col: %ld lin: %ld write: %ld\n",
+            b,
+            c,
+            reflect_bot_row,
+            border_bot_out_col,
+            reflect_bot_out,
+            b * (channels * width * height) + c * (width * height) +
+                reflect_bot_out);
+      }
       if (reflect_bot_out >= 0 && reflect_bot_out < N) {
         partial += grad_output
             [b * (channels * width * height) + c * (width * height) +
@@ -291,7 +335,17 @@ __global__ void reflection_pad2d_backward_det_out_kernel(
         const int64_t reflect_bl_out_col = (corner_bl_out_col - dist_cols);
         const int64_t reflect_bl_out =
             (reflect_bl_out_row * width) + reflect_bl_out_col;
-
+        if (input_xy == debug_thread) {
+          printf(
+              "378 b: %ld BOT LEFT: c: %ld bl_out_r: %ld bl_out_col: %ld lin: %ld write: %ld\n",
+              b,
+              c,
+              reflect_bl_out_row,
+              reflect_bl_out_col,
+              reflect_bl_out,
+              b * (channels * width * height) + c * (width * height) +
+                  reflect_bl_out);
+        }
         if (reflect_bl_out >= 0 && reflect_bl_out < N) {
           partial += grad_output
               [b * (channels * width * height) + c * (width * height) +
@@ -312,7 +366,17 @@ __global__ void reflection_pad2d_backward_det_out_kernel(
         const int64_t reflect_br_out_col = (corner_br_out_col - dist_cols);
         const int64_t reflect_br_out =
             (reflect_br_out_row * width) + reflect_br_out_col;
-
+        if (input_xy == debug_thread) {
+          printf(
+              "378 b: %ld BOT RIGHT c: %ld out_row: %ld out_col: %ld lin: %ld write: %ld\n",
+              b,
+              c,
+              reflect_br_out_row,
+              reflect_br_out_col,
+              reflect_br_out,
+              b * (channels * width * height) + c * (width * height) +
+                  reflect_br_out);
+        }
         if (reflect_br_out >= 0 && reflect_br_out < N) {
           partial += grad_output
               [b * (channels * width * height) + c * (width * height) +
@@ -331,7 +395,17 @@ __global__ void reflection_pad2d_backward_det_out_kernel(
       const int64_t reflect_left_out_col = border_left_out_col - dist_from_left;
       const int64_t reflect_left_out =
           reflect_left_out_row * width + reflect_left_out_col;
-
+      if (input_xy == debug_thread) {
+        printf(
+            "378 b: %ld LEFT c: %ld out_row: %ld out_col: %ld lin: %ld write: %ld\n",
+            b,
+            c,
+            reflect_left_out_row,
+            reflect_left_out_col,
+            reflect_left_out,
+            b * (channels * width * height) + c * (width * height) +
+                reflect_left_out);
+      }
       if (reflect_left_out >= 0 && reflect_left_out < N) {
         partial += grad_output
             [b * (channels * width * height) + c * (width * height) +
@@ -352,6 +426,18 @@ __global__ void reflection_pad2d_backward_det_out_kernel(
           border_right_out_col + dist_from_right;
       const int64_t reflect_right_out =
           reflect_right_out_row * width + reflect_right_out_col;
+      if (input_xy == debug_thread) {
+        printf(
+            "378 b: %ld RIGHT: c: %ld out_row: %ld out_col: %ld lin: %ld write: %ld\n",
+            b,
+            c,
+            reflect_right_out_row,
+            reflect_right_out_col,
+            reflect_right_out_row * width + reflect_right_out_col,
+            b * (channels * width * height) + c * (width * height) +
+                reflect_right_out);
+      }
+
       if (reflect_right_out >= 0 && reflect_right_out < N) {
         partial += grad_output
             [b * (channels * width * height) + c * (width * height) +
@@ -360,6 +446,18 @@ __global__ void reflection_pad2d_backward_det_out_kernel(
     }
     const int64_t out_row = inp_row + pad_t;
     const int64_t out_col = inp_col + pad_l;
+    auto write = b * (channels * width * height) + c * (width * height) +
+         out_row * width + out_col;
+    if (input_xy == debug_thread) {
+      printf(
+          "378 b: %ld NORMAL c: %ld out_row: %ld out_col: %ld lin: %ld write: %ld\n",
+          b,
+          c,
+          out_row,
+          out_col,
+          out_row * width + out_col,
+          write);
+    }
 
     partial += grad_output
         [b * (channels * width * height) + c * (width * height) +
