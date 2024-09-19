@@ -48,7 +48,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     requires_nccl_version,
     skip_if_lt_x_gpu,
-    skip_if_rocm,
+    skip_if_rocm_multiprocess,
     TEST_SKIPS,
     with_dist_debug_levels,
     with_nccl_blocking_wait,
@@ -237,6 +237,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             self.test_nan_assert_float32.__wrapped__,
             self.test_nan_assert_float64.__wrapped__,
             self.test_nan_assert_bfloat16.__wrapped__,
+            self.test_nan_assert_float8_e4m3fn.__wrapped__,
+            self.test_nan_assert_float8_e5m2.__wrapped__,
         ]
 
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
@@ -347,22 +349,54 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         not (TEST_MULTIGPU and CUDA_12_AND_ABOVE),
         "NCCL test requires 2+ GPUs and Device side assert could cause unexpected errors in lower versions of CUDA",
     )
-    @parametrize("type", [torch.float16, torch.float32, torch.float64, torch.bfloat16])
-    @skip_if_rocm
+    @parametrize(
+        "type",
+        [
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bfloat16,
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+        ],
+    )
+    @skip_if_rocm_multiprocess
     def test_nan_assert(self, type):
         # Expecting a device-side error when NaN is detected
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
         device = self.rank_to_GPU[self.rank][0]
-        size = (10, 10)
-        nan_tensor = torch.full(size, self.rank, dtype=type, device=device)
+        # Cover different buffer sizes
+        if type == torch.float64:
+            size = (1024,)  # 1K elements
+        elif type == torch.float32:
+            size = (1024, 1024)  # 1M elements
+        elif type == torch.float16:
+            size = (1024, 1024, 1024)  # 1G elements
+        else:
+            size = (1,)  # 1 element
+
+        # Note: currently we cannot fill values into a FP8 tensor, thus we
+        # create the NaN tensor in float32 type and cast it to FP8
+        if type == torch.float8_e4m3fn or type == torch.float8_e5m2:
+            init_type = torch.float32
+        else:
+            init_type = type
+
+        nan_tensor = torch.zeros(*size, dtype=init_type, device=device)
         # randomly pick an nan element
-        i = random.randint(0, nan_tensor.size(0) - 1)
-        j = random.randint(0, nan_tensor.size(1) - 1)
-        nan_tensor[i, j] = float("nan")
+        index = tuple([random.randrange(size[i]) for i in range(len(size))])
+        nan_tensor[index] = float("nan")
+        if init_type != type:
+            # Now cast to the targeted dtype
+            nan_tensor = nan_tensor.to(type)
+
+        output = torch.empty(self.world_size, *size, dtype=type, device=device)
         with self.assertRaises(RuntimeError):
-            pg.allreduce(nan_tensor)
+            # Note: using all-gather here bc FP8 types do not support reduce ops
+            # at the moment
+            pg._allgather_base(output, nan_tensor)
         dist.destroy_process_group()
         # reset env
         os.environ["TORCH_NCCL_NAN_CHECK"] = "0"
@@ -1690,7 +1724,7 @@ class DistributedDataParallelTest(
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
-    @skip_if_rocm
+    @skip_if_rocm_multiprocess
     def test_grad_layout_2devicemodule(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
         dev0 = torch.device("cuda:" + str(int_devices[0]))
@@ -2462,7 +2496,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
-    @skip_if_rocm
+    @skip_if_rocm_multiprocess
     @skip_but_pass_in_sandcastle("Test does not pass when run locally")
     def test_nccl_errors_nonblocking(self):
         # Note: we unset and restore TORCH_NCCL_ASYNC_ERROR_HANDLING for this test
@@ -2524,7 +2558,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
-    @skip_if_rocm
+    @skip_if_rocm_multiprocess
     def test_nccl_errors_blocking_clean_exit(self):
         self._test_nccl_errors_blocking(lambda: sys.exit(0))
 
@@ -2532,7 +2566,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
-    @skip_if_rocm
+    @skip_if_rocm_multiprocess
     def test_nccl_errors_blocking_nonzero_exit(self):
         self._test_nccl_errors_blocking(lambda: sys.exit(1))
 
@@ -2540,7 +2574,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
-    @skip_if_rocm
+    @skip_if_rocm_multiprocess
     @skip_but_pass_in_sandcastle(
         "Frequently times out see https://github.com/pytorch/pytorch/issues/58920"
     )
@@ -2551,7 +2585,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
-    @skip_if_rocm
+    @skip_if_rocm_multiprocess
     def test_nccl_errors_blocking_sigkill(self):
         self._test_nccl_errors_blocking(lambda: os.kill(os.getpid(), signal.SIGKILL))
 
@@ -2559,7 +2593,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
-    @skip_if_rocm
+    @skip_if_rocm_multiprocess
     def test_nccl_errors_blocking_sigterm(self):
         self._test_nccl_errors_blocking(lambda: os.kill(os.getpid(), signal.SIGTERM))
 
@@ -2775,7 +2809,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
+    @skip_if_rocm_multiprocess
     def test_intra_node_comm_all_reduce(self):
         from torch._C._distributed_c10d import _get_intra_node_comm_usage_counter
         from torch.testing._internal.common_cuda import SM80OrLater
@@ -4310,7 +4344,7 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
+    @skip_if_rocm_multiprocess
     def test_nccl_errors_dump(self):
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
         os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "1000"
