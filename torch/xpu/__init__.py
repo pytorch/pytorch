@@ -232,9 +232,14 @@ def get_device_capability(device: Optional[_device_t] = None) -> Dict[str, Any]:
         Dict[str, Any]: the xpu capability dictionary of the device
     """
     props = get_device_properties(device)
-    return {
+    props_dict = {
         prop: getattr(props, prop) for prop in dir(props) if not prop.startswith("__")
     }
+    # Remove `<bound method PyCapsule._pybind11_conduit_v1_ of _XpuDeviceProperties..>`
+    # to fix Triton tests.
+    # This field appears after updating pybind to 2.13.6.
+    props_dict.pop("_pybind11_conduit_v1_", None)
+    return props_dict
 
 
 def get_device_properties(device: Optional[_device_t] = None) -> _XpuDeviceProperties:
