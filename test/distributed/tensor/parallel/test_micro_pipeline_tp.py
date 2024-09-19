@@ -87,6 +87,8 @@ class MicroPipelineTPTest(TestCase):
             a = all_gather_tensor(inp, gather_dim=0, group=group.group_name)
             b = all_gather_tensor(inp, gather_dim=1, group=group.group_name)
             c = _fp8_all_gather(inp, gather_dim=0, group_name=group.group_name)
+            # pylint: disable-next=unused-variable
+            d = _fp8_all_gather(inp, gather_dim=1, group_name=group.group_name)
             return a, b, c
 
         inp = torch.rand(64, 32, device="cuda")
