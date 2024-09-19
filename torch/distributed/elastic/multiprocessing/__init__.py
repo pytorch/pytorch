@@ -113,7 +113,7 @@ def start_processes(
     The number of copies is determined by the number of entries for ``args`` and
     ``envs`` arguments, which need to have the same key set.
 
-    ``args`` and ``env`` parameters are the arguments and environment variables
+    ``args`` and ``envs`` parameters are the arguments and environment variables
     to pass down to the entrypoint mapped by the replica index (local rank).
     All local ranks must be accounted for.
     That is, the keyset should be ``{0,1,...,(nprocs-1)}``.
@@ -191,12 +191,11 @@ def start_processes(
         entrypoint: either a ``Callable`` (function) or ``cmd`` (binary)
         args: arguments to each replica
         envs: env vars to each replica
-        log_dir: directory used to write log files
+        logs_specs: ...
+        log_line_prefixes: ...
         start_method: multiprocessing start method (spawn, fork, forkserver)
                       ignored for binaries
-        redirects: which std streams to redirect to a log file
-        tee: which std streams to redirect + print to console
-        local_ranks_filter: which ranks' logs to print to console
+        
 
     """
 

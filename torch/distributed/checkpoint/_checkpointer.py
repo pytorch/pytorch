@@ -48,7 +48,7 @@ class _Checkpointer:
             process_group: ProcessGroup to be used for cross-rank synchronization.
             coordinator_rank: Rank to use to coordinate the checkpoint. rank0 is used by default.
             no_dist: If ``True``, distributed checkpoint will not load in SPMD style. (Default: ``False``)
-            loader_planner: Instance of LoadPlanner to use when loading.
+            load_planner: Instance of LoadPlanner to use when loading.
             save_planner: Instance of SavePlanner to use when saving.
         """
         self.storage_writer = storage_writer

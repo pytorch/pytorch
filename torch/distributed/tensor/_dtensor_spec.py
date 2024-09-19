@@ -222,7 +222,7 @@ class DTensorSpec:
                 tensor dimension, see `dim_map` property doc for details
             sums (List[int]): a list of integer that represents the dist tensor have
                 pending sum on which device mesh dimension.
-            tensor meta (TensorMeta): DTensor metadata
+            tensor_meta (TensorMeta): DTensor metadata
 
         Return:
             a class:`DTensorSpec` object

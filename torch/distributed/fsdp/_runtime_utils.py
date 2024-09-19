@@ -356,7 +356,8 @@ def _pre_forward(
     also converts forward ``args`` and ``kwargs`` to the given precision.
 
     Args:
-        handles (List[FlatParamHandle]): Handles giving the parameters used in
+        state (_FSDPState): ...
+        handle (Optional[FlatParamHandle]): Handles giving the parameters used in
             the current forward.
         unshard_fn (Optional[Callable]): A callable to unshard any currently
             sharded parameters or ``None`` to not do any unsharding.
@@ -445,7 +446,8 @@ def _post_forward(
     and registering pre-backward hooks on the forward outputs.
 
     Args:
-        handles (List[FlatParamHandle]): Handles giving the parameters used in
+        state (_FSDPState): ...
+        handle (Optional[FlatParamHandle]): Handles giving the parameters used in
             the current forward.
         reshard_fn (Optional[Callable]): A callable to reshard any currently
             unsharded parameters (e.g. from the current forward) or ``None`` to
