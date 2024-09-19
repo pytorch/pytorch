@@ -581,7 +581,7 @@ inline std::tuple<dim3, dim3, StackArray<int64_t>> check_shape_and_partition_(
 
   StackArray<int64_t> jagged_dims_tensor;
   const int num_jagged_dim = dense_tensor.dim() - 2;
-  TORCH_CHECK(num_jagged_dim <= kStackArrayMaxDims);
+  TORCH_CHECK(num_jagged_dim <= static_cast<int>(kStackArrayMaxDims));
   jagged_dims_tensor.ndim = num_jagged_dim;
   std::memcpy(
       &(jagged_dims_tensor.vals[0]),
@@ -1220,7 +1220,7 @@ inline bool jagged_dense_dense_elementwise_jagged_output_matches_opt(
   // MI100 has independent shared mem and L1
   int used_shared_kb = shared_kb;
 #endif
-  int used_shared_bytes = used_shared_kb << 10;
+  auto used_shared_bytes = static_cast<size_t>(used_shared_kb << 10);
   AT_DISPATCH_INDEX_TYPES(
       x_offsets[0].scalar_type(), "check_shared_memory", [&] {
         auto B = y_0_reshaped.size(0);
@@ -1355,7 +1355,7 @@ void jagged_dense_elementwise_jagged_output_opt_(
             int used_shared_bytes = calc_used_shared_bytes(y_reshaped.get_device());
             set_max_dynamic_shared_mem_size_for_opt_search_kernel<index_t>(used_shared_bytes);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
-            TORCH_CHECK(dynamic_smem_size <= used_shared_bytes);
+            TORCH_CHECK(dynamic_smem_size <= static_cast<size_t>(used_shared_bytes));
           }
           dim3 threads_bs = dim3(1024, 1, 1);
           dim3 blocks_bs = dim3(div_round_up(nnz, threads_bs.x), 1, 1);
