@@ -1787,7 +1787,9 @@ def same(
                 # accuracy when comparing AMP with FP32 is within a difference of less than 0.1%.
                 # Thus, it's possible that the correctness check failures for these models are
                 # false alarms. We use multiplier of 3 instead of 2 to avoid these false alarms.
-                multiplier = 3.0 if res.dtype == torch.bfloat16 else 2.0
+                multiplier = (
+                    3.0 if res.dtype in (torch.float16, torch.bfloat16) else 2.0
+                )
 
                 if use_larger_multiplier_for_smaller_tensor and (
                     fp64_ref.numel() <= 10 and tol >= 4 * 1e-2
@@ -2915,6 +2917,8 @@ def is_frozen_dataclass(value):
         not object_has_getattribute(value)
         and not class_has_getattribute(value)
         and is_dataclass(value)
+        and hasattr(value, "__dataclass_params__")
+        and hasattr(value.__dataclass_params__, "frozen")
         and value.__dataclass_params__.frozen
     )
 
