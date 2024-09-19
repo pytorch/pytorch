@@ -30,7 +30,7 @@ from sympy.utilities.iterables import sift
 from .numbers import int_oo
 
 
-T = TypeVar("T", bound=SupportsFloat)
+_T = TypeVar("_T", bound=SupportsFloat)
 
 # Portions of this file are adapted from the Sympy codebase, which was
 # licensed as follows:
@@ -89,9 +89,9 @@ __all__ = [
 ]
 
 
-def _keep_float(f: Callable[..., T]) -> Callable[..., Union[T, sympy.Float]]:
+def _keep_float(f: Callable[..., _T]) -> Callable[..., sympy.Float]:
     @functools.wraps(f)
-    def inner(*args: Any) -> Union[T, sympy.Float]:
+    def inner(*args: Any) -> Union[_T, sympy.Float]:
         r = f(*args)
         if any(isinstance(a, sympy.Float) for a in args) and not isinstance(
             r, sympy.Float
