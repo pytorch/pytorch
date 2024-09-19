@@ -90,6 +90,8 @@ class Driver:
         self.curr_stream = 0
         # Constant properties of our device
         self.num_devices = 2
+        # Allocated memory belongs to which deivce
+        self.memory_belong = {}
         self.devices = []
 
         for i in range(self.num_devices):
@@ -112,16 +114,19 @@ class Driver:
         if cmd in Driver.registry:
             res = Driver.registry[cmd](self, *args)
         else:
-            req_queue, ans_queue, _ = self.devices[self.curr_device_idx]
-            validate_send_queue_args(cmd, args)
-            req_queue.put((cmd,) + args)
-            res = ans_queue.get()
+            res = self.run_on_exeuctor(self.curr_device_idx, cmd, *args)
 
         log.info("Main process result for %s received: %s", cmd, safe_str(res))
         if res == "ERROR":
             raise RuntimeError(f"Error in daemon while executing {cmd}, see logs")
         else:
             return res
+
+    def run_on_exeuctor(self, device_idx, cmd, *args):
+        req_queue, ans_queue, _ = self.devices[device_idx]
+        validate_send_queue_args(cmd, args)
+        req_queue.put((cmd,) + args)
+        return ans_queue.get()
 
     registry = {}
 
@@ -145,6 +150,19 @@ class Driver:
         res = self.curr_device_idx
         self.curr_device_idx = int(args[0])
         return res
+
+    @register(registry)
+    def malloc(self, size):
+        ptr = self.run_on_exeuctor(self.curr_device_idx, "malloc", size)
+        self.memory_belong[ptr] = self.curr_device_idx
+        return ptr
+
+    @register(registry)
+    def free(self, ptr):
+        device_idx = self.memory_belong.pop(ptr)
+        if device_idx is None:
+            return False
+        return self.run_on_exeuctor(device_idx, "free", ptr)
 
 
 class _Executor:
