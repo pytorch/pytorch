@@ -1157,7 +1157,7 @@ class Identity(sympy.Function):
     """
 
     def __repr__(self): # type: ignore[override]
-        return f"Identity({self.args[0]})" #
+        return f"Identity({self.args[0]})"
 
     def _eval_is_real(self):
         return self.args[0].is_real
