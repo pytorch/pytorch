@@ -543,7 +543,7 @@ class TestConstant(TestCase):
     @xpassIfTorchDynamo  # (reason="tuple values")
     def test_check_constant_pad_2d(self):
         arr = np.arange(4).reshape(2, 2)
-        test = np.lib.pad(
+        test = np.pad(
             arr, ((1, 2), (1, 3)), mode="constant", constant_values=((1, 2), (3, 4))
         )
         expected = np.array(
