@@ -747,14 +747,18 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
-        super().__init__(
+        _FileSystemWriter.__init__(
+            self,
             path=path,
             single_file_per_rank=single_file_per_rank,
             sync_files=sync_files,
             thread_count=thread_count,
             per_thread_copy_ahead=per_thread_copy_ahead,
-            cache_staged_state_dict=cache_staged_state_dict,
             overwrite=overwrite,
+        )
+        BlockingAsyncStager.__init__(
+            self,
+            cache_staged_state_dict=cache_staged_state_dict,
         )
 
     def stage(self, state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
