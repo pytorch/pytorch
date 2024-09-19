@@ -274,7 +274,8 @@ def transform_args(
     if type_promotion_kind or convert_input_to_bool:
         if convert_input_to_bool:
             dtype = torch.bool
-        else:
+        # always true, but makes mypy happy when calling get_promoted_dtype
+        elif type_promotion_kind:
             # FIXME that's a crude approximation for promoting args
             promoting_args = [
                 a
