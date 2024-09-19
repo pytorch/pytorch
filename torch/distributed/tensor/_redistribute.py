@@ -6,15 +6,14 @@ from typing import cast, List, NamedTuple, Tuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
-import torch.distributed.tensor.api as dtensor
+import torch.distributed.tensor._api as dtensor
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
-    DTensorSpec,
     Partial,
     Placement,
     Replicate,
     Shard,
-    TensorMeta,
 )
 
 

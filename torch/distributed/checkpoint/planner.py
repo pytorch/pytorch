@@ -169,18 +169,20 @@ class SavePlanner(abc.ABC):
     Using the global planning step to make central decisions that can't be made individually by each rank
 
     >>> # xdoctest: +SKIP("undefined vars")
-    >>> from itertools import islice
+    >>> from itertools import zip_longest
     >>> from dataclasses import replace
     >>> class DDPLoadBalancingPlanner(DefaultSavePlanner):
     >>>     # This uses the default local plan behavior of having all non-sharded writes in rank 0
     >>>     # This sample doesn't handle ShardedTensors
     >>>     def create_global_plan(self, all_plans):
-    >>>         def chunk(it, size):
-    >>>             it = iter(it)
-    >>>         return list(iter(lambda: tuple(islice(it, size)), ()))
+    >>>         iters = [iter(all_plans[0].items)] * len(all_plans)
+    >>>         items_per_rank = [
+    >>>             [item for item in items if item is not None]
+    >>>             for items in zip(*zip_longest(*iters), strict=True)
+    >>>         ]
     >>>         all_plans = [
-    >>>             replace(plan, items=items) for plan, items in
-    >>>                 zip(all_plans, chunk(all_plans[0].items, len(all_plans)))
+    >>>             replace(plan, items=items)
+    >>>             for plan, items in zip(all_plans, items_per_rank, strict=True)
     >>>         ]
     >>>         return super().create_global_plan(all_plans)
 

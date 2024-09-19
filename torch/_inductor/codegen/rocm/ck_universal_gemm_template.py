@@ -57,6 +57,7 @@ class CKGemmTemplate(CKTemplate):
             LDB,
             std::array<ck::index_t, {{1 if has_bias else 0}}>{ {{'LDD' if has_bias else ''}} },
             LDC,
+            1, // kBatch
             PassThrough {}, // a_elementwise_op
             PassThrough {}, // b_elementwise_op
             {{epilogue}} // c_elementwise_op

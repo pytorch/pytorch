@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 // alias for to_padded_tensor in nested namespace
 Tensor nested_to_padded_tensor(
@@ -11,5 +11,4 @@ Tensor nested_to_padded_tensor(
     return t.to_padded_tensor(padding, output_size);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

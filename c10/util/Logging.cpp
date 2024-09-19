@@ -1,4 +1,5 @@
 #include <c10/util/Backtrace.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Lazy.h>
 #include <c10/util/Logging.h>
@@ -147,7 +148,45 @@ DDPUsageLoggerType* GetDDPUsageLogger() {
   static DDPUsageLoggerType func = [](const DDPLoggingData&) {};
   return &func;
 }
+
+auto& EventSampledHandlerRegistry() {
+  static auto& registry =
+      *new std::map<std::string, std::unique_ptr<EventSampledHandler>>();
+  return registry;
+}
+
 } // namespace
+
+void InitEventSampledHandlers(
+    std::vector<
+        std::pair<std::string_view, std::unique_ptr<EventSampledHandler>>>
+        handlers) {
+  static c10::once_flag flag;
+  c10::call_once(flag, [&]() {
+    auto& registry = EventSampledHandlerRegistry();
+    for (auto& [event, handler] : handlers) {
+      auto entry = registry.find(std::string{event});
+      if (entry == registry.end()) {
+        entry = registry.emplace(event, nullptr).first;
+      }
+      entry->second = std::move(handler);
+    }
+  });
+}
+
+const std::unique_ptr<EventSampledHandler>& GetEventSampledHandler(
+    std::string_view event) {
+  static std::mutex guard;
+  auto& registry = EventSampledHandlerRegistry();
+
+  // The getter can be executed from different threads.
+  std::lock_guard<std::mutex> lock(guard);
+  auto entry = registry.find(std::string{event});
+  if (entry == registry.end()) {
+    entry = registry.emplace(event, nullptr).first;
+  }
+  return entry->second;
+}
 
 void SetAPIUsageLogger(std::function<void(const std::string&)> logger) {
   TORCH_CHECK(logger);
