@@ -1,8 +1,10 @@
 #include <torch/csrc/jit/backends/coreml/cpp/context.h>
 #include <atomic>
-#include <utility>
 
-namespace torch::jit::mobile::coreml {
+namespace torch {
+namespace jit {
+namespace mobile {
+namespace coreml {
 
 std::atomic<ContextInterface*> g_coreml_ctx_registry;
 
@@ -13,8 +15,11 @@ BackendRegistrar::BackendRegistrar(ContextInterface* ctx) {
 void setModelCacheDirectory(std::string path) {
   auto p = g_coreml_ctx_registry.load();
   if (p) {
-    p->setModelCacheDirectory(std::move(path));
+    p->setModelCacheDirectory(path);
   }
 }
 
-} // namespace torch::jit::mobile::coreml
+} // namespace coreml
+} // namespace mobile
+} // namespace jit
+} // namespace torch

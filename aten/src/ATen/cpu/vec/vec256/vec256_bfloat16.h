@@ -1097,7 +1097,7 @@ inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const V
   return Vectorized<type>::loadu(arr2); \
 }
 CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16);
-#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
+#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && !defined(CPU_CAPABILITY_SVE256)
 inline std::tuple<Vectorized<float>, Vectorized<float>> convert_half_float(const Vectorized<Half>& a) {
   static_assert(Vectorized<Half>::size() == 2 * Vectorized<float>::size());
 #if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
