@@ -128,8 +128,8 @@ class BoundVars:
         self.replacement_vals[old] = new
         return new
 
-    def get_index(self, name: Expr) -> ValueRanges[Expr]:
-        expr = self.loop_body.indexing_exprs[name]  # type: ignore[index]
+    def get_index(self, name: str) -> ValueRanges[Expr]:
+        expr = self.loop_body.indexing_exprs[name]
         bound = self.replacement_vals.get(expr)
         if bound is None:
             bound = bound_sympy(expr, self.replacement_vals)
