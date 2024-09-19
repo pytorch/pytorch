@@ -159,7 +159,7 @@ class Driver:
 
     @register(registry)
     def free(self, ptr):
-        device_idx = self.memory_belong.pop(ptr)
+        device_idx = self.memory_belong.pop(ptr, None)
         if device_idx is None:
             return False
         return self.run_on_exeuctor(device_idx, "free", ptr)
