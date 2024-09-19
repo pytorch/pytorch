@@ -83,7 +83,7 @@ class LoopBody:
     indexing_exprs_name: Dict[sympy.Expr, str]
     submodules: Dict[str, Any]
     subblocks: Dict[str, LoopBodyBlock]
-    indirect_vars: List[str]
+    indirect_vars: List[sympy.Symbol]
     indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr]
     root_block: LoopBodyBlock
     memory_usage: Dict[MemoryUsageType, List[MemoryEntry]]
@@ -352,7 +352,7 @@ class LoopBody:
     def add_indirect(self, size):
         var = sympy_index_symbol_with_prefix(SymT.INDIRECT, len(self.indirect_vars))
         assert var not in self.indirect_var_ranges
-        self.indirect_vars.append(var)  # type: ignore[arg-type]
+        self.indirect_vars.append(var)
         self.indirect_var_ranges[var] = size
         return var
 

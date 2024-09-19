@@ -99,7 +99,7 @@ class BoundVars:
             elif "set_indirect" in key:
                 idx = int(key[len("set_indirect") :])
                 var = self.loop_body.indirect_vars[idx]
-                indirect = partial(self.set_indirect, var)  # type: ignore[arg-type]
+                indirect = partial(self.set_indirect, var)
                 result[key] = indirect
             else:
                 assert "scan" in key
