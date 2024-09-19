@@ -1355,12 +1355,6 @@ class X86InductorQuantizer(Quantizer):
                         return False
                 return True
 
-            def is_any_users_connected_to_quantizable_op(users):
-                for user in list(users.keys()):
-                    if user.target in quantizable_ops:
-                        return True
-                return False
-
             if _skip_annotate([node], filter_fn):
                 return
 
@@ -1388,8 +1382,9 @@ class X86InductorQuantizer(Quantizer):
             elif (
                 node.target is torch.ops.aten.flatten.using_ints
                 and len(node.users) > 0
-                and not is_any_users_connected_to_quantizable_op(node.users)
+                and not any(user.target in quantizable_ops for user in node.users.keys())
             ):
+                # Recipe of flatten: check if any users of flatten node are quantizable ops or not
                 return
             else:
                 input_node = node.all_input_nodes[0]
