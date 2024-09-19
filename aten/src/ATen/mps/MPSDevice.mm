@@ -22,7 +22,7 @@ static inline MTLLanguageVersion getMetalLanguageVersion(const id<MTLDevice>& de
   }
 #endif
 
-  TORCH_CHECK([device supportsFamily:MTLGPUFamilyMac2], "Missing Metal support for MTLGPUFamilyMac2");
+  TORCH_CHECK([device supportsFamily:MTLGPUFamilyCommon2], "Missing Metal support for MTLGPUFamilyCommon2");
   return languageVersion;
 }
 
@@ -78,29 +78,7 @@ MPSDevice::MPSDevice() : _mtl_device(nil), _mtl_indexing_library(nil) {
   // Check that MacOS 12.3+ version of MPS framework is available
   // Create the MPSGraph and check method introduced in 12.3+
   // which is used by MPS backend.
-  id mpsCD = NSClassFromString(@"MPSGraph");
-
-  if ([mpsCD instancesRespondToSelector:@selector
-             (LSTMWithSourceTensor:recurrentWeight:inputWeight:bias:initState:initCell:descriptor:name:)] == NO) {
-    return;
-  }
-
-  NSArray* devices = [MTLCopyAllDevices() autorelease];
-  for (unsigned long i = 0; i < [devices count]; i++) {
-    id<MTLDevice> device = devices[i];
-    if ([device isLowPower]) { // exclude Intel GPUs
-      continue;
-    }
-    if (![device supportsFamily:MTLGPUFamilyMac2]) {
-      // Exclude devices that does not support Metal 2.0
-      // Virtualised MPS device on MacOS 12.6 should fail this check
-      TORCH_WARN("Skipping device ", [[device name] UTF8String], " that does not support Metal 2.0");
-      continue;
-    }
-    _mtl_device = [device retain];
-    break;
-  }
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(_mtl_device);
+  _mtl_device = [MTLCreateSystemDefaultDevice() retain];
 }
 
 bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {

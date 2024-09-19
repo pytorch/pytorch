@@ -338,6 +338,7 @@ class CMake:
         # 1. https://cmake.org/cmake/help/latest/manual/cmake.1.html#synopsis
         # 2. https://stackoverflow.com/a/27169347
         args.append(base_dir)
+        args.append('-DUSE_OPENMP=OFF')
         self.run(args, env=my_env)
 
     def build(self, my_env: Dict[str, str]) -> None:
