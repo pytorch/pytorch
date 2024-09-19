@@ -48,14 +48,14 @@ class CKGemmTemplate(CKTemplate):
         auto argument = gemm.MakeArgument(
             reinterpret_cast<const {{a_element_dtype}}*>(X),
             reinterpret_cast<const {{b_element_dtype}}*>(W),
-            std::array<const void*, {{1 if has_bias else 0}}>{ {{'Bias' if has_bias else ''}} },
+            std::array<const void*, {{ds_size}}>{ {{ds_names}} },
             reinterpret_cast<{{c_element_dtype}}*>(Y),
             M,
             N,
             K,
             LDA,
             LDB,
-            std::array<ck::index_t, {{1 if has_bias else 0}}>{ {{'LDD' if has_bias else ''}} },
+            std::array<ck::index_t, {{ds_size}}>{ {{ds_strides}} },
             LDC,
             1, // kBatch
             {{a_elementwise_op}},
@@ -256,20 +256,27 @@ class CKGemmTemplate(CKTemplate):
 
         op = copy.deepcopy(op)
 
-        if len(self.input_nodes) == 4:
-            scale_x = self.input_nodes[2]
-            scale_w = self.input_nodes[3]
-            op.c_elementwise_op = "Scale"
-        else:
-            scale_x = None
-            scale_w = None
-
         # This parameter is converted into tuple because of change
         # from DeviceGemm_Xdl_CShuffleV3 to DeviceGemmMultiD_Xdl_CShuffle_V3.
         # The first tuple element corresponds to matmul result...
         op.c_shuffle_block_transfer_scalar_per_vector_n_per_block = (
             op.c_shuffle_block_transfer_scalar_per_vector_n_per_block,
         )
+
+        if len(self.input_nodes) == 4:
+            scale_x = self.input_nodes[2]
+            scale_w = self.input_nodes[3]
+            if 1 == scale_x.get_numel() and 1 == scale_w.get_numel():
+                op.c_elementwise_op = "Scale"
+            else:
+                op.c_elementwise_op = "MultiplyMultiply"
+                op.c_shuffle_dtype = "F32"
+                op.ds_layouts = (torch_layout_to_ck_layout(scale_x.get_layout()), torch_layout_to_ck_layout(scale_w.get_layout()))
+                op.ds_element_dtypes = (self._TORCH_DTYPE_TO_CK[scale_x.get_layout().dtype], self._TORCH_DTYPE_TO_CK[scale_w.get_layout().dtype])
+                op.c_shuffle_block_transfer_scalar_per_vector_n_per_block += (1, 1)
+        else:
+            scale_x = None
+            scale_w = None
 
         if Bias is not None:
             op.ds_layouts = (torch_layout_to_ck_layout(Bias.get_layout()),)
@@ -306,14 +313,19 @@ class CKGemmTemplate(CKTemplate):
 """
         epilogue = None
 
-        if Bias is not None:
+        if op.c_elementwise_op == "Bilinear":
             epilogue = f"Bilinear {{ {self.alpha}, {self.beta} }}"
 
-        if scale_x is not None and scale_w is not None:
+        if op.c_elementwise_op == "Scale":
             epilogue = "Scale { (inv_scale_w && inv_scale_x) ? (*inv_scale_w * *inv_scale_x) : 1.0f }"
 
-        if epilogue is None:
+        if op.c_elementwise_op == "MultiplyMultiply":
+            epilogue = "MultiplyMultiply {}"
+
+        if op.c_elementwise_op == "PassThrough":
             epilogue = "PassThrough {}"
+
+        assert epilogue is not None, "CK GEMM epilogue is not set"
 
         return self._template_from_string(self.gemm_template).render(
             headers=self.header().getvalue(),
@@ -340,6 +352,13 @@ class CKGemmTemplate(CKTemplate):
             b_elementwise_op="PassThrough {}",
             epilogue=epilogue,
             has_bias=Bias is not None,
+            ds_size=1 if Bias is not None else 2 if scale_x is not None else 0,
+            ds_names=", ".join(
+                ["Bias"] if Bias is not None else ["inv_scale_x", "inv_scale_w"] if op.c_elementwise_op == "MultiplyMultiply" else []
+            ),
+            ds_strides=", ".join(
+                ["LDD"] if Bias is not None else ["0", "0"] if op.c_elementwise_op == "MultiplyMultiply" else []
+            ),
             version_comment=version_comment,
         )
 
