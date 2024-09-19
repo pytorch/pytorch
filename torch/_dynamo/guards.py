@@ -154,6 +154,7 @@ class GuardManager:
     """
 
     def __init__(self):
+        # test
         self.root = RootGuardManager()
 
         self.closure_vars = None
@@ -560,7 +561,6 @@ class GuardBuilder(GuardBuilderBase):
         self.tensor_check_examples: List[torch.Tensor] = []
         self.tensor_check_guards: List[Guard] = []
         self.tensor_check_guard_managers: List[GuardManager] = []
-
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
         # Collect the ids of dicts which need key order guarding. source_name is
@@ -2085,25 +2085,6 @@ class GuardBuilder(GuardBuilderBase):
             code_list,
             obj_ref,
         )
-
-
-# Common Sub-Expression Elimination for Python expressions.
-#
-# There are 2 steps to this pass:
-#     1. Count the frequency of each sub-expression (i.e. inner
-#        node in the AST tree)
-#
-#     2. Replace those that occur more than once by a fresh variable 'v'.
-#        'v' will be defined in the 'preface' list (output argument to
-#        'NodeTransformer')
-#
-# NB: the use of 'ast.unparse' while visiting the nodes makes this pass
-# quadratic on the depth of the tree.
-#
-# NB: this pass creates a new variable for each AST node that is repeated
-# more than 'USE_THRESHOLD'. e.g. if 'a.b.c.d' is used 10 times, 'a.b.c'
-# and 'a.b' are also used 10 times. So, there will be a new variable for
-# each of them.
 class PyExprCSEPass:
     # Maximum number of times a given expression can be used without being
     # replaced by a fresh variable.
