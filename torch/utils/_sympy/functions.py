@@ -1156,8 +1156,8 @@ class Identity(sympy.Function):
     Prevents expansion and other optimizations
     """
 
-    def __repr__(self) -> Any:
-        return f"Identity({self.args[0]})"
+    def __repr__(self): # type: ignore[override]
+        return f"Identity({self.args[0]})" #
 
     def _eval_is_real(self):
         return self.args[0].is_real
