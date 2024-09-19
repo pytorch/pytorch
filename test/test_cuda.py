@@ -3394,7 +3394,7 @@ class TestCudaMallocAsync(TestCase):
 
     @unittest.skipIf(IS_ARM64 or not IS_LINUX, "x86 linux only cpp unwinding")
     def test_direct_traceback(self):
-        from torch._C._profiler import gather_traceback, symbolize_tracebacks
+        from torch._C._profiler import gather_traceback, symbolize_tracebacks  # @manual
 
         c = gather_traceback(True, True, True)
         (r,) = symbolize_tracebacks([c])

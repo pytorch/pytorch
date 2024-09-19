@@ -464,13 +464,23 @@ class CachedMethod(Protocol, Generic[P, RV]):
 
 # See https://github.com/python/mypy/issues/13222#issuecomment-1193073470 to understand the type signature
 def cache_on_self(fn: Callable[Concatenate[Any, P], RV]) -> CachedMethod[P, RV]:
-    key = f"__{fn.__name__}_cache"
+    name = fn.__name__
+    key = f"__{name}_cache"
 
-    @functools.wraps(fn)
-    def wrapper(self):
-        if not hasattr(self, key):
-            setattr(self, key, fn(self))
-        return getattr(self, key)
+    # wrapper is likely on the hot path, compile a specialized version of it
+    ctx = {"fn": fn}
+    exec(
+        f"""\
+        def {name}_cache_on_self(self):
+            try:
+                return self.{key}
+            except AttributeError:
+                self.{key} = rv = fn(self)
+                return rv
+        """.lstrip(),
+        ctx,
+    )
+    wrapper = functools.wraps(fn)(ctx[f"{name}_cache_on_self"])
 
     def clear_cache(self):
         if hasattr(self, key):
