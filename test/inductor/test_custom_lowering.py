@@ -7,7 +7,7 @@ from torch._inductor.ir import Pointwise
 from torch._inductor.lowering import make_pointwise, register_lowering
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.virtualized import ops
-from torch.testing._internal.common_utils import skipIfRocm
+from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -152,6 +152,7 @@ class TestCustomLowering(InductorTestCase):
         )(add_custom_lowering)
 
     @requires_gpu()
+    @skipIfXpu
     def test_jagged_to_padded_dense_sanity_cuda(self):
         def fn(inp, offsets, max_seq_len):
             return torch.ops.test_inductor_ops.jagged_to_padded_dense(
@@ -177,6 +178,7 @@ class TestCustomLowering(InductorTestCase):
         )
 
     @requires_gpu()
+    @skipIfXpu
     def test_jagged_to_padded_dense_zero_size(self):
         # Previously, the masking was being completely stripped for the
         # masked load of the input value. That would lead to an IMA
@@ -199,6 +201,7 @@ class TestCustomLowering(InductorTestCase):
 
     @requires_gpu()
     @skipIfRocm
+    @skipIfXpu
     def test_tanh_approx(self):
         def fn(inp):
             return torch.ops.test_inductor_ops.tanh_approx(inp)
@@ -212,6 +215,7 @@ class TestCustomLowering(InductorTestCase):
 
     @requires_gpu()
     @skipIfRocm
+    @skipIfXpu
     def test_multi_inp_asm(self):
         def fn(a, b):
             return torch.ops.test_inductor_ops.add_custom(a, b)
