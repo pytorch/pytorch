@@ -376,6 +376,7 @@ def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
 @register_op_impl(torch.ops.aten.item.default)
 @register_op_impl(torch.ops.aten._local_scalar_dense.default)
 def local_scalar_dense(fake_mode, func, arg):
+    # import fbvscode; fbvscode.set_trace()
     if (r := arg.item_memo) is not None:
         return r
     if fake_mode.shape_env is None or (

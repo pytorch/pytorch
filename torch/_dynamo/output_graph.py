@@ -1433,6 +1433,7 @@ class OutputGraph:
         gm._param_name_to_source = self.param_name_to_source  # type: ignore[assignment]
         gm._source_to_user_stacks = self.source_to_user_stacks  # type: ignore[assignment]
 
+        # import fbvscode; fbvscode.set_trace()
         try:
             name = (
                 self.compiler_fn.__name__

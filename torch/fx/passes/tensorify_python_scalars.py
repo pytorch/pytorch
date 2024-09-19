@@ -146,12 +146,14 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
             if unbacked_bindings := node.meta.get("unbacked_bindings"):
                 for s, keypath in unbacked_bindings.items():
 
+                    # import fbvscode; fbvscode.set_trace()
+
                     def go(
                         node: fx.Node, keypath: tuple[object, ...]
                     ) -> fx.Node | None:
                         if keypath == ():
                             return node
-                        elif isinstance(keypath[0], CallMethodKey):
+                        elif keypath[0].name == 'item' and isinstance(keypath[0], CallMethodKey):
                             return go(
                                 graph.call_method(keypath[0].name, (node,)), keypath[1:]
                             )
@@ -185,6 +187,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
             if node.op == "call_function" and node.target is torch.ops.aten.add.Tensor:
                 args = []
                 transform = False
+                # import fbvscode; fbvscode.set_trace()
                 for a in node.args:
                     if isinstance(a, fx.Node) and isinstance(
                         zf := a.meta["val"], torch.SymFloat

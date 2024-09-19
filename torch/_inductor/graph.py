@@ -989,7 +989,6 @@ class GraphLowering(torch.fx.Interpreter):
             return target(*args, **kwargs)
 
         if target not in lowerings:
-            breakpoint()
             assert isinstance(
                 target, torch._ops.OpOverload
             ), f"{target} is not an OpOverload"
