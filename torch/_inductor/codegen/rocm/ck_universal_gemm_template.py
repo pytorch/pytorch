@@ -352,7 +352,7 @@ class CKGemmTemplate(CKTemplate):
             b_elementwise_op="PassThrough {}",
             epilogue=epilogue,
             has_bias=Bias is not None,
-            ds_size=1 if Bias is not None else 2 if scale_x is not None else 0,
+            ds_size=1 if Bias is not None else 2 if op.c_elementwise_op == "MultiplyMultiply" else 0,
             ds_names=", ".join(
                 ["Bias"] if Bias is not None else ["inv_scale_x", "inv_scale_w"] if op.c_elementwise_op == "MultiplyMultiply" else []
             ),
