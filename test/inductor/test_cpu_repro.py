@@ -42,7 +42,7 @@ try:
     try:
         from . import test_torchinductor
     except ImportError:
-        import test_torchinductor
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -3422,7 +3422,6 @@ class CPUReproTests(TestCase):
                 dtype if dtype else torch.float32,
             )
 
-    @config.patch("cpp.enable_tiling_heuristics", False)
     def test_group_norm_vec(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
