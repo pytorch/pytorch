@@ -99,7 +99,7 @@ DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from torch._inductor import config, test_operators
+from torch._inductor import config, cpu_vec_isa, test_operators
 from torch._inductor.compile_fx import (
     compile_fx,
     compile_fx_inner,
