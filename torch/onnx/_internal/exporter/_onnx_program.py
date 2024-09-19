@@ -121,7 +121,6 @@ ONNXProgram(
         include_initializers: bool = True,
         keep_initializers_as_inputs: bool = False,
         external_data: bool | None = None,
-        **_,
     ):
         """Save the ONNX model to the specified destination.
 
