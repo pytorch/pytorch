@@ -33,7 +33,8 @@ TestConfig = namedtuple("TestConfig", "test_name input_config tag run_backward")
 
 BENCHMARK_TESTER = []
 
-SKIP_OP_LISTS = ['weight_norm_sparsifier_step']
+SKIP_OP_LISTS = ["weight_norm_sparsifier_step"]
+
 
 def _register_test(*test_metainfo):
     """save the metainfo needed to create a test. Currently test_metainfo
@@ -401,6 +402,7 @@ class BenchmarkRunner:
         return cmd_flag_list is None or any(
             test_flag == cmd_flag for cmd_flag in cmd_flag_list
         )
+
     def _check_skip(self, test_module, cmd_flag):
         return cmd_flag is None or (test_module not in cmd_flag)
 
@@ -540,7 +542,9 @@ class BenchmarkRunner:
                     [
                         test_case.framework,
                         test_case.op_bench.module_name(),
-                        test_case.test_config.test_name + "_BACKWARD" if test_case.test_config.run_backward is True else test_case.test_config.test_name,
+                        test_case.test_config.test_name + "_BACKWARD"
+                        if test_case.test_config.run_backward is True
+                        else test_case.test_config.test_name,
                         test_case.test_config.tag,
                         test_case.test_config.run_backward,
                         reported_time[0],
