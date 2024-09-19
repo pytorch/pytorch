@@ -24,10 +24,11 @@ def check_perf(actual_csv, expected_csv, expected_filename, threshold):
         if expected_perf is None:
             status = "FAIL"
             print(
-                f"\n{case:34}  {status:9} Not Found. if it is expected, you can update in {expected_filename} to reflect the new module. "
+                f"\n{case:34}  {status:9} Not Found. if it is expected, \
+                you can update in {expected_filename} to reflect the new module. "
             )
             continue
-        
+
         speed_up = expected_perf / perf
 
         if (1 - threshold) <= speed_up < (1 + threshold):
@@ -82,7 +83,7 @@ def main():
     args = parser.parse_args()
 
     actual = pd.read_csv(args.actual)
-    actual.drop_duplicates(subset=['Case Name'], keep='first', inplace=True)
+    actual.drop_duplicates(subset=["Case Name"], keep="first", inplace=True)
     expected = pd.read_csv(args.expected)
 
     failed, msg = check_perf(actual, expected, args.expected, args.threshold)
