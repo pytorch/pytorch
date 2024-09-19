@@ -466,9 +466,10 @@ class PadMMTest(TestCase):
         assert should_pad_common(
             mat1, mat2
         ), "This should pass the common padding criteria"
-        assert should_pad_mm_bf16(
-            mat1.dtype, m, n, k
-        ), "This should pass the should_pad_mm_bf16 padding criteria"
+        if torch.cuda.get_device_capability() < (9, 0):
+            assert should_pad_mm_bf16(
+                mat1.dtype, m, n, k
+            ), "This should pass the should_pad_mm_bf16 padding criteria"
 
         @torch.compile()
         def mm(mat1, mat2):

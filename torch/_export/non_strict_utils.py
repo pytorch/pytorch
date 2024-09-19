@@ -506,7 +506,11 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
-        if log.isEnabledFor(logging.DEBUG) and config.extended_debug_current_loc:
+        if (
+            not torch.compiler.is_dynamo_compiling()
+            and log.isEnabledFor(logging.DEBUG)
+            and config.extended_debug_current_loc
+        ):
             frame = _find_user_code_frame()
             if frame is not None:
                 log.debug(
