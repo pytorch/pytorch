@@ -417,7 +417,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         ],
     )
     def test_save_with_without_initializer(
-        self, include_initializer, use_fake_mode, use_exported_program
+        self, include_initializer: bool, use_fake_mode: bool, use_exported_program: bool
     ):
         class MNISTModel(nn.Module):
             def __init__(self) -> None:
@@ -465,11 +465,10 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 include_initializers=include_initializer,
             )
             onnx_model = onnx.load(tmp_onnx_file.name)
-            self.assertEqual(
-                (include_initializer and len(onnx_model.graph.initializer) > 0)
-                or (not include_initializer and len(onnx_model.graph.initializer) == 0),
-                True,
-            )
+            if include_initializer:
+                assert len(onnx_model.graph.initializer) > 0
+            else:
+                assert len(onnx_model.graph.initializer) == 0
 
     def test_export_with_print(self):
         class PrintModule(torch.nn.Module):
