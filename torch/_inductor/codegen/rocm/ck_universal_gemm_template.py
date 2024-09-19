@@ -259,8 +259,7 @@ class CKGemmTemplate(CKTemplate):
         if len(self.input_nodes) == 4:
             scale_x = self.input_nodes[2]
             scale_w = self.input_nodes[3]
-            op.a_elementwise_op = "Scale"
-            op.b_elementwise_op = "Scale"
+            op.c_elementwise_op = "Scale"
 
         # This parameter is converted into tuple because of change
         # from DeviceGemm_Xdl_CShuffleV3 to DeviceGemmMultiD_Xdl_CShuffle_V3.
@@ -302,6 +301,16 @@ class CKGemmTemplate(CKTemplate):
 * {torch.version.git_version=}
 */
 """
+        epilogue = None
+
+        if Bias is not None:
+            epilogue = f"Bilinear {{ {self.alpha}, {self.beta} }}"
+
+        if scale_x is not None and scale_w is not None:
+            epilogue = "Scale { (inv_scale_w && inv_scale_x) ? (*inv_scale_w * *inv_scale_x) : 1.0f }"
+
+        if epilogue is None:
+            epilogue = "PassThrough {}"
 
         return self._template_from_string(self.gemm_template).render(
             headers=self.header().getvalue(),
@@ -324,15 +333,9 @@ class CKGemmTemplate(CKTemplate):
             bias_element_dtype=op.ds_element_dtypes[0] if Bias is not None else "",
             alpha=self.alpha,
             beta=self.beta,
-            a_elementwise_op="Scale { inv_scale_x ? *inv_scale_x : 1.0f }"
-            if scale_x is not None
-            else "PassThrough {}",
-            b_elementwise_op="Scale { inv_scale_w ? *inv_scale_w : 1.0f }"
-            if scale_w is not None
-            else "PassThrough {}",
-            epilogue=f"Bilinear {{ {self.alpha}, {self.beta} }}"
-            if Bias is not None
-            else "PassThrough {}",
+            a_elementwise_op="PassThrough {}",
+            b_elementwise_op="PassThrough {}",
+            epilogue=epilogue,
             has_bias=Bias is not None,
             version_comment=version_comment,
         )
