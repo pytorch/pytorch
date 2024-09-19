@@ -854,7 +854,6 @@ class GraphLowering(torch.fx.Interpreter):
     def allocate_non_dup_const_name(
         self, name: Optional[str], data: Union[Tensor]
     ) -> str:
-        orig_name = name
         if not config.aot_inductor.use_runtime_constant_folding:
             for constant_name, value in self.constants.items():
                 if (
@@ -871,7 +870,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         if name is None:
             name = f"constant{len(self.constants)}"
-        assert name is not None
+        orig_name = name
         if name[0].isdigit():
             name = f"constant_{name}"
         name = self.qualify_name(name)
@@ -1720,11 +1719,7 @@ class GraphLowering(torch.fx.Interpreter):
         if any(device in self.device_types for device in ["cuda", "xpu"]):
             # first pass
             self.cpp_wrapper = False
-            # Although triton.store_cubin was OrderedSet in compile_fx, the backward pass didn't pick
-            # that up. In theory it should work by only setting triton.store_cubin to True here,
-            # but that will cause a problem when use_runtime_constant_folding is OrderedSet.
-            with config.patch({"triton.store_cubin": True}):
-                compiled = self.compile_to_module().call
+            compiled = self.compile_to_module().call
 
             if not config.triton.autotune_at_compile_time:
 

@@ -2585,19 +2585,36 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     def test_woq_int8(self):
         class M(torch.nn.Module):
-            def forward(self, x, weight, scales):
-                return torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
+            def __init__(self, is_permute):
+                super().__init__()
+                self.is_permute = is_permute
 
-        mod = M().eval()
+            def forward(self, x, weight, scales):
+                if self.is_permute:
+                    weight = weight.t()
+                    m = torch.mm(
+                        x.reshape(-1, x.shape[-1]),
+                        weight.to(x.dtype),
+                    )
+                    y = m * scales.to(m.dtype)
+                    y = y.reshape(*x.shape[:-1], y.shape[-1])
+                    return y
+                else:
+                    return (
+                        torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
+                    )
+
         x_shape = (1, 1, 256)
-        w_shape = (12, 256)
         s_shape = 12
         x_strides = [
             (256, 256, 1),  # linear dispatching to mm
             (256, 32, 1),  # linear dispatching to bmm
         ]
-        for x_stride in x_strides:
+        is_permutes = [False, True]
+        for x_stride, is_permute in itertools.product(x_strides, is_permutes):
+            mod = M(is_permute=is_permute).eval()
             x = torch.randn(x_shape, dtype=torch.bfloat16).as_strided(x_shape, x_stride)
+            w_shape = (12, 256)
             w = torch.randint(-128, 127, w_shape, dtype=torch.int8)
             s = torch.randn(s_shape, dtype=torch.bfloat16)
 
