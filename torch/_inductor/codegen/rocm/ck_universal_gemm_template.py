@@ -260,6 +260,9 @@ class CKGemmTemplate(CKTemplate):
             scale_x = self.input_nodes[2]
             scale_w = self.input_nodes[3]
             op.c_elementwise_op = "Scale"
+        else:
+            scale_x = None
+            scale_w = None
 
         # This parameter is converted into tuple because of change
         # from DeviceGemm_Xdl_CShuffleV3 to DeviceGemmMultiD_Xdl_CShuffle_V3.
