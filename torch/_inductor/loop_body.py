@@ -79,7 +79,7 @@ class LoopBody:
     indexing simplifications and makes it easier to analyze loop bodies.
     """
 
-    indexing_exprs: Dict[str, sympy.Expr]
+    indexing_exprs: Dict[sympy.Expr, sympy.Expr]
     indexing_exprs_name: Dict[sympy.Expr, str]
     submodules: Dict[str, Any]
     subblocks: Dict[str, LoopBodyBlock]
@@ -270,6 +270,9 @@ class LoopBody:
     def get_read_expr(self, buffer_name):
         # reversed to match old behavior
         for entry in reversed(self.memory_usage[MemoryUsageType.LOAD]):
+            import sys
+            print("*** POINT 0: {type(entry.index_name)}", file=sys.stderr)
+            assert False
             if entry.buffer_name == buffer_name:
                 return self.indexing_exprs[entry.index_name]
         raise KeyError(buffer_name)
