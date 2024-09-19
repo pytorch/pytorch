@@ -71,7 +71,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
             # add data with default config here
             [self.add_data(name, data, **self.defaults) for name, data in data_list]
 
-    def prepare(self):
+    def prepare(self, model, config):
         raise NotImplementedError("this function is undefined for this class")
 
     def _extract_weight(self, data):
@@ -266,7 +266,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
             "_container": self._container.state_dict(),
         }
 
-    def __repr__(self):
+    def __repr__(self):  # type:ignore[override]
         format_string = self.__class__.__name__ + " ("
         for name, sparse_args in self.data_groups.items():
             format_string += "\n"
@@ -299,7 +299,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
                 self._container, name, leave_parametrized=leave_parametrized
             )
 
-    def step(self):
+    def step(self):  # type:ignore[override]
         if not self.enable_mask_update:
             return
         with torch.no_grad():

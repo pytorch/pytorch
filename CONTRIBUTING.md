@@ -50,7 +50,6 @@ aspects of contributing to PyTorch.
 - [Windows development tips](#windows-development-tips)
   - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
   - [Building on legacy code and CUDA](#building-on-legacy-code-and-cuda)
-- [Running clang-tidy](#running-clang-tidy)
 - [Pre-commit tidy/linting hook](#pre-commit-tidylinting-hook)
 - [Building PyTorch with ASAN](#building-pytorch-with-asan)
   - [Getting `ccache` to work](#getting-ccache-to-work)
@@ -1131,38 +1130,6 @@ CUDA, MSVC, and PyTorch versions are interdependent; please install matching ver
 | 11.0         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |      1.7.0      |
 
 Note: There's a [compilation issue](https://github.com/oneapi-src/oneDNN/issues/812) in several Visual Studio 2019 versions since 16.7.1, so please make sure your Visual Studio 2019 version is not in 16.7.1 ~ 16.7.5
-
-## Running clang-tidy
-
-[Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/index.html) is a C++
-linter and static analysis tool based on the clang compiler. We run clang-tidy
-in our CI to make sure that new C++ code is safe, sane and efficient. See the
-[`clang-tidy` job in our GitHub Workflow's
-lint.yml file](https://github.com/pytorch/pytorch/blob/main/.github/workflows/lint.yml)
-for the simple commands we use for this.
-
-To run clang-tidy locally, follow these steps:
-
-1. Install clang-tidy.
-We provide custom built binaries which have additional checks enabled. You can install it by running:
-```bash
-python3 -m tools.linter.clang_tidy.generate_build_files
-```
-We currently only support Linux and MacOS (x86).
-
-2. Install clang-tidy driver script dependencies
-```bash
-pip3 install -r tools/linter/clang_tidy/requirements.txt
-```
-
-3. Run clang-tidy
-```bash
-# Run clang-tidy on the entire codebase
-make clang-tidy
-# Run clang-tidy only on your changes
-make clang-tidy CHANGED_ONLY=--changed-only
-```
-This internally invokes our driver script and closely mimics how clang-tidy is run on CI.
 
 ## Pre-commit tidy/linting hook
 
