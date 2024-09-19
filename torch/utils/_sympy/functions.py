@@ -310,11 +310,11 @@ class ModularIndexing(sympy.Function):
         if isinstance(base, FloorDiv):
             return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
 
-    def _eval_is_nonnegative(self):
+    def _eval_is_nonnegative(self):  # type:ignore[override]
         p, q = self.args[:2]
         return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)  # type: ignore[attr-defined]
 
-    def _eval_is_positive(self):
+    def _eval_is_positive(self):  # type:ignore[override]
         p, q = self.args[:2]
         return fuzzy_eq(p.is_positive, q.is_positive)  # type: ignore[attr-defined]
 
@@ -329,14 +329,14 @@ class Where(sympy.Function):
     def _eval_is_integer(self):
         return True if self.args[1].is_integer and self.args[2].is_integer else None  # type: ignore[attr-defined]
 
-    def _eval_is_nonnegative(self):
+    def _eval_is_nonnegative(self):  # type:ignore[override]
         return (
             True
             if self.args[1].is_nonnegative and self.args[2].is_nonnegative  # type: ignore[attr-defined]
             else None
         )
 
-    def _eval_is_positive(self):
+    def _eval_is_positive(self):  # type:ignore[override]
         return True if self.args[1].is_positive and self.args[2].is_positive else None  # type: ignore[attr-defined]
 
     @classmethod
@@ -397,7 +397,7 @@ class PythonMod(sympy.Function):
             return S.Zero
 
     # NB: args[1] for PythonMod
-    def _eval_is_nonnegative(self):
+    def _eval_is_nonnegative(self):  # type:ignore[override]
         return True if self.args[1].is_positive else None  # type: ignore[attr-defined]
 
     def _eval_is_nonpositive(self):
@@ -823,13 +823,13 @@ class Max(MinMaxBase, Application):  # type: ignore[misc]
     zero = S.Infinity
     identity = S.NegativeInfinity
 
-    def _eval_is_positive(self):
+    def _eval_is_positive(self):  # type:ignore[override]
         return fuzzy_or(a.is_positive for a in self.args)  # type: ignore[attr-defined]
 
-    def _eval_is_nonnegative(self):
+    def _eval_is_nonnegative(self):  # type:ignore[override]
         return fuzzy_or(a.is_nonnegative for a in self.args)  # type: ignore[attr-defined]
 
-    def _eval_is_negative(self):
+    def _eval_is_negative(self):  # type:ignore[override]
         return fuzzy_and(a.is_negative for a in self.args)
 
 
@@ -841,13 +841,13 @@ class Min(MinMaxBase, Application):  # type: ignore[misc]
     zero = S.NegativeInfinity
     identity = S.Infinity
 
-    def _eval_is_positive(self):
+    def _eval_is_positive(self):  # type:ignore[override]
         return fuzzy_and(a.is_positive for a in self.args)  # type: ignore[attr-defined]
 
-    def _eval_is_nonnegative(self):
+    def _eval_is_nonnegative(self):  # type:ignore[override]
         return fuzzy_and(a.is_nonnegative for a in self.args)  # type: ignore[attr-defined]
 
-    def _eval_is_negative(self):
+    def _eval_is_negative(self):  # type:ignore[override]
         return fuzzy_or(a.is_negative for a in self.args)
 
 

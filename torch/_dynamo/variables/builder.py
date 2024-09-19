@@ -204,6 +204,7 @@ from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .torch_function import (
     build_torch_function_fn,
     TensorWithTFOverrideVariable,
+    torch_function_mode_stack_state_mgr,
     TorchFunctionModeVariable,
 )
 from .user_defined import (
@@ -547,11 +548,6 @@ class VariableBuilder:
         if id_dispatch is not None:
             return id_dispatch(self, value)
 
-        # Note - There are some nested values where types mismatch!
-        # We want to get those out and wrap those.
-        if is_function_or_wrapper(value):
-            value = inspect.getattr_static(value, "_torchdynamo_inline", value)
-
         # Everything else (NB: order matters!)
         if is_traceable_wrapper_subclass(value) or istype(
             value, config.traceable_tensor_subclasses
@@ -848,6 +844,9 @@ class VariableBuilder:
         elif isinstance(value, (torch._C._SDPAParams)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return SDPAParamsVariable.create(self.tx, value, self.source)
+        elif isinstance(value, torch._C._SDPBackend):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return ConstantVariable(value)
         elif isinstance(value, _EventBase):
             self.install_guards(GuardBuilder.ID_MATCH)
             torch._dynamo.utils.store_user_object_weakref(value)
@@ -988,6 +987,13 @@ class VariableBuilder:
         elif is_lru_cache_wrapped_function(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return WrapperUserFunctionVariable(value, "__wrapped__", source=self.source)
+        elif is_function_or_wrapper(value) and inspect.getattr_static(
+            value, "_torchdynamo_inline", False
+        ):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return WrapperUserFunctionVariable(
+                value, "_torchdynamo_inline", source=self.source
+            )
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
             # For these wrappers, Dynamo points to the wrapped function,
@@ -1663,15 +1669,16 @@ class VariableBuilder:
                 # but warning is not the end of the world
                 assert isinstance(value.base, np.nditer)
 
-        try:
-            tensor_value = _util._try_convert_to_tensor(value)
-            if readonly:
-                from torch._prims_common import clone_preserve_strides
+        with torch_function_mode_stack_state_mgr.temp_restore_stack():
+            try:
+                tensor_value = _util._try_convert_to_tensor(value)
+                if readonly:
+                    from torch._prims_common import clone_preserve_strides
 
-                tensor_value = clone_preserve_strides(tensor_value)
-        except NotImplementedError as e:
-            # failed to convert to tensor, graph break
-            unimplemented(str(e))
+                    tensor_value = clone_preserve_strides(tensor_value)
+            except NotImplementedError as e:
+                # failed to convert to tensor, graph break
+                unimplemented(str(e))
 
         # We do this because we want the full behavior of guarding the numpy ndarray as if it were
         # a tensor. It's a little annoying to make a VT to throw out, but there's so many side effects here
