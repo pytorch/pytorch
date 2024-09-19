@@ -3289,7 +3289,9 @@
   autogen: native_layer_norm_backward.out
   tags: core
 
-- func: rms_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, float? eps=None) -> Tensor
+- func: rms_norm(Tensor input, SymInt[] normalized_shape, Tensor? weight=None, float? eps=None) -> Tensor
+  dispatch:
+    CompositeImplicitAutograd: rms_norm_symint
 
 - func: nan_to_num(Tensor self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor
   variants: function, method
@@ -13056,12 +13058,14 @@
   dispatch:
     CPU: im2col_out_cpu
     CUDA: im2col_out_cuda
+    MPS: im2col_out_mps
 
 - func: im2col(Tensor self, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
   python_module: nn
   dispatch:
     CPU: im2col_cpu
     CUDA: im2col_cuda
+    MPS: im2col_mps
 
 - func: isfinite(Tensor self) -> Tensor
   variants: function, method
@@ -14718,6 +14722,11 @@
   dispatch:
     CUDA: _fbgemm_dense_to_jagged_forward_symint
     CPU: _padded_dense_to_jagged_forward_cpu
+
+- func: _nested_from_padded_tensor(Tensor padded, Tensor offsets, Tensor dummy, int ragged_idx=1, Tensor? min_seqlen=None, Tensor? max_seqlen=None, SymInt? sum_S=None) -> Tensor
+  variants: function
+  device_check: NoCheck
+  dispatch: {}
 
 - func: _nested_tensor_softmax_with_shape(Tensor self, Tensor query) -> Tensor
   dispatch:
