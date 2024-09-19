@@ -1,6 +1,8 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 
+from itertools import count
+
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
@@ -22,6 +24,8 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.graph_module import GraphModule
 
+
+counter = count(0)
 
 """
 Problems
@@ -96,8 +100,9 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         super().__init__("invoke_subgraph")
 
     # No need of kwargs
-    def __call__(self, subgraph: GraphModule, *args):
-        return super().__call__(subgraph, *args)
+    # Identifier is for connecting forward and backward graphs
+    def __call__(self, subgraph: GraphModule, identifier: str, *args):
+        return super().__call__(subgraph, identifier, *args)
 
 
 invoke_subgraph = InvokeSubgraphHOP()
@@ -216,7 +221,7 @@ def create_fw_bw_graph(fn, use_output_and_grad_bw, fw_inputs, fw_outputs):
 
 
 @invoke_subgraph.py_impl(DispatchKey.CompositeExplicitAutograd)
-def invoke_subgraph_composite_explicit_autograd(subgraph, *args):
+def invoke_subgraph_composite_explicit_autograd(subgraph, identifier, *args):
     return subgraph(*args)
 
 
@@ -227,18 +232,20 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(ctx, fw_graph, bw_graph, *args):
+    def forward(ctx, fw_graph, bw_graph, identifier, *args):
         """
         num_fwd_outputs is the number of outputs of the forward graph. Rest of
         the outputs are saved for the backward graph.
         """
         ctx._fw_graph = fw_graph
         ctx._bw_graph = bw_graph
+        ctx.identifier = identifier
 
         # TODO(anijain2305) - Learn what is this ctx manager
         with torch._C._AutoDispatchBelowAutograd():
             out = invoke_subgraph(
                 fw_graph,
+                identifier,
                 *args,
             )
 
@@ -248,9 +255,10 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
     @staticmethod
     def backward(ctx, *grad_outs):
         bw_graph = ctx._bw_graph
+        identifier = ctx.identifier
         saved_tensors = ctx.saved_tensors
-        grads = invoke_subgraph(bw_graph, *(grad_outs + saved_tensors))
-        return None, None, *grads
+        grads = invoke_subgraph(bw_graph, identifier, *(grad_outs + saved_tensors))
+        return None, None, None, *grads
 
 
 def create_fw_bw_graph_local(subgraph, *args):
@@ -289,7 +297,7 @@ def create_fw_bw_graph_local(subgraph, *args):
 
 
 @invoke_subgraph.py_impl(DispatchKey.Autograd)
-def invoke_subgraph_autograd(subgraph, *args):
+def invoke_subgraph_autograd(subgraph, identifier, *args):
     # All of these imports need to be here in order to avoid circular dependencies
     # import functools
     # from torch._dispatch.python import suspend_functionalization
@@ -308,29 +316,35 @@ def invoke_subgraph_autograd(subgraph, *args):
     #         out = aot_module_simplified(subgraph, args, fw_compile)
     #         return out(*args)
     fw_graph, bw_graph = create_fw_bw_graph_local(subgraph, *args)
+    global counter
+    new_identifier = identifier
+    if identifier == "start":
+        new_identifier = f"subgraph_{next(counter)}"
 
-    return InvokeSubgraphAutogradOp.apply(fw_graph, bw_graph, *args)
+    return InvokeSubgraphAutogradOp.apply(fw_graph, bw_graph, new_identifier, *args)
 
 
 @invoke_subgraph.py_functionalize_impl
-def invoke_subgraph_func(ctx, subgraph, *args):
+def invoke_subgraph_func(ctx, subgraph, identifier, *args):
     unwrapped_args = ctx.unwrap_tensors(args)
     with ctx.redispatch_to_next() as m:
         # TODO(anijain2305) - What to do for mutation?
         functionalized_subgraph = ctx.functionalize(subgraph)
 
         # TODO(anijain2305) - Why is the next line not - functionalized_subgraph(*unwrapped_args)?
-        out = invoke_subgraph(functionalized_subgraph, *unwrapped_args)
+        out = invoke_subgraph(functionalized_subgraph, identifier, *unwrapped_args)
     return ctx.wrap_tensors(out)
 
 
 @invoke_subgraph.py_impl(FakeTensorMode)
-def invoke_subgraph_fake_tensor_mode(mode, subgraph, *args):
+def invoke_subgraph_fake_tensor_mode(mode, subgraph, identifier, *args):
     with mode:
         return subgraph(*args)
 
 
-def trace_invoke_subgraph(proxy_mode: ProxyTorchDispatchMode, subgraph, *args):
+def trace_invoke_subgraph(
+    proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *args
+):
     example_out = subgraph(*args)
 
     graph = reenter_make_fx(subgraph)(*args)
@@ -338,7 +352,7 @@ def trace_invoke_subgraph(proxy_mode: ProxyTorchDispatchMode, subgraph, *args):
     qualname = proxy_mode.tracer.get_fresh_qualname("repeated_subgraph")
     proxy_mode.tracer.root.register_module(qualname, graph)
 
-    node_args = (graph, *args)
+    node_args = (graph, identifier, *args)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", invoke_subgraph, proxy_args, {}
@@ -349,5 +363,5 @@ def trace_invoke_subgraph(proxy_mode: ProxyTorchDispatchMode, subgraph, *args):
 
 
 @invoke_subgraph.py_impl(ProxyTorchDispatchMode)
-def invole_subgraph_proxy_torch_dispatch_mode(proxy_mode, subgraph, *args):
-    return trace_invoke_subgraph(proxy_mode, subgraph, *args)
+def invole_subgraph_proxy_torch_dispatch_mode(proxy_mode, subgraph, identifier, *args):
+    return trace_invoke_subgraph(proxy_mode, subgraph, identifier, *args)

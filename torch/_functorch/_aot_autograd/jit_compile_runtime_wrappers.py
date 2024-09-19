@@ -309,6 +309,232 @@ def collect_bw_donated_buffer_idxs(
     return [fw_metadata.num_symints_saved_for_bw + i for i in fw_donated_buffer]
 
 
+import operator
+from collections import defaultdict
+
+
+def partition_invoke_subgraphs(
+    joint_gm: torch.fx.GraphModule,
+    joint_inputs: Any,
+    aot_config: AOTConfig,
+) -> torch.fx.GraphModule:
+    """
+    Partitions the joint graph into forward and backward subgraphs.
+    """
+    # if aot_config.partition_fn is None:
+    #     return
+
+    fw_bw_invoke_subgraph = defaultdict(list)
+    new_fw_bw_invoke_subgraph = defaultdict(list)
+    num_original_fwd_outputs = {}
+    num_saved_tensors_in_fwd = {}
+
+    for node in joint_gm.graph.nodes:
+        if (
+            node.op == "call_function"
+            and node.target == torch.ops.higher_order.invoke_subgraph
+        ):
+            assert isinstance(node.args[1], str)
+            subgraph_identifier = node.args[1]
+            subgraph_name = node.args[0].target
+            subgraph = getattr(joint_gm, subgraph_name)
+
+            fw_bw_invoke_subgraph[subgraph_identifier].append(subgraph)
+
+    for key in fw_bw_invoke_subgraph:
+        fw_subgraph, bw_subgraph = fw_bw_invoke_subgraph[key]
+
+        num_inputs = 0
+        fw_nodes = []
+        fw_outputs = []
+        for node in fw_subgraph.graph.nodes:
+            if node.op == "placeholder":
+                num_inputs += 1
+            elif node.op != "output":
+                fw_nodes.append(node)
+            elif node.op == "output":
+                fw_outputs = node.args[0]
+
+        num_joint_inputs = 0
+        counter = 0
+        mapping = {}
+        for node in bw_subgraph.graph.nodes:
+            if node.op == "placeholder":
+                num_joint_inputs += 1
+            elif node.op != "output" and counter < len(fw_nodes):
+                # TODO(anijain2305) - Is this assumption valid? Maybe true
+                # today. But this is very fragile.
+                mapping[fw_nodes[counter]] = node
+                counter += 1
+
+        new_graph = torch.fx.Graph()
+        env = {}
+        bw_outputs = []
+        for idx, node in enumerate(bw_subgraph.graph.nodes):
+            if node.op == "placeholder":
+                if idx >= (num_joint_inputs - num_inputs):
+                    env[node] = new_graph.placeholder(f"primals_{counter}")
+                    # Must copy node.meta to ensure partitioner works
+                    env[node].meta = node.meta
+                    counter += 1
+                else:
+                    env[node] = new_graph.placeholder(f"tangents_{counter}")
+                    env[node].meta = node.meta
+                    counter += 1
+            elif node.op != "output":
+                new_node = new_graph.node_copy(node, lambda x: env[x])
+                env[node] = new_node
+            elif node.op == "output":
+                bw_outputs = node.args[0]
+
+        output_values = []
+        for fw_output in fw_outputs:
+            output_values.append(env[mapping[fw_output]])
+
+        for bw_output in bw_outputs:
+            output_values.append(env[bw_output])
+
+        new_graph.output(tuple(output_values))
+
+        new_graph.eliminate_dead_code()
+        new_graph.lint()
+        # TODO(anijain2305) - What should be the root module? This is most probably wrong.
+        joint_subgraph_mod = torch.fx.GraphModule(joint_gm, new_graph)
+        print(joint_subgraph_mod)
+
+        # TODO(anijain2305) - Probably use a torch.fx.Interpreter to get the
+        # joint_inputs for the subgraph.
+        new_fw_module, new_bw_module = aot_config.partition_fn(
+            joint_subgraph_mod, [], num_fwd_outputs=len(fw_outputs)
+        )
+        new_fw_bw_invoke_subgraph[key] = [new_fw_module, new_bw_module]
+        num_original_fwd_outputs[key] = len(fw_outputs)
+
+    env = {}
+    new_graph = torch.fx.Graph()
+
+    to_be_deleted_subgraphs = set()
+    seen_subgraph_identifiers = set()
+
+    counter = 0
+
+    def add_subgraph(new_subgraph_mod):
+        nonlocal counter
+        new_subgraph_attr_name = f"_modified_repeated_subgraph_{counter}"
+        joint_gm.register_module(new_subgraph_attr_name, new_subgraph_mod)
+        counter += 1
+        return new_subgraph_attr_name
+
+    def propagate_meta_info(new_subgraph_mod, new_node):
+        # TODO(anijain2305) - What to do with node.meta?
+        out_example_vals = []
+        for n in new_subgraph_mod.graph.nodes:
+            if n.op == "output":
+                for out_arg in n.args[0]:
+                    out_example_vals.append(out_arg.meta["val"])
+
+        for key, value in node.meta.items():
+            if key == "val":
+                new_node.meta["val"] = tuple(out_example_vals)
+            else:
+                new_node.meta[key] = value
+
+    new_partitioned_fw_subgraph_node = {}
+
+    for node in joint_gm.graph.nodes:
+        if (
+            node.op == "call_function"
+            and node.target == torch.ops.higher_order.invoke_subgraph
+        ):
+            assert isinstance(node.args[1], str)
+            subgraph_identifier = node.args[1]
+            subgraph_name = node.args[0].target
+            to_be_deleted_subgraphs.add(subgraph_name)
+
+            if subgraph_identifier not in seen_subgraph_identifiers:
+                # this is forward graph
+                # 1) Insert the fw subgraph module in the joint_gm
+                # 2) Get a proxy for the subgraph module and then do get_attr call_function
+                # 3) Return a new call_fucntion invoke_subgraph with this new subgraph
+                seen_subgraph_identifiers.add(subgraph_identifier)
+
+                new_fw_subgraph = new_fw_bw_invoke_subgraph[subgraph_identifier][0]
+                subgraph_attr_node = new_graph.get_attr(add_subgraph(new_fw_subgraph))
+
+                env[node] = new_graph.call_function(
+                    the_function=torch.ops.higher_order.invoke_subgraph,
+                    args=(
+                        subgraph_attr_node,
+                        "start",
+                        *(env[n] for n in node.args[2:]),
+                    ),
+                )
+                propagate_meta_info(new_fw_subgraph, env[node])
+
+                for n in new_fw_subgraph.graph.nodes:
+                    if n.op == "output":
+                        num_saved_tensors_in_fwd[subgraph_identifier] = (
+                            len(n.args[0])
+                            - num_original_fwd_outputs[subgraph_identifier]
+                        )
+
+                new_partitioned_fw_subgraph_node[subgraph_identifier] = env[node]
+
+            else:
+                # this is backward pass
+                new_bw_subgraph = new_fw_bw_invoke_subgraph[subgraph_identifier][1]
+                subgraph_attr_node = new_graph.get_attr(add_subgraph(new_bw_subgraph))
+
+                num_saved_tensors = num_saved_tensors_in_fwd[subgraph_identifier]
+                num_original_outputs = num_original_fwd_outputs[subgraph_identifier]
+                num_tangents = num_original_outputs
+
+                total_inputs = len(node.args[2:])
+
+                # Old subgraph signature - (*tangents, *saved_tensors)
+                # len(tangents) = len(primals)
+                # Using this we can find out the tangets from the old graph
+                # New subgraph signature - (*saved_tensors_hat, *tangets)
+                # for saved_tensors_hat, we will have to do getitem from the fwd node
+                #
+
+                saved_tensors_nodes = []
+                fw_graph_node = new_partitioned_fw_subgraph_node[subgraph_identifier]
+                for idx in range(num_saved_tensors):
+                    saved_tensor_idx = num_original_outputs + idx
+                    getitem_node = new_graph.call_function(
+                        the_function=operator.getitem,
+                        args=(fw_graph_node, saved_tensor_idx),
+                    )
+                    # TODO(anijain2305) - Again annoying node.meta business - required for paritioner
+                    getitem_node.meta["val"] = fw_graph_node.meta["val"][
+                        saved_tensor_idx
+                    ]
+                    saved_tensors_nodes.append(getitem_node)
+
+                tangent_nodes = []
+                for idx in range(num_tangents):
+                    tangent_nodes.append(env[node.args[2 + idx]])
+
+                env[node] = new_graph.call_function(
+                    the_function=torch.ops.higher_order.invoke_subgraph,
+                    args=(
+                        subgraph_attr_node,
+                        "start",
+                        *(saved_tensors_nodes + tangent_nodes),
+                    ),
+                )
+                propagate_meta_info(new_bw_subgraph, env[node])
+        else:
+            env[node] = new_graph.node_copy(node, lambda x: env[x])
+
+    new_graph.eliminate_dead_code()
+    new_graph.lint()
+    new_joint_gm = torch.fx.GraphModule(joint_gm, new_graph)
+
+    return new_joint_gm
+
+
 def aot_dispatch_autograd(
     flat_fn,
     flat_args: List[Any],
@@ -333,6 +559,12 @@ def aot_dispatch_autograd(
     fx_g, joint_inputs, maybe_subclass_meta = aot_dispatch_autograd_graph(
         flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
     )
+    # TODO(anijain2305) - this changes fx_g signature. But somehow it still
+    # works. I don't understand why it works. There will be some place where we
+    # let go of fx_g and use fw_module and bw_module. The question is - does
+    # joint graph partitioners need to keep the invariant of original fx_g
+    # signature?
+    fx_g = partition_invoke_subgraphs(fx_g, joint_inputs, aot_config)
 
     # Copied from aot_dispatch_autograd_graph.
     disable_amp = torch._C._is_any_autocast_enabled()
@@ -379,6 +611,7 @@ def aot_dispatch_autograd(
                 + inner_meta.num_outputs_rng_offset
                 + num_tokens  # See Note [Side-Effectful Tokens in AOTAutograd]
             )
+
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )

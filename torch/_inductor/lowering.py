@@ -6224,7 +6224,7 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
 
 
 @register_lowering(torch.ops.higher_order.invoke_subgraph)
-def invoke_subgraph(subgraph_fn: ir.Subgraph, *args):
+def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, *args):
     # TODO(anijain2305) - There is some softness around unpack args and list and
     # tuple. Probably follow cond example and always have operands as a tuple.
     result = ir.InvokeSubgraph.create(subgraph_fn, list(args))

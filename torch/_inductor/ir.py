@@ -6462,7 +6462,7 @@ class InvokeSubgraph(ExternKernel):
         operands = [cls.realize_input(x) for x in operands]
 
         # TODO(anijain2305) - If we decided to change *args to operands, we will need to update this.
-        fx_operands = V.graph.current_node.args[1:]
+        fx_operands = V.graph.current_node.args[2:]
         fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
 
         if subgraph.graph is None:

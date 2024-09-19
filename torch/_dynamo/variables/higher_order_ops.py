@@ -1960,8 +1960,77 @@ class AutoFunctionalizeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 # TODO(anijin2305) - Refactor the base class - WrapHigherOrderVariable - to share code
+# This is the copy/paste of WrapHigherOrderVariable because invoke_subgraph has an identifier arg
 class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
-    pass
+    def create_wrapped_node(
+        self, tx: "InstructionTranslator", args, kwargs, description
+    ):
+        # See NOTE [HigherOrderOperator tracing design] for more details
+
+        (
+            (body_r, treespec),
+            body_graph,
+            body_lifted_freevars,
+        ) = speculate_subgraph(
+            tx,
+            args[0],  # function
+            [*args[2:]],
+            kwargs,
+            description,
+            source_target=self.value,
+            should_flatten_outputs=True,
+        )
+
+        body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
+        body_name = add_subgraph(
+            tx,
+            "wrap_body",
+            body_gmod,
+        )
+
+        body_node = make_attr(tx, body_name)
+
+        # Since, we call `speculate_subgraph` with `set_subgraph_inputs="automatic`,
+        # all the arguments are lifted.
+        lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
+
+        proxy_args = (body_node,) + lifted_args
+        example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
+
+        return proxy_args, {}, example_value, body_r, treespec, body_gmod
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        # This flattens the kwargs into lifted args
+        p_args, p_kwargs, example_value, body_r, treespec, _ = self.create_wrapped_node(
+            tx, args, kwargs, "wrap"
+        )
+
+        if len(p_kwargs) > 0:
+            unimplemented("kwargs should have been flattened into lifted args")
+
+        flat_example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
+
+        p_args = (
+            p_args[0],
+            args[1].as_proxy(),
+            *p_args[1:],
+        )
+        return _call_function_and_unflatten_output(
+            tx, self.value, tuple(p_args), p_kwargs, flat_example_value, treespec
+        )
 
 
 class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
