@@ -326,11 +326,11 @@ def export(
             Refer to https://github.com/pytorch/pytorch/pull/74765 for more details.
     """
     if dynamo is True or isinstance(model, torch.export.ExportedProgram):
-        from torch.onnx._internal import exporter
+        from torch.onnx._internal.exporter import _compat
 
         if isinstance(args, torch.Tensor):
             args = (args,)
-        return exporter.export_compat(
+        return _compat.export_compat(
             model,
             args,
             f,
@@ -435,11 +435,11 @@ def dynamo_export(
     import warnings
 
     from torch.onnx import _flags
-    from torch.onnx._internal import exporter
+    from torch.onnx._internal.exporter import _compat
     from torch.utils import _pytree
 
     if isinstance(model, torch.export.ExportedProgram):
-        return exporter.export_compat(
+        return _compat.export_compat(
             model,  # type: ignore[arg-type]
             model_args,
             f=None,
@@ -487,7 +487,7 @@ def dynamo_export(
         else:
             dynamic_shapes = None
 
-        return exporter.export_compat(
+        return _compat.export_compat(
             model,  # type: ignore[arg-type]
             model_args,
             f=None,
