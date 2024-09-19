@@ -104,7 +104,6 @@ struct dummy_int1_7_t {};
   _(c10::dummy_int1_7_t<6>, Int6) /* 42 */               \
   _(c10::dummy_int1_7_t<7>, Int7) /* 43 */
 
-
 // If you want to support ComplexHalf for real, add ComplexHalf
 // into this macro (and change the name).  But beware: convert()
 // doesn't work for all the conversions you need...

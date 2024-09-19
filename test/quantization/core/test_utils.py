@@ -198,25 +198,25 @@ class TestUtils(TestCase):
             return (*size[:-1], size[-1] * 2)
 
         for dtype in [torch.uint4, torch.int4]:
-           class UInt4OrInt4Tensor(torch.Tensor):
-               @staticmethod
-               def __new__(cls, elem, **kwargs):
-                   assert elem.dtype is torch.uint8
-                   assert not kwargs.get("requires_grad", False)
-                   kwargs["requires_grad"] = False
-                   return torch.Tensor._make_wrapper_subclass(cls, up_size(elem.shape), dtype=dtype, **kwargs)
+            class UInt4OrInt4Tensor(torch.Tensor):
+                @staticmethod
+                def __new__(cls, elem, **kwargs):
+                    assert elem.dtype is torch.uint8
+                    assert not kwargs.get("requires_grad", False)
+                    kwargs["requires_grad"] = False
+                    return torch.Tensor._make_wrapper_subclass(cls, up_size(elem.shape), dtype=dtype, **kwargs)
 
-               def __init__(self, elem):
-                   self.elem = elem
+                def __init__(self, elem):
+                    self.elem = elem
 
-               @classmethod
-               def __torch_dispatch__(cls, func, types, args, kwargs=None):
-                   pass
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs=None):
+                    pass
 
-           # make sure it runs
-           x = UInt4OrInt4Tensor(torch.tensor([
-               [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF],
-               [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF],
-               [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF],
-           ], dtype=torch.uint8))
-           assert x.dtype == dtype
+            # make sure it runs
+            x = UInt4OrInt4Tensor(torch.tensor([
+                [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF],
+                [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF],
+                [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF],
+            ], dtype=torch.uint8))
+            assert x.dtype == dtype
