@@ -224,20 +224,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         torch_weights = {*model.state_dict().keys()}
         self.assertTrue(onnx_initilizers.issubset(torch_weights))
 
-    @common_utils.parametrize(
-        "checkpoint_type",
-        [
-            common_utils.subtest(
-                "state_dict",
-                name="state_dict",
-            ),
-            common_utils.subtest(
-                "state_dict",
-                name="checkpoint_file",
-            ),
-        ],
-    )
-    def test_fake_tensor_mode_simple(self, checkpoint_type):
+    def test_fake_tensor_mode_simple(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -258,146 +245,13 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         assert (
             onnx_program is not None
         ), "ONNXProgram must be created on successful export"
+
+        onnx_program.apply_weights(Model().state_dict())
+
         assert (
             onnx_program.model_proto is not None
         ), "A model protobuf must be created on a successful export"
         onnx.checker.check_model(onnx_program.model_proto, full_check=True)
-        assert (
-            len(onnx_program.model_proto.graph.initializer) == 0
-        ), "Initializers cannot exist when fake mode is enabled"
-
-        if checkpoint_type == "state_dict":
-            # Variant 1: Save ONNX proto using Model's state_dict()
-            with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
-                model_state_dict = (
-                    Model().state_dict()
-                )  # Create a state_dict for testing
-                onnx_program.save(tmp_onnx_file.name, model_state=model_state_dict)
-                assert (
-                    len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
-                ), "Initializers must be present after loading it from model_state_dict"
-                # Let's make sure consecutive `save` calls don't create dupes
-                onnx_program.save(tmp_onnx_file.name, model_state=model_state_dict)
-                assert (
-                    len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
-                ), "Initializers must be present after loading it from model_state_dict"
-        elif checkpoint_type == "checkpoint_file":
-            # Variant 2: Save ONNX proto using Model checkpoint file
-            with tempfile.NamedTemporaryFile(
-                suffix=".onnx"
-            ) as tmp_onnx_file, tempfile.NamedTemporaryFile(
-                suffix=".pt"
-            ) as tmp_checkpoint_file:
-                torch.save(
-                    Model().state_dict(), tmp_checkpoint_file.name
-                )  # Create checkpoint file for testing
-                onnx_program.save(
-                    tmp_onnx_file.name, model_state=tmp_checkpoint_file.name
-                )
-                assert (
-                    len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
-                ), "Initializers must be present after loading it from model_state_dict"
-                # Let's make sure consecutive `save` calls don't create dupes
-                onnx_program.save(
-                    tmp_onnx_file.name, model_state=tmp_checkpoint_file.name
-                )
-                assert (
-                    len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
-                ), "Initializers must be present after loading it from model_state_dict"
-
-    def test_fake_tensor_mode_simple_invalid_input(self):
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(2, 2)
-
-            def forward(self, x):
-                out = self.linear(x)
-                return out
-
-        real_model = Model()
-        real_x = torch.rand(5, 2, 2)
-        with torch.onnx.enable_fake_mode() as fake_context:
-            fake_model = Model()
-            fake_x = torch.rand(5, 2, 2)
-
-            # TODO: Split each scenario on its own test case
-            # Scenario 1: Fake model and fake input WITHOUT ExportOptions(fake_context=...)
-            with self.assertRaises(torch.onnx.OnnxExporterError):
-                export_options = ExportOptions(fake_context=None)
-                _ = torch.onnx.dynamo_export(
-                    fake_model, fake_x, export_options=export_options
-                )
-
-            # Scenario 2: Fake model and real input WITHOUT fake_context
-            with self.assertRaises(torch.onnx.OnnxExporterError):
-                export_options = ExportOptions(fake_context=None)
-                _ = torch.onnx.dynamo_export(
-                    fake_model, real_x, export_options=export_options
-                )
-
-            # Scenario 3: Real model and real input WITH fake_context
-            with self.assertRaises(torch.onnx.OnnxExporterError):
-                export_options = ExportOptions(fake_context=fake_context)
-                _ = torch.onnx.dynamo_export(
-                    real_model, real_x, export_options=export_options
-                )
-
-            # Scenario 4: Fake model and real input WITH fake_context
-            with self.assertRaises(torch.onnx.OnnxExporterError):
-                export_options = ExportOptions(fake_context=fake_context)
-                _ = torch.onnx.dynamo_export(
-                    fake_model, real_x, export_options=export_options
-                )
-
-    @pytorch_test_common.xfail(
-        error_message="Dynamic control flow is not supported at the moment."
-    )
-    def test_fake_tensor_mode_huggingface_llama(self):
-        config = transformers.LlamaConfig(
-            vocab_size=8096, hidden_size=256, num_hidden_layers=2, num_attention_heads=2
-        )
-        batch, seq = 4, 256
-
-        with torch.onnx.enable_fake_mode() as fake_context:
-            model = transformers.LlamaModel(config).eval()
-            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
-            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
-            position_ids = torch.arange(0, seq, dtype=torch.long)
-            position_ids = position_ids.unsqueeze(0).view(-1, seq)
-
-            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
-            onnx_program = torch.onnx.dynamo_export(
-                model,
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                position_ids=position_ids,
-                export_options=export_options,
-            )
-            onnx.checker.check_model(onnx_program.model_proto)
-            onnx.shape_inference.infer_shapes(onnx_program.model_proto)
-
-    @pytorch_test_common.xfail(
-        error_message="Dynamic control flow is not supported at the moment."
-    )
-    def test_fake_tensor_mode_huggingface_tiiuae_falcon(self):
-        config = transformers.FalconConfig()
-        batch, seq = 4, 256
-
-        with torch.onnx.enable_fake_mode() as fake_context:
-            model = transformers.FalconModel(config).eval()
-            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
-            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
-
-            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
-            onnx_program = torch.onnx.dynamo_export(
-                model,
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                export_options=export_options,
-            )
-            onnx.checker.check_model(onnx_program.model_proto)
-            onnx.shape_inference.infer_shapes(onnx_program.model_proto)
 
     def test_exported_program_torch_distributions_normal_Normal(self):
         class Model(torch.nn.Module):
@@ -516,7 +370,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             model, **input, export_options=export_options
         )
         with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
-            onnx_program.save(tmp_onnx_file.name)
+            onnx_program.save(
+                tmp_onnx_file.name,
+                keep_initializers_as_inputs=True,
+                include_initializers=False,
+            )
             onnx.checker.check_model(tmp_onnx_file.name, full_check=True)
 
     @common_utils.parametrize(
