@@ -6,7 +6,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import torch
 from torch._ops import OpOverload
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor.placement_types import DTensorSpec, Placement
+from torch.distributed.tensor._dtensor_spec import DTensorSpec
+from torch.distributed.tensor.placement_types import Placement
 
 
 try:

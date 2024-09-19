@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
-from torch._dynamo.utils import ChromiumEventLogger, counters
+from torch._dynamo.utils import counters, get_chromium_event_logger
 from torch._functorch import config
 from torch._inductor.codecache import (
     _ident,
@@ -256,13 +256,13 @@ class FXGraphCacheLoadable:
         # [Note: AOTAutogradCache and FXGraphCache Guard interactions]
         # As mentioned, AOTAutograd takes in the symint inputs from dynamo's list of arguments.
         # FXGraphCache serializes guards that are needed in the shape_env based on these symint inputs to the graph.
-        # he invariant that AOTAutograd uses here is that the sources for symints given to it by dynamo are exactly
+        # The invariant that AOTAutograd uses here is that the sources for symints given to it by dynamo are exactly
         # the same as the ones it passes to inductor, for both the forward and backward passes.
         # (This does not mean that the tensor values passed in are the same: only that their symints are).
         # That is, AOTAutograd and Inductor never create new guards based on symints with different sources
         # than those passed to it by inductor.
         result = FxGraphCache._lookup_graph(
-            self.fx_graph_cache_key, example_inputs, local=True, remote_cache=False
+            self.fx_graph_cache_key, example_inputs, local=True, remote_cache=None
         )
         if result is None:
             log.info("FXGraphCache cache miss for key %s", self.fx_graph_cache_key)
@@ -502,7 +502,8 @@ class AOTAutogradCache:
             "cache_state": cache_state,
             "components": debug_lines,
         }
-        ChromiumEventLogger.log_instant_event(
+        chromium_log = get_chromium_event_logger()
+        chromium_log.log_instant_event(
             f"autograd_cache_{cache_state}", cache_event_time, metadata=cache_args
         )
         torch._logging.trace_structured(

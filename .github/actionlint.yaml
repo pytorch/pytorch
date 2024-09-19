@@ -3,18 +3,20 @@ self-hosted-runner:
     # GitHub hosted x86 Linux runners
     - linux.20_04.4x
     - linux.20_04.16x
-    # Repo-specific LF hosted ARC runners
-    - linux.large.arc
     # Organization-wide AWS Linux Runners
     - linux.large
     - linux.2xlarge
     - linux.4xlarge
     - linux.9xlarge.ephemeral
+    - am2.linux.9xlarge.ephemeral
     - linux.12xlarge
     - linux.12xlarge.ephemeral
     - linux.24xlarge
+    - linux.24xlarge.ephemeral
     - linux.arm64.2xlarge
+    - linux.arm64.2xlarge.ephemeral
     - linux.arm64.m7g.4xlarge
+    - linux.arm64.m7g.4xlarge.ephemeral
     - linux.4xlarge.nvidia.gpu
     - linux.8xlarge.nvidia.gpu
     - linux.16xlarge.nvidia.gpu
@@ -38,6 +40,7 @@ self-hosted-runner:
     - amz2023.linux.24xlarge
     - amz2023.linux.arm64.2xlarge
     - amz2023.linux.arm64.m7g.4xlarge
+    - amz2023.linux.arm64.m7g.4xlarge.ephemeral
     - amz2023.linux.4xlarge.nvidia.gpu
     - amz2023.linux.8xlarge.nvidia.gpu
     - amz2023.linux.16xlarge.nvidia.gpu
@@ -58,6 +61,7 @@ self-hosted-runner:
     # Organization wide AWS Windows runners
     - windows.g4dn.xlarge
     - windows.g4dn.xlarge.nonephemeral
+    - windows.4xlarge
     - windows.4xlarge.nonephemeral
     - windows.8xlarge.nvidia.gpu
     - windows.8xlarge.nvidia.gpu.nonephemeral

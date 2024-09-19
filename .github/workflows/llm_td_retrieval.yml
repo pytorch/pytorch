@@ -8,9 +8,20 @@ permissions:
   contents: read
 
 jobs:
+
+  get-label-type:
+    name: get-label-type
+    uses: ./.github/workflows/_runner-determinator.yml
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
   llm-retrieval:
-    runs-on: linux.4xlarge
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     continue-on-error: true
+    needs: get-label-type
     steps:
       - name: Clone PyTorch
         uses: actions/checkout@v3
@@ -58,7 +69,7 @@ jobs:
           aws s3 cp "s3://target-determinator-assets/CodeLlama-7b-Python" "CodeLlama-7b-Python" --recursive --no-progress
 
       - name: Fetch indexes
-        uses: nick-fields/retry@v2.8.2
+        uses: nick-fields/retry@v3.0.0
         with:
           max_attempts: 3
           retry_wait_seconds: 10

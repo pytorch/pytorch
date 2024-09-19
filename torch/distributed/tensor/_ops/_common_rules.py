@@ -2,6 +2,7 @@
 from typing import cast, Dict, List, Optional, Tuple
 
 import torch
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     _is_inplace_op,
     _is_out_variant_op,
@@ -9,8 +10,7 @@ from torch.distributed.tensor._op_schema import (
     OutputSharding,
 )
 from torch.distributed.tensor._ops.utils import prod
-from torch.distributed.tensor._utils import compute_local_shape
-from torch.distributed.tensor.placement_types import DTensorSpec, TensorMeta
+from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
 
 
 def _replace_char_in_str(string: str, new_char: str, idx: int) -> str:
@@ -171,7 +171,7 @@ def einop_rule(
                     ):
                         assert input_spec.tensor_meta is not None
                         global_shape = input_spec.tensor_meta.shape
-                        local_shape = compute_local_shape(
+                        local_shape, _ = compute_local_shape_and_global_offset(
                             global_shape, input_spec.mesh, input_spec.placements
                         )
                         cost += prod(local_shape) * input_spec.mesh.size(mesh_dim)

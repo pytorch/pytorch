@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import threading
 from functools import lru_cache
 from itertools import chain
 from typing import Callable, cast, Dict, List, Optional, Sequence, Tuple, Union
@@ -7,6 +8,7 @@ import torch
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpInfo,
     OpSchema,
@@ -19,11 +21,10 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._utils import (
-    compute_local_shape,
+    compute_local_shape_and_global_offset,
     compute_local_stride,
     try_find_mesh_from_args,
 )
-from torch.distributed.tensor.placement_types import DTensorSpec, TensorMeta
 
 
 aten = torch.ops.aten
@@ -37,6 +38,17 @@ def _length(obj) -> int:
     return len(obj)
 
 
+class LocalLRUCache(threading.local):
+    def __init__(self, user_function: Callable) -> None:
+        self.cache = lru_cache(None)(user_function)
+
+    def __call__(self, *args, **kwargs) -> object:
+        return self.cache(*args, **kwargs)
+
+    def cache_info(self):
+        return self.cache.cache_info()
+
+
 class ShardingPropagator:
     def __init__(self) -> None:
         self.op_to_rules: Dict[OpOverload, Callable[[OpSchema], OutputSharding]] = {}
@@ -46,7 +58,9 @@ class ShardingPropagator:
         ] = {}
         # op map to save static argnum to decide to reuse sharding prop cache or re-run sharding prop
         self.op_to_schema_info: Dict[OpOverload, RuntimeSchemaInfo] = {}
-        self.propagate_op_sharding = lru_cache(None)(self.propagate_op_sharding_non_cached)  # type: ignore[method-assign]
+        self.propagate_op_sharding = LocalLRUCache(
+            self.propagate_op_sharding_non_cached
+        )
         # op map to save indices of shape (and stride) args which may need to be modified in sharding prop
         self.op_to_shape_and_stride_idx: Dict[
             OpOverload, Union[int, Tuple[int, int]]
@@ -183,7 +197,9 @@ class ShardingPropagator:
         if op_info.schema.has_symints:
             output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
         else:
-            output_sharding = self.propagate_op_sharding(op_info.schema)
+            output_sharding = cast(
+                OutputSharding, self.propagate_op_sharding(op_info.schema)
+            )
         op_info.output_sharding = output_sharding
 
     def propagate_op_sharding_non_cached(self, op_schema: OpSchema) -> OutputSharding:
@@ -239,7 +255,7 @@ class ShardingPropagator:
 
                 # check if we need to redistribute the input
                 needs_redistribute = False
-                expected_input_specs = []
+                expected_input_specs: List[DTensorSpec] = []
 
                 # in case where the op does not specify input_specs and output_specs
                 # is a DTensorSpec, we use output_specs as the spec for each DTensor
@@ -468,7 +484,7 @@ class ShardingPropagator:
         expected_input_schema = list(schema.args_schema)
         # adjust shape to be the same as that of the _local_tensor
         # of the DTensor input arg at index 0, which is inferred
-        expected_input_schema[shape_idx] = compute_local_shape(
+        expected_input_schema[shape_idx], _ = compute_local_shape_and_global_offset(
             out_tensor_meta.shape, mesh, spec.placements
         )
 

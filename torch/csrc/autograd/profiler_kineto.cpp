@@ -261,7 +261,22 @@ struct AddGenericMetadata : public MetadataBase {
 
     // Add metadata for kwinputs if exist
     for (const auto& [key, val] : op_event.kwinputs_) {
-      addMetadata(key, ivalueToStr(val));
+      if (key == "stream" && !val.isInt()) {
+        LOG(WARNING) << "Inputted stream is not an int for op: "
+                     << op_event.name_ << " skipping";
+        continue;
+      }
+
+      // Until needed, lets limit the kwargs to only ints, doubles, strings and
+      // bools
+      if (!val.isInt() && !val.isDouble() && !val.isString() && !val.isBool()) {
+        LOG(WARNING) << "Inputted kwarg: " << key
+                     << " is not an int, double, string, or bool for op: "
+                     << op_event.name_ << " skipping";
+        continue;
+      }
+      bool isString = val.isString();
+      addMetadata(key, ivalueToStr(val, isString));
     }
     // Add extra metadata if any
     for (const auto& [key, val] : op_event.extra_meta_) {
@@ -631,6 +646,9 @@ static void toggleTorchOpCollectionDynamic(bool enable) {
     }
   }
 }
+
+// Set this function to be unused as profiler implementation needs more
+// refactoring to support Python ops collection dynamic toggling
 #ifdef _MSC_VER
 #define UNUSED
 #else
