@@ -140,7 +140,7 @@ def simple_floordiv_gcd(p: sympy.Basic, q: sympy.Basic) -> sympy.Basic:
         return functools.reduce(math.gcd, integer_factors)
 
     gcd: int = math.gcd(integer_factor(p), integer_factor(q))
-    p, q = p / sympy.Integer(gcd), q / sympy.Integer(gcd)
+    p, q = p / gcd, q / gcd # type: ignore[operator, assignment]  # remove in py3.12
 
     base_splits: List[Tuple[sympy.Basic, ...]] = list(
         map(sympy.Mul.make_args, sympy.Add.make_args(p))
@@ -148,8 +148,8 @@ def simple_floordiv_gcd(p: sympy.Basic, q: sympy.Basic) -> sympy.Basic:
     divisor_split: Tuple[sympy.Basic, ...] = sympy.Mul.make_args(q)
     for x in divisor_split:
         if all(x in base_split for base_split in base_splits):
-            gcd = gcd * sympy.Integer(x)
-    return sympy.Integer(gcd)
+            gcd = gcd * x # type: ignore[operator]  # remove in py3.12
+    return gcd # type: ignore[return-value]  # remove in py3.12
 
 
 # It would be nice to have assertions on whether or not inputs is_integer
