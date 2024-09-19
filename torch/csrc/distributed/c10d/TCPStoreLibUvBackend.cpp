@@ -13,6 +13,7 @@
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
+#include <torch/csrc/distributed/c10d/socket_fmt.h>
 
 #ifdef TORCH_USE_LIBUV
 #include <uv.h>
@@ -89,6 +90,7 @@ class UvHandle : public c10::intrusive_ptr_target {
 
 class UvTcpSocket : public UvHandle {
   uv_tcp_t client{};
+  std::string address_{"unknown"};
 
   c10::intrusive_ptr<UvTcpSocket> iptr() {
     return c10::intrusive_ptr<UvTcpSocket>::reclaim_copy(this);
@@ -143,7 +145,24 @@ class UvTcpSocket : public UvHandle {
     }
   }
 
+  const std::string& address() const {
+    return address_;
+  }
+
   void startRead() {
+    struct ::sockaddr_storage addr {};
+    int addrLen{sizeof(struct ::sockaddr_storage)};
+
+    if (int err = uv_tcp_getpeername(
+            &client, reinterpret_cast<struct ::sockaddr*>(&addr), &addrLen)) {
+      C10D_WARNING(
+          "The remote address of the client socket cannot be retrieved. err={}",
+          uv_strerror(err));
+    } else {
+      address_ =
+          formatSockAddr(reinterpret_cast<struct ::sockaddr*>(&addr), addrLen);
+    }
+
     int res = uv_read_start((uv_stream_t*)&client, alloc_buffer, read_callback);
     if (res) {
       C10D_WARNING(
@@ -246,8 +265,8 @@ class UvTcpServer : public UvTcpSocket {
           ", message: ",
           uv_strerror(uv_res));
 
-      uv_res =
-          uv_tcp_bind(res->unsafeGetSocket(), (const struct sockaddr*)&addr, 0);
+      uv_res = uv_tcp_bind(
+          res->unsafeGetSocket(), (const struct ::sockaddr*)&addr, 0);
       TORCH_CHECK(
           uv_res == 0,
           "The server socket has failed to bind. ",
@@ -325,7 +344,7 @@ class UvTcpServer : public UvTcpSocket {
 
     if (uv_tcp_getsockname(
             (uv_tcp_t*)unsafeGetStream(),
-            reinterpret_cast<sockaddr*>(&addr_s),
+            reinterpret_cast<::sockaddr*>(&addr_s),
             &addr_len) != 0) {
       throw std::runtime_error(
           "The port number of the socket cannot be retrieved.");
@@ -753,6 +772,8 @@ class UvClient : public UvTcpSocket {
     if (!stream.read_value(validateNumber))
       return false;
 
+    C10D_TRACE("validate magic:{} address:{}", validateNumber, this->address());
+
     if (validateNumber != c10d::detail::validationMagicNumber)
       return false;
     return true;
@@ -763,6 +784,8 @@ class UvClient : public UvTcpSocket {
     if (!stream.read_value(nonce)) {
       return false;
     }
+
+    C10D_TRACE("ping nonce:{} address:{}", nonce, this->address());
 
     StreamWriter sw(iptr());
     sw.write_value(nonce);
@@ -778,6 +801,8 @@ class UvClient : public UvTcpSocket {
     std::vector<uint8_t> newData;
     if (!stream.read_payload(newData))
       return false;
+
+    C10D_TRACE("set key:{} address:{}", key, this->address());
 
     store->set(key, newData);
     return true;
@@ -796,6 +821,8 @@ class UvClient : public UvTcpSocket {
     if (!stream.read_payload(newValue))
       return false;
 
+    C10D_TRACE("compareAndSet key:{} address:{}", key, this->address());
+
     auto res = store->compareAndSet(key, currentValue, newValue);
     StreamWriter sw(iptr());
     sw.write_vector(res);
@@ -808,6 +835,8 @@ class UvClient : public UvTcpSocket {
     std::string key;
     if (!stream.read_key(key))
       return false;
+
+    C10D_TRACE("get key:{} address:{}", key, this->address());
 
     const auto& data = store->get(key);
     StreamWriter sw(iptr());
@@ -824,6 +853,8 @@ class UvClient : public UvTcpSocket {
     int64_t addVal = 0;
     if (!stream.read_value(addVal))
       return false;
+
+    C10D_TRACE("add key:{} val:{} address:{}", key, addVal, this->address());
 
     addVal = store->add(key, addVal);
     StreamWriter sw(iptr());
@@ -850,6 +881,8 @@ class UvClient : public UvTcpSocket {
       if (!stream.read_key(keys[i]))
         return false;
     }
+
+    C10D_TRACE("check key_count:{} address:{}", key_count, this->address());
 
     // Now we have received all the keys
     StreamWriter sw(iptr());
@@ -881,6 +914,8 @@ class UvClient : public UvTcpSocket {
         return false;
     }
 
+    C10D_TRACE("wait key_count:{} address:{}", key_count, this->address());
+
     if (store->waitKeys(keys, iptr())) {
       StreamWriter sw(iptr());
       sw.write1((uint8_t)WaitResponseType::STOP_WAITING);
@@ -891,6 +926,8 @@ class UvClient : public UvTcpSocket {
   }
 
   bool parse_getnumkeys_command() {
+    C10D_TRACE("getnumkeys address:{}", this->address());
+
     StreamWriter sw(iptr());
     sw.write_value<int64_t>(store->size());
     sw.send();
@@ -902,6 +939,8 @@ class UvClient : public UvTcpSocket {
     std::string key;
     if (!stream.read_key(key))
       return false;
+
+    C10D_TRACE("delete key:{} address:{}", key, this->address());
 
     auto numDeleted = store->deleteKey(key);
     StreamWriter sw(iptr());
@@ -922,6 +961,8 @@ class UvClient : public UvTcpSocket {
       return false;
     }
 
+    C10D_TRACE("append key:{} address:{}", key, this->address());
+
     store->append(key, data);
     return true;
   }
@@ -938,6 +979,8 @@ class UvClient : public UvTcpSocket {
         key_count,
         ", max: ",
         MAX_KEY_COUNT);
+
+    C10D_TRACE("multi_get key_count:{} address:{}", key_count, this->address());
 
     StreamWriter sw(iptr());
     for (const auto _ : c10::irange(key_count)) {
@@ -967,6 +1010,8 @@ class UvClient : public UvTcpSocket {
         ", max: ",
         MAX_KEY_COUNT);
 
+    C10D_TRACE("multi_set key_count:{} address:{}", key_count, this->address());
+
     for (const auto _ : c10::irange(key_count)) {
       (void)_; // Suppress unused variable warning
 
@@ -986,6 +1031,8 @@ class UvClient : public UvTcpSocket {
 
   bool parse_cancel_wait_command() {
     store->clearClientWaitState(iptr());
+
+    C10D_TRACE("cancel_wait key_count:{} address:{}", this->address());
 
     StreamWriter sw(iptr());
     sw.write1((uint8_t)WaitResponseType::WAIT_CANCELED);
