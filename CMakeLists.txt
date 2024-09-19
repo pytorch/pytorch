@@ -920,7 +920,7 @@ endif()
 
 # Enable sleef on Arm(R) architecture by default (except Android)
 if((NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Android")
-  AND ("${CMAKE_SYSTEM_PROCESSOR}" MATCHES "aarch64"))
+  AND("${CMAKE_SYSTEM_PROCESSOR}" MATCHES "aarch64"))
   string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
   add_definitions(-DAT_BUILD_ARM_VEC256_WITH_SLEEF)
 endif()
