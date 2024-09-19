@@ -29,6 +29,10 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 class TestFullyShardStateDictMultiProcess(FSDPTest):
     @property
+    def backend(self) -> str:
+        return "cuda:nccl,cpu:gloo"
+
+    @property
     def world_size(self) -> int:
         return min(8, torch.cuda.device_count())
 
