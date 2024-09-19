@@ -23,34 +23,34 @@ concurrency:
 permissions: read-all
 
 jobs:
-  linux-jammy-cpu-py3_8-gcc11-opbenchmark-build:
-    name: linux-jammy-cpu-py3.8-gcc11-opbenchmark
+  linux-jammy-cpu-py3_9-gcc11-opbenchmark-build:
+    name: linux-jammy-cpu-py3.9-gcc11-opbenchmark
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-jammy-py3.8-gcc11-build
-      docker-image-name: pytorch-linux-jammy-py3.8-gcc11-opbenchmark-build
+      build-environment: linux-jammy-py3.9-gcc11-build
+      docker-image-name: pytorch-linux-jammy-py3.9-gcc11-opbenchmark-build
       test-matrix: |
         { include: [
           { config: "cpu_operator_benchmark_short", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
         ]}
 
-  linux-jammy-cpu-py3_8-gcc11-opbenchmark-on-demand-build:
+  linux-jammy-cpu-py3_9-gcc11-opbenchmark-on-demand-build:
     if: github.event_name == 'workflow_dispatch'
-    name: linux-jammy-cpu-py3.8-gcc11-opbenchmark
+    name: linux-jammy-cpu-py3.9-gcc11-opbenchmark
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-jammy-py3.8-gcc11-build
-      docker-image-name: pytorch-linux-jammy-py3.8-gcc11-opbenchmark-build
+      build-environment: linux-jammy-py3.9-gcc11-build
+      docker-image-name: pytorch-linux-jammy-py3.9-gcc11-opbenchmark-build
       test-matrix: |
         { include: [
           { config: "cpu_operator_benchmark_${{ inputs.test_mode }}", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
         ]}
 
-  linux-jammy-cpu-py3_8-gcc11-opbenchmark-test:
-    name: linux-jammy-cpu-py3.8-gcc11-opbenchmark
+  linux-jammy-cpu-py3_9-gcc11-opbenchmark-test:
+    name: linux-jammy-cpu-py3.9-gcc11-opbenchmark
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-cpu-py3_8-gcc11-opbenchmark-build
+    needs: linux-jammy-cpu-py3_9-gcc11-opbenchmark-build
     with:
-      build-environment: linux-jammy-py3.8-gcc11-build
-      docker-image: ${{ needs.linux-jammy-cpu-py3_8-gcc11-opbenchmark-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cpu-py3_8-gcc11-opbenchmark-build.outputs.test-matrix }}
+      build-environment: linux-jammy-py3.9-gcc11-build
+      docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-opbenchmark-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-opbenchmark-build.outputs.test-matrix }}
