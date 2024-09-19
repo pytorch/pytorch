@@ -258,7 +258,7 @@ class MaskedTensor(torch.Tensor):
         self._masked_mask = mask
         self._validate_members()
 
-    def __repr__(self):
+    def __repr__(self):  # type: ignore[override]
         formatter = "{0:8.4f}"
         if self.dim() == 0:
             scalar_data = self.get_data().item()
@@ -350,7 +350,7 @@ class MaskedTensor(torch.Tensor):
     def is_sparse_coo(self):
         return self.layout == torch.sparse_coo
 
-    def is_sparse_csr(self):
+    def is_sparse_csr(self):  # type: ignore[override]
         return self.layout == torch.sparse_csr
 
     # Update later to support more sparse layouts

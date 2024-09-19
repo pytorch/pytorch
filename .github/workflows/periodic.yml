@@ -297,13 +297,13 @@ jobs:
       docker-image: ${{ needs.linux-vulkan-focal-py3_11-clang10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-vulkan-focal-py3_11-clang10-build.outputs.test-matrix }}
 
-  linux-focal-rocm6_1-py3_8-build:
-    name: linux-focal-rocm6.1-py3.8
+  linux-focal-rocm6_1-py3_10-build:
+    name: linux-focal-rocm6.1-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-rocm6.1-py3.8
+      build-environment: linux-focal-rocm6.1-py3.10
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       test-matrix: |
         { include: [
@@ -312,19 +312,19 @@ jobs:
           { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu" },
         ]}
 
-  linux-focal-rocm6_1-py3_8-test:
+  linux-focal-rocm6_1-py3_10-test:
     permissions:
       id-token: write
       contents: read
-    name: linux-focal-rocm6.1-py3.8
+    name: linux-focal-rocm6.1-py3.10
     uses: ./.github/workflows/_rocm-test.yml
     needs:
-      - linux-focal-rocm6_1-py3_8-build
+      - linux-focal-rocm6_1-py3_10-build
       - target-determination
     with:
-      build-environment: linux-focal-rocm6.1-py3.8
-      docker-image: ${{ needs.linux-focal-rocm6_1-py3_8-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-rocm6_1-py3_8-build.outputs.test-matrix }}
+      build-environment: linux-focal-rocm6.1-py3.10
+      docker-image: ${{ needs.linux-focal-rocm6_1-py3_10-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-rocm6_1-py3_10-build.outputs.test-matrix }}
 
   linux-focal-cuda12_1-py3_10-gcc9-experimental-split-build:
     name: linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build
