@@ -286,7 +286,7 @@ case "$image" in
     TRITON=yes
     ;;
   pytorch-linux-focal-rocm-n-1-py3)
-    ANACONDA_PYTHON_VERSION=3.8
+    ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
@@ -297,7 +297,7 @@ case "$image" in
     TRITON=yes
     ;;
   pytorch-linux-focal-rocm-n-py3)
-    ANACONDA_PYTHON_VERSION=3.8
+    ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
