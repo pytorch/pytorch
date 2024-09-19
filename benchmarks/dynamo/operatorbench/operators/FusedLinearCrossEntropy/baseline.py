@@ -5,7 +5,8 @@ import torch
 from . import FusedLinearCrossEntropyOperator, H, V
 
 
-# Reference: https://github.com/linkedin/Liger-Kernel/blob/3d0653b035222cbb845435a1994854e4fd219107/benchmark/scripts/benchmark_fused_linear_cross_entropy.py#L17
+# Reference: https://github.com/linkedin/Liger-Kernel/blob/\
+# 3d0653b035222cbb845435a1994854e4fd219107/benchmark/scripts/benchmark_fused_linear_cross_entropy.py#L17
 
 
 class TorchLMHeadCE(torch.nn.Module):

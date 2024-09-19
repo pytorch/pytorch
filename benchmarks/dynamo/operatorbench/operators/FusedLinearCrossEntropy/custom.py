@@ -8,7 +8,8 @@ import torch
 from . import FusedLinearCrossEntropyOperator, H, V
 
 
-# Reference: https://github.com/linkedin/Liger-Kernel/blob/3d0653b035222cbb845435a1994854e4fd219107/benchmark/scripts/benchmark_fused_linear_cross_entropy.py#L40
+# Reference: https://github.com/linkedin/Liger-Kernel/blob/\
+# 3d0653b035222cbb845435a1994854e4fd219107/benchmark/scripts/benchmark_fused_linear_cross_entropy.py#L40
 class LigerLMHeadCE(torch.nn.Module):
     def __init__(self, H: int, V: int, dtype: torch.dtype, ignore_index: int = -100):
         super().__init__()
