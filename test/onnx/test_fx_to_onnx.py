@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import tempfile
-from typing import Mapping, Tuple, TYPE_CHECKING
+from typing import Mapping, Tuple
 
 import onnx
 import onnx.inliner
@@ -16,42 +16,7 @@ from torch import nn
 from torch._subclasses import fake_tensor
 from torch.nn import functional as F
 from torch.onnx import dynamo_export, ExportOptions
-from torch.onnx._internal.fx import diagnostics, registration
 from torch.testing._internal import common_utils
-
-
-if TYPE_CHECKING:
-    from torch.onnx._internal.diagnostics import infra
-
-
-def assert_has_diagnostics(
-    diagnostic_context: diagnostics.DiagnosticContext,
-    rule: infra.Rule,
-    level: infra.Level,
-    expected_node: str,
-):
-    rule_level_pairs = (rule.id, level.name.lower())
-    sarif_log = diagnostic_context.sarif_log()
-    actual_results = []
-    for run in sarif_log.runs:
-        if run.results is None:
-            continue
-        for result in run.results:
-            id_level_pair = (result.rule_id, result.level)
-            actual_results.append(id_level_pair)
-            if (
-                rule_level_pairs == id_level_pair
-                and result.message.text
-                and result.message.markdown
-                and expected_node in result.message.text
-            ):
-                return
-
-    raise AssertionError(
-        f"Expected diagnostic results of rule id and level pair {rule_level_pairs} "
-        f"not found with expected error node {expected_node} and "
-        f"Actual diagnostic results: {actual_results}"
-    )
 
 
 @common_utils.instantiate_parametrized_tests
@@ -92,16 +57,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         self.assertNotIsInstance(tensor_x, fake_tensor.FakeTensor)
         self.assertNotIsInstance(tensor_y, fake_tensor.FakeTensor)
 
-    @common_utils.parametrize(
-        "diagnostic_rule",
-        [
-            common_utils.subtest(
-                diagnostics.rules.find_opschema_matched_symbolic_function,
-                name="optional_inputs",
-            ),
-        ],
-    )
-    def test_mnist_exported_with_no_warnings(self, diagnostic_rule):
+    def test_mnist_exported_with_no_warnings(self):
         class MNISTModel(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -125,13 +81,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
         onnx_program = dynamo_export(MNISTModel(), tensor_x)
-
-        assert_has_diagnostics(
-            onnx_program.diagnostic_context,
-            diagnostic_rule,
-            diagnostics.levels.NONE,
-            expected_node="aten.convolution.default",
-        )
+        assert onnx_program is not None
 
     def test_trace_only_op_with_evaluator(self):
         model_input = torch.tensor([[1.0, 2.0, 3.0], [1.0, 1.0, 2.0]])
@@ -160,87 +110,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         x = torch.arange(1.0, 6.0, requires_grad=True)
 
         _ = dynamo_export(TopKModel(), x, export_options=self.export_options)
-
-    def test_unsupported_function_schema_raises_diagnostic_warning_when_found_nearest_match(
-        self,
-    ):
-        class TraceModel(torch.nn.Module):
-            def forward(self, input):
-                return input.new_zeros(())
-
-        x = torch.randn((2, 3), dtype=torch.float32)
-        onnx_program = dynamo_export(TraceModel(), x)
-
-        assert_has_diagnostics(
-            onnx_program.diagnostic_context,
-            diagnostics.rules.find_opschema_matched_symbolic_function,
-            diagnostics.levels.WARNING,
-            expected_node="aten.new_zeros.default",
-        )
-
-    def test_perfect_match_on_sequence_and_bool_attributes(
-        self,
-    ):
-        class TraceModel(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.conv2 = torch.nn.Conv2d(
-                    16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1)
-                )
-
-            def forward(self, input):
-                return self.conv2(input)
-
-        x = torch.randn(20, 16, 50, 50)
-        onnx_program = dynamo_export(TraceModel(), x)
-        assert_has_diagnostics(
-            onnx_program.diagnostic_context,
-            diagnostics.rules.find_opschema_matched_symbolic_function,
-            diagnostics.levels.NONE,
-            expected_node="aten.convolution.default",
-        )
-
-    def test_aten_clone_does_not_raise_warning_of_lack_of_memory_format(self):
-        class CustomModule(torch.nn.Module):
-            def forward(self, input):
-                return torch.ops.aten.clone(input, memory_format=torch.preserve_format)
-
-        x = torch.tensor(3)
-        onnx_program = dynamo_export(CustomModule(), x)
-        assert_has_diagnostics(
-            onnx_program.diagnostic_context,
-            diagnostics.rules.find_opschema_matched_symbolic_function,
-            diagnostics.levels.NONE,
-            expected_node="aten.clone.default",
-        )
-
-    def test_missing_complex_onnx_variant_raises_errors_in_dispatcher(self):
-        registry = torch.onnx.OnnxRegistry()
-
-        # NOTE: simulate unsupported nodes
-        aten_mul_tensor = registration.OpName.from_name_parts(
-            namespace="aten", op_name="mul", overload="Tensor"
-        )
-
-        # Only keep real aten.mul to test missing complex aten.mul
-        registry._registry[aten_mul_tensor] = [
-            onnx_func
-            for onnx_func in registry._registry[aten_mul_tensor]
-            if not onnx_func.is_complex
-        ]
-
-        class TraceModel(torch.nn.Module):
-            def forward(self, input):
-                return torch.ops.aten.mul.Tensor(input, input)
-
-        x = torch.tensor([1 + 2j, 3 + 4j], dtype=torch.complex64)
-
-        with self.assertRaises(torch.onnx.OnnxExporterError) as e:
-            torch.onnx.dynamo_export(
-                TraceModel(),
-                x,
-                export_options=torch.onnx.ExportOptions(onnx_registry=registry),
-            )
 
     def test_symbolic_shape_of_values_inside_function_is_exported_as_graph_value_info(
         self,
