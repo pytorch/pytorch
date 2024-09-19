@@ -245,6 +245,14 @@ using namespace c10::xpu;
 #endif
 
 #if defined(_MSC_VER)
+#define C10_ALWAYS_INLINE_ATTRIBUTE
+#elif __has_attribute(always_inline) || defined(__GNUC__)
+#define C10_ALWAYS_INLINE_ATTRIBUTE __attribute__((__always_inline__))
+#else
+#define C10_ALWAYS_INLINE_ATTRIBUTE
+#endif
+
+#if defined(_MSC_VER)
 #define C10_ATTR_VISIBILITY_HIDDEN
 #elif defined(__GNUC__)
 #define C10_ATTR_VISIBILITY_HIDDEN __attribute__((__visibility__("hidden")))
