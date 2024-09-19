@@ -17,6 +17,7 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 import torch.fx
 import torch.utils._pytree as pytree
 from functorch.compile import min_cut_rematerialization_partition
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo import (
     compiled_autograd,
     config as dynamo_config,
@@ -400,20 +401,22 @@ def fake_tensor_prop(
 
     The created fake mode will be returned.
     """
-    fake_mode = detect_fake_mode(example_inputs)
-    if not fake_mode:
-        fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
-        FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
-    else:
-        ctx = (
-            contextlib.nullcontext()
-            if not force_allow_non_fake_inputs
-            else mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
-        )
-        with ctx:  # type: ignore[attr-defined]
-            FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
-                *example_inputs
+    # Ensure that decomps that support symbolic shapes are used
+    with enable_python_dispatcher():
+        fake_mode = detect_fake_mode(example_inputs)
+        if not fake_mode:
+            fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+            FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
+        else:
+            ctx = (
+                contextlib.nullcontext()
+                if not force_allow_non_fake_inputs
+                else mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
             )
+            with ctx:  # type: ignore[attr-defined]
+                FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
+                    *example_inputs
+                )
 
     return fake_mode
 
@@ -1243,6 +1246,18 @@ def fw_compiler_freezing(
     return wrapper
 
 
+def get_cpp_wrapper_config():
+    return {
+        # Set autotune_at_compile_time to True as default if the option is not explicitly set
+        "triton.autotune_at_compile_time": config.triton.autotune_at_compile_time
+        if config.triton.autotune_at_compile_time is not None
+        else True,
+        "triton.autotune_cublasLt": False,
+        "triton.cudagraphs": False,  # TODO: to be removed
+        "triton.store_cubin": True,
+    }
+
+
 def compile_fx(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
@@ -1265,18 +1280,8 @@ def compile_fx(
         if config.cpp_wrapper:
             with config.patch(
                 {
-                    "cpp_wrapper": False,
-                    # For triton.autotune_at_compile_time, disable by default for
-                    # FBCode, but enabled by default for OSS.
-                    "triton.autotune_at_compile_time": config.triton.autotune_at_compile_time
-                    if config.is_fbcode()
-                    else os.environ.get(
-                        "TORCHINDUCTOR_TRITON_AUTOTUNE_AT_COMPILE_TIME", "1"
-                    )
-                    == "1",
-                    "triton.autotune_cublasLt": False,
-                    "triton.cudagraphs": False,
-                    "triton.store_cubin": True,
+                    "cpp_wrapper": False,  # reset to break recursive call to compile_fx
+                    **get_cpp_wrapper_config(),
                 }
             ), V.set_real_inputs(example_inputs_):
                 inputs_ = example_inputs_
@@ -1467,16 +1472,19 @@ def compile_fx(
                         n.name for n in model_outputs if isinstance(n, torch.fx.Node)
                     )
                 fixed = count_tangents(model)
-                return inner_compile(
-                    model,
-                    example_inputs,
-                    static_input_idxs=list(range(fixed)),
-                    cudagraphs=cudagraphs,
-                    is_backward=True,
-                    graph_id=graph_id,
-                    boxed_forward_device_index=forward_device,
-                    user_visible_outputs=user_visible_outputs,
-                )
+                with config.patch(
+                    get_cpp_wrapper_config()
+                ) if config.cpp_wrapper else contextlib.nullcontext():
+                    return inner_compile(
+                        model,
+                        example_inputs,
+                        static_input_idxs=list(range(fixed)),
+                        cudagraphs=cudagraphs,
+                        is_backward=True,
+                        graph_id=graph_id,
+                        boxed_forward_device_index=forward_device,
+                        user_visible_outputs=user_visible_outputs,
+                    )
 
         # TODO: can add logging before/after the call to create_aot_dispatcher_function
         # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
