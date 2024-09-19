@@ -48,10 +48,11 @@ def _extract_carry_and_out(flat_out: List[Any], num_carry: int):
     return flat_out[:num_carry], flat_out[num_carry:]
 
 
-# an empty function that's used for inductor lowering in lowering.py
-# difference is that this function supports tensor idx while select doesn't
-# dst.select(dim, idx).copy_(src)
-def override_slice(dst, src, dim, idx):
+# An empty function that's used for inductor lowering in lowering.py
+# Compared with aten.select, the lowring rule is more specialized
+# to the scan operator. For example, we skips a bunch of checks that we're
+# ceratin to be true for scan.
+def scan_slice_view(dst, dim, idx):
     pass
 
 

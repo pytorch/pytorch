@@ -6786,17 +6786,14 @@ class SequentialScan(ExternKernel):
             for i, ini in enumerate(init)
         ]
 
-        def stacked_size_stride(y):
+        def stacked_size_stride(y, scan_length):
             sizes = [scan_length, *y.get_size()]
-            # TODO: this is a hacky way to get the stride of the stacked output
+            # This is a hacky way to get the stride of the stacked output
             # Semantic-wise this is correct because scan will torch.stack the intermediates, so
             # torch.stack will force the output become contingous.
-            strides = [1]
-            for i, sz in enumerate(reversed(sizes[1:])):
-                strides.append(sz * strides[-1])
-            return sizes, list(reversed(strides))
+            return sizes, FlexibleLayout.contiguous_strides(sizes)
 
-        stacked_y_size_stride = [stacked_size_stride(y) for y in ys]
+        stacked_y_size_stride = [stacked_size_stride(y, scan_length) for y in ys]
 
         stacked_output = [
             MultiOutput(
@@ -6818,6 +6815,87 @@ class SequentialScan(ExternKernel):
 
     def codegen(self, wrapper):
         wrapper.codegen_sequential_scan(self)
+
+    # The signature before the transformation:
+    # gm(*init: List[Tensor],
+    #   *selected_inputs: List[Tensor],
+    #   *additional_inputs: List[Tensor]
+    # ) -> last_carry: List[Tensor], ys: List[Tensor]
+    #
+    # The signature after _to_out_variant_graph:
+    # gm_out_variant(*init: List[Tensor],
+    #   *xs: List[Tensor],
+    #   *additional_inputs: List[Tensor],
+    #   *ys_outs: List[Tensor]
+    #   *idx: SymInt,
+    # ) -> last_carry: List[Tensor], ys: List[Tensor]
+    #
+    # For example, if scan_length is 10, selected_inputs[0].shape is (3, 4), ys[0].shape is (5, 6)
+    # In gm_out_variant's input, xs[0].shape is (10, 3, 4), ys_outs[0].shape is (10, 5, 6).
+    # idx is a symint that's computed based on the iteration idx of the loop in wrapper codegen.
+    #
+    # Note: even though ys are copied into ys_outs directly and is not going to be used downsteram,
+    # we didn't delete them in the out variant graph in case they gets DCEed accidentally.
+    @staticmethod
+    def _to_out_variant_graph(
+        gm: torch.fx.GraphModule,
+        ys_outs: List[torch.Tensor],
+        dim: int,
+        num_init_leaves: int,
+        num_xs: int,
+    ) -> torch.fx.GraphModule:
+        from torch._higher_order_ops.scan import _extract_carry_and_out
+
+        phs = [node for node in gm.graph.nodes if node.op == "placeholder"]
+        xs_phs = phs[num_init_leaves : num_init_leaves + num_xs]
+        output_node = list(gm.graph.nodes)[-1]
+        assert output_node.op == "output"
+        # Add an idx node that's used to parameterize the tensor layout of out buffers ys_outs
+        # and xs inputs.
+        with gm.graph.inserting_after(phs[-1]):
+            idx_node = gm.graph.placeholder("idx")
+
+        # Add ys_outs to placeholders
+        ys_out_phs = []
+        with gm.graph.inserting_before(idx_node):
+            for i, ys in enumerate(ys_outs):
+                ph = gm.graph.placeholder(f"ys_outs{i}")
+                ys_out_phs.append(ph)
+
+        # Replace each original x with x[idx]
+        with gm.graph.inserting_after(idx_node):
+            for x_ph in xs_phs:
+                args = (x_ph, dim, idx_node)
+                selected_x = gm.graph.call_function(
+                    torch._higher_order_ops.scan.scan_slice_view,
+                    args,
+                )
+                # x_ph is the original gm's placeholder, which is a slice of x
+                selected_x.meta["val"] = x_ph.meta["val"].clone()
+                x_ph.replace_all_uses_with(selected_x)
+                # replace_all_uses_with alos replace the x_phs of scan_slice_viwe
+                # so we re-wreite it back
+                selected_x.args = args
+                x_ph.users.clear()
+                x_ph.users.setdefault(selected_x)
+
+        # For each y, call y_out[idx].copy_(y).
+        with gm.graph.inserting_before(output_node):
+            inner_last_carry, inner_ys = _extract_carry_and_out(
+                output_node.args[0], num_init_leaves
+            )
+            for fake_ys, ph, ys in zip(ys_outs, ys_out_phs, inner_ys):
+                # Outputs are always stacked along 0-th dimension
+                select_node = gm.graph.call_function(
+                    torch._higher_order_ops.scan.scan_slice_view, (ph, 0, idx_node)
+                )
+                select_node.meta["val"] = fake_ys.clone()
+                copy__node = gm.graph.call_function(
+                    torch.ops.aten.copy_.default, (select_node, ys)
+                )
+                copy__node.meta["val"] = fake_ys.clone()
+        gm.recompile()
+        return gm
 
 
 class EffectfulKernel(FallbackKernel):
