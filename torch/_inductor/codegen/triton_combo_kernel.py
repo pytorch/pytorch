@@ -992,7 +992,7 @@ class ComboKernel(Kernel):
 
             result.writeline("args = get_args()")
             result.writeline(
-                "ms = benchmarker.benchmark_gpu(lambda: call(args), rep=40, fast_flush=True)"
+                "ms = benchmarker.benchmark_gpu(lambda: call(args), rep=40)"
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
@@ -1087,7 +1087,7 @@ class ComboKernel(Kernel):
             call_args,
             grid,
             V.graph.scheduler.get_current_device_or_throw().index,
-            cuda=True,
+            gpu=True,
             triton=True,
             arg_types=arg_types,
             grid_fn="grid_combo_kernels",
