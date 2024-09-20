@@ -31,7 +31,7 @@ void launch_log_sigmoid_forward_kernel(TensorIteratorBase& iter) {
           const opmath_t in = in_;
           const auto min = std::min(opmath_t(0), in);
           const auto z = std::exp(-std::abs(in));
-          return min - std::log1p(z);
+          return min - ::log1p(z);
         });
       });
 }

@@ -1119,7 +1119,7 @@ struct PreventFma
 
 template <typename T>
 std::enable_if_t<!is_complex<T>::value, T> local_log2(T x) {
-    return std::log2(x);
+    return ::log2(x);
 }
 
 template <typename T>

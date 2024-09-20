@@ -64,7 +64,7 @@ void xlog1py_kernel_cuda(TensorIteratorBase& iter) {
       if (x == 0){
         return 0;
       }
-      return x * std::log1p(y);
+      return x * ::log1p(y);
     });
   });
 }

@@ -82,7 +82,7 @@ Tensor& randperm_out_cuda(int64_t n, std::optional<Generator> generator, Tensor&
   double nd = static_cast<double>(n);
 
   int bits = std::min(64,
-    static_cast<int>(std::ceil(std::log2(nd - (6 * nd * nd + 1) / log_threshold_12))));
+    static_cast<int>(std::ceil(::log2(nd - (6 * nd * nd + 1) / log_threshold_12))));
 
   if (n == 0) {
     return result;
