@@ -149,6 +149,12 @@ def caching_allocator_delete(mem_ptr):
     torch._C._cuda_cudaCachingAllocator_raw_delete(mem_ptr)
 
 
+def caching_allocator_enable(value: bool = True) -> None:
+    r"""Enable or disable the GPU caching allocator. On by default."""
+    if is_initialized():
+        torch._C._cuda_cudaCachingAllocator_enable(value)
+
+
 def set_per_process_memory_fraction(
     fraction, device: Union[Device, int] = None
 ) -> None:
@@ -191,12 +197,6 @@ def empty_cache() -> None:
     """
     if is_initialized():
         torch._C._cuda_emptyCache()
-
-
-def enable_cache(value: bool = True) -> None:
-    r"""Enable the GPU caching allocator. On by default."""
-    if is_initialized():
-        torch._C._cuda_allocator_enable(value)
 
 
 def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:

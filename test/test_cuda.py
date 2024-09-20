@@ -3769,7 +3769,7 @@ class TestCudaMallocAsync(TestCase):
 
         try:
             # Deactivate the caching allocator
-            torch.cuda.enable_cache(False)
+            torch.cuda.caching_allocator_enable(False)
 
             # For a deactivated caching allocator, result is zero
             cuda_alloc_size = requested_bytes_alloc_stats(raw_alloc_size, stream)
@@ -3778,7 +3778,7 @@ class TestCudaMallocAsync(TestCase):
         finally:
             # Make sure we get back to the default state that is
             # an activated caching allocator
-            torch.cuda.enable_cache(True)
+            torch.cuda.caching_allocator_enable(True)
 
             # For an active caching allocator, result matches raw_alloc_size
             cuda_alloc_size = requested_bytes_alloc_stats(raw_alloc_size, stream)
