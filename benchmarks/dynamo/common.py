@@ -39,6 +39,7 @@ from typing_extensions import Self
 from unittest.mock import MagicMock
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 import psutil
 import yaml
@@ -1565,14 +1566,14 @@ class OnnxModel(abc.ABC):
     def format_pt_outputs(self, pt_outputs: Any) -> Sequence[torch.Tensor]:
         ...
 
-    def adapt_pt_inputs_to_onnx(self, pt_inputs) -> Mapping[str, np.ndarray]:
+    def adapt_pt_inputs_to_onnx(self, pt_inputs) -> Mapping[str, npt.NDArray]:
         pt_inputs = self.format_pt_inputs(pt_inputs)
         return {
             ort_input.name: pt_input.cpu().numpy()
             for ort_input, pt_input in zip(self.onnx_session.get_inputs(), pt_inputs)
         }
 
-    def adapt_onnx_outputs_to_pt(self, onnx_outputs: List[np.ndarray]) -> Any:
+    def adapt_onnx_outputs_to_pt(self, onnx_outputs: List[npt.NDArray]) -> Any:
         pt_outputs = [
             torch.from_numpy(onnx_output).to(current_device)
             for onnx_output in onnx_outputs
