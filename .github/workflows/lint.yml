@@ -61,7 +61,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    runs-on: linux.2xlarge
+    runs-on: lf.linux.2xlarge
     if: github.event_name == 'pull_request'
     steps:
       - name: Checkout pytorch
