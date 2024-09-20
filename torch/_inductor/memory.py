@@ -461,11 +461,15 @@ def topological_sort_dfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNo
     def visit(n: BaseSchedulerNode) -> None:
         if n not in seen:
             seen.add(n)
-            for dep in sorted(n.unmet_dependencies, key=lambda d: d.name):
-                # We only care about doing toposort within `nodes`
-                if dep.name not in name_to_node:
-                    continue
-                visit(name_to_node[dep.name])
+            dep_nodes = [
+                name_to_node[dep.name]
+                for dep in n.unmet_dependencies
+                if dep.name in name_to_node
+            ]
+            for node in sorted(
+                dep_nodes, key=lambda x: (x.mpi_node.size_with_reads, x.mpi_node.index)
+            ):
+                visit(node)
             result.append(n)
 
     for node in nodes:
@@ -475,10 +479,10 @@ def topological_sort_dfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNo
     for t, node in enumerate(nodes):
         node.mpi_node.index = t
         node.mpi_node.size = sum(
-            buffer.mpi_node.size_alloc for buffer in node.get_outputs()
+            buffer.mpi_buffer.size_alloc for buffer in node.get_outputs()
         )
         node.mpi_node.size_with_reads = node.mpi_node.size + sum(
-            pred_buf.mpi_node.size_free for pred_buf in node.mpi_node.pred_buffers
+            pred_buf.mpi_buffer.size_free for pred_buf in node.mpi_node.pred_buffers
         )
     for node in sorted(
         nodes, key=lambda x: (x.mpi_node.size_with_reads, x.mpi_node.index)
