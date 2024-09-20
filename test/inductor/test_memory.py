@@ -190,7 +190,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
                 .check("buf1 = ")
                 .check("buf3 = ")
                 .check("buf5 = ")
-                .check("buf6 = ")  # TODO: should be buf7
+                .check("buf7 = ")
                 .run(code)
             )
             # check for correctness

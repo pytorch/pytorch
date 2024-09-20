@@ -78,7 +78,7 @@ class SchedulerBuffer:
     node: ir.Buffer
     defining_op: BaseSchedulerNode
     users: List[NodeUser] = dataclasses.field(default_factory=list)
-    mpi: MemoryPlanningInfoForBuffer = dataclasses.field(
+    mpi_buffer: MemoryPlanningInfoForBuffer = dataclasses.field(
         default_factory=MemoryPlanningInfoForBuffer
     )
 
@@ -171,7 +171,7 @@ class BaseSchedulerNode:
     # .min_order = .max_order = X if this node is X-th node in `self.scheduler.nodes`.
     min_order: int
     max_order: int
-    mpi: MemoryPlanningInfoForNode
+    mpi_node: MemoryPlanningInfoForNode
 
     def __init__(self, scheduler: Scheduler) -> None:
         self.scheduler: Scheduler = scheduler

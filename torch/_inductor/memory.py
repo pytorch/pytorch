@@ -41,13 +41,13 @@ class MemoryPlanningInfoForNode:
     index: int = 0
     memory_to_free: int = 0
     size: int = 0
-    measure: int = 0
+    size_with_reads: int = 0
 
 
 @dataclasses.dataclass
 class FreeableInputBuffer:
     dep: Dep
-    mpi: MemoryPlanningInfoForBuffer = dataclasses.field(
+    mpi_buffer: MemoryPlanningInfoForBuffer = dataclasses.field(
         default_factory=MemoryPlanningInfoForBuffer
     )
 
@@ -87,7 +87,7 @@ def get_freeable_input_buf(
                 and dep.name not in name_to_input_buf
             ):
                 name_to_input_buf[dep.name] = FreeableInputBuffer(dep)
-                name_to_input_buf[dep.name].mpi.size_free = dep_size_hint(dep)
+                name_to_input_buf[dep.name].mpi_buffer.size_free = dep_size_hint(dep)
 
     return name_to_input_buf
 
@@ -112,23 +112,23 @@ def compute_size_for_scheduler_buffer(name_to_buf: Dict[str, SchedulerBuffer]) -
     # compute the size of SchedulerBuffer without MultiOutputLayout layout
     for sched_buf in name_to_buf.values():
         if not isinstance(sched_buf.node.layout, MultiOutputLayout):
-            sched_buf.mpi = MemoryPlanningInfoForBuffer()
-            sched_buf.mpi.size_alloc = V.graph.sizevars.size_hint(
+            sched_buf.mpi_buffer = MemoryPlanningInfoForBuffer()
+            sched_buf.mpi_buffer.size_alloc = V.graph.sizevars.size_hint(
                 sched_buf.node.get_numel(), fallback=0
             ) * get_dtype_size(sched_buf.node.get_dtype())
-            sched_buf.mpi.size_free = sched_buf.mpi.size_alloc
+            sched_buf.mpi_buffer.size_free = sched_buf.mpi_buffer.size_alloc
 
     # compute the size of SchedulerBuffer with MultiOutputLayout layout
     for sched_buf in name_to_buf.values():
         if isinstance(sched_buf.node.layout, MultiOutputLayout):
-            sched_buf.mpi = MemoryPlanningInfoForBuffer()
+            sched_buf.mpi_buffer = MemoryPlanningInfoForBuffer()
             for user in sched_buf.users:
                 if isinstance(user.node, OutputNode):
                     continue
                 assert isinstance(user.node, BaseSchedulerNode)
                 for buf in user.node.get_outputs():
-                    sched_buf.mpi.size_alloc += buf.mpi.size_alloc
-                    buf.mpi.size_alloc = 0
+                    sched_buf.mpi_buffer.size_alloc += buf.mpi_buffer.size_alloc
+                    buf.mpi_buffer.size_alloc = 0
 
 
 def map_successor_nodes_with_predecessor_buffers(
@@ -144,20 +144,20 @@ def map_successor_nodes_with_predecessor_buffers(
     A buffer's successor nodes determines when a buffer can be freed.
     """
     for node in nodes:
-        node.mpi = MemoryPlanningInfoForNode()
-        node.mpi.pred_buffers = []
+        node.mpi_node = MemoryPlanningInfoForNode()
+        node.mpi_node.pred_buffers = []
         for dep_name in {dep.name for dep in node.unmet_dependencies}:
             sched_buf = name_to_buf.get(dep_name)
             if sched_buf:
-                node.mpi.pred_buffers.append(sched_buf)
-                sched_buf.mpi.succ_nodes.add(node)
+                node.mpi_node.pred_buffers.append(sched_buf)
+                sched_buf.mpi_buffer.succ_nodes.add(node)
         for dep_name in {
             dep.name for dep in node.read_writes.reads - node.unmet_dependencies
         }:
             input_buf = name_to_input_buf.get(dep_name)
             if input_buf:
-                node.mpi.pred_buffers.append(input_buf)
-                input_buf.mpi.succ_nodes.add(node)
+                node.mpi_node.pred_buffers.append(input_buf)
+                input_buf.mpi_buffer.succ_nodes.add(node)
 
 
 def estimate_peak_memory(
@@ -190,8 +190,8 @@ def estimate_peak_memory(
     for buf_name, input_buf in name_to_input_buf.items():
         name_to_buf_info[buf_name] = BufferInfo(
             input_buf,
-            input_buf.mpi.size_free,
-            input_buf.mpi.size_free,
+            input_buf.mpi_buffer.size_free,
+            input_buf.mpi_buffer.size_free,
             0,
             0,
         )
@@ -200,8 +200,8 @@ def estimate_peak_memory(
         for sched_buf in node.get_outputs():
             name_to_buf_info[sched_buf.get_name()] = BufferInfo(
                 sched_buf,
-                sched_buf.mpi.size_alloc,
-                sched_buf.mpi.size_free,
+                sched_buf.mpi_buffer.size_alloc,
+                sched_buf.mpi_buffer.size_free,
                 t,
                 t,
             )
@@ -210,7 +210,7 @@ def estimate_peak_memory(
     for buf_name, buf_info in name_to_buf_info.items():
         succ_node_time = [
             node_name_to_time[succ_node.get_name()]
-            for succ_node in buf_info.buffer.mpi.succ_nodes
+            for succ_node in buf_info.buffer.mpi_buffer.succ_nodes
             if succ_node.get_name() in node_name_to_time
         ]
         if succ_node_time:
@@ -250,21 +250,21 @@ def assign_predcessor_and_successor_nodes_to_nodes(
     from .scheduler import SchedulerBuffer
 
     for node in nodes:
-        node.mpi.pred_nodes = list(
+        node.mpi_node.pred_nodes = list(
             {
                 name_to_fused_node[pred_buffer.defining_op.get_name()]
-                for pred_buffer in node.mpi.pred_buffers
+                for pred_buffer in node.mpi_node.pred_buffers
                 if (
                     isinstance(pred_buffer, SchedulerBuffer)
                     and pred_buffer.defining_op.get_name() in name_to_fused_node
                 )
             }
         )
-        node.mpi.succ_nodes = list(
+        node.mpi_node.succ_nodes = list(
             {
                 succ_node
                 for buffer in node.get_outputs()
-                for succ_node in buffer.mpi.succ_nodes
+                for succ_node in buffer.mpi_buffer.succ_nodes
             }
         )
 
@@ -296,24 +296,24 @@ def topological_sort_lpmf(
     for node in nodes:
         # note that .unmet_dependencies could have deps with the same name
         # and in that case, it should only be counted once
-        node.mpi.indegree = len(node.mpi.pred_nodes)
-        if node.mpi.indegree == 0:
+        node.mpi_node.indegree = len(node.mpi_node.pred_nodes)
+        if node.mpi_node.indegree == 0:
             nodes_to_schedule.add(node)
 
     # compute buffers' number of unmet successors (used to decide when to free)
     for buf in list(name_to_buf.values()) + list(name_to_input_buf.values()):
-        buf.mpi.outdegree = len(buf.mpi.succ_nodes)
+        buf.mpi_buffer.outdegree = len(buf.mpi_buffer.succ_nodes)
         if buf.get_name() in graph_outputs:
-            buf.mpi.outdegree += 1
+            buf.mpi_buffer.outdegree += 1
 
     # initialize memory estimations
     live_memory = sum(
-        input_buf.mpi.size_free for input_buf in name_to_input_buf.values()
+        input_buf.mpi_buffer.size_free for input_buf in name_to_input_buf.values()
     )
 
     # this is the total output memory, which is a lower bound for peak memory
     output_memory = sum(
-        name_to_buf[buf_name].mpi.size_free
+        name_to_buf[buf_name].mpi_buffer.size_free
         for buf_name in graph_outputs
         if buf_name in name_to_buf
     )
@@ -322,19 +322,21 @@ def topological_sort_lpmf(
     # compute the amount of memory that is allocated when a node is scheduled
     # and the amount of memory that can be freed when a node is scheduled
     for i, node in enumerate(nodes):
-        node.mpi.index = i  # keep track of the original order
-        node.mpi.size = sum(buffer.mpi.size_alloc for buffer in node.get_outputs())
-        node.mpi.memory_to_free = 0
+        node.mpi_node.index = i  # keep track of the original order
+        node.mpi_node.size = sum(
+            buffer.mpi_buffer.size_alloc for buffer in node.get_outputs()
+        )
+        node.mpi_node.memory_to_free = 0
         # 1. if a buffer read by this node is last used by this node
         #    then the buffer can be freed
-        for buf in node.mpi.pred_buffers:
-            if buf.mpi.outdegree == 1:
-                node.mpi.memory_to_free += buf.mpi.size_free
+        for buf in node.mpi_node.pred_buffers:
+            if buf.mpi_buffer.outdegree == 1:
+                node.mpi_node.memory_to_free += buf.mpi_buffer.size_free
         # 2. if a buffer written by this node is used internally and
         #    not needed afterwards, it can be freed
         for buf in node.get_outputs():
-            if buf.mpi.outdegree == 0:
-                node.mpi.memory_to_free += buf.mpi.size_free
+            if buf.mpi_buffer.outdegree == 0:
+                node.mpi_node.memory_to_free += buf.mpi_buffer.size_free
 
     # schedule nodes one at a time
     schedule: List[BaseSchedulerNode] = []
@@ -344,9 +346,9 @@ def topological_sort_lpmf(
         selected_node = min(
             nodes_to_schedule,
             key=lambda node: (
-                max(live_memory + node.mpi.size, max_memory),
-                node.mpi.size - node.mpi.memory_to_free,
-                node.mpi.index,
+                max(live_memory + node.mpi_node.size, max_memory),
+                node.mpi_node.size - node.mpi_node.memory_to_free,
+                node.mpi_node.index,
             ),
         )
         nodes_to_schedule.remove(selected_node)
@@ -354,24 +356,24 @@ def topological_sort_lpmf(
         num_iters += 1
 
         # update memory usage
-        live_memory += selected_node.mpi.size
+        live_memory += selected_node.mpi_node.size
         max_memory = max(max_memory, live_memory)
-        live_memory -= selected_node.mpi.memory_to_free
+        live_memory -= selected_node.mpi_node.memory_to_free
 
         # update successor nodes and nodes_to_schedule
-        for succ_node in selected_node.mpi.succ_nodes:
-            assert succ_node.mpi.indegree > 0
-            succ_node.mpi.indegree -= 1
-            if succ_node.mpi.indegree == 0:
+        for succ_node in selected_node.mpi_node.succ_nodes:
+            assert succ_node.mpi_node.indegree > 0
+            succ_node.mpi_node.indegree -= 1
+            if succ_node.mpi_node.indegree == 0:
                 nodes_to_schedule.add(succ_node)
 
         # update predecessor nodes
-        for buf in selected_node.mpi.pred_buffers:
-            assert buf.mpi.outdegree > 0
-            buf.mpi.outdegree -= 1
-            if buf.mpi.outdegree == 1:
-                for succ_node in buf.mpi.succ_nodes:
-                    succ_node.mpi.memory_to_free += buf.mpi.size_free
+        for buf in selected_node.mpi_node.pred_buffers:
+            assert buf.mpi_buffer.outdegree > 0
+            buf.mpi_buffer.outdegree -= 1
+            if buf.mpi_buffer.outdegree == 1:
+                for succ_node in buf.mpi_buffer.succ_nodes:
+                    succ_node.mpi_node.memory_to_free += buf.mpi_buffer.size_free
 
     if num_iters > len(nodes):
         raise RuntimeError("Failed to schedule, while loop ran too long for lpmf")
@@ -383,8 +385,8 @@ def topological_sort_bfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNo
     """
     A BFS topological sort that selects nodes whose dependencies are executed the
     earliest. This follows a FIFO idea. Specifically, at every iteration, for each node
-    that is schedulable, we gather the time when its predecessors nodes are executed,
-    and this sorted list of execution times of predecessors nodes defines the priority.
+    that is schedulable, we gather the order in which its predecessor nodes are executed,
+    and this sorted list of execution orders of predecessor nodes defines the priority.
     We select the node whose predecessors nodes are executed the earliest. The FIFO
     idea aims to reduce the liveness duration of buffers created.
     """
@@ -396,24 +398,26 @@ def topological_sort_bfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNo
 
         def __lt__(self, other: HeapElement) -> bool:
             if self.priority == other.priority:
-                return self.node.mpi.index < other.node.mpi.index
+                return self.node.mpi_node.index < other.node.mpi_node.index
             return self.priority < other.priority
 
     def _node_priority(node: BaseSchedulerNode) -> List[int]:
-        assert node.mpi.indegree == 0
-        ids = sorted({pred_node.mpi.index for pred_node in node.mpi.pred_nodes})
-        ids.append(node.mpi.index)
+        assert node.mpi_node.indegree == 0
+        ids = sorted(
+            {pred_node.mpi_node.index for pred_node in node.mpi_node.pred_nodes}
+        )
+        ids.append(node.mpi_node.index)
         return ids
 
     # compute nodes' number of unmet dependencies (for schedulability)
     # initialize the list of nodes ready to be scheduled
     nodes_to_schedule: List[HeapElement] = []
     for t, node in enumerate(nodes):
-        node.mpi.index = t
+        node.mpi_node.index = t
         # note that .unmet_dependencies could have deps with the same name
         # and in that case, it should only be counted once
-        node.mpi.indegree = len(node.mpi.pred_nodes)
-        if node.mpi.indegree == 0:
+        node.mpi_node.indegree = len(node.mpi_node.pred_nodes)
+        if node.mpi_node.indegree == 0:
             heapq.heappush(nodes_to_schedule, HeapElement(_node_priority(node), node))
 
     # schedule nodes one at a time
@@ -422,15 +426,15 @@ def topological_sort_bfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNo
     while num_iters < len(nodes) and nodes_to_schedule:
         # select a node to schedule
         selected_node = heapq.heappop(nodes_to_schedule).node
-        selected_node.mpi.index = len(schedule)
+        selected_node.mpi_node.index = len(schedule)
         schedule.append(selected_node)
         num_iters += 1
 
         # update successor nodes and nodes_to_schedule
-        for succ_node in selected_node.mpi.succ_nodes:
-            assert succ_node.mpi.indegree > 0
-            succ_node.mpi.indegree -= 1
-            if succ_node.mpi.indegree == 0:
+        for succ_node in selected_node.mpi_node.succ_nodes:
+            assert succ_node.mpi_node.indegree > 0
+            succ_node.mpi_node.indegree -= 1
+            if succ_node.mpi_node.indegree == 0:
                 heapq.heappush(
                     nodes_to_schedule,
                     HeapElement(_node_priority(succ_node), succ_node),
@@ -469,12 +473,16 @@ def topological_sort_dfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNo
             name_to_node[name] = node
 
     for t, node in enumerate(nodes):
-        node.mpi.index = t
-        node.mpi.size = sum(buffer.mpi.size_alloc for buffer in node.get_outputs())
-        node.mpi.measure = node.mpi.size + sum(
-            pred_buf.mpi.size_free for pred_buf in node.mpi.pred_buffers
+        node.mpi_node.index = t
+        node.mpi_node.size = sum(
+            buffer.mpi_node.size_alloc for buffer in node.get_outputs()
         )
-    for node in sorted(nodes, key=lambda x: (x.mpi.measure, x.mpi.index)):
+        node.mpi_node.size_with_reads = node.mpi_node.size + sum(
+            pred_buf.mpi_node.size_free for pred_buf in node.mpi_node.pred_buffers
+        )
+    for node in sorted(
+        nodes, key=lambda x: (x.mpi_node.size_with_reads, x.mpi_node.index)
+    ):
         visit(node)
     return result
 
