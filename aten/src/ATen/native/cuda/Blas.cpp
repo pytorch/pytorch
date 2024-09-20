@@ -1073,8 +1073,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 #ifdef USE_ROCM
 #define F8E4M3 Float8_e4m3fnuz
 #define F8E5M2 Float8_e5m2fnuz
-#define kF8E4M3 kFloat8_E4m3fnuz
-#define kF8E5M2 kFloat8_E5m2fnuz
+#define kF8E4M3 kFloat8_e4m3fnuz
+#define kF8E5M2 kFloat8_e5m2fnuz
 #else
 #define F8E4M3 Float8_e4m3fn
 #define F8E5M2 Float8_e5m2
