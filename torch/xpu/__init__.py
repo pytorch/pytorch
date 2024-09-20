@@ -232,14 +232,14 @@ def get_device_capability(device: Optional[_device_t] = None) -> Dict[str, Any]:
         Dict[str, Any]: the xpu capability dictionary of the device
     """
     props = get_device_properties(device)
-    props_dict = {
-        prop: getattr(props, prop) for prop in dir(props) if not prop.startswith("__")
-    }
-    # Remove `<bound method PyCapsule._pybind11_conduit_v1_ of _XpuDeviceProperties..>`
+    # pybind service attributes are no longer needed and their presence breaks
+    # the further logic related to the serialization of the created dictionary.
+    # In particular it filters out `<bound method PyCapsule._pybind11_conduit_v1_ of _XpuDeviceProperties..>`
     # to fix Triton tests.
     # This field appears after updating pybind to 2.13.6.
-    props_dict.pop("_pybind11_conduit_v1_", None)
-    return props_dict
+    return {
+        prop: getattr(props, prop) for prop in dir(props) if not prop.startswith(("__", "_pybind11_"))
+    }
 
 
 def get_device_properties(device: Optional[_device_t] = None) -> _XpuDeviceProperties:
