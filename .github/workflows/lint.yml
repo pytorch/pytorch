@@ -4,10 +4,6 @@ on:
   pull_request:
     branches-ignore:
       - nightly
-  # For lint-autoformat https://github.com/parkerbxyz/suggest-changes/issues/33
-  pull_request_target:
-    types: [opened, synchronize, reopened]
-    branches: [main]
   push:
     branches:
       - main
@@ -60,6 +56,7 @@ jobs:
         export ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT"
         .github/scripts/lintrunner.sh
 
+  # NB: This doesn't work with forked PR https://github.com/parkerbxyz/suggest-changes/issues/33 :(
   lintrunner-autoformat:
     permissions:
       contents: read
