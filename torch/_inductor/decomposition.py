@@ -995,4 +995,4 @@ def adaptive_max_pool2d(
         kernel_size = [h_in // h_out, w_in // w_out]
         return aten.max_pool2d_with_indices(x, kernel_size)
 
-    raise NotImplementedError
+    return NotImplemented
