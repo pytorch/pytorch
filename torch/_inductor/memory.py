@@ -508,7 +508,7 @@ def reorder_for_peak_memory(
     resulting topological order has the lowest peak memory estimation.
     """
 
-    torch_log.info("Reordering for peak memory -- %d nodes", len(nodes))
+    torch_log.warning("Reordering for peak memory -- %d nodes", len(nodes))
 
     @dataclasses.dataclass
     class PeakMemoryResult:
@@ -532,7 +532,7 @@ def reorder_for_peak_memory(
         nodes, name_to_input_buf, graph_outputs
     )
     peak_memory_diff_methods.append(PeakMemoryResult(nodes, estimated_peak_memory))
-    torch_log.info("Baseline peak memory: %d", estimated_peak_memory)
+    torch_log.warning("Baseline peak memory: %d", estimated_peak_memory)
 
     # other methods
     for method in methods:
@@ -546,7 +546,7 @@ def reorder_for_peak_memory(
                 order, name_to_input_buf, graph_outputs
             )
             peak_memory_diff_methods.append(PeakMemoryResult(order, peak_memory))
-            torch_log.info("%s peak memory: %d", method.__name__, peak_memory)
+            torch_log.warning("%s peak memory: %d", method.__name__, peak_memory)
         except Exception as e:
             torch_log.error("Failed to reorder for %s: %s", method.__name__, e)
 
