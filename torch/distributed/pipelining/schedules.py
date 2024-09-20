@@ -638,6 +638,9 @@ class _ScheduleForwardOnly(PipelineScheduleSingle):
             )
 
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
+        if not self._stage_initialized:
+            self._stage._prepare_forward_infra(self._n_microbatches)
+            self._stage_initialized = True
 
         # Delay send waits
         fwd_sends_to_wait: List[dist.Work] = []
@@ -1459,6 +1462,13 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         not support models with skip connections.
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
+        if not self._stages_initialized:
+            for stage in self._stages:
+                # TODO: why do i pass args/kwargs here? its not used?
+                stage._prepare_forward_infra(self._n_microbatches)
+                if self._has_backward:
+                    stage._prepare_backward_infra(self._n_microbatches)
+            self._stages_initialized = True
 
         # Based on the plan in Step 1 created in __init__:
         # 2. Perform communication based on the pipeline_order

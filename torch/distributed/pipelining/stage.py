@@ -1266,9 +1266,6 @@ class PipelineStage(_PipelineStageBase):
     ):
         super().__init__(submodule, stage_index, num_stages, device, group, dw_builder)
         self.inputs: Optional[List[torch.Tensor]] = None
-        inputs_devices = set(
-            tree_map_only(torch.Tensor, lambda x: x.device, input_args)
-        )
 
         # Note: inputs and submod should ideally be on meta device. We decided not to assert this (yet) becuase it
         # might be breaking for existing users.
