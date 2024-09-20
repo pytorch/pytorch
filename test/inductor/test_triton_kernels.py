@@ -1,5 +1,5 @@
 # Owner(s): ["module: inductor"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 # flake8: noqa: E731
 # Skip do not assign a lambda expression, use a def
 import functools

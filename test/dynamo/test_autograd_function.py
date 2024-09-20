@@ -783,7 +783,7 @@ class GraphModule(torch.nn.Module):
             def backward(ctx, gO):
                 return torch.tensor(float("nan")).expand(10, 10)
 
-        def run_fn(a):  # pylint: disable=unused-variable
+        def run_fn(a):  # noqa: F841
             out = MyFunc2.apply(a)
             return out.sum()
 

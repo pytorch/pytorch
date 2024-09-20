@@ -1,5 +1,5 @@
 # Owner(s): ["module: linear algebra"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 
 import torch
 import numpy as np

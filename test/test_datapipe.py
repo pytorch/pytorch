@@ -1,5 +1,5 @@
 # mypy: ignore-errors
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 
 # Owner(s): ["module: dataloader"]
 

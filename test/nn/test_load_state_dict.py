@@ -353,7 +353,7 @@ class TestLoadStateDict(NNTestCase):
         x = torch.randn(4, 3)
         num_iters = 3
 
-        for i in range(num_iters):
+        for _ in range(num_iters):
             opt.zero_grad()
             out = net(x)
             out.sum().backward()
@@ -371,7 +371,7 @@ class TestLoadStateDict(NNTestCase):
         opt2.load_state_dict(opt_state_dict)
 
         y = x.clone()
-        for i in range(num_iters):
+        for _ in range(num_iters):
             opt.zero_grad()
             out = net(x)
             out.sum().backward()

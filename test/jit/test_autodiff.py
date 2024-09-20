@@ -1,5 +1,5 @@
 # Owner(s): ["oncall: jit"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 
 from typing import List
 

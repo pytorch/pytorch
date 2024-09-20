@@ -550,7 +550,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # First allreduce to initialize default PG's communicator.
         pg.allreduce(t).wait()
         # PG1 is an PG without comms initialized, since we don't call collective on it
-        new_pg1 = c10d.new_group([0, 1])  # pylint: disable=unused-variable
+        new_pg1 = c10d.new_group([0, 1])  # noqa: F841
         new_pg2 = c10d.new_group([0, 1])
         t2 = torch.rand(10, 10, device=device)
 

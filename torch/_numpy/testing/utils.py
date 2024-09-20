@@ -78,7 +78,6 @@ def assert_(val, msg=""):
 
     """
 
-    # pylint: disable-next=unused-variable
     __tracebackhide__ = True  # Hide traceback for py.test
     if not val:
         try:
@@ -184,7 +183,6 @@ def assert_equal(actual, desired, err_msg="", verbose=True):
     >>> np.testing.assert_equal(np.array([1.0, 2.0, np.nan]), [1, 2, np.nan])
 
     """
-    # pylint: disable-next=unused-variable
     __tracebackhide__ = True  # Hide traceback for py.test
 
     num_nones = sum([actual is None, desired is None])
@@ -313,7 +311,6 @@ def print_assert_equal(test_string, actual, desired):
     [0, 2]
 
     """
-    # pylint: disable-next=unused-variable
     __tracebackhide__ = True  # Hide traceback for py.test
     import pprint
 
@@ -396,7 +393,6 @@ def assert_almost_equal(actual, desired, decimal=7, err_msg="", verbose=True):
      y: torch.ndarray([1.0000, 2.3333], dtype=float64)
 
     """
-    # pylint: disable-next=unused-variable
     __tracebackhide__ = True  # Hide traceback for py.test
     from torch._numpy import imag, iscomplexobj, ndarray, real
 
@@ -511,7 +507,6 @@ def assert_approx_equal(actual, desired, significant=7, err_msg="", verbose=True
     True
 
     """
-    # pylint: disable-next=unused-variable
     __tracebackhide__ = True  # Hide traceback for py.test
     import numpy as np
 
@@ -567,7 +562,6 @@ def assert_array_compare(
     *,
     strict=False,
 ):
-    # pylint: disable-next=unused-variable
     __tracebackhide__ = True  # Hide traceback for py.test
     from torch._numpy import all, array, asarray, bool_, inf, isnan, max
 
@@ -587,7 +581,6 @@ def assert_array_compare(
         at the same locations.
 
         """
-        # pylint: disable-next=unused-variable
         __tracebackhide__ = True  # Hide traceback for py.test
         x_id = func(x)
         y_id = func(y)
@@ -829,7 +822,6 @@ def assert_array_equal(x, y, err_msg="", verbose=True, *, strict=False):
      x: torch.ndarray([2, 2, 2])
      y: torch.ndarray([2., 2., 2.])
     """
-    # pylint: disable-next=unused-variable
     __tracebackhide__ = True  # Hide traceback for py.test
     assert_array_compare(
         operator.__eq__,
@@ -919,7 +911,6 @@ def assert_array_almost_equal(x, y, decimal=6, err_msg="", verbose=True):
      y: torch.ndarray([1.0000, 2.3333, 5.0000], dtype=float64)
 
     """
-    # pylint: disable-next=unused-variable
     __tracebackhide__ = True  # Hide traceback for py.test
     from torch._numpy import any as npany, float_, issubdtype, number, result_type
 
@@ -1036,7 +1027,6 @@ def assert_array_less(x, y, err_msg="", verbose=True):
      y: torch.ndarray([4])
 
     """
-    # pylint: disable-next=unused-variable
     __tracebackhide__ = True  # Hide traceback for py.test
     assert_array_compare(
         operator.__lt__,
@@ -1076,7 +1066,6 @@ def assert_string_equal(actual, desired):
 
     """
     # delay import of difflib to reduce startup time
-    # pylint: disable-next=unused-variable
     __tracebackhide__ = True  # Hide traceback for py.test
     import difflib
 
@@ -1150,7 +1139,6 @@ def assert_raises_regex(exception_class, expected_regexp, *args, **kwargs):
     .. versionadded:: 1.9.0
 
     """
-    # pylint: disable-next=unused-variable
     __tracebackhide__ = True  # Hide traceback for py.test
     return _d.assertRaisesRegex(exception_class, expected_regexp, *args, **kwargs)
 
@@ -1294,7 +1282,6 @@ def assert_allclose(
     >>> np.testing.assert_allclose(x, y, rtol=1e-5, atol=0)
 
     """
-    # pylint: disable-next=unused-variable
     __tracebackhide__ = True  # Hide traceback for py.test
 
     def compare(x, y):
@@ -1366,7 +1353,6 @@ def assert_array_almost_equal_nulp(x, y, nulp=1):
     AssertionError: X and Y are not equal to 1 ULP (max is 2)
 
     """
-    # pylint: disable-next=unused-variable
     __tracebackhide__ = True  # Hide traceback for py.test
     import numpy as np
 
@@ -1424,7 +1410,6 @@ def assert_array_max_ulp(a, b, maxulp=1, dtype=None):
     >>> res = np.testing.assert_array_max_ulp(a, np.arcsin(np.sin(a)))  # doctest: +SKIP
 
     """
-    # pylint: disable-next=unused-variable
     __tracebackhide__ = True  # Hide traceback for py.test
     import numpy as np
 
@@ -1532,7 +1517,6 @@ def integer_repr(x):
 
 @contextlib.contextmanager
 def _assert_warns_context(warning_class, name=None):
-    # pylint: disable-next=unused-variable
     __tracebackhide__ = True  # Hide traceback for py.test
     with suppress_warnings() as sup:
         l = sup.record(warning_class)
@@ -1598,7 +1582,6 @@ def assert_warns(warning_class, *args, **kwargs):
 
 @contextlib.contextmanager
 def _assert_no_warnings_context(name=None):
-    # pylint: disable-next=unused-variable
     __tracebackhide__ = True  # Hide traceback for py.test
     with warnings.catch_warnings(record=True) as l:
         warnings.simplefilter("always")
@@ -2151,7 +2134,6 @@ class suppress_warnings:
 
 @contextlib.contextmanager
 def _assert_no_gc_cycles_context(name=None):
-    # pylint: disable-next=unused-variable
     __tracebackhide__ = True  # Hide traceback for py.test
 
     # not meaningful to test if there is no refcounting

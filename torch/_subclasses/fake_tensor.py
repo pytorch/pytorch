@@ -1677,8 +1677,7 @@ class FakeTensorMode(TorchDispatchMode):
                 "%sFakeTensorMode.__torch_dispatch__: %s", " " * RECURSION_COUNT, func
             )
             # NOTE: incr is intentionally unused for a RAII pattern
-            # pylint: disable-next=unused-variable
-            incr = IncrementRecursionCount()
+            incr = IncrementRecursionCount()  # noqa: F841
 
         # Some attribute queries that can be serviced directly
         # See Note [is_coalesced is dispatched]

@@ -1,5 +1,5 @@
 # Owner(s): ["module: inductor"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 import gc
 import math
 import sys
@@ -326,7 +326,7 @@ class CudaReproTests(TestCase):
             out = x + x
             return out.t()
 
-        foo_opt = torch._dynamo.optimize("inductor")(foo)
+        torch._dynamo.optimize("inductor")(foo)
 
         inpt = torch.randn(10, 10, device="cuda", requires_grad=True)
         # TODO: this is broken, fix later
@@ -523,7 +523,7 @@ class CudaReproTests(TestCase):
             def forward(self, view, reshape_2):
                 permute = view.permute(0, 2, 1)
                 view = None
-                reshape = torch.reshape(permute, (-1, 642))
+                reshape = torch.reshape(permute, (-1, 642))  # noqa: F841
                 bmm = torch.bmm(permute, reshape_2)
                 return (bmm,)
 
@@ -592,7 +592,7 @@ class CudaReproTests(TestCase):
         try:
             torch.cuda.memory.empty_cache()
             torch.cuda.memory._record_memory_history(True)
-            r = fn(x, w, b)
+            fn(x, w, b)
         finally:
             torch.cuda.memory._record_memory_history(False)
         snapshot = str(torch.cuda.memory._snapshot())
@@ -775,7 +775,7 @@ class CudaReproTests(TestCase):
         idx = torch.zeros(N, dtype=torch.int64, device="cuda")
         values = torch.randn(N, device="cuda")
 
-        r0 = fn(idx, values)
+        fn(idx, values)
         with DeterministicGuard(True):
             r1 = fn(idx, values)
             for _ in range(10):
@@ -1076,9 +1076,9 @@ class CudaReproTests(TestCase):
             input2 = torch.rand(5, 513, 1024, device="cuda", dtype=torch.float16)
             input3 = torch.rand(5, 514, 1024, device="cuda", dtype=torch.float16)
 
-            out1 = model(input1)
-            out2 = model(input2)
-            out3 = model(input3)
+            model(input1)
+            model(input2)
+            model(input3)
 
         self.assertEqual(cnts.frame_count, 1)
 

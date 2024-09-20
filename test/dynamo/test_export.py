@@ -3622,7 +3622,7 @@ G['macademia'], accessed at:
         arglebargle = torch.randn(3)
 
         def f(y):
-            x = arglebargle  # pylint: disable=unused-variable
+            x = arglebargle  # noqa: F841
             return y
 
         torch._dynamo.export(f)(torch.randn(3))

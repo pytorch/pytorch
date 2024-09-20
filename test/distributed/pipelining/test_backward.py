@@ -117,8 +117,7 @@ class StageBackwardTests(TestCase):
         )
 
         # backward of loss with respect to weights
-        # pylint: disable-next=unused-variable
-        dweights = stage_backward_weight(mod.parameters(), param_groups)
+        dweights = stage_backward_weight(mod.parameters(), param_groups)  # noqa: F841
 
         # Run reference
         ref_out = ref_mod(ref_x)

@@ -1862,8 +1862,7 @@ class TestFSDPOptimState(FSDPTest):
         )
         step()
 
-        # pylint: disable-next=unused-variable
-        osd_to_load = FSDP.optim_state_dict_to_load(
+        osd_to_load = FSDP.optim_state_dict_to_load(  # noqa: F841
             model, optim, osd, load_directly=True
         )
         self._check_same_state(

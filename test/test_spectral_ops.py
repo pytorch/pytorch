@@ -1,5 +1,5 @@
 # Owner(s): ["module: fft"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 
 import torch
 import unittest

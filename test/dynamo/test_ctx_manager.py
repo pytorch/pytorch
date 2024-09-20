@@ -1296,7 +1296,7 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         torch.compile(fn, backend=eager, fullgraph=False)(torch.randn(()))
 
-        def check_graph(actual, expected):  # pylint: disable=unused-variable
+        def check_graph(actual, expected):  # noqa: F841
             self.assertExpectedInline(actual, expected)
 
         graph = eager.graphs[0]

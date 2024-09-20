@@ -578,7 +578,7 @@ class CompileTest(TestCase):
         assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
 
         # Test aoti
-        out = AOTIRunnerUtil.run("cuda", func, (args,))
+        out = AOTIRunnerUtil.run("cuda", func, (args,))  # noqa: F841
         torch.cuda.synchronize()
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
@@ -701,7 +701,7 @@ class CompileTest(TestCase):
         )
 
         # Test aoti
-        out = AOTIRunnerUtil.run("cuda", func, (args,))
+        out = AOTIRunnerUtil.run("cuda", func, (args,))  # noqa: F841
         torch.cuda.synchronize()
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")

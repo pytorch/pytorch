@@ -1,6 +1,6 @@
 # Owner(s): ["oncall: export"]
-# pylint: disable=unused-variable
-# pylint: disable=unused-variable
+# ruff: noqa: F841
+# ruff: noqa: F841
 # flake8: noqa
 import copy
 import dataclasses

@@ -1,5 +1,5 @@
 # Owner(s): ["module: custom-operators"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 
 import collections
 import itertools

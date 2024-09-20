@@ -1,5 +1,5 @@
 # Owner(s): ["module: dataloader"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 
 import ctypes
 import errno
@@ -41,6 +41,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TestCase,
+    xfailIfLinux,
 )
 from torch.utils.data import (
     _utils,
@@ -1383,6 +1384,8 @@ except RuntimeError as e:
             del loader1_it
             del loader2_it
 
+    # https://github.com/pytorch/pytorch/issues/128551
+    @xfailIfLinux
     def test_segfault(self):
         p = ErrorTrackingProcess(target=_test_segfault)
         p.start()

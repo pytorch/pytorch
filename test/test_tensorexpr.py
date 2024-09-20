@@ -1,5 +1,5 @@
 # Owner(s): ["NNC"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 
 import numpy as np
 import torch

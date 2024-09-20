@@ -1,5 +1,5 @@
 # Owner(s): ["module: vmap"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 
 import functools
 import itertools

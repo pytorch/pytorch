@@ -79,8 +79,7 @@ def forward(self, x_1):
                 _tensor_constant0
             )
             _tensor_constant0 = None
-            # pylint: disable-next=unused-variable
-            index: "f32[6144, 4190]" = torch.ops.aten.index.Tensor(
+            index: "f32[6144, 4190]" = torch.ops.aten.index.Tensor(  # noqa: F841
                 primals_48, [None, lift_fresh_copy]
             )
             lift_fresh_copy = None

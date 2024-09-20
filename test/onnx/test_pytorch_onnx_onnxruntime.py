@@ -1,5 +1,5 @@
 # Owner(s): ["module: onnx"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 
 from __future__ import annotations
 

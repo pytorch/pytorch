@@ -1,5 +1,5 @@
 # Owner(s): ["module: decompositions"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 
 import itertools
 import torch

@@ -873,7 +873,7 @@ class TestOperators(common_utils.TestCase):
 
     def test_cumsum(self):
         x = torch.randn(2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: torch.cumsum(x, dim=1), x, opset_version=11)
+        self.assertONNX(lambda *args: torch.cumsum(*args, dim=1), x, opset_version=11)
 
     def test_dict(self):
         class MyModel(torch.nn.Module):
@@ -1070,7 +1070,7 @@ class TestOperators(common_utils.TestCase):
                 )
 
             def forward(self, x, h0, c0):
-                a, b = self.rnn(x, (h0, c0))
+                _, b = self.rnn(x, (h0, c0))
                 return torch.ones(b[0].shape)
 
         self.assertONNX(

@@ -6636,7 +6636,7 @@ class TestValidation(DistributionsTestCase):
                     except ValueError as e:
                         if e.args and "must be within the support" in e.args[0]:
                             try:
-                                log_prob = d_nonval.log_prob(val)
+                                d_nonval.log_prob(val)
                             except RuntimeError:
                                 pass
 

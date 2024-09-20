@@ -1968,8 +1968,7 @@ class DistributedDataParallelTest(
         This unit test verifies whether the Future object is passed properly.
         The callback function creates a Future object and sets a value to it.
         """
-        # pylint: disable-next=unused-variable
-        store = c10d.FileStore(self.file_name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)  # noqa: F841
 
         process_group = self._get_process_group()
 

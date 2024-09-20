@@ -1,5 +1,5 @@
 # Owner(s): ["NNC"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 
 import contextlib
 import math

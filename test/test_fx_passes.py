@@ -1,5 +1,5 @@
 # Owner(s): ["module: fx.passes"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 
 from dataclasses import dataclass
 import operator

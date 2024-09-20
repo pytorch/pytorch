@@ -3072,12 +3072,11 @@ class GraphModule(torch.nn.Module):
     def test_rand_inlined(self):
         @torch.compile(backend="eager", dynamic=True)
         def fn():
-            # pylint: disable=unused-variable
             idx_size = [10]
             idx_size[random.randint(0, 0)] = random.randint(1, 8)
             t = tuple(idx_size)
-            src_size = [random.randint(1, 5) + s for s in idx_size]
-            idx = torch.empty(t)
+            src_size = [random.randint(1, 5) + s for s in idx_size]  # noqa: F841
+            idx = torch.empty(t)  # noqa: F841
 
         fn()
 
@@ -3104,7 +3103,7 @@ class GraphModule(torch.nn.Module):
             )
             t1 = make_q_tensor()
             t2 = make_kv_tensor()
-            t3 = t1 + t2  # pylint: disable=unused-variable
+            t3 = t1 + t2  # noqa: F841
 
         func()
 
@@ -3112,7 +3111,7 @@ class GraphModule(torch.nn.Module):
         @torch.compile(backend="eager")
         def fn():
             t = torch.ones(2)
-            y = t.to("meta")  # pylint: disable=unused-variable
+            y = t.to("meta")  # noqa: F841
 
         fn()
 
@@ -3273,8 +3272,7 @@ class GraphModule(torch.nn.Module):
             y += 1
             return x
 
-        # pylint: disable-next=unused-variable
-        l = list(zip([a, b], map(f, [1, 2, 3, 4])))
+        l = list(zip([a, b], map(f, [1, 2, 3, 4])))  # noqa: F841
         return a + y
 
     @make_test

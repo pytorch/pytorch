@@ -1,5 +1,5 @@
 # Owner(s): ["module: meta tensors"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 
 
 import contextlib

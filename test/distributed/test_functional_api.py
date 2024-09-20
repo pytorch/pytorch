@@ -580,8 +580,7 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         def allreduce(t, pg):
             return ft_c.all_reduce(t, "sum", pg)
 
-        # pylint: disable-next=unused-variable
-        compiled_allreduce = torch.compile(allreduce, fullgraph=True)
+        compiled_allreduce = torch.compile(allreduce, fullgraph=True)  # noqa: F841
         dist.init_process_group(
             backend="fake",
             rank=0,

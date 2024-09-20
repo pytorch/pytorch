@@ -159,7 +159,6 @@ class AOTAutogradCacheTests(InductorTestCase):
         def fn(a, b):
             out = a.cos() + b
             loss = out.sum()
-            # pylint: disable-next=unused-variable
             ga, gb = torch.autograd.grad(loss, inputs=[a, b])
 
         a = torch.randn(25, requires_grad=True)
@@ -609,7 +608,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return x.sin().cos()
 
-        def fn2(x):  # pylint: disable=unused-variable
+        def fn2(x):  # noqa: F841
             y = x.sin()
             z = y.cos()
             return z

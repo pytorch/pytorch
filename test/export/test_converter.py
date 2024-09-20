@@ -25,7 +25,7 @@ class TestConverter(TestCase):
         init_torchbind_implementations()
 
         @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
-        class FakeTensorQueue:  # pylint: disable=unused-variable
+        class FakeTensorQueue:  # noqa: F841
             def __init__(self, queue):
                 self.queue = queue
 
@@ -1338,12 +1338,12 @@ class TestConverter(TestCase):
                     x_list.append(x_list[k] + x_list[k + 1] - x_list[k + 2])
             return x, x_list
 
-        def func2(x):  # pylint: disable=unused-variable
+        def func2(x):  # noqa: F841
             for i in range(x.size(0)):
                 x = x * x * i
             return x
 
-        def func3(x):  # pylint: disable=unused-variable
+        def func3(x):  # noqa: F841
             while x.sum() < 10:
                 x += x.sin()
             return x

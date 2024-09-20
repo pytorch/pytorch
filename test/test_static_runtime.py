@@ -1,5 +1,5 @@
 # Owner(s): ["module: unknown"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 
 import unittest
 from typing import Dict, Optional

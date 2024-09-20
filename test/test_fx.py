@@ -1,5 +1,5 @@
 # Owner(s): ["module: fx"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 
 import builtins
 import contextlib

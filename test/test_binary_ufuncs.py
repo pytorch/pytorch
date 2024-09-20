@@ -1,5 +1,5 @@
 # Owner(s): ["module: tests"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 
 import itertools
 import math

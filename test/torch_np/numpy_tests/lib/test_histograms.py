@@ -1,5 +1,5 @@
 # Owner(s): ["module: dynamo"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 
 import functools
 from unittest import expectedFailure as xfail, skipIf

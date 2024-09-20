@@ -1,5 +1,5 @@
 # Owner(s): ["module: inductor"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 import contextlib
 import copy
 import dataclasses

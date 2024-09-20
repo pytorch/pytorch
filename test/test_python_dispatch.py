@@ -1,5 +1,5 @@
 # Owner(s): ["module: __torch_dispatch__"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 
 import logging
 import sys

@@ -1722,8 +1722,7 @@ class WelfordReduction(Reduction):
         for i in intermediates:
             i.realize()
 
-        # pylint: disable-next=unused-variable
-        i_loaders = [i.make_loader() for i in intermediates]
+        i_loaders = [i.make_loader() for i in intermediates]  # noqa: F841
 
         def intermediate_loader_fn(index, reduction_index, loader):
             return loader([*index, *reduction_index])

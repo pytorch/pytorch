@@ -1,5 +1,5 @@
 # flake8: noqa
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 import torch
 
 

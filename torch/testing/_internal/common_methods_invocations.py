@@ -13,6 +13,7 @@ import enum
 
 import torch
 import numpy as np
+import numpy.typing as npt
 from torch import inf, nan
 
 from typing import Any, Dict, List, Tuple, Union, Sequence
@@ -7787,8 +7788,7 @@ def reference_inputs_where(op, device, dtype, requires_grad, **kwargs):
 
     # type promoting
     # FIXME(rec): shouldn't other_dtype be used two lines below?
-    # pylint: disable-next=unused-variable
-    other_dtype = torch.double if dtype is not torch.double else torch.long
+    other_dtype = torch.double if dtype is not torch.double else torch.long  # noqa: F841
     c = make_cond((10, 3), noncontiguous=True)
     a = make_arg((10, 1), dtype=torch.long)
     b = make_arg((10, 1))
@@ -8781,8 +8781,7 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
 
     # Add non standard shapes
     # FIXME(rec): should diff_v_head_dim be appended to samples?
-    # pylint: disable-next=unused-variable
-    diff_v_head_dim = SampleInput(
+    diff_v_head_dim = SampleInput(  # noqa: F841
         make((batch, num_heads, seq_q, head_dim)),
         make((batch, num_heads, seq_kv, head_dim)),
         make((batch, num_heads, seq_kv, head_dim + 8)),
@@ -8849,8 +8848,7 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
 
     # Add non standard shapes
     # FIXME(rec): should diff_v_head_dim be appended to samples?
-    # pylint: disable-next=unused-variable
-    diff_v_head_dim = SampleInput(
+    diff_v_head_dim = SampleInput(  # noqa: F841
         make((batch, seq_q, num_heads, head_dim)),
         make((batch, seq_kv, num_heads, head_dim)),
         make((batch, seq_kv, num_heads, head_dim + 8)),
@@ -11332,7 +11330,7 @@ def reference_gelu(X, *, approximate='none'):
         return _gelu_ref(X)
 
 
-def reference_one_hot(a: np.ndarray, num_classes: int = -1) -> np.ndarray:
+def reference_one_hot(a: npt.NDArray, num_classes: int = -1) -> npt.NDArray:
     if num_classes == -1:
         num_classes = int(np.amax(a) + 1)
 
@@ -11352,11 +11350,11 @@ def reference_mse_loss(input, target, reduction="mean"):
         return se
 
 
-def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
+def reference_layer_norm(inp: npt.NDArray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
     return reference_native_layer_norm(inp, normalized_shape, weight, bias, eps)[0]
 
 
-def reference_native_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight, bias, eps):
+def reference_native_layer_norm(inp: npt.NDArray, normalized_shape: Tuple[int], weight, bias, eps):
     feature_size = np.prod(normalized_shape)
     inp_view = inp.reshape(-1, feature_size)  # type: ignore[call-overload]
     mean = inp_view.mean(axis=-1, keepdims=True)
@@ -11373,7 +11371,7 @@ def reference_native_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], w
     return Y.reshape(*inp.shape), mean.reshape(stat_shape), (1.0 / np.sqrt(var + eps)).reshape(stat_shape)
 
 
-def reference_rms_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, eps=None):
+def reference_rms_norm(inp: npt.NDArray, normalized_shape: Tuple[int], weight=None, eps=None):
     if eps is None:
         eps = torch.finfo(numpy_to_torch_dtype(inp.dtype)).eps
     feature_size = np.prod(normalized_shape)
@@ -11385,7 +11383,7 @@ def reference_rms_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=Non
     return Y.reshape(*inp.shape)
 
 
-def reference_group_norm(inp: np.ndarray, num_groups: int, weight=None, bias=None, eps=1e-5):
+def reference_group_norm(inp: npt.NDArray, num_groups: int, weight=None, bias=None, eps=1e-5):
     inp_view = inp
     if np.prod(inp.shape) != 0:
         inp_view = inp.reshape((inp.shape[0], num_groups, -1))
@@ -11471,7 +11469,7 @@ def reference_std_var(f):
     g = reference_reduction_numpy(f)
 
     @wraps(g)
-    def wrapper(x: np.ndarray, *args, **kwargs):
+    def wrapper(x: npt.NDArray, *args, **kwargs):
         assert not ('unbiased' in kwargs and 'correction' in kwargs)
 
         if 'unbiased' in kwargs:

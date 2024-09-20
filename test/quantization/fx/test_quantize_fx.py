@@ -1,5 +1,5 @@
 # Owner(s): ["oncall: quantization"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 
 from collections import OrderedDict
 import contextlib

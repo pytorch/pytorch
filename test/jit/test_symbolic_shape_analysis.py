@@ -678,7 +678,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         # to make into a jit function cant have multiple outputs
         g.makeMultiOutputIntoTuple()
         func = torch._C._create_function_from_graph("partial_eval_graph", g)
-        mapping = shape_compute_graph.graph_output_to_symbolic_shape_dim()
+        mapping = shape_compute_graph.graph_output_to_symbolic_shape_dim()  # noqa: F841
         output_shape = func(tensor.size())
         # the first 4 dims are input sym dimensions, then the ,
         self.assertEqual(list(output_shape[0:4]), list(tensor.size()))

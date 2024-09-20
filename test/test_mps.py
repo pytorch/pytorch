@@ -1,5 +1,5 @@
 # Owner(s): ["module: mps"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 import io
 import platform
 import sys

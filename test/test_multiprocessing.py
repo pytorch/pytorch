@@ -1,5 +1,5 @@
 # Owner(s): ["module: multiprocessing"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 import contextlib
 import copy
 import gc

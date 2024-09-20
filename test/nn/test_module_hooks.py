@@ -1,5 +1,5 @@
 # Owner(s): ["module: nn"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 import gc
 import math
 import pickle

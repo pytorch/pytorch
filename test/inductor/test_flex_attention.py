@@ -1,5 +1,5 @@
 # Owner(s): ["module: inductor"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 # flake8: noqa: B950
 
 import functools
@@ -31,26 +31,24 @@ from torch.nn.attention.flex_attention import (
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MULTIGPU
-from torch.testing._internal.common_utils import skipIfRocm, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import TEST_WITH_ROCM
 from torch.utils._triton import has_triton
 
 
 # Skip tests if Triton is not available
 supported_platform = skipUnless(
     torch.cuda.is_available()
-    and torch.version.hip is None
     and has_triton()
     and torch.cuda.get_device_capability() >= (8, 0),
     "Requires CUDA and Triton",
 )
 
 # Use this decorator only when hitting Triton bugs on H100
-running_on_a100_only = skipUnless(
+running_on_a100_or_rocm_only = skipUnless(
     torch.cuda.is_available()
-    and torch.version.hip is None
     and has_triton()
-    and torch.cuda.get_device_capability() == (8, 0),
-    "Requires A100 and Triton",
+    and (torch.cuda.get_device_capability() == (8, 0) or torch.version.hip is not None),
+    "Requires (A100 or ROCm) and Triton",
 )
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
@@ -315,8 +313,6 @@ class TestFlexAttention(InductorTestCase):
         V_D: int = D,
         block_mask: Optional[BlockMask] = None,
     ):
-        if TEST_WITH_ROCM and Q_H != KV_H:
-            self.skipTest("enable_gqa=True is unsupported on ROCM, for now")
         q = torch.randn(
             (Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
         )
@@ -584,7 +580,7 @@ class TestFlexAttention(InductorTestCase):
     def test_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
         self.run_test(score_mod, dtype)
 
-    @running_on_a100_only
+    @running_on_a100_or_rocm_only
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_seqlen_lt_default_sparse_block_size(
@@ -598,7 +594,7 @@ class TestFlexAttention(InductorTestCase):
         )
         self.run_test_with_call(attention, dtype, B, H, 64, D, B, H, 64, D)
 
-    @running_on_a100_only
+    @running_on_a100_or_rocm_only
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_seqlen_lt_custom_sparse_block_size(
@@ -1365,7 +1361,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test_with_call(attention)
 
-    @skipIfRocm
     @supported_platform
     def test_GQA_causal_mask(self):
         def mask_mod(b, h, q, kv):
@@ -1877,6 +1872,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("backend", ["flex_attention", "flex_decode", "eager"])
     def test_lse_masked_output(self, backend):
         if backend == "flex_decode":
+            if TEST_WITH_ROCM:
+                self.skipTest("backend=flex_decode is unsupported on ROCM, for now")
             kernel_options = {"FORCE_USE_FLEX_ATTENTION": False}
             flex_call = torch.compile(flex_attention, fullgraph=True)
         elif backend == "flex_attention":
@@ -2446,8 +2443,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
     @supported_platform
     @common_utils.parametrize("compile", [False, True])
     def test_no_q_info(self, compile: bool):
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 

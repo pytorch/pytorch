@@ -1,5 +1,5 @@
 # Owner(s): ["module: cuda"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 
 import contextlib
 import ctypes
@@ -2829,8 +2829,7 @@ exit(2)
                 with torch.amp.autocast(
                     device_type="cuda", enabled=with_amp, cache_enabled=cache_enabled
                 ):
-                    # pylint: disable-next=unused-variable
-                    out = m({"x": data, "unused_input": unused_input})["output"]
+                    m({"x": data, "unused_input": unused_input})["output"]
 
         # We graphed the models in training mode. Eval should still run ungraphed.
         model_graphed.eval()
@@ -3361,7 +3360,7 @@ class TestCudaMallocAsync(TestCase):
         try:
             torch.cuda.memory.empty_cache()
             torch.cuda.memory._record_memory_history("state", stacks="all")
-            x = torch.rand(311, 411, device="cuda")  # pylint: disable=unused-variable
+            x = torch.rand(311, 411, device="cuda")  # noqa: F841
 
             ss = torch.cuda.memory._snapshot()["segments"]
             found_it = False
@@ -3561,7 +3560,7 @@ class TestCudaMallocAsync(TestCase):
             def foo():
                 return torch.rand(311, 411, device="cuda")
 
-            x = foo()  # pylint: disable=unused-variable
+            x = foo()  # noqa: F841
 
             ss = torch.cuda.memory._snapshot()["segments"]
             found_it = False

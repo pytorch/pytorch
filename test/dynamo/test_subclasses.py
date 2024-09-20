@@ -1099,7 +1099,7 @@ class GraphModule(torch.nn.Module):
         )
 
         ff = torch.func.functionalize(f)
-        ff_out = ff(t_clone)  # pylint: disable=unused-variable
+        ff_out = ff(t_clone)  # noqa: F841
         # frame count and op count are incremented due to re-compilation
         check_count_and_graph(
             2,
@@ -1126,7 +1126,7 @@ class GraphModule(torch.nn.Module):
             x = torch._to_functional_tensor(t_clone2)
             torch._mirror_autograd_meta_to(t_clone2, x)
             torch._enable_functionalization(reapply_views=False)
-            aot_f_out = f(x)  # pylint: disable=unused-variable
+            aot_f_out = f(x)  # noqa: F841
         finally:
             torch._disable_functionalization()
 
@@ -1273,7 +1273,7 @@ class GraphModule(torch.nn.Module):
 
         x = DoubleSizeMaybeAddGeThreeTensor(inp)
         torch._dynamo.mark_dynamic(x, 0)
-        res = fn(x)  # pylint: disable=unused-variable
+        res = fn(x)  # noqa: F841
         # During fakeifying, we end up allocating a separate symint
         # for the outer and inner tensor (in this test, s0 is unused).
         expected_var_to_val = {
@@ -2468,7 +2468,7 @@ Eq(s12, s10)""",
         x_inner = torch.ones(4)
         x = TwoTensor(x_inner, x_inner)
         x_view = x.view(2, 2)
-        out = f(x_view)  # pylint: disable=unused-variable
+        out = f(x_view)  # noqa: F841
 
     # NJT1 -> Dense -> NJT2 -> Dense view
     # During view replay, the Dense -> NJT2 part will construct an intermediate,

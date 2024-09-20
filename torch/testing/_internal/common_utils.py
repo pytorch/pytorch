@@ -1507,6 +1507,10 @@ def xfailIfTorchDynamo(func):
     return unittest.expectedFailure(func) if TEST_WITH_TORCHDYNAMO else func
 
 
+def xfailIfLinux(func):
+    return unittest.expectedFailure(func) if IS_LINUX and not TEST_WITH_ROCM else func
+
+
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
     """
     Usage:
@@ -3815,7 +3819,6 @@ class TestCase(expecttest.TestCase):
             exact_is_coalesced=False
     ):
         # Hide this function from `pytest`'s traceback
-        # pylint: disable-next=unused-variable
         __tracebackhide__ = True
 
         # numpy's dtypes are a superset of what PyTorch supports. In case we encounter an unsupported dtype, we fall

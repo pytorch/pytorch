@@ -1,5 +1,5 @@
 # Owner(s): ["module: inductor"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 import contextlib
 import functools
 import gc
@@ -254,9 +254,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             z = torch.rand([1, 2, 1, 4, 9, 7], dtype=torch.float16).cuda()
 
             model = Model().cuda()
-            eag = model(x, y, z)
+            model(x, y, z)
             with capture_stderr() as captured_output:
-                opt = torch.compile(model.forward, mode="reduce-overhead")(x, y, z)
+                torch.compile(model.forward, mode="reduce-overhead")(x, y, z)
 
             FileCheck().check(
                 "skipping cudagraphs due to mutated inputs (1 instances). Found from"
@@ -1117,7 +1117,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def foo(args):
                 x = args[0]
                 args.clear()
-                x_orig = x
                 for _ in range(100):
                     x = x @ x
                 return (x,)
@@ -1253,7 +1252,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             frozen = torch._dynamo.run(foo)
 
             for _ in range(3):
-                out = frozen(torch.rand([10, 10], device="cuda"))
+                frozen(torch.rand([10, 10], device="cuda"))
 
             # didnt do additional recordings
             self.assertTrue(self.get_manager().new_graph_id().id == 2)
@@ -1277,7 +1276,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def foo(args):
                 x = args[0]
                 args.clear()
-                out = x + x
                 return (x, x[0])
 
             foo_cg = self.cudagraphify_impl(foo, [inp], ())
@@ -1311,7 +1309,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             inp = torch.rand([0], device="cuda")
             for _ in range(3):
-                out = foo(inp)
+                foo(inp)
                 node = self.curr_node()
                 self.assertEqual(len(list(node.path_live_weakrefs())), 1)
 
@@ -1453,7 +1451,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def foo(args):
                 x = args[0]
                 args.clear()
-                x_tmp = x + 1
                 return x[0], x[1]
 
             inp = torch.rand([2, 2], device="cuda")
@@ -1541,7 +1538,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 for _ in range(2)
             ]
 
-            out = foo(*inps)
+            foo(*inps)
             torch.cuda.synchronize()
             foo(*inps)
             torch.cuda.synchronize()
@@ -1604,7 +1601,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 return m(inp)
 
             def f():
-                l = []
                 m = torch.nn.Linear(20, 20).cuda()
                 for _ in range(4):
                     inp = torch.rand([20, 20], device="cuda")
@@ -1788,7 +1784,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             warnings.resetwarnings()
             with warnings.catch_warnings(record=True) as w:
-                out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
+                foo(torch.rand([4, 4], device="cuda", requires_grad=True))
 
             FileCheck().check(
                 "Unable to hit fast path of CUDAGraphs because of pending"
@@ -1804,7 +1800,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
 
             torch.compiler.cudagraph_mark_step_begin()
-            out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
+            foo(torch.rand([4, 4], device="cuda", requires_grad=True))
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
         @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -1906,7 +1902,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             torch._C._set_storage_access_error_msg(x, "custom error msg")
 
             with self.assertRaisesRegex(Exception, "custom error msg"):
-                device = x.untyped_storage()
+                x.untyped_storage()
 
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
         @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", False)
@@ -2244,7 +2240,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 x = torch.rand(2, 3, device="cuda")
                 y = foo(x)
                 y_clone = y.clone()
-                z = goo(y_clone)
+                goo(y_clone)
 
             FileCheck().check_count(
                 "skipping cudagraph due to function 1 exceeding max re-recording limit (=0) "

@@ -1307,7 +1307,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(error_on_recompile=True)
     @torch.fx.experimental._config.patch(use_duck_shape=False)
     def test_dynamic_shape_disable_duck_size(self):
-        # pylint: disable=unused-variable
+        # noqa: F841
 
         class TestModel(nn.Module):
             def __init__(
@@ -1324,11 +1324,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x1 = torch.rand(2, 5, 10, 10).to(memory_format=torch.channels_last)
         x2 = torch.rand(2, 5, 4, 8).to(memory_format=torch.channels_last)
 
-        o1_ref = main_model(x1, 4)
-        o1 = opt_model(x1, 4)
+        main_model(x1, 4)
+        opt_model(x1, 4)
 
-        o2_ref = main_model(x2, 20)
-        o2 = opt_model(x2, 20)
+        main_model(x2, 20)
+        opt_model(x2, 20)
 
     def test_chunk_reformer_ff(self):
         input = torch.randn([1, 4096, 256])
@@ -2700,8 +2700,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             for (sh, st, dt, dev, rg) in args
         ]
 
-        # pylint: disable-next=unused-variable
-        opt_foo = torch._dynamo.optimize("aot_eager_decomp_partition")(foo)
+        torch._dynamo.optimize("aot_eager_decomp_partition")(foo)
+
         with torch.cuda.amp.autocast(enabled=True):
             ref = foo(*args)[0]
             res = foo(*args)[0]
@@ -4395,7 +4395,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 pass
 
         def fn(x, y):
-            ucm = UserCtxManager()  # pylint: disable=unused-variable
+            ucm = UserCtxManager()  # noqa: F841
             return x * x
 
         cnt = torch._dynamo.testing.CompileCounter()
@@ -4464,7 +4464,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 pass
 
         def fn(x, y):
-            ucm = UserCtxManager(y)  # pylint: disable=unused-variable
+            ucm = UserCtxManager(y)  # noqa: F841
             return x * y[0]
 
         cnt = torch._dynamo.testing.CompileCounter()
@@ -4488,7 +4488,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         def fn(x, counter):
             x = x * x
-            ucm = UserCtxManager(counter)  # pylint: disable=unused-variable
+            ucm = UserCtxManager(counter)  # noqa: F841
             return x * x
 
         cnt = torch._dynamo.testing.CompileCounter()
@@ -4628,7 +4628,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_invalid_seq_unpack(self):
         def myfn(arg):
-            (a, b) = arg  # pylint: disable=unused-variable
+            (a, b) = arg  # noqa: F841
 
         def fn():
             return myfn((1, 2, 3))
@@ -5666,7 +5666,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         @torch.compile(backend="aot_eager_decomp_partition")
         def f(x, l):
-            z = x.sin()  # pylint: disable=unused-variable
+            z = x.sin()  # noqa: F841
             y = x + 1
             # graph input has its storage mutated
             torch.ops.fsdp.copy_.default(x, y)
@@ -5755,14 +5755,14 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         opt_mod = torch.compile(mod, backend="eager")
 
         x = torch.randn(1, 1)
-        ref = mod(x)  # pylint: disable=unused-variable
-        res = opt_mod(x)  # pylint: disable=unused-variable
+        ref = mod(x)  # noqa: F841
+        res = opt_mod(x)  # noqa: F841
 
         mod.submod.multipliers = [3.3, 4.4]
         # Since guard_nn_modules is False, this will not recompile
         with torch._dynamo.config.patch(error_on_recompile=True):
-            ref = mod(x)
-            res = opt_mod(x)
+            ref = mod(x)  # noqa: F841
+            res = opt_mod(x)  # noqa: F841
 
     def test_optimized_module_training(self):
         mod = torch.nn.Linear(3, 3)

@@ -1,5 +1,5 @@
 # Owner(s): ["oncall: quantization"]
-# pylint: disable=unused-variable
+# ruff: noqa: F841
 from typing import List, Tuple
 
 import torch

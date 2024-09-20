@@ -897,9 +897,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             # TODO: This should be possible to do inside the function, but
             @torch.compile()
             def f(x, y):
-                # pylint: disable=unused-variable
-                zx = x.shape
-                zy = y.shape
+                zx = x.shape  # noqa: F841
+                zy = y.shape  # noqa: F841
                 return x.sum() + y.sum()
 
             if self.rank == 0:
@@ -928,11 +927,10 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
             @torch.compile()
             def f(x, y):
-                # pylint: disable=unused-variable
-                z = y
+                z = y  # noqa: F841
                 print("woof")
-                zx = x.shape
-                zy = y.shape
+                zx = x.shape  # noqa: F841
+                zy = y.shape  # noqa: F841
                 return x.sum() + y.sum()
 
             if self.rank == 0:
@@ -961,9 +959,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
             @torch.compile()
             def f(x, y):
-                # pylint: disable=unused-variable
-                zx = x.shape
-                zy = y.shape
+                zx = x.shape  # noqa: F841
+                zy = y.shape  # noqa: F841
                 return x.sum() + y.sum()
 
             if self.rank == 0:
