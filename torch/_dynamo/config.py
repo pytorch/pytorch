@@ -395,7 +395,7 @@ record_compile_time_instruction_count = False
 #
 # for i in range(3):
 #     # 1st iteration: forward is run in eager, backward is run in eager.
-#     # 2nd iteration: forward is run with compile, backward is run with Compiled Autograd.
+#     # 2nd iteration and beyond: forward is run with compile, backward is run with Compiled Autograd.
 #     fn(inputs)
 # ```
 # NOTE: if you are using the standalone Compiled Autograd context manager,
