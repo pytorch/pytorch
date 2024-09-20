@@ -3747,7 +3747,9 @@ class CPUReproTests(TestCase):
             def fn(x):
                 return x.to(dst_dtype)
 
-            x = torch.randint(0, 100, (32, 32), dtype=src_dtype)
+            low = 0 if src_dtype == torch.uint8 else -100
+
+            x = torch.randint(low, 100, (32, 32), dtype=src_dtype)
             with config.patch({"cpp.simdlen": _simd_len}):
                 torch._dynamo.reset()
                 metrics.reset()

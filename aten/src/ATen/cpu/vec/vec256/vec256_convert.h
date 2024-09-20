@@ -226,7 +226,7 @@ struct VecConvert<
     at::vec::Vectorized<dst_t> vec2 = convert_float_to_int8<dst_t>(src[1]);
     __m128 lane2 = _mm256_castps256_ps128(_mm256_castsi256_ps(vec2));
     __m256 combined = _mm256_insertf128_ps(_mm256_castsi256_ps(vec1), lane2, 1);
-    // Shuffle [191:128] bit from combined to [127:64] bit of result
+    // Shuffle [191:128] bit from combined in to [127:64] bit of result
     __m256i result = _mm256_permute4x64_epi64(_mm256_castps_si256(combined), 0b11011000);
     return at::vec::Vectorized<dst_t>(result);
   }
