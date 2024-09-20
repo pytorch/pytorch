@@ -222,6 +222,10 @@ def create_fw_bw_graph(fn, use_output_and_grad_bw, fw_inputs, fw_outputs):
 
 @invoke_subgraph.py_impl(DispatchKey.CompositeExplicitAutograd)
 def invoke_subgraph_composite_explicit_autograd(subgraph, identifier, *args):
+    from torch.utils._python_dispatch import _get_current_dispatch_mode
+
+    mode = _get_current_dispatch_mode()
+    assert mode is None, "Mode should never be enabled for CPU/CUDA key"
     return subgraph(*args)
 
 
@@ -315,6 +319,17 @@ def invoke_subgraph_autograd(subgraph, identifier, *args):
     #     with disable_proxy_modes_tracing():
     #         out = aot_module_simplified(subgraph, args, fw_compile)
     #         return out(*args)
+
+    # A shortcut for the case where all inputs don't require gradient,
+    # we skip tracing the forward and backward graph.
+    if pytree.tree_all_only(
+        torch.Tensor,
+        lambda t: not t.requires_grad,  # type: ignore[union-attr]
+        args,
+    ):
+        with torch._C._AutoDispatchBelowAutograd():
+            return invoke_subgraph(subgraph, identifier, *args)
+
     fw_graph, bw_graph = create_fw_bw_graph_local(subgraph, *args)
     global counter
     new_identifier = identifier
