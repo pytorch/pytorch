@@ -305,6 +305,7 @@ def update_bn(
 
     It performs one pass over data in `loader` to estimate the activation
     statistics for BatchNorm layers in the model.
+
     Args:
         loader (torch.utils.data.DataLoader): dataset loader to compute the
             activation statistics on. Each data batch should be either a

@@ -362,7 +362,7 @@ class LSTMLinearModel(nn.Module):
         self.linear = nn.Linear(hidden_dim, output_dim)
 
     def forward(self, input: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        output, hidden = self.lstm(input)
+        output, _ = self.lstm(input)
         decoded = self.linear(output)
         return decoded, output
 

@@ -117,7 +117,7 @@ class TuningProcess:
         )
         try:
             TuningProcess.workloop(request_queue, response_queue)
-        except Exception as ex:
+        except Exception:
             log.exception("Exception in TuningProcess")
 
     @staticmethod
@@ -636,7 +636,6 @@ class TritonBenchmarkRequest(GPUDeviceBenchmarkRequest):
         )
 
         run_method = getattr(mod, self.kernel_name).run
-        extra_args = list(self.extra_args)
 
         # Newer version of triton add warmup argument to JITFunction.run.
         # This code handles backward-compatibility.
@@ -825,14 +824,14 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
         # Prepopulate CppCodeCache
         # may happen in separate Threadpool
         log.debug("Precompiling %s", self)
-        CppCodeCache.load(self.source_code, cuda=False)
+        CppCodeCache.load(self.source_code, device_type="cpu")
         log.debug("Done precompiling %s", self)
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
     ) -> Callable[[], None]:
         # TODO(jgong5): use CppPythonBindingsCodeCache for better binding perf
-        self.DLL = CppCodeCache.load(self.source_code, cuda=False)
+        self.DLL = CppCodeCache.load(self.source_code, device_type="cpu")
         args = [tensor.data_ptr() for tensor in list(input_tensors) + [output_tensor]]
         log.debug(
             "make_run_fn: self.kernel_name=%s, self.DLL=%s, args=%s, self.extra_args=%s",

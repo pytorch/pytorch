@@ -59,6 +59,18 @@ IMPLICIT_IMPORT_ALLOWLIST: Iterable[str] = [
 ]
 
 
+# Compatibility name mapping to facilitate upgrade of external modules.
+# The primary motivation is to enable Numpy upgrade that many modules
+# depend on. The latest release of Numpy removed `numpy.str` and
+# `numpy.bool` breaking unpickling for many modules.
+EXTERN_IMPORT_COMPAT_NAME_MAPPING: Dict[str, Dict[str, Any]] = {
+    "numpy": {
+        "str": str,
+        "bool": bool,
+    },
+}
+
+
 class PackageImporter(Importer):
     """Importers allow you to load code written to packages by :class:`PackageExporter`.
     Code is loaded in a hermetic way, using files from the package
@@ -410,6 +422,11 @@ class PackageImporter(Importer):
             cur = cur.children[atom]
             if isinstance(cur, _ExternNode):
                 module = self.modules[name] = importlib.import_module(name)
+
+                if compat_mapping := EXTERN_IMPORT_COMPAT_NAME_MAPPING.get(name):
+                    for old_name, new_name in compat_mapping.items():
+                        module.__dict__.setdefault(old_name, new_name)
+
                 return module
         return self._make_module(name, cur.source_file, isinstance(cur, _PackageNode), parent)  # type: ignore[attr-defined]
 
@@ -457,7 +474,7 @@ class PackageImporter(Importer):
             parent_module = self.modules[parent]
 
             try:
-                path = parent_module.__path__  # type: ignore[attr-defined]
+                parent_module.__path__  # type: ignore[attr-defined]
 
             except AttributeError:
                 # when we attempt to import a package only containing pybinded files,

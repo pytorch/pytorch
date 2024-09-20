@@ -290,6 +290,7 @@ __all__ = [
     "take_along_dim",
     "tensor_split",
     "transpose",
+    "transpose_copy",
     "unfold",
     "unfold_copy",
     "unsqueeze",
@@ -804,7 +805,7 @@ def logsumexp(
         dim = (dim,)
     if self.numel() == 0:
         return torch.sum(torch.exp(self), dim, keepdim).log()
-    maxes = torch.amax(self, dim, keepdim=True)
+    maxes = torch.amax(torch.real(self), dim, keepdim=True)
     maxes = torch.masked_fill(maxes, maxes.abs() == float("inf"), 0)
     maxes_squeezed = maxes if keepdim else torch.squeeze(maxes, dim)
     result = torch.sum(torch.exp(self - maxes), dim, keepdim)
@@ -2882,8 +2883,16 @@ def constant_pad_nd(
         if pad[pad_idx + 1] < 0:
             c_input = c_input.narrow(i, 0, c_input.shape[i] + pad[pad_idx + 1])
 
-    # if none of the pads are positive we can just return the result
-    if builtins.all(p <= 0 for p in pad):
+    # If all the pads are negative we can return the result.
+    # Avoid early exiting if all pads = 0 to prevent specialization on export.
+    # During export, raw if statements are specialized on the input, meaning
+    # that we lose a branch depending on the example input used to export.
+    # Here, this is either the case where all pads = 0, or the case where at
+    # least one pad > 0 and the rest are >= 0.
+    # Avoiding the early exit when all pads = 0 ensures we can export
+    # constant_pad_nd for cases when all pads >= 0.
+    # Note: if any pads are negative, this code specializes due to the if statements above.
+    if builtins.all(p < 0 for p in pad):
         return c_input.clone()
 
     new_shape = list(input_sizes[:l_diff])
@@ -2916,11 +2925,11 @@ def constant_pad_nd(
     c_output = output
     for i in range(l_diff, l_inp):
         pad_idx = 2 * (l_inp - i - 1)
-        if pad[pad_idx] > 0:
+        if pad[pad_idx] >= 0:
             c_output = c_output.narrow(
                 i, pad[pad_idx], c_output.shape[i] - pad[pad_idx]
             )
-        if pad[pad_idx + 1] > 0:
+        if pad[pad_idx + 1] >= 0:
             c_output = c_output.narrow(i, 0, c_output.shape[i] - pad[pad_idx + 1])
 
     prims.copy_to(c_output, c_input)
@@ -3024,7 +3033,7 @@ def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorL
 
     # Tries to take a view
     # TODO: we could look at directing collapse_view to skip its meta function here (unsafe_collapse_view)
-    new_shape, new_strides = prims._collapse_view_helper(a, start_dim, end_dim)
+    new_shape, _ = prims._collapse_view_helper(a, start_dim, end_dim)
     if new_shape is not None:
         return prims.collapse_view(a, start_dim, end_dim)
 
@@ -3353,7 +3362,6 @@ def stft(
         input = aten.pad(input.view(extended_shape), [pad_amount, pad_amount], pad_mode)
         input = input.view(input.size()[extra_dims:])
 
-    batch = input.size(0)
     length = input.size(1)
     torch._check(
         0 < n_fft <= length,
@@ -3541,12 +3549,6 @@ def istft(
     y = y.narrow(dim=1, start=start, length=length)
     window_envelop = window_envelop.narrow(dim=1, start=start, length=length)
 
-    window_envelop_lowest = window_envelop.abs().min().lt(1e-11)
-    torch._check(
-        not window_envelop_lowest.item(),
-        lambda: "window overlap add min less than 1e-11",
-    )
-
     y = y / window_envelop
     if original_ndim == 2:
         y = y.squeeze(0)
@@ -3632,7 +3634,7 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
     # derive permute order by sorting urtensor strides
     enumerated_stride = list(enumerate(urtensor_stride))
     enumerated_stride.sort(key=operator.itemgetter(1), reverse=True)
-    permute_order, sorted_stride = zip(*enumerated_stride)
+    permute_order, _ = zip(*enumerated_stride)
 
     # add new and expand dimensions according to urtensor
     repeat_xtensor = a.expand(urtensor_shape)
@@ -3743,7 +3745,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             # may return a view of a copy
 
             # Checks if collapse can be a view and short-circuits to copying reshape if it can't
-            new_shape, new_strides = prims._collapse_view_helper(a_, idx, end)
+            new_shape, _ = prims._collapse_view_helper(a_, idx, end)
             if new_shape is None:
                 if allow_copy:
                     return prims.reshape(a, shape)
@@ -4981,14 +4983,14 @@ def arange(
         dtype = torch.int64 if integer_args else torch.get_default_dtype()
 
     is_integer = utils.is_integer_dtype(dtype)
-    if is_integer:
+    if is_integer or integer_args:
         xstart = sym_int(start)
         xend = sym_int(end)
         xstep = sym_int(step)
 
     # For int64 we truncate arguments to int before calculating length, but
     # other integral dtypes we don't. Weird... but needed to match ATen shapes.
-    if dtype == torch.int64:
+    if dtype == torch.int64 or integer_args:
         # Uses floordiv to avoid ceil in inductor.
         sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
         length = (xend - xstart + xstep - sgn) // xstep  # type: ignore[possibly-undefined]
@@ -5909,7 +5911,7 @@ def triu_indices(
 @register_decomposition(aten.bucketize)
 @out_wrapper(exact_dtype=True)
 def bucketize(
-    a: TensorLikeType,
+    a: TensorOrNumberLikeType,
     boundaries: TensorLikeType,
     *,
     out_int32: bool = False,
@@ -5920,6 +5922,7 @@ def bucketize(
         lambda: f"boundaries tensor must be 1 dimension but got dim({boundaries.dim()})",
     )
 
+    a = a if isinstance(a, torch.Tensor) else torch.tensor(a)
     out_dtype = torch.int32 if out_int32 else torch.int64
     n_boundaries = boundaries.shape[-1]
     if n_boundaries == 0:
@@ -6332,6 +6335,7 @@ expand_copy = _make_copy_from_view(aten.expand)
 # no sparse support. See narrow_copy_sparse in core.
 narrow_copy = _make_copy_from_view(aten.narrow)
 t_copy = _make_copy_from_view(aten.t)
+transpose_copy = _make_copy_from_view(aten.transpose)
 unsqueeze_copy = _make_copy_from_view(aten.unsqueeze)
 view_copy = _make_copy_from_view(aten.view)
 

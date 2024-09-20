@@ -53,10 +53,10 @@ class ExternalProperties(object):
     invocations: Optional[List[_invocation.Invocation]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "invocations"}
     )
-    logical_locations: Optional[
-        List[_logical_location.LogicalLocation]
-    ] = dataclasses.field(
-        default=None, metadata={"schema_property_name": "logicalLocations"}
+    logical_locations: Optional[List[_logical_location.LogicalLocation]] = (
+        dataclasses.field(
+            default=None, metadata={"schema_property_name": "logicalLocations"}
+        )
     )
     policies: Optional[List[_tool_component.ToolComponent]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "policies"}
@@ -76,10 +76,10 @@ class ExternalProperties(object):
     taxonomies: Optional[List[_tool_component.ToolComponent]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "taxonomies"}
     )
-    thread_flow_locations: Optional[
-        List[_thread_flow_location.ThreadFlowLocation]
-    ] = dataclasses.field(
-        default=None, metadata={"schema_property_name": "threadFlowLocations"}
+    thread_flow_locations: Optional[List[_thread_flow_location.ThreadFlowLocation]] = (
+        dataclasses.field(
+            default=None, metadata={"schema_property_name": "threadFlowLocations"}
+        )
     )
     translations: Optional[List[_tool_component.ToolComponent]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "translations"}

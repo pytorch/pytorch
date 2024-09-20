@@ -18,6 +18,7 @@ def mock_parse_args() -> object:
     class Object:
         def __init__(self) -> None:
             self.pr_num = 76123
+            self.exit_non_zero = False
 
     return Object()
 

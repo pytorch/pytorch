@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 # mypy: disable-error-code="method-assign"
-
+import atexit
 import copy
+import cProfile
 import functools
 import getpass
 import inspect
@@ -10,6 +11,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import textwrap
 from collections import Counter
@@ -361,12 +363,14 @@ def same_two_models(
             fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
         except Exception:
             if require_fp64:
-                raise RuntimeError("Could not generate fp64 outputs")  # noqa: B904
+                raise RuntimeError(  # noqa: B904
+                    "Could not generate fp64 outputs, workaround with torch._dynamo.config.same_two_models_use_fp64 = False"
+                )
             log.warning("Could not generate fp64 outputs")
 
     try:
         res = run_fwd_maybe_bwd(opt_gm, example_inputs, only_fwd)
-    except Exception as e:
+    except Exception:
         # This means that the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return True.
         log.exception(
@@ -451,7 +455,7 @@ def backend_accuracy_fails(
             require_fp64=require_fp64,
             ignore_non_fp=ignore_non_fp,
         )
-    except Exception as e:
+    except Exception:
         # This means that the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return False.
         log.exception(
@@ -780,3 +784,41 @@ def aot_graph_input_parser(
             setattr(container, attr_name, gen_tensor(shape, dtype))
 
     return kwargs
+
+
+def profile_to_file(filename: str) -> Callable[[T], T]:
+    """
+    Decorator to cProfile a given function and save the result to disk on process exit.
+
+    Args:
+        filename: filename to save profile to
+    """
+    prof = cProfile.Profile()
+    filename = os.path.abspath(os.path.expanduser(filename))
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            prof.enable()
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                prof.disable()
+
+        return wrapper
+
+    def save_it():
+        prof.dump_stats(filename)
+        sys.stderr.write(
+            textwrap.dedent(
+                f"""\
+                Wrote profile to {filename}, view with:
+
+                    snakeviz {filename}
+
+                """
+            )
+        )
+
+    atexit.register(save_it)
+    return decorator

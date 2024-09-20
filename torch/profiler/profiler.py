@@ -36,6 +36,28 @@ __all__ = [
 PROFILER_STEP_NAME = "ProfilerStep"
 
 
+class _NumpyEncoder(json.JSONEncoder):
+    """
+    Json encoder for numpy types (np.int, np.float, np.array etc.)
+    Returns default encoder if numpy is not available
+    """
+
+    def default(self, obj):
+        """Encode NumPy types to JSON"""
+        try:
+            import numpy as np
+        except ImportError:
+            return json.JSONEncoder.default(self, obj)
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        else:
+            return json.JSONEncoder.default(self, obj)
+
+
 def supported_activities():
     """
     Returns a set of supported profiler tracing activities.
@@ -187,7 +209,9 @@ class _KinetoProfile:
         if kineto_available():
             dist_info = self._get_distributed_info()
             if dist_info:
-                self.add_metadata_json("distributedInfo", json.dumps(dist_info))
+                self.add_metadata_json(
+                    "distributedInfo", json.dumps(dist_info, cls=_NumpyEncoder)
+                )
 
             if hasattr(torch, "_inductor"):
                 import torch._inductor.config as inductor_config
@@ -242,12 +266,31 @@ class _KinetoProfile:
     def toggle_collection_dynamic(
         self, enable: bool, activities: Iterable[ProfilerActivity]
     ):
-        """Toggle collection of activities on/off. Currently supports toggling Torch Ops (CPU) and all CUDA activity
-        supported in Kineto
+        """Toggle collection of activities on/off at any point of collection. Currently supports toggling Torch Ops
+        (CPU) and CUDA activity supported in Kineto
 
         Args:
-            activities (iterable): list of activity groups (CPU, CUDA) to use in profiling, supported values:
+            activities (iterable): list of activity groups to use in profiling, supported values:
                 ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``
+        Examples:
+
+        .. code-block:: python
+
+            with torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ]
+            ) as p:
+                code_to_profile_0()
+                // turn off collection of all CUDA activity
+                p.toggle_collection_dynamic(False, [torch.profiler.ProfilerActivity.CUDA])
+                code_to_profile_1()
+                // turn on collection of all CUDA activity
+                p.toggle_collection_dynamic(True, [torch.profiler.ProfilerActivity.CUDA])
+                code_to_profile_2()
+            print(p.key_averages().table(
+                sort_by="self_cuda_time_total", row_limit=-1))
         """
         if not self.profiler:
             return
@@ -912,5 +955,6 @@ class ExecutionTraceObserver(_ITraceObserver):
         ):
             pg_config_info = torch.distributed.distributed_c10d._world.pg_config_info
             torch.autograd._record_function_with_args_enter(
-                "## process_group:init ##", json.dumps(pg_config_info)
+                "## process_group:init ##",
+                json.dumps(pg_config_info, cls=_NumpyEncoder),
             )

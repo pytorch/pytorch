@@ -109,13 +109,12 @@ class EventList(list):
         #
         # Algorithm has O(N * log(N)) complexity where N is number of
         # intervals
-        for thread_id, thread_events in threads:
+        for _, thread_events in threads:
             thread_events_ = sorted(
                 thread_events,
                 key=lambda event: [event.time_range.start, -event.time_range.end],
             )
             current_events: List[FunctionEvent] = []
-            cur_end = 0
             for event in thread_events_:
                 while len(current_events) > 0:
                     parent = current_events[-1]
@@ -219,7 +218,6 @@ class EventList(list):
 
         device_name = "cuda" if not self._use_device else self._use_device
         with open(path, "w") as f:
-            chrome_events = []
             next_id = 0
             # Use file IO over using json.dump since JSON dumping is very slow and
             # this technique is proven to give a 4x speedup.
@@ -243,7 +241,7 @@ class EventList(list):
                         else f'" node_id:{evt.node_id}, thread_id:{evt.thread} "',
                     )
                 )
-                for k in evt.kernels:
+                for _ in evt.kernels:
                     # 's' and 'f' draw Flow arrows from
                     # the CPU launch to the GPU kernel
                     f.write(
@@ -501,6 +499,9 @@ class FunctionEvent(FormattedTimesMixin):
         self.is_legacy: bool = is_legacy
         self.flops: Optional[int] = flops
         self.is_user_annotation: Optional[bool] = is_user_annotation
+        self.self_cpu_percent = -1
+        self.total_cpu_percent = -1
+        self.total_device_percent = -1
 
     def append_kernel(self, name, device, duration):
         assert self.device_type == DeviceType.CPU
@@ -1017,26 +1018,33 @@ def _build_table(
         name = evt.key
         if max_name_column_width is not None and len(name) >= max_name_column_width - 3:
             name = name[: (max_name_column_width - 3)] + "..."
+        evt.self_cpu_percent = _format_time_share(
+            evt.self_cpu_time_total, sum_self_cpu_time_total
+        )
+        evt.total_cpu_percent = (
+            _format_time_share(evt.cpu_time_total, sum_self_cpu_time_total)
+            if not evt.is_async
+            else 0
+        )
         row_values = [
             name,
             # Self CPU total %, 0 for async events.
-            _format_time_share(evt.self_cpu_time_total, sum_self_cpu_time_total),
+            evt.self_cpu_percent,
             evt.self_cpu_time_total_str,  # Self CPU total
             # CPU total %, 0 for async events.
-            _format_time_share(evt.cpu_time_total, sum_self_cpu_time_total)
-            if not evt.is_async
-            else 0,
+            evt.total_cpu_percent,
             evt.cpu_time_total_str,  # CPU total
             evt.cpu_time_str,  # CPU time avg
         ]
         if has_device_time:
+            evt.total_device_percent = _format_time_share(
+                evt.self_device_time_total, sum_self_device_time_total
+            )
             row_values.extend(
                 [
                     evt.self_device_time_total_str,
                     # device time total %
-                    _format_time_share(
-                        evt.self_device_time_total, sum_self_device_time_total
-                    ),
+                    evt.total_device_percent,
                     evt.device_time_total_str,
                     evt.device_time_str,  # device time avg
                 ]

@@ -10,8 +10,10 @@
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/csrc/inductor/inductor_ops.h>
+#include <torch/csrc/jit/serialization/pickle.h>
 #include <cstdint>
 #include <cstdio>
+#include <fstream>
 #include <iostream>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -24,6 +26,8 @@
 #include <ATen/ops/_scaled_dot_product_efficient_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
 #include <ATen/ops/_scaled_mm.h>
+#include <ATen/ops/_wrapped_linear_prepack.h>
+#include <ATen/ops/_wrapped_quantized_linear_prepacked.h>
 #include <ATen/ops/addmm.h>
 #include <ATen/ops/as_strided.h>
 #include <ATen/ops/bmm.h>
@@ -42,6 +46,47 @@
 #include <ATen/ops/view_ops.h>
 
 #endif
+
+#if __has_include("filesystem")
+#include <filesystem>
+namespace fs = std::filesystem;
+#else
+#include <experimental/filesystem>
+namespace fs = std::experimental::filesystem;
+#endif
+
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
+
+// HACK for failed builds in ARVR, where it cannot find these symbols within
+// std::experimental::filesystem
+namespace {
+fs::path get_current_path() {
+#if __has_include("filesystem")
+  return fs::current_path();
+#else
+  throw std::runtime_error("Not implemented");
+#endif
+}
+
+bool file_exists(std::string& path) {
+#ifdef _WIN32
+  return fs::exists(path);
+#else
+  struct stat rc;
+  return lstat(path.c_str(), &rc) == 0;
+#endif
+}
+
+bool create_directories(const std::string& path) {
+#if __has_include("filesystem")
+  return fs::create_directories(path);
+#else
+  throw std::runtime_error("Not implemented");
+#endif
+}
+} // namespace
 
 using namespace torch::aot_inductor;
 
@@ -802,6 +847,28 @@ AOTITorchError aoti_torch_cpu_wrapped_fbgemm_pack_gemm_matrix_fp16(
   });
 }
 
+AOTITorchError aoti_torch_cpu__wrapped_linear_prepack(
+    AtenTensorHandle weight,
+    AtenTensorHandle weight_scale,
+    AtenTensorHandle weight_zero_point,
+    AtenTensorHandle bias,
+    AtenTensorHandle* out) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* weight_tensor = tensor_handle_to_tensor_pointer(weight);
+    at::Tensor* weight_scale_tensor =
+        tensor_handle_to_tensor_pointer(weight_scale);
+    at::Tensor* weight_zero_point_tensor =
+        tensor_handle_to_tensor_pointer(weight_zero_point);
+    at::Tensor* bias_tensor = tensor_handle_to_tensor_pointer(bias);
+
+    *out = new_tensor_handle(at::_wrapped_linear_prepack(
+        *weight_tensor,
+        *weight_scale_tensor,
+        *weight_zero_point_tensor,
+        *bias_tensor));
+  });
+}
+
 AOTITorchError aoti_torch_cpu_wrapped_fbgemm_linear_fp16_weight(
     AtenTensorHandle input,
     AtenTensorHandle weight,
@@ -815,6 +882,36 @@ AOTITorchError aoti_torch_cpu_wrapped_fbgemm_linear_fp16_weight(
 
     *out = new_tensor_handle(at::fbgemm_linear_fp16_weight_fp32_activation(
         *input_tensor, *weight_tensor, *bias_tensor));
+  });
+}
+
+AOTITorchError aoti_torch_cpu__wrapped_quantized_linear_prepacked(
+    AtenTensorHandle input,
+    AtenTensorHandle input_scale,
+    AtenTensorHandle input_zero_point,
+    AtenTensorHandle weight,
+    AtenTensorHandle out_scale,
+    AtenTensorHandle out_zeropoint,
+    int64_t out_channel,
+    AtenTensorHandle* out) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* input_tensor = tensor_handle_to_tensor_pointer(input);
+    at::Tensor* input_scale_tensor =
+        tensor_handle_to_tensor_pointer(input_scale);
+    at::Tensor* input_zero_point_tensor =
+        tensor_handle_to_tensor_pointer(input_zero_point);
+    at::Tensor* weight_tensor = tensor_handle_to_tensor_pointer(weight);
+    at::Tensor* out_scale_tensor = tensor_handle_to_tensor_pointer(out_scale);
+    at::Tensor* out_zeropoint_tensor =
+        tensor_handle_to_tensor_pointer(out_zeropoint);
+    *out = new_tensor_handle(at::_wrapped_quantized_linear_prepacked(
+        *input_tensor,
+        *input_scale_tensor,
+        *input_zero_point_tensor,
+        *weight_tensor,
+        *out_scale_tensor,
+        *out_zeropoint_tensor,
+        out_channel));
   });
 }
 
@@ -893,7 +990,7 @@ AOTITorchError aoti_torch_index_put_out(
     AtenTensorHandle self,
     const AtenTensorHandle* indices,
     const uint32_t num_indices,
-    const AtenTensorHandle& values,
+    const AtenTensorHandle values,
     bool accumulate) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::List<std::optional<at::Tensor>> indices_;
@@ -932,12 +1029,44 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_view_dtype(
   });
 }
 
+AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
+    AtenTensorHandle self,
+    const char* tensor_name,
+    const char* launch_prefix,
+    const char* kernel_name) {
+  at::Tensor* t = tensor_handle_to_tensor_pointer(self);
+#ifndef C10_MOBILE
+  // Save tensor to tmp .pt file for tensors and can be torch.load'ed later
+  std::string cwd = get_current_path().string();
+  std::string tmp_folder = cwd + "/tmp/aoti_torch/";
+  if (!file_exists(tmp_folder)) {
+    std::cout
+        << "aoti_torch_save_tensor_handle: Path does not exist, creating it..."
+        << tmp_folder << std::endl;
+
+    if (!create_directories(tmp_folder)) {
+      std::cout << "aoti_torch_save_tensor_handle: Error creating directory: "
+                << tmp_folder << std::endl;
+      return;
+    }
+  }
+  std::string tensor_filepath_to_save = tmp_folder + launch_prefix + "_" +
+      kernel_name + "_" + tensor_name + "_" + t->device().str() + ".pt";
+
+  auto bytes = torch::jit::pickle_save(c10::IValue(*t));
+  std::ofstream fout(tensor_filepath_to_save, std::ios::out | std::ios::binary);
+  fout.write(bytes.data(), bytes.size());
+  fout.close();
+
+  std::cout << "aoti_torch_save_tensor_handle: Saved tensor to "
+            << tensor_filepath_to_save << std::endl;
+#endif // !defined(C10_MOBILE)
+}
+
 AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
     AtenTensorHandle self,
     const char* msg) {
   at::Tensor* t = tensor_handle_to_tensor_pointer(self);
-
-  auto device = t->device();
 
   // Display message
   std::cout << "[";
@@ -955,15 +1084,31 @@ AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
 
   // Print summary stats of the tensor
   std::cout << "Number of elements: " << numel << std::endl;
+  std::cout << "Dtype: " << t->dtype() << std::endl;
   if (numel > 0) {
-    std::cout << "Mean value: " << t->mean().item() << std::endl;
-    std::cout << "Min value: " << t->min().item<float>() << std::endl;
-    std::cout << "Max value: " << t->max().item<float>() << std::endl;
+    // torch/aten `mean()` function only supports float and complex dtypes
+    // See:
+    // https://github.com/pytorch/pytorch/blob/a0e062c6f1a03ec93e87413e42c4d0b336518131/aten/src/ATen/native/ReduceOps.cpp#L304-L309
+    auto mean_value = [t](at::ScalarType dtype) {
+      return t->to(dtype).mean().item();
+    };
+    bool is_complex_type =
+        at::isComplexType(at::typeMetaToScalarType(t->dtype()));
+    at::ScalarType float_dtype =
+        is_complex_type ? at::kComplexFloat : at::kFloat;
+    std::cout << "Mean value: " << mean_value(float_dtype) << std::endl;
+    if (!is_complex_type) {
+      // "min_all_cuda" function is not implemented for 'ComplexFloat' type.
+      // (similar for max) Skip printing min/max value for complex type tensors
+      // here If encountered complex dtypes (rare occasions), suggest to print
+      // out the whole value of the tensor.
+      std::cout << "Min value: " << t->min().item<float>() << std::endl;
+      std::cout << "Max value: " << t->max().item<float>() << std::endl;
+    }
   }
-  std::cout << "Device: " << device << std::endl;
+  std::cout << "Device: " << t->device() << std::endl;
   std::cout << "Size: " << t->sizes() << std::endl;
   std::cout << "Stride: " << t->strides() << std::endl;
-  std::cout << "Dtype: " << t->dtype() << std::endl;
   std::cout << "Layout: " << t->layout() << std::endl;
   std::cout << "Is contiguous: " << t->is_contiguous() << std::endl;
   std::cout << "Requires grad: " << t->requires_grad() << std::endl;

@@ -7,6 +7,7 @@ import heapq
 import inspect
 import io
 import json
+import keyword
 import logging
 import math
 import operator
@@ -14,6 +15,7 @@ import re
 import typing
 import traceback
 
+from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
@@ -1394,6 +1396,7 @@ class ExportedProgramSerializer(metaclass=Final):
                 minor=SCHEMA_VERSION[1],
             ),
             verifiers=[v.dialect for v in exported_program.verifiers],
+            torch_version=torch.__version__,
         )
 
         # Test canonical form is well defined.
@@ -1945,12 +1948,18 @@ class GraphModuleDeserializer(metaclass=Final):
             for input in serialized_node.inputs
         }
         args = []
-        kwargs = {}
+        kwargs: OrderedDict[str, Any] = OrderedDict()
         for schema_arg in schema_args:
             is_positional = (
                 not schema_arg.has_default_value() and not schema_arg.kwarg_only
             )
             if is_positional:
+                args.append(actual_args[schema_arg.name])
+            elif keyword.iskeyword(schema_arg.name):
+                assert not schema_arg.kwarg_only
+                if len(kwargs) > 0:
+                    kwargs = OrderedDict()
+                    args.extend(list(kwargs.values()))
                 args.append(actual_args[schema_arg.name])
             else:
                 if schema_arg.name in actual_args:
@@ -2741,7 +2750,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
     assert len(graph.outputs) == len(signature.output_specs)
 
     def rank_input(inp) -> Tuple[int, Optional[str], int]:
-        idx, (arg, spec) = inp
+        idx, (_, spec) = inp
         assert isinstance(spec, InputSpec)
         if spec.type == "user_input":
             return 5, None, idx
@@ -2761,7 +2770,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
             raise AssertionError(f"Unknown input type: {spec}")
 
     def rank_output(out) -> Tuple[int, Optional[str], int]:
-        idx, (arg, spec) = out
+        idx, (_, spec) = out
         assert isinstance(spec, OutputSpec)
         if spec.type == "user_output":
             return 3, None, idx
@@ -2905,6 +2914,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
         range_constraints=range_constraints,
         schema_version=ep.schema_version,
         verifiers=ep.verifiers,
+        torch_version=ep.torch_version,
     )
 
 

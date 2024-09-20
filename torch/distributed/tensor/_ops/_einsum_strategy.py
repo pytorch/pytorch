@@ -3,9 +3,9 @@ from dataclasses import dataclass
 from typing import List, Set, Tuple
 
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import OpStrategy, PlacementStrategy
 from torch.distributed.tensor.placement_types import (
-    DTensorSpec,
     Partial,
     Placement,
     Replicate,

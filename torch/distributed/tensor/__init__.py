@@ -2,8 +2,8 @@
 
 import torch
 import torch.distributed.tensor._ops  # force import all built-in dtensor ops
-from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
-from torch.distributed.tensor.api import (
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh  # noqa: F401
+from torch.distributed.tensor._api import (
     distribute_module,
     distribute_tensor,
     DTensor,
@@ -31,10 +31,8 @@ from torch.utils._foreach_utils import (
 # All public APIs from dtensor package
 __all__ = [
     "DTensor",
-    "DeviceMesh",
     "distribute_tensor",
     "distribute_module",
-    "init_device_mesh,",
     "Shard",
     "Replicate",
     "Partial",
@@ -55,3 +53,15 @@ if DTensor not in _optim_foreach_supported_types:
 
 if DTensor not in _util_foreach_supported_types:
     _util_foreach_supported_types.append(DTensor)
+
+
+# Set namespace for exposed private names
+DTensor.__module__ = "torch.distributed.tensor"
+distribute_tensor.__module__ = "torch.distributed.tensor"
+distribute_module.__module__ = "torch.distributed.tensor"
+ones.__module__ = "torch.distributed.tensor"
+empty.__module__ = "torch.distributed.tensor"
+full.__module__ = "torch.distributed.tensor"
+rand.__module__ = "torch.distributed.tensor"
+randn.__module__ = "torch.distributed.tensor"
+zeros.__module__ = "torch.distributed.tensor"

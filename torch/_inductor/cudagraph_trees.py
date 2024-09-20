@@ -1404,7 +1404,7 @@ class CUDAGraphNode:
         for depth, output_refs in enumerate(self.path_weakrefs):
             for output_index, storage_ref in enumerate(output_refs):
                 if (storage_and_ptr := maybe_deref(storage_ref)) is not None:
-                    storage, ptr = storage_and_ptr
+                    _, ptr = storage_and_ptr
                     if ptr == t.untyped_storage().data_ptr():
                         return (depth, output_index)
 
@@ -1578,7 +1578,7 @@ class CUDAGraphNode:
         self, inputs: List[InputType]
     ) -> List[Union[torch.Tensor, int]]:
         """
-        Allocate inputs for non static, non cudagraph managraphed managed tensors in the memory pool
+        Allocate inputs for non static, non cudagraph managed tensors in the memory pool
         and copy over the tensor values.
         """
 

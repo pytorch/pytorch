@@ -18,6 +18,7 @@ from typing import (
 import torch
 from torch import Tensor
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpStrategy,
@@ -32,12 +33,7 @@ from torch.distributed.tensor._ops.utils import (
     prod,
     register_op_strategy,
 )
-from torch.distributed.tensor.placement_types import (
-    DTensorSpec,
-    Placement,
-    Replicate,
-    Shard,
-)
+from torch.distributed.tensor.placement_types import Placement, Replicate, Shard
 
 
 aten = torch.ops.aten
@@ -217,7 +213,7 @@ def normalize_sizes(sizes: Union[Shape, Tuple[Shape]]) -> Shape:
     if isinstance(sizes[0], int):
         return cast(Shape, sizes)
     elif len(sizes) == 1:
-        return cast(Shape, sizes[0])  # type: ignore[redundant-cast]
+        return sizes[0]
     else:
         raise RuntimeError("Size must be int... or tuple")
 
@@ -381,7 +377,7 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
 
         if len(to_group_shape) > 0:
             flattened = Flatten.new(
-                tuple(InputDim(fi) for fi in from_group_dim if from_size[fi] > 1)
+                tuple(InputDim(fi) for fi in from_group_dim if from_size[fi] >= 1)
             )
             result_pp += [
                 Split.new(flattened, tuple(to_group_shape), i)

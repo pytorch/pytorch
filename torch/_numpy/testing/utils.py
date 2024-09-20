@@ -77,6 +77,7 @@ def assert_(val, msg=""):
     For documentation on usage, refer to the Python documentation.
 
     """
+
     __tracebackhide__ = True  # Hide traceback for py.test
     if not val:
         try:
@@ -262,9 +263,6 @@ def assert_equal(actual, desired, err_msg="", verbose=True):
             return  # both nan, so equal
 
         # handle signed zero specially for floats
-        array_actual = np.asarray(actual)
-        array_desired = np.asarray(desired)
-
         if desired == 0 and actual == 0:
             if not signbit(desired) == signbit(actual):
                 raise AssertionError(msg)

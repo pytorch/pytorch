@@ -5,7 +5,7 @@ from typing import cast, Dict, List, Tuple
 
 import torch
 import torch.distributed as dist
-import torch.distributed.tensor.api as dtensor
+import torch.distributed.tensor._api as dtensor
 
 
 aten = torch.ops.aten

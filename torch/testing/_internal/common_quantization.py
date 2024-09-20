@@ -67,7 +67,6 @@ except ImportError:
 import copy
 import io
 import functools
-import time
 import os
 
 import unittest
@@ -125,7 +124,7 @@ def test_only_eval_fn(model, calib_data):
     input Tensors and run the model on the dataset
     """
     for inp in calib_data:
-        output = model(*inp)
+        model(*inp)
 
 _default_loss_fn = torch.nn.CrossEntropyLoss()
 def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
@@ -135,7 +134,7 @@ def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
     """
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     train_loss, correct, total = 0, 0, 0
-    for i in range(10):
+    for _ in range(10):
         model.train()
 
         for data, target in train_data:
@@ -194,7 +193,6 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, ntrain_bat
     model.train()
     cnt = 0
     for image, target in data_loader:
-        start_time = time.time()
         print('.', end='')
         cnt += 1
         image, target = image.to(device), target.to(device)
@@ -203,7 +201,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, ntrain_bat
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        acc1, acc5 = accuracy(output, target, topk=(1, 5))
+        accuracy(output, target, topk=(1, 5))
         if cnt >= ntrain_batches:
             return
     return
@@ -1183,7 +1181,8 @@ class QuantizationLiteTestCase(QuantizationTestCase):
         # Creates quantized model for testing mobile script modules
         qengine = "qnnpack"
         with override_quantized_engine(qengine):
-            qconfig = torch.ao.quantization.get_default_qconfig(qengine)
+            # FIXME(rec): shouldn't qconfig be passed to quantize?
+            qconfig = torch.ao.quantization.get_default_qconfig(qengine)  # noqa: F841
             model = model_class(**kwargs)
             model = quantize(model, test_only_eval_fn, [self.calib_data])
 
@@ -1247,6 +1246,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         export_with_dynamic_shape=False,
         is_qat=False,
         is_debug_mode=False,
+        capture_pre_autograd_graph_node_occurrence=None,
     ):
         # resetting dynamo cache
         torch._dynamo.reset()
@@ -1305,6 +1305,10 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             for k, v in PT2EQuantizationTestCase._MAP_TO_FX_TRACED_OPS.items():
                 if k in expected_node_occurrence:
                     node_occurrence[ns.call_function(v)] = expected_node_occurrence[k]
+            if capture_pre_autograd_graph_node_occurrence is not None:
+                node_occurrence = {
+                    ns.call_function(k): v for k, v in capture_pre_autograd_graph_node_occurrence.items()
+                }
             self.checkGraphModuleNodes(m_fx, expected_node_occurrence=node_occurrence)
             fx_quant_output = m_fx(*example_inputs)
             self.assertEqual(fx_quant_output, pt2_quant_output)
@@ -2369,7 +2373,7 @@ class ModelWithSequentialFusion(nn.Module):
         self.conv1 = nn.Conv2d(3, 3, 1)
         self.relu1 = nn.ReLU(inplace=False)
         layers = []
-        for i in range(3):
+        for _ in range(3):
             layers.append(ConvBNReLU())
         self.features = nn.Sequential(*layers)
         head = [nn.Linear(300, 10), nn.ReLU(inplace=False)]

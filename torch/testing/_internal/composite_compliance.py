@@ -402,8 +402,8 @@ def check_with_mode(op, args, kwargs, assert_equal_fn):
 
 def gather_leaf_tensors(args, kwargs):
     leaf_tensors = []
-    args, args_spec = tree_flatten(args)
-    kwargs, kwargs_spec = tree_flatten(kwargs)
+    args, _ = tree_flatten(args)
+    kwargs, _ = tree_flatten(kwargs)
     args = args + kwargs
     for arg in args:
         if not isinstance(arg, torch.Tensor):

@@ -102,7 +102,6 @@ def add_loggers_to_model(
 
     new_graph = Graph()
     env: Dict[str, Any] = {}
-    modules = dict(gm.named_modules())
 
     def load_arg(a):
         return map_arg(a, lambda node: env[node.name])
@@ -537,11 +536,7 @@ def _insert_copy_of_subgraph_a_after_input_node_c(
     """
     TODO(before land): real docblock
     """
-    if isinstance(input_node_c, Node):
-        graph_c = input_node_c.graph
-    else:
-        assert isinstance(input_node_c, list)
-        graph_c = input_node_c[0].graph
+    assert isinstance(input_node_c, (Node, list))
 
     # create a sequential list of the subgraphs' nodes from start to end,
     # because we need to add the nodes to graph C in non-reverse order
@@ -694,13 +689,13 @@ def _insert_copy_of_node_a_after_input_node_c(
         mod_a = getattr_from_fqn(gm_a, node_a.target)
         setattr(gm_b, new_mod_copy_name, mod_a)
         node_a_shadows_c = graph_c.create_node(
-            node_a.op, new_mod_copy_name, new_args, new_kwargs, node_a_shadows_c_name
+            node_a.op, new_mod_copy_name, new_args, new_kwargs, node_a_shadows_c_name  # type: ignore[arg-type]
         )
         return node_a_shadows_c
     else:
         assert node_a.op in ("call_function", "call_method")
         node_a_shadows_c = graph_c.create_node(
-            node_a.op, node_a.target, new_args, new_kwargs, node_a_shadows_c_name
+            node_a.op, node_a.target, new_args, new_kwargs, node_a_shadows_c_name  # type: ignore[arg-type]
         )
         return node_a_shadows_c
 
@@ -748,7 +743,6 @@ def create_a_shadows_b(
     # the shadows with the nodes copied from graph_a
     graph_c = Graph()
     env_c: Dict[str, Any] = {}
-    modules = dict(gm_b.named_modules())
 
     def load_arg(a):
         return map_arg(a, lambda node: env_c[node.name])

@@ -176,7 +176,7 @@ def device_assert_then(cond, msg, r):
 
 @triton.jit
 def randint64(seed, offset, low, high):
-    r0, r1, r2, r3 = tl.randint4x(seed, offset)
+    r0, r1, _, _ = tl.randint4x(seed, offset)
     r0 = r0.to(tl.uint64)
     r1 = r1.to(tl.uint64)
     result = r0 | (r1 << 32)

@@ -19,7 +19,6 @@ from torch.ao.quantization.pt2e.utils import (
 from torch.ao.quantization.quantizer import (
     QuantizationAnnotation,
     QuantizationSpec,
-    QuantizationSpecBase,
     SharedQuantizationSpec,
 )
 from torch.ao.quantization.quantizer.utils import (
@@ -599,7 +598,6 @@ def _annotate_gru_io_only(
             continue
         # inside each GRU partition, we should be able to annotate each linear
         # subgraph
-        input_qspec_map: Dict[Node, QuantizationSpecBase] = {}
         input_act = input_nodes[0]
         input_act_user = next(iter(input_act.users.keys()))
         assert isinstance(input_act, Node)
@@ -979,13 +977,13 @@ def _annotate_cat(
         inputs = cat_node.args[0]
 
         input_qspec_map = {}
-        input_act0 = inputs[0]
+        input_act0 = inputs[0]  # type: ignore[index]
         if isinstance(input_act0, Node):
             input_qspec_map[input_act0] = input_act_qspec
 
-        shared_with_input0_qspec = SharedQuantizationSpec((input_act0, cat_node))
-        for input_act in inputs[1:]:
-            input_qspec_map[input_act] = shared_with_input0_qspec
+        shared_with_input0_qspec = SharedQuantizationSpec((input_act0, cat_node))  # type: ignore[arg-type]
+        for input_act in inputs[1:]:  # type: ignore[index]
+            input_qspec_map[input_act] = shared_with_input0_qspec  # type: ignore[index]
 
         output_act_qspec = shared_with_input0_qspec
 

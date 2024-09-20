@@ -21,7 +21,7 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed.tensor.debug.visualize_sharding import visualize_sharding
+from torch.distributed.tensor.debug import visualize_sharding
 
 
 if TYPE_CHECKING:

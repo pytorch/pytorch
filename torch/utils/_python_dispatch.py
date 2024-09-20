@@ -3,7 +3,7 @@ import contextlib
 
 import warnings
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Union, Protocol, Tuple, Sequence, overload, Deque
+from typing import Any, Dict, List, Optional, Set, Union, Protocol, Tuple, Sequence, overload, Deque, Type
 from typing_extensions import TypeGuard
 from collections import deque
 
@@ -391,6 +391,11 @@ def is_traceable_wrapper_subclass(t: object) -> TypeGuard[TensorWithFlatten]:
         and hasattr(t, "__tensor_unflatten__")
     )
 
+def is_traceable_wrapper_subclass_type(t: Type) -> TypeGuard[Type[TensorWithFlatten]]:
+    """Same as above, but takes a type argument instead of an instance."""
+    return (issubclass(t, torch.Tensor) and t != torch.Tensor
+            and hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__"))
+
 
 def transform_subclass(t, callback, outer_size=None, outer_stride=None):
     """
@@ -614,7 +619,7 @@ def return_and_correct_aliasing(func, args, kwargs, out):
         return None
 
     def get_arg_from_alias(output_alias, schema_info, args, kwargs):
-        new_args, new_kwargs = torch.fx.operator_schemas.normalize_function(
+        new_args, new_kwargs = torch.fx.operator_schemas.normalize_function(  # type: ignore[misc]
             func, args=args, kwargs=kwargs
         )
 

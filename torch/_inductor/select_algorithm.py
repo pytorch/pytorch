@@ -203,7 +203,7 @@ class TritonTemplateKernel(TritonKernel):
         num_bytes = []
         for i, inp in enumerate(itertools.chain(self.input_nodes, (self.output_node,))):
             size = V.graph.sizevars.size_hints(inp.get_size())
-            numel = functools.reduce(operator.mul, size)
+            numel = functools.reduce(operator.mul, size, 1)
             dtype_size = get_dtype_size(inp.get_dtype())
             num_bytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
         return sum(num_bytes)
@@ -1258,6 +1258,11 @@ class AlgorithmSelectorCache(PersistentCache):
             if timings:
                 return no_op
 
+            if config.search_autotune_cache and not (
+                config.max_autotune or config.max_autotune_gemm
+            ):
+                return no_op
+
             precompile_key = create_precompile_key(name, inputs_key, choices)
             if precompile_func := self.precompile_cache.get(precompile_key):
                 return precompile_func
@@ -1388,7 +1393,6 @@ class AlgorithmSelectorCache(PersistentCache):
             return choices[0].output_node()
 
         selected_key = builtins.min(timings, key=timings.__getitem__)
-        selected_time = timings[selected_key]
         selected_choice = selected_key.output_node()
         log.debug("selected choice: %s", str(selected_choice))
         return selected_choice
@@ -1446,6 +1450,7 @@ class AlgorithmSelectorCache(PersistentCache):
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
 
+        # FIXME(rec): This doesn't seem to be used
         def debug_str(example_inputs, out):
             def tensor_repr(x):
                 return (
@@ -1479,7 +1484,6 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def benchmark_in_current_process(choices):
             inputs = get_inputs()
-            example_inputs, _, out, _, _ = inputs
             timings = {}
             for choice in choices:
                 try:

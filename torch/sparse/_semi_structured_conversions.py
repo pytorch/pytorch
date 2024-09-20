@@ -87,11 +87,11 @@ def sparse_semi_structured_from_dense_cutlass(dense):
     if dense.dtype != torch.float:
         ksparse = 4
         dense_4 = dense.view(-1, k // ksparse, ksparse)
-        m0, m1, m2, m3 = (dense_4 != 0).unbind(-1)
+        m0, m1, _, m3 = (dense_4 != 0).unbind(-1)
     else:
         ksparse = 2
         dense_2 = dense.view(-1, k // ksparse, ksparse)
-        m0, m2 = m1, m3 = (dense_2 != 0).unbind(-1)
+        m0, _ = m1, m3 = (dense_2 != 0).unbind(-1)
     meta_ncols = k // (ksparse * quadbits_per_meta_elem)
 
     # Encoding quadruples of True/False values as follows:

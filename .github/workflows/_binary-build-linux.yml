@@ -18,7 +18,7 @@ on:
         description: prefix for runner label
       runs_on:
         required: false
-        default: linux.12xlarge
+        default: linux.12xlarge.ephemeral
         type: string
         description: Hardware to run this "build" job on, linux.12xlarge or linux.arm64.2xlarge.
       timeout-minutes:
@@ -283,7 +283,7 @@ jobs:
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         with:
           name: ${{ inputs.build_name }}

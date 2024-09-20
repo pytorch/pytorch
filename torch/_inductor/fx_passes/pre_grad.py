@@ -88,6 +88,22 @@ def fuse_chunk_reshape_unsqueeze_concat_pass(graph):
     return None
 
 
+def fuse_chunk_reshape_concat_pass(graph):
+    return None
+
+
+def remove_noop_pass(graph):
+    return None
+
+
+def stack_to_unsqueeze_pass(graph):
+    return None
+
+
+def merge_concats_pass(graph):
+    return None
+
+
 @init_once_fakemode
 def lazy_init():
     from . import efficient_conv_bn_eval, split_cat  # noqa: F401  # noqa: F401
@@ -139,10 +155,16 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 "[Pre grad(predispatch IR)]Apply normalize_node_kwargs_pass",
             )
             pass_execution_and_save(
-                fuse_chunk_reshape_unsqueeze_concat_pass,
+                remove_noop_pass,
                 gm,
                 example_inputs,
-                "[Pre grad(predispatch IR)] Apply fuse_chunk_reshape_unsqueeze_concat_pass",
+                "[Pre grad(predispatch IR)]Apply remove_noop pass",
+            )
+            pass_execution_and_save(
+                fuse_chunk_reshape_concat_pass,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)] Apply fuse_chunk_reshape_concat_pass",
             )
             pass_execution_and_save(
                 group_batch_fusion_passes,
@@ -161,6 +183,12 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 gm,
                 example_inputs,
                 "[Pre grad(predispatch IR)] Apply fuse_chunk_squeeze_cat_pass",
+            )
+            pass_execution_and_save(
+                merge_concats_pass,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)] Apply merge_concats_pass",
             )
             pass_execution_and_save(
                 fuse_split_linear_add_pass.apply,
@@ -185,6 +213,26 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 gm,
                 example_inputs,
                 "[Pre grad(predispatch IR)] Apply remove_split_ops",
+            )
+            # run before fuse_chunk_reshape_unsqueeze_concat_pass
+            pass_execution_and_save(
+                stack_to_unsqueeze_pass,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)] Apply stack_to_unsqueeze_pass",
+            )
+            pass_execution_and_save(
+                fuse_chunk_reshape_unsqueeze_concat_pass,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)] Apply fuse_chunk_reshape_unsqueeze_concat_pass",
+            )
+            # Remove noops at the end, which may be generated other passes.
+            pass_execution_and_save(
+                remove_noop_pass,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)]Apply remove_noop pass",
             )
             shape_prop(gm)
 

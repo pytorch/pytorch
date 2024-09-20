@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import numpy as np
+import numpy.typing as npt
 
 import torch
 from torch.ao.nn.quantized.modules.utils import WeightedQuantizedModule
@@ -115,8 +116,6 @@ class LinearAPoT(WeightedQuantizedModule):
             activation (Tensor): uniformly quantized activation
         """
         rows1 = activation.size(dim=0)
-        cols1 = activation.size(dim=1)
-
         rows2 = decomposed_weight.shape[0]
         cols2 = decomposed_weight.shape[1]
 
@@ -148,7 +147,7 @@ class LinearAPoT(WeightedQuantizedModule):
         weight_rows = self.weight_transposed.size()[0]
         weight_cols = self.weight_transposed.size()[1]
 
-        decomposed_weight: np.ndarray = np.empty(
+        decomposed_weight: npt.NDArray = np.empty(
             shape=(weight_rows, weight_cols), dtype=object
         )
         for row in range(weight_rows):

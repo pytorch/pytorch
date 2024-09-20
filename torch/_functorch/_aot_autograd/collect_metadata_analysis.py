@@ -9,6 +9,7 @@ a functionalized version of the graph under compilation.
 """
 
 import collections
+import contextlib
 import logging
 from functools import wraps
 from typing import Callable, DefaultDict, Dict, List, Optional
@@ -162,15 +163,18 @@ def run_functionalized_fw_and_collect_metadata(
         # It doesn't matter if we run this under predispatch or not because it is
         # only for figuring out metadata
         mode = FunctionalTensorMode(_allow_token_discovery=True)
-        with disable_above, mode:
+        suppress_pending = contextlib.nullcontext()
+        fake_mode = detect_fake_mode()
+        if fake_mode and (shape_env := fake_mode.shape_env):
+            suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
+        with disable_above, mode, suppress_pending:
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_outs = f(*flat_f_args)
             # We didn't do any tracing, so we don't need to process the
             # unbacked symbols, they will just disappear into the ether.
             # Also, prevent memoization from applying.
-            if (fake_mode := detect_fake_mode()) and (shape_env := fake_mode.shape_env):
-                shape_env.pending_fresh_unbacked_symbols.clear()
+            if fake_mode:
                 fake_mode.epoch += 1
                 fake_mode.reset_nt_tensor_id_counter()
 
@@ -200,10 +204,8 @@ def run_functionalized_fw_and_collect_metadata(
                     "tensor subclasses"
                 )
 
-            if not isinstance(arg, Tensor):
-                new_arg = arg
-            else:
-                new_arg = from_fun(f_arg)
+            if isinstance(arg, Tensor):
+                from_fun(f_arg)
             mutates_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=False
             )
@@ -670,7 +672,7 @@ from a multi-output view call"
             coerce_tangent,
             traced_tangents,
         )
-        user_outs = pytree.tree_map(from_fun, f_output_tangents)
+        pytree.tree_map(from_fun, f_output_tangents)
 
         nonlocal static_input_indices
         static_input_indices = static_input_indices or []

@@ -6,6 +6,7 @@ Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --produce-onnx-test-data: generate onnx test data
           --accept: accept onnx updates and overwrite models
 """
+
 import glob
 import inspect
 import io
@@ -872,14 +873,15 @@ class TestOperators(common_utils.TestCase):
 
     def test_cumsum(self):
         x = torch.randn(2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: torch.cumsum(x, dim=1), x, opset_version=11)
+        self.assertONNX(lambda *args: torch.cumsum(*args, dim=1), x, opset_version=11)
 
     def test_dict(self):
         class MyModel(torch.nn.Module):
             def forward(self, x_in):
                 x_out = {}
                 x_out["test_key_out"] = torch.add(
-                    x_in[list(x_in.keys())[0]], list(x_in.keys())[0]  # noqa: RUF015
+                    x_in[list(x_in.keys())[0]],  # noqa: RUF015
+                    list(x_in.keys())[0],  # noqa: RUF015
                 )
                 return x_out
 

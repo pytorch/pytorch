@@ -54,18 +54,19 @@ _device_t = Union[_device, str, int, None]
 _HAS_PYNVML = False
 _PYNVML_ERR = None
 try:
+    from torch import version as _version
+
     try:
-        import pynvml  # type: ignore[import]
+        if not _version.hip:
+            import pynvml  # type: ignore[import]
+        else:
+            import amdsmi  # type: ignore[import]
 
         _HAS_PYNVML = True
     except ModuleNotFoundError:
         pass
-    try:
-        import amdsmi  # type: ignore[import]
-
-        _HAS_PYNVML = True
-    except ModuleNotFoundError:
-        pass
+    finally:
+        del _version
 except ImportError as err:
     _PYNVML_ERR = err  # sometimes a lib is installed but the import fails for some other reason, so we log the error for later
 
@@ -185,7 +186,7 @@ def _check_capability():
      work properly, but your PyTorch was compiled
      with CUDA_VERSION %d. Please install the correct PyTorch binary
      using instructions from https://pytorch.org
-    """
+    """  # noqa: F841
 
     old_gpu_warn = """
     Found GPU%d %s which is of cuda capability %d.%d.
@@ -194,7 +195,7 @@ def _check_capability():
     """
 
     if torch.version.cuda is not None:  # on ROCm we don't want this check
-        CUDA_VERSION = torch._C._cuda_getCompiledVersion()
+        CUDA_VERSION = torch._C._cuda_getCompiledVersion()  # noqa: F841
         for d in range(device_count()):
             capability = get_device_capability(d)
             major = capability[0]
@@ -1121,7 +1122,8 @@ def _get_amdsmi_power_draw(device: Optional[Union[Device, int]] = None) -> int:
 
 def _get_amdsmi_clock_rate(device: Optional[Union[Device, int]] = None) -> int:
     handle = _get_amdsmi_handler(device)
-    return amdsmi.amdsmi_get_clock_info(handle, amdsmi.AmdSmiClkType.GFX)["cur_clk"]
+    clk_info = amdsmi.amdsmi_get_clock_info(handle, amdsmi.AmdSmiClkType.GFX)
+    return clk_info["clk"] if "clk" in clk_info else clk_info["cur_clk"]
 
 
 def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
@@ -1627,6 +1629,7 @@ __all__ = [
     "memory_usage",
     "MemPool",
     "MemPoolContext",
+    "use_mem_pool",
     "temperature",
     "power_draw",
     "clock_rate",

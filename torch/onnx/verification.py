@@ -21,6 +21,7 @@ import warnings
 from typing import Any, Callable, Collection, Mapping, Sequence, Tuple, Union
 
 import numpy as np
+import numpy.typing as npt
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -98,7 +99,7 @@ def _flatten_tuples(elem):
 
 
 # TODO(justinchuby): Add type checking by narrowing down the return type when input is None
-def _to_numpy(elem) -> list | np.ndarray:
+def _to_numpy(elem) -> list | npt.NDArray:
     if isinstance(elem, torch.Tensor):
         if elem.requires_grad:
             return elem.detach().cpu().numpy()
@@ -217,8 +218,8 @@ def _compare_onnx_pytorch_outputs_in_np(
     pt_outs: _OutputsType,
     options: VerificationOptions,
 ):
-    assert len(onnx_outs) == len(
-        pt_outs
+    assert (
+        len(onnx_outs) == len(pt_outs)
     ), f"Number of outputs differ ONNX runtime: ({len(onnx_outs)}) PyTorch: ({len(pt_outs)})"
     acceptable_error_percentage = options.acceptable_error_percentage
     if acceptable_error_percentage and (
@@ -1782,7 +1783,7 @@ def find_mismatch(
         args = utils._decide_input_format(model, inputs_for_export)
 
         model = utils._pre_trace_quant_model(model, args)
-        graph, params, torch_out, module = utils._create_jit_graph(model, args)
+        graph, params, _, _ = utils._create_jit_graph(model, args)
         params_dict = utils._get_named_param_dict(graph, params)
 
         utils._apply_friendly_debug_names(graph, params_dict)

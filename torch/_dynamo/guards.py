@@ -65,6 +65,7 @@ from torch._guards import (
     Source,
 )
 from torch._logging import structured
+from torch._utils_internal import justknobs_check
 from torch.fx.experimental.symbolic_shapes import (
     EqualityConstraint,
     is_symbolic,
@@ -76,7 +77,9 @@ from torch.utils.weak import TensorWeakRef
 from . import config, convert_frame, exc, mutation_guard
 from .eval_frame import set_guard_error_hook
 from .source import (
+    AttrProxySource,
     AttrSource,
+    CallFunctionNoArgsSource,
     ChainedSource,
     ConstDictKeySource,
     DefaultsSource,
@@ -95,10 +98,12 @@ from .source import (
     ScriptObjectQualifiedNameSource,
     ShapeEnvSource,
     SubclassAttrListSource,
+    TorchFunctionModeStackSource,
     TupleIteratorGetItemSource,
     TypeSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
+    UnspecializedParamBufferSource,
     WeakRefCallSource,
 )
 from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
@@ -106,6 +111,8 @@ from .utils import (
     common_constant_types,
     dict_keys_repr,
     get_custom_getattr,
+    get_torch_function_mode_stack,
+    get_torch_function_mode_stack_at,
     guard_failures,
     istype,
     key_is_id,
@@ -151,7 +158,7 @@ class GuardManager:
 
         self.closure_vars = None
         self.args = None
-        self.code_parts = None
+        self.code_parts = []
         self.verbose_code_parts = None
         self.global_scope = None
         self.guard_fail_fn = None
@@ -257,6 +264,32 @@ class GuardManager:
         # Only needed for debugging purposes.
         return self.root.check_verbose(x)
 
+    def populate_code_parts_for_debugging(self):
+        # This should be called when the guard manager is fully populated
+        tensor_aliasing_guard_seen = False
+
+        def get_code_parts(leaf_guard):
+            code_parts = []
+            for verbose_code_part in leaf_guard.verbose_code_parts():
+                code_part = verbose_code_part.split("#")[0].rstrip()
+                code_parts.append(code_part)
+            return code_parts
+
+        def visit(mgr):
+            nonlocal tensor_aliasing_guard_seen
+            for guard in mgr.get_leaf_guards():
+                if isinstance(guard, torch._C._dynamo.guards.NO_TENSOR_ALIASING):  # type: ignore[attr-defined]
+                    if not tensor_aliasing_guard_seen:
+                        self.code_parts.extend(get_code_parts(guard))
+                        tensor_aliasing_guard_seen = True
+                else:
+                    self.code_parts.extend(get_code_parts(guard))
+
+            for child_mgr in mgr.get_child_managers():
+                visit(child_mgr)
+
+        visit(self.root)
+
 
 def from_numpy(a):
     # If not numpy array, piggy back on e.g. tensor guards to check type
@@ -283,6 +316,7 @@ CLOSURE_VARS = {
     "___dict_contains": lambda a, b: a in b,
     "___tuple_iterator_len": tuple_iterator_len,
     "___tuple_iterator_getitem": tuple_iterator_getitem,
+    "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
     "__math_isnan": math.isnan,
     "__numpy_isnan": None if np is None else np.isnan,
     "inf": float("inf"),
@@ -421,7 +455,6 @@ def getitem_on_dict_manager(
     source, base_guard_manager, base_example_value, example_value, guard_manager_enum
 ):
     base_source_name = source.base.name()
-    source_name = source.name()
     if isinstance(source.index, ConstDictKeySource):
         index = source.index.index
     else:
@@ -546,6 +579,8 @@ class GuardBuilder(GuardBuilderBase):
         self._cached_guard_managers: Dict[
             str, torch._C._dynamo.guards.GuardManager
         ] = {}
+
+        self._cached_duplicate_input_guards: Set[Tuple[str, str]] = set()
 
     def guard_on_dict_keys_and_ignore_order(self, example_value, guard):
         dict_mgr = self.get_guard_manager(guard)
@@ -868,6 +903,15 @@ class GuardBuilder(GuardBuilderBase):
         ):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager
+        elif istype(source, TorchFunctionModeStackSource):
+            out = root_guard_manager.lambda_manager(
+                python_lambda=lambda _: get_torch_function_mode_stack_at(
+                    source._get_index()
+                ),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, GradSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.grad_manager(
@@ -875,7 +919,7 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
-        elif istype(source, AttrSource):
+        elif istype(source, (AttrSource, UnspecializedParamBufferSource)):
             assert base_guard_manager  # to make mypy happy
 
             if (
@@ -1034,6 +1078,14 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, AttrProxySource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: x.get_base(),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, TupleIteratorGetItemSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.tuple_iterator_getitem_manager(
@@ -1053,9 +1105,16 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
-        elif isinstance(source, WeakRefCallSource):
+        elif istype(source, WeakRefCallSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.weakref_call_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, CallFunctionNoArgsSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.call_function_no_args_manager(
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
@@ -1082,7 +1141,7 @@ class GuardBuilder(GuardBuilderBase):
         # code_parts in a function object which is then passed on to the leaf
         # guard.
         make_guard_fn_args = ", ".join(closure_vars.keys())
-        guard_body, pycode = build_guard_function(code_parts, make_guard_fn_args)
+        _, pycode = build_guard_function(code_parts, make_guard_fn_args)
         out: Dict[str, Any] = {}
         globals_for_guard_fn = {"G": self.scope["G"]}
         exec(pycode, globals_for_guard_fn, out)
@@ -1399,7 +1458,6 @@ class GuardBuilder(GuardBuilderBase):
     def EQUALS_MATCH(self, guard: Guard):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
-        t = type(val)
         if np:
             np_types: Tuple[Type[Any], ...] = (
                 np.int8,
@@ -1417,20 +1475,22 @@ class GuardBuilder(GuardBuilderBase):
         else:
             np_types = ()
 
+        ok_mutable_types = (list, set)
+
         ok_types = tuple(
             common_constant_types
             | {
                 type,
-                list,
                 tuple,
-                set,
                 frozenset,
                 slice,
                 range,
                 torch.Size,
                 *np_types,
+                *ok_mutable_types,
             }
         )
+
         if torch.distributed.is_available():
             from torch.distributed.device_mesh import DeviceMesh
             from torch.distributed.tensor.placement_types import (
@@ -1489,6 +1549,11 @@ class GuardBuilder(GuardBuilderBase):
         if config.enable_cpp_guard_manager:
             # Construct a debug string to put into the c++ equals match guard.
             code = [f"{ref} == {val!r}"]
+            if istype(val, ok_mutable_types):
+                # C++ guards perform a pointer equality check to speedup guards, but the assumption is that the object
+                # is mutable. For a few corner cases like sets and lists, we make a deepcopy to purposefully fail the
+                # pointer equality check.
+                val = deepcopy(val)
             self.get_guard_manager(guard).add_equals_match_guard(
                 val, get_verbose_code_parts(code, guard)
             )
@@ -1566,7 +1631,6 @@ class GuardBuilder(GuardBuilderBase):
         # tuple, collections.deque etc
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        t = type(value)
 
         if not (config.enable_cpp_guard_manager and isinstance(value, dict)):
             # C++ DICT_LENGTH checks for type
@@ -1628,6 +1692,13 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
 
         if config.enable_cpp_guard_manager:
+            # Check that the guard has not been inserted already
+            key = (ref_a, ref_b)
+            if key in self._cached_duplicate_input_guards:
+                return
+            self._cached_duplicate_input_guards.add((ref_a, ref_b))
+            self._cached_duplicate_input_guards.add((ref_b, ref_a))
+
             install_object_aliasing_guard(
                 self.get_guard_manager(guard),
                 self.get_guard_manager_from_source(source_b),
@@ -1640,7 +1711,6 @@ class GuardBuilder(GuardBuilderBase):
         # Guard on the keys and their order
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        t = type(value)
 
         self.TYPE_MATCH(guard)
         code = []
@@ -1678,7 +1748,6 @@ class GuardBuilder(GuardBuilderBase):
         """Constant keys match"""
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        t = type(value)
 
         if not config.enable_cpp_guard_manager:
             # DictGuardManager supports TYPE_MATCH internally
@@ -1752,6 +1821,7 @@ class GuardBuilder(GuardBuilderBase):
             ]
 
         if output_graph.export_constraints:
+            names: Dict[str, Tuple[int, int]] = {}
             source_pairs: List[Tuple[Source, Source]] = []
             derived_equalities: List[  # type: ignore[type-arg]
                 Tuple[Source, Union[Source, Symbol], Callable]
@@ -1763,6 +1833,7 @@ class GuardBuilder(GuardBuilderBase):
                         constraint,
                         get_sources,
                         output_graph.shape_env,
+                        names,
                         source_pairs,
                         derived_equalities,
                         phantom_symbols,
@@ -1929,8 +2000,8 @@ class GuardBuilder(GuardBuilderBase):
             # this logic, be my guest!  -- ezyang 2024)
             #
             assert guard.source is not None
-            static, reason = tensor_always_has_static_shape(
-                value, is_tensor=True, guard_source=guard.source
+            static, _ = tensor_always_has_static_shape(
+                value, is_tensor=True, tensor_source=guard.originating_source
             )
 
             if not static:
@@ -2150,6 +2221,12 @@ class CheckFunctionManager:
         self.output_graph = output_graph
         w_builder = None
 
+        # NB: Until we trace device contexts, we need to use the stack recorded at the beginning of tracing
+        # in case a set default device call was made in the graph.
+        self.torch_function_mode_stack = (
+            output_graph.torch_function_mode_stack if output_graph else None
+        )
+
         def source_ref(source):
             guard_source = source.guard_source()
             if guard_source is GuardSource.CONSTANT:
@@ -2179,9 +2256,16 @@ class CheckFunctionManager:
         # Break retain cycle. See test_release_input_memory
         w_builder = weakref.ref(builder, cleanup_builder)
 
+        guard_on_nn_modules = config.guard_nn_modules and justknobs_check(
+            "pytorch/compiler:guard_nn_modules"
+        )
+
+        if not justknobs_check("pytorch/compiler:guard_nn_modules"):
+            log.warning("guard_nn_modules is turned off using justknobs killswitch")
+
         for guard in sorted(guards or [], key=Guard.sort_key):
             if (
-                not config.guard_nn_modules
+                not guard_on_nn_modules
                 and guard.is_specialized_nn_module()
                 # Default func args must be guarded on.
                 # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
@@ -2248,17 +2332,32 @@ class CheckFunctionManager:
 
         code_parts = []
         verbose_code_parts = []
-        structured_guard_fns = []
+        structured_guard_fns: list[Callable[[], dict[str, Any]]] = []
+
+        torch_function_mode_stack_check_fn = make_torch_function_mode_stack_guard(
+            self.torch_function_mode_stack
+        )
 
         if config.enable_cpp_guard_manager:
             # Insert the global_state guard
             assert self.guard_manager  # to make mypy happy
             self.guard_manager.root.add_global_state_guard(["___check_global_state()"])
+
+            self.guard_manager.root.add_torch_function_mode_stack_guard(
+                self.torch_function_mode_stack,
+                ["___check_torch_function_mode_stack()"],
+            )
+            # Clear references to torch_function modes held in the list
+            self.torch_function_mode_stack = None
         else:
             # Don't report this guard, it's always the same, useless!
             global_guard = "___check_global_state()"
             code_parts.append(global_guard)
             verbose_code_parts.append(global_guard)
+
+            tf_mode_stack_guard = "___check_torch_function_mode_stack()"
+            code_parts.append(tf_mode_stack_guard)
+            verbose_code_parts.append(tf_mode_stack_guard)
 
         def add_code_part(code_part, guard, log_only=False):
             verbose_code_part = get_verbose_code_part(code_part, guard)
@@ -2405,6 +2504,7 @@ class CheckFunctionManager:
             "___check_tensors": check_tensors_fn,
             "___check_tensors_verbose": check_tensors_verbose_fn,
             "___check_global_state": global_state.check,
+            "___check_torch_function_mode_stack": torch_function_mode_stack_check_fn,
             "tensor_check_names": tensor_check_names,
             **SYMPY_INTERP,
             **CLOSURE_VARS,
@@ -2445,7 +2545,10 @@ class CheckFunctionManager:
         guard_fn.closure_vars = closure_vars
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
         guard_fn.args = largs
-        guard_fn.code_parts = code_parts
+        if config.enable_cpp_guard_manager:
+            guard_fn.populate_code_parts_for_debugging()
+        else:
+            guard_fn.code_parts = code_parts
         guard_fn.verbose_code_parts = verbose_code_parts
         # Grab only G, but preserve "G" because guards access it as "G"
         guard_fn.global_scope = globals_for_guard_fn
@@ -2545,6 +2648,25 @@ def is_recompiles_verbose_enabled():
     return torch._logging._internal.log_state.is_artifact_enabled("recompiles_verbose")
 
 
+# this will only be used if cpp guards are disabled
+def make_torch_function_mode_stack_guard(intial_stack):
+    types = [type(x) for x in intial_stack]
+
+    def check_torch_function_mode_stack():
+        cur_stack = get_torch_function_mode_stack()
+
+        if len(cur_stack) != len(types):
+            return False
+
+        for ty, mode in zip(types, cur_stack):
+            if ty != type(mode):
+                return False
+
+        return True
+
+    return check_torch_function_mode_stack
+
+
 def recompilation_reason_for_no_tensor_aliasing_guard(guard_manager, scope):
     duplicate_tensors = []
     global_scope = dict(guard_manager.global_scope)
@@ -2615,7 +2737,7 @@ def get_guard_fail_reason_helper(
             with report_compile_source_on_error():
                 try:
                     fail_reason = eval(part, global_scope, scope)
-                except Exception as e:
+                except Exception:
                     if is_recompiles_verbose_enabled():
                         continue
                     else:
@@ -2648,7 +2770,7 @@ def get_guard_fail_reason(
             guard_fn.guard_fail_fn(
                 GuardFail(reason_str or "unknown reason", orig_code_map[code])
             )
-    except Exception as e:
+    except Exception:
         log.exception(
             "Failure in guard_fail_fn callback - raising here will cause a NULL Error on guard eval",
         )

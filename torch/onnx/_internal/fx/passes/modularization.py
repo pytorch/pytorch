@@ -139,7 +139,7 @@ class _ModuleMeta:
         cls, raw_meta: _DYNAMO_NN_MODULE_META_TYPE
     ) -> _ModuleMeta:
         """Create a module meta from raw meta produced by FX dynamo tracer."""
-        module_name, (qualified_name, module_class) = raw_meta
+        module_name, (_, module_class) = raw_meta
         return _ModuleMeta(module_name, module_class, raw_meta)
 
     @classmethod
@@ -814,7 +814,9 @@ class Modularize(_pass.Transform):
         >>>         out = self.linear(out)
         >>>         return out
         >>>
-        >>> gm, _ = torch._dynamo.export(TestModule(), aten_graph=True)(torch.tensor([0, 1, 2]))
+        >>> gm, _ = torch._dynamo.export(TestModule(), aten_graph=True)(
+        ...     torch.tensor([0, 1, 2])
+        ... )
         >>> gm.print_readable()
 
         >>> gm = passes.Modularize(infra.DiagnosticContext("test_context", "1.0"), gm).run()
