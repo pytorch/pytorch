@@ -37,6 +37,8 @@ minimum_call_count = 1
 # turn on/off DCE pass
 dead_code_elimination = True
 
+custom_ops_profile = None
+
 # disable (for a function) when cache reaches this size
 
 # controls the maximum number of cache entries with a guard on same ID_MATCH'd
