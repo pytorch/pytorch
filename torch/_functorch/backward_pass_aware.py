@@ -197,7 +197,7 @@ class LongRecomputationChains:
             logger.error("Solver failed to find a solution: %s", LpStatus[status])
         else:
             print("Solver found a solution")
-        sol = [X[i].varValue for i in X.keys() if X[i].varValue > 0.9]
+
         saved_values = [i for i in X.keys() if X[i].varValue > 0.9]
         recomp_values = [i for i in X.keys() if X[i].varValue <= 0.9]
         return saved_values, recomp_values
