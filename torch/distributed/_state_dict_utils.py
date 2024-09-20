@@ -565,7 +565,7 @@ def _distribute_tensors(
             local_state.device_mesh,
             local_state.placements,
             shape=local_state.shape,
-            stride=local_state.stride,
+            stride=local_state.stride(),
         )
 
 
