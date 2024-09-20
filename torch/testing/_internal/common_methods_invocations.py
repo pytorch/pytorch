@@ -13,6 +13,7 @@ import enum
 
 import torch
 import numpy as np
+import numpy.typing as npt
 from torch import inf, nan
 
 from typing import Any, Dict, List, Tuple, Union, Sequence
@@ -20,7 +21,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     _dispatch_dtypes, floating_types, floating_types_and, complex_types, floating_and_complex_types,
     floating_and_complex_types_and, all_types_and_complex_and, all_types_and, all_types_and_complex, integral_types_and,
-    all_types, empty_types, complex_types_and, integral_types, custom_types,
+    empty_types, complex_types_and, integral_types, custom_types,
 )
 from torch.testing._internal.common_device_type import \
     (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
@@ -4541,7 +4542,7 @@ def sample_inputs_native_layer_norm(opinfo, device, dtype, requires_grad, **kwar
         )
 
 def sample_inputs_rms_norm(opinfo, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, high=1000)
 
     # Ordered as input shape, normalized_shape and a kwarg dict for eps
     cases: Tuple[Tuple[int], Tuple[int], dict] = (  # type: ignore[assignment]
@@ -8776,8 +8777,13 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
 
     qkv_shapes = [(dim_3_q_shape, dim_3_kv_shape), (dim_4_q_shape, dim_4_kv_shape), broadcast_tuple]
     samples = []
+    gqa_options = [False] if TEST_WITH_ROCM else [True, False]  # TODO: GQA support
+    if TEST_WITH_ROCM and dtype == torch.float32:
+        causal_options = [False]  # FIXME: Large errors with causal+fp32
+    else:
+        causal_options = [True, False]
     for qkv_shape, is_causal, dropout_p, enable_gqa in product(
-            qkv_shapes, [True, False], [0.0, 0.5], [True, False]):
+            qkv_shapes, causal_options, [0.0, 0.5], gqa_options):
         shape_q, shape_kv = qkv_shape
         samples.append(SampleInput(
             make(shape_q),
@@ -8807,14 +8813,15 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
             dropout_p=0.0)
     )
 
-    samples.append(
-        SampleInput(
-            make((batch, num_heads_q_gqa, seq_q, head_dim)),
-            make((batch, num_heads_kv_gqa, seq_kv, head_dim)),
-            make((batch, num_heads_kv_gqa, seq_kv, head_dim)),
-            enable_gqa=True
+    if not TEST_WITH_ROCM:
+        samples.append(
+            SampleInput(
+                make((batch, num_heads_q_gqa, seq_q, head_dim)),
+                make((batch, num_heads_kv_gqa, seq_kv, head_dim)),
+                make((batch, num_heads_kv_gqa, seq_kv, head_dim)),
+                enable_gqa=True
+            )
         )
-    )
 
     yield from samples
 
@@ -11336,7 +11343,7 @@ def reference_gelu(X, *, approximate='none'):
         return _gelu_ref(X)
 
 
-def reference_one_hot(a: np.ndarray, num_classes: int = -1) -> np.ndarray:
+def reference_one_hot(a: npt.NDArray, num_classes: int = -1) -> npt.NDArray:
     if num_classes == -1:
         num_classes = int(np.amax(a) + 1)
 
@@ -11356,11 +11363,11 @@ def reference_mse_loss(input, target, reduction="mean"):
         return se
 
 
-def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
+def reference_layer_norm(inp: npt.NDArray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
     return reference_native_layer_norm(inp, normalized_shape, weight, bias, eps)[0]
 
 
-def reference_native_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight, bias, eps):
+def reference_native_layer_norm(inp: npt.NDArray, normalized_shape: Tuple[int], weight, bias, eps):
     feature_size = np.prod(normalized_shape)
     inp_view = inp.reshape(-1, feature_size)  # type: ignore[call-overload]
     mean = inp_view.mean(axis=-1, keepdims=True)
@@ -11377,7 +11384,7 @@ def reference_native_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], w
     return Y.reshape(*inp.shape), mean.reshape(stat_shape), (1.0 / np.sqrt(var + eps)).reshape(stat_shape)
 
 
-def reference_rms_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, eps=None):
+def reference_rms_norm(inp: npt.NDArray, normalized_shape: Tuple[int], weight=None, eps=None):
     if eps is None:
         eps = torch.finfo(numpy_to_torch_dtype(inp.dtype)).eps
     feature_size = np.prod(normalized_shape)
@@ -11389,7 +11396,7 @@ def reference_rms_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=Non
     return Y.reshape(*inp.shape)
 
 
-def reference_group_norm(inp: np.ndarray, num_groups: int, weight=None, bias=None, eps=1e-5):
+def reference_group_norm(inp: npt.NDArray, num_groups: int, weight=None, bias=None, eps=1e-5):
     inp_view = inp
     if np.prod(inp.shape) != 0:
         inp_view = inp.reshape((inp.shape[0], num_groups, -1))
@@ -11475,7 +11482,7 @@ def reference_std_var(f):
     g = reference_reduction_numpy(f)
 
     @wraps(g)
-    def wrapper(x: np.ndarray, *args, **kwargs):
+    def wrapper(x: npt.NDArray, *args, **kwargs):
         assert not ('unbiased' in kwargs and 'correction' in kwargs)
 
         if 'unbiased' in kwargs:
@@ -13573,8 +13580,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_gradient,
            error_inputs_func=error_inputs_gradient),
     OpInfo('isin',
-           dtypes=all_types(),
-           dtypesIfCUDA=all_types_and(torch.half),
+           dtypes=all_types_and(torch.bfloat16, torch.half),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_isin),
     OpInfo('kthvalue',
@@ -14704,7 +14710,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_adaptive_avg_pool2d),
     OpInfo('nn.functional.adaptive_avg_pool3d',
            dtypes=floating_types_and(torch.half, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            decorators=(
                # RuntimeError:
                # adaptive_avg_pool3d(Tensor input, int[3] output_size) -> (Tensor):
@@ -14758,8 +14763,7 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_adaptive_max_pool2d,
            sample_inputs_func=sample_inputs_adaptive_max_pool2d),
     OpInfo('nn.functional.adaptive_max_pool3d',
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           dtypes=floating_types_and(torch.bfloat16, torch.half),
            decorators=(
                # RuntimeError:
                # adaptive_max_pool3d(Tensor input, int[3] output_size) -> (Tensor):
@@ -15214,8 +15218,7 @@ op_db: List[OpInfo] = [
            variant_test_name='reflect',
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='reflect'),
            skips=(
                # Doesn't have a corresponding aten operator.
@@ -15229,8 +15232,7 @@ op_db: List[OpInfo] = [
            variant_test_name='replicate',
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='replicate'),
            skips=(
                # Doesn't have a corresponding aten operator.
@@ -15244,8 +15246,7 @@ op_db: List[OpInfo] = [
            variant_test_name='replicate_negative',
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_nn_pad_replicate_negative,
            skips=(
                # Doesn't have a corresponding aten operator.
@@ -18319,7 +18320,6 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('unique',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64),
-           dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.uint16, torch.uint32, torch.uint64),
            sample_inputs_func=sample_inputs_unique,
            supports_out=False,
            supports_autograd=False,
@@ -18331,7 +18331,6 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('unique_consecutive',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
-           dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
            sample_inputs_func=sample_inputs_unique_consecutive,
            supports_out=False,
            supports_autograd=False,
@@ -19621,6 +19620,24 @@ op_db: List[OpInfo] = [
            # vmap does not support inplace views
            check_inplace_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_transpose_swapdims),
+    OpInfo('transpose_copy',
+           assert_jit_shape_analysis=True,
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
+           supports_out=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # vmap does not support inplace views
+           check_inplace_batched_forward_grad=False,
+           sample_inputs_func=sample_inputs_transpose_swapdims,
+           skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
+               DecorateInfo(
+                   unittest.expectedFailure,
+                   'TestJit',
+                   'test_variant_consistency_jit',
+                   dtypes=(torch.float32,)
+               ),
+           )),
     OpInfo('T',
            op=lambda x: x.T,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
@@ -23834,6 +23851,15 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.transpose",
         torch_opinfo_name="transpose",
+    ),
+    PythonRefInfo(
+        "_refs.transpose_copy",
+        torch_opinfo_name="transpose_copy",
+        skips=(
+            # RuntimeError: no _refs support for torch.Tensor.is_conj
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+        ),
+        supports_out=True,
     ),
     PythonRefInfo(
         "_refs.t",

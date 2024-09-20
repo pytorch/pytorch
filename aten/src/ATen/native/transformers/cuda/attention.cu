@@ -774,6 +774,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   TORCH_CHECK(
       max_seqlen_batch_k == max_seqlen_batch_v,
       "Key and Value must have the same sequence length");
+  auto attn_bias_ = attn_bias;
+  if (attn_bias_.has_value()) {
+    const auto bias_dim = attn_bias_.value().dim();
+    if (bias_dim == 2) {
+      attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
+    } else if (bias_dim == 3) {
+      attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
+    } else {
+      attn_bias_ = attn_bias_.value().expand({batch_size, attn_bias_.value().size(1), max_seqlen_batch_q, max_seqlen_batch_k});
+      TORCH_CHECK(bias_dim == 4, "cuDNN SDPA expects either a 2D, 3D, or 4D attn_bias but got ", attn_bias_.value().dim(), "D");
+    }
+  }
 
   Tensor attention, log_sumexp;
 
@@ -818,13 +830,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
                       query/* Tensor q*/,
                       key/* Tensor k*/,
                       value/* Tensor v*/,
+                      attn_bias_ /* std::optional<Tensor> */,
                       log_sumexp/*Tensor softmaxstats*/,
                       attention/*Tensor o*/,
                       cudnn_seed/*Tensor dropoutseed*/,
                       cudnn_offset/*Tensor dropoutoffset*/);
 
   // TODO(eqy): support debug_attn_mask
-  return std::make_tuple(attention, log_sumexp, Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, cudnn_seed, cudnn_offset, Tensor());
+  return std::make_tuple(std::move(attention), std::move(log_sumexp), Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, std::move(cudnn_seed), std::move(cudnn_offset), Tensor());
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
@@ -1102,10 +1115,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       offset_t = at::empty({}, at::dtype(at::kLong).device(device));
     } else {
       auto [seed, offset] = at::cuda::philox::unpack(philox_state);
-      seed_t = at::scalar_tensor(
-          at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong));
-      offset_t = at::scalar_tensor(
-          at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong));
+#ifdef USE_ROCM
+      const auto options = at::dtype(at::kLong).device(at::kCUDA);
+#else
+      const auto options = at::dtype(at::kLong);
+#endif
+      seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(seed)), options);
+      offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), options);
     }
   } else {
     // Not using dropout
@@ -1118,7 +1134,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   auto ret = aotriton::v2::flash::check_gpu(stream);
   if (hipSuccess != ret) {
       TORCH_CHECK(false,
-                  "[AOTriton] Accelerated SDPA only supports MI200/MI300X GPUs (gfx90a:sramecc+:xnack- or gfx94a:sramecc+:xnack-)")
+                  "[AOTriton] Accelerated SDPA only supports MI200/MI300X/Navi31 GPUs"
+                  " (gfx90a:sramecc+:xnack-/gfx942:sramecc+:xnack-/gfx1100)")
   }
 
   // AOTriton may accept aligned on logsumexp tensor in the future for better
@@ -1147,8 +1164,16 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
 
   using aotriton::v2::flash::attn_fwd;
   using sdp::aotriton_adapter::mk_aotensor;
+  using sdp::aotriton_adapter::mk_aoscalartensor;
+  using sdp::aotriton_adapter::mk_philoxtensor;
   aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, aotriton::DType::kFloat16);
   at::Tensor softmax_fa_t = at::empty({ 0, 0, 0, 0 }, query.options());
+  const bool use_philox_state = in_capture_stream;
+  auto seed = use_philox_state ? mk_philoxtensor(philox_state.seed_.ptr) : mk_aoscalartensor(seed_t);
+  auto offset1 = use_philox_state ? mk_philoxtensor(philox_state.offset_.ptr) : mk_aoscalartensor(offset_t);
+  auto offset2 = use_philox_state ? philox_state.offset_intragraph_ : 0;
+  auto seed_output = use_philox_state ? mk_philoxtensor(seed_t.data_ptr<int64_t>()) : mk_philoxtensor(nullptr);
+  auto offset_output = use_philox_state ? mk_philoxtensor(offset_t.data_ptr<int64_t>()) : mk_philoxtensor(nullptr);
   hipError_t err; // TODO: Error handling
   err = attn_fwd(mk_aotensor(q_t, "q"),
                  mk_aotensor(k_t, "k"),
@@ -1158,8 +1183,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
                  mk_aotensor<2>(softmax_lse, "M"),
                  mk_aotensor(output_t, "Out"),
                  dropout_p,
-                 use_dropout ? *seed_t.data_ptr<int64_t>() : 0,
-                 use_dropout ? *offset_t.data_ptr<int64_t>() : 0,
+                 seed,
+                 offset1,
+                 offset2,
+                 seed_output,
+                 offset_output,
                  mk_aotensor(softmax_fa_t, "encoded_softmax"),
                  is_causal,
                  stream);
