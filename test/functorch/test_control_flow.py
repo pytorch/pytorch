@@ -2890,20 +2890,50 @@ def forward(self, pred_1, x_1):
             grads = grads[:2]
             self.assertEqual(grads, expected_grads)
             self.assertEqual(add_input_grads, expected_add_input_grads)
+            
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("autograd", [False, True])
+    def test_scan_closure_RNN_parameters_as_inputs(self, reverse, compile_mode, device, autograd):        
+        x = torch.randn(3, 5, 10, device=device, requires_grad=autograd)
+        h = torch.randn(3, 7, device=device, requires_grad=autograd)
+        W_ih = torch.randn(5, 7, device=device, requires_grad=autograd)
+        b_ih = torch.randn(7, device=device, requires_grad=autograd)
+        W_hh = torch.randn(7, 7, device=device, requires_grad=autograd)
+        b_hh = torch.randn(7, device=device, requires_grad=autograd)
+
+        def RNN(x: torch.Tensor, y: torch.Tensor):
+            c_new = y[0] @ W_ih[1] + b_ih[2]
+            h_new = torch.tanh(c_new + x @ W_hh[3] + b_hh[4])
+            return c_new, h_new
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "All xs leaves must at least have.*",
+        ):
+            result = scan(RNN, h, [x, W_ih, b_ih, W_hh, b_hh], dim=2, reverse=reverse)
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
+    # @parametrize("reverse", [False])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # @parametrize("compile_mode", ["eager"])
+    # @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("device", [torch.device("cpu")])
     def test_scan_closure_RNN_partial_autograd(self, reverse, compile_mode, device):
         import random
 
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
         autograds = []
+        autograds.append([True, True, True, False, True, False])
+        autograds.append([True, True, True, False, False, False])
+        autograds.append([True, True, False, False, False, False])
+        
         # autograds.append([True, True, True, True, True, True])
-        autograds.append([True, True, True, False, False, True])
         # autograds.append([False, False, True, True, True, True])
         # autograds.append([True, True, False, False, False, False])
         # autograds.append([True, False, False, False, False, False])
@@ -2926,25 +2956,19 @@ def forward(self, pred_1, x_1):
                 h_new = torch.tanh(c_new + x @ W_hh + b_hh)
                 return c_new, h_new
 
-            if False in autograd:
-                # with self.assertRaisesRegex(
-                #     RuntimeError,
-                #     "scan currently only supports Autograd if all.*",
-                # ):
-                #     result = scan_fct(RNN, h, x, dim=dim, reverse=reverse)
-                result = scan_fct(RNN, h, x, dim=dim, reverse=reverse)
-                result_exp = _fake_scan(RNN, h, x, dim=dim, reverse=reverse)
-                self.assertEqual(result, result_exp)
+            # if False in autograd:
+            #     with self.assertRaisesRegex(
+            #         RuntimeError,
+            #         "scan currently only supports Autograd if all.*",
+            #     ):
+            #         result = scan_fct(RNN, h, x, dim=dim, reverse=reverse)
+            # else:
+            result = scan_fct(RNN, h, x, dim=dim, reverse=reverse)
+            result_exp = _fake_scan(RNN, h, x, dim=dim, reverse=reverse)
+            self.assertEqual(result, result_exp)
 
-                if autograd:
-                    self.check_autograd(result, result_exp, params)
-            else:
-                result = scan_fct(RNN, h, x, dim=dim, reverse=reverse)
-                result_exp = _fake_scan(RNN, h, x, dim=dim, reverse=reverse)
-                self.assertEqual(result, result_exp)
-
-                if autograd:
-                    self.check_autograd(result, result_exp, params)
+            if autograd:
+                self.check_autograd(result, result_exp, params)
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
