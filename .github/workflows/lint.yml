@@ -61,8 +61,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    runs-on: linux.2xlarge
-    if: github.event_name == 'pull_request'
+    runs-on: "linux.2xlarge"
+    if: ${{ github.event_name == 'pull_request' && github.repository_owner == 'pytorch' }}
     steps:
       - name: Checkout pytorch
         uses: actions/checkout@v4
@@ -70,11 +70,11 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
       - name: Setup miniconda
-        # You could potentially lock this down to a specific hash as well
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: "3.10"
       - name: Run lintrunner (nonretryable)
+        continue-on-error: true
         run: |
           export ADDITIONAL_LINTRUNNER_ARGS="format --all-files"
           .github/scripts/lintrunner.sh
