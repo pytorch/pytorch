@@ -51,3 +51,5 @@ jq --raw-output \
     lint.json || true
 
 exit $RC
+
+
