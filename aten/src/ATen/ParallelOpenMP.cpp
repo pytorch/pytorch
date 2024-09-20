@@ -13,10 +13,10 @@
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 namespace at {
-#if AT_MKLDNN_ENABLED()
-namespace native { namespace mkldnn {
+#if AT_ONEDNN_ENABLED()
+namespace native { namespace onednn {
 void clear_computation_cache();
-}} // namespace native::mkldnn
+}} // namespace native::onednn
 #endif
 
 namespace {
@@ -65,8 +65,8 @@ void set_num_threads(int nthreads) {
   TORCH_INTERNAL_ASSERT(pool, "Invalid thread pool!");
   pool->set_thread_count(nthreads);
 #endif
-#if AT_MKLDNN_ENABLED()
-  at::native::mkldnn::clear_computation_cache();
+#if AT_ONEDNN_ENABLED()
+  at::native::onednn::clear_computation_cache();
 #endif
 }
 

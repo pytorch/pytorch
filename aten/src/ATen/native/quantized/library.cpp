@@ -255,7 +255,7 @@ TORCH_LIBRARY(_quantized, m) {
   m.def(TORCH_SELECTIVE_SCHEMA("_quantized::_wrapped_quantized_linear_prepacked(Tensor X, Tensor X_scale, Tensor X_zero_point, Tensor W_prepack, Tensor output_scale, Tensor output_zero_point, int out_channel) -> Tensor Y"), {at::Tag::flexible_layout});
 }
 
-TORCH_LIBRARY(onednn, m) {
+TORCH_LIBRARY_FRAGMENT(onednn, m) {
   // New OP definition for Quantization in PyTorch 2.0 Export
   // Weight Prepack
   m.def(TORCH_SELECTIVE_SCHEMA("onednn::qconv_prepack(Tensor weight, Tensor w_scales, float x_scale, int x_zp, int[] stride, int[] padding, int[] dilation, int groups, int[]? x_shape=None) -> Tensor"));

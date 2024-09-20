@@ -392,6 +392,14 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(dropout);
   OP_DECOMPOSE(_scaled_dot_product_attention_math);
   OP_DECOMPOSE(scaled_dot_product_attention);
+
+  // Alias for mkldnn related operators
+  OP_DECOMPOSE(mkldnn_rnn_layer);
+  OP_DECOMPOSE(mkldnn_rnn_layer_backward);
+  OP_DECOMPOSE(mkldnn_linear);
+  OP_DECOMPOSE(mkldnn_linear_backward_input);
+  OP_DECOMPOSE(mkldnn_linear_backward_weights);
+  OP_DECOMPOSE(mkldnn_linear_backward);
 }
 
 } // namespace at::functorch

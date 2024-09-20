@@ -41,7 +41,7 @@ def is_avx512_supported():
 IS_AVX512_UNSUPPORTED = not is_avx512_supported()
 
 LLGA_FUSION_GROUP = 'prim::oneDNNFusionGroup'
-LLGA_NOT_ENABLED = not torch.backends.mkldnn.is_available() or IS_WINDOWS or IS_MACOS
+LLGA_NOT_ENABLED = not torch.backends.onednn.is_available() or IS_WINDOWS or IS_MACOS
 
 def warmup_forward(f, *args, profiling_count=3):
     for i in range(profiling_count):

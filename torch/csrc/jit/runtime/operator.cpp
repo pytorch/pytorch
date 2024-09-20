@@ -242,8 +242,8 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::TensorExprGroup, // optimization pass adds it
       prim::TensorExprDynamicGroup, // optimization pass adds it
       prim::StaticSubgraph, // optimization pass adds it
-      prim::ConstantMKLDNNTensor, // optimization pass adds it
-      prim::BroadcastMKLDNNTensors, // optimization pass adds it
+      prim::ConstantONEDNNTensor, // optimization pass adds it
+      prim::BroadcastONEDNNTensors, // optimization pass adds it
       prim::oneDNNFusionGroup, // optimization pass adds it
       prim::oneDNNFusionGuard, // optimization pass adds it
       prim::StaticRuntimeCopyOuts, // used in SR only
@@ -308,9 +308,9 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::PythonOp,
       prim::ConstantChunk,
       prim::BroadcastingChunk,
-      prim::MKLDNNGroup,
-      prim::ConstantMKLDNNTensor,
-      prim::BroadcastMKLDNNTensors,
+      prim::ONEDNNGroup,
+      prim::ConstantONEDNNTensor,
+      prim::BroadcastONEDNNTensors,
       prim::fork,
       prim::awaitable,
       prim::awaitable_nowait,

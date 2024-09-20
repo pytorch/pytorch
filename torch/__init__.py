@@ -2521,7 +2521,7 @@ _deprecated_attrs = {
     "has_mps": torch.backends.mps.is_built,
     "has_cuda": torch.backends.cuda.is_built,
     "has_cudnn": torch.backends.cudnn.is_available,
-    "has_mkldnn": torch.backends.mkldnn.is_available,
+    "has_mkldnn": torch.backends.onednn.is_available,
 }
 
 if TYPE_CHECKING:

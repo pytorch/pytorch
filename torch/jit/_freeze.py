@@ -190,7 +190,7 @@ def optimize_for_inference(
 
     In addition to generic optimizations that should speed up your model regardless
     of environment, prepare for inference will also bake in build specific settings
-    such as the presence of CUDNN or MKLDNN, and may in the future make transformations
+    such as the presence of CUDNN or ONEDNN, and may in the future make transformations
     which speed things up on one machine but slow things down on another. Accordingly,
     serialization is not implemented following invoking `optimize_for_inference` and
     is not guaranteed.
@@ -208,8 +208,8 @@ def optimize_for_inference(
         mod = torch.nn.Sequential(conv, bn)
         frozen_mod = torch.jit.optimize_for_inference(torch.jit.script(mod.eval()))
         assert "batch_norm" not in str(frozen_mod.graph)
-        # if built with MKLDNN, convolution will be run with MKLDNN weights
-        assert "MKLDNN" in frozen_mod.graph
+        # if built with ONEDNN, convolution will be run with ONEDNN weights
+        assert "ONEDNN" in frozen_mod.graph
     """
     if not isinstance(mod, ScriptModule):
         raise RuntimeError(

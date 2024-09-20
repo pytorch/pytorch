@@ -23,8 +23,8 @@ struct C10_EXPORT RegisterLlgaFuseGraph
     : public PassManager<RegisterLlgaFuseGraph> {
   static bool setEnabled(bool enabled) {
     TORCH_CHECK(
-        AT_MKLDNN_ENABLED(),
-        "Running oneDNN Graph fuser is only supported with MKLDNN builds.");
+        AT_ONEDNN_ENABLED(),
+        "Running oneDNN Graph fuser is only supported with ONEDNN builds.");
     bool oldState = fuser::onednn::getLlgaEnabled();
     fuser::onednn::getLlgaEnabled() = enabled;
     if (enabled) {

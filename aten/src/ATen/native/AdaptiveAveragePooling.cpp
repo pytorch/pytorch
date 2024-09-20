@@ -113,7 +113,7 @@ namespace {
         "adaptive_avg_pool2d: elements of output_size must be greater than or equal to 0 ",
         "but received {", output_size[0], ", ", output_size[1], "}");
 
-    if (input.is_mkldnn()) {
+    if (input.is_onednn()) {
       return at::mkldnn_adaptive_avg_pool2d(input, C10_AS_INTARRAYREF_SLOW(output_size));
     }
 

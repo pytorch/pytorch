@@ -153,7 +153,7 @@ std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
       GRAPH_DEBUG("inplace computation - input tensor would be reused");
 #endif
       auto inputTensor = inputs[spec.get_input_tensor_index()];
-      if (inputTensor.is_mkldnn()) {
+      if (inputTensor.is_onednn()) {
         auto dataType = spec.dtype();
         if (C10_UNLIKELY(!useOpaqueLayout(i))) {
           // If the input tensor was between two partitions, it would've been

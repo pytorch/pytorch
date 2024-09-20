@@ -490,7 +490,7 @@ void PackedLinearWeightFp16::set_bias(std::optional<at::Tensor> bias) {
 
 #endif // USE_FBGEMM
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 template <bool ReluFused>
 at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
     at::Tensor input,
@@ -532,7 +532,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
   }
 #endif
 
-#if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
+#if defined(__aarch64__) && AT_ONEDNN_ACL_ENABLED()
   // oneDNN+ACL has optimized kernels for s8s8 matmul, so input is signed
   using input_qtype = int8_t;
 #else
@@ -616,7 +616,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_relu(
       std::move(input), reduce_range);
 }
 
-#endif // #if AT_MKLDNN_ENABLED()
+#endif // #if AT_ONEDNN_ENABLED()
 
 namespace at {
 namespace native {
