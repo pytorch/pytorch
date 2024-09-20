@@ -1854,6 +1854,7 @@ class VariableBuilder:
         return unspec_var
 
     def wrap_symfloat(self, value):
+        # import fbvscode; fbvscode.set_trace()
         # SymFloat wrapping is special.  We first wrap it in the same way we
         # do an unspecialized primitive, and then we item() it into a
         # SymFloat.  Removal of the item() call is left to a later FX pass,

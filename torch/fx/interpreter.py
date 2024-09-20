@@ -134,6 +134,8 @@ class Interpreter:
                     initial=0, position=0, leave=True, disable=config.disable_progress, delay=0)
 
         for node in self.graph.nodes:
+            # if node.name == 'item':
+            #     import fbvscode; fbvscode.set_trace()
             pbar.update(1)
             if node in self.env:
                 # Short circuit if we have this value. This could

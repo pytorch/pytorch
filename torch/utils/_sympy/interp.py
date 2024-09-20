@@ -118,7 +118,7 @@ def _run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
     ):
         return analysis.sqrt(args[0])
     if isinstance(expr, ToFloat):
-        return analysis.to_dtype(args[0], torch.float64)
+        return analysis.to_dtype(args[0], torch.float32)
 
     # These handlers are special because they take an extra dtype argument
     # specifying what they should convert to, and we need to appropriately set

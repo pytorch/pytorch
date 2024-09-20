@@ -459,6 +459,10 @@ def check_model(
     if reference_in_float and exact_dtype:
         for expect_dtype, actual_result in zip(expect_dtypes, actual_flat):
             if expect_dtype is not None:
+                if actual_result.dtype != expect_dtype:
+                    import fbvscode
+
+                    fbvscode.set_trace()
                 assert (
                     actual_result.dtype == expect_dtype
                 ), f"dtype mismatch, expected {expect_dtype} but got {actual_result.dtype}"
