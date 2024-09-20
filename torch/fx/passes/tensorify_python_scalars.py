@@ -112,7 +112,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                 dtype = torch.int64
                 c = int(expr)
             elif isinstance(expr, sympy.Number):
-                dtype = torch.double
+                dtype = torch.float32
                 c = float(expr)
 
             expr_to_tensor_proxy[expr] = fx.Proxy(
@@ -146,8 +146,6 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
             # Look for tensor.item() calls on placeholders
             if unbacked_bindings := node.meta.get("unbacked_bindings"):
                 for s, keypath in unbacked_bindings.items():
-
-                    # import fbvscode; fbvscode.set_trace()
 
                     def go(
                         node: fx.Node, keypath: tuple[object, ...]
@@ -188,7 +186,6 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
             if node.op == "call_function" and node.target is torch.ops.aten.add.Tensor:
                 args = []
                 transform = False
-                # import fbvscode; fbvscode.set_trace()
                 for a in node.args:
                     if isinstance(a, fx.Node) and isinstance(
                         zf := a.meta["val"], torch.SymFloat
