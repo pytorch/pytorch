@@ -76,7 +76,7 @@ jobs:
       - name: Run lintrunner (nonretryable)
         continue-on-error: true
         run: |
-          export ADDITIONAL_LINTRUNNER_ARGS="format --all-files"
+          export ADDITIONAL_LINTRUNNER_ARGS="format"
           .github/scripts/lintrunner.sh
       - name: Suggest changes
         uses: parkerbxyz/suggest-changes@v1
