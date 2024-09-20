@@ -227,6 +227,10 @@ std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type) {
       return "uchar";
     case ScalarType::Bool:
       return "bool";
+    case ScalarType::ComplexHalf:
+      return "half2";
+    case ScalarType::ComplexFloat:
+      return "float2";
     default:
       TORCH_CHECK(false, "Undefined type ", scalar_type);
       return "Undefined";

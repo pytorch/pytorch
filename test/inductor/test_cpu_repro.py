@@ -42,7 +42,7 @@ try:
     try:
         from . import test_torchinductor
     except ImportError:
-        import test_torchinductor
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -1907,6 +1907,16 @@ class CPUReproTests(TestCase):
         res = cfn(x, bit_num)
         self.assertEqual(res_aten_eager, res)
 
+    def test_view_dtype(self):
+        def f(x):
+            return x.view(torch.int32) >> 2
+
+        input = torch.ones(16, 16)
+        res_aten_eager = f(input)
+        cfn = torch.compile(f)
+        res = cfn(input)
+        self.assertEqual(res_aten_eager, res)
+
     @patch("torch.cuda.is_available", lambda: False)
     def test_scatter_using_atomic_add(self):
         def fn(a, dim, index, b):
@@ -3412,7 +3422,6 @@ class CPUReproTests(TestCase):
                 dtype if dtype else torch.float32,
             )
 
-    @config.patch("cpp.enable_tiling_heuristics", False)
     def test_group_norm_vec(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -3434,6 +3443,18 @@ class CPUReproTests(TestCase):
                 self.common(mod, (x,))
                 # 2 generated kernels (one for var_mean, the other for result)
                 check_metrics_vec_kernel_count(2)
+
+            # check loop split optimization
+            if fmt == torch.channels_last:
+                torch._dynamo.reset()
+                metrics.reset()
+                with torch.no_grad():
+                    opt_mod = torch.compile(mod)
+                    _, code = run_and_get_cpp_code(opt_mod, x)
+                # check that there are no non_contiguous loads
+                FileCheck().check_count("__at_align__ std::array", 0, exactly=True).run(
+                    code
+                )
 
     def test_int_div_vec(self):
         def fn(x, y, mode):
@@ -4043,6 +4064,68 @@ class CPUReproTests(TestCase):
             )
             n_veckernel = 6 if op is torch.masked.mean else 3
             check_metrics_vec_kernel_count(n_veckernel)
+
+    @requires_vectorization
+    def test_full_bits_lowp(self):
+        def check_use_full_bits(func, shapes, dtype, mixed, check_vecn):
+            example_inputs = [torch.randn(shape, dtype=dtype) for shape in shapes]
+            if mixed:
+                example_inputs[0] = example_inputs[0].to(
+                    dtype=torch.half if dtype == torch.bfloat16 else torch.bfloat16
+                )
+            f_opt = torch.compile()(func)
+            _, code = run_and_get_cpp_code(f_opt, *example_inputs)
+            if check_vecn:
+                self.assertTrue(
+                    "at::vec::VectorizedN" in code or "at::vec::convert<float,2" in code
+                )
+            else:
+                self.assertFalse(
+                    "at::vec::VectorizedN" in code or "at::vec::convert<float,2" in code
+                )
+
+        funcs = []
+
+        def func0(arg0, arg1):
+            return torch.ops.aten.sum(
+                torch.ops.aten.add(torch.ops.aten.atanh(arg0), arg1), (2, 3)
+            )
+
+        funcs.append(func0)
+
+        def func1(arg0):
+            v = torch.ops.prims.convert_element_type.default(arg0, torch.float)
+            v = torch.ops.aten.add(torch.ops.aten.atanh(arg0), v)
+            return torch.ops.prims.convert_element_type.default(v, arg0.dtype)
+
+        funcs.append(func1)
+
+        def func2(arg0, arg1):
+            v = torch.ops.aten.atanh(arg0)
+            v = torch.ops.aten.add(v, arg1)
+            return torch.ops.prims.convert_element_type.default(v, arg1.dtype)
+
+        funcs.append(func2)
+
+        # test small shapes
+        funcs.append(func2)
+        small_size = cpu_vec_isa.pick_vec_isa().nelements(dtype=torch.bfloat16) // 2
+
+        example_shapes = [
+            [(10, 32, 20, 20), (10, 32, 20, 20)],
+            [(10, 32, 20, 20)],
+            [(10, 32, 20, 20), (10, 32, 20, 20)],
+            # test small shapes
+            [(small_size), (small_size)],
+        ]
+        mixed_types = [False, False, True, False]
+        check_vecns = [True, True, True, False]
+
+        for dtype in [torch.bfloat16, torch.float16]:
+            for func, shapes, mixed, check_vecn in zip(
+                funcs, example_shapes, mixed_types, check_vecns
+            ):
+                check_use_full_bits(func, shapes, dtype, mixed, check_vecn)
 
 
 if __name__ == "__main__":
