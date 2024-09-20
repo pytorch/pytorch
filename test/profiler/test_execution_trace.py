@@ -195,7 +195,6 @@ class TestExecutionTrace(TestCase):
         )
 
     def test_execution_trace_alone(self, device):
-        #use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
         use_device = torch.profiler.ProfilerActivity.CUDA or torch.profiler.ProfilerActivity.HPU in supported_activities()
         # Create a temp file to save execution trace data.
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
@@ -318,7 +317,6 @@ class TestExecutionTrace(TestCase):
         assert loop_count == expected_loop_events
 
     def test_execution_trace_repeat_in_loop(self, device):
-        #use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
         use_device = torch.profiler.ProfilerActivity.CUDA or torch.profiler.ProfilerActivity.HPU in supported_activities()
         iter_list = {3, 4, 6, 8}
         expected_loop_events = len(iter_list)
