@@ -4364,10 +4364,10 @@ def matmul(tensor1, tensor2, *, is_out=False):
         if t2_is_matrix:
             # This copies if we perform a 2D @ 3D and the first tensor requires_grad
             # See should_fold native/LinearAlgebra.cpp for why.
-            output = t1_folded.mm(t2).view(output_shape)
+            output = torch.ops.aten._unsafe_view(t1_folded.mm(t2), output_shape)
             return output.mT.contiguous() if transpose else output
         else:
-            return t1_folded.mv(t2).view(output_shape)
+            return torch.ops.aten._unsafe_view(t1_folded.mv(t2), output_shape)
 
     elif dim_tensor1 >= 1 and dim_tensor2 >= 1:
         # We are multiplying b1 x n x m1 by x2 x m2 x p (where b1 can be a list);
