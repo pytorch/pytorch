@@ -4,7 +4,7 @@ import pathlib
 from typing import List
 
 from utils.common import BenchmarkConfig
-
+from operator_inp_utils import OperatorInputsLoader
 
 class OperatorNotFoundError(RuntimeError):
     pass
@@ -40,6 +40,12 @@ class BaseOperator:
     def single_run(self):
         """For the first input size"""
         raise NotImplementedError("Subclasses must implement this method.")
+
+class NativeOperator(BaseOperator):
+    def __init__(self, benchmark_config: BenchmarkConfig):
+        super().__init__(benchmark_config)
+        self.operator_inputs_loader = OperatorInputsLoader(self.full_name)
+
 
 
 def dir_contains_file(dir, file_name) -> bool:
