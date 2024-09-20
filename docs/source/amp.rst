@@ -388,7 +388,7 @@ CPU Ops that can autocast to ``bfloat16``
 ``matmul``,
 ``_convolution``,
 ``conv_tbc``,
-``mkldnn_rnn_layer``,
+``onednn_rnn_layer``,
 ``conv_transpose1d``,
 ``conv_transpose2d``,
 ``conv_transpose3d``,
