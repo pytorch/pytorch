@@ -1211,7 +1211,6 @@ def not_close_error_metas(
         **options (Any): Options passed to each pair during construction.
     """
     # Hide this function from `pytest`'s traceback
-    # pylint: disable-next=unused-variable
     __tracebackhide__ = True
 
     try:
@@ -1504,7 +1503,6 @@ def assert_close(
         Footer
     """
     # Hide this function from `pytest`'s traceback
-    # pylint: disable-next=unused-variable
     __tracebackhide__ = True
 
     error_metas = not_close_error_metas(

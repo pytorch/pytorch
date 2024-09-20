@@ -271,8 +271,10 @@ class AutocastCPUTestLists:
         mat2_fp32 = (torch.randn((n, n), dtype=torch.float32, device=dev),)
         mat3_fp32 = (torch.randn((n, n), dtype=torch.float32, device=dev),)
 
-        dummy_fp32 = [(torch.randn(dimset, dtype=torch.float32, device=dev),)
-                      for dimset in dummy_dimsets]
+        dummy_fp32 = [  # noqa: F841
+            (torch.randn(dimset, dtype=torch.float32, device=dev),)
+            for dimset in dummy_dimsets
+        ]
         # The lists below organize ops that autocast needs to test.
         # self.list_name corresponds to test_autocast_list_name in test/test_cpu.py.
         # Each op is associated with a tuple of valid arguments.

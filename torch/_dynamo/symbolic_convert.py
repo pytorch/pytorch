@@ -3128,7 +3128,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             msg = f"SKIPPED INLINING {code}: {e}"
             log.debug(msg)
             raise Unsupported(msg) from e
-        except Exception as e:
+        except Exception:
             log.debug("FAILED INLINING %s", code)
             raise
         assert tracer.symbolic_result is not None

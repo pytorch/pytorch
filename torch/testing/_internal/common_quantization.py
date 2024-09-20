@@ -1182,8 +1182,7 @@ class QuantizationLiteTestCase(QuantizationTestCase):
         qengine = "qnnpack"
         with override_quantized_engine(qengine):
             # FIXME(rec): shouldn't qconfig be passed to quantize?
-            # pylint: disable-next=unused-variable
-            qconfig = torch.ao.quantization.get_default_qconfig(qengine)
+            qconfig = torch.ao.quantization.get_default_qconfig(qengine)  # noqa: F841
             model = model_class(**kwargs)
             model = quantize(model, test_only_eval_fn, [self.calib_data])
 

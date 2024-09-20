@@ -3121,7 +3121,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         # Wait for all init to complete.
         dist.barrier()
 
-        rref = rpc.remote(  # pylint: disable=unused-variable
+        rref = rpc.remote(  # noqa: F841
             worker_name((self.rank + 1) % self.world_size),
             torch.add,
             args=(torch.ones(2, 2), 1),

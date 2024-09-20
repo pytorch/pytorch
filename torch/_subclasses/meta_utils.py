@@ -770,7 +770,6 @@ class MetaConverter:
             else:
                 return (t.size, t.stride, t.storage_offset)
 
-        # pylint: disable-next=unused-variable
         def empty_create(
             inner_t: MetaTensorDesc, inner_src, symbolic_context=symbolic_context
         ):

@@ -212,7 +212,6 @@ class TritonTemplateKernel(TritonKernel):
         if self.use_jit:
             return "@triton.jit"
 
-        # pylint: disable-next=unused-variable
         argdefs, _, signature, _ = self.args.python_argdefs()
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
@@ -1452,7 +1451,6 @@ class AlgorithmSelectorCache(PersistentCache):
             print(f"{len(choices)} tuning requests:")
 
         # FIXME(rec): This doesn't seem to be used
-        # pylint: disable-next=unused-variable
         def debug_str(example_inputs, out):
             def tensor_repr(x):
                 return (

@@ -49,11 +49,11 @@ class PackagePickler(_PyTorchLegacyPickler):
         self.dispatch[FunctionType] = PackagePickler.save_global  # type: ignore[assignment]
 
     def save_global(self, obj, name=None):
+        # ruff: noqa: F841
         # unfortunately the pickler code is factored in a way that
         # forces us to copy/paste this function. The only change is marked
         # CHANGED below.
         write = self.write  # type: ignore[attr-defined]
-        # pylint: disable-next=unused-variable
         memo = self.memo  # type: ignore[attr-defined]
 
         # CHANGED: import module from module environment instead of __import__
