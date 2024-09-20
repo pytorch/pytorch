@@ -382,18 +382,25 @@ inline_inbuilt_nn_modules = not is_fbcode()
 record_compile_time_instruction_count = False
 
 # Number of eager warmup runs to run before compiling.
-# NOTE: To have warmup runs for Compiled Autograd, you must reuse the same Compiled Autograd context manager
-# (where we will do the stateful tracking of the warmup count).
 # Example:
 # ```
 # torch._dynamo.config.warmup_runs = 1
-# ctx = torch._dynamo.compiled_autograd.enable(torch.compile)
+# torch._dynamo.config.compiled_autograd = True
+#
+# @torch.compile
+# def fn(inputs):
+#     output = model(inputs)
+#     loss = loss_fn(output)
+#     loss.backward()
+#
 # for i in range(3):
-#     # 1st iteration backward is run in eager.
-#     # 2nd iteration backward is run with Compiled Autograd.
-#     with ctx:
-#         output = model(inputs)
+#     # 1st iteration: forward is run in eager, backward is run in eager.
+#     # 2nd iteration: forward is run with compile, backward is run with Compiled Autograd.
+#     fn(inputs)
 # ```
+# NOTE: if you are using the standalone Compiled Autograd context manager,
+# to have warmup runs for Compiled Autograd you must reuse the same context manager for all iterations.
+# (This is because we do the stateful tracking of the warmup count within that context manager.)
 warmup_runs = 0
 
 
