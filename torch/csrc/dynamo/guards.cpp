@@ -26,8 +26,8 @@
 #endif
 
 #include <sstream>
-#include <utility>
 #include <tuple>
+#include <utility>
 
 // For TupleIteratorGetItemAccessor, we need a fast way to retrieve the
 // underlying tuple and access the item. Before Python 3.12 version, the
@@ -2463,24 +2463,24 @@ std::unique_ptr<GuardManager> make_guard_manager(
     py::handle example_value,
     py::handle guard_manager_enum) {
 #if IS_PYBIND_2_13_PLUS
-    using fourobjects =
-        std::tuple<py::object, py::object, py::object, py::object>;
-    PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<fourobjects>
-        storage;
+  using fourobjects =
+      std::tuple<py::object, py::object, py::object, py::object>;
+  PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<fourobjects>
+      storage;
 
-    auto& [guard_manager_enum_class, base_guard_manager_enum, dict_guard_manager_enum, dict_subclass_guard_manager_enum] =
-        storage
-            .call_once_and_store_result([]() -> fourobjects {
-                py::object guard_manager_enum_class =
-                    py::module_::import("torch._dynamo.guards")
-                        .attr("GuardManagerType");
-                return {
-                    guard_manager_enum_class,
-                    guard_manager_enum_class.attr("GUARD_MANAGER"),
-                    guard_manager_enum_class.attr("DICT_GUARD_MANAGER"),
-                    guard_manager_enum_class.attr("DICT_SUBCLASS_GUARD_MANAGER")};
-            })
-            .get_stored();
+  auto& [guard_manager_enum_class, base_guard_manager_enum, dict_guard_manager_enum, dict_subclass_guard_manager_enum] =
+      storage
+          .call_once_and_store_result([]() -> fourobjects {
+            py::object guard_manager_enum_class =
+                py::module_::import("torch._dynamo.guards")
+                    .attr("GuardManagerType");
+            return {
+                guard_manager_enum_class,
+                guard_manager_enum_class.attr("GUARD_MANAGER"),
+                guard_manager_enum_class.attr("DICT_GUARD_MANAGER"),
+                guard_manager_enum_class.attr("DICT_SUBCLASS_GUARD_MANAGER")};
+          })
+          .get_stored();
 #else
   static py::object guard_manager_enum_class =
       py::module_::import("torch._dynamo.guards").attr("GuardManagerType");
