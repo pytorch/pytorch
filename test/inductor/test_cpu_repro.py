@@ -3432,29 +3432,27 @@ class CPUReproTests(TestCase):
                 return self.group_norm(x)
 
         options = itertools.product(
-            vec_dtypes, [torch.contiguous_format, torch.channels_last]
+            vec_dtypes, [torch.contiguous_format, torch.channels_last], [True, False]
         )
-        for dtype, fmt in options:
+        for dtype, fmt, dynamic in options:
             torch._dynamo.reset()
             metrics.reset()
             mod = M().eval()
             x = torch.randn((2, 90, 6, 6), dtype=dtype).to(memory_format=fmt)
             with torch.no_grad():
-                self.common(mod, (x,))
+                expected = mod(x)
+                compiled_m = torch.compile(mod, dynamic=dynamic)
+                actual, code = run_and_get_cpp_code(compiled_m, x)
+                self.assertEqual(expected, actual)
                 # 2 generated kernels (one for var_mean, the other for result)
                 check_metrics_vec_kernel_count(2)
 
-            # check loop split optimization
-            if fmt == torch.channels_last:
-                torch._dynamo.reset()
-                metrics.reset()
-                with torch.no_grad():
-                    opt_mod = torch.compile(mod)
-                    _, code = run_and_get_cpp_code(opt_mod, x)
-                # check that there are no non_contiguous loads
-                FileCheck().check_count("__at_align__ std::array", 0, exactly=True).run(
-                    code
-                )
+                # check loop split optimization
+                if fmt == torch.channels_last:
+                    # check that there are no non_contiguous loads
+                    FileCheck().check_count(
+                        "__at_align__ std::array", 0, exactly=True
+                    ).run(code)
 
     def test_int_div_vec(self):
         def fn(x, y, mode):
