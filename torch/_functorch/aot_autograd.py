@@ -1068,7 +1068,7 @@ def aot_module_simplified(
         return compiled_fn
 
     # Autograd cache stuff
-    if config.enable_autograd_cache:
+    if config.enable_autograd_cache and not torch._inductor.config.force_disable_caches:
         compiled_fn = AOTAutogradCache.load(
             dispatch_and_compile, mod, fake_flat_args, aot_config, cudagraphs
         )
