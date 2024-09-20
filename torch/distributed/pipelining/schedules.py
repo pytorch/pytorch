@@ -580,7 +580,7 @@ class PipelineScheduleSingle(_PipelineSchedule):
         self._num_stages = stage.num_stages
         # Set the same has_backward flag for stage object
         self._stage.has_backward = self._has_backward
-        self._initialized = False
+        self._stage_initialized = False
 
     def step(self, *args, target=None, losses: Optional[List] = None, **kwargs):
         """
@@ -593,11 +593,11 @@ class PipelineScheduleSingle(_PipelineSchedule):
         target: target for the loss function.
         losses: a list to store the losses for each microbatch.
         """
-        if not self._initialized:
+        if not self._stage_initialized:
             self._stage._prepare_forward_infra(self._n_microbatches, args, kwargs)
             if self._has_backward:
                 self._stage._prepare_backward_infra(self._n_microbatches)
-            self._initialized = True
+            self._stage_initialized = True
 
         # Clean per iteration
         self._stage.clear_runtime_states()
@@ -1076,6 +1076,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
         # Set the same has_backward flag for stage object
         for stage in self._stages:
             stage.has_backward = self._has_backward
+        self._stages_initialized = False
 
         self._should_compute_loss = (
             lambda stage: stage.is_last and self._loss_fn is not None
@@ -1084,13 +1085,6 @@ class PipelineScheduleMulti(_PipelineSchedule):
         # This will be set during init of derived schedules
         self.pipeline_order: Dict[int, List[Optional[_Action]]] = {}
         self.use_full_backward = use_full_backward
-
-        # TODO: later replace this with lazy shape inference during forward
-        # Prepare forward send/recv infrastructure for stage
-        for stage in self._stages:
-            stage._prepare_forward_infra(n_microbatches)
-            if self._has_backward:
-                stage._prepare_backward_infra(n_microbatches)
 
     def _dump_csv(self, filename):
         """Dump a CSV representation of the schedule into a file with the provided filename."""
@@ -1186,6 +1180,12 @@ class PipelineScheduleMulti(_PipelineSchedule):
         target: target for the loss function.
         losses: a list to store the losses for each microbatch.
         """
+        if not self._stages_initialized:
+            for stage in self._stages:
+                stage._prepare_forward_infra(self._n_microbatches, args, kwargs)
+                if self._has_backward:
+                    stage._prepare_backward_infra(self._n_microbatches)
+            self._stages_initialized = True
 
         # Clean per iteration
         for stage in self._stages:

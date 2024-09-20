@@ -13,6 +13,7 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.distributed._composable.fsdp.fully_shard import FSDPModule, fully_shard
 from torch.fx.node import map_aggregate
 from torch.nn.parallel import DistributedDataParallel
+from torch.utils._pytree import tree_map_only
 
 from ._backward import stage_backward, stage_backward_input, stage_backward_weight
 from ._debug import map_debug_info
@@ -251,7 +252,12 @@ class _PipelineStageBase(ABC):
         return grad_send_info
 
     @abstractmethod
-    def _prepare_forward_infra(self, num_microbatches: int):
+    def _prepare_forward_infra(
+        self,
+        num_microbatches: int,
+        args: Tuple[Any, ...],
+        kwargs: Optional[Dict[str, Any]] = None,
+    ):
         raise NotImplementedError
 
     def _prepare_backward_infra(self, num_microbatches: int):
@@ -845,7 +851,12 @@ class _PipelineStage(_PipelineStageBase):
         else:
             self.submod.to(self.device)
 
-    def _prepare_forward_infra(self, num_microbatches: int):
+    def _prepare_forward_infra(
+        self,
+        num_microbatches: int,
+        args: Tuple[Any, ...],
+        kwargs: Optional[Dict[str, Any]] = None,
+    ):
         """
         Create send/recv infrastructures for activations (during forward)
         """
@@ -1257,15 +1268,25 @@ class PipelineStage(_PipelineStageBase):
         group: Optional[dist.ProcessGroup] = None,
         dw_builder: Optional[Callable[[], Callable[..., None]]] = None,
     ):
+        assert submodule.device == torch.device(
+            "meta"
+        ), "PipelineStage submodule should be passed on the meta device, and initialized after pipeline stage creation"
         super().__init__(submodule, stage_index, num_stages, device, group, dw_builder)
-        self.inputs: List[torch.Tensor] = None
+        self.inputs: Optional[List[torch.Tensor]] = None
+        inputs_devices = set(
+            tree_map_only(torch.Tensor, lambda x: x.device, input_args)
+        )
+        assert (
+            len(inputs_devices) == 1 and inputs_devices.pop() == submodule.device
+        ), "Inputs were not all on the meta device, refusing to perform shape inference"
         self.inputs_meta = (
             (input_args,) if isinstance(input_args, torch.Tensor) else input_args
         )
+        if output_args is None:
+            output_args = submodule(*self.inputs_meta)
         self._configure_outputs_meta(
             (output_args,) if isinstance(output_args, torch.Tensor) else output_args
         )
-
         # these are the buffers used in backwards send/recv, they are allocated later
         self.outputs_grad: List[torch.Tensor] = []
 
@@ -1286,7 +1307,12 @@ class PipelineStage(_PipelineStageBase):
             f"output: {[output.shape for output in self.get_outputs_meta()]}"
         )
 
-    def _prepare_forward_infra(self, num_microbatches: int, args, kwargs) -> None:
+    def _prepare_forward_infra(
+        self,
+        num_microbatches: int,
+        args: Tuple[Any, ...],
+        kwargs: Optional[Dict[str, Any]] = None,
+    ) -> None:
         # TODO move self.device to an argument from step API (from its input tensors)?
 
         # Receive info during forward
@@ -1431,9 +1457,13 @@ def _validate_stage_shapes(pipeline_stages: List[PipelineStage]):
             _create_metadata_tensor(device=stage.device)
             for _ in range(stage.group_size)
         ]
-        expected_outputs = stage.outputs
-        stage_output = _create_metadata_tensor(expected_outputs, device=stage.device)
-        dist.all_gather(tensor_list, stage_output)
+        outputs_meta = stage.get_outputs_meta()
+        # TODO, (1) are we deleting output validation when we move to shape inference?
+        # (2) if not, we should support multiple outputs
+        assert (
+            len(outputs_meta) == 1
+        ), f"validation logic assumes single output, got {len(outputs_meta)} outputs "
+        dist.all_gather(tensor_list, outputs_meta[0])
         stage_output_shapes = [
             _extract_metadata_from_tensor(tensor) for tensor in tensor_list
         ]
