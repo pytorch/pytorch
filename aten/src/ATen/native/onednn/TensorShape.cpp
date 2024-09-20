@@ -38,16 +38,8 @@ Tensor onednn_transpose(const Tensor& self, int64_t dim0, int64_t dim1) {
   TORCH_CHECK(false, "onednn_transpose: ATen not compiled with ONEDNN support");
 }
 
-Tensor mkldnn_transpose(const Tensor& self, int64_t dim0, int64_t dim1) {
-  TORCH_CHECK(false, "mkldnn_transpose: ATen not compiled with ONEDNN support");
-}
-
 Tensor& onednn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
   TORCH_CHECK(false, "onednn_transpose_: ATen not compiled with ONEDNN support");
-}
-
-Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
-  TORCH_CHECK(false, "mkldnn_transpose_: ATen not compiled with ONEDNN support");
 }
 
 } // namespace native
@@ -107,16 +99,8 @@ Tensor onednn_transpose(const Tensor& self, int64_t dim0, int64_t dim1) {
                                  self.options().device_opt());
 }
 
-Tensor mkldnn_transpose(const Tensor& self, int64_t dim0, int64_t dim1) {
-  return at::native::onednn_transpose(self, dim0, dim1);
-}
-
 Tensor& onednn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
   TORCH_CHECK(false, "onednn_transpose_: in-place onednn operations are not supported yet");
-}
-
-Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
-  TORCH_CHECK(false, "mkldnn_transpose_: in-place onednn operations are not supported yet");
 }
 
 } // namespace native
