@@ -78,7 +78,12 @@ jobs:
         run: |
           export ADDITIONAL_LINTRUNNER_ARGS="format"
           .github/scripts/lintrunner.sh
+      - name: Check for changes
+        id: git-check
+        run: |
+          git diff --exit-code || echo "changes=true" >> $GITHUB_OUTPUT
       - name: Suggest changes
+        if: steps.git-check.outputs.changes == 'true'
         uses: parkerbxyz/suggest-changes@v1
         with:
           comment: "Please commit the suggested changes from pytorch's linter."
