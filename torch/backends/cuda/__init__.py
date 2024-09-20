@@ -124,14 +124,12 @@ class cuFFTPlanCacheManager:
 
 class cuBLASModule:
     def __getattr__(self, name):
-        if name == "allow_tf32":
-            return torch._C._get_cublas_allow_tf32()
+        if name in ("allow_tf32", "fp32_precision", ):
+            return torch._C._get_fp32_precision("cuda", "matmul")
         elif name == "allow_fp16_reduced_precision_reduction":
             return torch._C._get_cublas_allow_fp16_reduced_precision_reduction()
         elif name == "allow_bf16_reduced_precision_reduction":
             return torch._C._get_cublas_allow_bf16_reduced_precision_reduction()
-        elif name == "fp32_precision":
-            return torch._C._get_fp32_precision("cuda", "matmul")
         raise AttributeError("Unknown attribute " + name)
 
     def __setattr__(self, name, value):
