@@ -14,9 +14,9 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 
 try:
-    from .test_fp8 import _quantize_tensorwise, _quantize_rowwise
+    from .test_fp8 import _quantize_rowwise, _quantize_tensorwise
 except ImportError:
-    from test_fp8 import _quantize_tensorwise, _quantize_rowwise
+    from test_fp8 import _quantize_rowwise, _quantize_tensorwise
 
 
 torch.set_float32_matmul_precision("high")
@@ -276,11 +276,14 @@ class TestCKBackend(TestCase):
 
         dtype_float8 = torch.float8_e4m3fnuz
 
-        f_quantize = _quantize_tensorwise if quantize_type == "tensorwise" else _quantize_rowwise
+        f_quantize = (
+            _quantize_tensorwise if quantize_type == "tensorwise" else _quantize_rowwise
+        )
 
         # quantize weight (prior to inference)
         w_fp8, w_inverse_scale = f_quantize(w, dtype_float8)
         w_t_fp8 = w_fp8.t()
+        w_inverse_scale_t = w_inverse_scale.t()
 
         # quantize input x
         x_fp8, x_inverse_scale = f_quantize(x, dtype_float8)
@@ -301,13 +304,27 @@ class TestCKBackend(TestCase):
             )
             return y
 
-        y_eager = linear(
-            x_fp8,
-            x_inverse_scale,
-            w_t_fp8,
-            w_inverse_scale,
-            bias,
-        )
+        if quantize_type == "tensorwise":
+            y_eager = linear(
+                x_fp8,
+                x_inverse_scale,
+                w_t_fp8,
+                w_inverse_scale_t,
+                bias,
+            )
+        else:
+            # FIXME when rowwise quantize is supported by pt eager on ROCm
+            w_fp8_tw, w_inverse_scale_tw = _quantize_tensorwise(w, dtype_float8)
+            w_fp8_tw_t = w_fp8_tw.t()
+            w_inverse_scale_tw_t = w_inverse_scale_tw.t()
+            x_fp8_tw, x_inverse_scale_tw = _quantize_tensorwise(x, dtype_float8)
+            y_eager = linear(
+                x_fp8_tw,
+                x_inverse_scale_tw,
+                w_fp8_tw_t,
+                w_inverse_scale_tw_t,
+                bias,
+            )
 
         with config.patch(
             {
@@ -325,7 +342,7 @@ class TestCKBackend(TestCase):
                 x_fp8,
                 x_inverse_scale,
                 w_t_fp8,
-                w_inverse_scale,
+                w_inverse_scale_t,
                 bias,
             )
             self.assertEqual(y_eager.dtype, dtype)

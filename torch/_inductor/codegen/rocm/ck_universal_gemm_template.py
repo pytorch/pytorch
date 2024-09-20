@@ -271,8 +271,14 @@ class CKGemmTemplate(CKTemplate):
             else:
                 op.c_elementwise_op = "MultiplyMultiply"
                 op.c_shuffle_dtype = "F32"
-                op.ds_layouts = (torch_layout_to_ck_layout(scale_x.get_layout()), torch_layout_to_ck_layout(scale_w.get_layout()))
-                op.ds_element_dtypes = (self._TORCH_DTYPE_TO_CK[scale_x.get_layout().dtype], self._TORCH_DTYPE_TO_CK[scale_w.get_layout().dtype])
+                op.ds_layouts = (
+                    torch_layout_to_ck_layout(scale_x.get_layout()),
+                    torch_layout_to_ck_layout(scale_w.get_layout()),
+                )
+                op.ds_element_dtypes = (
+                    self._TORCH_DTYPE_TO_CK[scale_x.get_layout().dtype],
+                    self._TORCH_DTYPE_TO_CK[scale_w.get_layout().dtype],
+                )
                 op.c_shuffle_block_transfer_scalar_per_vector_n_per_block += (1, 1)
         else:
             scale_x = None
@@ -352,12 +358,24 @@ class CKGemmTemplate(CKTemplate):
             b_elementwise_op="PassThrough {}",
             epilogue=epilogue,
             has_bias=Bias is not None,
-            ds_size=1 if Bias is not None else 2 if op.c_elementwise_op == "MultiplyMultiply" else 0,
+            ds_size=1
+            if Bias is not None
+            else 2
+            if op.c_elementwise_op == "MultiplyMultiply"
+            else 0,
             ds_names=", ".join(
-                ["Bias"] if Bias is not None else ["inv_scale_x", "inv_scale_w"] if op.c_elementwise_op == "MultiplyMultiply" else []
+                ["Bias"]
+                if Bias is not None
+                else ["inv_scale_x", "inv_scale_w"]
+                if op.c_elementwise_op == "MultiplyMultiply"
+                else []
             ),
             ds_strides=", ".join(
-                ["LDD"] if Bias is not None else ["0", "0"] if op.c_elementwise_op == "MultiplyMultiply" else []
+                ["LDD"]
+                if Bias is not None
+                else ["0", "0"]
+                if op.c_elementwise_op == "MultiplyMultiply"
+                else []
             ),
             version_comment=version_comment,
         )
