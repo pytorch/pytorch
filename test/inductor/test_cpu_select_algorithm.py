@@ -14,6 +14,7 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch._inductor.select_algorithm as select_algorithm
 from torch._dynamo.utils import counters
+from torch._inductor import test_operators
 from torch._inductor.cpu_vec_isa import VecAMX
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_device_type import (
@@ -557,6 +558,13 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             True,
         ),
     )
+    @parametrize(
+        "epilogue",
+        (
+            False,
+            True,
+        ),
+    )
     @dtypes(torch.float32)
     def test_linear_unsupported_epilogue_fusion(
         self,
@@ -567,6 +575,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         out_features,
         out_features_conv,
         bias,
+        epilogue,
         dtype,
     ):
         img_size_0 = int(size_0 * size_0)
@@ -589,6 +598,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                     dilation=1,
                     groups=1,
                 )
+                self.epilogue = epilogue
 
             def forward(self, mul_239, view_425, add_184):
                 _mkl_linear_91 = self.linear1(view_425)
@@ -604,6 +614,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 mul_239 = None
 
                 _mkl_linear_89 = self.linear2(view_429)
+                if self.epilogue:
+                    _mkl_linear_89 = torch.pow(_mkl_linear_89, 2)
+                    _mkl_linear_89 = test_operators.realize(_mkl_linear_89)
 
                 view_430 = torch.ops.aten.reshape.default(
                     _mkl_linear_89, [batch_size, img_size_0, img_size_1, in_features]
@@ -655,7 +668,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             )
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
         # TODO: change cpp_epilogue_fusion_counter to 1 once supported
-        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
+        self.assertEqual(
+            counters["inductor"]["cpp_epilogue_fusion_counter"], 1 if epilogue else 0
+        )
 
     @inductor_config.patch({"freezing": True})
     @patches

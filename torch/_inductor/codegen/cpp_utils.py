@@ -5,7 +5,7 @@ import functools
 import math
 import sys
 from collections import namedtuple
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 from unittest.mock import patch
 
 import sympy
@@ -19,7 +19,7 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from .. import ir
 from ..dependencies import Dep
 from ..loop_body import LoopBody
-from ..scheduler import BaseSchedulerNode
+from ..scheduler import BaseSchedulerNode, SchedulerBuffer
 from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
 from ..virtualized import ops, OpsValue, V
 from .common import (
@@ -920,12 +920,12 @@ def _get_dtype_from_loopbodies(loop_bodies):
 
 
 def _get_indexes_of_template_buf_read(
-    epilogue_node: ir.Operation, template_buf_name: str
+    epilogue_node: ir.Operation, template_buf_names: List[str]
 ) -> List[sympy.Expr]:
     return [
         read.index
         for read in epilogue_node.get_reads()
-        if read.name == template_buf_name
+        if read.name in template_buf_names
     ]
 
 
@@ -955,12 +955,11 @@ def _check_supported_and_same_indexes(
 
 
 def _template_fusion_supported(
-    template_node: ir.TemplateBuffer, epilogue_nodes: List[ir.Operation]
+    template_outputs: Sequence[SchedulerBuffer], epilogue_nodes: List[ir.Operation]
 ) -> Tuple[bool, bool]:
-    assert isinstance(template_node, ir.CppTemplateBuffer)
-    template_buf_name = template_node.get_name()
+    template_buf_names = [x.get_name() for x in template_outputs]
     indexes_of_template_buf_reads = [
-        _get_indexes_of_template_buf_read(epilogue_node, template_buf_name)
+        _get_indexes_of_template_buf_read(epilogue_node, template_buf_names)
         for epilogue_node in epilogue_nodes
     ]
     epilogue_nodes_writes = [
@@ -979,8 +978,7 @@ def template_fusion_with_epilogues_supported(
     template: BaseSchedulerNode, epilogues: List[BaseSchedulerNode]
 ) -> Tuple[bool, bool]:
     assert template.is_template()
-    template_node = template.get_template_node()
-    assert template_node is not None
+    template_outputs = template.get_outputs()
 
     epilogue_nodes = [
         n.node
@@ -988,4 +986,4 @@ def template_fusion_with_epilogues_supported(
         for n in epilogue.get_nodes()
         if n.node is not None
     ]
-    return _template_fusion_supported(template_node, epilogue_nodes)
+    return _template_fusion_supported(template_outputs, epilogue_nodes)
