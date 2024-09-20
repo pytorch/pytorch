@@ -49,3 +49,12 @@ jobs:
       build-environment: linux-jammy-xpu-py3.9
       docker-image: ${{ needs.linux-jammy-xpu-py3_9-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-xpu-py3_9-build.outputs.test-matrix }}
+
+  windows-xpu-build:
+    name: win-vs2022-xpu-py3
+    uses: ./.github/workflows/_win-build.yml
+    with:
+      build-environment: win-vs2022-xpu-py3
+      cuda-version: cpu
+      use-xpu: true
+      vc-year: '2022'
