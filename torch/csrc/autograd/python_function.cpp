@@ -330,7 +330,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   args.collect(f->compiled_autograd_symints);
   args.set_default_dyn_type(prior);
 
-  args.collect(f->saved_variables);
+  args.collect(f->saved_variables, true); // always unpacked as output in eager
   args.collect(f->materialize_grads);
   args.collect(f->is_variable_input);
   args.collect(f->needs_input_grad);

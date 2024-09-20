@@ -1115,7 +1115,6 @@ class DynamicRendezvousHandler(RendezvousHandler):
             bootstrap_store_info.master_port,
             is_master=True,
             multi_tenant=True,
-            use_libuv=True,
         )
 
     @property
@@ -1179,7 +1178,9 @@ class DynamicRendezvousHandler(RendezvousHandler):
 
         # opt-out option of TCP store sharing
         if os.getenv("TORCH_DISABLE_SHARE_RDZV_TCP_STORE", "0") == "1":
-            bootstrap_store_info = RendezvousStoreInfo.build(rank, store)
+            bootstrap_store_info = RendezvousStoreInfo.build(
+                rank, store, local_addr=self._this_node.addr
+            )
             return RendezvousInfo(
                 store,
                 rank,
@@ -1199,7 +1200,9 @@ class DynamicRendezvousHandler(RendezvousHandler):
             else:
                 # If the store is not type of TCPStore start TCPStore server, which requries
                 # bootstrapping info across ranks
-                self._bootstrap_store_info = RendezvousStoreInfo.build(rank, store)
+                self._bootstrap_store_info = RendezvousStoreInfo.build(
+                    rank, store, local_addr=self._this_node.addr
+                )
                 if rank == 0:
                     self._shared_tcp_store_server = self._create_tcp_store_server(
                         self._bootstrap_store_info

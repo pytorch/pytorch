@@ -49,13 +49,8 @@ if [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
 fi
 
 # Enable LLVM dependency for TensorExpr testing
-if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  export USE_LLVM=/opt/rocm/llvm
-  export LLVM_DIR=/opt/rocm/llvm/lib/cmake/llvm
-else
-  export USE_LLVM=/opt/llvm
-  export LLVM_DIR=/opt/llvm/lib/cmake/llvm
-fi
+export USE_LLVM=/opt/llvm
+export LLVM_DIR=/opt/llvm/lib/cmake/llvm
 
 if [[ "$BUILD_ENVIRONMENT" == *executorch* ]]; then
   # To build test_edge_op_registration
@@ -285,9 +280,8 @@ else
     if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
           "$BUILD_ENVIRONMENT" != *xla* ]]; then
       if [[ "$BUILD_ENVIRONMENT" != *py3.8* ]]; then
-        # Install numpy-2.0 release candidate for builds
-        # Which should be backward compatible with Numpy-1.X
-        python -mpip install --pre numpy==2.0.0rc1
+        # Install numpy-2.0.2 for builds which are backward compatible with 1.X
+        python -mpip install --pre numpy==2.0.2
       fi
 
       WERROR=1 python setup.py clean

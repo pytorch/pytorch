@@ -10,30 +10,21 @@ import unittest
 from typing import Callable
 from unittest.mock import patch
 
-import numpy as np
-import sympy
-
 import torch
 from torch import nn
 from torch._C import FileCheck
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config, cpu_vec_isa, metrics, test_operators
-from torch._inductor.codegen.common import OptimizationContext
-from torch._inductor.codegen.cpp import (
-    CppOverrides,
-    CppVecKernelChecker,
-    CppVecOverrides,
-)
+from torch._inductor.codegen.cpp import CppOverrides, CppVecOverrides
 from torch._inductor.compile_fx import (
     compile_fx,
     compile_fx_inner,
     complex_memory_overlap,
 )
 from torch._inductor.graph import GraphLowering
-from torch._inductor.ir import InterpreterShim
 from torch._inductor.utils import timed
-from torch._inductor.virtualized import V
+from torch._prims_common import is_float_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
@@ -51,7 +42,7 @@ try:
     try:
         from . import test_torchinductor
     except ImportError:
-        import test_torchinductor
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -1916,6 +1907,16 @@ class CPUReproTests(TestCase):
         res = cfn(x, bit_num)
         self.assertEqual(res_aten_eager, res)
 
+    def test_view_dtype(self):
+        def f(x):
+            return x.view(torch.int32) >> 2
+
+        input = torch.ones(16, 16)
+        res_aten_eager = f(input)
+        cfn = torch.compile(f)
+        res = cfn(input)
+        self.assertEqual(res_aten_eager, res)
+
     @patch("torch.cuda.is_available", lambda: False)
     def test_scatter_using_atomic_add(self):
         def fn(a, dim, index, b):
@@ -1970,6 +1971,32 @@ class CPUReproTests(TestCase):
 
             with config.patch({"cpp.dynamic_threads": True}), set_num_threads(1):
                 _internal_check(fn, inps, "aten.scatter_reduce_")
+
+    @patch("torch.cuda.is_available", lambda: False)
+    @requires_vectorization
+    @torch._inductor.config.patch({"cpp.fallback_scatter_reduce_sum": False})
+    def test_scatter_using_atomic_add_vec(self):
+        def fn(a, dim, index, b):
+            return aten.scatter(a, dim, index, b, reduce="add")
+
+        inps = (
+            torch.zeros(1, 1, 25),
+            2,
+            torch.tensor([[[3, 5, 7, 9] * 5]]),
+            torch.ones(1, 1, 25),
+        )
+        torch._dynamo.reset()
+        metrics.reset()
+        self.common(fn, inps)
+        assert metrics.generated_cpp_vec_kernel_count == 2
+
+        with set_num_threads(1), config.patch(
+            {"fx_graph_cache": False, "fx_graph_remote_cache": False}
+        ):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, inps)
+            assert metrics.generated_cpp_vec_kernel_count == 2
 
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @requires_vectorization
@@ -2215,6 +2242,37 @@ class CPUReproTests(TestCase):
                     - metrics.generated_cpp_vec_kernel_count
                 ) == 0
 
+    @requires_vectorization
+    def test_vec_remainder(self):
+        for dtype in [
+            torch.int8,
+            torch.uint8,
+            torch.int32,
+            torch.int64,
+            torch.bfloat16,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+        ]:
+            if is_float_dtype(dtype):
+                x = torch.randn(64, dtype=dtype)
+                y = torch.randn(64, dtype=dtype)
+            else:
+                lower = 1 if dtype == torch.uint8 else -100
+                x = torch.randint(lower, 100, (64,), dtype=dtype)
+                y = torch.randint(lower, 100, (64,), dtype=dtype)
+                y = torch.where(
+                    y == torch.zeros_like(y),
+                    torch.ones_like(y),
+                    y,
+                )
+
+            torch._dynamo.reset()
+            metrics.reset()
+            _args = (x, y)
+            self.common(torch.remainder, _args)
+            check_metrics_vec_kernel_count(1)
+
     def test_skip_cpp_codegen(self):
         with config.patch({"disable_cpp_codegen": True}):
             inps = torch.ones([20]), torch.rand([20])
@@ -2316,230 +2374,6 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         assert metrics.cpp_to_dtype_count == 2
         check_metrics_vec_kernel_count(1)
-
-    @requires_vectorization
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_cpp_vec_constant_checker(self):
-        _graph: torch.fx.Graph = torch.fx.Graph()
-        a: torch.fx.Node = _graph.create_node("placeholder", "ops")
-        iv: torch.fx.Node = _graph.create_node("placeholder", "iv")
-        fv: torch.fx.Node = _graph.create_node("placeholder", "fv")
-        b: torch.fx.Node = _graph.create_node(
-            "call_method",
-            "constant",
-            args=(
-                a,
-                iv,
-                torch.int64,
-            ),
-        )
-        c: torch.fx.Node = _graph.create_node(
-            "call_method",
-            "constant",
-            args=(
-                a,
-                fv,
-                torch.double,
-            ),
-        )
-        d: torch.fx.Node = _graph.create_node(
-            "call_method",
-            "ge",
-            args=(
-                a,
-                b,
-                b,
-            ),
-        )
-        _graph.output((d, c))
-
-        def get_index():
-            return ""
-
-        submodules = {"get_index": get_index}
-
-        graph_lowering = GraphLowering(
-            torch.fx.GraphModule(submodules, _graph),
-            shape_env=None,
-        )
-
-        def set_opt_dtype(graph):
-            for node in graph.nodes:
-                if node.target == "constant":
-                    if OptimizationContext.key in node.meta:
-                        opt_ctx = node.meta[OptimizationContext.key]
-                    else:
-                        opt_ctx = OptimizationContext()
-                    opt_ctx.dtype = node.args[-1]
-                    node.meta[OptimizationContext.key] = opt_ctx
-
-        with patch.object(graph_lowering, "wrapper_code", ""), V.set_graph_handler(
-            graph_lowering
-        ):
-            # The moset inner loop variable is used in the index_expr
-            tiling_factor = cpu_vec_isa.pick_vec_isa().nelements(dtype=torch.float)
-            with CppVecKernelChecker(
-                args=None, num_threads=1, tiling_factor=tiling_factor
-            ) as vec_checker:
-                i32_iinfo = np.iinfo(np.int32)
-                f32_iinfo = np.finfo(np.float32)
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.max, f32_iinfo.max
-                )
-                self.assertTrue(vec_checker.simd_vec)
-
-                vec_checker.simd_vec = True
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.min, f32_iinfo.min
-                )
-                self.assertTrue(vec_checker.simd_vec)
-
-                vec_checker.simd_vec = True
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.min, np.inf
-                )
-                self.assertTrue(vec_checker.simd_vec)
-
-                vec_checker.simd_vec = True
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.min, -np.inf
-                )
-                self.assertTrue(vec_checker.simd_vec)
-
-                vec_checker.simd_vec = True
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.min - 1, f32_iinfo.min
-                )
-                self.assertTrue(vec_checker.simd_vec)
-
-                vec_checker.simd_vec = True
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.max + 1, f32_iinfo.max
-                )
-                self.assertTrue(vec_checker.simd_vec)
-
-                vec_checker.simd_vec = True
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.min, f32_iinfo.min * (1 + 1e-5)
-                )
-                self.assertTrue(vec_checker.simd_vec)
-
-                vec_checker.simd_vec = True
-                set_opt_dtype(_graph)
-                InterpreterShim(_graph, submodules).run(
-                    V.get_ops_handler(), i32_iinfo.max, f32_iinfo.max * (1 + 1e-5)
-                )
-                self.assertTrue(vec_checker.simd_vec)
-
-    @requires_vectorization
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_cpp_vec_index_expr_checker(self):
-        _graph: torch.fx.Graph = torch.fx.Graph()
-        a: torch.fx.Node = _graph.create_node("placeholder", "ops")
-        b: torch.fx.Node = _graph.create_node("call_module", "get_index", args=())
-        c: torch.fx.Node = _graph.create_node(
-            "call_method",
-            "index_expr",
-            args=(
-                a,
-                b,
-                torch.int64,
-            ),
-        )
-        d: torch.fx.Node = _graph.create_node(
-            "call_method",
-            "ge",
-            args=(
-                a,
-                c,
-                c,
-            ),
-        )
-        _graph.output(d)
-
-        def get_index():
-            return ""
-
-        submodules = {"get_index": get_index}
-        graph_lowering = GraphLowering(
-            torch.fx.GraphModule(submodules, _graph),
-            shape_env=None,
-        )
-        with patch.object(graph_lowering, "wrapper_code", ""), V.set_graph_handler(
-            graph_lowering
-        ):
-            itervars = [sympy.Symbol("i"), sympy.Symbol("j"), sympy.Symbol("k")]
-
-            tiling_factor = cpu_vec_isa.pick_vec_isa().nelements(dtype=torch.float)
-            # The most inner loop variable is used in the index_expr
-            with CppVecKernelChecker(
-                args=None, num_threads=1, tiling_factor=tiling_factor
-            ) as vec_checker:
-
-                def get_index():
-                    return -itervars[0] ** 2 + 2 * itervars[0] + itervars[1]
-
-                ranges = [0, 100, 200]
-                vec_checker.itervars = itervars[:2]
-                vec_checker.ranges = ranges[:2]
-                submodules = {"get_index": get_index}
-                InterpreterShim(_graph, submodules).run(V.get_ops_handler())
-                self.assertTrue(vec_checker.simd_vec)
-
-            # Most inner loop variable irrevalant
-            with CppVecKernelChecker(
-                args=None, num_threads=1, tiling_factor=tiling_factor
-            ) as vec_checker:
-
-                def get_index():
-                    return -itervars[0] ** 2 + 2 * itervars[0] + itervars[1]
-
-                ranges = [0, 100, 200]
-                vec_checker.itervars = itervars
-                vec_checker.ranges = ranges
-                submodules = {"get_index": get_index}
-                InterpreterShim(_graph, submodules).run(V.get_ops_handler())
-                self.assertTrue(vec_checker.simd_vec)
-
-            i32_iinfo = np.iinfo(np.int32)
-            _max_value = i32_iinfo.max + 1
-            ranges = [_max_value, _max_value, _max_value]
-            # Most inner loop variable irrevalant but max value is greater than
-            # the max value of INT32
-            with CppVecKernelChecker(
-                args=None, num_threads=1, tiling_factor=tiling_factor
-            ) as vec_checker:
-
-                def get_index():
-                    return itervars[0]
-
-                submodules = {"get_index": get_index}
-                vec_checker.itervars = itervars
-                vec_checker.ranges = ranges
-                InterpreterShim(_graph, submodules).run(V.get_ops_handler())
-                self.assertTrue(vec_checker.simd_vec)
-
-            # Most inner loop variable irrevalant but min value is greater than
-            # the min value of INT32
-            with CppVecKernelChecker(
-                args=None, num_threads=1, tiling_factor=tiling_factor
-            ) as vec_checker:
-
-                def get_index():
-                    return -itervars[0] - 2
-
-                submodules = {"get_index": get_index}
-                vec_checker.itervars = itervars
-                vec_checker.ranges = ranges
-                InterpreterShim(_graph, submodules).run(V.get_ops_handler())
-                self.assertTrue(vec_checker.simd_vec)
 
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
@@ -3588,7 +3422,6 @@ class CPUReproTests(TestCase):
                 dtype if dtype else torch.float32,
             )
 
-    @config.patch("cpp.enable_tiling_heuristics", False)
     def test_group_norm_vec(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -3599,29 +3432,45 @@ class CPUReproTests(TestCase):
                 return self.group_norm(x)
 
         options = itertools.product(
-            vec_dtypes, [torch.contiguous_format, torch.channels_last]
+            vec_dtypes, [torch.contiguous_format, torch.channels_last], [True, False]
         )
-        for dtype, fmt in options:
+        for dtype, fmt, dynamic in options:
             torch._dynamo.reset()
             metrics.reset()
             mod = M().eval()
             x = torch.randn((2, 90, 6, 6), dtype=dtype).to(memory_format=fmt)
             with torch.no_grad():
-                self.common(mod, (x,))
+                expected = mod(x)
+                compiled_m = torch.compile(mod, dynamic=dynamic)
+                actual, code = run_and_get_cpp_code(compiled_m, x)
+                self.assertEqual(expected, actual)
                 # 2 generated kernels (one for var_mean, the other for result)
                 check_metrics_vec_kernel_count(2)
+
+                # check loop split optimization
+                if fmt == torch.channels_last:
+                    # check that there are no non_contiguous loads
+                    FileCheck().check_count(
+                        "__at_align__ std::array", 0, exactly=True
+                    ).run(code)
 
     def test_int_div_vec(self):
         def fn(x, y, mode):
             return torch.div(x, y, rounding_mode=mode)
 
-        x = torch.randint(1, 100, (32, 32))
-        y = torch.randint(1, 100, (32, 32))
-        for mode in [None, "trunc", "floor"]:
-            with torch.no_grad():
-                metrics.reset()
-                self.common(fn, (x, y, mode))
-                check_metrics_vec_kernel_count(1)
+        for dtype in [
+            torch.int8,
+            torch.uint8,
+            torch.int32,
+            torch.int64,
+        ]:
+            x = torch.randint(1, 100, (32, 32), dtype=dtype)
+            y = torch.randint(1, 100, (32, 32), dtype=dtype)
+            for mode in [None, "trunc", "floor"]:
+                with torch.no_grad():
+                    metrics.reset()
+                    self.common(fn, (x, y, mode))
+                    check_metrics_vec_kernel_count(1)
 
     def test_uint8_add(self):
         # https://github.com/pytorch/pytorch/issues/113016
@@ -4213,6 +4062,68 @@ class CPUReproTests(TestCase):
             )
             n_veckernel = 6 if op is torch.masked.mean else 3
             check_metrics_vec_kernel_count(n_veckernel)
+
+    @requires_vectorization
+    def test_full_bits_lowp(self):
+        def check_use_full_bits(func, shapes, dtype, mixed, check_vecn):
+            example_inputs = [torch.randn(shape, dtype=dtype) for shape in shapes]
+            if mixed:
+                example_inputs[0] = example_inputs[0].to(
+                    dtype=torch.half if dtype == torch.bfloat16 else torch.bfloat16
+                )
+            f_opt = torch.compile()(func)
+            _, code = run_and_get_cpp_code(f_opt, *example_inputs)
+            if check_vecn:
+                self.assertTrue(
+                    "at::vec::VectorizedN" in code or "at::vec::convert<float,2" in code
+                )
+            else:
+                self.assertFalse(
+                    "at::vec::VectorizedN" in code or "at::vec::convert<float,2" in code
+                )
+
+        funcs = []
+
+        def func0(arg0, arg1):
+            return torch.ops.aten.sum(
+                torch.ops.aten.add(torch.ops.aten.atanh(arg0), arg1), (2, 3)
+            )
+
+        funcs.append(func0)
+
+        def func1(arg0):
+            v = torch.ops.prims.convert_element_type.default(arg0, torch.float)
+            v = torch.ops.aten.add(torch.ops.aten.atanh(arg0), v)
+            return torch.ops.prims.convert_element_type.default(v, arg0.dtype)
+
+        funcs.append(func1)
+
+        def func2(arg0, arg1):
+            v = torch.ops.aten.atanh(arg0)
+            v = torch.ops.aten.add(v, arg1)
+            return torch.ops.prims.convert_element_type.default(v, arg1.dtype)
+
+        funcs.append(func2)
+
+        # test small shapes
+        funcs.append(func2)
+        small_size = cpu_vec_isa.pick_vec_isa().nelements(dtype=torch.bfloat16) // 2
+
+        example_shapes = [
+            [(10, 32, 20, 20), (10, 32, 20, 20)],
+            [(10, 32, 20, 20)],
+            [(10, 32, 20, 20), (10, 32, 20, 20)],
+            # test small shapes
+            [(small_size), (small_size)],
+        ]
+        mixed_types = [False, False, True, False]
+        check_vecns = [True, True, True, False]
+
+        for dtype in [torch.bfloat16, torch.float16]:
+            for func, shapes, mixed, check_vecn in zip(
+                funcs, example_shapes, mixed_types, check_vecns
+            ):
+                check_use_full_bits(func, shapes, dtype, mixed, check_vecn)
 
 
 if __name__ == "__main__":

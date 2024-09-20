@@ -136,6 +136,7 @@ blocklist = [
     "requires_grad",
     "range",
     # defined in functional
+    "cumsum",
     "einsum",
     # Somehow, these are defined in both _C and in functional. Ick!
     "broadcast_tensors",
@@ -780,6 +781,9 @@ def gen_pyi(
             "_sync": ["def _sync(t: Tensor) -> None: ..."],
             "_is_functional_tensor": [
                 "def _is_functional_tensor(t: Tensor) -> _bool: ..."
+            ],
+            "_is_functional_tensor_base": [
+                "def _is_functional_tensor_base(t: Tensor) -> _bool: ..."
             ],
             "_from_functional_tensor": [
                 "def _from_functional_tensor(t: Tensor) -> Tensor: ..."
