@@ -10,6 +10,17 @@ from typing import Dict, List, Set, Tuple
 import networkx as nx
 import torch.fx as fx
 import xpress as xp
+from pulp import (
+    lpDot,
+    LpInteger,
+    LpMinimize,
+    LpProblem,
+    LpStatus,
+    lpSum,
+    LpVariable,
+    PULP_CBC_CMD,
+    value,
+)
 
 
 @dataclass
@@ -127,98 +138,68 @@ class LongRecomputationChains:
         """
         solve the ILP problem to find the set of nodes to save.
         """
-        # solve ILP
-        print("---------formulating ILP problem---------")
-        prob = xp.problem()
+        prob = LpProblem("BWPA", LpMinimize)
+        # Define variables
+        X = LpVariable.dicts("X", list(self.graph.nodes), 0, None, LpBinary)
+        Z = LpVariable.dicts("Z", list(self.graph.nodes), 0, None, LpContinuous)
+        y = LpVariable("y", 0, None, LpContinuous)
+        Q = LpVariable.dicts(
+            "Q",
+            [(i, j) for i in self.graph.nodes for j in self.graph.nodes],
+            0,
+            None,
+            LpContinuous,
+        )
+        recomp_budget = 2
+        # Define problem
+        prob = LpProblem("ILP", LpMinimize)
+        # Add variables to problem
 
-        # Variables 1: x_i i.e. whether node is saved (1) or recomputed (0)
-        X = {
-            (i): xp.var(vartype=xp.binary, name="X[{i}]".format(i=i))
-            for i in list(self.graph.nodes)
-        }
-        prob.addVariable(list(X.values()))
-
-        # Variables 2: z_i cumulative memory needed to compute node i
-        Z = {
-            (i): xp.var(vartype=xp.continuous, name="Z[{i}]".format(i=i))
-            for i in list(self.graph.nodes)
-        }
-        prob.addVariable(list(Z.values()))
-
-        # Variables 3: dummy variable y for the max
-        y = xp.var(vartype=xp.continuous, name="y")
-        prob.addVariable(y)
-
-        # Variables 4: q_i aux variables for linearizing cumulative memory constraints q_i = Z[i]*X[i]. (Z ---> x and X ---> d see https://msi-jp.com/xpress/learning/square/10-mipformref.pdf pg 8)
-        Q = {}
-        for i in self.graph.nodes:
-            prec = list(self.graph.predecessors(i))
-            if i not in prec:
-                prec += [i]
-            for j in prec:
-                Q[i, j] = xp.var(vartype=xp.continuous, name=f"Q[{i}, {j}]")
-                prob.addVariable(Q[i, j])
-
-        M = 20 * sum([self.data[i]["mem"] for i in self.graph.nodes])
+        # Define constraints
+        M = 20 * sum([self.data[i]["mem"] for i in graph.nodes])
 
         for i in list(self.graph.nodes):
             prec = list(self.graph.predecessors(i))
             if i in prec:
                 prec.remove(i)
-            # Constraint 1: cumulative memory: z_i = sum_j in prec z_j*(1-x_j) + m_i*(1-x_i) for (j,i) in E
-            c1 = xp.constraint(
-                (
-                    Z[i]
-                    == -self.data[i]["mem"] * X[i]
-                    + xp.Sum(Z[t] - Q[t, t] for t in prec)
-                    + self.data[i]["mem"]
-                ),
-                name="cumulative_mem_constraint {i}".format(i=i),
+
+            # Constraint 1: cumulative memory
+            prob += (
+                Z[i]
+                == -self.data[i]["mem"] * X[i]
+                + sum(Z[t] - Q[t, t] for t in prec)
+                + self.data[i]["mem"]
             )
-            prob.addConstraint(c1)
-            c2 = xp.constraint(
-                Z[i] <= y, name="peak mem constraint {i}".format(i=i)
-            )  # peak memory dummy consraint
-            prob.addConstraint(c2)
+
+            # Constraint 2: peak memory dummy constraint
+            prob += Z[i] <= y
+
             for t in prec:
-                c3 = xp.constraint(
-                    Q[t, t] <= M * X[t],
-                    name="linearization constraint 1 {i}{t}".format(i=i, t=t),
-                )  # linearization constraint
-                prob.addConstraint(c3)
-                c4 = xp.constraint(
-                    Q[t, t] >= 0,
-                    name="linearization constraint 2 {i}{t}".format(i=i, t=t),
-                )  # linearization constraint
-                prob.addConstraint(c4)
-                c5 = xp.constraint(
-                    Z[t] - Q[t, t] >= 0,
-                    name="linearization constraint 3 {i}{t}".format(i=i, t=t),
-                )  # linearization constraint
-                prob.addConstraint(c5)
-                c6 = xp.constraint(
-                    Z[i] - Q[t, t] <= M * (1 - X[t]),
-                    name="linearization constraint 4 {i}{t}".format(i=i, t=t),
-                )  # linearization constraint
-                prob.addConstraint(c6)
-        prob.addConstraint(
-            xp.Sum(self.data[i]["mem"] * X[i] for i in list(self.graph.nodes))
+                # Linearization constraints
+                prob += Q[t, t] <= M * X[t]
+                prob += Q[t, t] >= 0
+                prob += Z[t] - Q[t, t] >= 0
+                prob += Z[i] - Q[t, t] <= M * (1 - X[t])
+
+        # Add budget constraint
+        prob += (
+            sum(self.data[i]["mem"] * X[i] for i in list(self.graph.nodes))
             <= recomp_budget
         )
-
-        prob.setObjective(y, sense=xp.minimize)  # objective is to minimize peak memory
-        print("---------ILP problem is ready to be solved----------")
+        # Set Objeictive
+        prob += lpSum(y)
         self.prob = prob
 
     def solve_ILP(self) -> Tuple[List[int], List[int]]:
-        self.prob.solve()
-        X = self.prob.getSolution()
-        saved_values = [
-            idx for idx, z in enumerate(X[: len(self.graph.nodes)]) if z > 0.9
-        ]
-        recomp_values = [
-            idx for idx, z in enumerate(X[: len(self.graph.nodes)]) if z <= 0.9
-        ]
+        solver = PULP_CBC_CMD()
+        status = self.prob.solve(solver)  # Use the default solver
+        if status != 1:
+            logger.error("Solver failed to find a solution: %s", LpStatus[status])
+        else:
+            print("Solver found a solution")
+        sol = [X[i].varValue for i in X.keys() if X[i].varValue > 0.9]
+        saved_values = [i for i in X.keys() if X[i].varValue > 0.9]
+        recomp_values = [i for i in X.keys() if X[i].varValue <= 0.9]
         return saved_values, recomp_values
 
 
