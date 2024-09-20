@@ -6,6 +6,9 @@
 #include <c10/core/Device.h>
 #include <c10/core/Storage.h>
 #include <c10/util/Exception.h>
+#include <c10/core/TensorOptions.h>
+#include <c10/core/TensorImpl.h>
+#include <c10/util/OptionalArrayRef.h>
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
 
@@ -48,6 +51,13 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
         false,
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `resizePrivateUse1Bytes`.");
   }
+  virtual void forBlobPrivateUse1(Tensor&tensor, void* data, 
+  IntArrayRef sizes, 
+  at::OptionalIntArrayRef strides, 
+  c10::optional<int64_t> storage_offset,
+  at::TensorOptions options,
+  const c10::optional<Device> target_device) const {return;};
+
 };
 
 struct TORCH_API PrivateUse1HooksArgs {};
