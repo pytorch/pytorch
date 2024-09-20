@@ -56,7 +56,7 @@ static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
   TORCH_CHECK(
       !invalid,
       "Attempted to access the data pointer on an invalid python storage.")
-  return torch::autograd::utils::wrap(self_.mutable_data());
+  return PyLong_FromVoidPtr(self_.mutable_data());
   END_HANDLE_TH_ERRORS
 }
 
