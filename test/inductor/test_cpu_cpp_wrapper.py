@@ -28,11 +28,11 @@ try:
             test_torchinductor_dynamic_shapes,
         )
     except ImportError:
-        import test_cpu_repro
-        import test_cpu_select_algorithm
-        import test_mkldnn_pattern_matcher
-        import test_torchinductor
-        import test_torchinductor_dynamic_shapes
+        import test_cpu_repro  # @manual=fbcode//caffe2/test/inductor:test_cpu_repro-library
+        import test_cpu_select_algorithm  # @manual=fbcode//caffe2/test/inductor:cpu_select_algorithm_cpu-library
+        import test_mkldnn_pattern_matcher  # @manual
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+        import test_torchinductor_dynamic_shapes  # @manual=fbcode//caffe2/test/inductor:test_inductor-library_dynamic_shapes
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -129,7 +129,7 @@ def make_test_case(
     assert callable(func), "not a callable"
     func = slowTest(func) if slow else func
 
-    @config.patch(cpp_wrapper=True)
+    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
     def fn(self):
         tests.setUpClass()
         tests.setUp()

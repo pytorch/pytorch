@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import torch
 
+from . import triton_helpers
 from .autotune_cache import AutotuneCache
 from .benchmarking import benchmarker
 from .coordinate_descent_tuner import CoordescTuner
@@ -265,10 +266,11 @@ class CachingAutotuner(KernelInterface):
                 self.inductor_meta.get("dynamic_scale_rblock", True)
                 and self.heuristic_type == HeuristicType.REDUCTION
                 and self.size_hints is not None
-                # Disable for AMDGPU/Intel as Triton is not ready to return n_regs for a compiled_binary.
-                and device_prop.type == "cuda"
+                # Disable for Intel as Triton is not ready to return n_regs for a compiled_binary.
+                and device_prop.type in ["cuda", "hip"]
                 and device_prop.major
-                and device_prop.major >= 8
+                and (device_prop.major >= 8 or torch.version.hip)
+                and device_prop.regs_per_multiprocessor is not None
             ):
                 assert device_prop.regs_per_multiprocessor
                 assert device_prop.max_threads_per_multi_processor
@@ -305,7 +307,7 @@ class CachingAutotuner(KernelInterface):
                     ):
                         continue
 
-                    nreg_per_warp = nreg * 32
+                    nreg_per_warp = nreg * device_prop.warp_size
                     nreg_per_block = nreg_per_warp * triton_config.num_warps
 
                     # Previously we set max_blocks_per_sm to 'max_threads_per_multi_processo / (32 * num_warps)'
@@ -359,7 +361,7 @@ class CachingAutotuner(KernelInterface):
                 if k == "waves_per_eu":
                     compile_meta["waves_per_eu"] = v
                     continue
-            compile_meta["constants"][self.fn.arg_names.index(k)] = v
+            compile_meta["constants"][k] = v
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
         compile_meta["debug"] = self.inductor_meta.get(
@@ -369,6 +371,11 @@ class CachingAutotuner(KernelInterface):
         # device type will be "hip" rather than "cuda" here
         compile_meta["device_type"] = self.device_props.type
         compile_meta["cc"] = self.device_props.cc
+
+        if self.device_props.type == "cpu":
+            triton_helpers.set_driver_to_cpu()
+        else:
+            triton_helpers.set_driver_to_gpu()
 
         if ASTSource:
             compile_args = (
@@ -408,7 +415,7 @@ class CachingAutotuner(KernelInterface):
                 "num_stages": compile_meta["num_stages"],
                 "debug": compile_meta["debug"],
             }
-            if self.device_props.type != "hip":
+            if self.device_props.type == "hip":
                 if "waves_per_eu" in compile_meta:
                     options["waves_per_eu"] = compile_meta["waves_per_eu"]
                 if "matrix_instr_nonkdim" in compile_meta:
@@ -675,7 +682,7 @@ class CachingAutotuner(KernelInterface):
         if self.device_props.type == "cpu":
             return benchmarker.benchmark_cpu(kernel_call)
 
-        return benchmarker.benchmark_gpu(kernel_call, rep=40, fast_flush=True)
+        return benchmarker.benchmark_gpu(kernel_call, rep=40)
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
         from ..compile_fx import clone_preserve_strides

@@ -219,13 +219,15 @@ class TritonTemplateKernel(TritonKernel):
 
         argdefs, _, signature, _ = self.args.python_argdefs()
         triton_meta = {
-            "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
+            "signature": signature_to_meta(
+                signature, size_dtype=self.index_dtype, argdefs=argdefs
+            ),
             "device": DeviceProperties.create(self.output_node.get_device()),
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
         for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
-            triton_meta["constants"][arg_num] = 1  # type: ignore[index]
+            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index]
         matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", 0)
         if matrix_instr_nonkdim != 0:
             triton_meta["matrix_instr_nonkdim"] = matrix_instr_nonkdim
@@ -578,7 +580,7 @@ class TritonTemplateKernel(TritonKernel):
                 grid_fn=f"{self.grid_fn.__module__}.{self.grid_fn.__name__}",
                 arg_types=arg_types,
                 triton_meta=self.triton_meta,
-                cuda="cpu" not in V.graph.device_types,
+                gpu="cpu" not in V.graph.device_types,
             )
 
 
@@ -1267,6 +1269,11 @@ class AlgorithmSelectorCache(PersistentCache):
             )
 
             if timings:
+                return no_op
+
+            if config.search_autotune_cache and not (
+                config.max_autotune or config.max_autotune_gemm
+            ):
                 return no_op
 
             precompile_key = create_precompile_key(name, inputs_key, choices)
