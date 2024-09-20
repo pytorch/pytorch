@@ -24,10 +24,10 @@ torch_log = logging.getLogger(__name__)
 class MemoryPlanningInfoForBuffer:
     size_alloc: int = 0
     size_free: int = 0
-    outdegree: int = 0
     succ_nodes: OrderedSet[BaseSchedulerNode] = dataclasses.field(
         default_factory=OrderedSet
     )
+    outdegree: int = 0  # this is used only in topological_sort_lpmf
 
 
 @dataclasses.dataclass
@@ -39,9 +39,9 @@ class MemoryPlanningInfoForNode:
     succ_nodes: List[BaseSchedulerNode] = dataclasses.field(default_factory=list)
     indegree: int = 0
     index: int = 0
-    memory_to_free: int = 0
     size: int = 0
-    size_with_reads: int = 0
+    memory_to_free: int = 0  # this is used only in topological_sort_lpmf
+    size_with_reads: int = 0  # this is used only in topological_sort_dfs
 
 
 @dataclasses.dataclass
