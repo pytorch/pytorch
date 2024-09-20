@@ -61,7 +61,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    runs-on: "linux.2xlarge"
+    runs-on: "lf.linux.2xlarge"
     if: ${{ github.event_name == 'pull_request' && github.repository_owner == 'pytorch' }}
     steps:
       - name: Checkout pytorch
@@ -83,6 +83,7 @@ jobs:
         run: |
           git diff --exit-code || echo "changes=true" >> $GITHUB_OUTPUT
       - name: Suggest changes
+        continue-on-error: true
         if: steps.git-check.outputs.changes == 'true'
         uses: parkerbxyz/suggest-changes@v1
         with:
