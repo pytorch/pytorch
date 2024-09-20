@@ -11049,6 +11049,13 @@ foreach_binary_op_db: List[OpInfo] = [
                          dtypes=(torch.bool,),),
             DecorateInfo(unittest.skip("flaky"), "TestForeach", "test_parity", device_type="cpu", dtypes=(torch.complex64,)),
             DecorateInfo(
+                unittest.skip("failed starting on ROCm 6.2"),
+                "TestForeach",
+                "test_parity",
+                device_type="cuda",
+                dtypes=(torch.complex64,),
+                active_if=TEST_WITH_ROCM),
+            DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
                 "test_binary_op_with_scalar_self_support",
