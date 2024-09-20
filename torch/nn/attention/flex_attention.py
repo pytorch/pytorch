@@ -925,6 +925,9 @@ class PagedAttention:
         assert D == cache.shape[3]
         device = val.device
 
+        if not val.is_contiguous():
+            val = val.contiguous()
+
         # find address
         logical_block_idx = input_pos // self.page_size  # [S]
         logical_block_offset = input_pos % self.page_size  # [S]
@@ -1015,6 +1018,7 @@ class PagedAttention:
         return new_mask_mod
 
     def get_score_mod(self, score_mod: _score_mod_signature) -> _score_mod_signature:
+        # TODO: discuss what's the correct handle of score_mod = None.
         def new_score_mod(score, b, h, q_idx, physical_kv_idx):
             physical_kv_block = physical_kv_idx // self.page_size
             physical_kv_offset = physical_kv_idx % self.page_size
