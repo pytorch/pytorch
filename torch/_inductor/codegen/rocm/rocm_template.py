@@ -160,9 +160,7 @@ class ROCmTemplate(KernelTemplate):
                 #endif
                 #endif
 
-                // using bfloat16 = __hip_bfloat16;
-                // using float8_e4m3fnuz = __hip_fp8_e4m3_fnuz;
-                // using float8_e5m2fnuz = __hip_fp8_e5m2_fnuz;
+                // as long as there is no custom arithmetic it's fine
                 using bfloat16 = uint16_t;
                 using float8_e4m3fnuz = uint8_t;
                 using float8_e5m2fnuz = uint8_t;

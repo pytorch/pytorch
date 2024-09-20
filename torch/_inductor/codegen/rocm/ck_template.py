@@ -24,11 +24,6 @@ class CKTemplate(ROCmTemplate):
         res = super().header()
         res.splice(
             """
-                // HIP headers
-
-                // #include <hip/hip_bf16.h>
-                // #include <hip/hip_fp8.h>
-
                 // CK headers
 
                 #ifdef DEBUG_LOG
