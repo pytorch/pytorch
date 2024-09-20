@@ -115,7 +115,11 @@ class LoopBody:
         where we are just reordering/merging/splitting the args of an
         existing LoopBody.
         """
-        self.indexing_exprs = other.indexing_from_args(args)
+        indexing_exprs = other.indexing_from_args(args)
+        self.indexing_exprs = {
+            name: V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges)
+            for name, expr in indexing_exprs.items()
+        }
         self.subblocks = {k: v.clone(self) for k, v in other.subblocks.items()}
         self.indirect_vars = other.indirect_vars
         self.indirect_var_ranges = other.indirect_var_ranges
