@@ -1071,41 +1071,66 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
 #ifdef USE_ROCM
-#define F8E4M3 Float8_e4m3fnuz
-#define F8E5M2 Float8_e5m2fnuz
-#else
-#define F8E4M3 Float8_e4m3fn
-#define F8E5M2 Float8_e5m2
-#endif
-#define TUNABLE_DISPATCH(BLASOP_A, BLASOP_B)                   \
-        if (mat1.scalar_type() == ScalarType::F8E4M3) {        \
-          if (mat2.scalar_type() == ScalarType::F8E4M3) {      \
-            static at::cuda::tunable::ScaledGemmTunableOp<     \
-                at::F8E4M3, at::F8E4M3, scalar_t,              \
-                BLASOP_A, BLASOP_B> scaledgemm{&params};       \
-            scaledgemm(&params);                               \
-          }                                                    \
-          else if (mat2.scalar_type() == ScalarType::F8E5M2) { \
-            static at::cuda::tunable::ScaledGemmTunableOp<     \
-                at::F8E4M3, at::F8E5M2, scalar_t,              \
-                BLASOP_A, BLASOP_B> scaledgemm{&params};       \
-            scaledgemm(&params);                               \
-          }                                                    \
-        }                                                      \
-        else if (mat1.scalar_type() == ScalarType::F8E5M2) {   \
-          if (mat2.scalar_type() == ScalarType::F8E4M3) {      \
-            static at::cuda::tunable::ScaledGemmTunableOp<     \
-                at::F8E5M2, at::F8E4M3, scalar_t,              \
-                BLASOP_A, BLASOP_B> scaledgemm{&params};       \
-            scaledgemm(&params);                               \
-          }                                                    \
-          else if (mat2.scalar_type() == ScalarType::F8E5M2) { \
-            static at::cuda::tunable::ScaledGemmTunableOp<     \
-                at::F8E5M2, at::F8E5M2, scalar_t,              \
-                BLASOP_A, BLASOP_B> scaledgemm{&params};       \
-            scaledgemm(&params);                               \
-          }                                                    \
+#define TUNABLE_DISPATCH(BLASOP_A, BLASOP_B)                            \
+        if (mat1.scalar_type() == ScalarType::Float8_e4m3fnuz) {        \
+          if (mat2.scalar_type() == ScalarType::Float8_e4m3fnuz) {      \
+            static at::cuda::tunable::ScaledGemmTunableOp<              \
+                at::Float8_e4m3fnuz, at::Float8_e4m3fnuz, scalar_t,     \
+                BLASOP_A, BLASOP_B> scaledgemm{&params};                \
+            scaledgemm(&params);                                        \
+          }                                                             \
+          else if (mat2.scalar_type() == ScalarType::Float8_e5m2fnuz) { \
+            static at::cuda::tunable::ScaledGemmTunableOp<              \
+                at::Float8_e4m3fnuz, at::Float8_e5m2fnuz, scalar_t,     \
+                BLASOP_A, BLASOP_B> scaledgemm{&params};                \
+            scaledgemm(&params);                                        \
+          }                                                             \
+        }                                                               \
+        else if (mat1.scalar_type() == ScalarType::Float8_e5m2fnuz) {   \
+          if (mat2.scalar_type() == ScalarType::Float8_e4m3fnuz) {      \
+            static at::cuda::tunable::ScaledGemmTunableOp<              \
+                at::Float8_e5m2fnuz, at::Float8_e4m3fnuz, scalar_t,     \
+                BLASOP_A, BLASOP_B> scaledgemm{&params};                \
+            scaledgemm(&params);                                        \
+          }                                                             \
+          else if (mat2.scalar_type() == ScalarType::Float8_e5m2fnuz) { \
+            static at::cuda::tunable::ScaledGemmTunableOp<              \
+                at::Float8_e5m2fnuz, at::Float8_e5m2fnuz, scalar_t,     \
+                BLASOP_A, BLASOP_B> scaledgemm{&params};                \
+            scaledgemm(&params);                                        \
+          }                                                             \
         }
+#else
+#define TUNABLE_DISPATCH(BLASOP_A, BLASOP_B)                            \
+        if (mat1.scalar_type() == ScalarType::Float8_e4m3fn) {          \
+          if (mat2.scalar_type() == ScalarType::Float8_e4m3fn) {        \
+            static at::cuda::tunable::ScaledGemmTunableOp<              \
+                at::Float8_e4m3fn, at::Float8_e4m3fn, scalar_t,         \
+                BLASOP_A, BLASOP_B> scaledgemm{&params};                \
+            scaledgemm(&params);                                        \
+          }                                                             \
+          else if (mat2.scalar_type() == ScalarType::Float8_e5m2) {     \
+            static at::cuda::tunable::ScaledGemmTunableOp<              \
+                at::Float8_e4m3fn, at::Float8_e5m2, scalar_t,           \
+                BLASOP_A, BLASOP_B> scaledgemm{&params};                \
+            scaledgemm(&params);                                        \
+          }                                                             \
+        }                                                               \
+        else if (mat1.scalar_type() == ScalarType::Float8_e5m2) {       \
+          if (mat2.scalar_type() == ScalarType::Float8_e4m3fn) {        \
+            static at::cuda::tunable::ScaledGemmTunableOp<              \
+                at::Float8_e5m2, at::Float8_e4m3fn, scalar_t,           \
+                BLASOP_A, BLASOP_B> scaledgemm{&params};                \
+            scaledgemm(&params);                                        \
+          }                                                             \
+          else if (mat2.scalar_type() == ScalarType::Float8_e5m2) {     \
+            static at::cuda::tunable::ScaledGemmTunableOp<              \
+                at::Float8_e5m2, at::Float8_e5m2, scalar_t,             \
+                BLASOP_A, BLASOP_B> scaledgemm{&params};                \
+            scaledgemm(&params);                                        \
+          }                                                             \
+        }
+#endif
     AT_DISPATCH_V2(out_dtype_, "_tunable_scaled_gemm", AT_WRAP([&] {
       bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
       bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
