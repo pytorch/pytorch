@@ -12,11 +12,17 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/linear.h>
 #include <ATen/ops/onednn_linear_backward_input.h>
+#include <ATen/ops/mkldnn_linear_backward_input.h>
 #include <ATen/ops/onednn_linear_backward_input_native.h>
+#include <ATen/ops/mkldnn_linear_backward_input_native.h>
 #include <ATen/ops/onednn_linear_backward_native.h>
+#include <ATen/ops/mkldnn_linear_backward_native.h>
 #include <ATen/ops/onednn_linear_backward_weights.h>
+#include <ATen/ops/mkldnn_linear_backward_weights.h>
 #include <ATen/ops/onednn_linear_backward_weights_native.h>
+#include <ATen/ops/mkldnn_linear_backward_weights_native.h>
 #include <ATen/ops/onednn_linear_native.h>
+#include <ATen/ops/mkldnn_linear_native.h>
 #endif
 
 #if !AT_ONEDNN_ENABLED()
