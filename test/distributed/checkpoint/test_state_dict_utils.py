@@ -28,12 +28,9 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 class TestStateDictUtils(DTensorTestBase):
-    # @property
-    # def world_size(self):
-    #     return min(4, torch.cuda.device_count())
     @property
-    def world_size(self) -> int:
-        return 2
+    def world_size(self):
+        return min(4, torch.cuda.device_count())
 
     @with_comms
     @skip_if_lt_x_gpu(2)
