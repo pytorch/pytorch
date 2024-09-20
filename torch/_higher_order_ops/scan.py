@@ -66,7 +66,7 @@ def shift_source_dim_to_target_dim(t, from_dim: int, to_dim: int):
     return t.permute(*dims)
 
 def get_gradient_mask(tensor_list):
-    return [True if v.requires_grad else False for v in tensor_list]
+    return [True if v is not None and v.requires_grad else False for v in tensor_list]
 
 
 # Internal functions for scan.py
@@ -187,9 +187,8 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs):
                     )
                 ]
                 g_xs = g_xs[: len(g_xs) - num_additional_inputs]
-                
-                g_c = [g for g, g_m in zip(g_c, carry_mask) if g_m]
                 g_xs = [g for g, g_m in zip(g_xs, xs_mask) if g_m]
+                g_c = [g for g, g_m in zip(g_c, carry_mask) if g_m]
                 
                 return [*new_g_additional_inputs, *g_c, *g_xs]
 
@@ -387,19 +386,22 @@ def generic_scan(operator, init, xs, dim=0, reverse=False, additional_inputs=Non
         # idxs -> Index matrix for scatter_
         # out: (num_elems, M, N, ...)
         # idx: (1, M, N)
-        outs, idxs = zip(
-            *[
-                [
-                    torch.zeros(
-                        [num_elems] + list(e.size()),
-                        dtype=e.dtype,
-                        device=e.device,
-                    ),
-                    torch.ones_like(e, dtype=torch.int64).unsqueeze(0),
+        if len(dummy_out) > 0:
+            outs, idxs = zip(
+                *[
+                    [
+                        torch.zeros(
+                            [num_elems] + list(e.size()),
+                            dtype=e.dtype,
+                            device=e.device,
+                        ),
+                        torch.ones_like(e, dtype=torch.int64).unsqueeze(0),
+                    ]
+                    for i, e in enumerate(dummy_out)
                 ]
-                for i, e in enumerate(dummy_out)
-            ]
-        )
+            )
+        else:
+            outs, idxs = [], []
 
         def store_out_in_outs(out, ind):
             # Store the intermediate out in the outs matrix
@@ -695,7 +697,7 @@ class ScanAutogradOp(torch.autograd.Function):
             )
             xs_bwd = [*g_ys, *carries, *xs]
 
-            # import pdb
+            import pdb
             g_outs = scan_op(
                 joint_graph,
                 [*g_additional_inputs, *g_c_T],
@@ -713,9 +715,11 @@ class ScanAutogradOp(torch.autograd.Function):
             g_xs = g_outs[len(g_outs) - num_xs_mask:]
             g_xs = prepare_final_gradients_xs(g_xs, dim, reverse)
 
-        # pdb.set_trace()
+        
         new_g_additional_inputs = fill_grads_with_mask(new_g_additional_inputs, additional_inputs_mask)
-        # pdb.set_trace()
+        pdb.set_trace()
+        g_xs = fill_grads_with_mask(g_xs, xs_mask)
+        pdb.set_trace()
         return *[None] * 6, *g_init, *g_xs, *new_g_additional_inputs
 
 

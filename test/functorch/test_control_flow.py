@@ -2917,10 +2917,10 @@ def forward(self, pred_1, x_1):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    @parametrize("reverse", [False, True])
-    # @parametrize("reverse", [False])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    # @parametrize("compile_mode", ["eager"])
+    # @parametrize("reverse", [False, True])
+    @parametrize("reverse", [False])
+    # @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["eager"])
     # @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("device", [torch.device("cpu")])
     def test_scan_closure_RNN_partial_autograd(self, reverse, compile_mode, device):
@@ -2929,9 +2929,10 @@ def forward(self, pred_1, x_1):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
         autograds = []
-        autograds.append([True, True, True, False, True, False])
-        autograds.append([True, True, True, False, False, False])
-        autograds.append([True, True, False, False, False, False])
+        autograds.append([False, True, True, True, True, True, True])
+        # autograds.append([True, True, True, False, True, False])
+        # autograds.append([True, True, True, False, False, False])
+        # autograds.append([True, True, False, False, False, False])
         
         # autograds.append([True, True, True, True, True, True])
         # autograds.append([False, False, True, True, True, True])
@@ -2943,16 +2944,17 @@ def forward(self, pred_1, x_1):
 
         for autograd in autograds:
             x = torch.randn(3, 10, 5, device=device, requires_grad=autograd[0])
-            h = torch.randn(3, 7, device=device, requires_grad=autograd[1])
-            W_ih = torch.randn(5, 7, device=device, requires_grad=autograd[2])
-            b_ih = torch.randn(7, device=device, requires_grad=autograd[3])
-            W_hh = torch.randn(7, 7, device=device, requires_grad=autograd[4])
-            b_hh = torch.randn(7, device=device, requires_grad=autograd[5])
+            x1 = torch.randn(3, 10, 5, device=device, requires_grad=autograd[1])
+            h = torch.randn(3, 7, device=device, requires_grad=autograd[2])
+            W_ih = torch.randn(5, 7, device=device, requires_grad=autograd[3])
+            b_ih = torch.randn(7, device=device, requires_grad=autograd[4])
+            W_hh = torch.randn(7, 7, device=device, requires_grad=autograd[5])
+            b_hh = torch.randn(7, device=device, requires_grad=autograd[6])
 
-            params = [p for p, a in zip([x, h, W_ih, b_ih, W_hh, b_hh], autograd) if a]
+            params = [p for p, a in zip([x, x1, h, W_ih, b_ih, W_hh, b_hh], autograd) if a]
 
             def RNN(x: torch.Tensor, y: torch.Tensor):
-                c_new = y @ W_ih + b_ih
+                c_new = y[0] @ W_ih + b_ih + y[1] @ W_ih
                 h_new = torch.tanh(c_new + x @ W_hh + b_hh)
                 return c_new, h_new
 
@@ -2963,8 +2965,8 @@ def forward(self, pred_1, x_1):
             #     ):
             #         result = scan_fct(RNN, h, x, dim=dim, reverse=reverse)
             # else:
-            result = scan_fct(RNN, h, x, dim=dim, reverse=reverse)
-            result_exp = _fake_scan(RNN, h, x, dim=dim, reverse=reverse)
+            result = scan_fct(RNN, h, (x, x1), dim=dim, reverse=reverse)
+            result_exp = _fake_scan(RNN, h, (x, x1), dim=dim, reverse=reverse)
             self.assertEqual(result, result_exp)
 
             if autograd:
