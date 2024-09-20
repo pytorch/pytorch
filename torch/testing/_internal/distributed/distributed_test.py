@@ -62,7 +62,7 @@ from torch.testing._internal.common_distributed import (
     initialize_temp_directories,
     cleanup_temp_dir,
     simple_sparse_reduce_tests,
-    skip_if_rocm,
+    skip_if_rocm_multiprocess,
     skip_if_small_worldsize,
     skip_if_odd_worldsize,
     skip_if_lt_x_gpu,
@@ -3936,7 +3936,7 @@ class DistributedTest:
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl", "Only NCCL supports CUDA all_to_all"
         )
-        @skip_if_rocm
+        @skip_if_rocm_multiprocess
         def test_all_to_all_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -3952,7 +3952,7 @@ class DistributedTest:
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl", "Only NCCL supports CUDA all_to_all"
         )
-        @skip_if_rocm
+        @skip_if_rocm_multiprocess
         def test_all_to_all_cuda_complex(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -4020,7 +4020,7 @@ class DistributedTest:
             BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
         )
         @skip_if_small_worldsize
-        @skip_if_rocm
+        @skip_if_rocm_multiprocess
         def test_all_to_all_group_cuda(self):
             group, group_id, rank = self._init_group_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -4080,7 +4080,7 @@ class DistributedTest:
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl", "Only NCCL supports CUDA all_to_all"
         )
-        @skip_if_rocm
+        @skip_if_rocm_multiprocess
         def test_all_to_all_full_group_cuda(self):
             group, group_id, rank = self._init_full_group_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -8866,6 +8866,8 @@ class DistributedTest:
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_monitored_barrier_allreduce_hang_wait_all_ranks(self):
+            # Need to disable TORCH_NCCL_DUMP_ON_TIMEOUT otherwise this test times out
+            os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = "0"
             # tests expected behavior when nonzero rank hangs and we want to
             # report all timed out ranks.
             self._test_monitored_barrier_allreduce_hang(wait_all_ranks=True)

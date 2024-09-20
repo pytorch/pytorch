@@ -115,7 +115,7 @@ class CommDebugModeExample:
             output_tp = model(inp)
             output_tp.sum().backward()
 
-        comm_mode.print_sharding_info()
+        print(comm_mode.get_sharding_info())
 
     def example_MLPStacked_distributed_sharding_display(self) -> None:
         """
@@ -152,7 +152,7 @@ class CommDebugModeExample:
             output_tp = model(inp)
             output_tp.sum().backward()
 
-        comm_mode.print_sharding_info()
+        print(comm_mode.get_sharding_info())
 
     def example_MLP_module_tracing(self) -> None:
         """

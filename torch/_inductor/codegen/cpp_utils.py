@@ -16,6 +16,7 @@ from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import ir
+from ..loop_body import LoopBody
 from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
 from ..virtualized import ops, OpsValue, V
 from .common import (
@@ -84,7 +85,7 @@ LAYOUT_TO_ATEN = {
 
 _IS_WINDOWS = sys.platform == "win32"
 
-INDEX_TYPE = "int64_t" if _IS_WINDOWS else "long"
+INDEX_TYPE = "int64_t"
 
 GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
 
@@ -223,7 +224,9 @@ class CppCSEVariable(CSEVariable):
 
 class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr):
-        return f"{int(expr)}LL" if _IS_WINDOWS else f"{int(expr)}L"
+        return (
+            f"{int(expr)}LL" if sys.platform in ["darwin", "win32"] else f"{int(expr)}L"
+        )
 
     def _print_Where(self, expr):
         c = self.paren(self.doprint(expr.args[0]))
@@ -237,7 +240,7 @@ class CppPrinter(ExprPrinter):
         if div != 1:
             div = self.paren(self.doprint(div))
             if expr.is_integer:
-                x = f"c10::div_floor_integer({x}, {div})"
+                x = f"c10::div_floor_integer(static_cast<int64_t>({x}), static_cast<int64_t>({div}))"
             else:
                 x = f"c10::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
         mod = self.paren(self.doprint(mod))
@@ -248,7 +251,7 @@ class CppPrinter(ExprPrinter):
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
         if expr.is_integer:
-            return f"c10::div_floor_integer({x}, {div})"
+            return f"c10::div_floor_integer(static_cast<int64_t>({x}), static_cast<int64_t>({div}))"
         return f"c10::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
 
     def _print_floor(self, expr):
@@ -346,7 +349,7 @@ class CppPrinter(ExprPrinter):
     def _print_Min(self, expr):
         args = [self._print(a) for a in expr.args]
         if len(args) == 2:
-            return f"std::min({args[0]}, {args[1]})"
+            return f"std::min(static_cast<{INDEX_TYPE}>({args[0]}), static_cast<{INDEX_TYPE}>({args[1]}))"
         else:
             # Initializer list overload
             il = "{" + ", ".join(args) + "}"
@@ -355,7 +358,7 @@ class CppPrinter(ExprPrinter):
     def _print_Max(self, expr):
         args = [self._print(a) for a in expr.args]
         if len(args) == 2:
-            return f"std::max({args[0]}, {args[1]})"
+            return f"std::max(static_cast<{INDEX_TYPE}>({args[0]}), static_cast<{INDEX_TYPE}>({args[1]}))"
         else:
             # Initializer list overload
             il = "{" + ", ".join(args) + "}"
@@ -878,3 +881,36 @@ def create_epilogue_with_attr(input_buffer, attr, **kwargs):
         inner_fn=inner_fn,
         ranges=input_buffer.get_size(),
     )
+
+
+def _get_loop_body(fn_list):
+    if all(isinstance(fn, LoopBody) for fn in fn_list):
+        loop_bodies = fn_list
+    else:
+        if hasattr(fn_list[0], "original_fn"):
+            # For the case of local buffer, we wrap the fn with localize_function
+            assert all(hasattr(fn, "original_fn") for fn in fn_list)
+            assert all(
+                isinstance(fn.original_fn.args[0]._body, LoopBody) for fn in fn_list
+            )
+            loop_bodies = [fn.original_fn.args[0]._body for fn in fn_list]
+        else:
+            assert all(isinstance(fn, functools.partial) for fn in fn_list)
+            assert all(isinstance(fn.args[0]._body, LoopBody) for fn in fn_list)
+            loop_bodies = [fn.args[0]._body for fn in fn_list]
+    assert loop_bodies is not None
+    return loop_bodies
+
+
+def _get_dtype_from_loopbodies(loop_bodies):
+    dtypes = set()
+    for loop_body in loop_bodies:
+        graphs = [loop_body.root_block.graph] + [
+            body.graph for body in list(loop_body.subblocks.values())
+        ]
+        for graph in graphs:
+            for node in graph.nodes:
+                if node.op != "call_method":
+                    continue
+                dtypes.add(node.meta[OptimizationContext.key].dtype)
+    return dtypes
