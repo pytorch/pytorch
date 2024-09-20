@@ -3129,10 +3129,8 @@ class DeviceCachingAllocator {
 // errors, since the caching allocator foils cuda-memcheck.
 static bool forceUncachedAllocator() {
   // Allow either CUDA or HIP name for env var for maximum user comfort
-  // break up the name to avoid hipify changing it
-  static const char* cuda_env = getenv(
-      "PYTORCH_NO_C"
-      "UDA_MEMORY_CACHING");
+  // the CUDA env var avoids being hipified in cuda_to_hip_mappings.py
+  static const char* cuda_env = getenv("PYTORCH_NO_CUDA_MEMORY_CACHING");
   static const char* rocm_env = getenv("PYTORCH_NO_HIP_MEMORY_CACHING");
   static bool force_uncached = (cuda_env != nullptr) || (rocm_env != nullptr);
   return force_uncached;
