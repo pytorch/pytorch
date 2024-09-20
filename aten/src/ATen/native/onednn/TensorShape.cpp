@@ -26,10 +26,6 @@ Tensor onednn_reshape(const Tensor& self, IntArrayRef size) {
   TORCH_CHECK(false, "onednn_reshape: ATen not compiled with ONEDNN support");
 }
 
-Tensor mkldnn_reshape(const Tensor& self, IntArrayRef size) {
-  TORCH_CHECK(false, "mkldnn_reshape: ATen not compiled with ONEDNN support");
-}
-
 Tensor onednn_clone(const Tensor& self, std::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(false, "onednn_clone: ATen not compiled with ONEDNN support");
 }
@@ -67,10 +63,6 @@ Tensor onednn_reshape(const Tensor& self, IntArrayRef size) {
   y.reshape(inferred_size);
   return new_with_itensor_onednn(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
                                  self.options().device_opt());
-}
-
-Tensor mkldnn_reshape(const Tensor& self, IntArrayRef size) {
-  return at::native::onednn_reshape(self, size);
 }
 
 Tensor onednn_clone(const Tensor& self, std::optional<c10::MemoryFormat> optional_memory_format) {
