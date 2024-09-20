@@ -255,8 +255,6 @@ class _PipelineStageBase(ABC):
     def _prepare_forward_infra(
         self,
         num_microbatches: int,
-        args: Tuple[Any, ...],
-        kwargs: Optional[Dict[str, Any]] = None,
     ):
         raise NotImplementedError
 
@@ -854,8 +852,6 @@ class _PipelineStage(_PipelineStageBase):
     def _prepare_forward_infra(
         self,
         num_microbatches: int,
-        args: Tuple[Any, ...],
-        kwargs: Optional[Dict[str, Any]] = None,
     ):
         """
         Create send/recv infrastructures for activations (during forward)
@@ -1268,22 +1264,28 @@ class PipelineStage(_PipelineStageBase):
         group: Optional[dist.ProcessGroup] = None,
         dw_builder: Optional[Callable[[], Callable[..., None]]] = None,
     ):
-        assert submodule.device == torch.device(
-            "meta"
-        ), "PipelineStage submodule should be passed on the meta device, and initialized after pipeline stage creation"
         super().__init__(submodule, stage_index, num_stages, device, group, dw_builder)
         self.inputs: Optional[List[torch.Tensor]] = None
         inputs_devices = set(
             tree_map_only(torch.Tensor, lambda x: x.device, input_args)
         )
-        assert (
-            len(inputs_devices) == 1 and inputs_devices.pop() == submodule.device
-        ), "Inputs were not all on the meta device, refusing to perform shape inference"
+
+        # Note: inputs and submod should ideally be on meta device. We decided not to assert this (yet) becuase it
+        # might be breaking for existing users.
         self.inputs_meta = (
             (input_args,) if isinstance(input_args, torch.Tensor) else input_args
         )
         if output_args is None:
-            output_args = submodule(*self.inputs_meta)
+            try:
+                output_args = submodule(*self.inputs_meta)
+                output_args = tree_map_only(
+                    torch.Tensor, lambda x: x.to("meta"), output_args
+                )
+            except Exception as e:
+                raise RuntimeError(
+                    "Failed to perform pipeline shape inference- are your inputs on the same device as your module?"
+                ) from e
+        assert output_args is not None  # for mypy
         self._configure_outputs_meta(
             (output_args,) if isinstance(output_args, torch.Tensor) else output_args
         )
@@ -1310,8 +1312,6 @@ class PipelineStage(_PipelineStageBase):
     def _prepare_forward_infra(
         self,
         num_microbatches: int,
-        args: Tuple[Any, ...],
-        kwargs: Optional[Dict[str, Any]] = None,
     ) -> None:
         # TODO move self.device to an argument from step API (from its input tensors)?
 
