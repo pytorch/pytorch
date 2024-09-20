@@ -2630,7 +2630,7 @@ class Module:
             <class 'torch.Tensor'> (20L, 1L, 5L, 5L)
 
         """
-        for name, param in self.named_parameters(recurse=recurse):
+        for _, param in self.named_parameters(recurse=recurse):
             yield param
 
     def named_parameters(
@@ -2725,7 +2725,7 @@ class Module:
         Yields:
             Module: a child module
         """
-        for name, module in self.named_children():
+        for _, module in self.named_children():
             yield module
 
     def named_children(self) -> Iterator[Tuple[str, "Module"]]:

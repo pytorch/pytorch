@@ -46,7 +46,7 @@ class Int16Tensor(torch.Tensor):
 
     def __repr__(self) -> str:
         with no_dispatch():
-            t16 = self.view(torch.int16)
+            self.view(torch.int16)
             return f"TensorSubclassDemo{self.view(torch.int16)}"
 
 

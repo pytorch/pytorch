@@ -317,7 +317,6 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                         check_overloaded(a)
 
             overloaded_args = tuple(overloaded_args_list)
-            overloaded_types = tuple(type(arg) for arg in overloaded_args)
 
             # Step 1: dispatch on any user TorchDispatchModes
             from torch.utils._python_dispatch import _pop_mode_temporarily
@@ -1155,7 +1154,7 @@ def _call_overload_packet_from_python(op: OpOverloadPacket, args, kwargs):
     err_msg = (
         f"Fail to match any TorchBindOverload of {op} with following exceptions:\n"
     )
-    for i, (key, msg) in enumerate(exceptions.items()):
+    for key, msg in exceptions.items():
         err_msg += f"Overload name {key}:\n {msg}\n"
     raise RuntimeError(err_msg)
 

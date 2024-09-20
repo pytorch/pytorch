@@ -235,7 +235,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
         x = torch.tensor([1 + 2j, 3 + 4j], dtype=torch.complex64)
 
-        with self.assertRaises(torch.onnx.OnnxExporterError) as e:
+        with self.assertRaises(torch.onnx.OnnxExporterError):
             torch.onnx.dynamo_export(
                 TraceModel(),
                 x,

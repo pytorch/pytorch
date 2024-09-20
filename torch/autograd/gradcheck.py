@@ -674,7 +674,7 @@ def _get_numerical_vJu(
 ):
     # Note that all_v can also be None, in that case, this function only computes Ju.
     reduced_jacobians: List[List[torch.Tensor]] = []
-    for i, (inp_idx, u) in enumerate(zip(inp_indices, all_u)):
+    for inp_idx, u in zip(inp_indices, all_u):
         all_Ju = _get_numerical_jvp_wrt_specific_input(
             fn, inp_idx, inputs, u, eps, is_forward_ad
         )
@@ -1226,10 +1226,8 @@ def _test_backward_mul_by_grad_output(outputs, inputs, masked) -> bool:
 def _test_undefined_forward_mode(func, outputs, inputs):
     fwAD = torch.autograd.forward_ad
 
-    inp_tensors_idx, inp_tensors = _get_inp_tensors(inputs)
-    all_v, all_u, all_u_dense = _make_vectors(inp_tensors, outputs, use_forward_ad=True)
-
-    tensor_inputs = tuple(i for i in inputs if is_tensor_like(i) and i.requires_grad)
+    _, inp_tensors = _get_inp_tensors(inputs)
+    _, all_u, _ = _make_vectors(inp_tensors, outputs, use_forward_ad=True)
 
     with fwAD.dual_level():
         fw_grads = []
@@ -1271,8 +1269,8 @@ def _test_undefined_forward_mode(func, outputs, inputs):
             dual_inputs[idx] = dual_inp_obj
 
             for index_o, (d_o1, d_o2) in enumerate(zip(dual_outputs1, dual_outputs2)):
-                val1, res1 = fwAD.unpack_dual(d_o1)
-                val2, res2 = fwAD.unpack_dual(d_o2)
+                _, res1 = fwAD.unpack_dual(d_o1)
+                _, res2 = fwAD.unpack_dual(d_o2)
 
                 if not (res1 is None or res2 is None):
                     if not torch.allclose(res1, res2):
@@ -1320,7 +1318,7 @@ def _test_undefined_backward_mode(func, outputs, inputs) -> bool:
                 '"tools/autograd/derivatives.yaml"'
             ) from e
 
-        for gi, i in zip(grads_input, diff_input_list):
+        for gi in grads_input:
             if (gi is not None) and (not gi.eq(0).all()):
                 warn_bc_breaking()
                 raise GradcheckError(
@@ -2046,7 +2044,7 @@ def gradcheck(
     if not raise_exception:
         try:
             return _gradcheck_helper(**args)
-        except GradcheckError as e:
+        except GradcheckError:
             return False
     else:
         return _gradcheck_helper(**args)

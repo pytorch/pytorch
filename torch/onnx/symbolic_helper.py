@@ -1988,7 +1988,7 @@ def _embedding_bag_helper(
 
     # FIXME(justinchuby): We need to handle what happens when we call b.op on a node return
     block_input_iter = utils._add_input_to_block(loop_block)
-    cond = utils._add_input_to_block(loop_block)
+    utils._add_input_to_block(loop_block)
 
     indices_start = loop_context.op(
         "Gather", offsets_starts, block_input_iter, axis_i=0

@@ -1,4 +1,5 @@
 # Owner(s): ["module: multi-headed-attention"]
+# ruff: noqa: F841
 
 import contextlib
 from functools import partial

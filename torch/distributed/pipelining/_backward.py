@@ -58,7 +58,7 @@ def reverse_closure(
         node = q.popleft()
         metadata = cast(Dict[str, List], node.metadata)
         reverse_edges = metadata.get("reverse_edges", [])
-        for holder_ref, idx in reverse_edges:
+        for holder_ref, _ in reverse_edges:
             ref = holder_ref()
             if ref is None:
                 # this reverse graph is no longer alive
@@ -123,8 +123,8 @@ def get_param_groups(inputs: List[Node], params: List[Node]) -> List[Dict[str, A
     # but omits weights and any subgraphs connecting weights to this closure
     inputs_closure, _ = reverse_closure(inputs, set())
     param_groups: Dict[Node, Dict[str, Set]] = dict()  # keyed on intermediates
-    for i, param in enumerate(params):
-        closure, intersected = reverse_closure([param], inputs_closure)
+    for param in params:
+        _, intersected = reverse_closure([param], inputs_closure)
         param_group: Dict[str, Set] = {
             "params": {param},
             "intermediates": intersected,

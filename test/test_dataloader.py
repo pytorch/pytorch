@@ -1,4 +1,5 @@
 # Owner(s): ["module: dataloader"]
+# ruff: noqa: F841
 
 import ctypes
 import errno

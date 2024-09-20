@@ -1314,7 +1314,7 @@ class TestDistributions(DistributionsTestCase):
         if not msk.all():
             counts = np.concatenate([counts[msk], np.sum(counts[~msk], keepdims=True)])
             pmf = np.concatenate([pmf[msk], np.sum(pmf[~msk], keepdims=True)])
-        chisq, p = scipy.stats.chisquare(counts, pmf * num_samples)
+        _, p = scipy.stats.chisquare(counts, pmf * num_samples)
         self.assertGreater(p, failure_rate, message)
 
     def _check_enumerate_support(self, dist, examples):
@@ -1912,9 +1912,7 @@ class TestDistributions(DistributionsTestCase):
     @set_default_dtype(torch.double)
     def test_one_hot_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
-        probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
         p = torch.tensor(probabilities, requires_grad=True)
-        s = torch.tensor(probabilities_1, requires_grad=True)
         self.assertEqual(OneHotCategorical(p).sample().size(), (2, 3))
         self.assertEqual(
             OneHotCategorical(p).sample(sample_shape=(3, 4)).size(), (3, 4, 2, 3)
@@ -2074,13 +2072,11 @@ class TestDistributions(DistributionsTestCase):
     @set_default_dtype(torch.double)
     def test_relaxed_one_hot_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
-        probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
         temp = torch.tensor([3.0], requires_grad=True)
         # The lower the temperature, the more unstable the log_prob gradcheck is
         # w.r.t. the sample. Values below 0.25 empirically fail the default tol.
         temp_2 = torch.tensor([0.25], requires_grad=True)
         p = torch.tensor(probabilities, requires_grad=True)
-        s = torch.tensor(probabilities_1, requires_grad=True)
         self.assertEqual(RelaxedOneHotCategorical(temp, p).sample().size(), (2, 3))
         self.assertEqual(
             RelaxedOneHotCategorical(temp, p).sample(sample_shape=(3, 4)).size(),
@@ -3939,7 +3935,7 @@ class TestDistributions(DistributionsTestCase):
         for dim in range(2, 5):
             log_probs = []
             lkj = LKJCholesky(dim, concentration=1.0, validate_args=True)
-            for i in range(2):
+            for _ in range(2):
                 sample = lkj.sample()
                 sample_tril = tril_matrix_to_vec(sample, diag=-1)
                 log_prob = lkj.log_prob(sample)
@@ -6241,7 +6237,7 @@ class TestLazyLogitsInitialization(DistributionsTestCase):
             except NotImplementedError:
                 pass
             self.assertNotIn("probs", dist.__dict__, msg=message)
-            batch_shape, event_shape = dist.batch_shape, dist.event_shape
+            dist.batch_shape, dist.event_shape
             self.assertNotIn("probs", dist.__dict__, msg=message)
 
     def test_lazy_probs_initialization(self):
@@ -6258,7 +6254,7 @@ class TestLazyLogitsInitialization(DistributionsTestCase):
             except NotImplementedError:
                 pass
             self.assertNotIn("logits", dist.__dict__, msg=message)
-            batch_shape, event_shape = dist.batch_shape, dist.event_shape
+            dist.batch_shape, dist.event_shape
             self.assertNotIn("logits", dist.__dict__, msg=message)
 
 
@@ -6565,6 +6561,7 @@ class TestFunctors(DistributionsTestCase):
         expected_jac = sum(
             [t1.log_abs_det_jacobian(x1, y1), t2.log_abs_det_jacobian(x2, y2)]
         )
+        self.assertEqual(actual_jac, expected_jac)
 
     def test_stack_transform(self):
         x1 = -1 * torch.arange(1, 101, dtype=torch.float)
@@ -6628,18 +6625,18 @@ class TestValidation(DistributionsTestCase):
                 for v in torch.tensor([-2.0, -1.0, 0.0, 1.0, 2.0]):
                     # samples with incorrect shape must throw ValueError only
                     try:
-                        log_prob = d_val.log_prob(v)
+                        d_val.log_prob(v)
                     except ValueError:
                         pass
                     # get sample of correct shape
                     val = torch.full(d_val.batch_shape + d_val.event_shape, v)
                     # check samples with incorrect support
                     try:
-                        log_prob = d_val.log_prob(val)
+                        d_val.log_prob(val)
                     except ValueError as e:
                         if e.args and "must be within the support" in e.args[0]:
                             try:
-                                log_prob = d_nonval.log_prob(val)
+                                d_nonval.log_prob(val)
                             except RuntimeError:
                                 pass
 

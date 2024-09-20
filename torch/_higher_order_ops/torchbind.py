@@ -88,7 +88,7 @@ def inner(mode, *args, **kwargs):
     )
     out = call_torchbind(*args, **kwargs)
 
-    obj, method, *rest_args = args
+    obj, method, *_ = args
     if isinstance(obj, torch.ScriptObject):
         ns, class_name = _ns_and_class_name(
             obj._type().qualified_name()  # type: ignore[attr-defined]

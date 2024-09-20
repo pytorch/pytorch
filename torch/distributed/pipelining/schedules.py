@@ -782,7 +782,6 @@ class Schedule1F1B(PipelineScheduleSingle):
         # Chunk counters
         fwd_mb_index = 0
         bwd_mb_index = 0
-        weight_stage_mb_index = 0
 
         # Warmup phase
         send_work = None

@@ -375,7 +375,7 @@ def ones_like(func, *args, **kwargs):
 @register_dispatch_func([torch.ops.aten._softmax_backward_data])
 def _softmax_backward_data(func, *args, **kwargs):
     _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=4)
-    grad, output, dim, input_dtype = args
+    grad, output, dim, _ = args
     if is_masked_tensor(grad) and is_masked_tensor(output):
         if not _masks_match(grad, output):
             raise ValueError(

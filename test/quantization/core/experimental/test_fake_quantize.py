@@ -86,7 +86,7 @@ class TestFakeQuantize(unittest.TestCase):
         observer(input)
         alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False)
 
-        test = gradcheck(fake_quantize_function.apply, (input, alpha, gamma, quantization_levels, level_indices), atol=1e-4)
+        gradcheck(fake_quantize_function.apply, (input, alpha, gamma, quantization_levels, level_indices), atol=1e-4)
 
 if __name__ == '__main__':
     unittest.main()

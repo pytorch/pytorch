@@ -1070,7 +1070,7 @@ class TestOperators(common_utils.TestCase):
                 )
 
             def forward(self, x, h0, c0):
-                a, b = self.rnn(x, (h0, c0))
+                _, b = self.rnn(x, (h0, c0))
                 return torch.ones(b[0].shape)
 
         self.assertONNX(

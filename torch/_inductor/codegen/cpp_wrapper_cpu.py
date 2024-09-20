@@ -1045,7 +1045,6 @@ class CppWrapperCpu(WrapperCodeGen):
                         cached_output_name = (
                             f"cached_output_{next(self.cached_output_id)}"
                         )
-                        output_value_type = f"std::decay_t<decltype(std::get<{idx}>(output_arrayref_tensors).data()[0])>"
                         self.wrapper_call.writeline(
                             f"thread_local RAIIAtenTensorHandle {cached_output_name};"
                         )
