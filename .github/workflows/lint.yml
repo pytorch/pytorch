@@ -4,6 +4,10 @@ on:
   pull_request:
     branches-ignore:
       - nightly
+  # For lint-autoformat https://github.com/parkerbxyz/suggest-changes/issues/33
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    branches: [main]
   push:
     branches:
       - main
