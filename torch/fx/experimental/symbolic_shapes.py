@@ -103,7 +103,7 @@ aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
-    "guard_int", "guard_float", "guard_scalar", "canonicalize_bool_expr",
+    "is_concrete_float", "guard_int", "guard_float", "guard_scalar", "canonicalize_bool_expr",
     "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
     "is_concrete_bool", "is_nested_int", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
     "has_free_symbols", "sym_eq", "SymbolicContext", "StatelessSymbolicContext",
@@ -231,6 +231,24 @@ def is_concrete_int(a: Union[int, SymInt]) -> bool:
         return True
 
     if isinstance(a.node.expr, sympy.core.numbers.Integer):
+        return True
+
+    return False
+
+def is_concrete_float(a: Union[float, SymFloat]) -> bool:
+    r""" Utility to check if underlying object
+    in SymInt is concrete value. Also returns
+    true if integer is passed in.
+
+    Args:
+        a (SymInt or float): Object to test if it float
+    """
+    assert isinstance(a, (SymFloat, float))
+
+    if isinstance(a, float):
+        return True
+
+    if isinstance(a.node.expr, sympy.core.numbers.Float):
         return True
 
     return False
