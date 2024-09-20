@@ -7,9 +7,7 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_mkldnn_reshape_native.h>
 #include <ATen/ops/_onednn_reshape_native.h>
-#include <ATen/ops/_mkldnn_transpose_native.h>
 #include <ATen/ops/_onednn_transpose_native.h>
 #include <ATen/ops/clone_native.h>
 #include <ATen/ops/view_native.h>
