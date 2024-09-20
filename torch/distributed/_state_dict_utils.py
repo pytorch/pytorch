@@ -558,8 +558,14 @@ def _distribute_tensors(
         )
         slices = [slice(offset[i], shape[i] + offset[i]) for i in range(len(shape))]
         local_tensor = full_tensor[slices]
+        # TODO: currently, we cannot handle strided sharding if the dp dimension is not even. For example,
+        # one of the case that is not yet supported is when placements = (Shard(0), _StridedShard(0, sf=2)).
         local_state_dict[key] = DTensor.from_local(
-            local_tensor, local_state.device_mesh, local_state.placements
+            local_tensor,
+            local_state.device_mesh,
+            local_state.placements,
+            shape=local_state.shape,
+            stride=local_state.stride,
         )
 
 
