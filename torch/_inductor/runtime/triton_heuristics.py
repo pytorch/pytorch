@@ -737,6 +737,8 @@ class CachingAutotuner(KernelInterface):
             self.save_cache_hook(self.launchers[0].config, self.autotune_time_taken_ns)
 
     def save_gpu_kernel(self, grid, stream, launcher):
+        if self.cuda_kernel_saved:
+            return
         if callable(grid):
             grid_x, grid_y, grid_z = grid(launcher.config.kwargs)
         else:
