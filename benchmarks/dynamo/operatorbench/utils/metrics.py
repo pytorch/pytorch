@@ -3,8 +3,6 @@ from typing import Any, List, Tuple
 
 from triton.testing import do_bench
 
-from .common import Device
-
 
 class MetricResult:
     def __init__(self) -> None:
@@ -38,6 +36,11 @@ class Metrics(Enum):
     MEM_THROUGHPUT = "mem_throughput"
     CPU_PEAK_MEM = "cpu_peak_mem"
     GPU_PEAK_MEM = "gpu_peak_mem"
+
+
+class Device(Enum):
+    CPU = "cpu"
+    CUDA = "cuda"
 
 
 def get_execution_time(fn, grad_to_none=None, device=None, **kwargs):

@@ -1,3 +1,5 @@
+import warnings
+from collections import defaultdict
 from contextlib import nullcontext
 
 import click
@@ -12,18 +14,33 @@ import torch
 enable_profile = False
 
 
-def benchmark_operator(
-    OperatorClass: BaseOperator, device, dtype, phase, max_samples, repeat, metrics
-):
-    benchmark_config = BenchmarkConfig(
-        device=device,
-        dtype=dtype,
-        phase=phase,
-        max_samples=max_samples,
-        repeat=repeat,
-    )
-    operator = OperatorClass(benchmark_config)
+# Create operator instances from desired operator names
+def create_operator_instances(
+    operator_names: list[str],
+    name_to_variant_list: dict[str, list[BaseOperator]],
+    benchmark_config: BenchmarkConfig,
+    skip_variants: list[str],
+) -> list[BaseOperator]:
+    operator_instances = []
+    for operator_name in operator_names:
+        variant_classes = name_to_variant_list.get(operator_name, [])
+        if not variant_classes:
+            warnings.warn(f"Operator {operator_name} not found")
+            continue
+        for VariantClass in variant_classes:
+            if VariantClass.variant in skip_variants:
+                continue
+            operator_instances.append(VariantClass(benchmark_config))
+    return operator_instances
+
+
+def benchmark_operator(operator: BaseOperator, benchmark_config: BenchmarkConfig):
     print(f"Benchmarking {operator.full_name}")
+    phase = benchmark_config.phase
+    max_samples = benchmark_config.max_samples
+    repeat = benchmark_config.repeat
+    device = benchmark_config.device
+    metrics = benchmark_config.metrics
     if phase == Phase.FORWARD:
         phase_fn = operator.forward
     elif phase == Phase.BACKWARD:
@@ -130,12 +147,15 @@ def run_benchmarks(
     global enable_profile
     enable_profile = profile
     # This is a list of classes, not instances
-    operators_list: list[BaseOperator] = operators.list_operators()
+    operator_class_list: list[BaseOperator] = operators.list_operators()
+    name_to_variant_list = defaultdict(list)
+    for OperatorClass in operator_class_list:
+        name_to_variant_list[OperatorClass.name].append(OperatorClass)
     desired_op_names = None
     if op is not None:
         desired_op_names = op.split(",")
     else:
-        desired_op_names = [operator.name for operator in operators_list]
+        desired_op_names = name_to_variant_list.keys()
 
     dtype = dtype_mapping.get(dtype, torch.float32)  # Default to float32 if not found
     metrics = [
@@ -153,16 +173,20 @@ def run_benchmarks(
     ]
     phase = Phase[phase.upper()]
     operator_metric_results = {}
-    for operator in operators_list:
-        if operator.name in desired_op_names:
-            if operator.variant.lower().strip() in skip_variants:
-                continue
-            metric_result = benchmark_operator(
-                operator, device, dtype, phase, max_samples, repeat, metrics
-            )
-            operator_metric_results[
-                f"{operator.name}.{operator.variant}"
-            ] = metric_result
+    benchmark_config = BenchmarkConfig(
+        device=device,
+        dtype=dtype,
+        phase=phase,
+        max_samples=max_samples,
+        repeat=repeat,
+        metrics=metrics,
+    )
+    operator_instances = create_operator_instances(
+        desired_op_names, name_to_variant_list, benchmark_config, skip_variants
+    )
+    for Operator in operator_instances:
+        metric_result = benchmark_operator(Operator, benchmark_config)
+        operator_metric_results[f"{Operator.name}.{Operator.variant}"] = metric_result
 
     for metric_result in operator_metric_results.values():
         print(metric_result)

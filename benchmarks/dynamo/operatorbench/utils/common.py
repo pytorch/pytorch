@@ -5,6 +5,8 @@ from typing import Dict, List, Optional
 
 import torch
 
+from .metrics import Device, Metrics
+
 
 @dataclasses.dataclass
 class OperatorConfig:
@@ -25,11 +27,6 @@ class BenchmarkResults:
         pass
 
 
-class Device(Enum):
-    CPU = "cpu"
-    CUDA = "cuda"
-
-
 @dataclasses.dataclass
 class BenchmarkConfig:
     device: Device
@@ -37,6 +34,7 @@ class BenchmarkConfig:
     phase: str
     max_samples: int
     repeat: int
+    metrics: List[Metrics]
 
 
 class Phase(Enum):
