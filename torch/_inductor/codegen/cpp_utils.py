@@ -12,11 +12,14 @@ import sympy
 
 import torch
 from torch._prims_common import is_integer_dtype
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import ir
+from ..dependencies import Dep
 from ..loop_body import LoopBody
+from ..scheduler import BaseSchedulerNode
 from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
 from ..virtualized import ops, OpsValue, V
 from .common import (
@@ -916,7 +919,9 @@ def _get_dtype_from_loopbodies(loop_bodies):
     return dtypes
 
 
-def _get_indexes_of_template_buf_read(epilogue_node, template_buf_name):
+def _get_indexes_of_template_buf_read(
+    epilogue_node: ir.Operation, template_buf_name: str
+) -> List[sympy.Expr]:
     return [
         read.index
         for read in epilogue_node.get_reads()
@@ -924,7 +929,9 @@ def _get_indexes_of_template_buf_read(epilogue_node, template_buf_name):
     ]
 
 
-def _check_supported_and_same_indexes(index_of_template_buf_read, epilogue_writes):
+def _check_supported_and_same_indexes(
+    index_of_template_buf_read: sympy.Expr, epilogue_writes: OrderedSet[Dep]
+) -> Tuple[bool, bool]:
     num_indexes = len(set(index_of_template_buf_read))
 
     if num_indexes > 1:
@@ -947,7 +954,9 @@ def _check_supported_and_same_indexes(index_of_template_buf_read, epilogue_write
     return supported, same_index
 
 
-def _template_fusion_supported(template_node, epilogue_nodes):
+def _template_fusion_supported(
+    template_node: ir.TemplateBuffer, epilogue_nodes: List[ir.Operation]
+) -> Tuple[bool, bool]:
     assert isinstance(template_node, ir.CppTemplateBuffer)
     template_buf_name = template_node.get_name()
     indexes_of_template_buf_reads = [
@@ -966,10 +975,17 @@ def _template_fusion_supported(template_node, epilogue_nodes):
     return all(supported), all(same_indexes)
 
 
-def template_fusion_with_epilogues_supported(template, epilogues):
+def template_fusion_with_epilogues_supported(
+    template: BaseSchedulerNode, epilogues: List[BaseSchedulerNode]
+) -> Tuple[bool, bool]:
     assert template.is_template()
     template_node = template.get_template_node()
     assert template_node is not None
 
-    epilogue_nodes = [n.node for epilogue in epilogues for n in epilogue.get_nodes()]
+    epilogue_nodes = [
+        n.node
+        for epilogue in epilogues
+        for n in epilogue.get_nodes()
+        if n.node is not None
+    ]
     return _template_fusion_supported(template_node, epilogue_nodes)
