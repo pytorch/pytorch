@@ -552,7 +552,7 @@ bool Buf::is_stride_one(int cur_dim) const {
   return exprEquals(strides_[cur_dim], alloc<LongImm>(1));
 }
 
-ExprHandle expr_to_vec(ExprHandle v, int lanes) {
+ExprHandle expr_to_vec(const ExprHandle& v, int lanes) {
   if (lanes == 1) {
     return v;
   } else {
