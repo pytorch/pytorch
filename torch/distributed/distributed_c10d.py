@@ -1819,10 +1819,10 @@ def _new_process_group_helper(
         elif backend_str == Backend.XCCL:
             if not is_xccl_available():
                 raise RuntimeError("Distributed package doesn't have XCCL built in")
-            if pg_options is not None:
+            if backend_options is not None:
                 assert isinstance(
-                    pg_options, ProcessGroupXCCL.Options
-                ), "Expected pg_options argument to be of type ProcessGroupXCCL.Options"
+                    backend_options, ProcessGroupXCCL.Options
+                ), "Expected backend_options argument to be of type ProcessGroupXCCL.Options"
             backend_class = ProcessGroupXCCL(
                 backend_prefix_store, group_rank, group_size
             )
