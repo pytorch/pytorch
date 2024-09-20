@@ -2000,7 +2000,7 @@ class TestSparse(TestSparseBase):
             sparse_x2 = x.to_sparse(sparse_dim=sparse_dim2)
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "add: expected 'self' and 'other' to have same dense dimensions"):
+                    "add: expected 'self' and 'other' to have same number of dense dimensions"):
                 sparse_x1 + sparse_x2
         test_dense_dim_mismatch([3, 4], 2, 1)
         test_dense_dim_mismatch([3, 2, 5, 6, 7, 8], 5, 3)
