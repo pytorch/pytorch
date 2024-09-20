@@ -759,13 +759,24 @@ def is_triton_cpu_backend(device):
 
 
 def skip_if_triton_cpu(fn):
-    @functools.wraps(fn)
-    def wrapper(self):
-        if is_triton_cpu_backend(self.device):
-            raise unittest.SkipTest("Triton CPU not supported")
-        return fn(self)
+    import types
 
-    return wrapper
+    reason = "Triton CPU not supported"
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(self):
+            if is_triton_cpu_backend(self.device):
+                raise unittest.SkipTest(reason)
+            return fn(self)
+
+        return wrapper
+
+    if isinstance(fn, types.FunctionType):
+        return decorator(fn)
+    else:
+        reason = fn
+        return decorator
 
 
 def xfail_if_triton_cpu(fn):
@@ -4385,7 +4396,7 @@ class CommonTemplate:
             thread.join()
 
     @unittest.skipIf(config.is_fbcode(), "fbcode triton error, needs debugging")
-    @skip_if_triton_cpu  # flaky
+    @skip_if_triton_cpu("Flaky on Triton CPU")
     @skip_if_gpu_halide  # https://github.com/halide/Halide/issues/8311
     def test_adaptive_avg_pool2d_low_prec(self):
         class Model(torch.nn.Module):
@@ -7452,6 +7463,7 @@ class CommonTemplate:
         b = torch.empty(0)
         self.common(fn, [a, b])
 
+    @with_tf32_off
     @xfail_if_triton_cpu
     def test_slice_scatter_reinplace(self):
         class M(nn.Module):
@@ -8230,7 +8242,7 @@ class CommonTemplate:
         self.assertFalse(torch.allclose(a0, a1))
 
     @requires_gpu()
-    @skip_if_triton_cpu  # flaky
+    @skip_if_triton_cpu("Flaky on Triton CPU")
     def test_like_rands3(self):
         # rand_like with `device` which is different from `x.device`
         def test_like_rands_on_different_device(device1, device2):
@@ -10686,6 +10698,7 @@ class CommonTemplate:
 
             lib.define(
                 "bar(Tensor x, bool is_compiling) -> Tensor",
+                tags=torch.Tag.flexible_layout,
             )
 
             bar_strides = []
@@ -10997,7 +11010,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     # We only support dtypeview for abi_conpatible aoti
-    @skip_if_triton_cpu  # compile time crash in CI
+    @skip_if_triton_cpu("Compile time crash in Triton CPU CI")
     @torch._inductor.config.patch(abi_compatible=True)
     def test_dtypeview(self):
         if TEST_WITH_ASAN:
@@ -11387,7 +11400,7 @@ class CommonTemplate:
         t = rand_strided((2, 3), (3, 1), device=self.device, dtype=torch.float8_e4m3fn)
         self.assertTrue(t.dtype is torch.float8_e4m3fn)
 
-    @skip_if_triton_cpu  # cannot xfail because it crashes process
+    @skip_if_triton_cpu("Triton CPU: Cannot xfail because it crashes process")
     def test_large_grid(self):
         # https://github.com/pytorch/pytorch/issues/123210
         def fn(primals_5):
