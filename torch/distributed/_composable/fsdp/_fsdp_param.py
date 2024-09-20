@@ -695,10 +695,11 @@ class FSDPParam:
             if isinstance(grad, AsyncCollectiveTensor):
                 grad = grad.wait()
             assert isinstance(grad, DTensor), f"{type(grad)}"
-            if any(pl.is_partial() for pl in grad.placements):
-                placements = [
-                    Replicate() if pl.is_partial() else pl for pl in grad.placements
-                ]
+            placements = self._tp_spec.placements
+            if placements != grad.placements:
+                assert len(self._tp_spec.placements) == len(
+                    grad.placements
+                ), f"{self._tp_spec=} {grad.placements=}"
                 grad = grad.redistribute(placements=placements)
             grad = grad._local_tensor
         return grad
