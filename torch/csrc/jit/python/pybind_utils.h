@@ -31,10 +31,6 @@
 
 #include <ATen/core/function_schema.h>
 #include <c10/core/Stream.h>
-#ifdef USE_C10D_NCCL
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAStream.h>
-#endif
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <optional>
@@ -1077,7 +1073,11 @@ inline py::object createPyObjectForStack(Stack&& stack) {
     return_values[ret] = toPyObject(std::move(stack[ret]));
   }
 
+#if defined(__clang__)
   return std::move(return_values);
+#else
+  return return_values;
+#endif
 }
 
 // TODO: Remove once we clean up the GraphExecutor usage.

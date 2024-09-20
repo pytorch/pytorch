@@ -516,7 +516,13 @@ def check_model(
 
         correct_grad = compute_grads(ref_inputs, ref_kwargs, correct, grads)
         all_none_grads = all(x is None for x in correct_grad)
-        if all_none_grads:
+        tensor_args = [
+            x
+            for x in pytree.tree_flatten(example_inputs)[0]
+            if isinstance(x, torch.Tensor)
+        ]
+        any_non_leaves = any(x.grad_fn is not None for x in tensor_args)
+        if all_none_grads and any_non_leaves:
             # See Note [Detaching inputs that never need gradients]
             # There are a handful of ops that can return None gradients, into of zero gradients.
             # If all inputs to an AOTAutograd graph are supposed to get None gradients,
@@ -665,7 +671,7 @@ def _run_and_assert_no_indirect_indexing(
             )
         if has_wrapping is not None:
             test_case.assertTrue(
-                ("where" in code or "?" in code) is has_wrapping,
+                ("where" in code or ") ? (" in code) is has_wrapping,
                 msg=f"Wanted {has_wrapping=} but got\n{code}",
             )
     test_case.assertTrue(
@@ -1517,7 +1523,7 @@ class CommonTemplate:
                 pass  # no device asserts in halide
             elif self.device == "cpu":
                 _, code = run_and_get_cpp_code(fn_opt, *inps)
-                self.assertTrue(("?" in code or "blendv" in code) is has_wrapping)
+                self.assertTrue((") ? (" in code or "blendv" in code) is has_wrapping)
                 self.assertTrue(("TORCH_CHECK" in code) is has_assert)
                 # Assert that we always vectorize the kernel regardless of wrapping / checks
                 self.assertTrue(("loadu" in code) is vectorize)
@@ -1877,6 +1883,21 @@ class CommonTemplate:
         a = make_tensor(10, 3, 352, 352, low=0, dtype=torch.float32, device=self.device)
         b = make_tensor(10, 3, 352, 352, low=0, dtype=torch.float64, device=self.device)
         self.common(fn, (a, b), rtol=1e-4, atol=1e-5, check_lowp=False)
+
+    @config.patch(max_autotune_pointwise=True)
+    def test_split_cumsum_index(self):
+        # Split scan uses a workspace that needs to be zeroed before use.
+        # data[index] does indirect indexing that should catch issues if the
+        # workspace is not zeroed.
+        def fn(lengths, data):
+            offsets = torch.cumsum(lengths, 0)
+            return data[offsets]
+
+        lengths = torch.full((2**14,), 2**2, dtype=torch.int64, device=self.device)
+        lengths[-2] = 3
+        lengths[-1] = 3
+        data = make_tensor((2**16,), dtype=torch.float32, device=self.device)
+        self.common(fn, (lengths, data))
 
     def test_split_cumprod(self):
         def fn(a):
@@ -7383,6 +7404,7 @@ class CommonTemplate:
         b = torch.empty(0)
         self.common(fn, [a, b])
 
+    @with_tf32_off
     def test_slice_scatter_reinplace(self):
         class M(nn.Module):
             def __init__(self, device):
@@ -7969,7 +7991,6 @@ class CommonTemplate:
         out = [torch.empty_like(x) for _ in range(2)]
         y = g(x)
 
-    @expectedFailureXPU
     def test_functionalize_rng_wrappers(self):
         # Ideally, we would like to use torch.compile for these operators. But
         # currently the plan is to introduce these operators at the partitioner
@@ -8134,6 +8155,17 @@ class CommonTemplate:
             return torch.rand_like(x), torch.randn_like(x)
 
         self.common(fn, [torch.zeros([20, 20])])
+
+    @config.patch(check_stack_no_cycles_TESTING_ONLY=True)
+    def test_check_stack_no_cycles(self):
+        @torch.compile()
+        def fn(x):
+            return x * 3
+
+        r = fn(torch.randn(2, device=self.device, requires_grad=True))
+        # Backward compilation isn't hooked into cprofile, it probably
+        # should...
+        # r.sum().backward()
 
     def test_like_rands2(self):
         # rand_like with kwargs `device` of str type
@@ -10596,6 +10628,7 @@ class CommonTemplate:
 
             lib.define(
                 "bar(Tensor x, bool is_compiling) -> Tensor",
+                tags=torch.Tag.flexible_layout,
             )
 
             bar_strides = []
@@ -10632,8 +10665,8 @@ class CommonTemplate:
             with torch.no_grad():
                 self.common(fn, (inp,), check_lowp=False)
 
-            # Dynamic shapes invalidate this test case
-            if torch._dynamo.config.assume_static_by_default:
+            # Dynamic shapes and rocm invalidate this test case
+            if torch._dynamo.config.assume_static_by_default and not TEST_WITH_ROCM:
                 # For this test to be valid, Inductor must have changed the conv
                 # to be channels-last. If this assertion ever fails then we need
                 # a new test case.
@@ -10875,6 +10908,7 @@ class CommonTemplate:
         fn(a, b)
 
     # Skipped on ROCm until https://github.com/ROCm/triton/issues/443 resolved
+    @slowTest
     def test_fuse_large_params(self):
         def pt2_optimizer_step(optimizer):
             @torch.compile()
@@ -11040,7 +11074,6 @@ class CommonTemplate:
         actual = torch.compile(fn)(a, b)
         self.assertEqual(ref, actual)
 
-    @skipIfWindows(msg="torch._dynamo.exc.BackendCompilerFailed")  # TODO: FIX IT
     def test_randint_int64_mod(self):
         # This used to not compile due to a wrong return type of randint64_cpu
         # See https://github.com/pytorch/pytorch/issues/117435
@@ -11930,7 +11963,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             with config.patch("triton.codegen_upcast_to_fp32", upcast_to_fp32):
                 func_opt = torch._dynamo.optimize("inductor")(func)
                 code = run_and_get_triton_code(func_opt, *inps)
-                fp32_cast_in_code = "float32" in code
+                fp32_cast_in_code = "to(tl.float32)" in code
                 self.assertEqual(fp32_cast_in_code, upcast_to_fp32)
 
         @config.patch("triton.use_block_ptr", False)

@@ -1107,6 +1107,12 @@ def configure_extension_build():
             "default = torch.distributed.elastic.multiprocessing:DefaultLogsSpecs",
         ],
     }
+
+    if cmake_cache_vars["USE_DISTRIBUTED"]:
+        # Only enable fr_trace command if distributed is enabled
+        entry_points["console_scripts"].append(
+            "torchfrtrace = tools.flight_recorder.fr_trace:main",
+        )
     return extensions, cmdclass, packages, entry_points, extra_install_requires
 
 
@@ -1238,6 +1244,7 @@ def main():
         "include/ATen/cpu/vec/vec256/zarch/*.h",
         "include/ATen/cpu/vec/vec512/*.h",
         "include/ATen/cpu/vec/*.h",
+        "include/ATen/cpu/vec/sve/*.h",
         "include/ATen/core/*.h",
         "include/ATen/cuda/*.cuh",
         "include/ATen/cuda/*.h",
@@ -1322,6 +1329,7 @@ def main():
         "include/torch/csrc/distributed/autograd/rpc_messages/*.h",
         "include/torch/csrc/dynamo/*.h",
         "include/torch/csrc/inductor/*.h",
+        "include/torch/csrc/inductor/aoti_package/*.h",
         "include/torch/csrc/inductor/aoti_runner/*.h",
         "include/torch/csrc/inductor/aoti_runtime/*.h",
         "include/torch/csrc/inductor/aoti_torch/*.h",
@@ -1505,7 +1513,7 @@ def main():
             f"Programming Language :: Python :: 3.{i}"
             for i in range(python_min_version[1], version_range_max)
         ],
-        license="BSD-3",
+        license="BSD-3-Clause",
         keywords="pytorch, machine learning",
     )
     if EMIT_BUILD_WARNING:

@@ -1556,15 +1556,10 @@ Example::
           py::arg("master_listen_fd") = py::none(),
           py::arg("use_libuv") = true,
           py::call_guard<py::gil_scoped_release>())
-      .def(
-          "collect_client_counters",
-          &::c10d::TCPStore::collectClientCounters,
-          "Return a dict of counters for tcp store client")
       .def_property_readonly(
           "host",
           &::c10d::TCPStore::getHost,
           R"(Gets the hostname on which the store listens for requests.)")
-
       .def_property_readonly(
           "port",
           &::c10d::TCPStore::getPort,
@@ -1818,8 +1813,7 @@ communication mechanism.
               py::init<
                   const c10::intrusive_ptr<::c10d::Store>&,
                   int,
-                  int,
-                  c10::intrusive_ptr<::c10d::ProcessGroup::Options>>(),
+                  int>(),
               py::call_guard<py::gil_scoped_release>())
           .def("rank", &::c10d::ProcessGroup::getRank)
           .def("size", &::c10d::ProcessGroup::getSize)
@@ -1829,7 +1823,6 @@ communication mechanism.
               "_backend_id",
               &::c10d::ProcessGroup::getBackendID,
               py::arg("backend_type"))
-          .def_property_readonly("options", &::c10d::ProcessGroup::getOptions)
           .def(
               "broadcast",
               &::c10d::ProcessGroup::broadcast,
@@ -2139,6 +2132,14 @@ communication mechanism.
               },
               py::arg("device"),
               py::call_guard<py::gil_scoped_release>())
+           .def(
+              "_set_default_backend",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const ::c10d::ProcessGroup::BackendType& backendType) {
+                return self->setDefaultBackend(backendType);
+              },
+              py::arg("backend_type"),
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "_register_on_completion_hook",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
@@ -2241,27 +2242,6 @@ Arguments:
       .value("MPI", ::c10d::ProcessGroup::BackendType::MPI)
       .value("CUSTOM", ::c10d::ProcessGroup::BackendType::CUSTOM)
       .export_values();
-
-  // base ProcessGroup::Options binding
-  auto processGroupOptions =
-      intrusive_ptr_class_<::c10d::ProcessGroup::Options>(
-          processGroup,
-          "Options",
-          R"(
-Base class for all processes group options implementations, such as the nccl
-options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
-)")
-          .def(
-              py::init([](const std::string& backend,
-                          const std::chrono::milliseconds& timeout) {
-                return c10::make_intrusive<::c10d::ProcessGroup::Options>(
-                    backend, timeout);
-              }),
-              py::arg("backend"),
-              py::arg("timeout") = kProcessGroupDefaultTimeout,
-              py::call_guard<py::gil_scoped_release>())
-          .def_readonly("backend", &::c10d::ProcessGroup::Options::backend)
-          .def_readwrite("_timeout", &::c10d::ProcessGroup::Options::timeout);
 
   // TODO: The collection definitions handles direct instantiation of
   // ProcessGroup subclasses (e.g. dist.ProcessGroupGloo). This is not supported
@@ -2547,7 +2527,8 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::call_guard<py::gil_scoped_release>())
           .def(
               "eager_connect_single_device",
-              &::c10d::Backend::eagerConnectSingleDevice)
+              &::c10d::Backend::eagerConnectSingleDevice,
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "_get_backend_name",
               &::c10d::Backend::getBackendName,
@@ -2561,6 +2542,29 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               &::c10d::Backend::endCoalescing,
               py::call_guard<py::gil_scoped_release>());
 
+  // base Backend::Options binding
+  // TODO: Maybe we can consider how to merge this with
+  // `DistributedBackendOptions`.
+  auto backendOptions =
+      intrusive_ptr_class_<::c10d::Backend::Options>(
+          backend,
+          "Options",
+          R"(
+Base class for all backend options implementations, such as the nccl
+options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
+)")
+          .def(
+              py::init([](const std::string& backend,
+                          const std::chrono::milliseconds& timeout) {
+                return c10::make_intrusive<::c10d::Backend::Options>(
+                    backend, timeout);
+              }),
+              py::arg("backend"),
+              py::arg("timeout") = kProcessGroupDefaultTimeout,
+              py::call_guard<py::gil_scoped_release>())
+          .def_readonly("backend", &::c10d::Backend::Options::backend)
+          .def_readwrite("_timeout", &::c10d::Backend::Options::timeout);
+
 #ifdef USE_C10D_GLOO
   static const std::string GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
 
@@ -2572,7 +2576,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
   shared_ptr_class_<::gloo::transport::Device>(processGroupGloo, "Device");
 
   intrusive_ptr_class_<::c10d::ProcessGroupGloo::Options>(
-      processGroupGloo, "_Options", processGroupOptions)
+      processGroupGloo, "_Options", backendOptions)
       .def(py::init<>())
       .def_readwrite("_devices", &::c10d::ProcessGroupGloo::Options::devices)
       .def_readwrite("_threads", &::c10d::ProcessGroupGloo::Options::threads);
@@ -2799,7 +2803,7 @@ for details.
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
       processGroupNCCL,
       "Options",
-      processGroupOptions,
+      backendOptions,
       R"(
 ProcessGroup options for the NCCL backend
 

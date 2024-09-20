@@ -48,6 +48,9 @@ cache_size_limit = 8
 # [@compile_ignored: runtime_behaviour] safeguarding to prevent horrible recomps
 accumulated_cache_size_limit = 256
 
+# [@compile_ignored: runtime_behaviour] skip tracing recursively if cache limit is hit
+skip_code_recursive_on_cache_limit_hit = True
+
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
 # inputs.  Note that assume_static_by_default will also cause ints to get
@@ -98,7 +101,7 @@ force_nn_module_property_static_shapes = True
 allow_ignore_mark_dynamic = False
 
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
-guard_nn_modules = False if is_fbcode() else True
+guard_nn_modules = True
 
 # Uses CPython internal dictionary tags to detect mutation. There is some
 # overlap between guard_nn_modules_using_dict_tags and guard_nn_modules flag.
@@ -373,6 +376,10 @@ enable_cpp_guard_manager = os.environ.get("TORCHDYNAMO_CPP_GUARD_MANAGER", "1") 
 
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = not is_fbcode()
+
+# When set, total compile time instruction count is recorded using
+# torch._dynamo.utilsCompileTimeInstructionCounter.
+record_compile_time_instruction_count = False
 
 
 def default_debug_dir_root():
