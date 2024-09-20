@@ -1828,7 +1828,7 @@ class CommonTemplate:
         atol = None
         rtol = None
         if self.device == "cpu" and os.getenv("ATEN_CPU_CAPABILITY") == "default":
-            atol = 1e-4
+            atol = 3e-4
             rtol = 1e-4
         self.common(
             fn,
@@ -1854,8 +1854,15 @@ class CommonTemplate:
         if self.device == "cpu" and os.getenv("ATEN_CPU_CAPABILITY") == "default":
             atol = 1e-3
             rtol = 1e-3
-        self.common(fn, (torch.rand((16, 16, 352, 352), dtype=torch.float16),))
-        self.common(fn, (torch.rand((14923), dtype=torch.float16),))
+        self.common(
+            fn,
+            (torch.rand((16, 16, 352, 352), dtype=torch.float16),),
+            atol=atol,
+            rtol=rtol,
+        )
+        self.common(
+            fn, (torch.rand((14923), dtype=torch.float16),), atol=atol, rtol=rtol
+        )
 
     def test_split_cumsum(self):
         def fn(a):

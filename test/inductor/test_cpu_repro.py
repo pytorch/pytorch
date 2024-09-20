@@ -1682,14 +1682,6 @@ class CPUReproTests(TestCase):
         self.assertTrue(vec_avx512.nelements(torch.bfloat16) == 32)
         self.assertTrue(vec_avx2.nelements(torch.bfloat16) == 16)
 
-        with config.patch({"cpp.simdlen": None}):
-            isa = cpu_vec_isa.pick_vec_isa()
-            if vec_amx in cpu_vec_isa.valid_vec_isa_list():
-                self.assertTrue(isa == vec_amx)
-            elif vec_avx512 in cpu_vec_isa.valid_vec_isa_list():
-                self.assertTrue(isa == vec_avx512)
-            else:
-                self.assertTrue(isa == vec_avx2)
 
         with config.patch({"cpp.simdlen": 0}):
             isa = cpu_vec_isa.pick_vec_isa()
@@ -1727,6 +1719,15 @@ class CPUReproTests(TestCase):
             os.environ.pop("ATEN_CPU_CAPABILITY")
 
         try:
+            with config.patch({"cpp.simdlen": None}):
+                isa = cpu_vec_isa.pick_vec_isa()
+                if vec_amx in cpu_vec_isa.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_amx)
+                elif vec_avx512 in cpu_vec_isa.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_avx512)
+                else:
+                    self.assertTrue(isa == vec_avx2)
+
             with config.patch({"cpp.simdlen": None}):
                 os.environ["ATEN_CPU_CAPABILITY"] = "avx2"
                 isa = cpu_vec_isa.pick_vec_isa()
