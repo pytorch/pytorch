@@ -10,7 +10,6 @@ from decimal import Decimal
 from typing import Any
 from warnings import warn
 
-
 # boto3 is an optional dependency. If it's not installed,
 # we'll just not emit the metrics.
 # Keeping this logic here so that callers don't have to

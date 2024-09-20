@@ -938,7 +938,7 @@ class _RendezvousJoinOp:
                 and len(state.participants) <= ctx.settings.max_nodes
                 and state.deadline is not None
             ):
-                if cast(datetime, state.deadline) < datetime.now(timezone.utc):
+                if state.deadline < datetime.now(timezone.utc):
                     msg = (
                         f"The node '{ctx.node}' marking the rendezvous complete, "
                         f"quorum established within deadline"
