@@ -128,7 +128,6 @@ class TestExecutionTrace(TestCase):
             nonlocal trace_called_num
             trace_called_num += 1
 
-        #use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
         use_device = torch.profiler.ProfilerActivity.CUDA or torch.profiler.ProfilerActivity.HPU in supported_activities()
         # Create a temp file to save execution trace and kineto data.
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
@@ -284,7 +283,6 @@ class TestExecutionTrace(TestCase):
         assert found_captured_triton_kernel_node
 
     def test_execution_trace_start_stop(self, device):
-        #use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
         use_device = torch.profiler.ProfilerActivity.CUDA or torch.profiler.ProfilerActivity.HPU in supported_activities()
         # Create a temp file to save execution trace data.
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
