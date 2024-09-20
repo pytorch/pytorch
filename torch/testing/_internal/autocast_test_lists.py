@@ -320,6 +320,7 @@ class AutocastCPUTestLists:
                          torch.randn((n, n, n), device=dev, dtype=torch.float32),
                          torch.randn((n, n, n), device=dev, dtype=torch.float32))),
             ("addmm", mat1_fp32 + mat2_fp32 + mat3_fp32),
+            ("_addmm_activation", mat1_fp32 + mat2_fp32 + mat3_fp32, {"beta": 1, "alpha": 1, "use_gelu": True}),
             ("addbmm", mat0_fp32 + (torch.randn((n, n, n), device=dev, dtype=torch.float32),
                                     torch.randn((n, n, n), device=dev, dtype=torch.float32))),
             ("conv_tbc", (torch.randn((10, 7, 3), device=dev, dtype=torch.float32),
