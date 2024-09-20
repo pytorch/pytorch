@@ -2370,7 +2370,11 @@ class BenchmarkRunner:
         return set()
 
     @property
-    def skip_models_for_freezing(self):
+    def skip_models_for_freezing_cpu(self):
+        return set()
+
+    @property
+    def skip_models_for_freezing_cuda(self):
         return set()
 
     @property
@@ -4275,7 +4279,6 @@ def run(runner, args, original_dir=None):
         runner.skip_models.update(runner.slow_models)
 
     if args.devices == ["cpu"]:
-        runner.skip_models.update(runner.very_slow_models)
         runner.skip_models.update(runner.skip_models_for_cpu)
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)
@@ -4284,7 +4287,10 @@ def run(runner, args, original_dir=None):
         runner.skip_models.update(runner.skip_multiprocess_models)
 
     if args.freezing:
-        runner.skip_models.update(runner.skip_models_for_freezing)
+        if args.devices == ["cpu"]:
+            runner.skip_models.update(runner.skip_models_for_freezing_cpu)
+        elif args.devices == ["cuda"]:
+            runner.skip_models.update(runner.skip_models_for_freezing_cuda)
 
     if args.no_skip:
         runner.skip_models.clear()
