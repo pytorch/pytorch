@@ -4038,6 +4038,10 @@ class CommonTemplate:
             # Greatest relative difference: 0.06512477175897748 at index (0, 4, 11, 9) (up to 0.001 allowed)
             atol=6e-5,
             rtol=0.001,
+            # Make sure we compute also with fp16 in the reference. Otherwise,
+            # the reference will compute with fp32 and cast back to fp16, which
+            # causes numeric differences beyond tolerance.
+            reference_in_float=False if torch.version.hip else True,
         )
 
     def test_convolution2(self):
@@ -4068,6 +4072,10 @@ class CommonTemplate:
             (torch.randn([2, 5, 16, 16]),),
             atol=6e-5,
             rtol=0.001,
+            # Make sure we compute also with fp16 in the reference. Otherwise,
+            # the reference will compute with fp32 and cast back to fp16, which
+            # causes numeric differences beyond tolerance.
+            reference_in_float=False if torch.version.hip else True,
         )
 
     @skip_if_gpu_halide
