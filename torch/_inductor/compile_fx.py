@@ -33,6 +33,7 @@ from torch._dynamo.utils import (
     lazy_format_graph_code,
 )
 from torch._functorch import config as functorch_config
+from torch._functorch._aot_autograd.subclass_utils import unwrap_tensor_subclasses
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import (
     _StrideExprStr,
@@ -1206,14 +1207,37 @@ def fw_compiler_freezing(
     )
 
     static_input_idxs = list(range(num_fixed))
+    wrapper_new_args_unwrapped_indices: List[int] = []
     # constant params will be real tensors, not fake
     tracing_context = torch._guards.TracingContext.try_get()
+    unwrapped_args_offsets = [0]
+    max_offset_idx = 0
     if tracing_context is not None:
-        params_flat = tracing_context.params_flat
-        assert params_flat is not None
-        for i in range(len(params_flat)):
+        params_flat_unwrap = tracing_context.params_flat_unwrap_subclasses
+        assert params_flat_unwrap is not None
+        max_offset_idx = max(0, len(params_flat_unwrap) - 1)
+        assert params_flat_unwrap is not None
+        preserved_indices_params_flat = set()
+        unwrapped_idxs = tracing_context.params_unwrapped_to_flat_index
+        assert unwrapped_idxs is not None
+        current_offset = 0
+        if len(params_flat_unwrap) > 0:
+            unwrapped_args_offsets = []
+
+        for i in range(len(params_flat_unwrap)):
             if i not in preserved_arg_indices:
-                params_flat[i] = None
+                params_flat_unwrap[i] = None
+                if i > 0 and unwrapped_idxs[i] == unwrapped_idxs[i - 1]:
+                    current_offset += 1
+            else:
+                preserved_indices_params_flat.add(unwrapped_idxs[i])
+            unwrapped_args_offsets.append(current_offset)
+
+        # Deallocate wrapped params, if all subelements were deallocated
+        assert tracing_context.params_flat is not None
+        for i in range(len(tracing_context.params_flat)):
+            if i not in preserved_indices_params_flat:
+                tracing_context.params_flat[i] = None
 
         if tracing_context.fw_metadata:
             static_input_idxs += tracing_context.fw_metadata.static_input_indices
@@ -1237,13 +1261,30 @@ def fw_compiler_freezing(
         return optimized_function
 
     def wrapper(args):
-        args_new = [args[i] for i in preserved_arg_indices]
+        args_unwrapped = unwrap_tensor_subclasses(args, is_joint_structure=False)
+        args_new = [
+            args_unwrapped[i - unwrapped_args_offsets[min(i, max_offset_idx)]]
+            for i in preserved_arg_indices
+        ]
+        args_unwrapped.clear()
         args.clear()
         return optimized_function(args_new)
 
     wrapper._boxed_call = True  # type: ignore[attr-defined]
 
     return wrapper
+
+
+def get_cpp_wrapper_config():
+    return {
+        # Set autotune_at_compile_time to True as default if the option is not explicitly set
+        "triton.autotune_at_compile_time": config.triton.autotune_at_compile_time
+        if config.triton.autotune_at_compile_time is not None
+        else True,
+        "triton.autotune_cublasLt": False,
+        "triton.cudagraphs": False,  # TODO: to be removed
+        "triton.store_cubin": True,
+    }
 
 
 def compile_fx(
@@ -1268,18 +1309,8 @@ def compile_fx(
         if config.cpp_wrapper:
             with config.patch(
                 {
-                    "cpp_wrapper": False,
-                    # For triton.autotune_at_compile_time, disable by default for
-                    # FBCode, but enabled by default for OSS.
-                    "triton.autotune_at_compile_time": config.triton.autotune_at_compile_time
-                    if config.is_fbcode()
-                    else os.environ.get(
-                        "TORCHINDUCTOR_TRITON_AUTOTUNE_AT_COMPILE_TIME", "1"
-                    )
-                    == "1",
-                    "triton.autotune_cublasLt": False,
-                    "triton.cudagraphs": False,
-                    "triton.store_cubin": True,
+                    "cpp_wrapper": False,  # reset to break recursive call to compile_fx
+                    **get_cpp_wrapper_config(),
                 }
             ), V.set_real_inputs(example_inputs_):
                 inputs_ = example_inputs_
@@ -1470,16 +1501,19 @@ def compile_fx(
                         n.name for n in model_outputs if isinstance(n, torch.fx.Node)
                     )
                 fixed = count_tangents(model)
-                return inner_compile(
-                    model,
-                    example_inputs,
-                    static_input_idxs=list(range(fixed)),
-                    cudagraphs=cudagraphs,
-                    is_backward=True,
-                    graph_id=graph_id,
-                    boxed_forward_device_index=forward_device,
-                    user_visible_outputs=user_visible_outputs,
-                )
+                with config.patch(
+                    get_cpp_wrapper_config()
+                ) if config.cpp_wrapper else contextlib.nullcontext():
+                    return inner_compile(
+                        model,
+                        example_inputs,
+                        static_input_idxs=list(range(fixed)),
+                        cudagraphs=cudagraphs,
+                        is_backward=True,
+                        graph_id=graph_id,
+                        boxed_forward_device_index=forward_device,
+                        user_visible_outputs=user_visible_outputs,
+                    )
 
         # TODO: can add logging before/after the call to create_aot_dispatcher_function
         # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
