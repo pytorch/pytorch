@@ -152,7 +152,6 @@ class TestCustomLowering(InductorTestCase):
         )(add_custom_lowering)
 
     @requires_gpu()
-    @skipIfXpu
     def test_jagged_to_padded_dense_sanity_cuda(self):
         def fn(inp, offsets, max_seq_len):
             return torch.ops.test_inductor_ops.jagged_to_padded_dense(
@@ -178,7 +177,6 @@ class TestCustomLowering(InductorTestCase):
         )
 
     @requires_gpu()
-    @skipIfXpu
     def test_jagged_to_padded_dense_zero_size(self):
         # Previously, the masking was being completely stripped for the
         # masked load of the input value. That would lead to an IMA
