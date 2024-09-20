@@ -38,19 +38,34 @@ Platform Linux
 
 Now we have all the required packages installed and environment activated. Use the following commands to install ``pytorch``, ``torchvision``, ``torchaudio`` on Linux.
 
+For release wheels
+
 .. code-block::
 
-    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/xpu
+    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/xpu
 
+For nightly wheels
+
+.. code-block::
+
+    pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/xpu
 
 Platform Windows
 """"""""""""""""
 
 Now we have all the required packages installed and environment activated. Use the following commands to install ``pytorch`` on Windows, build from source for ``torchvision`` and ``torchaudio``.
 
+For release wheels
+
 .. code-block::
 
-    pip3 install torch --index-url https://download.pytorch.org/whl/nightly/xpu
+    pip3 install torch --index-url https://download.pytorch.org/whl/xpu
+
+For nightly wheels
+
+.. code-block::
+
+    pip3 install --pre torch --index-url https://download.pytorch.org/whl/nightly/xpu
 
 From Source
 ^^^^^^^^^^^
