@@ -1277,6 +1277,19 @@ utils_device.CURRENT_DEVICE == None""".split(
         x = torch.tensor([300])
         r = f(x)
 
+    @torch._dynamo.config.patch(specialize_float=False)
+    def test_unspecialized_float(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f(x, y):
+            return x + y
+
+        f(torch.randn(3), 3.0)
+        f(torch.randn(3), 4.0)
+        self.assertEqual(cnts.frame_count, 1)
+
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_torch_check(self):
         cnts = torch._dynamo.testing.CompileCounter()
