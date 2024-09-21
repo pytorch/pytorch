@@ -150,7 +150,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
 
                     def go(
                         node: fx.Node, keypath: tuple[Any, ...]
-                    ) -> Union[fx.Node | None]:
+                    ) -> Union[fx.Node, None]:
                         if keypath == ():
                             return node
                         elif keypath[0].name == "item" and isinstance(
