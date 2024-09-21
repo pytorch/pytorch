@@ -294,13 +294,12 @@ class OpsHandler(Protocol[T]):
     def bucketize(
         self,
         values: T,
-        offsets_name: str,
-        num_bucket_boundaries: sympy.Expr,
-        offsets_size: sympy.Expr,
+        boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundary_indices: T,
         indexing_dtype: torch.dtype,
         right: bool,
-        offsets_indices: T,
-        sorter_name: Optional[str] = None,
+        sorter: Optional[Tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[T] = None,
     ) -> T:
         # See [Note: Inductor bucketize op]
         ...
@@ -1020,29 +1019,30 @@ class OpCounterCSE:
     def bucketize(
         self,
         values: T,
-        offsets_name: str,
-        num_bucket_boundaries: sympy.Expr,
-        offsets_size: sympy.Expr,
+        boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundary_indices: T,
         indexing_dtype: torch.dtype,
         right: bool,
-        offsets_indices: T,
-        sorter_name: Optional[str] = None,
+        sorter: Optional[Tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[T] = None,
     ) -> T:
+        """
+        See [Note: Inductor bucketize op]
+        """
         val = self.parent_handler.bucketize(
             values,
-            offsets_name,
-            num_bucket_boundaries,
-            offsets_size,
+            boundaries,
+            boundary_indices,
             indexing_dtype,
             right,
-            offsets_indices,
-            sorter_name,
+            sorter,
+            sorter_indices,
         )
         if val not in self.var_names:
             self._used_ops.add("bucketize")
-            self._read_names.append(offsets_name)
-            if sorter_name is not None:
-                self._read_names.append(sorter_name)
+            self._read_names.append(boundaries[0])
+            if sorter is not None:
+                self._read_names.append(sorter[0])
         return self._update_count(val)
 
     def getvalue(self):

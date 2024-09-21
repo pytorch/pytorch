@@ -5,7 +5,7 @@ import itertools
 import logging
 import re
 import typing
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar, Union
 from unittest.mock import patch
 
 import sympy
@@ -25,6 +25,8 @@ from .utils import (
 )
 from .virtualized import OpsHandler, ReductionType, V
 
+
+T = TypeVar("T")
 
 log = logging.getLogger(__name__)
 is_indirect = re.compile(r"indirect|tmp").search
@@ -504,21 +506,9 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         self._index_exprs.add(IndexExprDep(*self.canonicalize(index)))
         return f"index_expr({sympy_str(index)}, {dtype})"
 
-    def bucketize(
-        self,
-        values,
-        offsets_name: str,
-        num_bucket_boundaries: sympy.Expr,
-        offsets_size: sympy.Expr,
-        indexing_dtype: torch.dtype,
-        right: bool,
-        offsets_indices,
-        sorter_name: Optional[str] = None,
-    ):
-        self._reads.add(StarDep(offsets_name))
-        if sorter_name is not None:
-            self._reads.add(StarDep(sorter_name))
-        return f"bucketize({values}, {offsets_name}, {sympy_str(num_bucket_boundaries)}, {sympy_str(offsets_size)}, {indexing_dtype}, {right}, {offsets_indices}, {sorter_name})"  # noqa: B950 line too long
+    def bucketize(self, *args, buffer_name: str = "", **kwargs) -> None:
+        """Records the names of the buffers that bucketize will read from."""
+        self._reads.add(StarDep(buffer_name))
 
 
 class RecordLoadStore(V.KernelFormatterHandler):  # type: ignore[name-defined]
@@ -596,26 +586,8 @@ def extract_read_writes(
             )
         for entry in fn.memory_usage[MemoryUsageType.INDEX_EXPR]:
             inner.index_expr(name_to_index[entry.index_name], None)
-
-        # At Python 3.12, this can be replaced by itertools.batched.  We need this
-        # because every bucketize call has two index variables.
-        def iter_by_pairs(iterable):
-            iterator = iter(iterable)
-            while batch := tuple(itertools.islice(iterator, 2)):
-                yield batch
-
-        for entry_0, entry_1 in iter_by_pairs(
-            fn.memory_usage[MemoryUsageType.BUCKETIZE]
-        ):
-            inner.bucketize(
-                None,
-                entry_0.buffer_name,
-                name_to_index[entry_0.index_name],
-                name_to_index[entry_1.index_name],
-                None,
-                None,
-                None,
-            )
+        for entry in fn.memory_usage[MemoryUsageType.BUCKETIZE]:
+            inner.bucketize(buffer_name=entry.buffer_name)  # type: ignore[arg-type]
         # fn.memory_usage[MemoryUsageType.CHECK_BOUNDS] intentionally skipped
     else:
         # Slow path tracing the function

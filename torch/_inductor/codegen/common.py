@@ -1768,13 +1768,12 @@ class Kernel(CodeGen):
     def bucketize(
         self,
         values: CSEVariable,
-        offsets_name: str,
-        num_bucket_boundaries: sympy.Expr,
-        offsets_size: sympy.Expr,
+        boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundary_indices: CSEVariable,
         indexing_dtype: torch.dtype,
         right: bool,
-        offsets_indices: CSEVariable,
-        sorter_name: Optional[str] = None,
+        sorter: Optional[Tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[CSEVariable] = None,
     ) -> CSEVariable:
         """
         See [Note: Inductor bucketize op]
@@ -2026,57 +2025,81 @@ class Kernel(CodeGen):
             @staticmethod
             def bucketize(
                 values: CSEVariable,
-                offsets_name: str,
-                num_bucket_boundaries: sympy.Expr,
-                offsets_size: sympy.Expr,
+                boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+                boundary_indices: CSEVariable,
                 indexing_dtype: torch.dtype,
                 right: bool,
-                offsets_indices: CSEVariable,
-                sorter_name: Optional[str] = None,
+                sorter: Optional[Tuple[str, sympy.Expr]] = None,
+                sorter_indices: Optional[CSEVariable] = None,
             ) -> CSEVariable:
                 """
                 [Note: Inductor bucketize op]
 
-                Given values (tensor) and offsets_name (reference to the name of a
-                tensor), calculate the bucket that each value belongs to.  This works
-                differently in the 1-D and N-D cases.
+                Inputs:
+                -------
+                values: the values to be bucketized.
+                boundaries: a tuple containing
+                  (a) the name of the boundaries tensor (which must be sorted, unless
+                  the sorting tensor is present),
+                  (b) the length of the tensor in the last dimension (i.e. the length of
+                  one set of boundaries),
+                  (c) the number of elements in the underlying storage (i.e. the length
+                  of the flattened tensor, ignoring striding), and
+                  (d) the stride of the tensor in the last dimension.
+                boundary_indices: indices into a flattened version of the boundaries
+                tensor, of the same size and shape as "values".  Each index points to
+                the first element in the set of boundaries to be used for the
+                corresponding value.
+                indexing_dtype: the dtype to use when indexing into the boundaries
+                tensor.  This must be int64 or int32.  This additionally specifies the
+                dtype of the return value.
+                right: see "Details" below.
+                sorter: an optional tuple containing
+                  (a) the name of an optional sorting tensor, used to access unsorted
+                  boundaries without reordering the boundaries tensor, and
+                  (b) the stride of the tensor in the last dimension.
+                The values in the sorting tensor are used as indices into the *last*
+                dimension of the boundaries tensor, with all other indices matching.
+                The size of the sorting and boundaries tensors must be equivalent.
+                sorter_indices: must be present if the sorting array is present; see
+                "boundary_indices" for the equivalent definition for the boundaries
+                tensor.
 
-                for values [[-1, 0, 1, 2], [3, 4, 5, 9]], offsets [0, 4, 4, 8], right=True
+                Output:
+                -------
+                The buckets each value belongs in, within a given set of boundaries.  0
+                indicates a position before the first boundary, and len(boundaries_set)
+                represents a position after the last boundary.
+
+                Details:
+                --------
+                Given a value and a set of boundaries, calculate the bucket that each
+                value belongs to.  This works differently in 1-D and N-D cases.
+
+                for values [[-1, 0, 1, 2], [3, 4, 5, 9]], boundaries [0, 4, 4, 8], right=True
                 return =   [[ 0, 1, 1, 1], [1, 3, 3, 4]].
 
-                for values [[-1, 0, 1, 2], [3, 4, 5, 9]], offsets [[0, 4], [4, 8]], right=True
+                for values [[-1, 0, 1, 2], [3, 4, 5, 9]], boundaries [[0, 4], [4, 8]], right=True
                 return =   [[ 0, 1, 1, 1], [0, 1, 1, 2]]
 
-                Note that the dimensionality of values and offsets must match in every
-                dimension _except_ the last in the N-D case, while the 1-D case does not
-                have this restriction.
+                Note that in the N-D boundaries case, the shape of "values" and
+                "boundaries" must match in every dimension _except_ the last.
 
-                When right == False, bucket i refers to range (offsets[i], offsets[i+1]].
-                When right == True,  bucket i refers to range [offsets[i], offsets[i+1]).
+                When right == False, bucket i refers to range (boundaries[i], boundaries[i+1]].
+                When right == True,  bucket i refers to range [boundaries[i], boundaries[i+1]).
 
-                Offsets must be non-decreasing, or a sorter must be provided which
+                Boundaries must be non-decreasing, or a sorter must be provided which
                 would re-index offsets in a non-decreasing order (e.g. the second output
                 of torch.sort(offsets)).  Otherwise, the result is undefined.
-
-                Since the underlying op implementation treats offsets as a flattened
-                tensor, num_bucket_boundaries describes the length of a single,
-                independent set of offsets (4 and 2 in the examples above,
-                respectively).  offsets_size represents torch.numel(offsets).  For a 1-D
-                sequence of offsets, these values are identical.
-
-                offsets_indices is a tensor of the same size as values, containing the
-                index within offsets of the *start* of the set of offsets used for each
-                corresponding value.
                 """
                 return self.bucketize(
                     values,
-                    offsets_name,
-                    num_bucket_boundaries,
-                    offsets_size,
+                    boundaries,
+                    boundary_indices,
                     indexing_dtype,
                     right,
-                    offsets_indices,
-                    sorter_name,
+                    sorter,
+                    sorter_indices,
                 )
 
         # Use mypy to check protocol implemented correctly

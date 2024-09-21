@@ -2071,6 +2071,19 @@ def inductor_randint(
     )
 
 
+def _boundaries_helper(tb: TensorBox) -> Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr]:
+    return (
+        tb.get_name(),
+        tb.get_size()[-1],
+        tb.get_size()[0] * tb.get_stride()[0],
+        tb.get_stride()[-1],
+    )
+
+
+def _sorter_helper(tb: TensorBox) -> Tuple[str, sympy.Expr]:
+    return tb.get_name(), tb.get_stride()[-1]
+
+
 @register_lowering(aten.searchsorted.Tensor, type_promotion_kind=None)
 def searchsorted(
     sorted_sequence: TensorBox,
@@ -2084,16 +2097,12 @@ def searchsorted(
     validate_bucketize = lambda tb: V.graph.has_feature(  # noqa: E731
         tb, BackendFeature.BUCKETIZE
     )
-    validate_strides = lambda tb: tb.get_stride()[-1] == 1  # noqa: E731
     # sorted_sequence and sorter must both be contiguous in the last dimension for our
     # assumptions in ops.bucketize to work.
     if (
-        not (validate_strides(sorted_sequence) and validate_bucketize(sorted_sequence))
+        not validate_bucketize(sorted_sequence)
         or not validate_bucketize(self)
-        or (
-            sorter is not None
-            and not (validate_strides(sorter) and validate_bucketize(sorter))
-        )
+        or (sorter is not None and not validate_bucketize(sorter))
     ):
         return fallback_handler(aten.searchsorted.Tensor, add_to_fallback_set=False)(
             sorted_sequence,
@@ -2118,8 +2127,6 @@ def searchsorted(
     # sorted_sequence.get_name() (used below) will exist unless we call
     # sorted_sequence.realize().
     sorted_sequence.realize()
-    sequence_size = sorted_sequence.get_numel()
-    num_bucket_boundaries = sorted_sequence.get_size()[-1]
 
     if sorter is not None:
         sorter.realize()
@@ -2130,37 +2137,38 @@ def searchsorted(
             val = values_loader(idx)
             return ops.bucketize(
                 val,
-                sorted_sequence.get_name(),
-                num_bucket_boundaries,
-                sequence_size,
+                _boundaries_helper(sorted_sequence),
+                0,
                 index_dtype,
                 right,
-                0,
-                sorter_name=sorter.get_name() if sorter is not None else None,
+                sorter=None if sorter is None else _sorter_helper(sorter),
+                sorter_indices=None if sorter is None else 0,
             )
 
     else:
 
         def inner_fn(idx):
             val = values_loader(idx)
+
             # Get index to the beginning of the sorted sequence within a flattened
             # version of the array.
-            strides = sorted_sequence.get_stride()
-            subsequence_index = ops.index_expr(
-                functools.reduce(
-                    operator.add, (s * i for s, i in zip(strides[:-1], idx[:-1]))
-                ),
-                index_dtype,
-            )
+            def get_flattened_index(tb: TensorBox):
+                strides = tb.get_stride()
+                return ops.index_expr(
+                    functools.reduce(
+                        operator.add, (s * i for s, i in zip(strides[:-1], idx[:-1]))
+                    ),
+                    index_dtype,
+                )
+
             return ops.bucketize(
                 val,
-                sorted_sequence.get_name(),
-                num_bucket_boundaries,
-                sequence_size,
+                _boundaries_helper(sorted_sequence),
+                get_flattened_index(sorted_sequence),
                 index_dtype,
                 right,
-                subsequence_index,
-                sorter_name=sorter.get_name() if sorter is not None else None,
+                sorter=None if sorter is None else _sorter_helper(sorter),
+                sorter_indices=None if sorter is None else get_flattened_index(sorter),
             )
 
     device = self.get_device()
@@ -2195,7 +2203,6 @@ def bucketize(
     # guarantee that boundaries.get_name() (used below) will exist unless
     # we call boundaries.realize().
     boundaries.realize()
-    boundaries_size = boundaries.get_size()[0]
     device = input.get_device()
     input_loader = input.make_loader()
 
@@ -2205,12 +2212,10 @@ def bucketize(
         val = input_loader(index)
         indices = ops.bucketize(
             val,
-            boundaries.get_name(),
-            boundaries_size,
-            boundaries_size,
+            _boundaries_helper(boundaries),
+            0,
             index_dtype,
             right,
-            0,
         )
 
         return indices
@@ -2349,8 +2354,6 @@ make_fallback(aten._cdist_forward)  # p=2 should be feasible
 make_fallback(aten._cdist_backward)
 
 # 2) Medium
-make_fallback(aten.max_unpool2d)
-make_fallback(aten.max_unpool3d)
 make_fallback(aten._trilinear)
 
 

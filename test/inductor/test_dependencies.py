@@ -39,12 +39,15 @@ class TestDependencies(InductorTestCase):
             idx = index[0]
             return ops.bucketize(
                 values=idx,
-                offsets_name=offsets.get_name(),
-                num_bucket_boundaries=offsets.get_size()[0],
-                offsets_size=offsets.get_size()[0],
+                boundaries=(
+                    offsets.get_name(),
+                    offsets.get_size()[-1],
+                    offsets.get_size()[0] * offsets.get_stride()[0],
+                    offsets.get_stride()[-1],
+                ),
+                boundary_indices=0,
                 indexing_dtype=torch.int32,
                 right=True,
-                offsets_indices=0,
             )
 
         pointwise = Pointwise.create(
@@ -64,13 +67,20 @@ class TestDependencies(InductorTestCase):
             idx = index[0]
             return ops.bucketize(
                 values=idx,
-                offsets_name=offsets.get_name(),
-                num_bucket_boundaries=offsets.get_size()[0],
-                offsets_size=offsets.get_size()[0],
+                boundaries=(
+                    offsets.get_name(),
+                    offsets.get_size()[-1],
+                    offsets.get_size()[0] * offsets.get_stride()[0],
+                    offsets.get_stride()[-1],
+                ),
+                boundary_indices=0,
                 indexing_dtype=torch.int32,
                 right=True,
-                offsets_indices=0,
-                sorter_name=sorter.get_name(),
+                sorter=(
+                    sorter.get_name(),
+                    sorter.get_stride()[-1],
+                ),
+                sorter_indices=0,
             )
 
         pointwise = Pointwise.create(
