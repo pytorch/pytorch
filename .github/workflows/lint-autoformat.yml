@@ -5,6 +5,10 @@ on:
     types: [opened, synchronize, reopened]
     branches: [main]
 
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [gh/**/base]
+
 jobs:
   # NB: This doesn't work with forked PR https://github.com/parkerbxyz/suggest-changes/issues/33 :(
   lintrunner-autoformat:
