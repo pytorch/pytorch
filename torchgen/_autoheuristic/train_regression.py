@@ -399,7 +399,6 @@ class AHTrainRegressionTree(AHTrain):
 
         def dt_to_python(node, depth):
             indent = "    " * (depth + 1)
-            false_predicate = ""
             if tree_.feature[node] != -2:
                 name = feature_name[node]
                 threshold = tree_.threshold[node]
