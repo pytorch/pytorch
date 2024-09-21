@@ -148,7 +148,9 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
             if unbacked_bindings := node.meta.get("unbacked_bindings"):
                 for s, keypath in unbacked_bindings.items():
 
-                    def go(node: fx.Node, keypath: tuple[Any, ...]) -> fx.Node | None:
+                    def go(
+                        node: fx.Node, keypath: tuple[Any, ...]
+                    ) -> Union[fx.Node | None]:
                         if keypath == ():
                             return node
                         elif keypath[0].name == "item" and isinstance(
