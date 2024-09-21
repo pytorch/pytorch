@@ -111,18 +111,33 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs):
                 new_carry, y = _extract_carry_and_out(combine_fn(*args), num_init)
                 return [*new_carry, *[n_c.clone().detach() for n_c in new_carry], *y]
 
-            carry, outs = _extract_carry_and_out(
+            # Get gradient masks of inits, xs and additional_inputs
+            carry_mask = get_gradient_mask(init)
+            xs_mask = get_gradient_mask(xs)
+            additional_inputs_mask = get_gradient_mask(additional_inputs)
+            
+            # Enforce that the gradients of the inits are traced
+            fw_init_force_grad_track = [pytree.tree_map(_from_fun, x) for x in fw_init]
+            for el in fw_init_force_grad_track:
+                el.requires_grad = True
+                
+            fw_xs_force_grad_track = [pytree.tree_map(_from_fun, x) for x in fw_xs]
+            for el in fw_xs_force_grad_track:
+                el.requires_grad = True
+                
+            fw_additional_inputs_force_grad_track = [pytree.tree_map(_from_fun, x) for x in fw_additional_inputs]
+            for el in fw_additional_inputs_force_grad_track:
+                el.requires_grad = True
+
+            carry_unforced_grad, outs_unforced_grad = _extract_carry_and_out(
                 wrapper_fwd_combine_fn(*fw_init, *fw_xs, *fw_additional_inputs),
                 num_init,
             )
-            # # TODO: Support this in the future
-            # if pytree.tree_any(
-            #     lambda t: not t.requires_grad,  # type: ignore[union-attr]
-            #     combine_fn(*fw_init, *fw_xs, *fw_additional_inputs),
-            # ):
-            #     raise RuntimeError(
-            #         "scan currently only supports Autograd if all init, xs and lifted parameters require gradients."
-            #     )
+
+            carry, outs = _extract_carry_and_out(
+                wrapper_fwd_combine_fn(*fw_init_force_grad_track, *fw_xs_force_grad_track, *fw_additional_inputs_force_grad_track),
+                num_init,
+            )
 
             fw_carry, fw_outputs = [pytree.tree_map(_from_fun, c) for c in carry], [
                 pytree.tree_map(_from_fun, o) for o in outs
@@ -153,11 +168,11 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs):
             # xs_mask = get_gradient_mask(fw_xs)
             # additional_inputs_mask = get_gradient_mask(fw_additional_inputs)
             
-            # Enforce that the gradients of the inits are traced
-            for el in fw_init:
-                el.requires_grad = True
-            for el in fw_carry:
-                el.requires_grad = True
+            # # Enforce that the gradients of the inits are traced
+            # for el in fw_init:
+            #     el.requires_grad = True
+            # for el in fw_carry:
+            #     el.requires_grad = True
             
             # fw_xs = [pytree.tree_map(_from_fun, x) for x in fw_xs]
             # for el in fw_xs:
@@ -166,7 +181,8 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs):
             _, joint_graph = create_fw_bw_graph(
                 combine_fn,
                 False,
-                (*fw_init, *fw_xs, *fw_additional_inputs),
+                # (*fw_init, *fw_xs, *fw_additional_inputs),
+                (*fw_init_force_grad_track, *fw_xs_force_grad_track, *fw_additional_inputs_force_grad_track),
                 (*fw_carry, *fw_outputs[num_init:]),
             )
             
@@ -178,9 +194,10 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs):
                             *fw_xs,
                             *fw_additional_inputs,), num_init
             )
-            carry_mask = get_gradient_mask(g_c)
-            xs_mask = get_gradient_mask(g_xs[: len(g_xs) - num_additional_inputs])
-            additional_inputs_mask = get_gradient_mask(g_xs[len(g_xs) - num_additional_inputs :])
+            # carry_mask = [unforced_g & forced_g for unforced_g, forced_g in zip(carry_mask, get_gradient_mask(g_c))]
+            carry_mask_wrapper = get_gradient_mask(g_c)
+            xs_mask = [unforced_g & forced_g for unforced_g, forced_g in zip(xs_mask, get_gradient_mask(g_xs[: len(g_xs) - num_additional_inputs]))]
+            additional_inputs_mask = [unforced_g & forced_g for unforced_g, forced_g in zip(additional_inputs_mask, get_gradient_mask(g_xs[len(g_xs) - num_additional_inputs :]))]
             
             bw_additional_inputs = [add_inp for add_inp, add_inp_m in zip(bw_additional_inputs, additional_inputs_mask) if add_inp_m]
             num_additional_inputs_masked = len(bw_additional_inputs)
@@ -203,7 +220,7 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs):
                 ]
                 g_xs = g_xs[: len(g_xs) - num_additional_inputs]
                 g_xs = [g for g, g_m in zip(g_xs, xs_mask) if g_m]
-                g_c = [g if g_m else torch.zeros_like(gi) for g, g_m, gi in zip(g_c, carry_mask, args[num_additional_inputs_masked:num_additional_inputs_masked+num_init]) ]
+                g_c = [g if g_m else torch.zeros_like(gi) for g, g_m, gi in zip(g_c, carry_mask_wrapper, args[num_additional_inputs_masked:num_additional_inputs_masked+num_init]) ]
                 
                 return [*new_g_additional_inputs, *g_c, *g_xs]
 
@@ -757,15 +774,6 @@ def scan_autograd(combine_fn, init, xs, dim, reverse, additional_inputs):
     ):
         with torch._C._AutoDispatchBelowAutograd():
             return scan_op(combine_fn, init, xs, dim, reverse, additional_inputs)
-
-    # # TODO: Support this in the future
-    # if pytree.tree_any(
-    #     lambda t: not t.requires_grad,  # type: ignore[union-attr]
-    #     (init, xs, additional_inputs),
-    # ):
-    #     raise RuntimeError(
-    #         "scan currently only supports Autograd if all init, xs and lifted parameters require gradients."
-    #     )
 
     # TODO: The create_fw_bw is always invoked twice:
     # Once in the forward path and
