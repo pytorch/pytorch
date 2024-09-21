@@ -2,12 +2,12 @@ import argparse
 import random
 
 import pandas as pd
-from tqdm import tqdm
 
 import torch
 import torch.utils.benchmark as benchmark
 from torch import nn
 from torch.sparse import SparseSemiStructuredTensor, to_sparse_semi_structured
+from tqdm import tqdm
 
 
 torch.set_printoptions(
@@ -146,6 +146,7 @@ def test_tensor(m, k, n, dtype, contiguous, backend):
 
 if __name__ == "__main__":
     dtype_lookup = {
+        "fp8e4m3fn": torch.float8_e4m3fn,
         "int8": torch.int8,
         "fp16": torch.float16,
         "bf16": torch.bfloat16,

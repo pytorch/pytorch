@@ -53,6 +53,9 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
         case at::ScalarType::Float:
             type = CUDA_R_32F;
             break;
+        case at::ScalarType::Float8_e4m3fn:
+            type = CUDA_R_8F_E4M3;
+            break;
         default:
             TORCH_CHECK(false, "Unsupported dtype for cuSPARSELt compressed matrix");
             break;
@@ -153,6 +156,11 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         output_type = CUDA_R_32F;
         compute_type = CUSPARSE_COMPUTE_32F;
         break;
+    case at::ScalarType::Float8_e4m3fn:
+        input_type = CUDA_R_8F_E4M3;
+        output_type = CUDA_R_8F_E4M3;
+        compute_type = CUSPARSE_COMPUTE_32F;
+        break;
 
 // cuSPARSELt <= v0.5.2 uses CUSPARSE_COMPUTE_TF32, CUSPARSE_COMPUTE_16F
 #else
@@ -181,21 +189,45 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
   // special check for mixed dtype int8 int8 -> {fp16, bf16, int32} support
   if (out_dtype_opt.has_value()) {
     out_dtype = out_dtype_opt.value();
-    TORCH_CHECK(input_type == CUDA_R_8I, "out_dtype support only available for int8 inputs");
-    switch (out_dtype)
+    if (input_type == CUDA_R_8I)
     {
-        case at::ScalarType::Half:
-            output_type = CUDA_R_16F;
-            break;
-        case at::ScalarType::BFloat16:
-            output_type = CUDA_R_16BF;
-            break;
-        case at::ScalarType::Int:
-            output_type = CUDA_R_32I;
-            break;
-        default:
-            TORCH_CHECK(false, "Unsupported out_dtype passed, must be one of {fp16, bf16, int32}");
-            break;
+        switch (out_dtype)
+        {
+            case at::ScalarType::Half:
+                output_type = CUDA_R_16F;
+                break;
+            case at::ScalarType::BFloat16:
+                output_type = CUDA_R_16BF;
+                break;
+            case at::ScalarType::Int:
+                output_type = CUDA_R_32I;
+                break;
+            default:
+                TORCH_CHECK(false, "Unsupported out_dtype passed, must be one of {fp16, bf16, int32}");
+                break;
+        }
+    }
+    else if (input_type == CUDA_R_8F_E4M3)
+    {
+        switch (out_dtype)
+        {
+            case at::ScalarType::Half:
+                output_type = CUDA_R_16F;
+                break;
+            case at::ScalarType::BFloat16:
+                output_type = CUDA_R_16BF;
+                break;
+            case at::ScalarType::Float:
+                output_type = CUDA_R_32F;
+                break;
+            default:
+                TORCH_CHECK(false, "Unsupported out_dtype passed, must be one of {fp16, bf16, float32}");
+                break;
+        }
+
+    }
+    else {
+        TORCH_CHECK(false, "out_dtype support only available for int8/fp8 inputs");
     }
   }
 
@@ -230,8 +262,8 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
 
   // create result tensor
   auto res_tensor_options = c10::TensorOptions().dtype(out_dtype).device(dense_B.device());
-  at::Tensor res = (transpose_result) ? at::empty({n, m}, res_tensor_options)
-                                      : at::empty({m, n}, res_tensor_options);
+  at::Tensor res = (transpose_result) ? at::zeros({n, m}, res_tensor_options)
+                                      : at::zeros({m, n}, res_tensor_options);
 
   cusparseLtMatDescriptor_t res_descriptor;
   TORCH_CUDASPARSE_CHECK(cusparseLtDenseDescriptorInit(
@@ -244,6 +276,18 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
       output_type,
       (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW));
 
+  // For float8, need fp16 C_descriptor, can't use FP8 for this matrix
+  cusparseLtMatDescriptor_t C_descriptor;
+  TORCH_CUDASPARSE_CHECK(cusparseLtDenseDescriptorInit(
+      &handle,
+      &C_descriptor,
+      m,
+      n,
+      (transpose_result) ? m: n,
+      16,
+      CUDA_R_16F,
+      (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW));
+
   // initialize matmul
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescriptorInit(
       &handle,
@@ -252,7 +296,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
       (dense_B.is_contiguous()) ? CUSPARSE_OPERATION_NON_TRANSPOSE : CUSPARSE_OPERATION_TRANSPOSE,
       &sparse_input_descriptor,
       &dense_input_descriptor,
-      &res_descriptor,
+      &C_descriptor,
       &res_descriptor,
       compute_type));
 
