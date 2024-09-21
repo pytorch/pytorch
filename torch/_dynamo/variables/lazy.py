@@ -1,6 +1,7 @@
 import collections
 import functools
-from typing import Any, Dict, Optional, Self, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
+from typing_extensions import Self
 
 from .base import VariableTracker
 from .tensor import SymNodeVariable
