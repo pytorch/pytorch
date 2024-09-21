@@ -190,7 +190,8 @@ def make_tensor(
             f"`requires_grad=True` is not supported for boolean and integral dtypes, but got {dtype=}"
         )
 
-    if noncontiguous and functools.reduce(lambda x, y: x * y, shape, 1) != 1:
+    noncontiguous = noncontiguous and functools.reduce(lambda x, y: x * y, shape, 1) > 1
+    if noncontiguous:
         # Double the size of the shape in the last dimension, so that we have
         # non-identical values when we make the non-contiguous operation.
         shape = cast(Tuple[int, ...], (*shape[:-1], 2 * shape[-1]))
@@ -258,7 +259,7 @@ def make_tensor(
             " To request support, file an issue at: https://github.com/pytorch/pytorch/issues"
         )
 
-    if noncontiguous and result.numel() > 1:
+    if noncontiguous:
         # Offset by 1 to also catch offsetting issues
         result = result[..., 1::2]
     elif memory_format is not None:
