@@ -148,14 +148,20 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs):
                 *fw_init, *fw_xs, *fw_additional_inputs
             )
             
-            # Get mask to mask None gradients
-            carry_mask = get_gradient_mask(fw_init)
-            xs_mask = get_gradient_mask(fw_xs)
+            # # Get mask to mask None gradients
+            # carry_mask = get_gradient_mask(fw_init)
+            # xs_mask = get_gradient_mask(fw_xs)
             # additional_inputs_mask = get_gradient_mask(fw_additional_inputs)
             
             # Enforce that the gradients of the inits are traced
             for el in fw_init:
                 el.requires_grad = True
+            for el in fw_carry:
+                el.requires_grad = True
+            
+            # fw_xs = [pytree.tree_map(_from_fun, x) for x in fw_xs]
+            # for el in fw_xs:
+            #     el.requires_grad = True
 
             _, joint_graph = create_fw_bw_graph(
                 combine_fn,
@@ -172,6 +178,8 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs):
                             *fw_xs,
                             *fw_additional_inputs,), num_init
             )
+            carry_mask = get_gradient_mask(g_c)
+            xs_mask = get_gradient_mask(g_xs[: len(g_xs) - num_additional_inputs])
             additional_inputs_mask = get_gradient_mask(g_xs[len(g_xs) - num_additional_inputs :])
             
             bw_additional_inputs = [add_inp for add_inp, add_inp_m in zip(bw_additional_inputs, additional_inputs_mask) if add_inp_m]
@@ -195,7 +203,7 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs):
                 ]
                 g_xs = g_xs[: len(g_xs) - num_additional_inputs]
                 g_xs = [g for g, g_m in zip(g_xs, xs_mask) if g_m]
-                # g_c = [g if g_m else torch.ones_like(gi) for g, g_m, gi in zip(g_c, carry_mask, args[num_additional_inputs_masked:num_additional_inputs_masked+num_init]) ]
+                g_c = [g if g_m else torch.zeros_like(gi) for g, g_m, gi in zip(g_c, carry_mask, args[num_additional_inputs_masked:num_additional_inputs_masked+num_init]) ]
                 
                 return [*new_g_additional_inputs, *g_c, *g_xs]
 
