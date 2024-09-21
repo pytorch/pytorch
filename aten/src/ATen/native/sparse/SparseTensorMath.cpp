@@ -574,20 +574,20 @@ SparseTensor& add_out_sparse_cpu(const SparseTensor& t, const SparseTensor& src,
 
   // deal with empty sparse tensors
   if (src._nnz() == 0) {
-    // if (is_same_size) {
-    //   return copy_sparse_to_sparse_(r, t);
-    // } else {
+    if (is_same_size) {
+      return copy_sparse_to_sparse_(r, t);
+    } else {
     const SparseTensor& broadcasted_t = sparse_broadcast_to(t, res_shape);
     return copy_sparse_to_sparse_(r, broadcasted_t);
-    // }
+    }
   }
   if (t._nnz() == 0) {
-    // if (is_same_size) {
-    //   return copy_sparse_to_sparse_(r, src);
-    // } else {
+    if (is_same_size) {
+      return mul_out_sparse_scalar(r, src, value);
+    } else {
     const SparseTensor& broadcasted_src = sparse_broadcast_to(src, res_shape);
     return mul_out_sparse_scalar(r, broadcasted_src, value);
-    // }
+    }
   }
 
   // the two sparse tensors should have the same dense_dim.

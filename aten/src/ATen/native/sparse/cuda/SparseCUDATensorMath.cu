@@ -405,7 +405,7 @@ SparseTensor& add_out_sparse_cuda(const SparseTensor& t, const SparseTensor& src
   }
   if (t._nnz() == 0) {
     if (is_same_size) {
-      return copy_sparse_to_sparse_(r, src);
+      return mul_out_sparse_scalar(r, src, value);
     } else {
       const SparseTensor& broadcasted_src = sparse_broadcast_to(src, res_shape);
       return mul_out_sparse_scalar(r, broadcasted_src, value);
