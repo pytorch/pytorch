@@ -990,6 +990,7 @@ class aot_inductor:
     # 0: disable debug dumping
     # 1: enable saving intermediate tensor values
     # 2: enable printing intermediate tensor values
+    # 3: enable printing kernel names only (useful for pinpointing troublesome kernels)
     debug_intermediate_value_printer = os.environ.get(
         "AOT_INDUCTOR_DEBUG_INTERMEDIATE_VALUE_PRINTER", "0"
     )
