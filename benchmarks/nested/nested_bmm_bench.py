@@ -6,7 +6,7 @@ import torch
 
 def bench(nt_a, nt_b, niter):
     # Warmup
-    pnt_a.bmm(nt_b)
+    nt_a.bmm(nt_b)
 
     torch.cuda.synchronize()
     start_event = torch.cuda.Event(enable_timing=True)

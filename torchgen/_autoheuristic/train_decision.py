@@ -135,7 +135,6 @@ class AHTrainDecisionTree(AHTrain):
         best_model = None
         best_model_safe_proba = 0
         best_model_num_correct = 0
-        best_model_num_wrong = 0
         best_model_unsafe_leaves = []
         columns = ["set", "crit", "max_depth", "min_samples_leaf"]
         metrics_columns = []
