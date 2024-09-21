@@ -62,6 +62,19 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 
 
 def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
+    """
+    Converts Python scalar operations into Tensor operations within the graph. This pass looks for
+    Tensor operations that involve SymFloat arguments and transforms them into equivalent operations
+    that use only Tensor inputs.
+
+    Args:
+        gm: The FX graph module representing the computation graph.
+        shape_env: The shape environment responsible for symbolic shape tracking and propagation
+        during graph transformations.
+
+   Returns:
+        None
+    """
     import sympy
 
     from torch.fx.experimental.symbolic_shapes import CallMethodKey
