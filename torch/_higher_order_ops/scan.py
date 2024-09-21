@@ -147,6 +147,15 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs):
             fw_graph = _maybe_reenter_make_fx(wrapper_fwd_combine_fn)(
                 *fw_init, *fw_xs, *fw_additional_inputs
             )
+            
+            # Get mask to mask None gradients
+            carry_mask = get_gradient_mask(fw_init)
+            xs_mask = get_gradient_mask(fw_xs)
+            # additional_inputs_mask = get_gradient_mask(fw_additional_inputs)
+            
+            # Enforce that the gradients of the inits are traced
+            for el in fw_init:
+                el.requires_grad = True
 
             _, joint_graph = create_fw_bw_graph(
                 combine_fn,
@@ -163,9 +172,7 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs):
                             *fw_xs,
                             *fw_additional_inputs,), num_init
             )
-            carry_mask = get_gradient_mask(g_c)
-            xs_mask = get_gradient_mask(g_xs[: len(g_xs) - num_additional_inputs])
-            additional_inputs_mask = get_gradient_mask(additional_inputs)
+            additional_inputs_mask = get_gradient_mask(g_xs[len(g_xs) - num_additional_inputs :])
             
             bw_additional_inputs = [add_inp for add_inp, add_inp_m in zip(bw_additional_inputs, additional_inputs_mask) if add_inp_m]
             num_additional_inputs_masked = len(bw_additional_inputs)
@@ -188,7 +195,7 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs):
                 ]
                 g_xs = g_xs[: len(g_xs) - num_additional_inputs]
                 g_xs = [g for g, g_m in zip(g_xs, xs_mask) if g_m]
-                g_c = [g for g, g_m in zip(g_c, carry_mask) if g_m]
+                # g_c = [g if g_m else torch.ones_like(gi) for g, g_m, gi in zip(g_c, carry_mask, args[num_additional_inputs_masked:num_additional_inputs_masked+num_init]) ]
                 
                 return [*new_g_additional_inputs, *g_c, *g_xs]
 
@@ -200,7 +207,7 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs):
             *fw_xs,
             *fw_additional_inputs,
         )
-        return fw_graph, new_joint_graph
+        return fw_graph, new_joint_graph, carry_mask, xs_mask, additional_inputs_mask
 
 
 def scan(
@@ -522,6 +529,9 @@ class ScanAutogradOp(torch.autograd.Function):
         reverse,
         num_leaves_init,
         num_leaves_xs,
+        carry_mask,
+        xs_mask,
+        additional_inputs_mask,
         *flat_args,
     ):
         ctx._joint_graph = joint_graph
@@ -532,11 +542,11 @@ class ScanAutogradOp(torch.autograd.Function):
         init, xs, additional_inputs = ScanAutogradOp.extract_init_xs_additional_inputs(
             list(flat_args), num_leaves_init, num_leaves_xs
         )
-        
-        ctx._carry_mask = get_gradient_mask(init)
-        ctx._xs_mask = get_gradient_mask(xs)
-        ctx._additional_inputs_mask = get_gradient_mask(additional_inputs)
         ctx._num_leaves_additional_inputs = len(additional_inputs)
+        
+        ctx._carry_mask = carry_mask
+        ctx._xs_mask = xs_mask
+        ctx._additional_inputs_mask = additional_inputs_mask
 
         with torch._C._AutoDispatchBelowAutograd():
             carry, carries_outs = _extract_carry_and_out(
@@ -710,17 +720,21 @@ class ScanAutogradOp(torch.autograd.Function):
             new_g_additional_inputs = g_outs[:num_additional_inputs_mask]
             g_init = g_outs[
                 num_additional_inputs_mask : num_additional_inputs_mask
-                + num_carry_mask
+                + num_leaves_init
             ]
+            # pdb.set_trace()
+            g_init = [g for g, g_m in zip(g_init, carry_mask) if g_m]
+            # pdb.set_trace()
             g_xs = g_outs[len(g_outs) - num_xs_mask:]
             g_xs = prepare_final_gradients_xs(g_xs, dim, reverse)
 
         
         new_g_additional_inputs = fill_grads_with_mask(new_g_additional_inputs, additional_inputs_mask)
-        pdb.set_trace()
+        # pdb.set_trace()
         g_xs = fill_grads_with_mask(g_xs, xs_mask)
-        pdb.set_trace()
-        return *[None] * 6, *g_init, *g_xs, *new_g_additional_inputs
+        g_init = fill_grads_with_mask(g_init, carry_mask)
+        # pdb.set_trace()
+        return *[None] * 9, *g_init, *g_xs, *new_g_additional_inputs
 
 
 @scan_op.py_impl(DispatchKey.Autograd)
@@ -764,6 +778,9 @@ def scan_autograd(combine_fn, init, xs, dim, reverse, additional_inputs):
     (
         fw_graph,
         joint_graph,
+        carry_mask,
+        xs_mask,
+        additional_inputs_mask,
     ) = create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs)
 
     flat_out = ScanAutogradOp.apply(
@@ -773,6 +790,9 @@ def scan_autograd(combine_fn, init, xs, dim, reverse, additional_inputs):
         reverse,
         num_leaves_init,
         num_leaves_xs,
+        carry_mask,
+        xs_mask,
+        additional_inputs_mask,
         *(init + xs + additional_inputs),
     )
     return *flat_out[:num_leaves_init], *flat_out[num_leaves_init:]

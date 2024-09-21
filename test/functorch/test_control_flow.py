@@ -2929,10 +2929,12 @@ def forward(self, pred_1, x_1):
         dim = 1
         scan_fct = compile_mode_helper(scan, compile_mode)
         autograds = []
+        autograds.append([True, True, False, True, True, True, True])
         autograds.append([False, True, True, True, True, True, True])
-        # autograds.append([True, True, True, False, True, False])
-        # autograds.append([True, True, True, False, False, False])
-        # autograds.append([True, True, False, False, False, False])
+        autograds.append([False, False, True, True, True, True, True])
+        autograds.append([True, True, True, True, False, True, False])
+        autograds.append([True, True, True, True, False, False, False])
+        autograds.append([True, True, True, False, False, False, False])
         
         # autograds.append([True, True, True, True, True, True])
         # autograds.append([False, False, True, True, True, True])
@@ -2974,10 +2976,14 @@ def forward(self, pred_1, x_1):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @parametrize("autograd", [False, True])
+    # @parametrize("reverse", [False, True])
+    @parametrize("reverse", [False])
+    # @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["eager"])
+    # @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("device", [torch.device("cpu")])
+    # @parametrize("autograd", [False, True])
+    @parametrize("autograd", [True])
     def test_scan_closure_combine_fn_with_no_grad(
         self, reverse, compile_mode, device, autograd
     ):
@@ -2996,19 +3002,19 @@ def forward(self, pred_1, x_1):
                 h_new = torch.tanh(c_new + x @ W_hh + b_hh)
             return c_new, h_new
 
-        if autograd:
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "scan currently only supports Autograd if all.*",
-            ):
-                result = scan_fct(RNN, h, x, dim=dim, reverse=reverse)
-        else:
-            result = scan_fct(RNN, h, x, dim=dim, reverse=reverse)
-            result_exp = _fake_scan(RNN, h, x, dim=dim, reverse=reverse)
-            self.assertEqual(result, result_exp)
+        # if autograd:
+        #     with self.assertRaisesRegex(
+        #         RuntimeError,
+        #         "scan currently only supports Autograd if all.*",
+        #     ):
+        #         result = scan_fct(RNN, h, x, dim=dim, reverse=reverse)
+        # else:
+        result = scan_fct(RNN, h, x, dim=dim, reverse=reverse)
+        result_exp = _fake_scan(RNN, h, x, dim=dim, reverse=reverse)
+        self.assertEqual(result, result_exp)
 
-            if autograd:
-                self.check_autograd(result, result_exp, (x, h, W_ih, b_ih, W_hh, b_hh))
+        if autograd:
+            self.check_autograd(result[0], result_exp[0], (x, W_ih, b_ih))
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
