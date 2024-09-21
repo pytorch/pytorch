@@ -2568,6 +2568,134 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
     return ret / (length_h * length_w)
 
 
+def _max_unpoolnd(
+    self: TensorLike, indices: TensorLike, output_size: List[int], dim: int
+):
+    # If the input tensors self and indices came from max_pool call as
+    # required by the documentation, this operation is deterministic
+    # because that ensures that if there are two entries in `indices`
+    # tensor that are equal, the corresponding values in `self` are also
+    # equal. If this condition is not satisfied, the operation is
+    # non-deterministic as one of the different values in `self` 'wins'.
+    utils.alert_not_deterministic(f"max_unpooling{dim}d_forward_out")
+    nc = reduce(operator.mul, self.shape[:-dim])
+    hw = reduce(operator.mul, output_size)
+    indices_nc_shape = [1] * self.ndim
+    indices_nc_shape[:-dim] = self.shape[:-dim]
+    indices_flat = (
+        indices + aten.arange(nc, device=self.device).view(indices_nc_shape) * hw
+    ).reshape(-1)
+
+    output = self.new_zeros(list(self.shape[:-dim]) + list(output_size))
+    return aten._unsafe_index_put(
+        output.reshape(-1), [indices_flat], self.reshape(-1), accumulate=False
+    ).view(output.shape)
+
+
+@register_decomposition(aten.max_unpool2d)
+@out_wrapper()
+def max_unpool2d(
+    self: TensorLike,
+    indices: TensorLike,
+    output_size: List[int],
+):
+    torch._check(
+        indices.dtype == torch.int64,
+        lambda: f"elements in indices should be type int64 but got: {indices.dtype}",
+    )
+    torch._check(
+        len(output_size) == 2,
+        lambda: (
+            f"There should be exactly two elements (height, width) in output_size, "
+            f"but got {len(output_size)} elements."
+        ),
+    )
+
+    torch._check(
+        self.ndim in (3, 4),
+        lambda: (
+            f"Input to max_unpooling2d should be a 3d or 4d Tensor, "
+            f"but got a tensor with {self.ndim} dimensions."
+        ),
+    )
+    torch._check(
+        self.shape == indices.shape,
+        lambda: (
+            f"Expected shape of indices to be same as that of the input tensor ({self.shape}) "
+            f"but got indices tensor with shape: {indices.shape}"
+        ),
+    )
+
+    for i in range(1, self.ndim):
+        torch._check(
+            self.size(i) > 0,
+            lambda: (
+                f"max_unpooling2d(): "
+                f"Expected input to have non-zero size for non-batch dimensions, "
+                f"but got {self.shape} with dimension {i} being empty."
+            ),
+        )
+
+    return _max_unpoolnd(self, indices, output_size, 2)
+
+
+@register_decomposition(aten.max_unpool3d)
+@out_wrapper()
+def max_unpool3d(
+    input: TensorLike,
+    indices: TensorLike,
+    output_size: List[int],
+    stride: List[int],
+    padding: List[int],
+):
+    torch._check(
+        indices.dtype == torch.int64, lambda: "elements in indices should be type int64"
+    )
+    torch._check(
+        input.ndim in (4, 5),
+        lambda: f"Input to max_unpooling3d should be a 4d or 5d Tensor, but got a tensor with {input.ndim} dimensions.",
+    )
+    torch._check(
+        len(output_size) == 3,
+        lambda: (
+            f"There should be exactly three elements (depth, height, width) in output_size, "
+            f"but got {len(output_size)} elements."
+        ),
+    )
+    torch._check(
+        len(stride) == 3,
+        lambda: f"There should be exactly three elements (depth, height, width) in stride, but got: {len(stride)} elements.",
+    )
+    torch._check(
+        len(padding) == 3,
+        lambda: f"There should be exactly three elements (depth, height, width) in padding, but got: {len(padding)} elements.",
+    )
+    torch._check(
+        input.shape == indices.shape,
+        lambda: (
+            f"Expected shape of indices to be same as that of the input tensor ({input.shape}) "
+            f"but got indices tensor with shape: {indices.shape}"
+        ),
+    )
+
+    for i in range(1, input.ndim):
+        torch._check(
+            input.size(i) > 0,
+            lambda: (
+                f"max_unpooling3d(): "
+                f"Expected input to have non-zero size for non-batch dimensions, "
+                f"but got {input.shape} with dimension {i} being empty."
+            ),
+        )
+
+    torch._check(
+        stride[0] > 0 and stride[1] > 0 and stride[2] > 0,
+        lambda: f"strides should be greater than zero, but got stride: {stride}",
+    )
+
+    return _max_unpoolnd(input, indices, output_size, 3)
+
+
 @register_decomposition(aten.index_add_)
 def index_add_(
     x: TensorLike,
