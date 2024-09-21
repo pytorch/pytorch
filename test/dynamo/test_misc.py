@@ -1289,7 +1289,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         f(torch.randn(3), 4.0)
         self.assertEqual(cnts.frame_count, 1)
 
-
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_torch_check(self):
         cnts = torch._dynamo.testing.CompileCounter()
