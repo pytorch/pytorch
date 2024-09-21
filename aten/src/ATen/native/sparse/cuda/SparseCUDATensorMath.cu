@@ -392,7 +392,7 @@ SparseTensor& add_out_sparse_cuda(const SparseTensor& t, const SparseTensor& src
 
   // Check if the broadcasting can be performed and if applicable return the shape of the result.
   const std::vector<int64_t>& res_shape = infer_size(t.sizes(), src.sizes());
-  bool is_same_size = (t.sizes() == src.sizes());
+  bool is_same_size = t.sizes().equals(src.sizes());
 
   // deal with empty sparse tensors
   if (src._nnz() == 0) {

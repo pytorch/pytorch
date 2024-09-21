@@ -570,24 +570,24 @@ SparseTensor& add_out_sparse_cpu(const SparseTensor& t, const SparseTensor& src,
 
   // Check if the broadcasting can be performed and if applicable return the shape of the result.
   const std::vector<int64_t>& res_shape = infer_size(t.sizes(), src.sizes());
-  bool is_same_size = (t.sizes() == src.sizes());
+  bool is_same_size = t.sizes().equals(src.sizes());
 
   // deal with empty sparse tensors
   if (src._nnz() == 0) {
-    if (is_same_size) {
-      return copy_sparse_to_sparse_(r, t);
-    } else {
-      const SparseTensor& broadcasted_t = sparse_broadcast_to(t, res_shape);
-      return copy_sparse_to_sparse_(r, broadcasted_t);
-    }
+    // if (is_same_size) {
+    //   return copy_sparse_to_sparse_(r, t);
+    // } else {
+    const SparseTensor& broadcasted_t = sparse_broadcast_to(t, res_shape);
+    return copy_sparse_to_sparse_(r, broadcasted_t);
+    // }
   }
   if (t._nnz() == 0) {
-    if (is_same_size) {
-      return copy_sparse_to_sparse_(r, src);
-    } else {
-      const SparseTensor& broadcasted_src = sparse_broadcast_to(src, res_shape);
-      return mul_out_sparse_scalar(r, broadcasted_src, value);
-    }
+    // if (is_same_size) {
+    //   return copy_sparse_to_sparse_(r, src);
+    // } else {
+    const SparseTensor& broadcasted_src = sparse_broadcast_to(src, res_shape);
+    return mul_out_sparse_scalar(r, broadcasted_src, value);
+    // }
   }
 
   // the two sparse tensors should have the same dense_dim.
@@ -604,17 +604,17 @@ SparseTensor& add_out_sparse_cpu(const SparseTensor& t, const SparseTensor& src,
         return add_out_sparse_non_contiguous(r, t, src, value, commonDtype);
       }
   } else { // broadcasting
-    const SparseTensor& broadcasted_t = sparse_broadcast_to(t, res_shape);
-    const SparseTensor& broadcasted_src = sparse_broadcast_to(src, res_shape);
+  const SparseTensor& broadcasted_t = sparse_broadcast_to(t, res_shape);
+  const SparseTensor& broadcasted_src = sparse_broadcast_to(src, res_shape);
 
-    r.resize_as_(broadcasted_src);
-    if (r.is_meta()) {
-      return r;
-      } else if (broadcasted_src._values().is_contiguous() && broadcasted_t._values().is_contiguous()) {
-        return add_out_sparse_contiguous(r, broadcasted_t, broadcasted_src, value, commonDtype);
-      } else {
-        return add_out_sparse_non_contiguous(r, broadcasted_t, broadcasted_src, value, commonDtype);
-      }
+  r.resize_as_(broadcasted_src);
+  if (r.is_meta()) {
+    return r;
+    } else if (broadcasted_src._values().is_contiguous() && broadcasted_t._values().is_contiguous()) {
+      return add_out_sparse_contiguous(r, broadcasted_t, broadcasted_src, value, commonDtype);
+    } else {
+      return add_out_sparse_non_contiguous(r, broadcasted_t, broadcasted_src, value, commonDtype);
+    }
   }
 }
 
