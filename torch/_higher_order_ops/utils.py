@@ -213,7 +213,7 @@ def unique_graph_id(proxy_mode, prefix):
     return i, next_name
 
 
-def _from_fun(t):
+def _from_fun(t, force_requires_grad=False):
     from torch._functorch.aot_autograd import from_fun
     from torch._subclasses.functional_tensor import FunctionalTensor
 
@@ -223,7 +223,7 @@ def _from_fun(t):
                 t.size(),
                 t.stride(),
                 dtype=t.dtype,
-                requires_grad=t.requires_grad,
+                requires_grad=t.requires_grad if not force_requires_grad else True,
                 device=t.device,
             )
         else:

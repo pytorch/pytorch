@@ -65,8 +65,13 @@ def shift_source_dim_to_target_dim(t, from_dim: int, to_dim: int):
     dims.insert(to_dim, from_dim)
     return t.permute(*dims)
 
+
 def get_gradient_mask(tensor_list):
     return [True if v is not None and v.requires_grad else False for v in tensor_list]
+
+
+def mask_gradient(grads, mask):
+    return [g for g, m in zip(grads, mask) if m]
 
 
 # Internal functions for scan.py
@@ -111,31 +116,34 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs):
                 new_carry, y = _extract_carry_and_out(combine_fn(*args), num_init)
                 return [*new_carry, *[n_c.clone().detach() for n_c in new_carry], *y]
 
-            # Get gradient masks of inits, xs and additional_inputs
+            # The forward graph needs to be constructed from a different combine_fn than the joint_graph
+            fw_graph = _maybe_reenter_make_fx(wrapper_fwd_combine_fn)(
+                *fw_init, *fw_xs, *fw_additional_inputs
+            )
+
+            # Get gradient masks of inits, these masks are used during the backward path to
+            # return gradients for inits with requires_grad=True and None for the others
             carry_mask = get_gradient_mask(init)
             xs_mask = get_gradient_mask(xs)
             additional_inputs_mask = get_gradient_mask(additional_inputs)
-            
-            # Enforce that the gradients of the inits are traced
-            fw_init_force_grad_track = [pytree.tree_map(_from_fun, x) for x in fw_init]
-            for el in fw_init_force_grad_track:
-                el.requires_grad = True
-                
-            fw_xs_force_grad_track = [pytree.tree_map(_from_fun, x) for x in fw_xs]
-            for el in fw_xs_force_grad_track:
-                el.requires_grad = True
-                
-            fw_additional_inputs_force_grad_track = [pytree.tree_map(_from_fun, x) for x in fw_additional_inputs]
-            for el in fw_additional_inputs_force_grad_track:
-                el.requires_grad = True
 
-            carry_unforced_grad, outs_unforced_grad = _extract_carry_and_out(
-                wrapper_fwd_combine_fn(*fw_init, *fw_xs, *fw_additional_inputs),
-                num_init,
-            )
+            # Enforce that the gradients of the inits, xs and additional_inputs are traced
+            fw_init_force_grad_track = [
+                pytree.tree_map(_from_fun, x, True) for x in fw_init
+            ]
+            fw_xs_force_grad_track = [
+                pytree.tree_map(_from_fun, x, True) for x in fw_xs
+            ]
+            fw_additional_inputs_force_grad_track = [
+                pytree.tree_map(_from_fun, x, True) for x in fw_additional_inputs
+            ]
 
             carry, outs = _extract_carry_and_out(
-                wrapper_fwd_combine_fn(*fw_init_force_grad_track, *fw_xs_force_grad_track, *fw_additional_inputs_force_grad_track),
+                wrapper_fwd_combine_fn(
+                    *fw_init_force_grad_track,
+                    *fw_xs_force_grad_track,
+                    *fw_additional_inputs_force_grad_track,
+                ),
                 num_init,
             )
 
@@ -158,59 +166,65 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs):
                     f"Got types {[type(out) for out in fw_outputs]}."
                 )
 
-            # The forward graph needs to be constructed from a different combine_fn than the joint_graph
-            fw_graph = _maybe_reenter_make_fx(wrapper_fwd_combine_fn)(
-                *fw_init, *fw_xs, *fw_additional_inputs
-            )
-            
-            # # Get mask to mask None gradients
-            # carry_mask = get_gradient_mask(fw_init)
-            # xs_mask = get_gradient_mask(fw_xs)
-            # additional_inputs_mask = get_gradient_mask(fw_additional_inputs)
-            
-            # # Enforce that the gradients of the inits are traced
-            # for el in fw_init:
-            #     el.requires_grad = True
-            # for el in fw_carry:
-            #     el.requires_grad = True
-            
-            # fw_xs = [pytree.tree_map(_from_fun, x) for x in fw_xs]
-            # for el in fw_xs:
-            #     el.requires_grad = True
-
+            # The joint graph is constructed with the requires_grad forced to True for the init, xs and additional_inputs
+            # This is necessary because during the backward scan, we need the g_init for the other gradients, even if
+            # we don't directly need g_init
             _, joint_graph = create_fw_bw_graph(
                 combine_fn,
                 False,
-                # (*fw_init, *fw_xs, *fw_additional_inputs),
-                (*fw_init_force_grad_track, *fw_xs_force_grad_track, *fw_additional_inputs_force_grad_track),
+                (
+                    *fw_init_force_grad_track,
+                    *fw_xs_force_grad_track,
+                    *fw_additional_inputs_force_grad_track,
+                ),
                 (*fw_carry, *fw_outputs[num_init:]),
             )
-            
-            # Get mask to mask None gradients
+
             g_c, g_xs = _extract_carry_and_out(
-                joint_graph(*fw_carry,
-                            *fw_outputs[num_init:],
-                            *fw_init,
-                            *fw_xs,
-                            *fw_additional_inputs,), num_init
+                joint_graph(
+                    *fw_carry,
+                    *fw_outputs[num_init:],
+                    *fw_init,
+                    *fw_xs,
+                    *fw_additional_inputs,
+                ),
+                num_init,
             )
-            # carry_mask = [unforced_g & forced_g for unforced_g, forced_g in zip(carry_mask, get_gradient_mask(g_c))]
+            # The gradient masks are combined with the initial ones.
+            # The reason is that the combine_fn might contain ``with torch.no_grad()`` statements
+            # Thus, even if the gradients of init, xs or additional_inputs should be tracked,
+            # The ``torch.no_grad()`` statements may break the gradient tracking
             carry_mask_wrapper = get_gradient_mask(g_c)
-            xs_mask = [unforced_g & forced_g for unforced_g, forced_g in zip(xs_mask, get_gradient_mask(g_xs[: len(g_xs) - num_additional_inputs]))]
-            additional_inputs_mask = [unforced_g & forced_g for unforced_g, forced_g in zip(additional_inputs_mask, get_gradient_mask(g_xs[len(g_xs) - num_additional_inputs :]))]
-            
-            bw_additional_inputs = [add_inp for add_inp, add_inp_m in zip(bw_additional_inputs, additional_inputs_mask) if add_inp_m]
+            xs_mask = [
+                unforced_g & forced_g
+                for unforced_g, forced_g in zip(
+                    xs_mask,
+                    get_gradient_mask(g_xs[: len(g_xs) - num_additional_inputs]),
+                )
+            ]
+            additional_inputs_mask = [
+                unforced_g & forced_g
+                for unforced_g, forced_g in zip(
+                    additional_inputs_mask,
+                    get_gradient_mask(g_xs[len(g_xs) - num_additional_inputs :]),
+                )
+            ]
+
+            bw_additional_inputs = mask_gradient(
+                bw_additional_inputs, additional_inputs_mask
+            )
             num_additional_inputs_masked = len(bw_additional_inputs)
 
             def wrapper_bwd_combine_fn(*args):
                 carried_g_additional_input = args[:num_additional_inputs_masked]
-                # carried_g_additional_input = [add_inp for add_inp, add_inp_m in zip(carried_g_additional_input, additional_inputs_mask) if add_inp_m]
 
                 g_c, g_xs = _extract_carry_and_out(
                     joint_graph(*args[num_additional_inputs_masked:]), num_init
                 )
                 current_g_additional_inputs = g_xs[len(g_xs) - num_additional_inputs :]
-                current_g_additional_inputs = [add_inp for add_inp, add_inp_m in zip(current_g_additional_inputs, additional_inputs_mask) if add_inp_m]
+                current_g_additional_inputs = mask_gradient(
+                    current_g_additional_inputs, additional_inputs_mask
+                )
 
                 new_g_additional_inputs = [
                     carr_g + curr_g
@@ -219,9 +233,19 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs):
                     )
                 ]
                 g_xs = g_xs[: len(g_xs) - num_additional_inputs]
-                g_xs = [g for g, g_m in zip(g_xs, xs_mask) if g_m]
-                g_c = [g if g_m else torch.zeros_like(gi) for g, g_m, gi in zip(g_c, carry_mask_wrapper, args[num_additional_inputs_masked:num_additional_inputs_masked+num_init]) ]
-                
+                g_xs = mask_gradient(g_xs, xs_mask)
+                g_c = [
+                    g if g_m else torch.zeros_like(gi)
+                    for g, g_m, gi in zip(
+                        g_c,
+                        carry_mask_wrapper,
+                        args[
+                            num_additional_inputs_masked : num_additional_inputs_masked
+                            + num_init
+                        ],
+                    )
+                ]
+
                 return [*new_g_additional_inputs, *g_c, *g_xs]
 
         new_joint_graph = _maybe_reenter_make_fx(wrapper_bwd_combine_fn)(
@@ -326,8 +350,14 @@ def scan(
         raise RuntimeError("All init leaves must be a Tensor")
     if any(not isinstance(x, torch.Tensor) for x in leaves_xs):
         raise RuntimeError("All xs leaves must be a Tensor")
+    if any(x.ndim < dim for x in leaves_xs):
+        raise RuntimeError(
+            "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
+        )
     if any(x.shape[dim] == 0 for x in leaves_xs):
-        raise RuntimeError("All xs leaves must have a scan dimension > 0")
+        raise RuntimeError(
+            "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
+        )
 
     if len(leaves_xs) > 0:
         shape = leaves_xs[0].shape
@@ -409,7 +439,11 @@ def generic_scan(operator, init, xs, dim=0, reverse=False, additional_inputs=Non
         # Compute dummy shapes for the pre-allocation
         num_init_leaves = len(init)
         dummy_carry, dummy_out = _extract_carry_and_out(
-            operator(*carry, *[first_slice_copy(elem, dim) for elem in xs], *additional_inputs,),
+            operator(
+                *carry,
+                *[first_slice_copy(elem, dim) for elem in xs],
+                *additional_inputs,
+            ),
             num_init_leaves,
         )
 
@@ -418,22 +452,18 @@ def generic_scan(operator, init, xs, dim=0, reverse=False, additional_inputs=Non
         # idxs -> Index matrix for scatter_
         # out: (num_elems, M, N, ...)
         # idx: (1, M, N)
-        if len(dummy_out) > 0:
-            outs, idxs = zip(
-                *[
-                    [
-                        torch.zeros(
-                            [num_elems] + list(e.size()),
-                            dtype=e.dtype,
-                            device=e.device,
-                        ),
-                        torch.ones_like(e, dtype=torch.int64).unsqueeze(0),
-                    ]
-                    for i, e in enumerate(dummy_out)
-                ]
+        outs = [
+            torch.zeros(
+                [num_elems] + list(e.size()),
+                dtype=e.dtype,
+                device=e.device,
             )
-        else:
-            outs, idxs = [], []
+            for i, e in enumerate(dummy_out)
+        ]
+        idxs = [
+            torch.ones_like(e, dtype=torch.int64).unsqueeze(0)
+            for i, e in enumerate(dummy_out)
+        ]
 
         def store_out_in_outs(out, ind):
             # Store the intermediate out in the outs matrix
@@ -568,7 +598,7 @@ class ScanAutogradOp(torch.autograd.Function):
             list(flat_args), num_leaves_init, num_leaves_xs
         )
         ctx._num_leaves_additional_inputs = len(additional_inputs)
-        
+
         ctx._carry_mask = carry_mask
         ctx._xs_mask = xs_mask
         ctx._additional_inputs_mask = additional_inputs_mask
@@ -665,8 +695,8 @@ class ScanAutogradOp(torch.autograd.Function):
             # The initial gradients for the additional_inputs are all zeros
             g_additional_inputs = [torch.zeros_like(ai) for ai in additional_inputs]
             return g_c_T, g_ys, g_additional_inputs
-        
-        def fill_grads_with_mask(real_grads, mask):
+
+        def expand_grads_with_None(real_grads, mask):
             g_list = []
             true_cnt = 0
             for m in mask:
@@ -680,13 +710,11 @@ class ScanAutogradOp(torch.autograd.Function):
         joint_graph = ctx._joint_graph
         dim = ctx._dim
         reverse = ctx._reverse
-        num_leaves_init = ctx._num_leaves_init        
+        num_leaves_init = ctx._num_leaves_init
         num_leaves_xs = ctx._num_leaves_xs
-        num_leaves_additional_inputs = ctx._num_leaves_additional_inputs
         num_leaves_ys = ctx._num_leaves_ys
-        
+
         carry_mask = ctx._carry_mask
-        num_carry_mask = sum(carry_mask)
         xs_mask = ctx._xs_mask
         num_xs_mask = sum(xs_mask)
         additional_inputs_mask = ctx._additional_inputs_mask
@@ -721,8 +749,10 @@ class ScanAutogradOp(torch.autograd.Function):
                 num_leaves_ys,
                 bwd_scan_dim,
             )
-            
-            g_additional_inputs = [add_inp for add_inp, add_inp_m in zip(g_additional_inputs, additional_inputs_mask) if add_inp_m]
+
+            g_additional_inputs = mask_gradient(
+                g_additional_inputs, additional_inputs_mask
+            )
 
             # Prepare the inputs for the backward scan.
             # This involves flipping the input xs if needed as well as
@@ -732,7 +762,6 @@ class ScanAutogradOp(torch.autograd.Function):
             )
             xs_bwd = [*g_ys, *carries, *xs]
 
-            import pdb
             g_outs = scan_op(
                 joint_graph,
                 [*g_additional_inputs, *g_c_T],
@@ -741,24 +770,20 @@ class ScanAutogradOp(torch.autograd.Function):
                 True,
                 additional_inputs,
             )
-            # pdb.set_trace()
             new_g_additional_inputs = g_outs[:num_additional_inputs_mask]
             g_init = g_outs[
                 num_additional_inputs_mask : num_additional_inputs_mask
                 + num_leaves_init
             ]
-            # pdb.set_trace()
-            g_init = [g for g, g_m in zip(g_init, carry_mask) if g_m]
-            # pdb.set_trace()
-            g_xs = g_outs[len(g_outs) - num_xs_mask:]
+            g_init = mask_gradient(g_init, carry_mask)
+            g_xs = g_outs[len(g_outs) - num_xs_mask :]
             g_xs = prepare_final_gradients_xs(g_xs, dim, reverse)
 
-        
-        new_g_additional_inputs = fill_grads_with_mask(new_g_additional_inputs, additional_inputs_mask)
-        # pdb.set_trace()
-        g_xs = fill_grads_with_mask(g_xs, xs_mask)
-        g_init = fill_grads_with_mask(g_init, carry_mask)
-        # pdb.set_trace()
+        new_g_additional_inputs = expand_grads_with_None(
+            new_g_additional_inputs, additional_inputs_mask
+        )
+        g_xs = expand_grads_with_None(g_xs, xs_mask)
+        g_init = expand_grads_with_None(g_init, carry_mask)
         return *[None] * 9, *g_init, *g_xs, *new_g_additional_inputs
 
 
