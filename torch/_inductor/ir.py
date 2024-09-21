@@ -2103,9 +2103,9 @@ def as_storage_and_layout(
     x: IRNode,
     freeze: bool = True,
     want_contiguous: bool = False,
-    stride_order: Optional[Sequence[_IntLike]] = None,
+    stride_order: Optional[Sequence[Union[int, Integer]]] = None,
     allow_padding: bool = False,
-    exact_strides: Optional[Sequence[_IntLike]] = None,
+    exact_strides: Optional[Sequence[Union[int, Integer]]] = None,
 ) -> Tuple[StorageBox, Layout]:
     """
     Try to simplify x into a StorageBox and a Layout.
