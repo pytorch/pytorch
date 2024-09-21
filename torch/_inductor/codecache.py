@@ -1282,6 +1282,111 @@ class FxGraphCache:
                 raise BypassFxGraphCache("Can't cache torchbind objects")
 
     @staticmethod
+    def prepare_key(
+        gm: torch.fx.GraphModule,
+        example_inputs: List[torch.Tensor],
+        fx_kwargs: Dict[str, Any],
+        inputs_to_check: Sequence[int],
+        remote: bool,
+    ) -> Tuple[Optional[Tuple[str, List[str]]], Dict[str, Any]]:
+        """
+        Checks that the inductor input is cacheable, then computes
+        and returns the cache key for the input.
+        Returns (key_info, cache_info) where:
+        - key_info is (hash_key, debug_lines), and
+        - cache_info will contain debug info in the event of BypassFxGraphCache.
+
+        NB: It is possible to have this function return a union instead. But
+        I personally believe it is more annoying/difficult to read in that format.
+        """
+        try:
+            FxGraphCache._check_can_cache(gm)
+            key, debug_lines = compiled_fx_graph_hash(
+                gm, example_inputs, fx_kwargs, inputs_to_check
+            )
+        except BypassFxGraphCache as e:
+            counters["inductor"]["fxgraph_cache_bypass"] += 1
+            log.info("Bypassing FX Graph Cache because '%s'", e)
+            if remote:
+                log_cache_bypass("bypass_fx_graph", str(e))
+            cache_info = {
+                "cache_state": "bypass",
+                "cache_bypass_reason": str(e),
+                "cache_event_time": time_ns(),
+            }
+            return None, cache_info
+        # If key exists, then cache_info will come from load_with_key
+        return (key, debug_lines), {}
+
+    @staticmethod
+    def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
+        """
+        Attempts to load the remote cache, returns None on error.
+        """
+        remote_cache = None
+        cache_id = "fx-graph-v1"
+        try:
+            if config.is_fbcode():
+                from torch._inductor.fb.remote_cache import FbRemoteFxGraphCache
+
+                remote_cache = FbRemoteFxGraphCache(cache_id)
+            else:
+                from torch._inductor.remote_cache import RemoteFxGraphCache
+
+                remote_cache = RemoteFxGraphCache(cache_id)
+        except ModuleNotFoundError as e:
+            # No need for a stack trace on this error
+            remote_cache = None
+            log.warning("Unable to create a remote cache: %s", e)
+        except Exception:
+            remote_cache = None
+            log.warning("Unable to create a remote cache", exc_info=True)
+        return remote_cache
+
+    @staticmethod
+    def load_with_key(
+        key: str,
+        debug_lines: List[str],
+        example_inputs: List[torch.Tensor],
+        local: bool,
+        remote_cache: Optional[RemoteCache[JsonDataTy]],
+        is_backward: bool,
+    ) -> Tuple[Optional[CompiledFxGraph], Dict[str, Any]]:
+        """
+        Lookup the graph with the given key, and return results and metadata.
+        Doesn't do any logging on its own, because AOTAutograd handles a cache miss
+        differently from FXGraphCache.
+        """
+        compiled_graph = FxGraphCache._lookup_graph(
+            key, example_inputs, local, remote_cache
+        )
+        cache_info = {
+            "key": key,
+            "components": debug_lines,
+            "cache_event_time": time_ns(),
+        }
+        if compiled_graph is not None:
+            log.debug("fx graph cache miss for key %s", key)
+            counters["inductor"]["fxgraph_cache_hit"] += 1
+            cache_info["cache_state"] = "hit"
+
+            if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
+                cache_info["time_saved_ns"] = time_saved_ns
+                add_remote_cache_time_saved(time_saved_ns, is_backward)
+                if (
+                    ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
+                        time_saved_ns
+                    )
+                ) != 0:
+                    cache_info["ephemeral_timeout_increase"] = ephemeral_increase
+        else:
+            log.debug("fx graph cache hit for key %s", key)
+            counters["inductor"]["fxgraph_cache_miss"] += 1
+            cache_info["cache_state"] = "miss"
+
+        return compiled_graph, cache_info
+
+    @staticmethod
     def load(  # type: ignore[no-untyped-def]
         compile_fx_fn: Callable[..., Any],
         gm: torch.fx.GraphModule,
@@ -1297,92 +1402,70 @@ class FxGraphCache:
         """
         assert local or remote, "at least one of them needs to be enabled"
         compiled_graph = None
-        cache_state = None
-        cache_event_time = None
-        cache_info: Dict[str, Any] = {}
-        try:
-            FxGraphCache._check_can_cache(gm)
-            key, debug_lines = compiled_fx_graph_hash(
-                gm, example_inputs, fx_kwargs, inputs_to_check
-            )
-            cache_info["key"] = key
-            cache_info["components"] = debug_lines
-
-            remote_cache: Optional[RemoteCache[JsonDataTy]] = None
+        remote_cache = None
+        (key_info, cache_info) = FxGraphCache.prepare_key(
+            gm, example_inputs, fx_kwargs, inputs_to_check, remote
+        )
+        if key_info is not None:
+            key, debug_lines = key_info
             if remote:
-                cache_id = "fx-graph-v1"
-                try:
-                    if config.is_fbcode():
-                        from torch._inductor.fb.remote_cache import FbRemoteFxGraphCache
-
-                        remote_cache = FbRemoteFxGraphCache(cache_id)
-                    else:
-                        from torch._inductor.remote_cache import RemoteFxGraphCache
-
-                        remote_cache = RemoteFxGraphCache(cache_id)
-                except ModuleNotFoundError as e:
-                    # No need for a stack trace on this error
-                    remote_cache = None
-                    log.warning("Unable to create a remote cache: %s", e)
-                except Exception:
-                    remote_cache = None
-                    log.warning("Unable to create a remote cache", exc_info=True)
-
-            compiled_graph = FxGraphCache._lookup_graph(
-                key, example_inputs, local, remote_cache
+                remote_cache = FxGraphCache.get_remote_cache()
+            compiled_graph, cache_info = FxGraphCache.load_with_key(
+                key,
+                debug_lines,
+                example_inputs,
+                local,
+                remote_cache,
+                is_backward=fx_kwargs.get("is_backward", False),
             )
 
-            if compiled_graph is None:
-                log.debug("fx graph cache miss for key %s", key)
-                counters["inductor"]["fxgraph_cache_miss"] += 1
-                cache_state = "miss"
-                start_time = time_ns()
-                cache_event_time = start_time
-                compiled_graph = compile_fx_fn(
-                    gm, example_inputs, inputs_to_check, fx_kwargs
-                )
-                compiled_graph._time_taken_ns = time_ns() - start_time
-                cache_info["time_taken_ns"] = compiled_graph._time_taken_ns
-                FxGraphCache._save_graph(
-                    key,
-                    compiled_graph,
-                    example_inputs,
-                    local,
-                    remote_cache,
-                )
-            else:
-                log.debug("fx graph cache hit for key %s", key)
-                counters["inductor"]["fxgraph_cache_hit"] += 1
-                cache_state = "hit"
-                cache_event_time = time_ns()
-                if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
-                    cache_info["time_saved_ns"] = time_saved_ns
-                    add_remote_cache_time_saved(time_saved_ns, fx_kwargs["is_backward"])
-                    if (
-                        ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
-                            time_saved_ns
-                        )
-                    ) != 0:
-                        cache_info["ephemeral_timeout_increase"] = ephemeral_increase
-            compiled_graph._fx_graph_cache_key = key
-        except BypassFxGraphCache as e:
-            counters["inductor"]["fxgraph_cache_bypass"] += 1
-            cache_state = "bypass"
-            log.info("Bypassing FX Graph Cache because '%s'", e)
-            cache_info["cache_bypass_reason"] = str(e)
-            if remote:
-                log_cache_bypass("bypass_fx_graph", str(e))
-            cache_event_time = time_ns()
-
-        if not compiled_graph:
+        # CACHE BYPASS: Compile the graph, don't save it to the cache
+        if cache_info["cache_state"] == "bypass":
+            assert compiled_graph is None
             compiled_graph = compile_fx_fn(
                 gm, example_inputs, inputs_to_check, fx_kwargs
             )
+
+        # CACHE MISS: Compile the graph and save to cache
+        elif cache_info["cache_state"] == "miss":
+            assert compiled_graph is None
+            assert key_info is not None
+            start_time = cache_info["cache_event_time"]
+            compiled_graph = compile_fx_fn(
+                gm, example_inputs, inputs_to_check, fx_kwargs
+            )
+            compiled_graph._time_taken_ns = time_ns() - start_time
+            cache_key = key_info[0]
+            compiled_graph._fx_graph_cache_key = cache_key
+            cache_info["time_taken_ns"] = compiled_graph._time_taken_ns
+            FxGraphCache._save_graph(
+                cache_key,
+                compiled_graph,
+                example_inputs,
+                local,
+                remote_cache,
+            )
+        # CACHE HIT: not much to really do, just make sure the cache key
+        # is recorded on the graph
+        else:
+            assert cache_info["cache_state"] == "hit"
+            assert compiled_graph is not None
+            assert key_info is not None
+            cache_key = key_info[0]
+            compiled_graph._fx_graph_cache_key = cache_key
+
         assert compiled_graph is not None
-        cache_info["cache_state"] = cache_state
+
+        # Logging and observability: we log a single chromium event
+        # and a tlparse log for every cache action.
+        # In the event of a bypass, we also logged to the remote table earlier
+        # with log_cache_bypass.
         chromium_log = get_chromium_event_logger()
+        cache_state = cache_info["cache_state"]
         chromium_log.log_instant_event(
-            f"fx_graph_cache_{cache_state}", cache_event_time, metadata=cache_info
+            f"fx_graph_cache_{cache_state}",
+            cache_info["cache_event_time"],
+            metadata=cache_info,
         )
         torch._logging.trace_structured(
             "artifact",
