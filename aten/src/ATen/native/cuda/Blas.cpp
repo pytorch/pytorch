@@ -1079,7 +1079,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 #define F8E4M3 Float8_e4m3fn
 #define F8E5M2 Float8_e5m2
 #define kF8E4M3 kFloat8_e4m3fn
-#define kF8E5M2 kFloat8_e5m2 
+#define kF8E5M2 kFloat8_e5m2
 #endif
 #define TUNABLE_DISPATCH(BLASOP_A, BLASOP_B)                   \
         if (mat1.scalar_type() == ScalarType::F8E4M3) {        \
