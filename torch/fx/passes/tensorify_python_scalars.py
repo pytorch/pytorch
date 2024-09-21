@@ -72,7 +72,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
         shape_env: The shape environment responsible for symbolic shape tracking and propagation
         during graph transformations.
 
-   Returns:
+    Returns:
         None
     """
     import sympy
