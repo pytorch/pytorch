@@ -153,8 +153,10 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                     ) -> Union[fx.Node, None]:
                         if keypath == ():
                             return node
-                        elif keypath[0].name == "item" and isinstance(
-                            keypath[0], CallMethodKey
+                        elif (
+                            hasattr(keypath[0], "name")
+                            and keypath[0].name == "item"
+                            and isinstance(keypath[0], CallMethodKey)
                         ):
                             return go(
                                 graph.call_method(keypath[0].name, (node,)), keypath[1:]
