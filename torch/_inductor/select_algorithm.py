@@ -1308,7 +1308,7 @@ class AlgorithmSelectorCache(PersistentCache):
                             "Exception %s for benchmark choice %s", e, futures[future]
                         )
                     else:
-                        log.info("Precompiling benchmark choice %s took %ss", futures[future], future.result())
+                        log.info("Precompiling benchmark choice %s took %.02fs", futures[future], future.result())
 
                 executor.shutdown(wait=True)
 
