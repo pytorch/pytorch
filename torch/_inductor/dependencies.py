@@ -5,7 +5,7 @@ import itertools
 import logging
 import re
 import typing
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar, Union
 from unittest.mock import patch
 
 import sympy
@@ -25,6 +25,8 @@ from .utils import (
 )
 from .virtualized import OpsHandler, ReductionType, V
 
+
+T = TypeVar("T")
 
 log = logging.getLogger(__name__)
 is_indirect = re.compile(r"indirect|tmp").search
@@ -504,16 +506,9 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         self._index_exprs.add(IndexExprDep(*self.canonicalize(index)))
         return f"index_expr({sympy_str(index)}, {dtype})"
 
-    def bucketize(
-        self,
-        values,
-        offsets_name: str,
-        offsets_size: sympy.Expr,
-        indexing_dtype: torch.dtype,
-        right: bool,
-    ):
-        self._reads.add(StarDep(offsets_name))
-        return f"bucketize({values}, {offsets_name}, {sympy_str(offsets_size)}, {indexing_dtype}, {right})"
+    def bucketize(self, *args, buffer_name: str = "", **kwargs) -> None:
+        """Records the names of the buffers that bucketize will read from."""
+        self._reads.add(StarDep(buffer_name))
 
 
 class RecordLoadStore(V.KernelFormatterHandler):  # type: ignore[name-defined]
@@ -592,9 +587,7 @@ def extract_read_writes(
         for entry in fn.memory_usage[MemoryUsageType.INDEX_EXPR]:
             inner.index_expr(name_to_index[entry.index_name], None)
         for entry in fn.memory_usage[MemoryUsageType.BUCKETIZE]:
-            inner.bucketize(
-                None, entry.buffer_name, name_to_index[entry.index_name], None, None  # type: ignore[arg-type]
-            )
+            inner.bucketize(buffer_name=entry.buffer_name)  # type: ignore[arg-type]
         # fn.memory_usage[MemoryUsageType.CHECK_BOUNDS] intentionally skipped
     else:
         # Slow path tracing the function

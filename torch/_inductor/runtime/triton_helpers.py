@@ -198,11 +198,17 @@ def any(a, dim):
 
 @triton.jit
 def bucketize_binary_search(
-    values,  # 1D tensor
-    offsets_ptr,
-    indexing_dtype,
+    values: tl.tensor,
+    boundaries_ptr: tl.tensor,
+    BOUNDARIES_SIZE: tl.constexpr,
+    BOUNDARIES_UNDERLYING_NUMEL: tl.constexpr,
+    BOUNDARIES_STRIDE: tl.constexpr,
+    boundary_indices: tl.tensor,  # Indices pointing to the beginning of the 1-D sequence of offsets used to bucketize each value
+    indexing_dtype: tl.dtype,
     right,  # bool: if true, use intervals closed on the left; see [Note: Inductor bucketize op]
-    OFFSETS_SIZE: int,
+    sorter_ptr: tl.tensor,  # optional pointer of the same shape as offsets_ptr, None if not present
+    SORTER_STRIDE: tl.constexpr,
+    sorter_indices: tl.tensor,
     BLOCK_SHAPE,  # tuple/list of block shape
 ):
     """
@@ -210,13 +216,29 @@ def bucketize_binary_search(
     """
 
     low = tl.zeros(BLOCK_SHAPE, dtype=indexing_dtype)
-    high = tl.full(BLOCK_SHAPE, OFFSETS_SIZE, dtype=indexing_dtype)
+    high = tl.full(BLOCK_SHAPE, BOUNDARIES_SIZE, dtype=indexing_dtype)
 
-    full_range = OFFSETS_SIZE + 1
+    full_range = BOUNDARIES_SIZE + 1
     while full_range > 1:
         mid = (high + low) // 2
-        mask = mid < OFFSETS_SIZE
-        bucket_upper_bound = tl.load(offsets_ptr + mid, mask=mask, other=0.0)
+        mask = (
+            mid * BOUNDARIES_STRIDE + boundary_indices
+        ) < BOUNDARIES_UNDERLYING_NUMEL and mid < BOUNDARIES_SIZE
+        mid_indices = (
+            mid
+            if sorter_ptr is None or SORTER_STRIDE is None
+            else tl.load(
+                sorter_ptr + sorter_indices + SORTER_STRIDE * mid,
+                mask=mask,
+                other=0,
+            )
+        )
+
+        bucket_upper_bound = tl.load(
+            boundaries_ptr + boundary_indices + BOUNDARIES_STRIDE * mid_indices,
+            mask=mask,
+            other=0,
+        )
         if right:
             is_above = values >= bucket_upper_bound
         else:
