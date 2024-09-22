@@ -305,8 +305,9 @@ auto Function<T>::apply(Args&&... args)
   extract_vars(node->is_variable_input_, input_vars, args...);
   std::cout << "Function<T>::apply with " << input_vars.size() << " inputs"
             << std::endl;
+  int i = 0;
   for (const auto& var : node->is_variable_input_) {
-    std::cout << "is_variable_input: " << var << std::endl;
+    std::cout << "is_variable_input[" << i++ << "]: " << var << std::endl;
   }
 
   bool is_executable =
@@ -388,6 +389,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
       backward_inputs.emplace_back(std::move(inputs[i]));
     } else {
       std::cout << "inputs[" << i << "] is not defined" << std::endl;
+      // need to pass in undefined tensors!
       backward_inputs.emplace_back(output_info_[i].zeros(_device_guard));
     }
   }
@@ -445,6 +447,10 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
       continue;
     }
     results.emplace_back(outputs[i]);
+  }
+  std::cout << "CppNode<T>::apply returning " << results.size() << " final outputs" << std::endl;
+  for (const auto i : c10::irange(num_outputs)) {
+    std::cout << "defined? results[" << i << "]: " << results[i].defined() << std::endl;
   }
   return results;
 }

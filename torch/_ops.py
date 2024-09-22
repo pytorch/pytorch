@@ -713,6 +713,18 @@ class OpOverload(OperatorBase):
     # Use positional-only argument to avoid naming collision with aten ops arguments
     # that are named "self". This way, all the aten ops can be called by kwargs.
     def __call__(self, /, *args, **kwargs):
+        # TODO: find a place to trim the Nones
+        # if "compiled_autograd.cpp_node_op_" in self.__str__():
+        #     assert len(args) == 2
+        #     # if isinstance(args[0], torch.fx.immutable_collections.immutable_list):
+        #     # mmmmmm not working
+        #     new_args: List[torch.Tensor] = []
+        #     for arg in args[0]:
+        #         if arg is None:
+        #             continue
+                    
+        #         new_args.append(arg)
+        #     return self._op(new_args, args[1])
         return self._op(*args, **kwargs)
 
     # Use positional-only argument to avoid naming collision with aten ops arguments

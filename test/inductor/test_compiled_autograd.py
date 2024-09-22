@@ -93,10 +93,12 @@ class TestCompiledAutograd(TestCase):
             counters["compiled_autograd"].clear()
             torch.manual_seed(123)
             expected = list(fn())
+            print(f"expected={expected}")
             torch.manual_seed(123)
             with compiled_autograd.enable(compiler_fn):
                 opt_fn = torch.compile(fn) if compile_fn else fn
                 actual = list(opt_fn())
+                print(f"actual={actual}")
             self.assertEqual(expected, actual)
             self.assertEqual(counters["compiled_autograd"]["captures"], captures)
             self.assertEqual(counters["compiled_autograd"]["compiles"], compiles)
@@ -1875,7 +1877,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_id, m) {
     def test_autograd_cpp_node_saved(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
-  static torch::Tensor forward(
+  static torch::autograd::variable_list forward(
       torch::autograd::AutogradContext* ctx,
       const torch::Tensor& x,
       const torch::Tensor& y,
@@ -1889,7 +1891,7 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
     c10::Dict<std::string, double> dict;
     dict.insert("string", 1.0);
     ctx->saved_data["dict"] = std::move(dict);
-    return x;
+    return {x, y, fixed};
   }
 
   static torch::autograd::variable_list backward(
@@ -1915,7 +1917,7 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
   }
 };
 
-torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x, const torch::Tensor& y, const torch::Tensor& fixed) {
+torch::autograd::variable_list custom_op_backed_by_autograd_fn(const torch::Tensor& x, const torch::Tensor& y, const torch::Tensor& fixed) {
   return CustomOpAutogradFunction::apply(x, y, fixed);
 }
 
@@ -1936,10 +1938,13 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved, m) {
             for i in [10, 100, 10, 20, 10]:
                 x = torch.ones(i, i, requires_grad=True)
                 y = torch.randn(i, i)
-                out = torch.ops.test_autograd_cpp_node_saved.custom_op_backed_by_autograd_fn(
+                x1, y1, fixed1 = torch.ops.test_autograd_cpp_node_saved.custom_op_backed_by_autograd_fn(
                     x, y, fixed
                 )
-                loss = out.sum()
+                x2, y2, fixed2 = torch.ops.test_autograd_cpp_node_saved.custom_op_backed_by_autograd_fn(
+                    x1, y1, fixed1
+                )
+                loss = x2.sum()
                 loss.backward()
                 yield x.grad
 

@@ -465,6 +465,18 @@ static variable_list lambda_lift(
   size_t next_lambdas_idx = custom_op_impls->next_idx++;
   at::IValue& idx = *custom_op_impls->impls[next_lambdas_idx].idx;
   ssv.before(idx);
+  // TODO: proper support for eager inputs/outputs undefined tensor semantics
+
+  // for (auto i : c10::irange(inputs.size())) {
+  //   if (!inputs[i].defined()) {
+  //     static PyObject* method_name2 =
+  //         PyUnicode_InternFromString("get_hack");
+  //     THPObjectPtr hack(check(PyObject_CallMethodNoArgs(
+  //         py_compiler,
+  //         method_name2)));
+  //     inputs[i] = THPVariable_Unpack(hack.get());
+  //   }
+  // }
   THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
   auto& lambda_output_info = custom_op_impls->impls[next_lambdas_idx].output_info;
   std::cout << "lookup index: " << next_lambdas_idx << std::endl;
@@ -492,8 +504,7 @@ static variable_list lambda_lift(
       py_compiler,
       method_name,
       PyLong_FromUnsignedLong(
-          next_lambdas_idx - custom_op_impls->offset_idx), // doesnt work when there's 2 lifted in
-                                         // same graph
+          next_lambdas_idx - custom_op_impls->offset_idx),
       pyinputs.get(),
       pyoutputmetas.get(),
       nullptr)));
@@ -513,7 +524,11 @@ static PyObject* call_lambda(PyObject* dummy, PyObject* args) {
   }
   TORCH_INTERNAL_ASSERT(PyList_Check(inputs));
   // TODO: clear the list
+  // NEED TO KNOW HOW MANY UNDEFINED TENSORS TO CREATE
   variable_list cppinputs = THPVariable_UnpackList(inputs);
+  for (auto& inp : cppinputs) {
+    std::cout << "RUNTIME call_lambda inp=" << inp << std::endl;
+  }
   TORCH_INTERNAL_ASSERT(PyLong_Check(idx));
   size_t cppidx = PyLong_AsSize_t(idx);
   std::cout << "RUNTIME call_lambda idx=" << cppidx << std::endl;
@@ -526,6 +541,9 @@ static PyObject* call_lambda(PyObject* dummy, PyObject* args) {
   TORCH_INTERNAL_ASSERT(it2 != custom_op_impls->reverse_lifted_nodes.end());
   custom_op_impls->lifted_nodes.erase(it);
   custom_op_impls->reverse_lifted_nodes.erase(it2);
+
+  // NEED TO KNOW HOW MANY UNDEFINED TENSORS TO CONVERT
+
   return THPVariable_WrapList(outs);
   END_HANDLE_TH_ERRORS;
 }
