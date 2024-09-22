@@ -357,7 +357,6 @@ def build_collectives(
                     candidate_ranks.clear()
             # case four: mismatch cases due to not same type, size mismatch or state mismatch.
             elif len(errors) > 0:
-                print("error length", len(errors))
                 mismatch[pg_name] += 1
                 error_msg = ", ".join(
                     f"Culprit rank {error[0]}; {str(error[1])}" for error in errors
