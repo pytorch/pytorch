@@ -732,6 +732,7 @@ coverage_ignore_functions = [
     "is_bool_expr",
     "is_dim",
     # torch.fx.experimental.migrate_gradual_types.constraint_generator
+    "tensorify_python_scalars",
     "adaptive_inference_rule",
     "add_layer_norm_constraints",
     "add_linear_constraints",
