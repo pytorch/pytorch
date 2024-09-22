@@ -3357,11 +3357,11 @@
   dispatch:
     CUDA: _cslt_compress
 
-- func: _cslt_sparse_mm(Tensor compressed_A, Tensor dense_B, Tensor? bias=None, Tensor? alpha=None, ScalarType? out_dtype=None, bool transpose_result=False, int alg_id=0) -> Tensor
+- func: _cslt_sparse_mm(Tensor compressed_A, Tensor dense_B, Tensor? bias=None, Tensor? alpha=None, Tensor? beta=None, ScalarType? out_dtype=None, bool transpose_result=False, int alg_id=0) -> Tensor
   dispatch:
     CUDA: _cslt_sparse_mm
 
-- func: _cslt_sparse_mm_search(Tensor compressed_A, Tensor dense_B, Tensor? bias=None, Tensor? alpha=None, ScalarType? out_dtype=None, bool transpose_result=False) -> int
+- func: _cslt_sparse_mm_search(Tensor compressed_A, Tensor dense_B, Tensor? bias=None, Tensor? alpha=None, Tensor? beta=None, ScalarType? out_dtype=None, bool transpose_result=False) -> int
   dispatch:
     CUDA: _cslt_sparse_mm_search
 

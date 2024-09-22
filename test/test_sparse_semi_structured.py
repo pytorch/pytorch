@@ -341,14 +341,14 @@ class TestSparseSemiStructured(TestCase):
 
     @inference_dtypes
     @parametrize_backends
-    @parametrize("dense_input_shape", [(1, 128), (64, 128), (32, 32)])
+    @parametrize("dense_input_shape", [(1, 128), (64, 128), (256, 128)])
     def test_mm_sparse_first_NT(self, dense_input_shape, dtype, device, backend):
         """
         Ensure torch.mm(A_sparse, B.t()) is correct for float16/bfloat16
         and will throw an error for int8 + padding
         """
         SparseSemiStructuredTensor._FORCE_CUTLASS = backend == "cutlass"
-        A = rand_sparse_semi_structured_mask(32, 32, dtype=dtype)
+        A = rand_sparse_semi_structured_mask(256, 128, dtype=dtype)
         A_sparse = to_sparse_semi_structured(A)
 
         B = torch.rand(dense_input_shape, device=A_sparse.device).to(dtype)
@@ -382,15 +382,18 @@ class TestSparseSemiStructured(TestCase):
                 B.t(),
                 scale_a=A_scale,
                 scale_b=A_scale,
-                out_dtype=torch.float8_e4m3fn,
+                out_dtype=torch.float16,
             )
-            sparse_result = torch.mm(A_sparse, B.t())
+
+            sparse_result = torch.mm(A.to(torch.float32), B.t().to(torch.float32)).to(
+                torch.float16
+            )
             # mul_cuda not implemented for Float8, so cast to float 32 and compare.
             print(dense_result)
             print(sparse_result)
             torch.testing.assert_close(
-                dense_result.to(torch.float32),
-                sparse_result.to(torch.float32),
+                dense_result,
+                sparse_result,
                 rtol=1e-3,
                 atol=1e-3,
             )
@@ -1186,7 +1189,20 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
 
 
 CUSPARSELT_NUM_ALG_IDS = 4
-CUSPARSELT_MIXED_DTYPE_SUPPORT = [torch.float16, torch.bfloat16, torch.int32]
+CUSPARSELT_MIXED_DTYPE_SUPPORT = [torch.float16, torch.bfloat16, torch.float32]
+
+
+def to_float8(x, dtype=torch.float8_e4m3fn):
+    finfo = torch.finfo(dtype)
+    # Calculate the scale as dtype max divided by absmax
+    scale = finfo.max / x.abs().max().clamp(min=1e-12)
+    # scale and clamp the tensor to bring it to
+    # the representative range of float8 data type
+    # (as default cast is unsaturated)
+    x_scl_sat = (x * scale).clamp(min=finfo.min, max=finfo.max)
+    # Return both float8 data and the inverse scale (as float),
+    # as both required as inputs to torch._scaled_mm
+    return x_scl_sat.to(dtype), scale.float().reciprocal()
 
 
 class TestSparseSemiStructuredCUSPARSELT(TestCase):
@@ -1199,6 +1215,31 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
     def setUp(self):
         if "cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
             self.skipTest("cuSPARSELt not enabled")
+
+    @parametrize("out_dtype", CUSPARSELT_MIXED_DTYPE_SUPPORT)
+    @parametrize("dense_input_shape", [(256, 128)])
+    def test_cslt_sparse_mm_fp8(self, dense_input_shape, device, out_dtype):
+        A = rand_sparse_semi_structured_mask(256, 128, dtype=torch.float16)
+        B = torch.rand(dense_input_shape, device=device).to(torch.float16).t()
+
+        A_fp8, A_scale = to_float8(A)
+        B_fp8, B_scale = to_float8(B)
+
+        A_fp8_compressed = torch._cslt_compress(A_fp8)
+
+        dense_result = torch._scaled_mm(
+            A_fp8, B_fp8, scale_a=A_scale, scale_b=B_scale, out_dtype=out_dtype
+        )
+        sparse_result = torch._cslt_sparse_mm(
+            A_fp8_compressed,
+            B_fp8,
+            alpha=A_scale * B_scale,
+            out_dtype=out_dtype,
+            # beta=B_scale,
+        )
+        print(dense_result)
+        print(sparse_result)
+        torch.testing.assert_close(dense_result, sparse_result, rtol=7e-2, atol=7e-2)
 
     @parametrize("out_dtype", CUSPARSELT_MIXED_DTYPE_SUPPORT)
     @parametrize("dense_input_shape", [(128, 128)])

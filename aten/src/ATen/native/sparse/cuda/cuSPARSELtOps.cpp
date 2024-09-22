@@ -106,6 +106,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
     const Tensor& dense_B,
     const std::optional<Tensor>& bias_opt,
     const std::optional<Tensor>& alpha_opt,
+    const std::optional<Tensor>& beta_opt,
     const std::optional<c10::ScalarType> out_dtype_opt,
     bool transpose_result,
     int alg_id,
@@ -122,12 +123,15 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
   cusparseLtMatmulAlgSelection_t alg_sel;
 
   int tensor_alpha_mode = 0;
+  int tensor_beta_mode = 0;
   float alpha = 1.0;
   float beta = 0.0;
   cudaDataType input_type;
   cudaDataType output_type;
   cusparseComputeType compute_type;
   auto compression_factor = 9;
+
+  auto C_type = CUDA_R_16F;
 
 
   switch(compressed_A.scalar_type())
@@ -213,12 +217,15 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         {
             case at::ScalarType::Half:
                 output_type = CUDA_R_16F;
+                C_type = CUDA_R_16F;
                 break;
             case at::ScalarType::BFloat16:
                 output_type = CUDA_R_16BF;
+                C_type = CUDA_R_16BF;
                 break;
             case at::ScalarType::Float:
                 output_type = CUDA_R_32F;
+                C_type = CUDA_R_32F;
                 break;
             default:
                 TORCH_CHECK(false, "Unsupported out_dtype passed, must be one of {fp16, bf16, float32}");
@@ -285,7 +292,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
       n,
       (transpose_result) ? m: n,
       16,
-      CUDA_R_16F,
+      C_type,
       (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW));
 
   // initialize matmul
@@ -317,11 +324,34 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
 
   // set tensor_alpha_mode and alpha pointer for matmul
   const auto alpha_tensor = alpha_opt.has_value() ? *alpha_opt: Tensor{};
-  const auto alpha_ptr = alpha_opt.has_value() ? alpha_tensor.data_ptr(): &alpha;
+  auto alpha_ptr = &alpha;
   if (alpha_opt.has_value()) {
-    tensor_alpha_mode = 1;
-    TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
-        &handle, &matmul, CUSPARSELT_MATMUL_ALPHA_VECTOR_SCALING, &tensor_alpha_mode, sizeof(tensor_alpha_mode)));
+    if (alpha_tensor.numel() == 1) {
+        alpha = alpha_tensor.item<float>();
+        std::cout << "alpha: " << alpha << std::endl;
+    }
+    else {
+        tensor_alpha_mode = 1;
+        TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
+            &handle, &matmul, CUSPARSELT_MATMUL_ALPHA_VECTOR_SCALING, &tensor_alpha_mode, sizeof(tensor_alpha_mode)));
+        alpha_ptr = (float*)alpha_tensor.data_ptr();
+    }
+  }
+
+  // set tensor_beta_mode and beta pointer for matmul
+  const auto beta_tensor = beta_opt.has_value() ? *beta_opt: Tensor{};
+  auto beta_ptr = &beta;
+  if (beta_opt.has_value()) {
+    if (beta_tensor.numel() == 1) {
+        beta = beta_tensor.item<float>();
+        std::cout << "beta: " << beta << std::endl;
+    }
+    else {
+        tensor_beta_mode = 1;
+        TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
+            &handle, &matmul, CUSPARSELT_MATMUL_BETA_VECTOR_SCALING, &tensor_beta_mode, sizeof(tensor_beta_mode)));
+        beta_ptr = (float*)beta_tensor.data_ptr();
+    }
   }
 
   TORCH_CUDASPARSE_CHECK(
@@ -343,7 +373,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         alpha_ptr,
         compressed_A.data_ptr(),
         dense_B.data_ptr(),
-        &beta,
+        beta_ptr,
         res.data_ptr(),
         res.data_ptr(),
         workspacePtr.get(),
@@ -389,6 +419,7 @@ at::Tensor _cslt_sparse_mm(
     const Tensor& dense_B,
     const std::optional<Tensor>& bias_opt,
     const std::optional<Tensor>& alpha_opt,
+    const std::optional<Tensor>& beta_opt,
     const std::optional<c10::ScalarType> out_dtype_opt,
     bool transpose_result,
     int64_t alg_id
@@ -399,6 +430,7 @@ at::Tensor _cslt_sparse_mm(
         dense_B,
         bias_opt,
         alpha_opt,
+        beta_opt,
         out_dtype_opt,
         transpose_result,
         (int) alg_id,
@@ -411,6 +443,7 @@ int64_t _cslt_sparse_mm_search(
     const Tensor& dense_B,
     const std::optional<Tensor>& bias_opt,
     const std::optional<Tensor>& alpha_opt,
+    const std::optional<Tensor>& beta_opt,
     const std::optional<c10::ScalarType> out_dtype_opt,
     bool transpose_result
 )
@@ -421,6 +454,7 @@ int64_t _cslt_sparse_mm_search(
         dense_B,
         bias_opt,
         alpha_opt,
+        beta_opt,
         out_dtype_opt,
         transpose_result,
         alg_id_int,
@@ -444,6 +478,7 @@ at::Tensor _cslt_sparse_mm(
     const Tensor& dense_B,
     const std::optional<Tensor>& bias_opt,
     const std::optional<Tensor>& alpha_opt,
+    const std::optional<Tensor>& beta_opt,
     const std::optional<c10::ScalarType> out_dtype,
     bool transpose_result,
     int64_t alg_id)
@@ -456,6 +491,7 @@ int64_t _cslt_sparse_mm_search(
     const Tensor& dense_B,
     const std::optional<Tensor>& bias_opt,
     const std::optional<Tensor>& alpha_opt,
+    const std::optional<Tensor>& beta_opt,
     const std::optional<c10::ScalarType> out_dtype,
     bool transpose_result
 )
