@@ -89,10 +89,10 @@ __all__ = [
 ]
 
 
-def _keep_float(f: Callable[..., _T]) -> Callable[..., Union[_T, sympy.Float]]:
+def _keep_float(f: Callable[..., _T]) -> Callable[..., sympy.Float]:
     @functools.wraps(f)
     def inner(*args: Any) -> Union[_T, sympy.Float]:
-        r: Union[_T, sympy.Float] = f(*args)
+        r = f(*args)
         if any(isinstance(a, sympy.Float) for a in args) and not isinstance(
             r, sympy.Float
         ):
@@ -140,7 +140,7 @@ def simple_floordiv_gcd(p: sympy.Basic, q: sympy.Basic) -> sympy.Basic:
         return functools.reduce(math.gcd, integer_factors)
 
     gcd: int = math.gcd(integer_factor(p), integer_factor(q))
-    p, q = p / gcd, q / gcd  # type: ignore[operator, assignment]  # remove in py3.12
+    p, q = p / gcd, q / gcd
 
     base_splits: List[Tuple[sympy.Basic, ...]] = list(
         map(sympy.Mul.make_args, sympy.Add.make_args(p))
@@ -148,8 +148,8 @@ def simple_floordiv_gcd(p: sympy.Basic, q: sympy.Basic) -> sympy.Basic:
     divisor_split: Tuple[sympy.Basic, ...] = sympy.Mul.make_args(q)
     for x in divisor_split:
         if all(x in base_split for base_split in base_splits):
-            gcd = gcd * x  # type: ignore[operator]  # remove in py3.12
-    return gcd  # type: ignore[return-value]  # remove in py3.12
+            gcd = gcd * x
+    return gcd
 
 
 # It would be nice to have assertions on whether or not inputs is_integer
@@ -191,7 +191,7 @@ class FloorDiv(sympy.Function):
     def divisor(self) -> sympy.Basic:
         return self.args[1]
 
-    def _sympystr(self, printer: sympy.printing.StrPrinter) -> str:
+    def _sympystr(self, printer: sympy.printing.printer.Printer) -> str:
         base = printer.parenthesize(self.base, self.precedence)
         divisor = printer.parenthesize(self.divisor, self.precedence)
         return f"({base}//{divisor})"
@@ -199,9 +199,7 @@ class FloorDiv(sympy.Function):
     # Automatic evaluation.
     # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
     @classmethod
-    def eval(
-        cls, base: sympy.Integer, divisor: sympy.Integer
-    ) -> Union[sympy.Basic, None]:
+    def eval(cls, base: sympy.Basic, divisor: sympy.Basic) -> Union[sympy.Basic, None]:
         # python test/test_dynamic_shapes.py -k TestDimConstraints.test_dim_constraints_solve_full
         # Assert triggered by inequality solver
         # assert base.is_integer, base
@@ -283,7 +281,7 @@ class ModularIndexing(sympy.Function):
 
     @classmethod
     def eval(
-        cls, base: sympy.Integer, divisor: sympy.Integer, modulus: sympy.Integer
+        cls, base: sympy.Basic, divisor: sympy.Basic, modulus: sympy.Basic
     ) -> Optional[sympy.Basic]:
         if base == 0 or modulus == 1:
             return sympy.Integer(0)
@@ -308,7 +306,7 @@ class ModularIndexing(sympy.Function):
             pass  # https://github.com/pytorch/pytorch/issues/108276
 
         if isinstance(base, sympy.Add):
-            new_terms: List[sympy.Integer] = []
+            new_terms: List[sympy.Basic] = []
             all_positive: bool = True
             for term in base.args:
                 if sympy.gcd(term, modulus * divisor) != modulus * divisor:
@@ -1158,7 +1156,7 @@ class Identity(sympy.Function):
     Prevents expansion and other optimizations
     """
 
-    def __repr__(self):  # type: ignore[override]
+    def __repr__(self):
         return f"Identity({self.args[0]})"
 
     def _eval_is_real(self):

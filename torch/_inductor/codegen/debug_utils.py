@@ -231,7 +231,7 @@ class DebugPrinterManager:
                 # check if filtered kernel name list is provided
                 if (
                     len(self.filtered_kernel_names_to_print) > 0
-                    and kernel_name.lower() not in self.filtered_kernel_names_to_print
+                    and kernel_name not in self.filtered_kernel_names_to_print
                 ):
                     continue
 

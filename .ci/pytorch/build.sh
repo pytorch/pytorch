@@ -49,8 +49,13 @@ if [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
 fi
 
 # Enable LLVM dependency for TensorExpr testing
-export USE_LLVM=/opt/llvm
-export LLVM_DIR=/opt/llvm/lib/cmake/llvm
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  export USE_LLVM=/opt/rocm/llvm
+  export LLVM_DIR=/opt/rocm/llvm/lib/cmake/llvm
+else
+  export USE_LLVM=/opt/llvm
+  export LLVM_DIR=/opt/llvm/lib/cmake/llvm
+fi
 
 if [[ "$BUILD_ENVIRONMENT" == *executorch* ]]; then
   # To build test_edge_op_registration
