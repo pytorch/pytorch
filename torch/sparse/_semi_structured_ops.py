@@ -172,8 +172,8 @@ def semi_sparse_linear(func, types, args=(), kwargs=None) -> torch.Tensor:
 
 
 def semi_sparse_scaled_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
-    assert len(args) == 7
-    A, B, A_scale, B_scale, bias, scale_result, out_dtype = args
+    A, B, A_scale, B_scale, bias, scale_result, out_dtype = args[:7]
+
     assert A.dtype == torch.float8_e4m3fn
     assert B.dtype == torch.float8_e4m3fn
     assert isinstance(A, torch.sparse.SparseSemiStructuredTensorCUSPARSELT)
