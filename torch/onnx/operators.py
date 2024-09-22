@@ -9,7 +9,9 @@ Since then we have implemented these directly in ATen, so this
 file is kept purely for backward-compatibility.
 """
 
-__all__ = []
+from __future__ import annotations
+
+__all__: list[str] = []
 
 import torch
 
