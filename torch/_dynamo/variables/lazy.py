@@ -1,6 +1,6 @@
 import collections
 import functools
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 from typing_extensions import Self
 
 from .base import VariableTracker
@@ -151,7 +151,9 @@ class LazySymNodeFormatString:
         )
 
 
-def _create_realize_and_forward(name: str) -> Any:
+def _create_realize_and_forward(
+    name: str,
+) -> Callable[[LazyVariableTracker, Any, Any], Any]:
     @functools.wraps(getattr(VariableTracker, name))
     def realize_and_forward(
         self: LazyVariableTracker, *args: Any, **kwargs: Any

@@ -41,9 +41,9 @@ from torch.utils._triton import has_triton
 
 
 try:
-    from .mock_cache import global_stats, patch_fbcode, PatchCaches
+    from .mock_cache import global_stats, PatchCaches, Stats
 except ImportError:
-    from mock_cache import global_stats, patch_fbcode, PatchCaches  # @manual
+    from mock_cache import global_stats, PatchCaches, Stats  # @manual
 
 
 HAS_TRITON = has_triton()
@@ -190,10 +190,12 @@ class TestFxGraphCache(TestCase):
                     self.assertEqual(fn(a, b), compiled_fn(a, b))
                 reset()
 
-        global_stats.report()
-        self.assertEqual(global_stats.fx_graph.num_get_hit, 3)
-        self.assertEqual(global_stats.fx_graph.num_get_miss, 1)
-        self.assertEqual(global_stats.fx_graph.num_put, 1)
+        self.assertEqual(global_stats.fx_graph, Stats(1, 3, 1))
+
+        if config.is_fbcode():
+            # Check that the cache entries seem reasonable
+            for k in global_stats.fx_graph.cache.keys():
+                self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c10")
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
@@ -800,8 +802,7 @@ class TestAutotuneCache(TestCase):
     @config.patch({"autotune_local_cache": False})
     @config.patch({"autotune_remote_cache": True})
     @config.patch({"max_autotune": True})
-    @parametrize("fbcode", (False,) + (True,) * config.is_fbcode())
-    def test_autotune_cache(self, fbcode: bool):
+    def test_autotune_cache(self):
         class Model(torch.nn.Module):
             def forward(self, x, y, a, b):
                 return x + y, a + b
@@ -815,20 +816,22 @@ class TestAutotuneCache(TestCase):
         b = torch.randn(1000, 100).cuda()
         f_compiled = torch.compile(f, fullgraph=True)
 
-        with PatchCaches(), patch_fbcode(fbcode):
+        with PatchCaches():
             f_compiled(x, y, a, b)
 
-            self.assertEqual(global_stats.autotune.num_get_hit, 0)
-            self.assertEqual(global_stats.autotune.num_get_miss, 2)
-            self.assertEqual(global_stats.autotune.num_put, 2)
+            self.assertEqual(global_stats.autotune_remote, Stats(2, 0, 2))
 
             self.reset()
             f_compiled(x, y, a, b)
 
-        global_stats.report()
-        self.assertEqual(global_stats.autotune.num_get_hit, 2)
-        self.assertEqual(global_stats.autotune.num_get_miss, 2)
-        self.assertEqual(global_stats.autotune.num_put, 2)
+        self.assertEqual(global_stats.autotune_remote, Stats(2, 2, 2))
+
+        if config.is_fbcode():
+            # Check that the cache entries seem reasonable
+            for k in global_stats.autotune_remote.cache.keys():
+                self.assertRegex(k, r"[0-9a-z]{52}\.py")
+            for k in global_stats.triton.cache.keys():
+                self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c10")
 
 
 class TestUtils(TestCase):
