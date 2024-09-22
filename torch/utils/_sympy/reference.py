@@ -466,6 +466,22 @@ class TensorReferenceAnalysis:
         return torch.ops.aten.tanh.default(x)
 
     @staticmethod
+    def sinh(x):
+        return torch.ops.aten.sinh.default(x)
+
+    @staticmethod
+    def cosh(x):
+        return torch.ops.aten.cosh.default(x)
+
+    @staticmethod
+    def atan(x):
+        return torch.ops.aten.atan.default(x)
+
+    @staticmethod
+    def asin(x):
+        return torch.ops.aten.asin.default(x)
+
+    @staticmethod
     def pow(a, b):
         return torch.ops.aten.pow.Tensor_Tensor(a, b)
 
