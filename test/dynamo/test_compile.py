@@ -12,7 +12,7 @@ from torch._dynamo.testing import CompileCounter
 
 
 class ToyModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.linear = torch.nn.Linear(10, 10)
         self.relu = torch.nn.ReLU()
@@ -93,6 +93,19 @@ class InPlaceCompilationTests(TestCase):
             printed_output = mock_stdout.getvalue().strip()
 
         self.assertEqual(printed_output, "Compilation started.\nCompilation ended.")
+
+    def test_compile_eager_options(self):
+        @torch.compile(backend="eager", options={"foo": 2})
+        def f(x):
+            return x + x
+
+        f(torch.randn(3))
+
+        @torch.compile(backend="aot_eager", options={"foo": 2})
+        def g(x):
+            return x + x
+
+        g(torch.randn(3))
 
     def test_compilation_callback_with_graph_break(self):
         torch._dynamo.reset()

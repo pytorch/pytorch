@@ -20,8 +20,8 @@
 
 #include <vector>
 
-namespace at {
-namespace native {
+
+namespace at::native {
 namespace {
 // TODO: This function is the same as that of Pooling.cpp. We should refactor this into quantized directory
 // so that we don't need to duplicate the function
@@ -177,7 +177,7 @@ Tensor quantized_max_pool2d_cudnn(
       (ndim == 4 ? MemoryFormat::ChannelsLast : MemoryFormat::Contiguous));
 
   cudnnHandle_t handle = getCudnnHandle();
-  cudnnPoolingDescriptor_t poolingDesc;
+  cudnnPoolingDescriptor_t poolingDesc = nullptr;
   AT_CUDNN_CHECK_WITH_SHAPES(cudnnCreatePoolingDescriptor(&poolingDesc));
   AT_CUDNN_CHECK_WITH_SHAPES(cudnnSetPooling2dDescriptor(
       poolingDesc,
@@ -230,7 +230,7 @@ class QMaxPool_arr_args final {
       std::vector<int64_t> padding,
       std::vector<int64_t> dilation,
       bool ceil_mode) {
-    TORCH_CHECK(kSpatialDim == 2, "quantized max pool is only valid for 2D")
+    static_assert(kSpatialDim == 2, "quantized max pool is only valid for 2D");
     return quantized_max_pool2d_cudnn(qx, kernel_size, stride, padding,
                                     dilation, ceil_mode);
   }
@@ -241,5 +241,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
 }
 
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native

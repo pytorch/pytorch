@@ -3,6 +3,7 @@ import abc
 import copy
 import operator
 from collections import defaultdict
+from contextlib import contextmanager
 from copy import deepcopy
 from enum import Enum
 from typing import Any, cast, Dict, List, Optional, Set, Tuple, Union
@@ -21,6 +22,7 @@ from torch.export.exported_program import (
     TensorArgument,
 )
 from torch.fx._symbolic_trace import is_fx_tracing
+from torch.fx.graph_module import _print_readable
 from torch.utils._pytree import GetAttrKey, SequenceKey
 
 from ._remove_effect_tokens_pass import _remove_effect_tokens
@@ -33,6 +35,20 @@ class _AttrKind(Enum):
     PARAMETER = "parameter"
     BUFFER = "buffer"
     CONSTANT = "constant"
+
+
+RUN_WITH_INTERPRETER = True
+
+
+@contextmanager
+def _disable_interpreter():
+    global RUN_WITH_INTERPRETER
+    old_flag = RUN_WITH_INTERPRETER
+    RUN_WITH_INTERPRETER = False
+    try:
+        yield
+    finally:
+        RUN_WITH_INTERPRETER = old_flag
 
 
 # Assign attribute 'from_obj' to the qualified name 'target' on 'to_module
@@ -86,13 +102,18 @@ class InterpreterModule(torch.nn.Module):
         super().__init__()
         self.graph = graph
         self.graph.owning_module = self
+        self._run_with_interpeter = RUN_WITH_INTERPRETER
 
     def forward(self, *args, **kwargs):
         assert self.graph_module is not None, "Didn't finalize this InterpreterModule"
-        if torch.compiler.is_dynamo_compiling():
+        if not is_fx_tracing() and (
+            torch.compiler.is_dynamo_compiling() or not self._run_with_interpeter
+        ):
             # Dynamo cannot trace through torch.fx.Interpreter, so fall back to
             # GraphModule codegen in this instance.
-            return self.graph_module(*args, **kwargs)
+            # Patch the codegened forward to run with this InterpreterModule,
+            # so attribute accesses, etc. are on this module instead.
+            return type(self.graph_module).forward(self, *args, **kwargs)
         else:
             if kwargs:
                 # Handle **kwargs. FX only natively supports positional
@@ -133,6 +154,22 @@ class InterpreterModule(torch.nn.Module):
             if node.op == "placeholder":
                 self.arg_names.append(node.target)
 
+    def print_readable(
+        self,
+        print_output=True,
+        include_stride=False,
+        include_device=False,
+        colored=False,
+    ):
+        return _print_readable(
+            self,
+            "InterpreterModule",
+            print_output,
+            include_stride,
+            include_device,
+            colored,
+        )
+
 
 class FlatArgsAdapter(abc.ABC):
     """
@@ -165,10 +202,12 @@ class UnflattenedModule(torch.nn.Module):
         export_graph = deepcopy(export_module.graph)
         self.graph_signature = deepcopy(export_module.graph_signature)
         self.graph = torch.fx.Graph()
+        self.graph.owning_module = self
         self.module_call_graph = deepcopy(export_module.module_call_graph)
         self.flat_args_adapter = flat_args_adapter
         # Flag to indicate whether args have been adapted.
         self.adapted = False
+        self._run_with_interpeter = RUN_WITH_INTERPRETER
 
         _inplace_buffer_mutations(export_graph, self.graph_signature)
         _outline_submodules(export_graph, self)
@@ -192,7 +231,9 @@ class UnflattenedModule(torch.nn.Module):
         for name in self.graph_signature.parameters:  # this loop adds used params
             param = state_dict[name]
             if id(param) not in id_to_param:
-                id_to_param[id(param)] = torch.nn.Parameter(param.clone())
+                id_to_param[id(param)] = torch.nn.Parameter(
+                    param.clone(), requires_grad=param.requires_grad
+                )
 
             _assign_attr(
                 id_to_param[id(param)],
@@ -388,6 +429,7 @@ class UnflattenedModule(torch.nn.Module):
         assert [fqn for fqn, _ in self.named_modules(remove_duplicate=False)] == list(
             fqn_order.keys()
         )
+        self.graph.lint()
 
     def _print_graph(self):
         for fqn, mod in self.named_modules():
@@ -460,10 +502,29 @@ class UnflattenedModule(torch.nn.Module):
             _check_input_constraints_for_graph(
                 self.input_placeholders, new_flat_args_with_path, self.range_constraints
             )
-        tree_out = torch.fx.Interpreter(self, graph=self.graph).run(
-            *flat_args, enable_io_processing=False
-        )
+        if torch.compiler.is_dynamo_compiling() and not self._run_with_interpreter:
+            tree_out = torch.fx.GraphModule(self, self.graph)(*flat_args)
+        else:
+            tree_out = torch.fx.Interpreter(self, graph=self.graph).run(
+                *flat_args, enable_io_processing=False
+            )
         return pytree.tree_unflatten(tree_out, signature.out_spec)
+
+    def print_readable(
+        self,
+        print_output=True,
+        include_stride=False,
+        include_device=False,
+        colored=False,
+    ):
+        return _print_readable(
+            self,
+            "UnflattenedModule",
+            print_output,
+            include_stride,
+            include_device,
+            colored,
+        )
 
 
 def unflatten(
@@ -488,6 +549,8 @@ def unflatten(
         An instance of :class:`UnflattenedModule`, which has the same module
         hierarchy as the original eager module pre-export.
     """
+    if module.verifier.dialect == "TRAINING":
+        raise RuntimeError("Unflattener doesn't support non-functional training IR yet")
     module = _remove_effect_tokens(module)
     return UnflattenedModule(module, flat_args_adapter)
 
@@ -561,9 +624,13 @@ def _compute_accessor(parent_fqn: str, child_fqn: str) -> str:
     parent_split = parent_fqn.split(".")
     child_split = child_fqn.split(".")
 
-    assert (
-        child_split[: len(parent_split)] == parent_split
-    ), f"Child module '{child_fqn}' is not a descendant of parent module '{parent_fqn}'"
+    # TODO: support skip connection by inlining the child module.
+    if child_split[: len(parent_split)] != parent_split:
+        raise RuntimeError(
+            f"Child module '{child_fqn}' is not a descendant of parent mldule '{parent_fqn}'."
+            "This is currently unsupported."
+            "Please try to make child module attach to parent module direclty."
+        )
     return ".".join(child_split[len(parent_split) :])
 
 
@@ -650,12 +717,12 @@ def _add_submodule(mod: torch.nn.Module, target: str, module_to_add: torch.nn.Mo
 class _ModuleFrame:
     def __init__(
         self,
-        flat_graph,
-        nodes,
+        flat_graph: torch.fx.Graph,
+        nodes: Tuple[torch.fx.Node, ...],
         seen_nodes,
         seen_modules,
         parent,
-        module_stack,
+        module_stack: List[str],
         module_id,
         module_call_graph: Dict[str, ModuleCallSignature],
         module: Optional[torch.nn.Module] = None,
@@ -799,14 +866,8 @@ class _ModuleFrame:
         # To avoid this we copy these call_function nodes with sym_type results.
         # This should however only be done for sym_type nodes - call_function nodes on tensors
         # should not be deduplicated in the first place.
-        args = tuple(
-            self.remap_input(_x) if isinstance(_x, torch.fx.Node) else _x
-            for _x in x.args
-        )
-        kwargs = {
-            k: self.remap_input(_x) if isinstance(_x, torch.fx.Node) else _x
-            for k, _x in x.kwargs.items()
-        }
+        args = pytree.tree_map_only(torch.fx.Node, self.remap_input, x.args)
+        kwargs = pytree.tree_map_only(torch.fx.Node, self.remap_input, x.kwargs)
         node = self.graph.call_function(x.target, args, kwargs)
         node.meta = copy.copy(x.meta)
         self.node_map[x] = node
@@ -831,7 +892,18 @@ class _ModuleFrame:
                 with self.parent.graph.inserting_before(self.parent_call_module):
                     self.parent_call_module.insert_arg(0, self.parent.remap_input(x))
             return self.node_to_placeholder[x]
-        elif x.op == "call_function":
+        elif x.op == "call_function" and (
+            x.target
+            in (
+                torch.ops.aten.sym_size.int,
+                torch.ops.aten.item.default,
+                torch.ops.aten.unbind.int,
+                torch.ops.aten.sum.dim_IntList,
+                torch.ops.aten.view.default,
+                torch.ops.aten.diff.default,
+            )
+            or (hasattr(x.target, "__module__") and x.target.__module__ == "_operator")
+        ):
             # export deduplicates sym_size nodes, and may need to re-copy them
             # if module call signature needs to be preserved
             self.copy_sym_call_function(x)
@@ -840,7 +912,6 @@ class _ModuleFrame:
             raise RuntimeError(
                 f"Could not run remap_input() on op type: {x.op} for node {x}"
             )
-        return self.node_to_placeholder[x]
 
     def finalize_outputs(self):
         orig_outputs = []

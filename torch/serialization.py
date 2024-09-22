@@ -11,6 +11,7 @@ import struct
 import sys
 import tarfile
 import tempfile
+import threading
 import warnings
 from contextlib import closing, contextmanager
 from enum import Enum
@@ -54,10 +55,13 @@ __all__ = [
     "LoadEndianness",
     "get_default_load_endianness",
     "set_default_load_endianness",
+    "get_default_mmap_options",
+    "set_default_mmap_options",
     "clear_safe_globals",
     "get_safe_globals",
     "add_safe_globals",
     "safe_globals",
+    "skip_data",
 ]
 
 
@@ -83,6 +87,22 @@ if not IS_WINDOWS:
     from mmap import MAP_PRIVATE, MAP_SHARED
 else:
     MAP_SHARED, MAP_PRIVATE = None, None  # type: ignore[assignment]
+
+
+# _serialization_tls is used to store thread local state specific to serialization
+# that needs to be propagated to other files, in particular we use this for
+# (1) map_location (needed for wrapper subclasses/third party devices to torch._utils)
+# (2) skip_data (needed for torch.Tensor.__reduce_ex__ for skip_data ctx)
+# (3) materialize_fake_tensors (needed for torch.Tensor.__reduce_ex__ for skip_data ctx)
+class _SerializationLocal(threading.local):
+    def __init__(self):
+        super().__init__()
+        self.map_location: Optional[MAP_LOCATION] = None
+        self.skip_data: bool = False
+        self.materialize_fake_tensors: bool = False
+
+
+_serialization_tls = _SerializationLocal()
 
 
 class SourceChangeWarning(Warning):
@@ -163,9 +183,9 @@ def get_default_mmap_options() -> int:
     return _default_mmap_options
 
 
-def set_default_mmap_options(flags: int):
+class set_default_mmap_options:
     """
-    Set default mmap options for :func:`torch.load` with ``mmap=True`` to flags.
+    Context manager or function to set default mmap options for :func:`torch.load` with ``mmap=True`` to flags.
 
     For now, only either ``mmap.MAP_PRIVATE`` or ``mmap.MAP_SHARED`` are supported.
     Please open an issue if you need any other option to be added here.
@@ -176,17 +196,27 @@ def set_default_mmap_options(flags: int):
     Args:
         flags: ``mmap.MAP_PRIVATE`` or ``mmap.MAP_SHARED``
     """
-    global _default_mmap_options
-    if IS_WINDOWS:
-        raise RuntimeError(
-            "Changing the default mmap options is currently not supported for Windows"
-        )
-    if flags != MAP_PRIVATE and flags != MAP_SHARED:
-        raise ValueError(
-            "Invalid argument in function set_default_mmap_options, "
-            f"expected mmap.MAP_PRIVATE or mmap.MAP_SHARED, but got {flags}"
-        )
-    _default_mmap_options = flags
+
+    def __init__(self, flags: int) -> None:
+        if IS_WINDOWS:
+            raise RuntimeError(
+                "Changing the default mmap options is currently not supported for Windows"
+            )
+        if flags != MAP_PRIVATE and flags != MAP_SHARED:
+            raise ValueError(
+                "Invalid argument in function set_default_mmap_options, "
+                f"expected mmap.MAP_PRIVATE or mmap.MAP_SHARED, but got {flags}"
+            )
+        global _default_mmap_options
+        self.prev = _default_mmap_options
+        _default_mmap_options = flags
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        global _default_mmap_options
+        _default_mmap_options = self.prev
 
 
 def clear_safe_globals() -> None:
@@ -254,7 +284,47 @@ class safe_globals(_weights_only_unpickler._safe_globals):
         #          [-0.8234,  2.0500, -0.3657]])
         >>> assert torch.serialization.get_safe_globals() == []
     """
-    pass
+
+
+class skip_data:
+    """
+    Context-manager that skips writing storage bytes for ``torch.save`` calls.
+
+    Storages will still be saved, but the space that their bytes would usually be written to
+    will be empty space. The storage bytes can then be populated in a separate pass.
+
+    .. warning::
+        The ``skip_data`` context manager is an early prototype and is subject to change.
+
+    Args:
+        materialize_fake_tensors: Whether to materialize FakeTensors.
+
+    Example:
+        >>> # xdoctest: +SKIP("NamedTemporaryFile on Windows")
+        >>> import tempfile
+        >>> t = torch.randn(2, 3)
+        >>> with tempfile.NamedTemporaryFile() as f:
+        ...     with torch.serialization.skip_data():
+        ...         torch.save(t, f.name)
+        ...     torch.load(f.name, weights_only=True)
+        tensor([[0., 0., 0.],
+                [0., 0., 0.]])
+    """
+
+    def __init__(self, materialize_fake_tensors: bool = False):
+        self.materialize_fake_tensors = materialize_fake_tensors
+
+    def __enter__(self):
+        global _serialization_tls
+        self._old_skip_data = _serialization_tls.skip_data
+        self._old_materialize_fake_tensors = _serialization_tls.materialize_fake_tensors
+        _serialization_tls.skip_data = True
+        _serialization_tls.materialize_fake_tensors = self.materialize_fake_tensors
+
+    def __exit__(self, type, value, tb):
+        global _serialization_tls
+        _serialization_tls.skip_data = self._old_skip_data
+        _serialization_tls.materialize_fake_tensors = self._old_materialize_fake_tensors
 
 
 def _is_zipfile(f) -> bool:
@@ -766,7 +836,7 @@ def save(
         >>> # xdoctest: +SKIP("makes cwd dirty")
         >>> # Save to file
         >>> x = torch.tensor([0, 1, 2, 3, 4])
-        >>> torch.save(x, 'tensor.pt')
+        >>> torch.save(x, "tensor.pt")
         >>> # Save to io.BytesIO buffer
         >>> buffer = io.BytesIO()
         >>> torch.save(x, buffer)
@@ -786,6 +856,11 @@ def save(
             )
             return
     else:
+        global _serialization_tls
+        if _serialization_tls.skip_data:
+            raise RuntimeError(
+                "Cannot use skip_data=True with _use_new_zipfile_serialization=False"
+            )
         with _open_file_like(f, "wb") as opened_file:
             _legacy_save(obj, opened_file, pickle_module, pickle_protocol)
 
@@ -794,7 +869,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
     import torch.nn as nn
 
     serialized_container_types = {}
-    serialized_storages = {}
+    serialized_storages: Dict[str, Tuple[torch.UntypedStorage, torch.dtype]] = {}
 
     # Since loading storages that view the same data with different dtypes is
     # not supported, we need to keep track of the dtype associated with each
@@ -930,8 +1005,12 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
     pickle_module.dump(MAGIC_NUMBER, f, protocol=pickle_protocol)
     pickle_module.dump(PROTOCOL_VERSION, f, protocol=pickle_protocol)
     pickle_module.dump(sys_info, f, protocol=pickle_protocol)
-    pickler = pickle_module.Pickler(f, protocol=pickle_protocol)
-    pickler.persistent_id = persistent_id
+
+    class PyTorchLegacyPickler(pickle_module.Pickler):
+        def persistent_id(self, obj):
+            return persistent_id(obj)
+
+    pickler = PyTorchLegacyPickler(f, protocol=pickle_protocol)
     pickler.dump(obj)
 
     serialized_storage_keys = sorted(serialized_storages.keys())
@@ -944,7 +1023,13 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
         )
 
 
-def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_record):
+def _save(
+    obj,
+    zip_file,
+    pickle_module,
+    pickle_protocol,
+    _disable_byteorder_record,
+):
     serialized_storages = {}
     id_map: Dict[int, str] = {}
 
@@ -979,7 +1064,7 @@ def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_reco
             # If storage is allocated, ensure that any other saved storages
             # pointing to the same data all have the same dtype. If storage is
             # not allocated, don't perform this check
-            if storage.data_ptr() != 0:
+            if str(storage.device) != "meta" and storage.data_ptr() != 0:
                 if storage.data_ptr() in storage_dtypes:
                     if storage_dtype != storage_dtypes[storage.data_ptr()]:
                         raise RuntimeError(
@@ -990,7 +1075,10 @@ def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_reco
                     storage_dtypes[storage.data_ptr()] = storage_dtype
 
             storage_key = id_map.setdefault(storage._cdata, str(len(id_map)))
-            location = location_tag(storage)
+            if hasattr(obj, "_fake_device") and obj._fake_device is not None:
+                location = str(obj._fake_device)
+            else:
+                location = location_tag(storage)
             serialized_storages[storage_key] = storage
 
             return ("storage", storage_type, storage_key, location, storage_numel)
@@ -999,8 +1087,12 @@ def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_reco
 
     # Write the pickle data for `obj`
     data_buf = io.BytesIO()
-    pickler = pickle_module.Pickler(data_buf, protocol=pickle_protocol)
-    pickler.persistent_id = persistent_id
+
+    class PyTorchPickler(pickle_module.Pickler):  # type: ignore[name-defined]
+        def persistent_id(self, obj):
+            return persistent_id(obj)
+
+    pickler = PyTorchPickler(data_buf, protocol=pickle_protocol)
     pickler.dump(obj)
     data_value = data_buf.getvalue()
     zip_file.write_record("data.pkl", data_value, len(data_value))
@@ -1016,14 +1108,18 @@ def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_reco
     for key in sorted(serialized_storages.keys()):
         name = f"data/{key}"
         storage = serialized_storages[key]
-        # given that we copy things around anyway, we might use storage.cpu()
-        # this means to that to get tensors serialized, you need to implement
-        # .cpu() on the underlying Storage
-        if storage.device.type != "cpu":
-            storage = storage.cpu()
-        # Now that it is on the CPU we can directly copy it into the zip file
         num_bytes = storage.nbytes()
-        zip_file.write_record(name, storage, num_bytes)
+        global _serialization_tls
+        if _serialization_tls.skip_data:
+            zip_file.write_record_metadata(name, num_bytes)
+        else:
+            # given that we copy things around anyway, we might use storage.cpu()
+            # this means to that to get tensors serialized, you need to implement
+            # .cpu() on the underlying Storage
+            if storage.device.type != "cpu":
+                storage = storage.cpu()
+            # Now that it is on the CPU we can directly copy it into the zip file
+            zip_file.write_record(name, storage, num_bytes)
 
 
 def load(
@@ -1115,23 +1211,29 @@ def load(
 
     Example:
         >>> # xdoctest: +SKIP("undefined filepaths")
-        >>> torch.load('tensors.pt', weights_only=True)
+        >>> torch.load("tensors.pt", weights_only=True)
         # Load all tensors onto the CPU
-        >>> torch.load('tensors.pt', map_location=torch.device('cpu'), weights_only=True)
+        >>> torch.load("tensors.pt", map_location=torch.device("cpu"), weights_only=True)
         # Load all tensors onto the CPU, using a function
-        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage, weights_only=True)
+        >>> torch.load(
+        ...     "tensors.pt", map_location=lambda storage, loc: storage, weights_only=True
+        ... )
         # Load all tensors onto GPU 1
-        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage.cuda(1), weights_only=True)  # type: ignore[attr-defined]
+        >>> torch.load(
+        ...     "tensors.pt",
+        ...     map_location=lambda storage, loc: storage.cuda(1),
+        ...     weights_only=True,
+        ... )  # type: ignore[attr-defined]
         # Map tensors from GPU 1 to GPU 0
-        >>> torch.load('tensors.pt', map_location={'cuda:1': 'cuda:0'}, weights_only=True)
+        >>> torch.load("tensors.pt", map_location={"cuda:1": "cuda:0"}, weights_only=True)
         # Load tensor from io.BytesIO object
         # Loading from a buffer setting weights_only=False, warning this can be unsafe
-        >>> with open('tensor.pt', 'rb') as f:
+        >>> with open("tensor.pt", "rb") as f:
         ...     buffer = io.BytesIO(f.read())
         >>> torch.load(buffer, weights_only=False)
         # Load a module with 'ascii' encoding for unpickling
         # Loading from a module setting weights_only=False, warning this can be unsafe
-        >>> torch.load('module.pt', encoding='ascii', weights_only=False)
+        >>> torch.load("module.pt", encoding="ascii", weights_only=False)
     """
     torch._C._log_api_usage_once("torch.load")
     UNSAFE_MESSAGE = (
@@ -1145,22 +1247,35 @@ def load(
     )
 
     def _get_wo_message(message: str) -> str:
-        pattern = r"GLOBAL (\S+) was not an allowed global by default."
-        has_unsafe_global = re.search(pattern, message) is not None
+        unsafe_global_pattern = r"GLOBAL (\S+) was not an allowed global by default."
+        has_unsafe_global = re.search(unsafe_global_pattern, message) is not None
+        blocklist_pattern = r"whose module (\S+) is blocked"
+        has_blocklist = re.search(blocklist_pattern, message) is not None
         if has_unsafe_global:
             updated_message = (
-                "Weights only load failed. This file can still be loaded, to do so you have two options "
+                "Weights only load failed. This file can still be loaded, to do so you have two options, "
+                "\033[1mdo those steps only if you trust the source of the checkpoint\033[0m. "
                 f"\n\t(1) {UNSAFE_MESSAGE}\n\t(2) Alternatively, to load with `weights_only=True` please check "
                 "the recommended steps in the following error message.\n\tWeightsUnpickler error: "
                 + message
             )
         else:
-            updated_message = (
-                f"Weights only load failed. {UNSAFE_MESSAGE}\n Please file an issue with the following "
-                "so that we can make `weights_only=True` compatible with your use case: WeightsUnpickler "
-                "error: " + message
-            )
+            updated_message = f"Weights only load failed. {UNSAFE_MESSAGE}\n"
+            if not has_blocklist:
+                updated_message += (
+                    "Please file an issue with the following so that we can make "
+                    "`weights_only=True` compatible with your use case: WeightsUnpickler error: "
+                )
+            updated_message += message
         return updated_message + DOCS_MESSAGE
+
+    global _serialization_tls
+    skip_data = _serialization_tls.skip_data
+    if skip_data:
+        raise RuntimeError(
+            "`torch.load` called within a torch.serialization.skip_data context manager "
+            "is not supported yet. Please call torch.load outside the skip_data context manager."
+        )
 
     if weights_only is None:
         weights_only, warn_weights_only = False, True
@@ -1248,7 +1363,7 @@ def load(
                             overall_storage=overall_storage,
                             **pickle_load_args,
                         )
-                    except RuntimeError as e:
+                    except pickle.UnpicklingError as e:
                         raise pickle.UnpicklingError(_get_wo_message(str(e))) from None
                 return _load(
                     opened_zipfile,
@@ -1272,7 +1387,7 @@ def load(
                     _weights_only_unpickler,
                     **pickle_load_args,
                 )
-            except RuntimeError as e:
+            except pickle.UnpicklingError as e:
                 raise pickle.UnpicklingError(_get_wo_message(str(e))) from None
         return _legacy_load(
             opened_file, map_location, pickle_module, **pickle_load_args
@@ -1736,9 +1851,10 @@ def _load(
     unpickler.persistent_load = persistent_load
     # Needed for tensors where storage device and rebuild tensor device are
     # not connected (wrapper subclasses and tensors rebuilt using numpy)
-    torch._utils._thread_local_state.map_location = map_location
+    global _serialization_tls
+    _serialization_tls.map_location = map_location
     result = unpickler.load()
-    del torch._utils._thread_local_state.map_location
+    _serialization_tls.map_location = None
 
     torch._utils._validate_loaded_sparse_tensors()
     torch._C._log_api_usage_metadata(

@@ -9,13 +9,13 @@ import typing
 from typing import Any, List, Optional, Tuple, Union
 
 import torch.utils._pytree as pytree
-
 from torch import Tensor
 from torch._subclasses.fake_tensor import get_plain_tensors
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .schemas import MutationType, SubclassCreationMeta, ViewAndMutationMeta
 from .utils import strict_zip
+
 
 zip = strict_zip
 
@@ -134,6 +134,18 @@ def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
         unwrapped_args_fw = concat_inner_tensors_from_subclasses(wrapped_args)
         unwrapped_args = unwrapped_args_fw
     return unwrapped_args
+
+
+def unwrap_tensor_subclasses_with_indices_to_original(wrapped_args):
+    ret_unwrapped = []
+    ret_indices_to_original = []
+    for i, a in enumerate(wrapped_args):
+        a_unwrapped = unwrap_tensor_subclasses([a], is_joint_structure=False)
+        ret_unwrapped.extend(a_unwrapped)
+        n = len(a_unwrapped)
+        ret_indices_to_original.extend([i] * n)
+
+    return ret_unwrapped, ret_indices_to_original
 
 
 def remap_unwrapped_subclass_arg_indices(wrapped_args, static_input_indices):

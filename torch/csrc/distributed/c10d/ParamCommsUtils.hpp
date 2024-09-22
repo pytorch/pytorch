@@ -16,8 +16,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       std::tuple<std::string, std::string> pgName,
       int rank,
       std::string&& collName,
-      int inNelems,
-      int outNelems,
+      int64_t inNelems,
+      int64_t outNelems,
       at::ScalarType dType,
       std::vector<int64_t> inSplitSizes,
       std::vector<int64_t> outSplitSizes,
@@ -55,11 +55,11 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
     return collectiveName_;
   }
 
-  int getInMessageNelems() const {
+  int64_t getInMessageNelems() const {
     return inMessageNelems_;
   }
 
-  int getOutMessageNelems() const {
+  int64_t getOutMessageNelems() const {
     return outMessageNelems_;
   }
 
@@ -84,8 +84,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
   int rank_{};
   int worldSize_{};
   std::string collectiveName_;
-  int inMessageNelems_{};
-  int outMessageNelems_{};
+  int64_t inMessageNelems_{};
+  int64_t outMessageNelems_{};
   at::ScalarType dType_ = at::kByte;
   std::vector<int64_t> inputSplitSizes_;
   std::vector<int64_t> outputSplitSizes_;

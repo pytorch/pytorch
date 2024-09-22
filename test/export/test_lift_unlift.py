@@ -16,7 +16,6 @@ from torch.export.exported_program import (
     OutputSpec,
     TensorArgument,
 )
-
 from torch.export.graph_signature import CustomObjArgument
 from torch.testing._internal.common_utils import (
     find_library_location,
@@ -30,7 +29,7 @@ from torch.testing._internal.common_utils import (
 
 
 class GraphBuilder:
-    def __init__(self):
+    def __init__(self) -> None:
         self.graph = torch.fx.Graph()
         self.nodes = {}
         self.values = {}
@@ -355,7 +354,7 @@ class TestLift(TestCase):
 
     def test_unlift_nonpersistent_buffer(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.register_buffer(
                     "non_persistent_buf", torch.zeros(1), persistent=False

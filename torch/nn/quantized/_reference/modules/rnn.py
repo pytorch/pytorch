@@ -9,9 +9,11 @@ appropriate file under the `torch/ao/nn/quantized/reference`,
 while adding an import statement here.
 """
 
-from torch.ao.nn.quantized.reference.modules.rnn import RNNCellBase
-from torch.ao.nn.quantized.reference.modules.rnn import RNNCell
-from torch.ao.nn.quantized.reference.modules.rnn import LSTMCell
-from torch.ao.nn.quantized.reference.modules.rnn import GRUCell
-from torch.ao.nn.quantized.reference.modules.rnn import RNNBase
-from torch.ao.nn.quantized.reference.modules.rnn import LSTM
+from torch.ao.nn.quantized.reference.modules.rnn import (
+    GRUCell,
+    LSTM,
+    LSTMCell,
+    RNNBase,
+    RNNCell,
+    RNNCellBase,
+)

@@ -72,7 +72,7 @@ class TestEqualizeEager(QuantizationTestCase):
         given the same input
         '''
         class ChainModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = nn.Linear(3, 4)
                 self.linear2 = nn.Linear(4, 5)
@@ -108,7 +108,7 @@ class TestEqualizeEager(QuantizationTestCase):
         yield the same output given the same input
         '''
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(3, 3, 1).to(dtype=torch.float)
                 self.relu1 = nn.ReLU(inplace=False).to(dtype=torch.float)
@@ -154,7 +154,7 @@ class TestEqualizeEager(QuantizationTestCase):
         yield the same output given the same input
         '''
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = nn.Linear(3, 4)
                 self.relu1 = nn.ReLU(inplace=False).to(dtype=torch.float)

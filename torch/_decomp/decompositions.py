@@ -1,5 +1,7 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
+import itertools
 import numbers
 import operator
 import sys
@@ -31,6 +33,7 @@ from torch._prims_common.wrappers import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map
+
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 
@@ -418,6 +421,15 @@ def mse_loss_backward(
     return norm * (input - target) * grad_output
 
 
+@register_decomposition(aten._safe_softmax)
+def safe_softmax(self, dim, dtype=None):
+    out = torch.softmax(self, dim=dim, dtype=dtype)
+    masked = self.eq(float("-inf"))
+    masked_rows = torch.all(masked, dim=dim, keepdim=True)
+    zeros = torch.zeros_like(out)
+    return torch.where(masked_rows, zeros, out)
+
+
 @register_decomposition(aten.smooth_l1_loss)
 @out_wrapper()
 @pw_cast_for_opmath
@@ -753,18 +765,18 @@ def slice_forward(
     start_val = start if start is not None else 0
     end_val = end if end is not None else sys.maxsize  # 2^63 - 1
 
-    if start_val < 0:
+    if guard_size_oblivious(start_val < 0):
         start_val += sizes[dim]
 
-    if end_val < 0:
+    if guard_size_oblivious(end_val < 0):
         end_val += sizes[dim]
 
-    if start_val < 0:
+    if guard_size_oblivious(start_val < 0):
         start_val = 0
-    elif start_val > sizes[dim]:
+    elif guard_size_oblivious(start_val > sizes[dim]):
         start_val = sizes[dim]
 
-    if end_val < start_val:
+    if guard_size_oblivious(end_val < start_val):
         end_val = start_val
     elif statically_known_true(end_val == sys.maxsize) or guard_size_oblivious(
         end_val > sizes[dim]
@@ -1397,20 +1409,17 @@ def split_with_sizes(
         sum(split_sizes) == self.shape[dim],
         lambda: f"Split sizes add up to {sum(split_sizes)} but got the tensor's size of {self.shape[dim]}",
     )
-    num_splits = len(split_sizes)
+
     splits = []
-    start_idx = 0
+    offset = self.storage_offset()
 
-    # Avoid importing sympy at a module level
-    from torch.fx.experimental.symbolic_shapes import expect_true
-
-    for i in range(num_splits):
-        length = split_sizes[i]
-        # We know this is true thanks to the sum, but this assertion helps
-        # out our internal reasoning
-        expect_true(start_idx + length <= self.shape[dim])
-        splits.append(self.narrow(dim, start_idx, length))
-        start_idx += length
+    for split_size in split_sizes:
+        new_shape = list(self.shape)
+        new_shape[dim] = split_size
+        # We reimplement narrow here to avoid a lot of checks in the
+        # decomposition of narrow which calls slice_in_dim and slice
+        splits.append(self.as_strided(new_shape, self.stride(), offset))
+        offset = offset + self.stride()[dim] * split_size
     return splits
 
 
@@ -1573,7 +1582,7 @@ def native_group_norm_backward(
     utils.check_same_shape(mean, rstd, allow_cpu_scalar_tensors=False)
     torch._check(
         input.numel() == N * C * HxW,
-        lambda: f"Expect input to have { N * C * HxW} elements",
+        lambda: f"Expect input to have {N * C * HxW} elements",
     )
     torch._check(
         mean.shape == (N, group),
@@ -2557,6 +2566,134 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
         else:
             ret = ret + vals[..., i, :, j]
     return ret / (length_h * length_w)
+
+
+def _max_unpoolnd(
+    self: TensorLike, indices: TensorLike, output_size: List[int], dim: int
+):
+    # If the input tensors self and indices came from max_pool call as
+    # required by the documentation, this operation is deterministic
+    # because that ensures that if there are two entries in `indices`
+    # tensor that are equal, the corresponding values in `self` are also
+    # equal. If this condition is not satisfied, the operation is
+    # non-deterministic as one of the different values in `self` 'wins'.
+    utils.alert_not_deterministic(f"max_unpooling{dim}d_forward_out")
+    nc = reduce(operator.mul, self.shape[:-dim])
+    hw = reduce(operator.mul, output_size)
+    indices_nc_shape = [1] * self.ndim
+    indices_nc_shape[:-dim] = self.shape[:-dim]
+    indices_flat = (
+        indices + aten.arange(nc, device=self.device).view(indices_nc_shape) * hw
+    ).reshape(-1)
+
+    output = self.new_zeros(list(self.shape[:-dim]) + list(output_size))
+    return aten._unsafe_index_put(
+        output.reshape(-1), [indices_flat], self.reshape(-1), accumulate=False
+    ).view(output.shape)
+
+
+@register_decomposition(aten.max_unpool2d)
+@out_wrapper()
+def max_unpool2d(
+    self: TensorLike,
+    indices: TensorLike,
+    output_size: List[int],
+):
+    torch._check(
+        indices.dtype == torch.int64,
+        lambda: f"elements in indices should be type int64 but got: {indices.dtype}",
+    )
+    torch._check(
+        len(output_size) == 2,
+        lambda: (
+            f"There should be exactly two elements (height, width) in output_size, "
+            f"but got {len(output_size)} elements."
+        ),
+    )
+
+    torch._check(
+        self.ndim in (3, 4),
+        lambda: (
+            f"Input to max_unpooling2d should be a 3d or 4d Tensor, "
+            f"but got a tensor with {self.ndim} dimensions."
+        ),
+    )
+    torch._check(
+        self.shape == indices.shape,
+        lambda: (
+            f"Expected shape of indices to be same as that of the input tensor ({self.shape}) "
+            f"but got indices tensor with shape: {indices.shape}"
+        ),
+    )
+
+    for i in range(1, self.ndim):
+        torch._check(
+            self.size(i) > 0,
+            lambda: (
+                f"max_unpooling2d(): "
+                f"Expected input to have non-zero size for non-batch dimensions, "
+                f"but got {self.shape} with dimension {i} being empty."
+            ),
+        )
+
+    return _max_unpoolnd(self, indices, output_size, 2)
+
+
+@register_decomposition(aten.max_unpool3d)
+@out_wrapper()
+def max_unpool3d(
+    input: TensorLike,
+    indices: TensorLike,
+    output_size: List[int],
+    stride: List[int],
+    padding: List[int],
+):
+    torch._check(
+        indices.dtype == torch.int64, lambda: "elements in indices should be type int64"
+    )
+    torch._check(
+        input.ndim in (4, 5),
+        lambda: f"Input to max_unpooling3d should be a 4d or 5d Tensor, but got a tensor with {input.ndim} dimensions.",
+    )
+    torch._check(
+        len(output_size) == 3,
+        lambda: (
+            f"There should be exactly three elements (depth, height, width) in output_size, "
+            f"but got {len(output_size)} elements."
+        ),
+    )
+    torch._check(
+        len(stride) == 3,
+        lambda: f"There should be exactly three elements (depth, height, width) in stride, but got: {len(stride)} elements.",
+    )
+    torch._check(
+        len(padding) == 3,
+        lambda: f"There should be exactly three elements (depth, height, width) in padding, but got: {len(padding)} elements.",
+    )
+    torch._check(
+        input.shape == indices.shape,
+        lambda: (
+            f"Expected shape of indices to be same as that of the input tensor ({input.shape}) "
+            f"but got indices tensor with shape: {indices.shape}"
+        ),
+    )
+
+    for i in range(1, input.ndim):
+        torch._check(
+            input.size(i) > 0,
+            lambda: (
+                f"max_unpooling3d(): "
+                f"Expected input to have non-zero size for non-batch dimensions, "
+                f"but got {input.shape} with dimension {i} being empty."
+            ),
+        )
+
+    torch._check(
+        stride[0] > 0 and stride[1] > 0 and stride[2] > 0,
+        lambda: f"strides should be greater than zero, but got stride: {stride}",
+    )
+
+    return _max_unpoolnd(input, indices, output_size, 3)
 
 
 @register_decomposition(aten.index_add_)
@@ -3798,6 +3935,11 @@ def _unsafe_index(x, indices):
     return aten.index(x, indices)
 
 
+@register_decomposition([aten._unsafe_index_put])
+def _unsafe_index_put(x, indices, value, accumulate=False):
+    return aten.index_put(x, indices, value, accumulate)
+
+
 @register_decomposition([aten._unsafe_masked_index])
 def _unsafe_masked_index(x, mask, indices, fill):
     for index in indices:
@@ -4350,10 +4492,10 @@ def matmul(tensor1, tensor2, *, is_out=False):
         if t2_is_matrix:
             # This copies if we perform a 2D @ 3D and the first tensor requires_grad
             # See should_fold native/LinearAlgebra.cpp for why.
-            output = t1_folded.mm(t2).view(output_shape)
+            output = torch.ops.aten._unsafe_view(t1_folded.mm(t2), output_shape)
             return output.mT.contiguous() if transpose else output
         else:
-            return t1_folded.mv(t2).view(output_shape)
+            return torch.ops.aten._unsafe_view(t1_folded.mv(t2), output_shape)
 
     elif dim_tensor1 >= 1 and dim_tensor2 >= 1:
         # We are multiplying b1 x n x m1 by x2 x m2 x p (where b1 can be a list);
@@ -4601,6 +4743,97 @@ def _reflection_or_replication_pad(
     return result
 
 
+@register_decomposition(aten.reflection_pad1d_backward)
+@register_decomposition(aten.reflection_pad2d_backward)
+@register_decomposition(aten.reflection_pad3d_backward)
+@out_wrapper("grad_input")
+def _reflection_pad_backward(grad_output, x, padding):
+    dim = len(padding) // 2
+
+    dhw = [h - 1 for h in x.shape[-dim:]]
+
+    padding_left = [padding[2 * (dim - 1 - i)] for i in range(dim)]
+    padding_right = [padding[2 * (dim - 1 - i) + 1] for i in range(dim)]
+
+    indices = []
+    for i in range(x.ndim):
+        view_shape = [1] * x.ndim
+        view_shape[i] = -1
+        indices.append(torch.arange(x.shape[i], device=x.device).view(view_shape))
+
+    b = indices[:-dim]
+    xyz = indices[-dim:]
+
+    def index_range_condition(index_range):
+        i, lb, ub = index_range
+        return torch.logical_and(i >= lb, i <= ub)
+
+    # Areas after reflection:
+    #
+    #   top-left    |   top     |   top-right
+    # -----------------------------------------
+    #   left        |   center  |   right
+    # -----------------------------------------
+    #   bottom-left |   bottom  |   bottom-right
+    #
+    # The center area is the original matrix. Other areas are reflections.
+
+    center = [xyz[i] + padding_left[i] for i in range(dim)]
+    left_reflect = [padding_left[i] - xyz[i] for i in range(dim)]
+    right_reflect = [2 * dhw[i] + padding_left[i] - xyz[i] for i in range(dim)]
+
+    # Accumulate gradients from different areas
+    # If some of the padding is negative, center load is not always valid
+    range_c = [
+        (center[i], 0, dhw[i] + padding_left[i] + padding_right[i]) for i in range(dim)
+    ]
+    cond = functools.reduce(
+        aten.logical_and, [index_range_condition(range_c[i]) for i in range(dim)]
+    )
+    grad = aten._unsafe_masked_index(grad_output, cond, b + center, 0.0)
+
+    def accumulate(grad, out, index_ranges):
+        # If the upper bound is less than the lower bound, we can get rid of one accumulation.
+        # This happens when the padding size is zero.
+        for i in range(dim):
+            upper_less_than_lower = index_ranges[i][2] < index_ranges[i][1]
+            if isinstance(upper_less_than_lower, bool) and upper_less_than_lower:
+                return grad
+
+        cond = functools.reduce(
+            aten.logical_and,
+            [index_range_condition(index_range) for index_range in index_ranges],
+        )
+        g = aten._unsafe_masked_index(grad_output, cond, b + out, 0.0)
+        return grad + g
+
+    for area in itertools.product(*[[-1, 0, 1] for _ in range(dim)]):
+        if area == tuple([0] * dim):
+            # center, this is already done.
+            continue
+
+        outs = []
+        index_ranges = []
+
+        for i in range(dim):
+            if area[i] == 0:
+                out = center[i]
+                index_range = range_c[i]
+            elif area[i] == -1:
+                out = left_reflect[i]
+                index_range = (xyz[i], 1, padding_left[i])
+            elif area[i] == 1:
+                out = right_reflect[i]
+                index_range = (xyz[i], dhw[i] - padding_right[i], dhw[i] - 1)
+
+            outs.append(out)  # type: ignore[possibly-undefined]
+            index_ranges.append(index_range)  # type: ignore[possibly-undefined]
+
+        grad = accumulate(grad, outs, index_ranges)
+
+    return grad
+
+
 @register_decomposition(aten.aminmax)
 @out_wrapper("min", "max")
 def aminmax(self, *, dim=None, keepdim=False):
@@ -4803,9 +5036,7 @@ def scaled_dot_product_flash_attention_for_cpu(
     # Why this change?
     # In pre-dispatch export scaled_dot_product_attention is executed via
     # * flash_attention.
-    # flash_attention allocates output tensor as (N, L, H, E)
-    #   it then transposes that to get (N, H, L, E) which is supposed to be the return
-    # tensor dim for scaled_dot_product_attention
+    # flash_attention allocates output tensor as (N, H, L, E) (see PR #134656)
     # assume x: [N, H, L, E] is the output sdpa
     # In MHA code, this output is then permuted via (2, 0, 1, 3) to get
     # (L, N, H, E) dim tensor
@@ -4821,20 +5052,16 @@ def scaled_dot_product_flash_attention_for_cpu(
     # subsequent view is not valid and the export fails
     # solution is to maintain the return tensor view from the decomp to be
     # exactly same as *flash* variant.
-    # flash variants output is contiguous as [N, L, H, E]
-    # _match variant out is contiguous as [N, H, L, E]
-    # out = out.transpose(1, 2).contiguous gets output as contiguous
-    # in [N, L, H, E].
-    # Subsrequent transpose(1, 2) then returns a view on which
-    # aforementioned code snippet, as showm below, is valid
-    # x = x.permute(2, 0, 1, 3).contiguous() and the viewed via
-    # x = x.view(L * N, H * E)
 
     # Really the invariant you want to maintain is:
     # pre-dispatch op-output and its decomposed representation must
     # return tensor with same view and dims
-    output = output.transpose(1, 2).contiguous(memory_format=torch.contiguous_format)
-    return (output.transpose(1, 2), attn)
+    output = (
+        output.permute(2, 0, 1, 3)
+        .contiguous(memory_format=torch.contiguous_format)
+        .permute(1, 2, 0, 3)
+    )
+    return output, attn
 
 
 def register_inplace(aten_op, outplace_op):
@@ -4889,6 +5116,10 @@ def sum_default(
 
 @register_decomposition([aten.squeeze.default, aten.squeeze.dim])
 def squeeze_default(self: Tensor, dim: Optional[int] = None):
+    # handle a scalar directly
+    if not isinstance(self, torch.Tensor):
+        return self
+    # perform squeeze
     if dim is None:
         return aten.squeeze.dims(self, list(range(self.dim())))
     else:

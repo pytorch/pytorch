@@ -5,7 +5,7 @@
 
 namespace torch::jit::tensorexpr {
 
-const std::string& UniqueNameManager::get_unique_name(VarPtr v) {
+const std::string& UniqueNameManager::get_unique_name(const VarPtr& v) {
   // Find if we have already encountered this variable.
   auto iter = unique_name_mapping_.find(v);
   if (iter != unique_name_mapping_.end()) {
@@ -31,7 +31,7 @@ const std::string& UniqueNameManager::get_unique_name(VarPtr v) {
     }
     if (all_unique_names_.count(unique_name) == 0) {
       all_unique_names_.insert(unique_name);
-      auto result = unique_name_mapping_.insert(std::make_pair(v, unique_name));
+      auto result = unique_name_mapping_.emplace(v, unique_name);
       return result.first->second;
     }
   }

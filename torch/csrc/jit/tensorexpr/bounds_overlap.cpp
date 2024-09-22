@@ -8,7 +8,7 @@
 namespace torch::jit::tensorexpr::analysis {
 
 // Returns true if the given expression is guaranteed to be positive.
-static bool mustBePositive(ExprPtr e) {
+static bool mustBePositive(const ExprPtr& e) {
   if (e->isConstant()) {
     int e_val = immediateAs<int>(e);
     return e_val > 0;
@@ -17,7 +17,7 @@ static bool mustBePositive(ExprPtr e) {
 }
 
 // Returns true if the given expression is guaranteed to be negative.
-static bool mustBeNegative(ExprPtr e) {
+static bool mustBeNegative(const ExprPtr& e) {
   if (e->isConstant()) {
     int e_val = immediateAs<int>(e);
     return e_val < 0;
@@ -26,7 +26,7 @@ static bool mustBeNegative(ExprPtr e) {
 }
 
 // Returns true if the given expression is guaranteed to be zero.
-static bool mustBeZero(ExprPtr e) {
+static bool mustBeZero(const ExprPtr& e) {
   if (e->isConstant()) {
     int e_val = immediateAs<int>(e);
     return e_val == 0;
@@ -81,7 +81,7 @@ bool Bound::operator<(const Bound& other) const {
   return mustBeNegative(ret_expr);
 }
 
-OverlapKind boundOverlap(Bound a, Bound b) {
+OverlapKind boundOverlap(const Bound& a, const Bound& b) {
   // If they're equal they're equal.
   bool startEqual = exprEquals(a.start, b.start);
   bool endEqual = exprEquals(a.end, b.end);
@@ -237,7 +237,7 @@ OverlapKind overlaps(const IndexBounds& a, const IndexBounds& b) {
   return overlap;
 }
 
-std::vector<Bound> subtractBound(Bound a, Bound b) {
+std::vector<Bound> subtractBound(const Bound& a, const Bound& b) {
   OverlapKind overlap = boundOverlap(a, b);
   if (overlap == OverlapKind::NoOverlap) {
     return {a};

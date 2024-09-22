@@ -31,6 +31,11 @@ PASSTHROUGH_FNS = [
     torch.ops.aten._lazy_clone_alias,
     torch.ops.aten.cat,
     torch.ops.aten.unsqueeze,
+    torch.ops.aten.unfold,
+    torch.ops.aten.unfold_backward,
+    torch.ops.aten.im2col,
+    torch.ops.aten.col2im,
+    torch.ops.aten.stack,
 ]
 
 

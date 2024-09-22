@@ -23,12 +23,12 @@ std::optional<std::string> maybeConvertToString(const py::object& obj) {
 
 struct SourceRangeFactory {
   SourceRangeFactory(
-      std::string text,
+      const std::string& text,
       const py::object& filename,
       size_t file_lineno,
       size_t leading_whitespace_chars)
       : source_(std::make_shared<Source>(
-            std::move(text),
+            text,
             maybeConvertToString(filename),
             file_lineno)),
         leading_whitespace_chars_(leading_whitespace_chars) {}
@@ -36,17 +36,15 @@ struct SourceRangeFactory {
   SourceRange create(int line, int start_col, int end_col) {
     auto [start_byte_offset, end_byte_offset] = line_col_to_byte_offs(
         line,
-        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         start_col + leading_whitespace_chars_,
-        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         end_col + leading_whitespace_chars_);
     return SourceRange(source_, start_byte_offset, end_byte_offset);
   }
 
   std::tuple<size_t, size_t> line_col_to_byte_offs(
       int line,
-      int start_col,
-      int end_col) {
+      size_t start_col,
+      size_t end_col) {
     // lines are counted from 1.
     line--;
     auto line_start = source_->offset_for_line(line);

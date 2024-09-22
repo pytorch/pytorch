@@ -1,6 +1,7 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
 #include <torch/csrc/inductor/aoti_eager/kernel_meta_info.h>
 #include <iostream>
+#include <utility>
 
 namespace torch::inductor {
 
@@ -25,8 +26,8 @@ TensorMetadata::TensorMetadata(
       dtype_(dtype),
       device_(device),
       dispatch_key_set_(dispatch_key_set),
-      sizes_(sizes),
-      strides_(strides),
+      sizes_(std::move(sizes)),
+      strides_(std::move(strides)),
       requires_grad_(requires_grad) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       !is_symbolic_, "Not support symbolic shape now");
@@ -94,25 +95,24 @@ bool TensorMetadata::operator==(const TensorMetadata& other) const {
 std::ostream& operator<<(
     std::ostream& stream,
     const TensorMetadata& tensor_metadata) {
-  stream << "is_symbolic_: " << tensor_metadata.is_symbolic_ << std::endl;
-  stream << "dtype_: " << tensor_metadata.dtype_ << std::endl;
-  stream << "device_: " << tensor_metadata.device_ << std::endl;
+  stream << "is_symbolic_: " << tensor_metadata.is_symbolic_ << '\n';
+  stream << "dtype_: " << tensor_metadata.dtype_ << '\n';
+  stream << "device_: " << tensor_metadata.device_ << '\n';
   stream << "sizes_: ";
   for (const auto& size : tensor_metadata.sizes_) {
     stream << size << " ";
   }
-  stream << std::endl;
+  stream << '\n';
   stream << "strides_: ";
   for (const auto& stride : tensor_metadata.strides_) {
     stream << stride << " ";
   }
 
-  stream << "requires_grad_: " << tensor_metadata.requires_grad_ << std::endl;
-  stream << "dispatch_key_set_: " << tensor_metadata.dispatch_key_set_
-         << std::endl;
+  stream << "requires_grad_: " << tensor_metadata.requires_grad_ << '\n';
+  stream << "dispatch_key_set_: " << tensor_metadata.dispatch_key_set_ << '\n';
   stream << "tensor_check_: " << tensor_metadata.tensor_check_.has_value()
-         << std::endl;
-  stream << std::endl;
+         << '\n';
+  stream << '\n';
   return stream;
 }
 
@@ -138,8 +138,9 @@ ParameterMetadata::ParameterMetadata(
     uint64_t input_order)
     : tag_(TENSOR_LIST), order_(input_order) {
   std::vector<TensorMetadata> tensor_metadata_list;
+  tensor_metadata_list.reserve(tensor_list.size());
   for (const auto& tensor : tensor_list) {
-    tensor_metadata_list.push_back(TensorMetadata(tensor));
+    tensor_metadata_list.emplace_back(tensor);
   }
   value_ = tensor_metadata_list;
 }
@@ -147,9 +148,17 @@ ParameterMetadata::ParameterMetadata(
 ParameterMetadata::ParameterMetadata(
     const c10::Scalar& scalar,
     uint64_t input_order)
-    : tag_(SCALAR), order_(input_order) {
-  value_ = scalar;
-}
+    : tag_(SCALAR), value_(scalar), order_(input_order) {}
+
+ParameterMetadata::ParameterMetadata(
+    const std::string& str,
+    uint64_t input_order)
+    : tag_(STRING), value_(str), order_(input_order) {}
+
+ParameterMetadata::ParameterMetadata(
+    const c10::Device& device,
+    uint64_t input_order)
+    : tag_(DEVICE), value_(device), order_(input_order) {}
 
 bool ParameterMetadata::operator==(const ParameterMetadata& other) const {
   // Same type
@@ -174,6 +183,12 @@ bool ParameterMetadata::operator==(const ParameterMetadata& other) const {
           std::get<c10::Scalar>(other.value_).isFloatingPoint() ||
           std::get<c10::Scalar>(other.value_).isIntegral(true /*includeBool*/));
       return equal_to(std::get<c10::Scalar>(other.value_));
+    case STRING:
+      return std::get<std::string>(value_) ==
+          std::get<std::string>(other.value_);
+    case DEVICE:
+      return std::get<c10::Device>(value_) ==
+          std::get<c10::Device>(other.value_);
     default:
       return false;
   }

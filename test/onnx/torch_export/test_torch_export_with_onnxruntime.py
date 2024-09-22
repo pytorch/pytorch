@@ -6,9 +6,9 @@ import sys
 
 import torch
 import torch.onnx
-
 from torch.testing._internal import common_utils
 from torch.utils import _pytree as torch_pytree
+
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import onnx_test_common
@@ -36,14 +36,15 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             torch_outputs = torch_exported_program.module()(*input_args, **input_kwargs)
         else:
             torch_outputs = torch_exported_program(*input_args, **input_kwargs)
-        torch_outputs_onnx_format = onnx_exported_program.adapt_torch_outputs_to_onnx(
-            torch_outputs
-        )
-        if len(torch_outputs_onnx_format) != len(onnx_outputs):
+
+        if isinstance(torch_outputs, torch.Tensor):
+            torch_outputs = [torch_outputs]
+
+        if len(torch_outputs) != len(onnx_outputs):
             raise AssertionError(
-                f"Expected {len(torch_outputs_onnx_format)} outputs, got {len(onnx_outputs)}"
+                f"Expected {len(torch_outputs)} outputs, got {len(onnx_outputs)}"
             )
-        for torch_output, onnx_output in zip(torch_outputs_onnx_format, onnx_outputs):
+        for torch_output, onnx_output in zip(torch_outputs, onnx_outputs):
             torch.testing.assert_close(
                 torch_output, torch.tensor(onnx_output), rtol=rtol, atol=atol
             )
@@ -79,7 +80,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         with tempfile.NamedTemporaryFile(suffix=".pte") as f:
             torch.export.save(exported_program, f.name)
-            del exported_program  # Delete the exported program to ensure that we are loading from file
+            del (
+                exported_program
+            )  # Delete the exported program to ensure that we are loading from file
             loaded_exported_program = torch.export.load(f.name)
 
         self._compare_onnx_and_torch_exported_program(
@@ -110,18 +113,18 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     def test_onnx_program_supports_retraced_graph(self):
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buf", torch.ones(1))
+                self.buf = torch.nn.Buffer(torch.ones(1))
 
             def forward(self, x):
                 self.buf.add_(1)
                 return x.sum() + self.buf.sum()
 
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buf", torch.zeros(1))
+                self.buf = torch.nn.Buffer(torch.zeros(1))
                 self.bar = Bar()
 
             def forward(self, x):
@@ -209,7 +212,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         for persistent in (True, False):
 
             class CustomModule(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.register_buffer(
                         "my_buffer", torch.tensor(4.0), persistent=persistent

@@ -117,7 +117,7 @@ if HAS_PYDOT:
                 >>> # xdoctest: +REQUIRES(module:ubelt)
                 >>> # define module
                 >>> class MyModule(torch.nn.Module):
-                >>>     def __init__(self):
+                >>>     def __init__(self) -> None:
                 >>>         super().__init__()
                 >>>         self.linear = torch.nn.Linear(4, 5)
                 >>>     def forward(self, x):
@@ -251,8 +251,8 @@ if HAS_PYDOT:
                 label += f"|target={self._typename(node.target)}" + r"\n"
                 if self.normalize_args:
                     try:
-                        args, kwargs = normalize_function(
-                            node.target, node.args, node.kwargs, normalize_to_only_use_kwargs=True
+                        args, kwargs = normalize_function(  # type: ignore[misc]
+                            node.target, node.args, node.kwargs, normalize_to_only_use_kwargs=True  # type: ignore[arg-type]
                         )
                     except Exception:
                         # Fallback to not normalizing if there's an exception.

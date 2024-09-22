@@ -7,7 +7,6 @@ import numpy as np
 
 import torch
 from torch import nan
-
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -403,10 +402,10 @@ class TestSortAndSelect(TestCase):
             if tensor.size() != torch.Size([]):
                 if dtype is torch.bfloat16:
                     expected = torch.from_numpy(
-                        np.msort(tensor.float().cpu().numpy())
+                        np.sort(tensor.float().cpu().numpy(), axis=0)
                     ).bfloat16()
                 else:
-                    expected = torch.from_numpy(np.msort(tensor.cpu().numpy()))
+                    expected = torch.from_numpy(np.sort(tensor.cpu().numpy(), axis=0))
             else:
                 expected = tensor  # numpy.msort() does not support empty shapes tensor
 
@@ -419,12 +418,8 @@ class TestSortAndSelect(TestCase):
 
         shapes = (
             [],
-            [
-                0,
-            ],
-            [
-                20,
-            ],
+            [0],
+            [20],
             [1, 20],
             [30, 30],
             [10, 20, 30],

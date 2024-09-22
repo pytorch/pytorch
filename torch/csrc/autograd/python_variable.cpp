@@ -227,7 +227,7 @@ static bool check_has_torch_dispatch(PyObject* obj) {
       attr.ptr() != torch::disabled_torch_dispatch_impl());
 }
 
-// NOLINTNEXTLINE
+// NOLINTNEXTLINE(*-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyObject* device_to_py_class_[static_cast<size_t>(
     c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
 
@@ -382,19 +382,19 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
 
   tensor_impl->pyobj_slot()->set_owns_pyobj(true);
 
-// Resurrect the Python object.  This is something CPython does
-// internally occasionally, see
-// https://github.com/python/cpython/blob/b98eba5bc2ffbe7a0ed49d540ebc4f756ae61985/Objects/object.c#L248-L259
-// so we just copy the pattern here.  Note that we don't have to worry
-// about saving and restoring the refcount (as the quoted code does)
-// because we actually DO need to reset the refcount to one here, we
-// can't assume that some other code has taken care of it.
-// NB: this will overreport _Py_RefTotal but based on inspection of object.c
-// there is no way to avoid this
-#ifdef Py_TRACE_REFS
-  _Py_AddToAllObjects(reinterpret_cast<PyObject*>(self), 1);
-#endif
-  Py_INCREF(self);
+  // Resurrect the Python object.  This is something CPython does
+  // internally occasionally, see
+  // https://github.com/python/cpython/blob/b98eba5bc2ffbe7a0ed49d540ebc4f756ae61985/Objects/object.c#L248-L259
+  // so we just copy the pattern here.  Note that we don't have to worry
+  // about saving and restoring the refcount (as the quoted code does)
+  // because we actually DO need to reset the refcount to one here, we
+  // can't assume that some other code has taken care of it.
+  // NB: this will overreport _Py_RefTotal but based on inspection of object.c
+  // there is no way to avoid this
+
+  // When resurrecting, we MUST use _Py_NewReference and not Py_INCREF to
+  // ensure the PyObject is in a valid state
+  _Py_NewReference((PyObject*)self);
 
   // Flip THPVariable to be non-owning
   // (near use-after-free miss here: fresh MaybeOwned is created breaking
@@ -887,8 +887,8 @@ static PyObject* THPVariable_make_wrapper_subclass(
   END_HANDLE_TH_ERRORS
 }
 
-typedef PyObject* (*getter)(PyObject*, void*);
-typedef int (*setter)(PyObject*, PyObject*, void*);
+using getter = PyObject* (*)(PyObject*, void*);
+using setter = int (*)(PyObject*, PyObject*, void*);
 
 PyObject* THPVariable_get_python_dispatch(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
@@ -2159,14 +2159,9 @@ static int traverse_slots(
     PyObject* self,
     visitproc visit,
     void* arg) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  Py_ssize_t i, n;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  PyMemberDef* mp;
-
-  n = Py_SIZE(type);
-  mp = type->tp_members;
-  for (i = 0; i < n; i++, mp++) {
+  auto n = Py_SIZE(type);
+  auto mp = type->tp_members;
+  for (Py_ssize_t i = 0; i < n; i++, mp++) {
     if (mp->type == T_OBJECT_EX) {
       char* addr = (char*)self + mp->offset;
       PyObject* obj = *(PyObject**)addr;

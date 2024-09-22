@@ -1,6 +1,10 @@
 # mypy: allow-untyped-defs
 import logging
-from torch.ao.pruning._experimental.data_sparsifier.base_data_sparsifier import SUPPORTED_TYPES
+
+from torch.ao.pruning._experimental.data_sparsifier.base_data_sparsifier import (
+    SUPPORTED_TYPES,
+)
+
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -20,11 +24,13 @@ def _attach_model_to_data_sparsifier(module, data_sparsifier, config=None):
         if type(parameter) in SUPPORTED_TYPES:
             valid_name = _get_valid_name(name)
             # will be defaulted to default configs
-            data_sparsifier.add_data(name=valid_name, data=parameter, **config.get(valid_name, {}))
+            data_sparsifier.add_data(
+                name=valid_name, data=parameter, **config.get(valid_name, {})
+            )
 
 
 def _get_valid_name(name):
-    return name.replace('.', '_')  # . is not allowed as a name
+    return name.replace(".", "_")  # . is not allowed as a name
 
 
 def _log_sparsified_level(model, data_sparsifier) -> None:
@@ -35,6 +41,4 @@ def _log_sparsified_level(model, data_sparsifier) -> None:
         valid_name = _get_valid_name(name)
         mask = data_sparsifier.get_mask(name=valid_name)
         sparsity_level = 1.0 - mask.float().mean()
-        logger.info(
-            "Sparsity in layer %s = % .2%", name, sparsity_level
-        )
+        logger.info("Sparsity in layer %s = % .2%", name, sparsity_level)

@@ -3,8 +3,8 @@ import functools
 
 import torch
 from torch._inductor.compile_fx import fake_tensor_prop
-from ..._dynamo.utils import counters
 
+from ..._dynamo.utils import counters
 from .. import config
 from ..pattern_matcher import (
     _return_true,
@@ -19,6 +19,7 @@ from ..pattern_matcher import (
     register_replacement,
     stable_topological_sort,
 )
+
 
 aten = torch.ops.aten
 
@@ -222,5 +223,5 @@ def unnecessary_dtype_convert(match: Match, **kwargs):
     """Remove unnecessary dtype conversion op, probably left as a result of Conv-Bn folding"""
     graph = match.graph
     node = match.output_node()
-    node.replace_all_uses_with(node.args[0])
+    node.replace_all_uses_with(node.args[0])  # type: ignore[arg-type]
     graph.erase_node(node)

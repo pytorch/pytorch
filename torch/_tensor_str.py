@@ -655,7 +655,10 @@ def _str_intern(inp, *, tensor_contents=None):
         suffixes.append(f"tangent={tangent}")
 
     string_repr = _add_suffixes(
-        prefix + tensor_str, suffixes, indent, force_newline=self.is_sparse  # type: ignore[possibly-undefined]
+        prefix + tensor_str,  # type: ignore[possibly-undefined]
+        suffixes,
+        indent,
+        force_newline=self.is_sparse,
     )
 
     # Check if this instance is flagged as a parameter and change the repr accordingly.
