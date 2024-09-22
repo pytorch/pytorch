@@ -8,7 +8,7 @@ import re
 import sys
 import types
 import unittest
-from typing import Any, Callable, List, Optional, Sequence, Union
+from typing import Any, Callable, List, Optional, Sequence, Union, TypeVar
 from unittest.mock import patch
 
 import torch
@@ -101,7 +101,7 @@ def requires_bwd_pass(out: Any) -> bool:
     raise NotImplementedError("Don't know how to reduce", type(out))
 
 
-def reduce_to_scalar_loss(out: Any) -> torch.Tensor:
+def reduce_to_scalar_loss(out: Any) -> Union[torch.Tensor, float]:
     """Reduce the output of a model to get scalar loss"""
     if isinstance(out, torch.Tensor):
         # Mean does not work on integer tensors
@@ -173,7 +173,7 @@ class CompileCounter:
         self.frame_count = 0
         self.op_count = 0
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Callable:
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Callable[..., Any]:
         self.frame_count += 1
         for node in gm.graph.nodes:
             if "call" in node.op:
@@ -192,7 +192,7 @@ class CompileCounterWithBackend:
         self.backend = backend
         self.graphs: List[torch.fx.GraphModule] = []
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Callable:
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Callable[..., Any]:
         from .backends.registry import lookup_backend
 
         self.frame_count += 1
@@ -209,7 +209,7 @@ class EagerAndRecordGraphs:
     def __init__(self) -> None:
         self.graphs: List[torch.fx.GraphModule] = []
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Callable:
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Callable[..., Any]:
         self.graphs.append(gm)
         return gm.forward
 
@@ -239,7 +239,7 @@ def empty_line_normalizer(code: str) -> str:
 
 def standard_test(
     self: Any,
-    fn: Callable,
+    fn: Callable[..., Any],
     nargs: int,
     expected_ops: Optional[int] = None,
     expected_ops_dynamic: Optional[int] = None,
@@ -270,7 +270,7 @@ def standard_test(
         self.assertEqual(actual.op_count, expected_ops)
 
 
-def dummy_fx_compile(gm: fx.GraphModule, example_inputs: List[torch.Tensor]) -> Callable:
+def dummy_fx_compile(gm: fx.GraphModule, example_inputs: List[torch.Tensor]) -> Callable[..., Any]:
     return gm.forward
 
 
@@ -310,9 +310,11 @@ def rand_strided(
     return torch.as_strided(buffer, size, stride)
 
 
-def _make_fn_with_patches(fn: Callable, *patches: Any) -> Callable:
+_T = TypeVar('_T')
+
+def _make_fn_with_patches(fn: Callable[..., _T], *patches: Any) -> Callable[..., _T]:
     @functools.wraps(fn)
-    def _fn(*args: Any, **kwargs: Any) -> Any:
+    def _fn(*args: Any, **kwargs: Any) -> _T:
         with contextlib.ExitStack() as stack:
             for module, attr, val in patches:
                 stack.enter_context(patch.object(module, attr, val))
@@ -328,7 +330,7 @@ def make_test_cls_with_patches(
     fn_suffix: str,
     *patches: Any,
     xfail_prop: Optional[str] = None,
-    decorator: Callable[[Callable], Callable] = lambda x: x
+    decorator: Callable[[Callable[..., Any]], Callable[..., Any]] = lambda x: x
 ) -> type:
     DummyTestClass = type(f"{cls_prefix}{cls.__name__}", cls.__bases__, {})
     DummyTestClass.__qualname__ = DummyTestClass.__name__
@@ -353,53 +355,53 @@ def make_test_cls_with_patches(
 
 
 # test Python 3.11+ specific features
-def skipIfNotPy311(fn: Callable) -> Callable:
+def skipIfNotPy311(fn: Callable[..., Any]) -> Callable[..., Any]:
     if sys.version_info >= (3, 11):
         return fn
     return unittest.skip(fn)
 
 
-def skipIfNotPy312(fn: Callable) -> Callable:
+def skipIfNotPy312(fn: Callable[..., Any]) -> Callable[..., Any]:
     if sys.version_info >= (3, 12):
         return fn
-    return unittest.skip(fn)
+    return unittest.skip("Requires Python 3.12+")(fn)
 
 
-def xfailIfPy312(fn: Callable) -> Callable:
+def xfailIfPy312(fn: Callable[..., Any]) -> Callable[..., Any]:
     if sys.version_info >= (3, 12):
         return unittest.expectedFailure(fn)
     return fn
 
 
-def skipIfPy312(fn: Callable) -> Callable:
+def skipIfPy312(fn: Callable[..., Any]) -> Callable[..., Any]:
     if sys.version_info >= (3, 12):
-        return unittest.skip(fn)
+        return unittest.skip("Not supported in Python 3.12+")(fn)
     return fn
 
 
-def requiresPy310(fn: Callable) -> Callable:
+def requiresPy310(fn: Callable[..., Any]) -> Callable[..., Any]:
     if sys.version_info >= (3, 10):
         return fn
     else:
-        unittest.skip(fn)
+        return unittest.skip("Requires Python 3.10+")(fn)
 
 
 # Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py
 # and test/dynamo/test_dynamic_shapes.py
-def expectedFailureDynamic(fn: Callable) -> Callable:
-    fn._expected_failure_dynamic = True
+def expectedFailureDynamic(fn: Callable[..., Any]) -> Callable[..., Any]:
+    fn._expected_failure_dynamic = True  # type: ignore[attr-defined]
     return fn
 
 
 # Controls tests generated in test/inductor/test_torchinductor_codegen_dynamic_shapes.py
-def expectedFailureCodegenDynamic(fn: Callable) -> Callable:
-    fn._expected_failure_codegen_dynamic = True
+def expectedFailureCodegenDynamic(fn: Callable[..., Any]) -> Callable[..., Any]:
+    fn._expected_failure_codegen_dynamic = True  # type: ignore[attr-defined]
     return fn
 
 
 # Controls test generated in test/inductor/test_cpp_wrapper.py
-def expectedFailureDynamicWrapper(fn: Callable) -> Callable:
-    fn._expected_failure_dynamic_wrapper = True
+def expectedFailureDynamicWrapper(fn: Callable[..., Any]) -> Callable[..., Any]:
+    fn._expected_failure_dynamic_wrapper = True  # type: ignore[attr-defined]
     return fn
 
 
