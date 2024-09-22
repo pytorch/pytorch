@@ -194,21 +194,14 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs):
             # The reason is that the combine_fn might contain ``with torch.no_grad()`` statements
             # Thus, even if the gradients of init, xs or additional_inputs should be tracked,
             # The ``torch.no_grad()`` statements may break the gradient tracking
-            carry_mask_wrapper = get_gradient_mask(g_c)
-            xs_mask = [
-                unforced_g & forced_g
-                for unforced_g, forced_g in zip(
-                    xs_mask,
-                    get_gradient_mask(g_xs[: len(g_xs) - num_additional_inputs]),
-                )
-            ]
-            additional_inputs_mask = [
-                unforced_g & forced_g
-                for unforced_g, forced_g in zip(
-                    additional_inputs_mask,
-                    get_gradient_mask(g_xs[len(g_xs) - num_additional_inputs :]),
-                )
-            ]
+            # carry_mask_wrapper = get_gradient_mask(g_c)
+            carry_mask = carry_mask and get_gradient_mask(g_c)
+            xs_mask = xs_mask and get_gradient_mask(
+                g_xs[: len(g_xs) - num_additional_inputs]
+            )
+            additional_inputs_mask = additional_inputs_mask and get_gradient_mask(
+                g_xs[len(g_xs) - num_additional_inputs :]
+            )
 
             bw_additional_inputs = mask_gradient(
                 bw_additional_inputs, additional_inputs_mask
@@ -238,7 +231,7 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, dim, additional_inputs):
                     g if g_m else torch.zeros_like(gi)
                     for g, g_m, gi in zip(
                         g_c,
-                        carry_mask_wrapper,
+                        carry_mask,
                         args[
                             num_additional_inputs_masked : num_additional_inputs_masked
                             + num_init
