@@ -357,14 +357,15 @@ def build_collectives(
                     candidate_ranks.clear()
             # case four: mismatch cases due to not same type, size mismatch or state mismatch.
             elif len(errors) > 0:
+                print("error length", len(errors))
                 mismatch[pg_name] += 1
                 error_msg = ", ".join(
-                    f"Error rank {error[0]}, {str(error[1])}" for error in errors
+                    f"Culprit rank {error[0]}; {str(error[1])}" for error in errors
                 )
                 print(
                     f"Collective {record_id} errors for group {pg_desc} collective {profiling_name} ",
                     f"{input_sizes} {output_sizes} {len(expected_ranks)} {collective_state} ",
-                    f"\nFound errors: {error_msg}\n",
+                    f"\nFound errors: {error_msg}.\n",
                     f"\nCollective stack traces: \n{collective_frames} ",
                 )
                 candidate_ranks.update(found_ranks)
