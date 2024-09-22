@@ -454,6 +454,18 @@ class TensorReferenceAnalysis:
         return torch.ops.aten.sqrt.default(x)
 
     @staticmethod
+    def sin(x):
+        return torch.ops.aten.sin.default(x)
+
+    @staticmethod
+    def cos(x):
+        return torch.ops.aten.cos.default(x)
+
+    @staticmethod
+    def tanh(x):
+        return torch.ops.aten.tanh.default(x)
+
+    @staticmethod
     def pow(a, b):
         return torch.ops.aten.pow.Tensor_Tensor(a, b)
 
