@@ -322,13 +322,13 @@ class CKGemmTemplate(CKTemplate):
         if op.c_elementwise_op == "Bilinear":
             epilogue = f"Bilinear {{ {self.alpha}, {self.beta} }}"
 
-        if op.c_elementwise_op == "Scale":
+        elif op.c_elementwise_op == "Scale":
             epilogue = "Scale { (inv_scale_w && inv_scale_x) ? (*inv_scale_w * *inv_scale_x) : 1.0f }"
 
-        if op.c_elementwise_op == "MultiplyMultiply":
+        elif op.c_elementwise_op == "MultiplyMultiply":
             epilogue = "MultiplyMultiply {}"
 
-        if op.c_elementwise_op == "PassThrough":
+        elif op.c_elementwise_op == "PassThrough":
             epilogue = "PassThrough {}"
 
         assert epilogue is not None, "CK GEMM epilogue is not set"
