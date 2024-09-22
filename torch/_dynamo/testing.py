@@ -8,7 +8,18 @@ import re
 import sys
 import types
 import unittest
-from typing import Any, Callable, List, Optional, Sequence, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    overload,
+    Sequence,
+    Tuple,
+    TypeVar,
+    Union,
+)
 from unittest.mock import patch
 
 import torch
@@ -101,6 +112,18 @@ def requires_bwd_pass(out: Any) -> bool:
     elif isinstance(out, int):
         return False
     raise NotImplementedError("Don't know how to reduce", type(out))
+
+
+@overload
+def reduce_to_scalar_loss(out: torch.Tensor) -> torch.Tensor:
+    ...
+
+
+@overload
+def reduce_to_scalar_loss(
+    out: Union[List[Any], Tuple[Any, ...], Dict[Any, Any]]
+) -> float:
+    ...
 
 
 def reduce_to_scalar_loss(out: Any) -> Union[torch.Tensor, float]:
