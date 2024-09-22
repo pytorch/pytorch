@@ -3598,24 +3598,6 @@ def gather(tensor, gather_list=None, dst=0, group=None, async_op=False):
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group
 
-    .. note:: Note that all Tensors in gather_list must have the same size.
-
-    Example::
-        >>> # xdoctest: +SKIP("no rank")
-        >>> # We have 2 process groups, 2 ranks.
-        >>> tensor_size = 2
-        >>> device = torch.device(f'cuda:{rank}')
-        >>> tensor = torch.ones(tensor_size, device=device) + rank
-        >>> if dist.get_rank() == 0:
-        >>>     gather_list = [torch.zeros_like(tensor, device=device) for i in range(2)]
-        >>> else:
-        >>>     gather_list = None
-        >>> dist.gather(tensor, gather_list, dst=0)
-        >>> # Rank 0 gets gathered data.
-        >>> gather_list
-        [tensor([1., 1.], device='cuda:0'), tensor([2., 2.], device='cuda:0')] # Rank 0
-        None                                                                   # Rank 1
-
     """
     _check_single_tensor(tensor, "tensor")
 
@@ -3683,21 +3665,19 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
         >>> # Note: Process group initialization omitted on each rank.
         >>> import torch.distributed as dist
         >>> tensor_size = 2
-        >>> device = torch.device(f'cuda:{rank}')
-        >>> output_tensor = torch.zeros(tensor_size, device=device)
+        >>> t_ones = torch.ones(tensor_size)
+        >>> t_fives = torch.ones(tensor_size) * 5
+        >>> output_tensor = torch.zeros(tensor_size)
         >>> if dist.get_rank() == 0:
         >>>     # Assumes world_size of 2.
         >>>     # Only tensors, all of which must be the same size.
-        >>>     t_ones = torch.ones(tensor_size, device=device)
-        >>>     t_fives = torch.ones(tensor_size, device=device) * 5
         >>>     scatter_list = [t_ones, t_fives]
         >>> else:
         >>>     scatter_list = None
         >>> dist.scatter(output_tensor, scatter_list, src=0)
-        >>> # Rank i gets scatter_list[i].
+        >>> # Rank i gets scatter_list[i]. For example, on rank 1:
         >>> output_tensor
-        tensor([1., 1.], device='cuda:0') # Rank 0
-        tensor([5., 5.], device='cuda:1') # Rank 1
+        tensor([5., 5.])
 
     """
     _check_single_tensor(tensor, "tensor")
