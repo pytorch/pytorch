@@ -8,7 +8,7 @@ import re
 import sys
 import types
 import unittest
-from typing import Any, Callable, List, Optional, Sequence, Union, TypeVar
+from typing import Any, Callable, List, Optional, Sequence, TypeVar, Union
 from unittest.mock import patch
 
 import torch
@@ -49,7 +49,9 @@ def remove_optimized_module_prefix(name: str) -> str:
     return re.sub(r"^_orig_mod[.]", "", name)
 
 
-def collect_results(model: torch.nn.Module, prediction: Any, loss: Any, example_inputs: Any) -> List[Any]:
+def collect_results(
+    model: torch.nn.Module, prediction: Any, loss: Any, example_inputs: Any
+) -> List[Any]:
     results = []
     results.append(prediction)
     results.append(loss)
@@ -173,7 +175,9 @@ class CompileCounter:
         self.frame_count = 0
         self.op_count = 0
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Callable[..., Any]:
+    def __call__(
+        self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+    ) -> Callable[..., Any]:
         self.frame_count += 1
         for node in gm.graph.nodes:
             if "call" in node.op:
@@ -192,7 +196,9 @@ class CompileCounterWithBackend:
         self.backend = backend
         self.graphs: List[torch.fx.GraphModule] = []
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Callable[..., Any]:
+    def __call__(
+        self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+    ) -> Callable[..., Any]:
         from .backends.registry import lookup_backend
 
         self.frame_count += 1
@@ -209,7 +215,9 @@ class EagerAndRecordGraphs:
     def __init__(self) -> None:
         self.graphs: List[torch.fx.GraphModule] = []
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Callable[..., Any]:
+    def __call__(
+        self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+    ) -> Callable[..., Any]:
         self.graphs.append(gm)
         return gm.forward
 
@@ -270,11 +278,18 @@ def standard_test(
         self.assertEqual(actual.op_count, expected_ops)
 
 
-def dummy_fx_compile(gm: fx.GraphModule, example_inputs: List[torch.Tensor]) -> Callable[..., Any]:
+def dummy_fx_compile(
+    gm: fx.GraphModule, example_inputs: List[torch.Tensor]
+) -> Callable[..., Any]:
     return gm.forward
 
 
-def format_speedup(speedup: float, pvalue: float, is_correct: bool = True, pvalue_threshold: float = 0.1) -> str:
+def format_speedup(
+    speedup: float,
+    pvalue: float,
+    is_correct: bool = True,
+    pvalue_threshold: float = 0.1,
+) -> str:
     if not is_correct:
         return "ERROR"
     if pvalue > pvalue_threshold:
@@ -310,7 +325,8 @@ def rand_strided(
     return torch.as_strided(buffer, size, stride)
 
 
-_T = TypeVar('_T')
+_T = TypeVar("_T")
+
 
 def _make_fn_with_patches(fn: Callable[..., _T], *patches: Any) -> Callable[..., _T]:
     @functools.wraps(fn)
@@ -330,7 +346,7 @@ def make_test_cls_with_patches(
     fn_suffix: str,
     *patches: Any,
     xfail_prop: Optional[str] = None,
-    decorator: Callable[[Callable[..., Any]], Callable[..., Any]] = lambda x: x
+    decorator: Callable[[Callable[..., Any]], Callable[..., Any]] = lambda x: x,
 ) -> type:
     DummyTestClass = type(f"{cls_prefix}{cls.__name__}", cls.__bases__, {})
     DummyTestClass.__qualname__ = DummyTestClass.__name__
