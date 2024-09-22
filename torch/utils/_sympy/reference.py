@@ -474,6 +474,14 @@ class TensorReferenceAnalysis:
         return torch.ops.aten.cosh.default(x)
 
     @staticmethod
+    def tan(x):
+        return torch.ops.aten.tan.default(x)
+
+    @staticmethod
+    def acos(x):
+        return torch.ops.aten.acos.default(x)
+
+    @staticmethod
     def atan(x):
         return torch.ops.aten.atan.default(x)
 

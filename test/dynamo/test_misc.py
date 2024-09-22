@@ -2629,7 +2629,6 @@ utils_device.CURRENT_DEVICE == None""".split(
             self.assertEqual(r, False)
             self.assertEqual(cnts.frame_count, 0)  # graph break
 
-
     def test_numpy_iter(self):
         # test that iteration over an ndarray produces ndarrays not bare tensors
         def fn(x):
