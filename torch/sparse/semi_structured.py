@@ -15,6 +15,7 @@ from torch.sparse._semi_structured_ops import (
     semi_sparse_indices,
     semi_sparse_linear,
     semi_sparse_mm,
+    semi_sparse_scaled_mm,
     semi_sparse_t,
     semi_sparse_values,
     semi_sparse_view,
@@ -225,6 +226,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 torch.ops.aten.addmm: semi_sparse_addmm,
                 torch.ops.aten.linear: semi_sparse_linear,
                 torch.ops.aten._to_copy: fallback_dispatcher,
+                torch.ops.aten._scaled_mm: semi_sparse_scaled_mm,
             }
             if custom_dispatch_table is not None:
                 cls.SPARSE_DISPATCH.update(custom_dispatch_table)
@@ -410,7 +412,7 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
             sparse_tensor_cutlass,
             meta_tensor_cutlass,
         ) = sparse_semi_structured_from_dense_cutlass(original_tensor)
-        return cls(
+        cls(
             original_tensor.shape,
             packed=sparse_tensor_cutlass,
             meta=meta_tensor_cutlass,

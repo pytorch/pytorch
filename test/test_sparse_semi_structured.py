@@ -1215,6 +1215,28 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
     def setUp(self):
         if "cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
             self.skipTest("cuSPARSELt not enabled")
+        SparseSemiStructuredTensor._FORCE_CUTLASS = False
+
+    @parametrize("out_dtype", CUSPARSELT_MIXED_DTYPE_SUPPORT)
+    @parametrize("dense_input_shape", [(256, 128)])
+    def test_sparse_semi_structured_scaled_mm(
+        self, dense_input_shape, device, out_dtype
+    ):
+        A = rand_sparse_semi_structured_mask(256, 128, dtype=torch.float16)
+        B = torch.rand(dense_input_shape, device=device).to(torch.float16).t()
+
+        A_fp8, A_scale = to_float8(A)
+        B_fp8, B_scale = to_float8(B)
+
+        A_fp8_sparse = to_sparse_semi_structured(A_fp8)
+
+        dense_result = torch._scaled_mm(
+            A_fp8, B_fp8, scale_a=A_scale, scale_b=B_scale, out_dtype=out_dtype
+        )
+        sparse_result = torch._scaled_mm(
+            A_fp8_sparse, B_fp8, scale_a=A_scale, scale_b=B_scale, out_dtype=out_dtype
+        )
+        torch.testing.assert_close(dense_result, sparse_result, rtol=7e-2, atol=7e-2)
 
     @parametrize("out_dtype", CUSPARSELT_MIXED_DTYPE_SUPPORT)
     @parametrize("dense_input_shape", [(256, 128)])
