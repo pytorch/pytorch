@@ -246,7 +246,6 @@ class EagerAndRecordGraphs:
 
 
 def strip_comment(code: str) -> str:
-    code = str(code)
     return re.sub(r"(?m)^ *#.*\n?", "", code)
 
 
