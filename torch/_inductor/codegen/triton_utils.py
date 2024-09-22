@@ -12,6 +12,17 @@ from ..virtualized import V
 from .common import KernelArgType, SizeArg, TensorArg, WorkspaceArg
 
 
+def should_unwrap_unspec_arg(name: str):
+    if V.graph.is_unspec_arg(name):
+        # Unwrap on all devices except CPU
+        if V.graph.scheduler.get_current_device_or_throw().type != "cpu":
+            return True
+        # Only unwrap on CPU if the input is not used as an output
+        if name not in V.graph.mutated_buffers:
+            return True
+    return False
+
+
 def signature_of(arg: KernelArgType, *, size_dtype: str) -> str:
     if isinstance(arg, TensorArg):
         # TODO: Remove fp8 special handling when Triton supports PyTorch fp8 dtypes.
@@ -26,7 +37,7 @@ def signature_of(arg: KernelArgType, *, size_dtype: str) -> str:
             tye = "*fp8e5b16"
         else:
             tye = _type_of(arg.dtype)
-        if V.graph.is_unspec_arg(arg.buffer):
+        if should_unwrap_unspec_arg(arg.buffer):
             # had unwrapped 0d tensor as scalar
             new_tye = tye.lstrip("*")
             if new_tye in ["fp16", "bf16"]:
@@ -80,7 +91,7 @@ def is_unaligned_buffer(arg: TensorArg):
     if V.graph.scheduler:
         layout = V.graph.scheduler.get_buffer_layout(buf_name)
     else:
-        buffer = V.graph.get_buffer(buf_name)
+        buffer = V.graph.try_get_buffer(buf_name)
         # output arg
         if not buffer:
             assert buf_name == V.kernel.output_node.name

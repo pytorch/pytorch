@@ -26,7 +26,7 @@
 //
 //
 
-#include <stdint.h>
+#include <cstdint>
 #include <c10/util/C++17.h>
 #include <c10/util/Load.h>
 #include <c10/util/irange.h>
@@ -38,7 +38,7 @@
 
 #include <utility>
 
-namespace at { namespace native { inline namespace CPU_CAPABILITY {
+namespace at::native { inline namespace CPU_CAPABILITY {
 
 using namespace vec;
 
@@ -81,14 +81,14 @@ dereference_vec(char* C10_RESTRICT data[], const typename traits::result_type& o
 }
 
 template <typename func_t,
-    typename std::enable_if<!std::is_void<typename function_traits<func_t>::result_type>::value>::type* = nullptr>
+    std::enable_if_t<!std::is_void_v<typename function_traits<func_t>::result_type>>* = nullptr>
 inline void
 execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t n, func_t&& op) {
   using traits = function_traits<func_t>;
   using result_type = typename traits::result_type;
   for (; i < n; i++) {
     result_type* out_ptr = (result_type*)(data[0] + i * strides[0]);
-    *out_ptr = c10::guts::apply(std::forward<func_t>(op), dereference<traits>(
+    *out_ptr = c10::guts::apply(op, dereference<traits>(
         &data[1],
         &strides[1],
         i));
@@ -96,12 +96,12 @@ execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t
 }
 
 template <typename func_t,
-    typename std::enable_if<std::is_void<typename function_traits<func_t>::result_type>::value>::type* = nullptr>
+    std::enable_if_t<std::is_void_v<typename function_traits<func_t>::result_type>>* = nullptr>
 inline void
 execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t n, func_t&& op) {
   using traits = function_traits<func_t>;
   for (; i < n; i++) {
-    c10::guts::apply(std::forward<func_t>(op), dereference<traits>(
+    c10::guts::apply(op, dereference<traits>(
         &data[0],
         &strides[0],
         i));
@@ -212,8 +212,8 @@ vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, ve
   for (; i <= n - 2 * Vec::size(); i += 2 * Vec::size()) {
     auto args1 = dereference_vec<traits>(&data[1], opt_scalar, S, i);
     auto args2 = dereference_vec<traits>(&data[1], opt_scalar, S, i + Vec::size());
-    auto out1 = c10::guts::apply(std::forward<vec_func_t>(vop), std::move(args1));
-    auto out2 = c10::guts::apply(std::forward<vec_func_t>(vop), std::move(args2));
+    auto out1 = c10::guts::apply(vop, std::move(args1));
+    auto out2 = c10::guts::apply(vop, std::move(args2));
     out1.store(data[0] + i * sizeof(scalar_t));
     out2.store(data[0] + (i + Vec::size()) * sizeof(scalar_t));
   }
@@ -256,8 +256,8 @@ struct VectorizedLoop2d {
   static constexpr int ntensors = traits::arity + 1;
   using data_t = std::array<char*, ntensors>;
 
-  VectorizedLoop2d(const op_t &op, vop_t vop):
-    op(op), vop(std::move(vop)) {}
+  VectorizedLoop2d(op_t op, vop_t vop):
+    op(std::move(op)), vop(std::move(vop)) {}
 
   static void advance(data_t &data, const int64_t *outer_strides) {
     for (const auto arg : c10::irange(data.size())) {
@@ -296,8 +296,8 @@ struct VectorizedLoop2d {
 
 template <typename op_t, typename vop_t>
 VectorizedLoop2d<op_t, vop_t> make_vectorized_loop2d(
-    const op_t &op, const vop_t &vop) {
-  return VectorizedLoop2d<op_t, vop_t>(op, vop);
+    op_t &&op, vop_t &&vop) {
+  return VectorizedLoop2d<op_t, vop_t>(std::forward<op_t>(op), std::forward<vop_t>(vop));
 }
 
 template <typename func_t>
@@ -312,7 +312,7 @@ void cpu_kernel(TensorIteratorBase& iter, func_t&& op, int64_t grain_size = at::
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
     // basic loop can handle 1d slices with arbitrary strides, and 1d slices is all that
     // iter.for_each is ever sending to the loop lambda
-      basic_loop(data, strides, 0, n, std::forward<func_t>(op));
+      basic_loop(data, strides, 0, n, op);
   }, grain_size);
   iter.cast_outputs();
 }
@@ -332,7 +332,7 @@ void cpu_kernel_multiple_outputs(TensorIteratorBase& iter, func_t&& op, int64_t 
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
 
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
-    multiple_outputs_loop(data, strides, 0, n, std::forward<func_t>(op));
+    multiple_outputs_loop(data, strides, 0, n, op);
   }, grain_size);
   iter.cast_outputs();
 }
@@ -349,28 +349,28 @@ void cpu_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& vop, int
     TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
   }
 
-  iter.for_each(make_vectorized_loop2d(op, vop), grain_size);
+  iter.for_each(make_vectorized_loop2d(std::forward<func_t>(op), std::forward<vec_func_t>(vop)), grain_size);
   iter.cast_outputs();
 }
 
 template <typename func_t>
 void cpu_serial_kernel(TensorIteratorBase& iter, func_t&& op, const Range& range) {
   using traits = function_traits<func_t>;
-  constexpr bool result_void = std::is_void<typename traits::result_type>::value;
+  constexpr bool result_void = std::is_void_v<typename traits::result_type>;
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity &&
                         ((result_void && iter.noutputs() == 0) || (!result_void && iter.noutputs() == 1)));
   // dynamic casting not currently supported on CPU
   TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
 
   iter.serial_for_each([&](char** data, const int64_t* strides, int64_t n) {
-    basic_loop(data, strides, 0, n, std::forward<func_t>(op));
+    basic_loop(data, strides, 0, n, op);
   }, range);
   iter.cast_outputs();
 }
 
 template <typename func_t>
 void cpu_serial_kernel(TensorIteratorBase& iter, func_t&& op) {
-  cpu_serial_kernel(iter, op, {0, iter.numel()});
+  cpu_serial_kernel(iter, std::forward<func_t>(op), {0, iter.numel()});
 }
 
 template <typename func_t, typename vec_func_t>
@@ -382,13 +382,13 @@ void cpu_serial_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& v
   // dynamic casting not currently supported on CPU
   TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
 
-  iter.serial_for_each(make_vectorized_loop2d(op, vop), range);
+  iter.serial_for_each(make_vectorized_loop2d(std::forward<func_t>(op), std::forward<vec_func_t>(vop)), range);
   iter.cast_outputs();
 }
 
 template <typename func_t, typename vec_func_t>
 void cpu_serial_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& vop) {
-  cpu_serial_kernel_vec(iter, op, vop, {0, iter.numel()});
+  cpu_serial_kernel_vec(iter, std::forward<func_t>(op), std::forward<vec_func_t>(vop), {0, iter.numel()});
 }
 
-}}}  // namespace at::native::<anonymous>
+}} // namespace at::native::<anonymous>

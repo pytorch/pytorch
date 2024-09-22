@@ -3429,8 +3429,8 @@ Tensor unsqueeze_quantized(const Tensor& self, int64_t dim) {
 Tensor & unsqueeze_(Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim() + 1);
 
-  auto g = inferUnsqueezeGeometry(self, dim);
-  self.as_strided_(g.sizes, g.strides);
+  auto g = inferUnsqueezeGeometry_symint(self, dim);
+  self.as_strided__symint(g.sizes, g.strides);
   return self;
 }
 

@@ -12,12 +12,6 @@ import unittest
 from typing import List, Optional, Sequence, Union
 from unittest.mock import patch
 
-np: Optional[types.ModuleType] = None
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    np = None
-
 import torch
 from torch import fx
 from torch._dynamo.output_graph import OutputGraph
@@ -31,6 +25,14 @@ from .bytecode_transformation import (
 )
 from .guards import CheckFunctionManager, CompileId, GuardedCode
 from .utils import same
+
+
+np: Optional[types.ModuleType] = None
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
 
 unsupported = eval_frame.unsupported
 three = 3
@@ -161,6 +163,7 @@ def debug_insert_nops(
         local_scope=locals(),
         global_scope=globals(),
         f_code=frame.f_code,
+        torch_function_mode_stack=[],
     )
 
     return GuardedCode(code, CheckFunctionManager(graph).check_fn, CompileId(0, 0))
@@ -225,6 +228,14 @@ def normalize_gm(gm_str) -> str:
     # strip comments as comments have path to files which may differ from
     # system to system.
     return remove_trailing_space(strip_comment(gm_str))
+
+
+def empty_line_normalizer(code: str) -> str:
+    """
+    Normalize code: remove empty lines.
+    """
+    normal_code = re.sub(r"[\r\n]+", "\n", code)
+    return normal_code
 
 
 def standard_test(
@@ -360,6 +371,13 @@ def skipIfPy312(fn):
     if sys.version_info >= (3, 12):
         return unittest.skip(fn)
     return fn
+
+
+def requiresPy310(fn):
+    if sys.version_info >= (3, 10):
+        return fn
+    else:
+        unittest.skip(fn)
 
 
 # Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py

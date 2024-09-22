@@ -1013,22 +1013,17 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             return ar
 
         input = torch.ones(4, 4, device="cuda", requires_grad=True)
-        # TODO implement backwards
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "element 0 of tensors does not require grad and does not have a grad_fn",
-        ):
-            compiled = torch.compile(
-                func, backend="aot_eager"
-            )  # inductor bug with single-op allreduce graph
-            out = compiled(input)
-            out.sum().backward()
+        compiled = torch.compile(
+            func, backend="aot_eager"
+        )  # inductor bug with single-op allreduce graph
+        out = compiled(input)
+        out.sum().backward()
 
-            correct_input = input.clone().detach().requires_grad_()
-            correct = func(correct_input)
-            correct.sum().backward()
-            self.assertTrue(same(out, correct))
-            self.assertTrue(same(input.grad, correct_input.grad))
+        correct_input = input.clone().detach().requires_grad_()
+        correct = func(correct_input)
+        correct.sum().backward()
+        self.assertTrue(same(out, correct))
+        self.assertTrue(same(input.grad, correct_input.grad))
 
     def test_meta(self):
         x = torch.rand((2, 3, 4), device="meta")

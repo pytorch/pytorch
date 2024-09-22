@@ -6,6 +6,7 @@ from torch.distributions.binomial import Binomial
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 
+
 __all__ = ["Multinomial"]
 
 

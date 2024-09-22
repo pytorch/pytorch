@@ -13,7 +13,6 @@ from torch._inductor.codecache import HalideCodeCache
 from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import parallel_num_threads
-
 from torch.testing._internal.common_utils import IS_CI, IS_MACOS, IS_WINDOWS
 from torch.testing._internal.inductor_utils import HAS_CPU
 from torch.utils._triton import has_triton
@@ -28,7 +27,7 @@ if IS_WINDOWS and IS_CI:
     raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 try:
-    import halide
+    import halide  # @manual
 
     HAS_HALIDE = halide is not None
 except ImportError:
@@ -38,7 +37,7 @@ except ImportError:
 try:
     from . import test_torchinductor
 except ImportError:
-    import test_torchinductor
+    import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
 
 
 make_halide = config.patch(

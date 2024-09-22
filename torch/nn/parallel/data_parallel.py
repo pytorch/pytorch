@@ -11,11 +11,10 @@ from torch._utils import (
     _get_device_index,
     _get_devices_properties,
 )
-
-from ..modules import Module
-from .parallel_apply import parallel_apply
-from .replicate import replicate
-from .scatter_gather import gather, scatter_kwargs
+from torch.nn.modules import Module
+from torch.nn.parallel.parallel_apply import parallel_apply
+from torch.nn.parallel.replicate import replicate
+from torch.nn.parallel.scatter_gather import gather, scatter_kwargs
 
 
 __all__ = ["DataParallel", "data_parallel"]

@@ -13,9 +13,7 @@
 // - It provides a set of common APIs as defined by AcceleratorHooksInterface
 //
 // As of today, accelerator devices are (in no particular order):
-// CUDA, MTIA, XPU, PrivateUse1
-// We want to add once all the proper APIs are supported and tested:
-// HIP, MPS
+// CUDA, MTIA, XPU, HIP, MPS, PrivateUse1
 
 namespace at {
 
@@ -23,5 +21,7 @@ namespace at {
 // compile time if possible) and return it.
 // When checked is true, the returned optional always has a value.
 TORCH_API std::optional<c10::DeviceType> getAccelerator(bool checked = false);
+
+TORCH_API bool isAccelerator(c10::DeviceType d);
 
 } // namespace at

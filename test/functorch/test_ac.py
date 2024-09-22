@@ -1,11 +1,22 @@
 # Owner(s): ["oncall: pt2"]
 import random
+import unittest
+from math import prod
 
 import torch
 import torch._functorch.config as config
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
-from torch.utils.flop_counter import FlopCounterMode
+from torch.utils._triton import has_triton
+from torch.utils.flop_counter import FlopCounterMode, register_flop_formula
+
+
+if has_triton():
+    # note: if we only import triton in the test, the test fails:
+    # def relu_kernel_(inp_ptr, out_ptr, sz, BLOCK_SIZE: tl.constexpr):
+    # NameError('tl is not defined')
+    import triton
+    import triton.language as tl
 
 
 def compile_with_ac(f, memory_budget):
@@ -116,7 +127,7 @@ class MemoryBudgetTest(TestCase):
 
         def f(x, ws):
             xs = [torch.mm(x, w).cos() for w in ws]
-            return sum([x.sum() for x in xs])
+            return sum(x.sum() for x in xs)
 
         x = torch.randn(512, 512, requires_grad=True)
 
@@ -182,10 +193,86 @@ class MemoryBudgetTest(TestCase):
                 mem, _ = get_mem_and_flops(call, memory_budget=mem_achieved / total_mem)
                 self.assertEqual(mem, mem_achieved)
 
+    # needs CUDA, but this test file all needs CUDA.
+    @unittest.skipIf(not has_triton(), "test needs triton")
+    def test_custom_triton_kernel(self):
+        @triton.jit
+        def relu_kernel_(inp_ptr, out_ptr, sz, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            block = tl.arange(0, BLOCK_SIZE) + pid * BLOCK_SIZE
+            msk = block < sz
+            inp = tl.load(inp_ptr + block, mask=msk)
+            relu = tl.where(inp < 0, 0, inp)
+            tl.store(out_ptr + block, relu, mask=msk)
+
+        @torch._library.triton_op("testac::triton_relu", mutates_args=())
+        def triton_relu(x: torch.Tensor) -> torch.Tensor:
+            y = torch.empty_like(x)
+            sz = y.numel()
+            BLOCK_SIZE = 256
+            grid = (triton.cdiv(sz, BLOCK_SIZE),)
+            torch._library.capture_triton(relu_kernel_)[grid](x, y, sz, BLOCK_SIZE)
+            return y
+
+        @torch._library.triton_op("testac::triton_relu_backward", mutates_args=())
+        def triton_relu_backward(grad_out: torch.Tensor) -> torch.Tensor:
+            grad_x = torch.empty_like(grad_out)
+            sz = grad_out.numel()
+            BLOCK_SIZE = 256
+            grid = (triton.cdiv(sz, BLOCK_SIZE),)
+            # I know this is wrong, but whatever..
+            torch._library.capture_triton(relu_kernel_)[grid](
+                grad_out, grad_x, sz, BLOCK_SIZE
+            )
+            return grad_x
+
+        def _triton_relu_backward(ctx, grad_out: torch.Tensor) -> torch.Tensor:
+            return triton_relu_backward(grad_out)
+
+        def _triton_relu_setup_context(ctx, inputs, output):
+            pass
+
+        triton_relu.register_autograd(
+            _triton_relu_backward,
+            setup_context=_triton_relu_setup_context,
+        )
+
+        @register_flop_formula(
+            [torch.ops.testac.triton_relu, torch.ops.testac.triton_relu_backward]
+        )
+        def triton_relu_flops(inp_shape, *args, **kwargs):
+            return prod(inp_shape)
+
+        def f(x, ws):
+            x = torch.ops.testac.triton_relu(x)
+            for w in ws:
+                x = torch.ops.testac.triton_relu(torch.mm(x, w))
+            return x.sum()
+
+        x = torch.randn(512, 512, requires_grad=True, device="cuda")
+        ws = [
+            torch.randn(512, 512, requires_grad=True, device="cuda") for _ in range(5)
+        ]
+
+        def call():
+            return f(x, ws)
+
+        expected = call()
+        for budget in range(0, 11):
+            memory_budget = budget / 10
+            torch._dynamo.reset()
+            with config.patch(activation_memory_budget=memory_budget):
+                if memory_budget is not None:
+                    f_compile = torch.compile(
+                        call, backend="aot_eager_decomp_partition"
+                    )
+
+                self.assertEqual(expected, f_compile())
+
     def test_prioritize_cheaper_matmul(self):
         def f(xs, ws):
             xs = [torch.mm(x, w).cos() for x, w in zip(xs, ws)]
-            return sum([x.sum() for x in xs])
+            return sum(x.sum() for x in xs)
 
         x1, w1 = create_pair(1, 4)
         x2, w2 = create_pair(2, 2)
@@ -224,7 +311,7 @@ class MemoryBudgetTest(TestCase):
     def test_prioritize_cheaper_matmul2(self):
         def f(xs, ws):
             xs = [torch.mm(x, w).cos() for x, w in zip(xs, ws)]
-            return sum([x.sum() for x in xs])
+            return sum(x.sum() for x in xs)
 
         data = [(4, 4), (6, 2), (2, 6)]
         xs, ws = zip(*[create_pair(a, b) for a, b in data])

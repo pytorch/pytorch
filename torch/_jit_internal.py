@@ -79,6 +79,120 @@ boolean_dispatched: "weakref.WeakKeyDictionary[Callable, Dict[str, Callable]]" =
 FAKE_FILENAME_PREFIX = "__torch_jit_dataclass"
 
 
+def is_final(ann) -> bool:
+    return (
+        hasattr(ann, "__module__")
+        and ann.__module__ in {"typing", "typing_extensions"}
+        and (get_origin(ann) is Final or isinstance(ann, type(Final)))
+    )
+
+
+# allows BroadcastingList instance to be subscriptable
+class BroadcastingListCls:
+    def __getitem__(self, types):
+        return
+
+
+# mypy doesn't support parameters on types, so we have to explicitly type each
+# list size
+BroadcastingList1 = BroadcastingListCls()
+for i in range(2, 7):
+    globals()[f"BroadcastingList{i}"] = BroadcastingList1
+
+
+def is_scripting() -> bool:
+    r"""
+    Function that returns True when in compilation and False otherwise. This
+    is useful especially with the @unused decorator to leave code in your
+    model that is not yet TorchScript compatible.
+    .. testcode::
+
+        import torch
+
+        @torch.jit.unused
+        def unsupported_linear_op(x):
+            return x
+
+        def linear(x):
+            if torch.jit.is_scripting():
+                return torch.linear(x)
+            else:
+                return unsupported_linear_op(x)
+    """
+    return False
+
+
+# Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
+def _qualified_name(obj, mangle_name=True) -> str:
+    # This special case allows us to override the qualified name on a type.
+    # It's currently used in conjunction with tracing, where we create a
+    # fake module to filter only supported attributes. However, since this
+    # new type is defined as a local class, we need a mechanism to override
+    # its qualname so it appears correctly in the TorchScript system. This,
+    # we set '_jit_override_qualname' with the original traced module's
+    # qualified name, which is picked up here
+    if hasattr(obj, "_jit_override_qualname"):
+        return obj._jit_override_qualname
+    # short-circuit in cases where the object already has a known qualified name
+    if isinstance(obj, torch._C.ScriptFunction):
+        return obj.qualified_name
+
+    if getattr(obj, "__name__", None):
+        name = obj.__name__
+    # Enum classes do not have `__name__` attr, instead they have `name`.
+    elif isinstance(obj, enum.Enum):
+        name = obj.name
+    else:
+        raise RuntimeError("Could not get name of python class object")
+
+    if name == "<lambda>":
+        name = "_lambda"  # make name a valid identifier
+
+    module_name = obj.__module__
+
+    # If the module is actually a torchbind module, then we should short circuit
+    if module_name == "torch._classes":
+        return obj.qualified_name
+
+    # The Python docs are very clear that `__module__` can be None, but I can't
+    # figure out when it actually would be.
+    if module_name is None:
+        raise RuntimeError(
+            f"Could not get qualified name for class '{name}': "
+            "__module__ can't be None."
+        )
+
+    # if getattr(sys.modules[module_name], name) is not obj:
+    #     raise RuntimeError(f"Could not get qualified name for class '{name}': "
+    #                        f"the attr {name} on module {module_name} is not the class")
+
+    # torch.package and TorchScript have separate mangling schemes to avoid
+    # name collisions from multiple packages. To avoid them interfering with
+    # each other, normalize the package manging here.
+    if package_mangling.is_mangled(module_name):
+        module_name = module_name.replace("<", "_")
+        module_name = module_name.replace(">", "_")
+
+    # The PythonExceptionValue C++ class in torch/csrc/jit/python/python_sugared_value.h
+    # does not need mangle the python class name.
+    if mangle_name:
+        # __main__ is a builtin module, so rewrite it to "__torch__".
+        if module_name == "__main__":
+            module_name = "__torch__"
+        else:
+            # Everything else gets a "__torch__" prefix to avoid name collisions
+            # with the names of user values.
+            module_name = "__torch__." + module_name
+
+    if "." in name:
+        raise RuntimeError(
+            f"Could not get qualified name for class '{name}': "
+            f"'{name}' is not a valid identifier"
+        )
+
+    return module_name + "." + name
+
+
 class SourceLoader:
     def __init__(self):
         self.content = {}
@@ -179,9 +293,11 @@ def createResolutionCallbackFromFrame(frames_up: int = 0):
             cb = createResolutionCallbackFromFrame(1)
             print(cb("foo"))
 
+
         def baz():
             foo = 2
             bar()
+
 
         baz()
     """
@@ -609,6 +725,7 @@ def unused(fn):
             import torch
             import torch.nn as nn
 
+
             class MyModule(nn.Module):
                 def __init__(self, use_memory_efficient):
                     super().__init__()
@@ -617,6 +734,7 @@ def unused(fn):
                 @torch.jit.unused
                 def memory_efficient(self, x):
                     import pdb
+
                     pdb.set_trace()
                     return x + 10
 
@@ -626,6 +744,7 @@ def unused(fn):
                         return self.memory_efficient(x)
                     else:
                         return x + 10
+
 
             m = torch.jit.script(MyModule(use_memory_efficient=False))
             m.save("m.pt")
@@ -673,10 +792,12 @@ def ignore(drop=False, **kwargs):
         import torch
         import torch.nn as nn
 
+
         class MyModule(nn.Module):
             @torch.jit.ignore
             def debugger(self, x):
                 import pdb
+
                 pdb.set_trace()
 
             def forward(self, x):
@@ -686,6 +807,7 @@ def ignore(drop=False, **kwargs):
                 # to Python
                 self.debugger(x)
                 return x
+
 
         m = torch.jit.script(MyModule())
 
@@ -1109,120 +1231,6 @@ else:
     def is_rref_instance(obj) -> bool:
         # If the RPC module doesn't exist then RRefs don't exist either.
         return False
-
-
-def is_final(ann) -> bool:
-    return (
-        hasattr(ann, "__module__")
-        and ann.__module__ in {"typing", "typing_extensions"}
-        and (get_origin(ann) is Final or isinstance(ann, type(Final)))
-    )
-
-
-# allows BroadcastingList instance to be subscriptable
-class BroadcastingListCls:
-    def __getitem__(self, types):
-        return
-
-
-# mypy doesn't support parameters on types, so we have to explicitly type each
-# list size
-BroadcastingList1 = BroadcastingListCls()
-for i in range(2, 7):
-    globals()[f"BroadcastingList{i}"] = BroadcastingList1
-
-
-def is_scripting() -> bool:
-    r"""
-    Function that returns True when in compilation and False otherwise. This
-    is useful especially with the @unused decorator to leave code in your
-    model that is not yet TorchScript compatible.
-    .. testcode::
-
-        import torch
-
-        @torch.jit.unused
-        def unsupported_linear_op(x):
-            return x
-
-        def linear(x):
-           if torch.jit.is_scripting():
-              return torch.linear(x)
-           else:
-              return unsupported_linear_op(x)
-    """
-    return False
-
-
-# Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
-def _qualified_name(obj, mangle_name=True) -> str:
-    # This special case allows us to override the qualified name on a type.
-    # It's currently used in conjunction with tracing, where we create a
-    # fake module to filter only supported attributes. However, since this
-    # new type is defined as a local class, we need a mechanism to override
-    # its qualname so it appears correctly in the TorchScript system. This,
-    # we set '_jit_override_qualname' with the original traced module's
-    # qualified name, which is picked up here
-    if hasattr(obj, "_jit_override_qualname"):
-        return obj._jit_override_qualname
-    # short-circuit in cases where the object already has a known qualified name
-    if isinstance(obj, torch._C.ScriptFunction):
-        return obj.qualified_name
-
-    if getattr(obj, "__name__", None):
-        name = obj.__name__
-    # Enum classes do not have `__name__` attr, instead they have `name`.
-    elif isinstance(obj, enum.Enum):
-        name = obj.name
-    else:
-        raise RuntimeError("Could not get name of python class object")
-
-    if name == "<lambda>":
-        name = "_lambda"  # make name a valid identifier
-
-    module_name = obj.__module__
-
-    # If the module is actually a torchbind module, then we should short circuit
-    if module_name == "torch._classes":
-        return obj.qualified_name
-
-    # The Python docs are very clear that `__module__` can be None, but I can't
-    # figure out when it actually would be.
-    if module_name is None:
-        raise RuntimeError(
-            f"Could not get qualified name for class '{name}': "
-            "__module__ can't be None."
-        )
-
-    # if getattr(sys.modules[module_name], name) is not obj:
-    #     raise RuntimeError(f"Could not get qualified name for class '{name}': "
-    #                        f"the attr {name} on module {module_name} is not the class")
-
-    # torch.package and TorchScript have separate mangling schemes to avoid
-    # name collisions from multiple packages. To avoid them interfering with
-    # each other, normalize the package manging here.
-    if package_mangling.is_mangled(module_name):
-        module_name = module_name.replace("<", "_")
-        module_name = module_name.replace(">", "_")
-
-    # The PythonExceptionValue C++ class in torch/csrc/jit/python/python_sugared_value.h
-    # does not need mangle the python class name.
-    if mangle_name:
-        # __main__ is a builtin module, so rewrite it to "__torch__".
-        if module_name == "__main__":
-            module_name = "__torch__"
-        else:
-            # Everything else gets a "__torch__" prefix to avoid name collisions
-            # with the names of user values.
-            module_name = "__torch__." + module_name
-
-    if "." in name:
-        raise RuntimeError(
-            f"Could not get qualified name for class '{name}': "
-            f"'{name}' is not a valid identifier"
-        )
-
-    return module_name + "." + name
 
 
 def _try_get_dispatched_fn(fn):

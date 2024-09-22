@@ -63,7 +63,6 @@ inline std::string vectorToString(const std::vector<T>& v) {
 std::string json_str_escape(const std::string& str);
 
 constexpr size_t kMaxNumElements = 4096;
-constexpr size_t kMaxStrLength = 8192;
 
 inline std::string getScalarValue(const c10::IValue& val) {
   if (val.isDouble()) {
@@ -79,13 +78,6 @@ inline std::string getScalarValue(const c10::IValue& val) {
     return val.toBool() ? "true" : "false";
   } else if (val.isString()) {
     const std::string& str_val = val.toStringRef();
-    if (str_val.size() > kMaxStrLength) {
-      LOG(WARNING) << "string size=" << str_val.size()
-                   << " exceeded kMaxStrLength=" << kMaxStrLength;
-      return fmt::format(
-          "\"{}\"", json_str_escape(str_val.substr(0, kMaxStrLength)));
-    }
-
     return fmt::format("\"{}\"", json_str_escape(str_val));
   } else if (val.isDevice()) {
     return fmt::format("\"{}\"", val.toDevice().str());

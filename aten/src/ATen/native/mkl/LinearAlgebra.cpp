@@ -2,6 +2,7 @@
 #include <ATen/native/mkl/LinearAlgebra.h>
 #include <ATen/Config.h>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 #if !AT_MKL_ENABLED()
 
 namespace at { namespace native {
@@ -153,3 +154,4 @@ void mkl_gemm_f16f16f32(
 }} // namespace at::native
 
 #endif
+C10_DIAGNOSTIC_POP()

@@ -1,20 +1,24 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, Set, Tuple, Callable
 from collections import OrderedDict
+from typing import Any, Callable, Dict, Set, Tuple
+
 import torch
+from torch.ao.quantization.fx._equalize import EqualizationQConfig
 from torch.ao.quantization.fx._model_report.detector import (
-    DetectorBase,
+    DETECTOR_IS_POST_OBS_KEY,
     DETECTOR_OBS_ARGS_KEY,
     DETECTOR_OBS_TO_INSERT_KEY,
-    DETECTOR_IS_POST_OBS_KEY,
     DETECTOR_TARGET_NODE_KEY,
-    DetectorQConfigInfo
+    DetectorBase,
+    DetectorQConfigInfo,
 )
-from torch.ao.quantization.fx._model_report.model_report_visualizer import ModelReportVisualizer
+from torch.ao.quantization.fx._model_report.model_report_visualizer import (
+    ModelReportVisualizer,
+)
 from torch.ao.quantization.fx.graph_module import GraphModule
 from torch.ao.quantization.observer import ObserverBase
-from torch.ao.quantization.qconfig_mapping import QConfigMapping, QConfig
-from torch.ao.quantization.fx._equalize import EqualizationQConfig
+from torch.ao.quantization.qconfig_mapping import QConfig, QConfigMapping
+
 
 class ModelReport:
     r"""
@@ -112,7 +116,6 @@ class ModelReport:
     """
 
     def __init__(self, model: GraphModule, desired_report_detectors: Set[DetectorBase]):
-
         if len(desired_report_detectors) == 0:
             raise ValueError("Should include at least 1 desired report")
 
@@ -121,7 +124,9 @@ class ModelReport:
 
         # keep the reports private so they can't be modified
         self._desired_report_detectors = desired_report_detectors
-        self._desired_detector_names = {detector.get_detector_name() for detector in desired_report_detectors}
+        self._desired_detector_names = {
+            detector.get_detector_name() for detector in desired_report_detectors
+        }
 
         # keep a mapping of desired reports to observers of interest
         # this is to get the readings, and to remove them, can create a large set
@@ -141,11 +146,11 @@ class ModelReport:
         self._generated_reports: Dict[str, Dict] = {}
 
     def get_desired_reports_names(self) -> Set[str]:
-        """ Returns a copy of the desired reports for viewing """
+        """Returns a copy of the desired reports for viewing"""
         return self._desired_detector_names.copy()
 
     def get_observers_of_interest(self) -> Dict[str, Set[str]]:
-        """ Returns a copy of the observers of interest for viewing """
+        """Returns a copy of the observers of interest for viewing"""
         return self._detector_name_to_observer_fqns.copy()
 
     def prepare_detailed_calibration(self) -> GraphModule:
@@ -164,7 +169,9 @@ class ModelReport:
 
         # if already prepared once, cannot prepare again
         if self._prepared_flag:
-            raise ValueError("Already ran preparing detailed callibration. Run the report generation next after callibration.")
+            raise ValueError(
+                "Already ran preparing detailed callibration. Run the report generation next after callibration."
+            )
 
         # loop through each detector, find where placements should be, and keep track
         insert_observers_fqns: Dict[str, Any] = {}
@@ -175,7 +182,9 @@ class ModelReport:
             # map each insert point to the observer to use
             insert_observers_fqns.update(obs_fqn_to_info)
             # update the set of observers this report cares about
-            self._detector_name_to_observer_fqns[detector.get_detector_name()] = set(obs_fqn_to_info.keys())
+            self._detector_name_to_observer_fqns[detector.get_detector_name()] = set(
+                obs_fqn_to_info.keys()
+            )
 
         # now insert all the observers at their desired locations
         for observer_fqn in insert_observers_fqns:
@@ -197,7 +206,7 @@ class ModelReport:
         target_node: torch.fx.node.Node,
         obs_to_insert: ObserverBase,
         observer_args: Tuple,
-        insert_post: bool
+        insert_post: bool,
     ):
         r"""
         Helper function that inserts the observer into both the graph structure and the module of the model
@@ -215,7 +224,9 @@ class ModelReport:
 
         with self._model.graph.inserting_before(target_node):
             self._model.add_submodule(obs_fqn, obs_to_insert)
-            self._model.graph.create_node(op="call_module", target=obs_fqn, args=observer_args)
+            self._model.graph.create_node(
+                op="call_module", target=obs_fqn, args=observer_args
+            )
 
         # recompile model after inserts are made
         self._model.recompile()
@@ -270,11 +281,15 @@ class ModelReport:
         """
         # if we haven't prepped model for callibration, then we shouldn't generate report yet
         if not self._prepared_flag:
-            raise Exception("Cannot generate report without preparing model for callibration")  # noqa: TRY002
+            raise Exception(  # noqa: TRY002
+                "Cannot generate report without preparing model for callibration"
+            )
 
         # if we already removed the observers, we cannot generate report
         if self._removed_observers:
-            raise Exception("Cannot generate report on model you already removed observers from")  # noqa: TRY002
+            raise Exception(  # noqa: TRY002
+                "Cannot generate report on model you already removed observers from"
+            )
 
         # keep track of all the reports of interest and their outputs
         reports_of_interest = {}
@@ -290,7 +305,9 @@ class ModelReport:
             # get the set of all Observers inserted by this instance of ModelReport
             all_observers_of_interest: Set[str] = set()
             for desired_report in self._detector_name_to_observer_fqns:
-                observers_of_interest = self._detector_name_to_observer_fqns[desired_report]
+                observers_of_interest = self._detector_name_to_observer_fqns[
+                    desired_report
+                ]
                 all_observers_of_interest.update(observers_of_interest)
 
             # go through all_observers_of_interest and remove them from the graph and model
@@ -311,7 +328,8 @@ class ModelReport:
 
         # save the generated reports for visualization purposes
         saved_reports: Dict[str, Dict] = {
-            report_name : report_tuple[1] for report_name, report_tuple in reports_of_interest.items()
+            report_name: report_tuple[1]
+            for report_name, report_tuple in reports_of_interest.items()
         }
 
         self._generated_reports = saved_reports
@@ -344,7 +362,10 @@ class ModelReport:
             # if it's a tensor we have to handle separately
             if type(dict_a_val) == torch.Tensor:
                 # if dict_b_val not tensor, automatically false
-                if type(dict_b_val) != torch.Tensor or sum(dict_a_val != dict_b_val) != 0:
+                if (
+                    type(dict_b_val) != torch.Tensor
+                    or sum(dict_a_val != dict_b_val) != 0
+                ):
                     return False
             else:
                 # for non-tensor vals
@@ -383,7 +404,10 @@ class ModelReport:
 
                     # do safety check to make sure shared keys have same info
                     if self._is_same_info_for_same_key(new_info, present_info):
-                        module_fqns_to_features[module_fqn] = {**new_info, **present_info}
+                        module_fqns_to_features[module_fqn] = {
+                            **new_info,
+                            **present_info,
+                        }
                     else:
                         error_str = "You have the same key with different values across detectors. "
                         error_str += "Someone incorrectly implemented a detector with conflicting keys to existing detectors."
@@ -417,20 +441,24 @@ class ModelReport:
         """
         # check if user has generated reports at least once
         if len(self._generated_reports) == 0:
-            raise Exception("Unable to generate visualizers without first generating reports")  # noqa: TRY002
+            raise Exception(  # noqa: TRY002
+                "Unable to generate visualizers without first generating reports"
+            )
 
         # get the ordered dict mapping modules to their full set of collected features / stats
         module_fqns_to_features: OrderedDict = self._reformat_reports_for_visualizer()
 
         # create and return ModelReportVisualizer instance
-        visualizer: ModelReportVisualizer = ModelReportVisualizer(module_fqns_to_features)
+        visualizer: ModelReportVisualizer = ModelReportVisualizer(
+            module_fqns_to_features
+        )
 
         return visualizer
 
     def _generate_qconfig_mapping_helper(
         self,
         detector_qconfig_info_combined: Dict[str, DetectorQConfigInfo],
-        generation_function: Callable
+        generation_function: Callable,
     ) -> QConfigMapping:
         r"""
         This helper takes in the compiled detector qconfig info that
@@ -454,7 +482,9 @@ class ModelReport:
         # return compiled mapping
         return qconfig_mapping
 
-    def _update_detector_quantizaiton_qconfig_info(self, combined_info: DetectorQConfigInfo, new_info: DetectorQConfigInfo):
+    def _update_detector_quantizaiton_qconfig_info(
+        self, combined_info: DetectorQConfigInfo, new_info: DetectorQConfigInfo
+    ):
         r"""
         Takes in the old and new information and updates the combined information.
 
@@ -463,10 +493,16 @@ class ModelReport:
             new_info (DetectorQConfigInfo): The DetectorQConfigInfo with the information we are trying to merge the new info
                 into it
         """
-        combined_info.is_activation_dynamic = combined_info.is_activation_dynamic or new_info.is_activation_dynamic
-        combined_info.is_weight_per_channel = combined_info.is_weight_per_channel or new_info.is_weight_per_channel
+        combined_info.is_activation_dynamic = (
+            combined_info.is_activation_dynamic or new_info.is_activation_dynamic
+        )
+        combined_info.is_weight_per_channel = (
+            combined_info.is_weight_per_channel or new_info.is_weight_per_channel
+        )
 
-    def _update_detector_equalization_qconfig_info(self, combined_info: DetectorQConfigInfo, new_info: DetectorQConfigInfo):
+    def _update_detector_equalization_qconfig_info(
+        self, combined_info: DetectorQConfigInfo, new_info: DetectorQConfigInfo
+    ):
         r"""
         Takes in the old and new information and updates the combined information.
 
@@ -475,12 +511,14 @@ class ModelReport:
             new_info (DetectorQConfigInfo): The DetectorQConfigInfo with the information we are trying to merge the new info
                 into it
         """
-        is_equalization_recommended = combined_info.is_equalization_recommended or new_info.is_equalization_recommended
+        is_equalization_recommended = (
+            combined_info.is_equalization_recommended
+            or new_info.is_equalization_recommended
+        )
         combined_info.is_equalization_recommended = is_equalization_recommended
 
     def _generate_module_fqn_to_detector_info_mapping(
-        self,
-        update_qconfig_info_function: Callable
+        self, update_qconfig_info_function: Callable
     ) -> Dict[str, DetectorQConfigInfo]:
         r"""
         Generates a QConfigMapping based on the suggestions of the
@@ -503,18 +541,24 @@ class ModelReport:
         """
         # if we haven't prepped model for callibration, then we shouldn't generate mapping yet
         if not self._prepared_flag:
-            raise Exception("Cannot generate report without preparing model for callibration")  # noqa: TRY002
+            raise Exception(  # noqa: TRY002
+                "Cannot generate report without preparing model for callibration"
+            )
 
         # if we already removed the observers, we cannot mapping
         if self._removed_observers:
-            raise Exception("Cannot generate report on model you already removed observers from")  # noqa: TRY002
+            raise Exception(  # noqa: TRY002
+                "Cannot generate report on model you already removed observers from"
+            )
 
         # keep track of qconfig info for each module across detectors
         detector_qconfig_info_combined: Dict[str, DetectorQConfigInfo] = {}
 
         for detector in self._desired_report_detectors:
             # get the info from the detector
-            detector_info: Dict[str, DetectorQConfigInfo] = detector.get_qconfig_info(self._model)
+            detector_info: Dict[str, DetectorQConfigInfo] = detector.get_qconfig_info(
+                self._model
+            )
 
             # we go through the modules
             for module_fqn in detector_info:
@@ -527,7 +571,9 @@ class ModelReport:
                     update_qconfig_info_function(current_options, detector_options)
                 else:
                     # we just use this for now
-                    detector_qconfig_info_combined[module_fqn] = detector_info[module_fqn]
+                    detector_qconfig_info_combined[module_fqn] = detector_info[
+                        module_fqn
+                    ]
 
         return detector_qconfig_info_combined
 
@@ -548,31 +594,32 @@ class ModelReport:
             Throws exception if we try to generate mapping without preparing for callibration
         """
         # get the mapping info
-        detector_qconfig_info_combined = self._generate_module_fqn_to_detector_info_mapping(
-            self._update_detector_quantizaiton_qconfig_info
+        detector_qconfig_info_combined = (
+            self._generate_module_fqn_to_detector_info_mapping(
+                self._update_detector_quantizaiton_qconfig_info
+            )
         )
 
         # we will do a bit of processing and remove fqns that don't have input weight recommended
 
         # now we generate the QConfig for each of the options
         mapping: QConfigMapping = self._generate_qconfig_mapping_helper(
-            detector_qconfig_info_combined,
-            self._quantization_config_generator
+            detector_qconfig_info_combined, self._quantization_config_generator
         )
 
         # return the generated mapping
         return mapping
 
-    def _quantization_config_generator(self, detector_qconfig_info: DetectorQConfigInfo, module: torch.nn.Module) -> QConfig:
+    def _quantization_config_generator(
+        self, detector_qconfig_info: DetectorQConfigInfo, module: torch.nn.Module
+    ) -> QConfig:
         r"""
         Returns the quantization configuration generated by the DetectorQConfigInfo object
         """
         return detector_qconfig_info.generate_quantization_qconfig(module)
 
     def _equalization_config_generator(
-        self,
-        detector_qconfig_info: DetectorQConfigInfo,
-        module: torch.nn.Module
+        self, detector_qconfig_info: DetectorQConfigInfo, module: torch.nn.Module
     ) -> EqualizationQConfig:
         r"""
         We ignore the module argument here, and only focus on thedetector_qconfig_info
@@ -593,14 +640,15 @@ class ModelReport:
         Returns a QConfigMapping for the equalization configuration
         """
         # get the mapping info
-        detector_qconfig_info_combined = self._generate_module_fqn_to_detector_info_mapping(
-            self._update_detector_equalization_qconfig_info
+        detector_qconfig_info_combined = (
+            self._generate_module_fqn_to_detector_info_mapping(
+                self._update_detector_equalization_qconfig_info
+            )
         )
 
         # now we generate the QConfig for each of the options
         mapping: QConfigMapping = self._generate_qconfig_mapping_helper(
-            detector_qconfig_info_combined,
-            self._equalization_config_generator
+            detector_qconfig_info_combined, self._equalization_config_generator
         )
 
         # return the generated mapping

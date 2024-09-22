@@ -135,7 +135,7 @@ class OptionalDeviceGuard {
 
   /// Initialize the guard if a Device is passed; otherwise leave the
   /// guard uninitialized.
-  explicit OptionalDeviceGuard(optional<Device> device) : guard_(device) {}
+  explicit OptionalDeviceGuard(std::optional<Device> device) : guard_(device) {}
 
   /// Constructor for testing only.
   explicit OptionalDeviceGuard(

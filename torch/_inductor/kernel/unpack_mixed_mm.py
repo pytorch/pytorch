@@ -5,6 +5,7 @@ from typing import List, TYPE_CHECKING
 from ..select_algorithm import autotune_select_algorithm, TritonTemplate
 from .mm_common import mm_args, mm_configs, mm_grid, mm_options
 
+
 if TYPE_CHECKING:
     from ..ir import ChoiceCaller
 

@@ -76,12 +76,12 @@ struct OptionalCUDAGuard {
   explicit OptionalCUDAGuard() : guard_() {}
 
   /// Set the current CUDA device to the passed Device, if it is not nullopt.
-  explicit OptionalCUDAGuard(optional<Device> device_opt)
+  explicit OptionalCUDAGuard(std::optional<Device> device_opt)
       : guard_(device_opt) {}
 
   /// Set the current CUDA device to the passed device index, if it is not
   /// nullopt
-  explicit OptionalCUDAGuard(optional<DeviceIndex> device_index_opt)
+  explicit OptionalCUDAGuard(std::optional<DeviceIndex> device_index_opt)
       : guard_(device_index_opt) {}
 
   // Copy is not allowed
@@ -215,7 +215,7 @@ struct OptionalCUDAStreamGuard {
   /// Set the current device to the device associated with the passed stream,
   /// and set the current stream on that device to the passed stream,
   /// if the passed stream is not nullopt.
-  explicit OptionalCUDAStreamGuard(optional<Stream> stream_opt)
+  explicit OptionalCUDAStreamGuard(std::optional<Stream> stream_opt)
       : guard_(stream_opt) {}
 
   /// Copy is disallowed
@@ -244,7 +244,7 @@ struct OptionalCUDAStreamGuard {
     if (r.has_value()) {
       return std::make_optional(CUDAStream(CUDAStream::UNCHECKED, r.value()));
     } else {
-      return nullopt;
+      return std::nullopt;
     }
   }
 
@@ -256,7 +256,7 @@ struct OptionalCUDAStreamGuard {
     if (r.has_value()) {
       return std::make_optional(CUDAStream(CUDAStream::UNCHECKED, r.value()));
     } else {
-      return nullopt;
+      return std::nullopt;
     }
   }
 

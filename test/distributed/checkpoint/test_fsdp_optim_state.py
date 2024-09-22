@@ -1,12 +1,10 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
-
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed.checkpoint.optimizer import load_sharded_optimizer_state_dict
-
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -15,7 +13,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
 )
-
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -31,7 +28,7 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
         layer3_weight_dim = self.world_size * 3
 
         class TestDummyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.net1 = nn.Sequential(nn.Linear(8, layer1_weight_dim), nn.ReLU())
                 self.net2 = nn.Sequential(

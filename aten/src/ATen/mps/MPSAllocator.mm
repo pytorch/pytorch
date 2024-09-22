@@ -3,8 +3,6 @@
 #include <ATen/CPUFunctions.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/mps/MPSAllocator.h>
-#include <ATen/ops/_pin_memory_native.h>
-#include <ATen/ops/is_pinned_native.h>
 #include <c10/core/Allocator.h>
 #include <c10/core/Storage.h>
 
@@ -860,31 +858,12 @@ IMPSAllocator* getIMPSAllocator(bool sharedAllocator) {
   return nullptr;
 }
 
-} // namespace at::mps
-
-namespace at::native {
-
 // torch.is_pinned() implementation
 // Pinned memory will be helpful on Apple Silicon Macs with Unified memory as we
 // will be able to use SharedStorageMode for MTLBuffer allocations. This will
 // avoid extra copies on DataLoading operations.
-bool is_pinned_mps(const Tensor& self, std::optional<Device> device) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!device.has_value() || device->is_mps());
-  return at::mps::_getSharedAllocator().isSharedBuffer(self.storage().data());
+bool isMPSPinnedPtr(const void* data) {
+  return at::mps::_getSharedAllocator().isSharedBuffer(data);
 }
 
-// torch.pin_memory() implementation
-Tensor _pin_memory_mps(const Tensor& self, std::optional<Device> device) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!device.has_value() || device->is_mps());
-  auto* shared_allocator = at::mps::getIMPSAllocator(true);
-  TORCH_CHECK(shared_allocator, "unable to pin memory on a non-unified memory device");
-
-  const size_t storage_size = at::detail::computeStorageNbytes(self.sizes(), self.strides(), self.dtype().itemsize());
-  std::cerr << "Pinning memory of size " << storage_size / 1024UL << " KB\n";
-  auto storage = Storage(Storage::use_byte_size_t(), storage_size, shared_allocator, false);
-  auto tensor = at::cpu::empty({0}, self.options()).set_(storage, 0, self.sizes(), self.strides());
-  tensor.copy_(self);
-  return tensor;
-}
-
-} // namespace at::native
+} // namespace at::mps

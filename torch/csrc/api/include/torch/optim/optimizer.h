@@ -93,6 +93,8 @@ class TORCH_API OptimizerParamGroup {
       std::unique_ptr<OptimizerOptions> options)
       : params_(std::move(params)), options_(std::move(options)) {}
 
+  OptimizerParamGroup& operator=(const OptimizerParamGroup& param_group) =
+      delete;
   bool has_options() const;
   OptimizerOptions& options();
   const OptimizerOptions& options() const;

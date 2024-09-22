@@ -6,8 +6,8 @@ import weakref
 
 import torch.nn
 from torch.nn import Module
-from . import config
 
+from . import config
 from .utils import ExactWeakKeyDictionary, is_lazy_module, nn_module_has_global_hooks
 
 

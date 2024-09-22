@@ -9,8 +9,9 @@ import torch._dynamo
 import torch.utils.cpp_extension
 from torch._C import FileCheck
 
+
 try:
-    from extension_backends.cpp.extension_codegen_backend import (
+    from extension_backends.cpp.extension_codegen_backend import (  # @manual=fbcode//caffe2/test/inductor/extension_backends:extension_codegen_backend  # noqa: B950
         ExtensionCppWrapperCodegen,
         ExtensionScheduling,
         ExtensionWrapperCodegen,
@@ -32,11 +33,12 @@ from torch._inductor.codegen.common import (
 )
 from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS
 
+
 try:
     try:
         from . import test_torchinductor
     except ImportError:
-        import test_torchinductor
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)

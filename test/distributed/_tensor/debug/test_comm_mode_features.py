@@ -6,7 +6,7 @@ from typing import Any, Dict
 import torch
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor.api import distribute_tensor, DTensor
-from torch.distributed._tensor.debug import CommDebugMode
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -247,7 +247,10 @@ class TestCommModeFeatures(DTensorTestBase):
             self.assertEqual(
                 len(comm_mode.advanced_module_tracker.module_helper_dict), 1
             )
-            self.assertEqual(comm_mode.comm_module_counts, {})
+            self.assertEqual(
+                comm_mode.comm_module_counts,
+                {"Global": {"forward": {}, "backward": {}}},
+            )
             output_tp = model(inp)
 
         model_args = ModelArgs(dropout_p=0.0)

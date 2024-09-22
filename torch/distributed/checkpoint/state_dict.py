@@ -32,7 +32,6 @@ from torch.distributed._state_dict_utils import (
     _offload_state_dict_to_cpu,
     _unflatten_state_dict,
 )
-from torch.distributed._tensor import DTensor
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
@@ -50,6 +49,7 @@ from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state_if_fully_sharded_module,
     FSDP_WRAPPED_MODULE,
 )
+from torch.distributed.tensor import DTensor
 from torch.nn.modules.module import _IncompatibleKeys
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils._pytree import tree_map_only
@@ -358,6 +358,9 @@ def _verify_options(
             optim_state_dict_config,
         ):
             with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore", message="FSDP.state_dict_type", category=FutureWarning
+                )
                 with FSDP.state_dict_type(
                     module=module,
                     state_dict_type=state_dict_type,
@@ -549,7 +552,8 @@ def _load_model_state_dict(
                 state_dict[fqn_with_prefix] = state_dict.pop(fqn)
             local_state_dict[fqn_with_prefix] = value
 
-    if info.broadcast_from_rank0:
+    assign = False
+    if info.broadcast_from_rank0 or info.full_state_dict:
         device = None
         for key, value in local_state_dict.items():
             if torch.is_tensor(value) and value.dim() > 0:
@@ -558,9 +562,15 @@ def _load_model_state_dict(
                 else:
                     assert device == value.device
         assert device is not None
-        _broadcast_state_dict(
-            state_dict, local_state_dict, device=device, strict=info.strict
-        )
+        if device == torch.device("meta"):
+            device = dist.distributed_c10d._get_pg_default_device()
+            assign = True
+        if info.broadcast_from_rank0:
+            _broadcast_state_dict(
+                state_dict, local_state_dict, device=device, strict=info.strict
+            )
+        elif info.full_state_dict:
+            _distribute_state_dict(state_dict, local_state_dict, device=device)
         for fqn, local_state in local_state_dict.items():
             state_dict[fqn] = local_state
 
@@ -568,7 +578,7 @@ def _load_model_state_dict(
         return cast(
             _IncompatibleKeys,
             _state_dict_fn(model, "load_state_dict")(
-                state_dict=state_dict, strict=info.strict
+                state_dict=state_dict, strict=info.strict, assign=assign
             ),
         )
 
@@ -581,17 +591,17 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
         # The optimizer state is initialized.
         return
 
+    # There are some stateless optimizers like SGD. These optimizer will
+    # not return in the above condition. So if gradients exist, we should also
+    # return. If gradients do not exist, the following initialization should
+    # not disturb SGD because the gradients and lr are both zero.
     for param_group in optim.param_groups:
         for param in param_group[_PARAMS]:
             if param.grad is not None:
-                raise RuntimeError(
-                    "state_dict can only be used if the optimizer "
-                    "states are initialized (usually after one step() with "
-                    "gradients) or gradients are None. For the later case, "
-                    "state_dict will fake the gradients as zero "
-                    "to initialize the optimizer states. However, the "
-                    "gradients are not None."
-                )
+                return
+
+    for param_group in optim.param_groups:
+        for param in param_group[_PARAMS]:
             if param.requires_grad:
                 param.grad = torch.zeros_like(param)
 

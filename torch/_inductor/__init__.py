@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch.fx
 import torch.utils._pytree as pytree
 
+
 __all__ = ["compile", "list_mode_options", "list_options", "cudagraph_mark_step_begin"]
 
 
@@ -27,6 +28,48 @@ def compile(
     from .compile_fx import compile_fx
 
     return compile_fx(gm, example_inputs, config_patches=options)
+
+
+def aoti_compile_and_package(
+    exported_program,
+    args: Tuple[Any],
+    kwargs: Optional[Dict[str, Any]] = None,
+    *,
+    package_path: Optional[str] = None,
+    inductor_configs: Optional[Dict[str, Any]] = None,
+) -> str:
+    """
+    Compiles the exported program with AOTInductor, and packages it into a .pt2
+    file specified by the input package_path.
+    """
+    from torch._inductor.package import package_aoti
+    from torch.export import ExportedProgram
+
+    if not isinstance(exported_program, ExportedProgram):
+        raise ValueError("Only ExportedProgram is supported")
+
+    assert package_path is None or package_path.endswith(".pt2")
+
+    inductor_configs = inductor_configs or {}
+
+    if inductor_configs.get("aot_inductor.output_path"):
+        raise RuntimeError(
+            "Please pass in a package path to aot_inductor_compile() instead "
+            "of setting the aot_inductor.output_path config."
+        )
+    inductor_configs["aot_inductor.package"] = True
+
+    m = exported_program.module()
+    assert isinstance(m, torch.fx.GraphModule)
+
+    aoti_files = aot_compile(m, args, kwargs, options=inductor_configs)  # type: ignore[arg-type]
+
+    if package_path is None:
+        package_path = aoti_files + ".pt2"
+
+    res = package_aoti(package_path, aoti_files)
+    assert res == package_path
+    return package_path
 
 
 def aot_compile(
@@ -83,9 +126,12 @@ def aot_compile(
     flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
         (args, kwargs or {})
     )
-    flat_example_inputs = tuple(
-        x[1] for x in flat_args_with_path if isinstance(x[1], torch.Tensor)
-    )
+
+    # Replace non-tensor (constant) inputs with Nones, since these are not being
+    # used anyways by the graph
+    flat_example_inputs = [
+        x[1] if isinstance(x[1], torch.Tensor) else None for x in flat_args_with_path
+    ]
 
     if in_spec is not None and received_spec != in_spec:
         raise ValueError(  # noqa: B904
@@ -110,7 +156,7 @@ def aot_compile(
 
     return compile_fx_aot(
         gm,
-        list(flat_example_inputs),
+        flat_example_inputs,  # type: ignore[arg-type]
         config_patches=options,
     )
 
