@@ -120,9 +120,22 @@ class TorchExportStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
-        return torch.export.export(
-            model, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes
-        )
+        try:
+            return torch.export.export(
+                model, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes
+            )
+        except torch._dynamo.exc.UserError as exc:
+            # Refine the dynamic shapes based on the suggested fixes.
+            try:
+                new_shapes = torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes(
+                    exc.msg, dynamic_shapes
+                )
+            except Exception:
+                # If the dynamic shapes cannot be refined, re-raise the exception.
+                raise exc from None
+            return torch.export.export(
+                model, args, kwargs=kwargs, dynamic_shapes=new_shapes
+            )
 
     def _enter(self, model) -> None:
         model_repr = _take_first_line(repr(model))
@@ -148,9 +161,22 @@ class TorchExportNonStrictStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
-        return torch.export.export(
-            model, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes, strict=False
-        )
+        try:
+            return torch.export.export(
+                model, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes, strict=False
+            )
+        except torch._dynamo.exc.UserError as exc:
+            # Refine the dynamic shapes based on the suggested fixes.
+            try:
+                new_shapes = torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes(
+                    exc.msg, dynamic_shapes
+                )
+            except Exception:
+                # If the dynamic shapes cannot be refined, re-raise the exception.
+                raise exc from None
+            return torch.export.export(
+                model, args, kwargs=kwargs, dynamic_shapes=new_shapes, strict=False
+            )
 
     def _enter(self, model) -> None:
         model_repr = _take_first_line(repr(model))

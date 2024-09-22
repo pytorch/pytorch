@@ -544,6 +544,11 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     # Disable I8MM For CI since clang 9 does not support neon i8mm.
     set(XNNPACK_ENABLE_ARM_I8MM OFF CACHE BOOL "")
 
+    # Older MSVC versions don't support AVX512FP. TODO Minimum version support?
+    IF(CMAKE_C_COMPILER_ID STREQUAL "MSVC")
+      set(XNNPACK_ENABLE_AVX512FP16  OFF CACHE BOOL "")
+    ENDIF()
+
     # Conditionally disable AVX512AMX, as it requires Clang 11 or later. Note that
     # XNNPACK does conditionally compile this based on GCC version. Once it also does
     # so based on Clang version, this logic can be removed.
@@ -1103,10 +1108,6 @@ if(USE_ROCM)
       message(STATUS "Disabling Kernel Assert for ROCm")
     endif()
 
-    include(${CMAKE_CURRENT_LIST_DIR}/External/aotriton.cmake)
-    if(USE_CUDA)
-      caffe2_update_option(USE_MEM_EFF_ATTENTION OFF)
-    endif()
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
@@ -1327,6 +1328,28 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
 endif()
 
+# --[ x86-simd-sort integration
+if(USE_X86_SIMD_SORT)
+  if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(WARNING
+      "x64 operating system is required for x86-simd-sort. "
+      "Not compiling with x86-simd-sort. "
+      "Turn this warning off by USE_X86_SIMD_SORT=OFF.")
+    set(USE_X86_SIMD_SORT OFF)
+  endif()
+
+  if(USE_X86_SIMD_SORT)
+    if(USE_OPENMP AND NOT MSVC)
+      set(USE_XSS_OPENMP ON)
+    else()
+      set(USE_XSS_OPENMP OFF)
+    endif()
+
+    set(XSS_SIMD_SORT_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/x86-simd-sort)
+    include_directories(SYSTEM ${XSS_SIMD_SORT_INCLUDE_DIR})
+  endif()
+endif()
+
 # --[ ATen checks
 set(USE_LAPACK 0)
 
@@ -1357,6 +1380,15 @@ if(NOT INTERN_BUILD_MOBILE)
     # we want to respect the standard, and we are bored of those **** .
     add_definitions(-D_CRT_SECURE_NO_DEPRECATE=1)
     string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler=/wd4819,/wd4503,/wd4190,/wd4244,/wd4251,/wd4275,/wd4522")
+  else()
+    if(WERROR)
+      if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13)
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-dangling-reference ")
+      endif()
+      if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13))
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Werror -Xcompiler -Wno-error=sign-compare ")
+      endif()
+    endif()
   endif()
 
   string(APPEND CMAKE_CUDA_FLAGS " -Wno-deprecated-gpu-targets --expt-extended-lambda")
@@ -1564,7 +1596,7 @@ if(USE_KINETO)
     message(STATUS "Using Kineto with Roctracer support")
   endif()
 
-  if(NOT USE_XPU)
+  if((NOT USE_XPU) OR WIN32)
     set(LIBKINETO_NOXPUPTI ON CACHE STRING "" FORCE)
   else()
     set(LIBKINETO_NOXPUPTI OFF CACHE STRING "")
