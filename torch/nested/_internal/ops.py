@@ -346,6 +346,29 @@ def jagged_torch_function(func, *args, **kwargs):
 
         return inp.reshape(*new_shape)
 
+    # Handle nested-specific input validation for CompositeImplicit rms_norm
+    if func.__name__ == "rms_norm":
+
+        def _rms_norm_sig(input, normalized_shape, weight=None, eps=None):
+            pass
+
+        _, new_kwargs = normalize_function(  # type: ignore[misc]
+            _rms_norm_sig, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+        )
+
+        inp = new_kwargs.pop("input")
+        normalized_shape = new_kwargs.pop("normalized_shape")
+
+        # can't normalize over the ragged dim (yet)
+        max_normalizable = inp.dim() - inp._ragged_idx - 1
+        if len(normalized_shape) > max_normalizable:
+            raise ValueError(
+                "rms_norm(): Normalization over the ragged dim not supported for nested tensors"
+            )
+
+        with torch._C.DisableTorchFunctionSubclass():
+            return func(*args, **kwargs)
+
     raise NotImplementedError(func)
 
 
@@ -395,7 +418,7 @@ def prim_layout_default(func, *args, **kwargs):
 def tensor_attr_unsupported_getter(func, *args, **kwargs):
     if func == torch.ops.aten.size.default:
         raise RuntimeError(
-            "NestedTensors does not support directly calling torch.ops.aten.size "
+            "NestedTensor does not support directly calling torch.ops.aten.size; "
             "please use `nested_tensor.size()` instead."
         )
 
@@ -1434,12 +1457,15 @@ def mean_dim(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    if len(new_kwargs["dim"]) > 1:
-        raise RuntimeError(
-            "mean(): not supported across multiple dimensions for NestedTensor"
-        )
-
     inp = new_kwargs.pop("input")
+
+    if len(new_kwargs["dim"]) > 1 and (
+        inp._ragged_idx in new_kwargs["dim"] or 0 in new_kwargs["dim"]
+    ):
+        raise RuntimeError(
+            "mean(): not supported across multiple dimensions for NestedTensor "
+            "when either the batch dim or ragged dim is included"
+        )
 
     (
         new_kwargs["dim"],
