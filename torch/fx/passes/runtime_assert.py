@@ -111,6 +111,7 @@ def insert_deferred_runtime_asserts(
     # TODO: Request simplification on runtime asserts before emitting them
     ras_by_symbol = shape_env.deferred_runtime_asserts.copy()
     graph = gm.graph
+    tracer = fx.proxy.GraphAppendingTracer(graph)
     graph_code_log.debug(
         "%s",
         lazy_format_graph_code(
@@ -281,7 +282,7 @@ def insert_deferred_runtime_asserts(
                         and s not in expr_to_proxy
                     ):
                         with _set_node_metadata_hook(gm, _node_metadata_hook):
-                            expr_to_proxy[s] = fx.Proxy(cb())
+                            expr_to_proxy[s] = fx.Proxy(cb(), tracer=tracer)
                         log.debug("expr_to_proxy[%s] = %s", s, expr_to_proxy[s])
 
                 match_symbol(example_value, lambda: node)
@@ -386,7 +387,7 @@ def insert_deferred_runtime_asserts(
                 elif sym_expr not in expr_to_proxy and not isinstance(
                     sym_expr, (sympy.Number, sympy.logic.boolalg.BooleanAtom)
                 ):  # don't hash cons primitives
-                    expr_to_proxy[sym_expr] = fx.Proxy(node)  # type: ignore[arg-type]
+                    expr_to_proxy[sym_expr] = fx.Proxy(node, tracer=tracer)  # type: ignore[arg-type]
 
             # We add sym_constrain_range calls for symbols later in any case if they're size-like or range-constrained,
             # so calls before that are redundant.
@@ -479,7 +480,9 @@ def insert_deferred_runtime_asserts(
 
                     if s not in expr_to_proxy:
                         with _set_node_metadata_hook(gm, _node_metadata_hook):
-                            expr_to_proxy[s] = fx.Proxy(go(node, keypath))
+                            expr_to_proxy[s] = fx.Proxy(
+                                go(node, keypath), tracer=tracer
+                            )
                         log.debug("expr_to_proxy[%s] = %s", s, expr_to_proxy[s])
 
             for i0 in defs:

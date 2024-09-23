@@ -142,6 +142,10 @@ class ReferenceAnalysis:
     def add(a, b):
         return _keep_float(operator.add)(a, b)
 
+    @classmethod
+    def sym_add(cls, *args):
+        return sympy.Add(*args)
+
     @staticmethod
     def mul(a, b):
         return _keep_float(operator.mul)(a, b)
@@ -205,6 +209,10 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     @staticmethod
     def not_(a):
         return torch.sym_not(a)
+
+    @staticmethod
+    def sym_add(*args):
+        return torch.sym_add(*args)
 
     @staticmethod
     def floordiv(a, b):
