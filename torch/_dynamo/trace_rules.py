@@ -593,6 +593,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_cublas_allow_fp16_reduced_precision_reduction",
         "torch._C._get_cublas_allow_tf32",
         "torch._C._get_cudnn_allow_tf32",
+        "torch._C._get_fp32_precision",
         "torch._C._get_cudnn_benchmark",
         "torch._C._get_cudnn_deterministic",
         "torch._C._get_cudnn_enabled",
