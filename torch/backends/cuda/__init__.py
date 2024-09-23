@@ -140,7 +140,9 @@ class cuBLASModule:
             "allow_tf32",
             "fp32_precision",
         ):
-            return torch._C._set_fp32_precision("cuda", "matmul", value)
+            return torch._C._set_fp32_precision(
+                "cuda", "matmul", "tf32" if value else "ieee"
+            )
         elif name == "allow_fp16_reduced_precision_reduction":
             return torch._C._set_cublas_allow_fp16_reduced_precision_reduction(value)
         elif name == "allow_bf16_reduced_precision_reduction":
