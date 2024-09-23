@@ -83,6 +83,7 @@ from .variables.dicts import ConstDictVariable, SetVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
     NestedUserFunctionVariable,
+    SingleYieldGeneratorFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
@@ -579,7 +580,7 @@ def break_graph_if_unsupported(*, push):
                     # We don't support graph break under GenericContextWrappingVariable,
                     # If there is, we roll back to the checkpoint and fall back.
                     excp.remove_from_stats()
-                    unimplemented("Graph break under GenericContextWrappingVariable")
+                    unimplemented("Graph break under context manager")
 
                 if isinstance(excp, exc.UncapturedHigherOrderOpError):
                     raise
@@ -3038,7 +3039,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             unimplemented("inline with functions in skip files")
         assert isinstance(
             func,
-            (UserFunctionVariable, NestedUserFunctionVariable),
+            (
+                UserFunctionVariable,
+                NestedUserFunctionVariable,
+                SingleYieldGeneratorFunctionVariable,
+            ),
         )
         result = InliningInstructionTranslator.check_inlineable(func)
         assert result.skipped is False
