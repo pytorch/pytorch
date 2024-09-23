@@ -887,9 +887,20 @@ class ChromiumEventLogger:
         # Generate a unique id for this logger, which we can use in scuba to filter down
         # to a single python run.
         self.id_ = str(uuid.uuid4())
+        self.listeners: List[Callable[[Dict[str, Any]], None]] = []
 
         # TODO: log to init/id tlparse after I add support for it
         log.info("ChromiumEventLogger initialized with id %s", self.id_)
+
+    def add_listener(self, listener: Callable[[Dict[str, Any]], None]) -> None:
+        self.listeners.append(listener)
+
+    def remove_listener(self, listener: Callable[[Dict[str, Any]], None]) -> None:
+        self.listeners.remove(listener)
+
+    def notify_listeners(self, event: Dict[str, Any]) -> None:
+        for listener in self.listeners:
+            listener(event)
 
     def log_event_start(
         self,
@@ -910,6 +921,7 @@ class ChromiumEventLogger:
             metadata,
         )
         log_chromium_event_internal(event, self.get_stack(), self.id_)
+        self.notify_listeners(event)
         self.get_stack().append(event_name)
 
     def reset(self) -> None:
@@ -960,6 +972,7 @@ class ChromiumEventLogger:
             stack.pop()
 
         log_chromium_event_internal(event, stack, self.id_, start_time_ns)
+        self.notify_listeners(event)
         # Finally pop the actual event off the stack
         stack.pop()
 
@@ -1023,6 +1036,7 @@ class ChromiumEventLogger:
         )
         # Log an instant event with the same start and end time
         log_chromium_event_internal(event, self.get_stack(), self.id_)
+        self.notify_listeners(event)
 
 
 CHROMIUM_EVENT_LOG: Optional[ChromiumEventLogger] = None

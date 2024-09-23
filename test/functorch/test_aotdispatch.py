@@ -5989,6 +5989,141 @@ class TestAOTModuleSimplified(AOTTestCase):
         with torch.no_grad():
             torch.compile(m, fullgraph=True)(inp)
 
+    def test_aotd_debug_profile_overhead_logging(self):
+        last_backward_start_time = None
+        last_backward_compiled_bw_module_start_time = None
+        last_backward_compiled_bw_module_duration = None
+
+        backward_overheads_ns = []
+        backward_compiled_module_duration_ns = []
+        backward_total_duration_ns = []
+
+        def on_event(event):
+            event_name = event["name"]
+            event_ph = event["ph"]
+            if (
+                event_name
+                == "torch._functorch._aot_autograd.runtime_wrappers.CompiledFunction.backward.compiled_bw_module"
+            ):
+                if event_ph == "B":
+                    nonlocal last_backward_compiled_bw_module_start_time
+                    last_backward_compiled_bw_module_start_time = event["ts"]
+                elif event_ph == "E":
+                    nonlocal last_backward_compiled_bw_module_duration
+                    last_backward_compiled_bw_module_duration = (
+                        event["ts"] - last_backward_compiled_bw_module_start_time
+                    )
+                    backward_compiled_module_duration_ns.append(
+                        last_backward_compiled_bw_module_duration
+                    )
+            elif (
+                event_name
+                == "torch._functorch._aot_autograd.runtime_wrappers.CompiledFunction.backward"
+            ):
+                if event_ph == "B":
+                    nonlocal last_backward_start_time
+                    last_backward_start_time = event["ts"]
+                elif event_ph == "E":
+                    last_backward_duration = event["ts"] - last_backward_start_time
+                    backward_overheads_ns.append(
+                        last_backward_duration
+                        - last_backward_compiled_bw_module_duration
+                    )
+                    backward_total_duration_ns.append(last_backward_duration)
+
+        chromium_logger = torch._dynamo.utils.get_chromium_event_logger()
+        chromium_logger.add_listener(on_event)
+
+        num_iters = 100
+        warmup_iters = 20
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x):
+                r = self.conv(x)
+                return r
+
+        m = M()
+        m.train()
+
+        def inps_fn(x):
+            return (
+                TwoTensor(
+                    TwoTensor(x.clone(), x.clone()), TwoTensor(x.clone(), x.clone())
+                ),
+            )
+
+        benchmark_inps = [
+            inps_fn(
+                torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                    memory_format=torch.channels_last
+                )
+            )
+            for _ in range(num_iters)
+        ]
+
+        for i, inps in enumerate(benchmark_inps):
+            outs = torch.compile(m, backend="aot_eager", fullgraph=True)(*inps)
+            outs[0].sum().backward()
+
+        assert len(backward_compiled_module_duration_ns) == num_iters
+        assert len(backward_overheads_ns) == num_iters
+        assert len(backward_total_duration_ns) == num_iters
+
+        def _print_stat(s: str):
+            bwd_compiled_module_duration_avg_ns = (
+                sum(backward_compiled_module_duration_ns) / num_iters
+            )
+            bwd_aotd_overhead_avg_ns = sum(backward_overheads_ns) / num_iters
+            bwd_total_duration_avg_ns = sum(backward_total_duration_ns) / num_iters
+            print(
+                f"{s} BW_aotd_overhead_avg:{bwd_aotd_overhead_avg_ns:.3f}ns "
+                f"{100 * bwd_aotd_overhead_avg_ns / bwd_compiled_module_duration_avg_ns:.3f}% "
+                f"of bwd_compiled_module_duration_avg:{bwd_compiled_module_duration_avg_ns:.3f}ns "
+                f"bwd_total_duration_avg:{bwd_total_duration_avg_ns:.3f}ns"
+            )
+
+        _print_stat("   SUBCLASS")
+
+        backward_compiled_module_duration_ns.clear()
+        backward_overheads_ns.clear()
+        backward_total_duration_ns.clear()
+
+        class M2(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x0, x1, x2, x3):
+                return self.conv(x0), self.conv(x1), self.conv(x2), self.conv(x3)
+
+        m2 = M2()
+        m2.to(memory_format=torch.channels_last)
+        m2.train()
+
+        def inps_fn2(x):
+            return (x.clone(), x.clone(), x.clone(), x.clone())
+
+        benchmark_inps2 = [
+            inps_fn2(
+                torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                    memory_format=torch.channels_last
+                )
+            )
+            for _ in range(num_iters)
+        ]
+
+        for i, inps in enumerate(benchmark_inps2):
+            outs = torch.compile(m2, backend="aot_eager", fullgraph=True)(*inps)
+            outs[0].sum().backward()
+
+        assert len(backward_compiled_module_duration_ns) == 100
+        assert len(backward_overheads_ns) == 100
+        _print_stat("NO_SUBCLASS")
+
 
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)

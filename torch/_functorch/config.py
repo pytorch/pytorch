@@ -201,3 +201,5 @@ from torch.utils._config_module import install_config_module
 
 # adds patch, save_config, invalid config checks, etc
 install_config_module(sys.modules[__name__])
+
+aotd_debug_profile: bool = os.environ.get("PYTORCH_AOTD_DEBUG_PROFILE", "0") == "1"
