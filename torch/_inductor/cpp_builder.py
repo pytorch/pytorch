@@ -507,12 +507,29 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> List[str]:
     return cflags
 
 
+def _get_ffast_math_flags() -> List[str]:
+    # ffast-math is equivalent to these flags as in
+    # https://github.com/gcc-mirror/gcc/blob/4700ad1c78ccd7767f846802fca148b2ea9a1852/gcc/opts.cc#L3458-L3468
+    # however gcc<13 sets the FTZ/DAZ flags for runtime on x86 even if we have
+    # -ffast-math -fno-unsafe-math-optimizations because the flags for runtime
+    # are added by linking in crtfastmath.o. This is done by the spec file which
+    # only does globbing for -ffast-math.
+    return [
+        "fno-trapping-math",
+        "funsafe-math-optimizations",
+        "ffinite-math-only",
+        "fno-signed-zeros",
+        "fno-math-errno",
+        "fexcess-precision=fast",
+    ]
+
+
 def _get_optimization_cflags() -> List[str]:
     if _IS_WINDOWS:
         return ["O2"]
     else:
         cflags = ["O0", "g"] if config.aot_inductor.debug_compile else ["O3", "DNDEBUG"]
-        cflags.append("ffast-math")
+        cflags += _get_ffast_math_flags()
         cflags.append("fno-finite-math-only")
 
         if not config.cpp.enable_unsafe_math_opt_flag:
