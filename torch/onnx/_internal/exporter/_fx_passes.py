@@ -17,11 +17,7 @@ def decompose_with_registry(
     """
     onnx_registered_ops = set(_decomp.get_onnx_implemented_overloads(registry))
     decomp_table = _decomp.create_onnx_friendly_decomposition_table(onnx_registered_ops)
-    # Try to preserve some known CompositeImplicitAutograd ops
-    to_preserve = _decomp.get_preserve_ops()
-    # We can only preserve implemented ops
-    can_preserve = tuple(to_preserve.intersection(onnx_registered_ops))
-    return exported_program.run_decompositions(decomp_table, _preserve_ops=can_preserve)
+    return exported_program.run_decompositions(decomp_table)
 
 
 def insert_type_promotion_nodes(
@@ -39,7 +35,10 @@ def remove_assertion_nodes(graph_module: torch.fx.GraphModule) -> torch.fx.Graph
     """Remove all assertion and check nodes from the FX graph"""
     aten_assertion_targets = {
         torch.ops.aten.sym_constrain_range_for_size.default,
+        torch.ops.aten._assert_async.default,
         torch.ops.aten._assert_async.msg,
+        torch.ops.aten._assert_scalar.default,
+        torch.ops.aten._assert_tensor_metadata.default,
     }
     for node in graph_module.graph.nodes:
         if node.op == "call_function" and node.target in aten_assertion_targets:
