@@ -175,6 +175,7 @@ class AutogradCompilerInstance:
                 )
 
             global next_op
+
             @torch.library.custom_op(  # type: ignore[misc]
                 f"compiled_autograd::cpp_node_op_{next_op}", mutates_args=()
             )
@@ -189,7 +190,7 @@ class AutogradCompilerInstance:
                         device = out.device
                         break
                 assert device is not None
-                
+
                 # gradient layout contract doesn't enforce output strides to match input strides
                 return [
                     out.clone().contiguous()
@@ -221,9 +222,7 @@ class AutogradCompilerInstance:
         proxies = self.fx_tracer.create_proxy(
             kind="call_function",
             target=fill_uninitialized,
-            args=(
-                self.to_proxy(inputs),
-            ),
+            args=(self.to_proxy(inputs),),
             kwargs={},
         )
         with disable_proxy_modes_tracing():

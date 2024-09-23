@@ -320,7 +320,8 @@ static PyObject* the_autograd_compiler = nullptr;
 static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args);
 
 // We lift C++ autograd functions as custom ops in the graph
-// This class defines the info required to call the C++ autograd function at runtime
+// This class defines the info required to call the C++ autograd function at
+// runtime
 struct CustomOpImpl {
   std::function<variable_list(variable_list)> lambda;
   std::unique_ptr<at::IValue> idx;
@@ -339,7 +340,7 @@ struct CustomOpImpls {
   size_t offset_idx = 0;
 };
 
-// This object manages the lifetime of the custom ops C++ callables 
+// This object manages the lifetime of the custom ops C++ callables
 static std::unique_ptr<CustomOpImpls> custom_op_impls = CustomOpImpls::create();
 
 static PyObject* clear_cache(PyObject* dummy, PyObject* args) {
@@ -406,14 +407,16 @@ static at::IValue* lambda_collect(
       output_info_for_vars.emplace_back(output_info[next_output_idx++]);
     }
   }
-  std::cout << "output_info_for_vars size: " << output_info_for_vars.size() << std::endl;
-  int64_t idx = custom_op_impls->impls.size();
+  std::cout << "output_info_for_vars size: " << output_info_for_vars.size()
+            << std::endl;
+  auto idx = custom_op_impls->impls.size();
   custom_op_impls->impls.emplace_back(CustomOpImpl{
-    .lambda = std::move(lambda),
-    .idx = std::make_unique<at::IValue>(idx),
-    .output_info = std::move(output_info_for_vars),
+      .lambda = std::move(lambda),
+      .idx = std::make_unique<at::IValue>(static_cast<int64_t>(idx)),
+      .output_info = std::move(output_info_for_vars),
   });
-  std::cout << "custom_op_impls->impls[i].output_info " << custom_op_impls->impls[idx].output_info.size() << std::endl;
+  std::cout << "custom_op_impls->impls[i].output_info "
+            << custom_op_impls->impls[idx].output_info.size() << std::endl;
 
   std::shared_ptr<Node> node = args.get_node_call()->node;
   auto& lifted_nodes = custom_op_impls->lifted_nodes;
@@ -433,9 +436,9 @@ static at::IValue* lambda_collect(
       args.collect(output_info[i].size);
     }
   }
-  auto* ptr = custom_op_impls->impls[idx].idx.get();
-  TORCH_INTERNAL_ASSERT(ptr->isInt());
-  return ptr;
+  std::cout << "WTF: " << custom_op_impls->impls[idx].idx->tagKind()
+            << std::endl;
+  return custom_op_impls->impls[idx].idx.get();
 }
 
 PyObject* to_py_size(const std::vector<c10::SymInt>& size) {
@@ -465,22 +468,12 @@ static variable_list lambda_lift(
   size_t next_lambdas_idx = custom_op_impls->next_idx++;
   at::IValue& idx = *custom_op_impls->impls[next_lambdas_idx].idx;
   ssv.before(idx);
-  // TODO: proper support for eager inputs/outputs undefined tensor semantics
-
-  // for (auto i : c10::irange(inputs.size())) {
-  //   if (!inputs[i].defined()) {
-  //     static PyObject* method_name2 =
-  //         PyUnicode_InternFromString("get_hack");
-  //     THPObjectPtr hack(check(PyObject_CallMethodNoArgs(
-  //         py_compiler,
-  //         method_name2)));
-  //     inputs[i] = THPVariable_Unpack(hack.get());
-  //   }
-  // }
   THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
-  auto& lambda_output_info = custom_op_impls->impls[next_lambdas_idx].output_info;
+  auto& lambda_output_info =
+      custom_op_impls->impls[next_lambdas_idx].output_info;
   std::cout << "lookup index: " << next_lambdas_idx << std::endl;
-  std::cout << "found lambda with output infos: " << lambda_output_info.size() << std::endl;
+  std::cout << "found lambda with output infos: " << lambda_output_info.size()
+            << std::endl;
   THPObjectPtr pyoutputmetas(
       PyTuple_New(static_cast<Py_ssize_t>(lambda_output_info.size())));
   for (auto i : c10::irange(lambda_output_info.size())) {
@@ -503,8 +496,7 @@ static variable_list lambda_lift(
   THPObjectPtr pyresult(check(PyObject_CallMethodObjArgs(
       py_compiler,
       method_name,
-      PyLong_FromUnsignedLong(
-          next_lambdas_idx - custom_op_impls->offset_idx),
+      THPUtils_packUInt32(next_lambdas_idx - custom_op_impls->offset_idx),
       pyinputs.get(),
       pyoutputmetas.get(),
       nullptr)));
@@ -566,7 +558,8 @@ static struct PyModuleDef _module = {
 
 PyObject* wrap_lifted_ivalue_args(
     const std::vector<LiftedIValueArg>& lifted_ivalue_args) {
-  std::cout << "wrap_lifted_ivalue_args size:" << lifted_ivalue_args.size() << std::endl;
+  std::cout << "wrap_lifted_ivalue_args size:" << lifted_ivalue_args.size()
+            << std::endl;
   PyObject* pyivalueargs =
       PyList_New(static_cast<Py_ssize_t>(lifted_ivalue_args.size()));
   size_t idx = 0;
@@ -578,6 +571,7 @@ PyObject* wrap_lifted_ivalue_args(
       PyList_SET_ITEM(
           pyivalueargs, idx++, PyFloat_FromDouble(arg.actual_ptr->toDouble()));
     } else {
+      std::cout << "WTF: " << arg.actual_ptr->tagKind() << std::endl;
       TORCH_INTERNAL_ASSERT(false, "Unexpected lifted ivalue type");
     }
   }
@@ -659,7 +653,8 @@ CacheNode* _compiled_autograd_impl(
     THPObjectPtr* graph_arg_sizes,
     THPObjectPtr* graph_arg_ivalue_args,
     THPObjectPtr* graph_arg_hooks) {
-  custom_op_impls->next_idx = custom_op_impls->impls.size(); // cache hit will not lift
+  custom_op_impls->next_idx =
+      custom_op_impls->impls.size(); // cache hit will not lift
   custom_op_impls->offset_idx = custom_op_impls->impls.size();
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
@@ -864,7 +859,8 @@ CacheNode* _compiled_autograd_impl(
   // TODO(jansel): clear grads we will overwrite below
   if (!graph_task.keep_graph_) {
     for (auto& call : calls) {
-      if (custom_op_impls->reverse_lifted_nodes.find(call->node) == custom_op_impls->reverse_lifted_nodes.end()) {
+      if (custom_op_impls->reverse_lifted_nodes.find(call->node) ==
+          custom_op_impls->reverse_lifted_nodes.end()) {
         call->node->release_variables();
       }
     }

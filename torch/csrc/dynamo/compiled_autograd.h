@@ -312,6 +312,7 @@ class CompiledNodeArgs {
     at::IValue* ptr = _compiler.collect(
         *this, fn, std::move(lambda), is_variable_input, output_metas);
     std::cout << "COLLECTED PTR" << std::endl;
+    TORCH_INTERNAL_ASSERT(ptr->isInt(), "WTF");
     _compiler.lifted_ivalue_args.args.emplace_back(ptr);
   }
   void collect(const at::IValue& iv, bool nested = false) {

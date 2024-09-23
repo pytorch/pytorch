@@ -1917,7 +1917,8 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
   }
 };
 
-torch::autograd::variable_list custom_op_backed_by_autograd_fn(const torch::Tensor& x, const torch::Tensor& y, const torch::Tensor& fixed) {
+torch::autograd::variable_list custom_op_backed_by_autograd_fn(
+    const torch::Tensor& x, const torch::Tensor& y, const torch::Tensor& fixed) {
   return CustomOpAutogradFunction::apply(x, y, fixed);
 }
 
@@ -1938,10 +1939,18 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved, m) {
             for i in [10, 100, 10, 20, 10]:
                 x = torch.ones(i, i, requires_grad=True)
                 y = torch.randn(i, i)
-                x1, y1, fixed1 = torch.ops.test_autograd_cpp_node_saved.custom_op_backed_by_autograd_fn(
+                (
+                    x1,
+                    y1,
+                    fixed1,
+                ) = torch.ops.test_autograd_cpp_node_saved.custom_op_backed_by_autograd_fn(
                     x, y, fixed
                 )
-                x2, y2, fixed2 = torch.ops.test_autograd_cpp_node_saved.custom_op_backed_by_autograd_fn(
+                (
+                    x2,
+                    y2,
+                    fixed2,
+                ) = torch.ops.test_autograd_cpp_node_saved.custom_op_backed_by_autograd_fn(
                     x1, y1, fixed1
                 )
                 loss = x2.sum()

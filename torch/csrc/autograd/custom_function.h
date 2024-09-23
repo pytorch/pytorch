@@ -448,9 +448,11 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
     }
     results.emplace_back(outputs[i]);
   }
-  std::cout << "CppNode<T>::apply returning " << results.size() << " final outputs" << std::endl;
+  std::cout << "CppNode<T>::apply returning " << results.size()
+            << " final outputs" << std::endl;
   for (const auto i : c10::irange(num_outputs)) {
-    std::cout << "defined? results[" << i << "]: " << results[i].defined() << std::endl;
+    std::cout << "defined? results[" << i << "]: " << results[i].defined()
+              << std::endl;
   }
   return results;
 }

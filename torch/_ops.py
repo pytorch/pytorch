@@ -722,7 +722,7 @@ class OpOverload(OperatorBase):
         #     for arg in args[0]:
         #         if arg is None:
         #             continue
-                    
+
         #         new_args.append(arg)
         #     return self._op(new_args, args[1])
         return self._op(*args, **kwargs)

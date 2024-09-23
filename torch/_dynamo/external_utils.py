@@ -155,7 +155,7 @@ def fill_uninitialized(inputs: List[torch.Tensor]):
     assert device is not None
     for inp in inputs:
         if inp is None:
-            # TODO: need to match METADATA 
+            # TODO: need to match METADATA
             res.append(torch.empty(0, device=device))
         else:
             res.append(inp)
