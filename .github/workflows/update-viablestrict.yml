@@ -44,6 +44,6 @@ jobs:
             echo "No update pushed"
           else
             echo "{\"sha\": \"${LATEST_SHA}\", \"repository\":\"pytorch/pytorch\", \"timestamp\": ${TIME}}" > "/tmp/${TIME}.json"
-            pip install awscli
+            pip install awscli==1.29.40
             aws s3 cp "/tmp/${TIME}.json" "s3://ossci-raw-job-status/stable_pushes/pytorch/pytorch/${TIME}.json"
           fi
