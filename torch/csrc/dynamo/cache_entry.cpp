@@ -5,7 +5,7 @@
 #include <torch/csrc/dynamo/extra_state.h>
 
 CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
-    : backend(backend) {
+    : backend{backend} {
   this->check_fn = guarded_code.attr("check_fn");
   this->code = guarded_code.attr("code");
   this->compile_id = guarded_code.attr("compile_id");
@@ -16,12 +16,17 @@ CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
   }
 }
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(
+    "-Wdeprecated-copy-with-user-provided-dtor")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-copy-dtor")
 // NOLINTNEXTLINE(bugprone-exception-escape)
 CacheEntry::~CacheEntry() {
   // prevent check_fn from use-after-free when invalidating
   this->check_fn.attr("cache_entry") = py::none();
   this->check_fn.attr("extra_state") = py::none();
 }
+C10_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()
 
 py::object CacheEntry::next() {
   NULL_CHECK(this->_owner);
