@@ -933,7 +933,7 @@ def strip_extended_args(instructions: List[Instruction]) -> None:
     instructions[:] = [i for i in instructions if i.opcode != dis.EXTENDED_ARG]
 
 
-# Overwrites old_inst with a sequence of new isntructions.
+# Overwrites old_inst with a sequence of new instructions.
 # This is necessary in order to preserve jump targets to the old
 # instruction, exception table entries, and positions.
 # Returns the modified sequence of instructions (including the modified
