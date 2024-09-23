@@ -10,8 +10,7 @@ C10_DEFINE_bool(
     false,
     "Whether dynamic shape is enabled");
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 static const torch::lazy::Output kNullOutput = torch::lazy::Output();
 
@@ -164,11 +163,10 @@ std::string Node::ToString() const {
   return ss.str();
 }
 
-void Node::AddOperand(NodePtr node, size_t index) {
+void Node::AddOperand(const NodePtr& node, size_t index) {
   TORCH_CHECK_LT(index, node->num_outputs());
   operands_.push_back(node);
   operands_as_outputs_.emplace_back(operands_.back().get(), index);
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy
