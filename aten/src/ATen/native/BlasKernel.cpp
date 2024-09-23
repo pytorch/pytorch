@@ -302,7 +302,7 @@ static constexpr auto kF16RegistersPerIterationShift = kF16ElementsPerIterationS
 static constexpr auto kF16RegistersPerIteration = 1 << kF16RegistersPerIterationShift;
 static_assert(kF16RegistersPerIteration == kF16ElementsPerIteration / kF16ElementsPerRegister);
 
-static inline double reduce(float16x8_t x[kF16RegistersPerIteration]) {
+static inline float reduce(float16x8_t x[kF16RegistersPerIteration]) {
   int offset = kF16RegistersPerIteration;
   c10::ForcedUnroll<kF16RegistersPerIterationShift>{}([&offset, &x](auto idx) {
     offset /= 2;
@@ -312,7 +312,7 @@ static inline double reduce(float16x8_t x[kF16RegistersPerIteration]) {
   });
   const float32x4_t t0 = vcvt_f32_f16(vget_low_f16(x[0]));
   const float32x4_t t1 = vcvt_f32_f16(vget_high_f16(x[0]));
-  return (double)vaddvq_f32(vaddq_f32(t0, t1));
+  return vaddvq_f32(vaddq_f32(t0, t1));
 }
 
 static inline float16x8_t f16_fma(float16x8_t a, float16x8_t b, float16x8_t c) {
@@ -413,7 +413,7 @@ static constexpr auto kF32RegistersPerIterationShift = 3;
 static_assert(kF32RegistersPerIteration == kF32ElementsPerIteration / kF32ElementsPerRegister);
 static_assert(kF32RegistersPerIteration == 1 << kF32RegistersPerIterationShift);
 
-static inline double reduce(float32x4_t x[kF32RegistersPerIteration]) {
+static inline float reduce(float32x4_t x[kF32RegistersPerIteration]) {
   int offset = kF32RegistersPerIteration;
   c10::ForcedUnroll<kF32RegistersPerIterationShift>{}([&offset, &x](auto idx) {
     offset /= 2;
@@ -571,7 +571,7 @@ C10_ALWAYS_INLINE float dot_with_fp32_arith_tail_after_main_loop(
     const T* vec1,
     const T* vec2,
     int64_t len,
-    double reducedSum) {
+    float reducedSum) {
   // First-tier tail fixup: make sure we handle workloads that can
   // benefit from vectorization, but don't fit into our fully unrolled
   // loop above.
@@ -591,14 +591,14 @@ C10_ALWAYS_INLINE float dot_with_fp32_arith_tail_after_main_loop(
   return reducedSum;
 }
 
-TARGET_ARM_BF16_ATTRIBUTE double
+TARGET_ARM_BF16_ATTRIBUTE float
 dot_with_fp32_arith_bfdot(const BFloat16* vec1, const BFloat16* vec2, int64_t len) {
   auto reducedSum = dot_with_fp32_arith_main_loop_bfdot(vec1, vec2, len);
   return dot_with_fp32_arith_tail_after_main_loop(vec1, vec2, len, reducedSum);
 }
 
 template <typename T>
-C10_ALWAYS_INLINE double
+C10_ALWAYS_INLINE float
 dot_with_fp32_arith_no_bfdot(const T* vec1, const T* vec2, int64_t len) {
   auto reducedSum = dot_with_fp32_arith_main_loop_no_bfdot(vec1, vec2, len);
   return dot_with_fp32_arith_tail_after_main_loop(vec1, vec2, len, reducedSum);
