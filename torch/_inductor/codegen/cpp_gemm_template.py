@@ -909,14 +909,19 @@ class CppPackedGemmTemplate(CppTemplate):
         #     --> zero or more out-of-template epilogues (`epilogue_nodes`) -->
         #   Y
         if epilogue_creators:
-            gemm_output_name = "buf_GemmOut"
+            buf_GemmOut_str = "buf_GemmOut"
+            gemm_output_name = (
+                f"{buf_GemmOut_str}_{template_buffer_node.get_name()}"
+                if template_buffer_node
+                else buf_GemmOut_str
+            )
             gemm_output_buffer = ir.Buffer(gemm_output_name, template_buffer.layout)
             current_input_buffer = gemm_output_buffer
             for i, creator in enumerate(epilogue_creators):
                 if i == len(epilogue_creators) - 1:
                     buffer_name = template_buffer.get_name()
                 else:
-                    buffer_name = f"buf_GemmOut_epilogue_{i}"
+                    buffer_name = f"{buf_GemmOut_str}_epilogue_{i}"
                 epilogues.append(
                     ir.ComputedBuffer(
                         name=buffer_name,
