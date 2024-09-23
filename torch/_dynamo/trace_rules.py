@@ -48,7 +48,7 @@ from .variables import (
     FunctorchHigherOrderVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
-    SingleYieldGeneratorFunctionVariable,
+    ContextlibContextManagerFunctionVariable,
     SkipFunctionVariable,
     TorchInGraphFunctionVariable,
     UserFunctionVariable,
@@ -3476,7 +3476,7 @@ def check_verbose(obj, is_inlined_call=False):
             UserFunctionVariable,
             UserMethodVariable,
             NestedUserFunctionVariable,
-            SingleYieldGeneratorFunctionVariable,
+            ContextlibContextManagerFunctionVariable,
         ),
     ):
         try:

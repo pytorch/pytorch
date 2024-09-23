@@ -33,7 +33,7 @@ from .functions import (
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
-    SingleYieldGeneratorFunctionVariable,
+    ContextlibContextManagerFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,

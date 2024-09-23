@@ -418,7 +418,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             from .ctx_manager import GenericContextWrappingVariable
             from .functions import (
                 BaseUserFunctionVariable,
-                SingleYieldGeneratorFunctionVariable,
+                ContextlibContextManagerFunctionVariable,
             )
             from .torch_function import TorchFunctionModeVariable
 
@@ -437,7 +437,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 # This shouldn't be necessary once generator functions are fully
                 # supported in dynamo
                 assert isinstance(args[0], BaseUserFunctionVariable)
-                args[0] = SingleYieldGeneratorFunctionVariable(
+                args[0] = ContextlibContextManagerFunctionVariable(
                     args[0], source=self.source
                 )
                 # args[0] = SingleYieldGeneratorFunctionVariable(
