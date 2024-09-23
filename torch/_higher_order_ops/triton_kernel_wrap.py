@@ -523,7 +523,7 @@ def identify_mutated_tensors(kernel, kwargs):
 # Used for wrapping a Triton Kernel
 class TritonKernelWrapperMutation(HigherOrderOperator):
     def __init__(self) -> None:
-        super().__init__("triton_kernel_wrapper_mutation", cacheable=False)
+        super().__init__("triton_kernel_wrapper_mutation")
 
     def __call__(self, kernel_idx, constant_args_idx, grid, kwargs):
         return super().__call__(
@@ -540,7 +540,7 @@ triton_kernel_wrapper_mutation = TritonKernelWrapperMutation()
 # Used for wrapping a Triton Kernel in a functional manner
 class TritonKernelWrapperFunctional(HigherOrderOperator):
     def __init__(self) -> None:
-        super().__init__("triton_kernel_wrapper_functional", cacheable=False)
+        super().__init__("triton_kernel_wrapper_functional")
 
     def __call__(self, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone):
         return super().__call__(
