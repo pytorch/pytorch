@@ -3186,6 +3186,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // Only check for NaN for send ops, for recv ops `tensor` can be a random
   // placeholder
   if (enableNanCheck_ && opType == OpType::SEND) {
+    at::cuda::CUDAStreamGuard ncclStreamGuard(ncclStream);
     bool nan = isnan(tensor)._is_any_true().item<bool>();
     if (nan) {
       throw std::runtime_error("NaN check failed in pointToPoint()");
