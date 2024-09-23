@@ -295,16 +295,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         if (
-            (
-                dtype == torch.bfloat16
-                or (
-                    dtype == torch.float16
-                    and torch.ops.mkldnn._is_mkldnn_fp16_supported()
-                )
-            )
+            dtype == torch.float16
+            and torch.ops.mkldnn._is_mkldnn_fp16_supported()
             and epilogue != "mul"
             and epilogue != "div"
-            and not inductor_config.abi_compatible  # TODO: fix this
             or (dtype == torch.half and epilogue == "add" and not bias)
             or (
                 dtype == torch.float32
