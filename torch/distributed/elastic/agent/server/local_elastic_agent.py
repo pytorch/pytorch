@@ -219,9 +219,16 @@ class LocalElasticAgent(SimpleElasticAgent):
             else:
                 alive_callback = self._worker_watchdog.get_last_progress_time
 
+            try:
+                healthcheck_port_as_int = int(healthcheck_port)
+            except ValueError:
+                logger.info(
+                    f"Invalid healthcheck port value: {healthcheck_port}, expecting integer"
+                )
+
             self._health_check_server = create_healthcheck_server(
                 alive_callback=alive_callback,
-                port=int(healthcheck_port),
+                port=healthcheck_port_as_int,
                 timeout=60,
             )
             self._health_check_server.start()
