@@ -20054,9 +20054,8 @@ op_db: List[OpInfo] = [
     OpInfo('nonzero_static',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
            sample_inputs_func=sample_inputs_nonzero_static,
-           supports_out=False,
+           supports_out=False, # TODO: shouldn't this be true?
            supports_autograd=False,
-           decorators=[onlyCPU],
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
