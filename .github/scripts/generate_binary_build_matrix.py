@@ -333,7 +333,7 @@ def generate_wheels_matrix(
         package_type = "manywheel"
 
     if python_versions is None:
-        python_versions = FULL_PYTHON_VERSIONS + ["3.13"]
+        python_versions = FULL_PYTHON_VERSIONS + ["3.13", "3.13t"]
 
     if arches is None:
         # Define default compute archivectures
@@ -369,7 +369,7 @@ def generate_wheels_matrix(
             # TODO: Enable python 3.13 on rocm, aarch64, windows
             if (
                 gpu_arch_type == "rocm" or (os != "linux" and os != "linux-s390x")
-            ) and python_version == "3.13":
+            ) and (python_version == "3.13" or python_version == "3.13t"):
                 continue
 
             if use_split_build and (
