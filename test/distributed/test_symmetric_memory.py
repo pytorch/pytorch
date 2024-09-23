@@ -502,6 +502,29 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         self.assertTrue(res.eq(self.world_size).all().item())
         dist.destroy_process_group()
 
+    @skipIfRocm
+    def test_stream_write_value(self):
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        t = _SymmetricMemory.empty_strided_p2p(
+            size=(64,),
+            stride=(1,),
+            dtype=torch.float32,
+            device=self.device,
+            group_name=group_name,
+        ).fill_(self.rank + 42)
+        symm_mem = _SymmetricMemory.rendezvous(t)
+
+        tensor = torch.zeros(4, dtype=torch.uint32, device=self.device)
+        expect = torch.tril(torch.ones(4, 4, device=self.device)).to(torch.uint32)
+
+        for i in range(4):
+            symm_mem.stream_write_value32(
+                int(tensor.data_ptr()) + i * tensor.element_size(), 1
+            )
+            self.assertTrue(torch.allclose(tensor, expect[i]))
+
 
 if __name__ == "__main__":
     run_tests()
