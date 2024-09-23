@@ -1109,10 +1109,10 @@ class DynamicRendezvousHandler(RendezvousHandler):
             rank=rank,
         )
 
-    def _create_tcp_store_server(self, bootstrap_store_info) -> dist.TCPStore:
+    def _create_tcp_store_server(self, master_addr, master_port) -> dist.TCPStore:
         return dist.TCPStore(
-            bootstrap_store_info.master_addr,
-            bootstrap_store_info.master_port,
+            host_name=master_addr,
+            port=master_port,
             is_master=True,
             multi_tenant=True,
         )
@@ -1176,7 +1176,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
         self._record(message=msg, rank=rank)
         logger.info(msg)
 
-        # opt-out option of TCP store sharing
+        # opt-out option of TCPStore sharing
         if os.getenv("TORCH_DISABLE_SHARE_RDZV_TCP_STORE", "0") == "1":
             bootstrap_store_info = RendezvousStoreInfo.build(
                 rank, store, local_addr=self._this_node.addr
@@ -1188,25 +1188,22 @@ class DynamicRendezvousHandler(RendezvousHandler):
                 bootstrap_store_info,
             )
 
+        # This will only be hit when TCPStore sharing is enabled.
         if self._bootstrap_store_info is None:
-            if isinstance(self._store, dist.TCPStore):
-                addr = self._store.host
-                port = self._store.port
-                self._bootstrap_store_info = RendezvousStoreInfo(
-                    master_addr=addr, master_port=port
+            # To avoid race in get_free_port because we release the port after the call,
+            # we want to create a TCPStore server soon afterwards.
+            server_port = 0
+            if rank == 0:
+                self._shared_tcp_store_server = self._create_tcp_store_server(
+                    self._this_node.addr, server_port
                 )
-                if rank == 0:
-                    self._shared_tcp_store_server = self._store
-            else:
-                # If the store is not type of TCPStore start TCPStore server, which requries
-                # bootstrapping info across ranks
-                self._bootstrap_store_info = RendezvousStoreInfo.build(
-                    rank, store, local_addr=self._this_node.addr
-                )
-                if rank == 0:
-                    self._shared_tcp_store_server = self._create_tcp_store_server(
-                        self._bootstrap_store_info
-                    )
+                server_port = self._shared_tcp_store_server.port
+            self._bootstrap_store_info = RendezvousStoreInfo.build(
+                rank,
+                store,
+                local_addr=self._this_node.addr,
+                server_port=server_port,  # For non-0 rank, this is a no-op
+            )
 
         assert self._bootstrap_store_info is not None
         if rank == 0:
