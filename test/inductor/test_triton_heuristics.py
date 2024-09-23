@@ -18,12 +18,17 @@ except ImportError:
 
 from torch._inductor import config
 from torch._inductor.runtime.hints import (
+    AutotuneHint,
     DeviceProperties,
     HeuristicType,
     TRITON_MAX_BLOCK,
 )
 from torch._inductor.runtime.triton_helpers import math as tl_math
-from torch._inductor.runtime.triton_heuristics import CachingAutotuner, triton_config
+from torch._inductor.runtime.triton_heuristics import (
+    autotune_hints_to_configs,
+    CachingAutotuner,
+    triton_config,
+)
 from torch._inductor.test_case import run_tests, TestCase
 
 
@@ -139,6 +144,20 @@ class TestTritonHeuristics(TestCase):
 
         with self.assertRaisesRegex(AssertionError, "pre_hook"):
             autotuner = CachingAutotuner(**args)
+
+    def test_autotune_hints_to_configs(self):
+        device_props = (DeviceProperties.create(torch.device("cuda")),)
+        device_props.warp_size = 8
+
+        hints = {AutotuneHint.ONE_ELEMENT_PER_THREAD}
+        size_hints = (1024,)
+        block_size = 256
+
+        cfgs = autotune_hints_to_configs(hints, size_hints, block_size, device_props)
+        self.assertTrue(
+            any(cfg.num_elements_per_warp == 8 for cfg in cfgs),
+            "Expect at least one config to have 8 elements per warp",
+        )
 
 
 if __name__ == "__main__":

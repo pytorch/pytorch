@@ -1877,8 +1877,8 @@ class TritonKernel(SIMDKernel):
         # Triton performance for bucketize_binary_search is much better when the number
         # of threads equals the number of elements.
         # If we're trying to use a bucketize kernel, we should make sure that an
-        # autotuning config with num_elements_per_warp=32 exists.
-        self.autotune_hints.add(AutotuneHint.ELEMENTS_PER_WARP_32)
+        # autotuning config with num_elements_per_warp=(warp_size) exists.
+        self.autotune_hints.add(AutotuneHint.ONE_ELEMENT_PER_THREAD)
 
         offsets_ptr = self.args.input(offsets_name)
         block_size = self.dense_size_str()

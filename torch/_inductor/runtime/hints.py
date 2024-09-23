@@ -86,6 +86,7 @@ class HeuristicType(Enum):
 
 class AutotuneHint(Enum):
     ELEMENTS_PER_WARP_32 = 0
+    ONE_ELEMENT_PER_THREAD = 1
 
     # Triton codegen tries to codegen set of AutotuneHints.
     # Enum.__repr__ looks like "<AutotuneHint.ELEMENTS_PER_WARP_32: 0>""
