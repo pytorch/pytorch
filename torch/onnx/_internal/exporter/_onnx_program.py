@@ -182,6 +182,8 @@ ONNXProgram(
     def apply_weights(self, state_dict: dict[str, torch.Tensor]) -> None:
         """Apply the weights from the specified state dict to the ONNX model.
 
+        Use this method to replace FakeTensors or other weights.
+
         Args:
             state_dict: The state dict containing the weights to apply to the ONNX model.
         """
