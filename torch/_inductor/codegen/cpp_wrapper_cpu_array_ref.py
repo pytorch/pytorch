@@ -8,7 +8,9 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 from .. import config, ir
 from .cpp_utils import cexpr
 from .cpp_wrapper_cpu import CppWrapperCpu
-from .wrapper import BufferName
+
+
+BufferName = str
 
 
 class CppWrapperCpuArrayRef(CppWrapperCpu):
