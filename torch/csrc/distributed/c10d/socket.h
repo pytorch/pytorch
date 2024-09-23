@@ -103,7 +103,5 @@ class Socket {
 
   std::unique_ptr<SocketImpl> impl_;
 };
-
 } // namespace detail
-
 } // namespace c10d

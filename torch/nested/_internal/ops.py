@@ -294,18 +294,9 @@ def jagged_binary_pointwise(func, *args, **kwargs):
                 mismatch_error_msg.format(func.__name__, a.shape, b.shape)
             )
 
-        # handle broadcasting via jagged -> padded dense conversion
-        padded = nt.to_padded_tensor(0.0)
-
-        # broadcasting function call
-        lhs, rhs = (padded, t) if a_is_nt else (t, padded)
-        output_padded = func(lhs, rhs, *args[2:], **kwargs)
-
-        # padded dense -> jagged
-        total_L = nt._values.shape[0]
-
         from .nested_tensor import _load_val_from_tensor, nested_from_padded
 
+        # handle broadcasting via padded dense -> jagged conversion
         min_seqlen = None
         if nt._min_seqlen_tensor is not None:
             min_seqlen = _load_val_from_tensor(nt._min_seqlen_tensor)
@@ -314,14 +305,28 @@ def jagged_binary_pointwise(func, *args, **kwargs):
         if nt._max_seqlen_tensor is not None:
             max_seqlen = _load_val_from_tensor(nt._max_seqlen_tensor)
 
-        return nested_from_padded(
-            output_padded,
+        padded_max_S = max_seqlen
+        total_L = nt._values.shape[nt._ragged_idx - 1]
+        if padded_max_S is None:
+            # use upper bound on max seqlen if it's not present
+            padded_max_S = total_L
+
+        # convert dense tensor -> jagged
+        t = t.expand(
+            [x if i != nt._ragged_idx else padded_max_S for i, x in enumerate(t.shape)]
+        )
+        t_as_nt = nested_from_padded(
+            t,
             offsets=nt._offsets,
             ragged_idx=nt._ragged_idx,
             sum_S=total_L,
             min_seqlen=min_seqlen,
             max_seqlen=max_seqlen,
         )
+
+        # broadcasting function call
+        lhs, rhs = (nt, t_as_nt) if a_is_nt else (t_as_nt, nt)
+        return func(lhs, rhs, *args[2:], **kwargs)
 
     # ex: (B, j0, D_0, D_1) + (A, B, 1, D_0, D_1) -> error because this breaks the invariant
     # that ragged dim is wrt left-most batch dim
@@ -1126,15 +1131,19 @@ def sum_dim_IntList(func, *args, **kwargs):
 
             # _jagged_to_padded_dense_forward requires values to be a 2D tensor
             # with the ragged dimension as the 0th dimension
+            max_seqlen = inp._values.shape[inp._ragged_idx - 1]
+            if inp._max_seqlen_tensor is not None:
+                max_seqlen = inp._max_seqlen
+
             padded = torch.ops.aten._jagged_to_padded_dense_forward(
                 values_ragged_dim_outer.reshape(values_ragged_dim_outer.shape[0], -1),
                 [inp._offsets],
-                max_lengths=[inp._max_seqlen],
+                max_lengths=[max_seqlen],
             )
 
             padded_ragged_dim_original = padded.view(
                 padded.shape[0],
-                inp._max_seqlen,
+                max_seqlen,
                 *values_ragged_dim_outer.shape[
                     1:
                 ],  # expand non-batch dimensions of padded tensor
