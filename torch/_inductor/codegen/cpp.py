@@ -3368,15 +3368,12 @@ class TilingSelect:
                             group[tiling_indices[0]],
                         ]
                     )
-                    and group[tiling_indices[0]] < tiling_factor / 2
+                    and group[tiling_indices[0]] <= 2
                 ):
                     # For case of Multi Thread AMP Static shape of pyhpc_isoneutral_mixing,
                     # the inner loop range doesn't have enough elements to do vectorization
                     # explicitly and found that `#pragma GCC ivdep` has better performance than
                     # `#pragma omp simd simdlen(8)`. Disable vectorization for this case.
-                    # <TODO> Leslie: maybe we can always disable vectorization when loop range is less
-                    # than tiling factor and enable `#pragma omp simd simdlen(8)` for scalar kernel
-                    # when needed.
                     return [], []
 
             if dtype in DTYPE_LOWP_FP:
