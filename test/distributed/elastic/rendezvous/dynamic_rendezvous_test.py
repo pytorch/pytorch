@@ -1237,7 +1237,7 @@ class DynamicRendezvousHandlerTest(TestCase):
         with patch.object(dist, "PrefixStore", new=CustomPrefixStore):
             handler._store = Mock(spec=dist.TCPStore)
             type(handler._store).host = PropertyMock(return_value=TEST_ADDR)
-            type(handler._store).port = PropertyMock(return_value=54320)
+            type(handler._store).port = PropertyMock(return_value=TEST_PORT - 1)
             rdzv_info = handler.next_rendezvous()
             self.assertEqual(rdzv_info.bootstrap_store_info.master_addr, TEST_ADDR)
             self.assertEqual(rdzv_info.bootstrap_store_info.master_port, TEST_PORT)
