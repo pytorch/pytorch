@@ -9,7 +9,11 @@ import torch.onnx.operators
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm, same
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
-from torch.testing._internal.common_utils import TEST_WITH_ROCM
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    TEST_WITH_ROCM,
+)
 
 
 class CustomizedCtxManager:
@@ -24,10 +28,29 @@ class CustomizedCtxManager:
         torch._C._set_grad_enabled(self.prev)
 
 
+@contextlib.contextmanager
+def customized_ctx_manager(mode):
+    prev = torch.is_grad_enabled()
+    try:
+        yield torch._C._set_grad_enabled(mode)
+    finally:
+        torch._C._set_grad_enabled(prev)
+
+
 class CustomizedCtxManagerWithGraphBreak(CustomizedCtxManager):
     def __enter__(self):
         torch._dynamo.graph_break()
         super().__enter__()
+
+
+@contextlib.contextmanager
+def customized_ctx_manager_with_graph_break(mode):
+    prev = torch.is_grad_enabled()
+    try:
+        torch._dynamo.graph_break()
+        yield torch._C._set_grad_enabled(mode)
+    finally:
+        torch._C._set_grad_enabled(prev)
 
 
 class CtxManagerTests(torch._dynamo.test_case.TestCase):
@@ -951,9 +974,14 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(res[0].dtype == torch.float16)
         self.assertTrue(res[1].dtype == torch.float16)
 
-    def test_generic_ctx_manager_with_graph_break(self):
+    @parametrize(
+        "Ctx",
+        [CustomizedCtxManagerWithGraphBreak, customized_ctx_manager_with_graph_break],
+        name_fn=lambda x: x.__name__,
+    )
+    def test_generic_ctx_manager_with_graph_break(self, Ctx):
         def fn(x):
-            with CustomizedCtxManagerWithGraphBreak(False):
+            with Ctx(False):
                 # body runs on eager
                 y = x * 2
                 z = y.sin() + 3
@@ -988,9 +1016,14 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         cm = f(x)
         self.assertFalse(cm.mode)
 
-    def test_generic_context_manager(self):
+    @parametrize(
+        "Ctx",
+        [CustomizedCtxManager, customized_ctx_manager],
+        name_fn=lambda x: x.__name__,
+    )
+    def test_generic_context_manager(self, Ctx):
         def fn(x):
-            with CustomizedCtxManager(True):
+            with Ctx(True):
                 x = x + 1
                 if torch.is_grad_enabled():
                     x = x * 2
@@ -1015,13 +1048,18 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnts.frame_count, 2)
             self.assertEqual(cnts.op_count, 12)
 
-    def test_nested_generic_context_manager(self):
+    @parametrize(
+        "Ctx",
+        [CustomizedCtxManager, customized_ctx_manager],
+        name_fn=lambda x: x.__name__,
+    )
+    def test_nested_generic_context_manager(self, Ctx):
         def fn(x):
-            with CustomizedCtxManager(True):
+            with Ctx(True):
                 x = x + 1
                 if torch.is_grad_enabled():
                     x = x * 2
-                with CustomizedCtxManager(False):
+                with Ctx(False):
                     if torch.is_grad_enabled():
                         x = x - 3
                     x = x * 1.5
@@ -1046,9 +1084,14 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnts.frame_count, 2)
             self.assertEqual(cnts.op_count, 18)
 
-    def test_generic_context_manager_with_graph_break(self):
+    @parametrize(
+        "Ctx",
+        [CustomizedCtxManager, customized_ctx_manager],
+        name_fn=lambda x: x.__name__,
+    )
+    def test_generic_context_manager_with_graph_break(self, Ctx):
         def fn(x):
-            with CustomizedCtxManager(True):
+            with Ctx(True):
                 x = x + 1
                 if torch.is_grad_enabled():
                     x = x * 2
@@ -1064,23 +1107,30 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
-            self.assertEqual(cnts.frame_count, 2)
-            self.assertEqual(cnts.op_count, 2)
+            if Ctx is CustomizedCtxManager:
+                self.assertEqual(cnts.frame_count, 2)
+                self.assertEqual(cnts.op_count, 2)
 
         with torch.enable_grad():
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
-            self.assertEqual(cnts.frame_count, 4)
-            self.assertEqual(cnts.op_count, 4)
+            if Ctx is CustomizedCtxManager:
+                self.assertEqual(cnts.frame_count, 4)
+                self.assertEqual(cnts.op_count, 4)
 
-    def test_nested_generic_context_manager_with_graph_break(self):
+    @parametrize(
+        "Ctx",
+        [CustomizedCtxManager, customized_ctx_manager],
+        name_fn=lambda x: x.__name__,
+    )
+    def test_nested_generic_context_manager_with_graph_break(self, Ctx):
         def fn(x):
-            with CustomizedCtxManager(True):
+            with Ctx(True):
                 x = x + 1
                 if torch.is_grad_enabled():
                     x = x * 2
-                with CustomizedCtxManager(False):
+                with Ctx(False):
                     if torch.is_grad_enabled():
                         x = x - 3
                     torch._dynamo.graph_break()
@@ -1096,8 +1146,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
-            self.assertEqual(cnts.frame_count, 4)
-            self.assertEqual(cnts.op_count, 4)
+            if Ctx is CustomizedCtxManager:
+                self.assertEqual(cnts.frame_count, 4)
+                self.assertEqual(cnts.op_count, 4)
 
         torch._dynamo.reset()
         cnts = torch._dynamo.testing.CompileCounter()
@@ -1107,8 +1158,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
-            self.assertEqual(cnts.frame_count, 4)
-            self.assertEqual(cnts.op_count, 4)
+            if Ctx is CustomizedCtxManager:
+                self.assertEqual(cnts.frame_count, 4)
+                self.assertEqual(cnts.op_count, 4)
 
     def test_graph_break_inlining_grad(self):
         def gn(z):
@@ -1681,6 +1733,74 @@ class GraphModule(torch.nn.Module):
         return (x,)
 """,
         )
+
+    def test_contextlib_contextmanager_basic(self):
+        @contextlib.contextmanager
+        def compute_sin(x):
+            try:
+                yield x.sin()
+            finally:
+                pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            with compute_sin(x) as y:
+                return y.cos()
+
+        x = torch.tensor([1.0])
+        y = fn(x)
+        self.assertEqual(y, x.sin().cos())
+
+    def test_contextlib_contextmanager_change_parent(self):
+        def create_ctx():
+            @contextlib.contextmanager
+            def ctx(x):
+                try:
+                    yield x.sin()
+                finally:
+                    pass
+
+            return ctx
+
+        def run_ctx(ctx, x):
+            with ctx(x) as y:
+                return y.cos()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            ctx = create_ctx()
+            return run_ctx(ctx, x)
+
+        x = torch.tensor([1.0])
+        y = fn(x)
+        self.assertEqual(y, x.sin().cos())
+
+    def test_contextlib_contextmanager_change_parent_nested_user_function(self):
+        def create_ctx(x):
+            @contextlib.contextmanager
+            def ctx():
+                try:
+                    yield x.sin()
+                finally:
+                    pass
+
+            return ctx
+
+        def run_ctx(ctx):
+            with ctx() as y:
+                return y.cos()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            ctx = create_ctx(x)
+            return run_ctx(ctx)
+
+        x = torch.tensor([1.0])
+        y = fn(x)
+        self.assertEqual(y, x.sin().cos())
+
+
+instantiate_parametrized_tests(CtxManagerTests)
 
 
 if __name__ == "__main__":

@@ -348,7 +348,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return super().call_function(tx, args, kwargs)
 
 
-class GeneratorFunctionVariable(UserFunctionVariable):
+class SingleYieldGeneratorFunctionVariable(BaseUserFunctionVariable):
     """functions that behaves like iterators
 
     .. note::
@@ -356,9 +356,19 @@ class GeneratorFunctionVariable(UserFunctionVariable):
         This is only used when the function is annotated with @contextlib.contextmanager
     """
 
-    def __init__(self, fn, is_constant=False, **kwargs) -> None:
-        super().__init__(fn, is_constant, **kwargs)
+    def __init__(self, vt: VariableTracker, **kwargs):
+        self.vt = vt
         self.inline_tracer = None
+
+    # TODO: the __getattr__ call below should have redirect this call to the
+    # underlying variable tracker
+    def export_freevars(self, parent, child):
+        return self.vt.export_freevars(parent, child)
+
+    def __getattr__(self, name):
+        if name in self.__class__.__dict__.keys():
+            return getattr(self, name)
+        return getattr(self.vt, name)
 
     def call_function(
         self,
@@ -374,11 +384,14 @@ class GeneratorFunctionVariable(UserFunctionVariable):
         self.inline_tracer = InliningInstructionTranslator.build_inline_tracer(
             tx, self, [*self.self_args(), *args], kwargs
         )
-        # Not ideal!! Flags to the tracer to change the behavior of
-        # YIELD_VALUE/RETURN_VALUE
+        # Flag to the tracer to change the behavior of YIELD_VALUE/RETURN_VALUE
         self.inline_tracer.consume_all_items = False
 
         return self
+
+    def can_reconstruct(self, tx):
+        # Any graph break should force the entire context manager to run on eager mode
+        return False
 
     def next_variable(self, tx):
         from torch._dynamo import exc
@@ -388,9 +401,12 @@ class GeneratorFunctionVariable(UserFunctionVariable):
         try:
             # inline_call_ has a try/except block that does the same thing
             # TODO: figure it out why it is not working for this usecase
+            # TODO: Do we actually need the increment below?
+            tx.generic_context_manager_depth += 1
             return tracer.inline_call_().next_variable(tx)
         except exc.ObservedUserStopIteration as e:
             tx.exn_vt_stack.extend(tracer.exn_vt_stack)
+            tx.generic_context_manager_depth -= 1
             raise
 
 
