@@ -110,7 +110,7 @@ endif()
 # ---[ Create CAFFE2_BUILD_SHARED_LIBS for macros.h.in usage.
 set(CAFFE2_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 
-if(USE_NATIVE_ARCH)
+if(USE_NATIVE_ARCH AND NOT MSVC)
   check_cxx_compiler_flag("-march=native" COMPILER_SUPPORTS_MARCH_NATIVE)
   if(COMPILER_SUPPORTS_MARCH_NATIVE)
     add_definitions("-march=native")
