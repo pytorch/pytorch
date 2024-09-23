@@ -48,6 +48,7 @@ from .variables import (
     FunctorchHigherOrderVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
+    SingleYieldGeneratorFunctionVariable,
     SkipFunctionVariable,
     TorchInGraphFunctionVariable,
     UserFunctionVariable,
@@ -3468,7 +3469,13 @@ we don't want to inline the lower level function call (e.g, f3) by default.
 
 def check_verbose(obj, is_inlined_call=False):
     if isinstance(
-        obj, (UserFunctionVariable, UserMethodVariable, NestedUserFunctionVariable)
+        obj,
+        (
+            UserFunctionVariable,
+            UserMethodVariable,
+            NestedUserFunctionVariable,
+            SingleYieldGeneratorFunctionVariable,
+        ),
     ):
         try:
             py_obj = obj.get_function()

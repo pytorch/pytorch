@@ -31,9 +31,9 @@ from .dicts import (
 from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
 from .functions import (
     FunctoolsPartialVariable,
-    GeneratorFunctionVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
+    SingleYieldGeneratorFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
