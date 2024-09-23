@@ -173,14 +173,12 @@ class StageTest(MultiProcContinousTest):
         schedule = ScheduleGPipe(stage, chunks)
 
         # Run
-        def _run_step(x):
-            if self.rank == 0:
-                return schedule.step(x, y=y)
-            else:
-                return schedule.step()
+        if self.rank == 0:
+            out = schedule.step(x, y=y)
+        else:
+            out = schedule.step()
 
         # Last rank checks result
-        out = _run_step(x)
         if self.rank == self.world_size - 1:
             ref_out = mod(x, y=y)
             torch.testing.assert_close(out, ref_out, atol=1e-3, rtol=5e-2)
