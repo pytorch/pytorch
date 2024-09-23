@@ -706,6 +706,10 @@ class CppPackedGemmTemplate(CppTemplate):
                 W_node = new_input_nodes[1]
                 assert W_node.get_name() in V.graph.constants
                 W = V.graph.constants[W_node.get_name()]
+                if isinstance(W_node, ir.BaseView):
+                    view_size = W_node.get_size()
+                    view_stride = W_node.get_stride()
+                    W = W.as_strided(view_size, view_stride).contiguous()
                 new_input_nodes[1] = W
                 new_input_nodes, _ = pack_weight(
                     *normalize_shapes(*maybe_to_dense(new_input_nodes, layout))
