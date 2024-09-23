@@ -322,10 +322,11 @@ def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
 
     Args:
         fn: the function to compute the Jacobian for (must take inputs as a tuple)
-        input: input to `fn`
+        inputs: input to `fn`
         target: the Tensors wrt whom Jacobians are calculated (default=`input`)
         eps: the magnitude of the perturbation during finite differencing
              (default=`1e-3`)
+        grad_out: defaults to 1.0.
 
     Returns:
         A list of Jacobians of `fn` (restricted to its first output) with respect to

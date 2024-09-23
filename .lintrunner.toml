@@ -195,6 +195,7 @@ include_patterns = [
     # and excluding most sub-directories for now.
     'aten/src/ATen/*.h',
     'aten/src/ATen/*.cpp',
+    'aten/src/ATen/cuda/*.cpp',
     'aten/src/ATen/cpu/*.h',
     'aten/src/ATen/cpu/*.cpp',
     'aten/src/ATen/core/*.h',
@@ -224,7 +225,6 @@ exclude_patterns = [
     # CUDA files are also excluded.
     '**/fb/**',
     '**/*pb.h',
-    'aten/**/cuda/*pp',
     'c10/xpu/**/*.h',
     'c10/xpu/**/*.cpp',
     'c10/cuda/CUDAAlgorithm.h',
