@@ -128,17 +128,17 @@ ONNXProgram(
         the weights are saved as external data in a separate file.
 
         Initializer (model weights) serialization behaviors:
-        - include_initializers=True, keep_initializers_as_inputs=False (default):
+        * include_initializers=True, keep_initializers_as_inputs=False (default):
             The initializers are included in the saved model.
-        - include_initializers=True, keep_initializers_as_inputs=True:
+        * include_initializers=True, keep_initializers_as_inputs=True:
             The initializers are included in the saved model and kept as model inputs.
             Choose this option if you want the ability to override the model weights
             during inference.
-        - include_initializers=False, keep_initializers_as_inputs=False:
+        * include_initializers=False, keep_initializers_as_inputs=False:
             The initializers are not included in the saved model and are not listed
             as model inputs. Choose this option if you want to attach the initializers
             to the ONNX model in a separate, post-processing, step.
-        - include_initializers=False, keep_initializers_as_inputs=True:
+        * include_initializers=False, keep_initializers_as_inputs=True:
             The initializers are not included in the saved model but are listed as model
             inputs. Choose this option if you want to supply the initializers during
             inference and want to minimize the size of the saved model.
@@ -181,6 +181,7 @@ ONNXProgram(
 
     def apply_weights(self, state_dict: dict[str, torch.Tensor]) -> None:
         """Apply the weights from the specified state dict to the ONNX model.
+
         Args:
             state_dict: The state dict containing the weights to apply to the ONNX model.
         """
