@@ -773,9 +773,7 @@ def aot_dispatch_subclass(
             assert isinstance(wrapped_outs, tuple) and len(wrapped_outs) == 2
             # Don't need fw outs since we already have subclass metadata on them
             grad_inputs = wrapped_outs[1]
-            subclass_meta.grad_input_metas = create_subclass_meta(
-                grad_inputs, include_nested_int=False
-            )
+            subclass_meta.grad_input_metas = create_subclass_meta(grad_inputs)
 
             # Add extra symints as outputs to the forward/backward graphs
             # ignore nested ints here
@@ -790,7 +788,6 @@ def aot_dispatch_subclass(
                 wrapped_outs[1],
                 is_runtime=False,
                 append_symints=True,
-                include_nested_int=False,
                 subclass_metas=None,
             )
             return (forward_outs, backward_outs)
