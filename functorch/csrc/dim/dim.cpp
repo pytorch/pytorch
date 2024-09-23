@@ -739,9 +739,7 @@ public:
 
     static mpy::obj<Tensor> create() {
         if (!TensorType) {
-            TensorType = (PyTypeObject*) mpy::import("functorch.dim").attr("Tensor").ptr();
-            // NB: leak
-            Py_INCREF(TensorType);
+            TensorType = (PyTypeObject*) mpy::import("functorch.dim").attr("Tensor").release();
         }
         return Tensor::alloc(TensorType);
     }
