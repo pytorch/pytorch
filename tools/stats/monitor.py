@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import datetime
-from datetime import timezone
 import json
 import signal
 import time
+from datetime import timezone
 from typing import Any
 
 import psutil  # type: ignore[import]

@@ -1405,7 +1405,9 @@ class DynamicRendezvousHandlerTest(TestCase):
         self.assertEqual(self._state.last_heartbeats[self._node], now)
 
     def _assert_keep_alive_swallows_rendezvous_errors(self) -> None:
-        last_heartbeat_time = datetime.now(timezone.utc) - (self._keep_alive_interval * 2)
+        last_heartbeat_time = datetime.now(timezone.utc) - (
+            self._keep_alive_interval * 2
+        )
 
         self._state.last_heartbeats[self._node] = last_heartbeat_time
 

@@ -740,7 +740,9 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
         self._keep_alive()
 
         if len(state.participants) == self._settings.min_nodes:
-            state.deadline = datetime.now(timezone.utc) + self._settings.timeout.last_call
+            state.deadline = (
+                datetime.now(timezone.utc) + self._settings.timeout.last_call
+            )
 
         if len(state.participants) == self._settings.max_nodes:
             self._mark_rendezvous_complete()
@@ -848,7 +850,9 @@ def _should_keep_alive(ctx: _RendezvousContext) -> bool:
     except KeyError:
         return False
 
-    return last_heartbeat <= datetime.now(timezone.utc) - ctx.settings.keep_alive_interval
+    return (
+        last_heartbeat <= datetime.now(timezone.utc) - ctx.settings.keep_alive_interval
+    )
 
 
 class _RendezvousExitOp:
