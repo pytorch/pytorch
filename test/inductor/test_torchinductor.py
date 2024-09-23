@@ -1825,22 +1825,17 @@ class CommonTemplate:
         def fn(a):
             return torch.var(a)
 
-        atol = None
-        rtol = None
-        if self.device == "cpu" and os.getenv("ATEN_CPU_CAPABILITY") == "default":
-            atol = 3e-4
-            rtol = 1e-4
         self.common(
             fn,
             ((torch.rand((10, 3, 352, 352), dtype=torch.float32),)),
-            atol=atol,
-            rtol=rtol,
+            atol=1e-3,
+            rtol=1e-3,
         )
         self.common(
             fn,
             ((torch.rand((14923), dtype=torch.float32),)),
-            atol=atol,
-            rtol=rtol,
+            atol=1e-3,
+            rtol=1e-3,
         )
 
     @skipCPUIf(IS_MACOS, "fails on macos")

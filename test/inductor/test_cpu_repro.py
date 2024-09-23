@@ -67,7 +67,10 @@ requires_vectorization = unittest.skipUnless(
 
 
 def check_metrics_vec_kernel_count(num_expected_vec_kernels):
-    if cpu_vec_isa.valid_vec_isa_list() and os.getenv("ATEN_CPU_CAPABILITY") != "default":
+    if (
+        cpu_vec_isa.valid_vec_isa_list()
+        and os.getenv("ATEN_CPU_CAPABILITY") != "default"
+    ):
         assert metrics.generated_cpp_vec_kernel_count == num_expected_vec_kernels
 
 
@@ -1588,7 +1591,6 @@ class CPUReproTests(TestCase):
             metrics.reset()
             self.common(fn, (value,))
 
-
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(
         not cpu_vec_isa.valid_vec_isa_list()
@@ -1661,7 +1663,6 @@ class CPUReproTests(TestCase):
             elif os.getenv("ATEN_CPU_CAPABILITY"):
                 os.environ.pop("ATEN_CPU_CAPABILITY")
 
-
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(
         platform.machine() != "x86_64" or not cpu_vec_isa.valid_vec_isa_list(),
@@ -1681,7 +1682,6 @@ class CPUReproTests(TestCase):
         self.assertTrue(vec_avx2.nelements() == 8)
         self.assertTrue(vec_avx512.nelements(torch.bfloat16) == 32)
         self.assertTrue(vec_avx2.nelements(torch.bfloat16) == 16)
-
 
         with config.patch({"cpp.simdlen": 0}):
             isa = cpu_vec_isa.pick_vec_isa()
@@ -1788,7 +1788,6 @@ class CPUReproTests(TestCase):
                 os.environ["ATEN_CPU_CAPABILITY"] = pre_var
             elif os.getenv("ATEN_CPU_CAPABILITY"):
                 os.environ.pop("ATEN_CPU_CAPABILITY")
-
 
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
@@ -2770,6 +2769,7 @@ class CPUReproTests(TestCase):
                 1,
             )
 
+    @requires_vectorization
     def test_argmin(self):
         def fn(x):
             return torch.argmin(x, -1)
@@ -2781,6 +2781,7 @@ class CPUReproTests(TestCase):
             self.common(fn, (x,))
             assert metrics.generated_cpp_vec_kernel_count == 1
 
+    @requires_vectorization
     def test_argmax_argmin_with_nan_value(self):
         def fn(x):
             return torch.argmax(x)

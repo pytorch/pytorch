@@ -6,11 +6,12 @@ import platform
 import re
 import subprocess
 import sys
+import warnings
 from typing import Any, Callable, Dict, List, Union
 
 import torch
 from torch._inductor import config
-import warnings
+
 
 _IS_WINDOWS = sys.platform == "win32"
 
@@ -312,10 +313,12 @@ supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON()]
 
 
 def get_isa_from_cpu_capability(
-    capability: Union[str, None], vec_isa_list: List[VecISA], invalid_vec_isa: InvalidVecISA
+    capability: Union[str, None],
+    vec_isa_list: List[VecISA],
+    invalid_vec_isa: InvalidVecISA,
 ):
     # AMX setting is not supported in eager
-    # VecAMX will be prioritized for selection when setting ATEN_CPU_CAPABILITY to avx512 
+    # VecAMX will be prioritized for selection when setting ATEN_CPU_CAPABILITY to avx512
     capability_to_isa_str = {
         "default": "INVALID_VEC_ISA",
         "neon": "asimd",
