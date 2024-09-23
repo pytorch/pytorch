@@ -227,7 +227,7 @@ class TestCuda(TestCase):
         oom_regex = (
             "would exceed allowed memory"
             if TEST_CUDAMALLOCASYNC
-            else "Tried to allocate 800000000.00 GiB"
+            else f"Tried to allocate 800000000.00 GiB. GPU {tensor.device.index} has a total capacity of"
         )
         with self.assertRaisesRegex(RuntimeError, oom_regex):
             torch.empty(1024 * 1024 * 1024 * 800000000, dtype=torch.int8, device="cuda")
@@ -3345,7 +3345,7 @@ class TestCudaMallocAsync(TestCase):
 
     @unittest.skipIf(IS_ARM64 or not IS_LINUX, "x86 linux only cpp unwinding")
     def test_direct_traceback(self):
-        from torch._C._profiler import gather_traceback, symbolize_tracebacks
+        from torch._C._profiler import gather_traceback, symbolize_tracebacks  # @manual
 
         c = gather_traceback(True, True, True)
         (r,) = symbolize_tracebacks([c])
