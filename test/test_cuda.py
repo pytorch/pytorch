@@ -439,9 +439,11 @@ class TestCuda(TestCase):
             return
 
         orig = torch.backends.cuda.matmul.allow_tf32
-        self.assertEqual(torch._C._get_cublas_allow_tf32(), orig)
+        self.assertEqual(torch._C._get_fp32_precision("cuda", "matmul") == "tf32", orig)
         torch.backends.cuda.matmul.allow_tf32 = not orig
-        self.assertEqual(torch._C._get_cublas_allow_tf32(), not orig)
+        self.assertEqual(
+            torch._C._get_fp32_precision("cuda", "matmul") == "tf32", not orig
+        )
         torch.backends.cuda.matmul.allow_tf32 = orig
 
     def test_float32_matmul_precision_get_set(self):
