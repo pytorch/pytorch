@@ -12,7 +12,6 @@ from sympy import Expr
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
-from torch._inductor.codegen.debug_utils import IntermediateValueDebuggingLevel
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 
 from .. import config, ir
@@ -50,7 +49,6 @@ class CppWrapperCpu(WrapperCodeGen):
         self.extern_call_ops = set()
         self.size = "sizes()"
         self.stride = "strides()"
-        self.cuda = False
         self.supports_intermediate_hooks = False
         self.outputs_need_copy = set()
         self.kernel_callsite_id = count()
@@ -76,7 +74,7 @@ class CppWrapperCpu(WrapperCodeGen):
         call_args,
         grid=None,
         device_index=None,
-        cuda=True,
+        gpu=True,
         triton=True,
         arg_types=None,
         raw_args=None,
@@ -88,19 +86,19 @@ class CppWrapperCpu(WrapperCodeGen):
         """
         Generates kernel call code.
 
-        cuda: Defines whether the backend is GPU. Otherwise the backend is CPU.
+        gpu: Defines whether the backend is GPU. Otherwise the backend is CPU.
 
         triton: Defines whether the GPU backend uses Triton for codegen.
                 Otherwise it uses the CUDA language for codegen.
                 Only valid when cuda == True.
         """
-        if cuda:
+        if gpu:
             return super().generate_kernel_call(
                 kernel_name,
                 call_args,
                 grid,
                 device_index,
-                cuda,
+                gpu,
                 triton,
                 arg_types,
                 raw_args,
@@ -921,7 +919,7 @@ class CppWrapperCpu(WrapperCodeGen):
         self.prefix = cached_dtypes_buffer
 
     def define_kernel(
-        self, name: str, kernel: str, metadata: Optional[str] = None, cuda=False
+        self, name: str, kernel: str, metadata: Optional[str] = None, gpu=False
     ):
         self.header.splice(f"\n{kernel}\n")
 
@@ -1137,7 +1135,7 @@ class CppWrapperCpu(WrapperCodeGen):
         result.splice(
             f"""
             inductor_entry = CppWrapperCodeCache.load_pybinding(
-                ["std::vector<AtenTensorHandle>"], cpp_wrapper_src, {self.cuda}, {len(V.graph.graph_outputs)})
+                ["std::vector<AtenTensorHandle>"], cpp_wrapper_src, "{self.device}", {len(V.graph.graph_outputs)})
             """
         )
 
@@ -1215,14 +1213,7 @@ class CppWrapperCpu(WrapperCodeGen):
         self.allow_stack_allocation = False
 
         wrapped_args = []
-
-        args_to_print_or_save = None
         debug_printer_manager = V.graph.wrapper_code.debug_printer
-        if (
-            debug_printer_manager.debug_printer_level
-            != IntermediateValueDebuggingLevel.OFF
-        ):
-            args_to_print_or_save = []
 
         for x in args:
             pieces = x.split(", ")
@@ -1236,20 +1227,10 @@ class CppWrapperCpu(WrapperCodeGen):
                 if isinstance(piece, str) and piece.startswith(
                     ("buf", "arg", "wrap_with_raii_handle_if_needed")
                 ):
-                    # TODO: The current way to find a 'tensor' type arg is hacky also as mentioned above
-                    # Find a more reliable way to detect tensor kernel args for extern kernel calls
-                    if (
-                        debug_printer_manager.debug_printer_level
-                        != IntermediateValueDebuggingLevel.OFF
-                    ):
-                        if piece.startswith(("buf", "arg")):
-                            args_to_print_or_save.append(piece)
                     piece = f"convert_arrayref_tensor_to_tensor({piece})"
                 wrapped_args.append(piece)
 
-        debug_printer_manager.set_printer_args(
-            args_to_print_or_save, kernel, None, None
-        )
+        debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
         with debug_printer_manager:
             shim_fn = self.get_c_shim_func_name(kernel)
             self.writeline(
@@ -1269,7 +1250,11 @@ class CppWrapperCpu(WrapperCodeGen):
 
     def generate_extern_kernel_alloc(self, extern_kernel, args):
         if config.abi_compatible:
-            self.generate_c_shim_extern_kernel_alloc(extern_kernel, args)
+            if hasattr(extern_kernel, "outputs"):
+                # ir.ExternKernelAlloc may have outputs if it returns a tuple
+                self.generate_c_shim_fallback_kernel(extern_kernel, args)
+            else:
+                self.generate_c_shim_extern_kernel_alloc(extern_kernel, args)
         else:
             super().generate_extern_kernel_alloc(extern_kernel, args)
 
@@ -1495,7 +1480,8 @@ class CppWrapperCpu(WrapperCodeGen):
             'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>());'
         )
 
-    def write_triton_header_once(self):
+    @cache_on_self
+    def write_triton_header_once(self) -> None:
         pass
 
     def generate_start_graph(self):
@@ -1643,6 +1629,11 @@ class CppWrapperCpu(WrapperCodeGen):
                 f"at::Tensor {name} = at::detail::empty_strided_cuda("
                 f"{size}, {stride}, {dtype_code}, c10::DeviceType::CUDA);"
             )
+        if device.type == "xpu":
+            return (
+                f"at::Tensor {name} = at::detail::empty_strided_xpu("
+                f"{size}, {stride}, {dtype_code}, c10::DeviceType::XPU);"
+            )
         return (
             f"{self.declare}{name} = {self.namespace}empty_strided("
             f"{size}, {stride}, at::TensorOptions({tensor_device}).dtype({dtype_code})){self.ending}"
@@ -1693,11 +1684,11 @@ class CppWrapperCpu(WrapperCodeGen):
         stride = self.codegen_shape_tuple(stride_list)
         offset = self.codegen_sizevar(offset)
         call_strs = []
-        if config.abi_compatible:
-            final_tmp_name = None
-            final_tmp_name_is_RAIIAtenTensorHandle = False
+        final_tmp_name = None
+        final_tmp_name_is_RAIIAtenTensorHandle = False
 
-            def create_reinterpret_call():
+        def create_reinterpret_call() -> Tuple[str, str]:
+            if config.abi_compatible:
                 tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
                 args = [
                     f"{data.get_name()}",
@@ -1724,14 +1715,18 @@ class CppWrapperCpu(WrapperCodeGen):
                     f"auto {tmp_name} = reinterpret_tensor_wrapper({', '.join(args)});"
                 )
                 return tmp_name, call_str
+            else:
+                args = [data.get_name(), size, stride, offset]
+                return f"reinterpret_tensor({', '.join(args)})", ""
 
-            def create_dtypeview_call(reinterpret_call):
+        def create_dtypeview_call(reinterpret_call: str) -> Tuple[str, List[str]]:
+            if config.abi_compatible:
                 tmp_AtenTensorHandle = (
                     f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
                 )
                 call_strs = [f"AtenTensorHandle {tmp_AtenTensorHandle};"]
                 dtype_name = str(dtype).split(".")[-1]
-                device_name = "cuda" if data.layout.device.type == "cuda" else "cpu"
+                device_name = data.layout.device.type
                 get_dtype_function = f"aoti_torch_dtype_{dtype_name}"
                 dtypeview_function = f"aoti_torch_{device_name}_view_dtype"
                 call_strs.append(
@@ -1745,38 +1740,40 @@ class CppWrapperCpu(WrapperCodeGen):
                     f"RAIIAtenTensorHandle {tmp_RAIIAtenTensorHandle}({tmp_AtenTensorHandle});"
                 )
                 return tmp_RAIIAtenTensorHandle, call_strs
-
-            if (
-                size_list == data.layout.size
-                and stride_list == data.layout.stride
-                and original_offset == data.layout.offset
-            ):
-                # pure dtypeview
-                if dtype is not None and dtype != data.dtype:
-                    tmp_output_name, tmp_call_strs = create_dtypeview_call(
-                        data.get_name()
-                    )
-                    call_strs.extend(tmp_call_strs)
-                    final_tmp_name = tmp_output_name
-                    final_tmp_name_is_RAIIAtenTensorHandle = True
-                else:
-                    return f"{data.get_name()}"
             else:
-                # firstly create reinterpretview
-                final_tmp_name, reinterpret_call = create_reinterpret_call()
-                call_strs.append(reinterpret_call)
+                return f"{reinterpret_call}.view({self.codegen_dtype(dtype)})", []
 
-                if dtype is not None and dtype != data.dtype:
-                    # wrap it with dtypeview
-                    final_tmp_name, tmp_call_strs = create_dtypeview_call(
-                        reinterpret_call
-                    )
-                    call_strs.extend(tmp_call_strs)
-            # Because the memory planning is done in two passes (see the implementation
-            # of self.generate), the writeline behavior is different in the two passes.
-            if writer is None:
-                writer = self
-            writer.writelines(call_strs)
+        if (
+            size_list == data.layout.size
+            and stride_list == data.layout.stride
+            and original_offset == data.layout.offset
+        ):
+            # pure dtypeview
+            if dtype is not None and dtype != data.dtype:
+                tmp_output_name, tmp_call_strs = create_dtypeview_call(data.get_name())
+                call_strs.extend(tmp_call_strs)
+                final_tmp_name = tmp_output_name
+                final_tmp_name_is_RAIIAtenTensorHandle = True
+            else:
+                return f"{data.get_name()}"
+        else:
+            # firstly create reinterpretview
+            final_tmp_name, reinterpret_call = create_reinterpret_call()
+            call_strs.append(reinterpret_call)
+
+            if dtype is not None and dtype != data.dtype:
+                # wrap it with dtypeview
+                final_tmp_name, tmp_call_strs = create_dtypeview_call(reinterpret_call)
+                call_strs.extend(tmp_call_strs)
+
+        if writer is None:
+            writer = self
+
+        # Because the memory planning is done in two passes (see the implementation
+        # of self.generate), the writeline behavior is different in the two passes.
+        writer.writelines(call_strs)
+
+        if config.abi_compatible:
             if (
                 self.can_stack_allocate_buffer(data)
                 and self.is_statically_known_list_of_ints(size_list)
@@ -1819,8 +1816,7 @@ class CppWrapperCpu(WrapperCodeGen):
             else:
                 return final_tmp_name
         else:
-            args = [data.get_name(), size, stride, offset]
-            return f"reinterpret_tensor({', '.join(args)})"
+            return final_tmp_name
 
     def codegen_device_copy(self, src, dst):
         if config.abi_compatible:
@@ -2132,8 +2128,7 @@ class CppWrapperCpu(WrapperCodeGen):
 
         def extract_output_name(out):
             if out is None:
-                # Because out is not a MultiOutput, we assume the kernel returns a single output
-                return [buf_name]
+                return None
             elif isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
                 return out.get_name()
             elif isinstance(out, (list, tuple)):
@@ -2144,9 +2139,13 @@ class CppWrapperCpu(WrapperCodeGen):
         # output_args has the same pytree structure as outputs
         output_args = None
         if config.abi_compatible:
-            output_args = extract_output_name(outputs)
-            if isinstance(output_args, str):
-                output_args = [output_args]
+            if outputs is None:
+                # outputs is not specified, the default is to write to buf_name
+                output_args = [buf_name]
+            else:
+                output_args = extract_output_name(outputs)
+                if isinstance(output_args, str):
+                    output_args = [output_args]
 
         if V.graph.aot_mode and config.abi_compatible:
             assert op_overload is not None
@@ -2357,13 +2356,16 @@ if (py_{buf_name}.get() == NULL) {{
             else:
                 # result is a tuple of tensors
                 for idx, output_arg in enumerate(output_args):
+                    if output_arg is None:
+                        continue
                     lines += f"""
 {output_arg} =
     reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}.get(), {idx}), NULL));"""
 
             declarations_before_scope = [
                 f"RAIIAtenTensorHandle {output_arg};"
-                for idx, output_arg in enumerate(output_args)
+                for output_arg in output_args
+                if output_arg is not None
             ]
             scope_gil_acquire = self.generate_scoped_gil_acquire(
                 declarations_before_scope, lines

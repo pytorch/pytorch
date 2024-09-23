@@ -1597,6 +1597,23 @@ class CreateHandlerTest(TestCase):
                 create_handler(self._store, self._backend, self._params)
                 record_mock.assert_called_once()
 
+    def test_create_handler_rdzv_local_addr(self) -> None:
+        params = RendezvousParameters(
+            backend=self._backend.name,
+            endpoint="dummy_endpoint",
+            run_id="dummy_run_id",
+            min_nodes=1,
+            max_nodes=1,
+            join_timeout="50",
+            last_call_timeout="60",
+            close_timeout="70",
+            local_addr="127.0.0.2",
+        )
+        store = HashStore()
+        handler = create_handler(store, self._backend, params)
+        rdzv_info = handler.next_rendezvous()
+        self.assertEqual(rdzv_info.bootstrap_store_info.master_addr, "127.0.0.2")
+
 
 def _ignore_exception(exception_type: Exception, fn: Callable):
     try:
@@ -1656,7 +1673,7 @@ class IntegrationTest(TestCase):
             "min_nodes": 2,
             "max_nodes": 2,
             "join_timeout": "5",
-            "local_addr": f"address_{len(self._handlers)}",
+            "local_addr": f"127.0.0.{len(self._handlers)}",
         }
         params.update(**kwargs)
 
@@ -1714,7 +1731,7 @@ class IntegrationTest(TestCase):
         state_and_token = self._backend.get_state()
         state = pickle.loads(state_and_token[0])
         addresses = [node.addr for node in state.redundancy_list]
-        self.assertListEqual(addresses, ["address_2"])
+        self.assertListEqual(addresses, ["127.0.0.2"])
 
     def test_redundancy_transition_to_wait_list_then_join_rendezvous(self) -> None:
         handler1 = self._create_handler(
