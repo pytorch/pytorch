@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+from functools import partial
 import sys
 import warnings
 from typing import cast, List, Optional, Tuple, TYPE_CHECKING, Union
@@ -176,6 +177,10 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     return _maybe_wrap_tensor(tensor)
 
 
+def callback(x, group_size, gather_dim):
+    return torch.cat(torch.chunk(x, group_size, dim=0), dim=gather_dim)
+
+
 def all_gather_tensor(
     self: torch.Tensor,
     gather_dim: int,
@@ -210,8 +215,9 @@ def all_gather_tensor(
         # torch.cat access the data so we already need to wait here, first do wait
         # and then chunk + cat avoid us going through ACT dispatching logic again
         if isinstance(res, AsyncCollectiveTensor):
-            res = res.wait()  # type: ignore[attr-defined]
-        res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
+            res.register_callback(partial(callback, gather_dim=gather_dim, group_size=group_size))
+        else:
+            res = callback(res, gather_dim=gather_dim, group_size=group_size)
     return res
 
 
@@ -243,8 +249,9 @@ def all_gather_tensor_autograd(
         # torch.cat access the data so we already need to wait here, first do wait
         # and then chunk + cat avoid us going through ACT dispatching logic again
         if isinstance(res, AsyncCollectiveTensor):
-            res = res.wait()  # type: ignore[attr-defined]
-        res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
+            res.register_callback(partial(callback, gather_dim=gather_dim, group_size=group_size))
+        else:
+            res = callback(res, gather_dim=gather_dim, group_size=group_size)
     return res
 
 
@@ -569,6 +576,7 @@ class AsyncCollectiveTensor(torch.Tensor):
     """
     elem: torch.Tensor
     completed: bool
+    callbacks: list
 
     __slots__ = ["elem", "completed"]
 
@@ -586,6 +594,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         )
         r.elem = elem
         r.completed = False
+        r.callbacks = []
         return r
 
     def __tensor_flatten__(self):
@@ -607,9 +616,17 @@ class AsyncCollectiveTensor(torch.Tensor):
         if not self.completed:
             out = wait_tensor(self.elem)
             self.completed = True
-            return out
         else:
-            return self.elem
+            out = self.elem
+
+        return self._run_callbacks(out)
+
+    def _run_callbacks(self, x):
+        for func in self.callbacks:
+            x = func(x)
+
+        self.callbacks = []
+        return x
 
     def _get_acs_underlying_tensor(self):
         """This method enables  _functional_collectives_impl to test if a tensor is an ACS"""
@@ -617,10 +634,25 @@ class AsyncCollectiveTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        args_tuple = []
+        for arg in args:
+            if isinstance(arg, AsyncCollectiveTensor) and len(arg.callbacks) > 0:
+                arg = arg.wait()
+            args_tuple.append(arg)
+        args = tuple(args_tuple)
+
+        if kwargs is not None:
+            kwags_new = {}
+            for k, v in kwargs.items():
+                if isinstance(v, AsyncCollectiveTensor) and len(v.callbacks) > 0:
+                    v = v.wait()
+                kwags_new[k] = v
+            kwargs = kwags_new
+
         if func == torch.ops.aten.view.default:
             # Fast handle aten.view as a lot of view related op goes to aten.view
             # eventually, this avoids pytree slowdown
-            res = func(args[0].elem, args[1])
+            res = func(args[0].elem if hasattr(args[0], "elem") else args[0], args[1])
             wrapper_res = AsyncCollectiveTensor(res)
             return wrapper_res
 
@@ -652,6 +684,9 @@ class AsyncCollectiveTensor(torch.Tensor):
 
     def numpy(self):  # type: ignore[override]
         return self.wait().numpy()
+
+    def register_callback(self, func):
+        self.callbacks.append(func)
 
 
 """
