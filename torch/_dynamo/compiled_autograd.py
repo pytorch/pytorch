@@ -175,54 +175,45 @@ class AutogradCompilerInstance:
                 )
 
             global next_op
-
-            scope = globals()
-            code = f"""
-@torch.library.custom_op(  # type: ignore[misc]
-    f"compiled_autograd::cpp_node_op_{next_op}", mutates_args=()
-)
-def cpp_node_op_{idx}(
-    inputs: List[torch.Tensor], idx: int
-) -> List[torch.Tensor]:
-    print(f"CALLING CPP_NODE_OP_I: {idx}")
-    # inputs = [inp if getattr(inp, "is_empty", False) else None for inp in inputs]
-    outs = torch._C._dynamo.compiled_autograd.call_lambda(inputs, idx)
-    assert len(outs) == len(inputs)
-    device = None
-    for out in outs:
-        if out is not None:
-            device = out.device
-            break
-    assert device is not None
-    
-    # gradient layout contract doesn't enforce output strides to match input strides
-    return [
-        out.clone().contiguous()
-        if out is not None
-        else torch.empty(0, device=device)
-        for out in outs
-    ]
-
-@cpp_node_op_{idx}.register_fake
-def _(inputs, idx):
-    grad_ins: List[torch.Tensor] = []
-    for output_metadata in output_metadatas:
-        if output_metadata is None:
-            # eager semantics is to not return grads for tensors not requiring them
-            continue
-
-        layout, device, dtype, size = output_metadata
-        grad_ins.append(
-            torch.empty(
-                size=size, dtype=dtype, layout=layout, device=device
+            @torch.library.custom_op(  # type: ignore[misc]
+                f"compiled_autograd::cpp_node_op_{next_op}", mutates_args=()
             )
-        )
-    return grad_ins
+            def cpp_node_op_i(
+                inputs: List[torch.Tensor], idx: int
+            ) -> List[torch.Tensor]:
+                print(f"CALLING CPP_NODE_OP_I: {idx}")
+                outs = torch._C._dynamo.compiled_autograd.call_lambda(inputs, idx)
+                device = None
+                for out in outs:
+                    if out is not None:
+                        device = out.device
+                        break
+                assert device is not None
+                
+                # gradient layout contract doesn't enforce output strides to match input strides
+                return [
+                    out.clone().contiguous()
+                    if out is not None
+                    else torch.empty(0, device=device)
+                    for out in outs
+                ]
 
-cpp_node_op_i = cpp_node_op_{idx}
-            """
-            exec(code, scope)
-            cpp_node_proxies = scope["cpp_node_op_i"]
+            def _(inputs, idx):
+                grad_ins: List[torch.Tensor] = []
+                for output_metadata in output_metadatas:
+                    if output_metadata is None:
+                        # eager semantics is to not return grads for tensors not requiring them
+                        continue
+
+                    layout, device, dtype, size = output_metadata
+                    grad_ins.append(
+                        torch.empty(
+                            size=size, dtype=dtype, layout=layout, device=device
+                        )
+                    )
+                return grad_ins
+
+            cpp_node_op_i.register_fake(_)
 
             next_op += 1
 
@@ -439,7 +430,7 @@ cpp_node_op_i = cpp_node_op_{idx}
             finally:
                 in_compiled_autograd_region = False
 
-        return runtime_wrapper, torch.compile(graph, backend="eager")#self.compiler_fn(graph)
+        return runtime_wrapper, self.compiler_fn(graph)
 
     def rename_aot_dispatcher_nodes(self):
         """

@@ -50,8 +50,6 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
   // in addition to the one reference that we're holding.
   // 'num_expected_refs' is used to determine whether or not we should clone
   // the grad or can steal the grad.
-  std::cout << "accumulating the grad on " << variable << std::endl;
-  std::cout << "new_grad: " << new_grad << std::endl;
   accumulateGrad(
       variable,
       grad,
