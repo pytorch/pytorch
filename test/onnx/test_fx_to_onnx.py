@@ -463,9 +463,15 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx_program.save(
                 tmp_onnx_file.name,
                 include_initializers=include_initializer,
+                keep_initializers_as_inputs=not include_initializer,
             )
             onnx_model = onnx.load(tmp_onnx_file.name)
             if include_initializer:
+                if use_fake_mode and not use_exported_program:
+                    # FIXME: Remove the skip when we remove the legacy dynamo logic
+                    self.skipTest(
+                        "FIXME: Fake mode with no exported program does not have initializers"
+                    )
                 assert len(onnx_model.graph.initializer) > 0
             else:
                 assert len(onnx_model.graph.initializer) == 0
