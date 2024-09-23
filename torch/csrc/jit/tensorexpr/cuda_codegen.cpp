@@ -22,6 +22,7 @@
 #include <ATen/ops/empty_strided_native.h>
 #endif
 
+#include <iostream>
 #include <unordered_map>
 #include <utility>
 
@@ -868,6 +869,10 @@ void CudaCodeGen::Initialize() {
   // TODO: handle dynamic dimension.
   // TODO: call nvrtc.
   // TODO: merge HasRand with CudaAnalysis.
+  std::locale::global(std::locale(""));
+  std::cout << " LOCALE OF oss_ " << oss_.getloc().name() << " GLOBAL LOCALE "
+            << std::locale().name() << std::endl;
+
   GenericIntrinsicsExpander intrinsics_expander;
   apply_mutator(&intrinsics_expander);
 
@@ -1280,6 +1285,10 @@ void CudaCodeGen::CompileToNVRTC(
   nvrtcProgram program{nullptr};
   AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcCreateProgram(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
+  std::locale l;
+  std::cout << "Locale by C++: " << l.name() << "; number " << 1234678
+            << "; cout locale " << std::cout.getloc().name() << std::endl;
+  std::cout << code.c_str() << std::endl;
 
 #if defined(USE_ROCM)
   std::vector<const char*> args = {"--std=c++17"};
