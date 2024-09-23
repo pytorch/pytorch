@@ -83,7 +83,7 @@ from .variables.dicts import ConstDictVariable, SetVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
     NestedUserFunctionVariable,
-    SingleYieldGeneratorFunctionVariable,
+    ContextlibContextManagerFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
@@ -3042,7 +3042,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             (
                 UserFunctionVariable,
                 NestedUserFunctionVariable,
-                SingleYieldGeneratorFunctionVariable,
+                ContextlibContextManagerFunctionVariable,
             ),
         )
         result = InliningInstructionTranslator.check_inlineable(func)
