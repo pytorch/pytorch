@@ -923,7 +923,7 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
         shape = list(shape)
 
         from torch.fx.experimental.sym_node import SymNode
-        from torch.utils._sympy.functions import CleanDiv
+        from torch.utils._sympy.functions import CleanDiv, FloorDiv
 
         shape[dim] = numel // newsize
         if isinstance(newsize, torch.SymInt):
@@ -937,14 +937,15 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
 
             # Specify that this is a CleanDiv and not just a FloorDiv
             old_node = shape[dim].node
-            shape[dim].node = SymNode(
-                expr=CleanDiv(*old_node.expr.args),
-                shape_env=old_node.shape_env,
-                pytype=old_node.pytype,
-                hint=old_node.hint,
-                constant=old_node.constant,
-                fx_node=old_node.fx_node,
-            )
+            if isinstance(old_node.expr, FloorDiv):
+                shape[dim].node = SymNode(
+                    expr=CleanDiv(*old_node.expr.args),
+                    shape_env=old_node.shape_env,
+                    pytype=old_node.pytype,
+                    hint=old_node.hint,
+                    constant=old_node.constant,
+                    fx_node=old_node.fx_node,
+                )
 
         # NB: This is pretty important when you have unbacked SymInts.
         # Suppose you have (i0, 12) resizing into (2, -1, 12).  The old
