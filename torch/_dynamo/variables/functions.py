@@ -348,7 +348,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return super().call_function(tx, args, kwargs)
 
 
-class SingleYieldGeneratorFunctionVariable(BaseUserFunctionVariable):
+class ContextlibContextManagerFunctionVariable(BaseUserFunctionVariable):
     """functions that behaves like iterators
 
     .. note::
