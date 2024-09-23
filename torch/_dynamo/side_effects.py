@@ -1,7 +1,9 @@
 # mypy: allow-untyped-defs
+import contextlib
 import functools
 import inspect
 import warnings
+import weakref
 from collections.abc import MutableMapping
 from typing import Any, Dict, List, Optional, Type, Union
 
@@ -79,6 +81,7 @@ class SideEffects:
 
     def __init__(
         self,
+        output_graph,
         id_to_variable=None,
         store_attr_mutations=None,
         keepalive=None,
@@ -86,6 +89,7 @@ class SideEffects:
         tensor_hooks=None,
     ):
         super().__init__()
+        self.output_graph_weakref = weakref.ref(output_graph)
         self.id_to_variable = id_to_variable or {}
         self.store_attr_mutations = store_attr_mutations or {}
         self.keepalive = keepalive or []
@@ -130,6 +134,7 @@ class SideEffects:
     def clone(self):
         """Create a shallow copy"""
         return self.__class__(
+            output_graph=self.output_graph_weakref(),
             id_to_variable=dict(self.id_to_variable),
             store_attr_mutations={
                 k: dict(v) for k, v in self.store_attr_mutations.items()
@@ -145,12 +150,22 @@ class SideEffects:
     def __getitem__(self, item):
         return self.id_to_variable[id(item)]
 
+    def should_allow_side_effects_under_checkpoint(self):
+        output_graph = self.output_graph_weakref()
+        return (
+            output_graph
+            and output_graph.current_tx.output.current_tracer.under_activation_checkpoint
+            and output_graph.current_tx.output.current_tracer.allow_side_effects_under_checkpoint
+        )
+
     def check_allowed_side_effect(self, item):
         from torch._dynamo.variables.misc import AutogradFunctionContextVariable
 
         # People do things like self.dim = dim inside autograd.Function.
         # These are benign.
         if isinstance(item, AutogradFunctionContextVariable):
+            return True
+        if self.should_allow_side_effects_under_checkpoint():
             return True
         if not is_side_effect_safe(item.mutable_local):
             unimplemented(
@@ -608,11 +623,22 @@ class SideEffects:
             elif isinstance(
                 var, variables.torch_function.TorchFunctionModeStackVariable
             ):
+                # Needed in the finally block for stack restoration
+                cg.add_push_null(
+                    lambda: cg.load_import_from(
+                        utils.__name__, "get_torch_function_mode_stack"
+                    )
+                )
+                cg.call_function(0, False)
+                name = variables.torch_function.get_prev_stack_var_name()
+                cg.code_options["co_varnames"] += (name,)
+                cg.append_output(create_instruction("STORE_FAST", argval=name))
                 cg.add_push_null(
                     lambda: cg.load_import_from(
                         utils.__name__, "set_torch_function_mode_stack"
                     )
                 )
+
                 cg.foreach(var.symbolic_stack)
                 cg.append_output(
                     create_instruction("BUILD_LIST", arg=len(var.symbolic_stack))
@@ -714,3 +740,14 @@ class SideEffects:
     def clear(self):
         self.keepalive.clear()
         self.id_to_variable.clear()
+
+
+@contextlib.contextmanager
+def allow_side_effects_under_checkpoint(tx: "InstructionTranslator"):  # type: ignore[name-defined]  # noqa: F821
+    assert tx.output.current_tracer.under_activation_checkpoint
+    orig_val = tx.output.current_tracer.allow_side_effects_under_checkpoint
+    try:
+        tx.output.current_tracer.allow_side_effects_under_checkpoint = True
+        yield
+    finally:
+        tx.output.current_tracer.allow_side_effects_under_checkpoint = orig_val
