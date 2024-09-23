@@ -64,7 +64,6 @@ def main():
         Benchmark(ListOfLinears, "eager"),
         Benchmark(ListOfLinears, "inductor"),
         Benchmark(ListOfLinears, "inductor", is_gpu=True),
-        Benchmark(ListOfLinears, "inductor", is_gpu=True),
         Benchmark(ListOfLinears, "inductor", is_gpu=True, force_shape_pad=True),
     ]
     for b in benchmarks:

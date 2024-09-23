@@ -804,6 +804,7 @@ class CompilationMetrics:
     possibly_missed_reinplacing_opportunities: Optional[int]
     remote_cache_time_saved_s: Optional[float]
     structured_logging_overhead_s: Optional[float]
+    config_suppress_errors: Optional[bool]
 
 
 @dataclasses.dataclass
