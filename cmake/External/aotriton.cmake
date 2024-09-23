@@ -60,7 +60,7 @@ if(NOT __AOTRITON_INCLUDED)
     endif()
     list(FIND __AOTRITON_ROCM_LIST "rocm${__AOTRITON_ROCM}" __AOTRITON_SHA256_INDEX)
     list(GET __AOTRITON_SHA256_LIST ${__AOTRITON_SHA256_INDEX} __AOTRITON_SHA256)
-    set(__AOTRITON_ARCH "x86_64")
+    set(__AOTRITON_ARCH ${CMAKE_HOST_SYSTEM_PROCESSOR})
     string(CONCAT __AOTRITON_FILE "aotriton-"
                                   "${__AOTRITON_VER}-${__AOTRITON_MANY}"
                                   "_${__AOTRITON_ARCH}-rocm${__AOTRITON_ROCM}"
