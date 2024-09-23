@@ -136,6 +136,18 @@ def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
     return unwrapped_args
 
 
+def unwrap_tensor_subclasses_with_indices_to_original(wrapped_args):
+    ret_unwrapped = []
+    ret_indices_to_original = []
+    for i, a in enumerate(wrapped_args):
+        a_unwrapped = unwrap_tensor_subclasses([a], is_joint_structure=False)
+        ret_unwrapped.extend(a_unwrapped)
+        n = len(a_unwrapped)
+        ret_indices_to_original.extend([i] * n)
+
+    return ret_unwrapped, ret_indices_to_original
+
+
 def remap_unwrapped_subclass_arg_indices(wrapped_args, static_input_indices):
     static_input_indices = set(static_input_indices)
     new_ind = 0

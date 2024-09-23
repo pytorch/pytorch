@@ -304,10 +304,8 @@ class ConstDictVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             self.items.clear()
             return ConstantVariable.create(None)
-        elif (
-            name == "update"
-            and len(args) == 1
-            and isinstance(
+        elif name == "update" and self.mutable_local:
+            is_args_supported = len(args) == 1 and isinstance(
                 args[0],
                 (
                     ConstDictVariable,
@@ -318,20 +316,25 @@ class ConstDictVariable(VariableTracker):
                     UserDefinedObjectVariable,
                 ),
             )
-            and self.mutable_local
-        ):
-            tx.output.side_effects.mutation(self)
-            if isinstance(args[0], ConstDictVariable):
-                dict_vt = args[0]
+
+            is_kwargs_supported = len(kwargs) > 0 and len(args) == 0
+
+            if is_args_supported or is_kwargs_supported:
+                tx.output.side_effects.mutation(self)
+                if len(args) == 1:
+                    if isinstance(args[0], ConstDictVariable):
+                        dict_vt = args[0]
+                    else:
+                        dict_vt = BuiltinVariable.call_custom_dict(tx, dict, args[0])
+                    self.items.update(dict_vt.items)
+                # Wrap strings
+                kwargs = {
+                    Hashable(ConstantVariable.create(k)): v for k, v in kwargs.items()
+                }
+                self.items.update(kwargs)
+                return ConstantVariable.create(None)
             else:
-                dict_vt = BuiltinVariable.call_custom_dict(tx, dict, args[0])
-            self.items.update(dict_vt.items)
-            # Wrap strings
-            kwargs = {
-                Hashable(ConstantVariable.create(k)): v for k, v in kwargs.items()
-            }
-            self.items.update(kwargs)
-            return ConstantVariable.create(None)
+                return super().call_method(tx, name, args, kwargs)
         elif name in ("get", "__getattr__") and args[0] in self:
             return self.getitem_const(tx, args[0])
         elif name == "__contains__" and len(args) == 1:
@@ -952,9 +955,15 @@ class HFPretrainedConfigVariable(VariableTracker):
         assert self.is_matching_cls(type(obj))
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        from . import ConstantVariable
+        from .builder import VariableBuilder
 
-        return ConstantVariable.create(getattr(self.obj, name))
+        try:
+            attr_value = getattr(self.obj, name)
+            attr_source = AttrSource(self.source, name)
+            return VariableBuilder(tx, attr_source)(attr_value)
+
+        except AttributeError:
+            unimplemented(f"getattr({self.value}, {name})")
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         return variables.ConstantVariable.create(hasattr(self.obj, name))
