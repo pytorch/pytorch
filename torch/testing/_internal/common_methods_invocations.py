@@ -13,6 +13,7 @@ import enum
 
 import torch
 import numpy as np
+import numpy.typing as npt
 from torch import inf, nan
 
 from typing import Any, Dict, List, Tuple, Union, Sequence
@@ -20,7 +21,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     _dispatch_dtypes, floating_types, floating_types_and, complex_types, floating_and_complex_types,
     floating_and_complex_types_and, all_types_and_complex_and, all_types_and, all_types_and_complex, integral_types_and,
-    all_types, empty_types, complex_types_and, integral_types, custom_types,
+    empty_types, complex_types_and, integral_types, custom_types,
 )
 from torch.testing._internal.common_device_type import \
     (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
@@ -11048,6 +11049,13 @@ foreach_binary_op_db: List[OpInfo] = [
                          dtypes=(torch.bool,),),
             DecorateInfo(unittest.skip("flaky"), "TestForeach", "test_parity", device_type="cpu", dtypes=(torch.complex64,)),
             DecorateInfo(
+                unittest.skip("failed starting on ROCm 6.2"),
+                "TestForeach",
+                "test_parity",
+                device_type="cuda",
+                dtypes=(torch.complex64,),
+                active_if=TEST_WITH_ROCM),
+            DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
                 "test_binary_op_with_scalar_self_support",
@@ -11342,7 +11350,7 @@ def reference_gelu(X, *, approximate='none'):
         return _gelu_ref(X)
 
 
-def reference_one_hot(a: np.ndarray, num_classes: int = -1) -> np.ndarray:
+def reference_one_hot(a: npt.NDArray, num_classes: int = -1) -> npt.NDArray:
     if num_classes == -1:
         num_classes = int(np.amax(a) + 1)
 
@@ -11362,11 +11370,11 @@ def reference_mse_loss(input, target, reduction="mean"):
         return se
 
 
-def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
+def reference_layer_norm(inp: npt.NDArray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
     return reference_native_layer_norm(inp, normalized_shape, weight, bias, eps)[0]
 
 
-def reference_native_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight, bias, eps):
+def reference_native_layer_norm(inp: npt.NDArray, normalized_shape: Tuple[int], weight, bias, eps):
     feature_size = np.prod(normalized_shape)
     inp_view = inp.reshape(-1, feature_size)  # type: ignore[call-overload]
     mean = inp_view.mean(axis=-1, keepdims=True)
@@ -11383,7 +11391,7 @@ def reference_native_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], w
     return Y.reshape(*inp.shape), mean.reshape(stat_shape), (1.0 / np.sqrt(var + eps)).reshape(stat_shape)
 
 
-def reference_rms_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, eps=None):
+def reference_rms_norm(inp: npt.NDArray, normalized_shape: Tuple[int], weight=None, eps=None):
     if eps is None:
         eps = torch.finfo(numpy_to_torch_dtype(inp.dtype)).eps
     feature_size = np.prod(normalized_shape)
@@ -11395,7 +11403,7 @@ def reference_rms_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=Non
     return Y.reshape(*inp.shape)
 
 
-def reference_group_norm(inp: np.ndarray, num_groups: int, weight=None, bias=None, eps=1e-5):
+def reference_group_norm(inp: npt.NDArray, num_groups: int, weight=None, bias=None, eps=1e-5):
     inp_view = inp
     if np.prod(inp.shape) != 0:
         inp_view = inp.reshape((inp.shape[0], num_groups, -1))
@@ -11481,7 +11489,7 @@ def reference_std_var(f):
     g = reference_reduction_numpy(f)
 
     @wraps(g)
-    def wrapper(x: np.ndarray, *args, **kwargs):
+    def wrapper(x: npt.NDArray, *args, **kwargs):
         assert not ('unbiased' in kwargs and 'correction' in kwargs)
 
         if 'unbiased' in kwargs:
@@ -13579,8 +13587,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_gradient,
            error_inputs_func=error_inputs_gradient),
     OpInfo('isin',
-           dtypes=all_types(),
-           dtypesIfCUDA=all_types_and(torch.half),
+           dtypes=all_types_and(torch.bfloat16, torch.half),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_isin),
     OpInfo('kthvalue',
@@ -14710,7 +14717,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_adaptive_avg_pool2d),
     OpInfo('nn.functional.adaptive_avg_pool3d',
            dtypes=floating_types_and(torch.half, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            decorators=(
                # RuntimeError:
                # adaptive_avg_pool3d(Tensor input, int[3] output_size) -> (Tensor):
@@ -14764,8 +14770,7 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_adaptive_max_pool2d,
            sample_inputs_func=sample_inputs_adaptive_max_pool2d),
     OpInfo('nn.functional.adaptive_max_pool3d',
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           dtypes=floating_types_and(torch.bfloat16, torch.half),
            decorators=(
                # RuntimeError:
                # adaptive_max_pool3d(Tensor input, int[3] output_size) -> (Tensor):
@@ -15726,6 +15731,7 @@ op_db: List[OpInfo] = [
                             active_if=(not IS_MACOS)),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_forward_ad',
                             device_type='cpu'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick_core_backward'),
            )),
     OpInfo('nn.functional.max_unpool1d',
            variant_test_name='grad',
@@ -15758,6 +15764,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_grad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_forward_ad'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick_core_backward'),
            )),
     OpInfo('nn.functional.max_unpool2d',
            variant_test_name='grad',
@@ -15794,6 +15801,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_grad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_forward_ad'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick_core_backward'),
            )),
     OpInfo('nn.functional.max_unpool3d',
            variant_test_name='grad',
@@ -16408,7 +16416,6 @@ op_db: List[OpInfo] = [
     ),
     BinaryUfuncInfo('nextafter',
                     dtypes=floating_types_and(torch.bfloat16, torch.half),
-                    dtypesIfCUDA=floating_types_and(torch.bfloat16),
                     supports_autograd=False,
                     supports_rhs_python_scalar=False),
     OpInfo(
@@ -18322,7 +18329,6 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('unique',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64),
-           dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.uint16, torch.uint32, torch.uint64),
            sample_inputs_func=sample_inputs_unique,
            supports_out=False,
            supports_autograd=False,
@@ -18334,7 +18340,6 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('unique_consecutive',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
-           dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
            sample_inputs_func=sample_inputs_unique_consecutive,
            supports_out=False,
            supports_autograd=False,
@@ -24420,6 +24425,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.view_as_complex",
         torch_opinfo_name="view_as_complex",
+    ),
+    PythonRefInfo(
+        "_refs.split_with_sizes",
+        torch_opinfo_name="split_with_sizes",
     ),
 ]
 python_ref_db += opinfo.definitions.python_ref_db
