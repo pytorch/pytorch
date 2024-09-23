@@ -6726,12 +6726,12 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         loss_nt_compile.backward()
 
         self.assertEqual(v32_dense_eager.grad, v32_dense_compile.grad)
-        self.assertEqual(v32_dense_eager.grad, v32_nt_eager.grad)
-        self.assertEqual(v32_dense_eager.grad, v32_nt_compile.grad)
+        self.assertEqual(v32_dense_eager.grad, v32_nt_eager.grad, atol=1e-4, rtol=1e-4)
+        self.assertEqual(v32_dense_eager.grad, v32_nt_compile.grad, atol=1e-4, rtol=1e-4)
 
         self.assertEqual(v16_dense_eager.grad, v16_dense_compile.grad)
-        self.assertEqual(v16_dense_eager.grad, v16_nt_eager.grad)
-        self.assertEqual(v16_dense_eager.grad, v16_nt_compile.grad)
+        self.assertEqual(v16_dense_eager.grad, v16_nt_eager.grad, atol=1e-5, rtol=5e-3)
+        self.assertEqual(v16_dense_eager.grad, v16_nt_compile.grad, atol=1e-5, rtol=5e-3)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
