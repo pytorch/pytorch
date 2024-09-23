@@ -2183,6 +2183,18 @@ Tensor split_backward(
   return split_with_sizes_backward(grads, split_sizes, dim, sym_sizes, options);
 }
 
+Tensor _nested_narrow_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    int64_t dim,
+    const c10::SymInt& start,
+    const c10::SymInt& length) {
+  Tensor grad_input = at::zeros_like(self);
+  Tensor narrowed_grad = grad_input.narrow_symint(dim, start, length);
+  at::_nested_get_values(narrowed_grad).copy_(at::_nested_get_values(grad));
+  return grad_input;
+}
+
 Tensor max_pool_double_backward(
     const Tensor& grad,
     const Tensor& indices,

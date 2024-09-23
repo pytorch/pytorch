@@ -793,7 +793,7 @@ def split_with_sizes_default(func, *args, **kwargs):
 
 
 @register_jagged_func(
-    torch.ops.aten.narrow.default, "self: jt, dim: any, start: any, length: any"
+    torch.ops.aten.narrow.default, "self: jt_all, dim: any, start: any, length: any"
 )
 def narrow(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -801,7 +801,33 @@ def narrow(func, *args, **kwargs):
     )
     inp = new_kwargs.pop("input")
 
-    dim = _wrap_jagged_dim(inp.dim(), new_kwargs["dim"], "narrow")
+    dim = _wrap_jagged_dim(inp.dim(), new_kwargs["dim"], "narrow", allow_batch_dim=True)
+    if dim == 0:
+        out_kwargs = extract_kwargs(inp)
+        start, length = new_kwargs["start"], new_kwargs["length"]
+        out_kwargs["offsets"] = inp._offsets[start : start + length + 1]
+        # metadata cache may no longer be accurate since offsets have changed
+        if "_metadata_cache" in out_kwargs:
+            del out_kwargs["_metadata_cache"]
+
+        if inp._lengths is not None:
+            out_kwargs["lengths"] = inp._lengths[start : start + length]
+
+        start_offset = inp._offsets[start].item()
+        end_offset = inp._offsets[start + length].item()
+        new_values = inp._values.narrow(
+            dim=(inp._ragged_idx - 1),
+            start=start_offset,
+            length=end_offset - start_offset,
+        )
+
+        return NestedTensor(new_values, **out_kwargs)
+
+    if inp._lengths is not None or inp._ragged_idx != 1:
+        raise RuntimeError(
+            "narrow(): not yet supported for non-contiguous nested tensors on dim != 0"
+        )
+
     values = func(
         inp._values,
         dim=dim,
