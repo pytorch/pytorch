@@ -1202,6 +1202,8 @@ void ProcessGroupNCCL::abortCommsFromMap(
 
 // Abort all communicators on this rank
 bool ProcessGroupNCCL::abort(std::optional<std::string> abortReason) {
+  // This will log counter for how long the abort actually takes.
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__abort);
   // Remove record from global ncclCommDevIdxMapMutex before aboarting,
   // so that a new cache segment would not register to already aborded
   // communicators. Note that ncclCommDevIdxMap is a global container which may
