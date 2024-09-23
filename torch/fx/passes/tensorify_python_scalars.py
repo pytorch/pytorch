@@ -126,7 +126,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                 dtype = torch.int64
                 c = int(expr)
             elif isinstance(expr, sympy.Number):
-                dtype = torch.float32
+                dtype = torch.float64
                 c = float(expr)
 
             expr_to_tensor_proxy[expr] = fx.Proxy(
