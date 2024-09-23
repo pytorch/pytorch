@@ -4133,6 +4133,7 @@ class CPUReproTests(TestCase):
                 exactly=True,
             ).run(code)
 
+    @requires_vectorization
     def test_repeated_exp(self):
         def fn(x):
             y = x.sigmoid()
