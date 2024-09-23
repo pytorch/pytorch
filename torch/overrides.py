@@ -553,7 +553,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.cummax: lambda input, dim, out=None: -1,
         torch.cummin: lambda input, dim, out=None: -1,
         torch.cumprod: lambda input, dim, out=None, dtype=None: -1,
-        torch.cumsum: lambda input, dim, out=None, dtype=None: -1,
+        torch.cumsum: lambda input, dim, out=None, dtype=None, axis=None: -1,
         torch.cumulative_trapezoid: lambda y, x=None, dim=-1: -1,
         torch.logcumsumexp: lambda input, dim, out=None: -1,
         torch.deg2rad: lambda input, out=None: -1,
@@ -1252,8 +1252,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.vsplit: lambda input, indices_or_sections: -1,
         torch.vstack: lambda tensors, out=None: -1,
         torch.where: lambda condition, x=None, y=None: -1,
-        torch.wrapped_linear_prepack: lambda weight, weight_scale, weight_zero_point, bias : -1,
-        torch.wrapped_quantized_linear_prepacked: (
+        torch._wrapped_linear_prepack: lambda weight, weight_scale, weight_zero_point, bias : -1,
+        torch._wrapped_quantized_linear_prepacked: (
             lambda input, input_scale, input_zero_point, prepacked, out_scale, out_zero_point, out_channel : -1  # noqa: B950
         ),
         torch.zeros_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
