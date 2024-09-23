@@ -22,13 +22,12 @@ import warnings
 from collections import defaultdict
 from typing import Any, Callable, Final, Mapping, Sequence, TYPE_CHECKING, TypeVar
 
-from onnxscript import ir
-
 import torch
 import torch._ops
 import torch.utils._pytree as pytree
 from torch.onnx import errors
 from torch.onnx._internal import io_adapter
+from torch.onnx._internal._lazy_import import onnxscript_ir as ir
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.exporter import _onnx_program
 from torch.onnx._internal.fx import (
