@@ -22,7 +22,7 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
 )
 from torch.export import export_for_training
 from torch.testing._internal.common_quantization import TestHelperModules
-from torch.testing._internal.common_utils import IS_WINDOWS, TestCase
+from torch.testing._internal.common_utils import IS_WINDOWS, skipIfCrossRef, TestCase
 
 
 def _extract_debug_handles(model) -> Dict[torch.fx.Node, int]:
@@ -117,6 +117,8 @@ class TestNumericDebugger(TestCase):
 
         self.assertEqual(debug_handle_map, debug_handle_map_ref)
 
+    @skipIfCrossRef  # mlazos: retracing FX graph with torch function mode doesn't propagate metadata, because the stack
+    # trace of the mode torch function impl doesn't match the traced graph stored lineno.
     def test_re_export_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
