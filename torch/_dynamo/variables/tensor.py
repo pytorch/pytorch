@@ -603,6 +603,10 @@ class TensorVariable(VariableTracker):
         if self.dtype is not None:
             return ConstantVariable.create(self.dtype.is_floating_point)
 
+    def method_is_inference(self):
+        if (fake := self.proxy.node.meta.get("example_value")) is not None:
+            return ConstantVariable.create(fake.is_inference())
+
     def method_is_complex(self):
         if self.dtype is not None:
             return ConstantVariable.create(self.dtype.is_complex)

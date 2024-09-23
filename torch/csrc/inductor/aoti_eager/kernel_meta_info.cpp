@@ -12,7 +12,8 @@ TensorMetadata::TensorMetadata(const at::Tensor& src_tensor)
       dispatch_key_set_(src_tensor.key_set()),
       sizes_(src_tensor.sizes().vec()),
       strides_(src_tensor.strides().vec()),
-      requires_grad_(src_tensor.requires_grad()) {}
+      requires_grad_(src_tensor.requires_grad()),
+      is_inference_(src_tensor.is_inference()) {}
 
 TensorMetadata::TensorMetadata(
     bool is_symbolic,
@@ -21,14 +22,16 @@ TensorMetadata::TensorMetadata(
     c10::DispatchKeySet dispatch_key_set,
     std::vector<int64_t> sizes,
     std::vector<int64_t> strides,
-    bool requires_grad)
+    bool requires_grad,
+    bool is_inference)
     : is_symbolic_(is_symbolic),
       dtype_(dtype),
       device_(device),
       dispatch_key_set_(dispatch_key_set),
       sizes_(std::move(sizes)),
       strides_(std::move(strides)),
-      requires_grad_(requires_grad) {
+      requires_grad_(requires_grad),
+      is_inference_(is_inference) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       !is_symbolic_, "Not support symbolic shape now");
 }
@@ -55,6 +58,7 @@ void TensorMetadata::build_guard(const torch::dynamo::LocalState& local_state) {
       dtype_,
       device_.index(),
       requires_grad_,
+      is_inference_,
       sym_sizes,
       sym_strides);
 }
@@ -81,7 +85,9 @@ bool TensorMetadata::operator==(const TensorMetadata& other) const {
         other.device_,
         sym_sizes,
         sym_strides,
-        other.requires_grad_ /* Should we need to care about grad requirement?*/);
+        other
+            .requires_grad_ /* Should we need to care about grad requirement?*/,
+        other.is_inference_);
     return res;
   } else {
     return this->is_symbolic_ == other.is_symbolic_ &&

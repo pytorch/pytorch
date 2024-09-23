@@ -71,6 +71,7 @@ TensorCheck::TensorCheck(
       dtype_(v.dtype().toScalarType()),
       device_index_(v.device().index()),
       requires_grad_(v.requires_grad()),
+      is_inference_(v.is_inference()),
       sizes_(std::move(dynamic_dims_sizes)),
       strides_(std::move(dynamic_dims_strides)),
       dim_(static_cast<int64_t>(sizes_.size())) {
@@ -85,6 +86,7 @@ TensorCheck::TensorCheck(
     at::ScalarType dtype,
     at::DeviceIndex device_index,
     bool requires_grad,
+    bool is_inference,
     std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
     std::vector<std::optional<c10::SymInt>> dynamic_dims_strides)
     : pytype(pt),
@@ -92,6 +94,7 @@ TensorCheck::TensorCheck(
       dtype_(dtype),
       device_index_(device_index),
       requires_grad_(requires_grad),
+      is_inference_(is_inference),
       sizes_(std::move(dynamic_dims_sizes)),
       strides_(std::move(dynamic_dims_strides)),
       dim_(static_cast<int64_t>(sizes_.size())) {}
@@ -115,7 +118,8 @@ bool TensorCheck::check(const LocalState& state, const at::Tensor& v) {
       v.device(),
       v.sym_sizes(),
       sym_strides,
-      v.requires_grad());
+      v.requires_grad(),
+      v.is_inference());
 }
 
 bool TensorCheck::check(
@@ -125,10 +129,11 @@ bool TensorCheck::check(
     const c10::Device& device,
     const c10::SymIntArrayRef& sym_sizes,
     const c10::SymIntArrayRef& sym_strides,
-    const bool& requires_grad) {
+    const bool& requires_grad,
+    const bool& is_inference) {
   if (dispatch_key_ != state.apply(dispatch_key_set).raw_repr() ||
       dtype_ != dtype || device_index_ != device.index() ||
-      requires_grad_ != requires_grad) {
+      requires_grad_ != requires_grad || is_inference_ != is_inference) {
     return false;
   }
 
@@ -162,7 +167,11 @@ std::string TensorCheck::check_verbose(
     const std::string& tensor_name) {
   std::stringstream fail_reason;
   fail_reason << "tensor '" << tensor_name << "' ";
-  if (dispatch_key_ != state.apply(v.key_set()).raw_repr()) {
+  if (is_inference_ != v.is_inference()) {
+    fail_reason << "is_inference mismatch. expected is_inference="
+                << is_inference_;
+    return fail_reason.str();
+  } else if (dispatch_key_ != state.apply(v.key_set()).raw_repr()) {
     // return fmt::format("tensor dispatch key mismatch. expected {}, actual
     // {}", dispatch_key_, state.apply(v.key_set()).raw_repr());
     fail_reason << "dispatch key set mismatch. expected "

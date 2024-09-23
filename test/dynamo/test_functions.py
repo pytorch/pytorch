@@ -939,6 +939,46 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x - 1
 
     @make_test
+    def test_tensor_is_inference(x):
+        if x.is_inference():
+            return x + 1
+        else:
+            return x - 1
+
+    def test_is_inference_recompilation(self):
+        def fn(x):
+            if x.is_inference():
+                return x + 1
+            else:
+                return x + 2
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+
+        x = torch.randn(2, 2)
+        dynamo_result = fn(x)
+
+        with torch.no_grad():
+            x = torch.randn(2, 2)
+            fn(x)
+
+        self.assertEqual(cnts.frame_count, 2)  # Recompile! requires_grad changed
+
+        with torch.inference_mode():
+            x = torch.randn(2, 2)
+            fn(x)
+
+        self.assertEqual(cnts.frame_count, 3)  # Recompile! inference_mode changed
+
+        with torch.inference_mode():
+            x = torch.randn(2, 2)
+            fn(x)
+            fn(x)
+            fn(x)
+
+        self.assertEqual(cnts.frame_count, 3)  # no more recompiles
+
+    @make_test
     def test_get_privateuse1_name(x):
         if torch._C._get_privateuse1_backend_name() == "privateuseone":
             return x + 1
