@@ -750,7 +750,7 @@ void _apply_sparse_csr_linear_solve(
   TORCH_CUDSS_CHECK(cudssConfigCreate(&config));
   TORCH_CUDSS_CHECK(cudssDataCreate(handle, &cudss_data));
 
-  AT_DISPATCH_FLOATING_TYPES(values.type(), "create_matrix", ([&] {
+  AT_DISPATCH_FLOATING_TYPES(values.scalar_type(), "create_matrix", ([&] {
     scalar_t* values_ptr = values.data_ptr<scalar_t>();
     scalar_t* b_ptr = b.data_ptr<scalar_t>();
     scalar_t* x_ptr = x.data_ptr<scalar_t>();
