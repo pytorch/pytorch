@@ -68,7 +68,7 @@ class TestInvokeSubgraph(TestCase):
         out.sum().backward()
 
     def test_linear(self):
-        n_layers = 1
+        n_layers = 2
         mods = [torch.nn.Linear(1, 1, bias=False).cuda() for _ in range(n_layers)]
 
         def fn(x):
@@ -84,6 +84,22 @@ class TestInvokeSubgraph(TestCase):
         # opt_fn = torch.compile(fn)
 
         res = opt_fn(x)
+
+    def test_multiple(self):
+        def gn(x):
+            return torch.cos(x)
+
+        def fn(x):
+            a = invoke_subgraph(gn, "start", x)
+            b = invoke_subgraph(gn, "start", x)
+            return a + b
+
+        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
+        # opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        x = torch.randn(8, requires_grad=True, device="cuda")
+        out = opt_fn(x)
+        print(out)
 
 
 if __name__ == "__main__":
