@@ -1166,3 +1166,10 @@ AOTITorchError aoti_torch__alloc_from_pool(
         strides));
   });
 }
+
+AOTITorchError aoti_torch_zero_(AtenTensorHandle tensor) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    t->zero_();
+  });
+}

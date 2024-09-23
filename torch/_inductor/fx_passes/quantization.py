@@ -1561,6 +1561,27 @@ def _register_woq_mm_int8_pattern3():
     _register_woq_lowering(_woq_pattern, aten._weight_int8pack_mm.default, aten.reshape)
 
 
+def _register_woq_mm_int8_pattern4():
+    _woq_pattern = CallFunction(
+        aten.mul.Tensor,
+        CallFunction(
+            aten.mm.default,
+            KeywordArg("x"),
+            CallFunction(
+                prims.convert_element_type.default,
+                CallFunction(
+                    aten.permute.default,
+                    KeywordArg("weight"),
+                    Arg(),
+                ),
+                Arg(),
+            ),
+        ),
+        KeywordArg("scales"),
+    )
+    _register_woq_lowering(_woq_pattern, aten._weight_int8pack_mm.default, aten.reshape)
+
+
 def _register_quantization_lowerings():
     _register_quantization_unary_fusion()
     _register_quantization_binary_fusion()
@@ -1573,6 +1594,7 @@ def _register_woq_lowerings():
     _register_woq_mm_int8_pattern1()
     _register_woq_mm_int8_pattern2()
     _register_woq_mm_int8_pattern3()
+    _register_woq_mm_int8_pattern4()
 
 
 def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
