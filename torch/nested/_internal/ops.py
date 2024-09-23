@@ -283,8 +283,7 @@ def jagged_binary_pointwise(func, *args, **kwargs):
         lhs, rhs = (nt._values, t_squeezed) if a_is_nt else (t_squeezed, nt._values)
         return NestedTensor(func(lhs, rhs, *args[2:], **kwargs), **extracted_kwargs)
 
-    # Harder case: do manual broadcasting over unbound components
-    # when NT dim == non-NT dim
+    # Harder case: do manual broadcasting when NT dim == non-NT dim
     # ex: (B, j0, D_0, D_1) + (B, 1, D_0, D_1) -> (B, j0, D_0, D_1)
     if a.dim() == b.dim():
         # ex: (B, j0, D_0, D_1) + (1, 1, D_0, D_1) -> should
@@ -324,7 +323,7 @@ def jagged_binary_pointwise(func, *args, **kwargs):
             max_seqlen=max_seqlen,
         )
 
-        # broadcasting function call
+        # function call with two NJTs
         lhs, rhs = (nt, t_as_nt) if a_is_nt else (t_as_nt, nt)
         return func(lhs, rhs, *args[2:], **kwargs)
 
