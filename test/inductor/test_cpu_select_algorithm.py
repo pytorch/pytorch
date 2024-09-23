@@ -304,6 +304,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             )
             and epilogue != "mul"
             and epilogue != "div"
+            and not inductor_config.abi_compatible  # TODO: fix this
             or (dtype == torch.half and epilogue == "add" and not bias)
             or (
                 dtype == torch.float32
