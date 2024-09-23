@@ -3774,24 +3774,27 @@ def l1_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-    weight: Optional[Tensor] = None,
+    **kwargs,
 ) -> Tensor:  # noqa: D400,D402
-    r"""l1_loss(input, target, size_average=None, reduce=None, reduction='mean', weight=None) -> Tensor
+    r"""l1_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
-    Function that calculates the mean element-wise absolute value difference, with optional weighting.
+    Function that takes the mean element-wise absolute value difference.
 
     See :class:`~torch.nn.L1Loss` for details.
     """
-    if has_torch_function_variadic(input, target, weight):
+    weight = kwargs.get('weight', None)
+
+    args = (input, target, weight) if weight is not None else (input, target)
+
+    if has_torch_function_variadic(input, target):
         return handle_torch_function(
             l1_loss,
-            (input, target, weight),
+            (input, target),
             input,
             target,
             size_average=size_average,
             reduce=reduce,
             reduction=reduction,
-            weight=weight,
         )
     if not (target.size() == input.size()):
         warnings.warn(
@@ -3877,12 +3880,13 @@ def mse_loss(
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
 
+    expanded_input, expanded_target = torch.broadcast_tensors(input, target)
+
     if weight is not None:
         if weight.size() != input.size():
             raise ValueError("Weights and input must have the same size.")
 
-        # Perform weighted MSE loss manually
-        expanded_input, expanded_target = torch.broadcast_tensors(input, target)
+        # Perform weighted MSE loss manually      
         squared_errors = torch.pow(expanded_input - expanded_target, 2)
         weighted_squared_errors = squared_errors * weight
 
@@ -3896,8 +3900,7 @@ def mse_loss(
             raise ValueError(
                 f"Invalid reduction mode: {reduction}. Expected one of 'none', 'mean', 'sum'."
             )
-    else:
-        expanded_input, expanded_target = torch.broadcast_tensors(input, target)
+    else:    
         return torch._C._nn.mse_loss(
             expanded_input, expanded_target, _Reduction.get_enum(reduction)
         )
