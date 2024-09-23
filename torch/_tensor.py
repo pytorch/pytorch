@@ -846,6 +846,31 @@ class Tensor(torch._C.TensorBase):
 
         return _symeig(self, eigenvectors=eigenvectors)
 
+    def cumsum(
+        self,
+        dim=None,
+        *,
+        dtype=None,
+        out=None,
+        axis=None,
+    ):
+        r"""
+        cumsum(dim, dtype=None) -> Tensor
+
+        See :func:`torch.cumsum`
+        """
+        if has_torch_function_unary(self):
+            return handle_torch_function(
+                Tensor.cumsum,
+                (self,),
+                self,
+                dim,
+                dtype=dtype,
+                out=out,
+                axis=axis,
+            )
+        return torch.cumsum(self, dim, dtype=dtype, out=out, axis=axis)
+
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
         # If get_infos is True, then we don't need to check for errors and vice versa
@@ -1353,7 +1378,7 @@ class Tensor(torch._C.TensorBase):
             [name for name in names if not is_ellipsis(name)], ellipsis_idx
         )
 
-    def unflatten(self, dim, sizes):
+    def unflatten(self, dim, sizes):  # type: ignore[override]
         r"""
         unflatten(dim, sizes) -> Tensor
 

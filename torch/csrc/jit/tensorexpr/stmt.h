@@ -84,51 +84,47 @@ class TORCH_API Block : public StmtNode<Block> {
     return stmts_.empty();
   }
 
-  void prepend_stmt(StmtPtr s) {
+  void prepend_stmt(const StmtPtr& s) {
     if (s->get_parent()) {
-      throw malformed_input(
-          "Block prepend Stmt with existing parent", std::move(s));
+      throw malformed_input("Block prepend Stmt with existing parent", s);
     }
 
     stmts_.push_front(s);
     set_parent(s, this);
   }
-  void append_stmt(StmtPtr s) {
+  void append_stmt(const StmtPtr& s) {
     if (s->get_parent()) {
-      throw malformed_input(
-          "Block append Stmt with existing parent", std::move(s));
+      throw malformed_input("Block append Stmt with existing parent", s);
     }
 
     stmts_.push_back(s);
     set_parent(s, this);
   }
 
-  void insert_stmt_before(StmtPtr s, const StmtPtr& before) {
+  void insert_stmt_before(const StmtPtr& s, const StmtPtr& before) {
     if (s->get_parent()) {
-      throw malformed_input(
-          "Block append Stmt with existing parent", std::move(s));
+      throw malformed_input("Block append Stmt with existing parent", s);
     }
 
     auto pos = std::find(stmts_.begin(), stmts_.end(), before);
     if (pos == stmts_.end()) {
       throw malformed_input(
-          "Inserting after statement that is not in block", std::move(s));
+          "Inserting after statement that is not in block", s);
     }
 
     stmts_.insert(pos, s);
     set_parent(s, this);
   }
 
-  void insert_stmt_after(StmtPtr s, const StmtPtr& after) {
+  void insert_stmt_after(const StmtPtr& s, const StmtPtr& after) {
     if (s->get_parent()) {
-      throw malformed_input(
-          "Block append Stmt with existing parent", std::move(s));
+      throw malformed_input("Block append Stmt with existing parent", s);
     }
 
     auto pos = std::find(stmts_.begin(), stmts_.end(), after);
     if (pos == stmts_.end()) {
       throw malformed_input(
-          "Inserting after statement that is not in block", std::move(s));
+          "Inserting after statement that is not in block", s);
     }
 
     ++pos;
@@ -137,10 +133,10 @@ class TORCH_API Block : public StmtNode<Block> {
     set_parent(s, this);
   }
 
-  bool replace_stmt(const StmtPtr& old_stmt, StmtPtr new_stmt) {
+  bool replace_stmt(const StmtPtr& old_stmt, const StmtPtr& new_stmt) {
     if (new_stmt->get_parent()) {
       throw malformed_input(
-          "Block replace Stmt with existing parent", std::move(new_stmt));
+          "Block replace Stmt with existing parent", new_stmt);
     }
 
     auto pos = std::find(stmts_.begin(), stmts_.end(), old_stmt);
@@ -157,10 +153,10 @@ class TORCH_API Block : public StmtNode<Block> {
   // Creates a new block by cloning `this` block and replacing the given
   // statement with a new statement. Note that `old_stmt` refers to a statement
   // in `this` block. If the `old_stmt` is not found, it will return `nullptr`.
-  BlockPtr clone_and_replace(const StmtPtr& old_stmt, StmtPtr new_stmt) {
+  BlockPtr clone_and_replace(const StmtPtr& old_stmt, const StmtPtr& new_stmt) {
     if (new_stmt->get_parent()) {
       throw malformed_input(
-          "Block replace Stmt with existing parent", std::move(new_stmt));
+          "Block replace Stmt with existing parent", new_stmt);
     }
 
     std::vector<StmtPtr> stmts(stmts_.begin(), stmts_.end());
@@ -260,9 +256,7 @@ class TORCH_API Block : public StmtNode<Block> {
     StmtPtr p1_p = std::move(p1);
     while (p1_p) {
       if (BlockPtr b = to<Block>(p1_p)) {
-        if (b) {
-          enclosing.insert(b);
-        }
+        enclosing.insert(b);
       }
       p1_p = p1_p->get_parent();
     }
