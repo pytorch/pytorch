@@ -64,6 +64,7 @@ if args.output_directory:
     out_dir = args.output_directory
 
 includes = [
+    "caffe2/operators/*",
     "binaries/*",
     "caffe2/**/*_test*",
     "caffe2/core/*",
