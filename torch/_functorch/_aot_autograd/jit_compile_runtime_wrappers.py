@@ -465,7 +465,7 @@ def partition_invoke_subgraphs(
                     the_function=torch.ops.higher_order.invoke_subgraph,
                     args=(
                         subgraph_attr_node,
-                        "start",
+                        "_partitioned",
                         *(env[n] for n in node.args[2:]),
                     ),
                 )
@@ -520,7 +520,7 @@ def partition_invoke_subgraphs(
                     the_function=torch.ops.higher_order.invoke_subgraph,
                     args=(
                         subgraph_attr_node,
-                        "start",
+                        "_partitioned",
                         *(saved_tensors_nodes + tangent_nodes),
                     ),
                 )
