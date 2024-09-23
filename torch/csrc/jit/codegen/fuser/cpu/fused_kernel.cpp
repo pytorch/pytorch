@@ -11,10 +11,7 @@
 #include <iostream>
 #include <string>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cpu {
+namespace torch::jit::fuser::cpu {
 
 #ifdef _MSC_VER
 static const std::string getTempPath() {
@@ -357,7 +354,4 @@ static std::shared_ptr<FusedKernel> createFusionKernel(
 }
 
 RegisterFusionBackend reg(DeviceType::CPU, createFusionKernel);
-} // namespace cpu
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::cpu
