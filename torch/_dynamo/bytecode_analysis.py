@@ -189,8 +189,6 @@ class StackSize:
     def offset_of(self, other, n):
         prior = (self.low, self.high)
         self.low = min(self.low, other.low + n)
-        if other.low + n < 0:
-            breakpoint()
         self.high = max(self.high, other.high + n)
         if (self.low, self.high) != prior:
             self.fixed_point.value = False
@@ -198,8 +196,6 @@ class StackSize:
     def exn_tab_jump(self, depth):
         prior = (self.low, self.high)
         self.low = min(self.low, depth)
-        if depth < 0:
-            breakpoint()
         self.high = max(self.high, depth)
         if (self.low, self.high) != prior:
             self.fixed_point.value = False
