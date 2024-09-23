@@ -6,7 +6,7 @@ numpy
 psutil
 pyyaml
 requests
-setuptools
+setuptools==72.1.0
 types-dataclasses
 typing-extensions>=4.8.0
 sympy==1.12.1 ; python_version == "3.8"
@@ -18,6 +18,6 @@ fsspec
 lintrunner
 ninja
 # setuptools was removed from default python install
-setuptools ; python_version >= "3.12"
+setuptools==72.1.0 ; python_version >= "3.12"
 packaging
 optree>=0.12.0 ; python_version <= "3.12"
