@@ -2729,8 +2729,12 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   at::cuda::OptionalCUDAGuard gpuGuard(device);
 
   if (nanCheck) {
+    at::cuda::CUDAStreamGuard ncclStreamGuard(ncclStream);
     for (const auto& input : inputs) {
-      checkForNan(input, ncclStream);
+      bool nan = isnan(input)._is_any_true().item<bool>();
+      if (nan) {
+        throw std::runtime_error("NaN check failed in collective()");
+      }
     }
   }
 
@@ -3182,7 +3186,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // Only check for NaN for send ops, for recv ops `tensor` can be a random
   // placeholder
   if (enableNanCheck_ && opType == OpType::SEND) {
-    checkForNan(tensor, ncclStream);
+    bool nan = isnan(tensor)._is_any_true().item<bool>();
+    if (nan) {
+      throw std::runtime_error("NaN check failed in pointToPoint()");
+    }
   }
 
   if (!coalescing_state_) {
