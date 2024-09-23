@@ -1,5 +1,5 @@
 # Owner(s): ["oncall: jit"]
-# ruff: noqa: F841
+
 import torch
 
 # This is how we include tests located in test/jit/...
@@ -455,7 +455,7 @@ class TestJit(JitTestCase):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 return x
 
-            pickle.dumps(fn, protocol=0)
+            pkl_fn = pickle.dumps(fn, protocol=0)
 
     def test_restore_device(self):
         class M(torch.jit.ScriptModule):
@@ -926,7 +926,7 @@ class TestJit(JitTestCase):
                 # no opt plan
                 fwd._debug_flush_compilation_cache()
                 with self.assertRaisesRegex(RuntimeError, "INTERNAL ASSERT FAILED"):
-                    m.get_debug_state()
+                    states = m.get_debug_state()
 
     def test_numel(self):
         @torch.jit.script
@@ -2998,9 +2998,9 @@ class TestFrontend(JitTestCase):
         res_func = traced_func(**example_input_dict_func)
         self.assertEqual(res_func, 2 * torch.ones(1))
         with self.assertRaisesRegex(RuntimeError, r"forward\(\) is missing value for argument 'x'."):
-            traced_model_2(**{'z': torch.rand([2]), 'y': torch.rand([2])})  # noqa: PIE804
+            res_2 = traced_model_2(**{'z': torch.rand([2]), 'y': torch.rand([2])})  # noqa: PIE804
         with self.assertRaisesRegex(RuntimeError, r"forward\(\) is missing value for argument 'y'."):
-            traced_model_2(**{'x': torch.rand([2]), 'z': torch.rand([2])})  # noqa: PIE804
+            res_2 = traced_model_2(**{'x': torch.rand([2]), 'z': torch.rand([2])})  # noqa: PIE804
 
 
 class TestScript(JitTestCase):
@@ -3234,9 +3234,9 @@ class TestScript(JitTestCase):
             return x
 
         x = torch.ones(2, 3, 4, dtype=torch.float32)
-        fct_loop(x)
+        out = fct_loop(x)
         jit_trace = torch.jit.trace(fct_loop, x)
-        jit_trace(x)
+        out_trace = jit_trace(x)
 
     def test_no_self_arg_ignore_function(self):
         class MyModule(nn.Module):
@@ -3715,7 +3715,7 @@ def foo(x):
             return torch.zeros((input.shape[0], 1), dtype=input.dtype)
 
         with warnings.catch_warnings(record=True) as warns:
-            torch.jit.script(check_subclass_warn)
+            scripted = torch.jit.script(check_subclass_warn)
         FileCheck().check("TorchScript will treat type annotations of Tensor").run(str(warns[0]))
 
     def test_first_class_module(self):
@@ -3791,7 +3791,7 @@ def foo(x):
                     return a + 2
 
         with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
-            with self.capture_stdout():
+            with self.capture_stdout() as captured:
                 @torch.jit.script
                 def invalid_prefix_annotation3(a):
                     #     type: (Int) -> Int
@@ -4022,8 +4022,8 @@ def foo(x):
             def __init__(self, x):
                 super().__init__()
                 self.foo = x
-        What(foo)
-        What(foo)
+        a = What(foo)
+        c = What(foo)
 
     def test_training_param(self):
         class What(torch.jit.ScriptModule):
@@ -4328,7 +4328,7 @@ def foo(x):
 
         _, lineno = inspect.getsourcelines(foobar)
         with self.assertRaisesRegex(RuntimeError, f'test_jit.py", line {lineno + 1}'):
-            torch.jit.script(foobar)
+            scripted = torch.jit.script(foobar)
 
     def test_file_line_error_class_defn(self):
         class FooBar:
@@ -5308,8 +5308,8 @@ a")
         # test that shape analysis is written correctly for sum with OptionalIntArrayRef[1] dim argument
         self.run_pass('constant_propagation', func.graph)
         self.run_pass('constant_propagation', func2.graph)
-        _propagate_shapes(func.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
-        _propagate_shapes(func2.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
+        g = _propagate_shapes(func.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
+        g2 = _propagate_shapes(func2.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
 
     def test_cat(self):
         with enable_profiling_mode_for_profiling_tests():
@@ -5546,6 +5546,7 @@ a")
                 for _i in range(5):
                     b = x + 1
                     f = [1]
+                    before_resize_alias = b.sub_(1)
                     # for i in range(10):
                     f.append(1)
                     b.resize_(f)
@@ -6866,7 +6867,7 @@ a")
         f = as_interface(Bar())
 
         with self.assertRaises(RuntimeError) as cm:
-            f.one(torch.rand(10), torch.rand(9))
+            x = f.one(torch.rand(10), torch.rand(9))
             bar(torch.rand(10), torch.rand(9))
         FileCheck().check("The following operation failed in the TorchScript interpreter") \
                    .check("Traceback") \
