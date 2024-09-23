@@ -244,6 +244,16 @@ using namespace c10::xpu;
 #define C10_ALWAYS_INLINE inline
 #endif
 
+// Unlike C10_ALWAYS_INLINE, C10_ALWAYS_INLINE_ATTRIBUTE can be used
+// on a lambda.
+#if defined(_MSC_VER)
+#define C10_ALWAYS_INLINE_ATTRIBUTE [[msvc::forceinline]]
+#elif __has_attribute(always_inline) || defined(__GNUC__)
+#define C10_ALWAYS_INLINE_ATTRIBUTE __attribute__((__always_inline__))
+#else
+#define C10_ALWAYS_INLINE_ATTRIBUTE
+#endif
+
 #if defined(_MSC_VER)
 #define C10_ATTR_VISIBILITY_HIDDEN
 #elif defined(__GNUC__)
