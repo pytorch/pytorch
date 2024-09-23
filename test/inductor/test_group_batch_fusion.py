@@ -270,7 +270,7 @@ class TestPoitwiseOpsPostGrad(torch.nn.Module):
         return torch.cat(add, dim=1)
 
 
-@requires_gpu
+@requires_gpu()
 @torch._inductor.config.patch(
     pre_grad_fusion_options={
         "batch_linear": {},
@@ -449,7 +449,7 @@ class TestGroupBatchFusion(TestCase):
         self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
-    @requires_gpu
+    @requires_gpu()
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
@@ -477,7 +477,7 @@ class TestGroupBatchFusion(TestCase):
         self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
-    @requires_gpu
+    @requires_gpu()
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
@@ -495,7 +495,7 @@ class TestGroupBatchFusion(TestCase):
     def test_gate_fusion_post_grad(self):
         counters.clear()
         size = 20
-        module = TestHighwaySelfGating(d_model=10, size=size)
+        module = TestHighwaySelfGating(d_model=10, size=size, device=GPU_TYPE)
         input = [
             [
                 torch.randn(10, 10, requires_grad=True, device=GPU_TYPE)
@@ -536,7 +536,7 @@ class TestBMMFusionModule(torch.nn.Module):
         return output
 
 
-@requires_gpu
+@requires_gpu()
 @torch._inductor.config.patch(
     post_grad_fusion_options={"batch_linear_post_grad": {"require_fbgemm": False}}
 )
