@@ -401,9 +401,9 @@ pr_time_benchmarks() {
 
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
-  PYTHONPATH=$(pwd)/benchmarks/dynamo/pr_time_benchmarks source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
+  PYTHONPATH=$(pwd)/benchmarks/dynamo/pr_time_benchmarks source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
   echo "benchmark results on current PR: "
-  cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt"
+  cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv"
 
 }
 
@@ -604,11 +604,6 @@ test_inductor_micro_benchmark() {
 
 test_inductor_halide() {
   python test/run_test.py --include inductor/test_halide.py --verbose
-  assert_git_not_dirty
-}
-
-test_inductor_triton_cpu() {
-  python test/run_test.py --include inductor/test_triton_cpu_backend.py --verbose
   assert_git_not_dirty
 }
 
@@ -1388,14 +1383,16 @@ test_executorch() {
   assert_git_not_dirty
 }
 
-test_linux_aarch64(){
+test_linux_aarch64() {
   python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
-       test_transformers test_multiprocessing test_numpy_interop --verbose
+        test_transformers test_multiprocessing test_numpy_interop \
+        --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 
   # Dynamo tests
   python test/run_test.py --include dynamo/test_compile dynamo/test_backends dynamo/test_comptime dynamo/test_config \
        dynamo/test_functions dynamo/test_fx_passes_pre_grad dynamo/test_interop dynamo/test_model_output dynamo/test_modules \
-       dynamo/test_optimizers dynamo/test_recompile_ux dynamo/test_recompiles --verbose
+       dynamo/test_optimizers dynamo/test_recompile_ux dynamo/test_recompiles \
+       --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 
   # Inductor tests
   python test/run_test.py --include inductor/test_torchinductor inductor/test_benchmark_fusion inductor/test_codecache \
@@ -1405,7 +1402,8 @@ test_linux_aarch64(){
        inductor/test_max_autotune inductor/test_memory_planning inductor/test_metrics inductor/test_multi_kernel inductor/test_pad_mm \
        inductor/test_pattern_matcher inductor/test_perf inductor/test_profiler inductor/test_select_algorithm inductor/test_smoke \
        inductor/test_split_cat_fx_passes inductor/test_standalone_compile inductor/test_torchinductor \
-       inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes --verbose
+       inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes \
+       --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose inductor/test_memory
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
@@ -1438,8 +1436,6 @@ elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
   test_inductor_halide
-elif [[ "${TEST_CONFIG}" == *inductor-triton-cpu* ]]; then
-  test_inductor_triton_cpu
 elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
   test_inductor_micro_benchmark
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then

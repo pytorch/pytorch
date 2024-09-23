@@ -36,9 +36,9 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 
 try:
-    from .mock_cache import global_stats, PatchCaches
+    from .mock_cache import global_stats, PatchCaches, Stats
 except ImportError:
-    from mock_cache import global_stats, PatchCaches  # @manual
+    from mock_cache import global_stats, PatchCaches, Stats  # @manual
 
 
 torch.set_float32_matmul_precision("high")
@@ -771,9 +771,7 @@ class TestMaxAutotuneRemoteCache(TestCase):
                     reset()
 
                 global_stats.report()
-                self.assertEqual(global_stats.autotune.num_get_hit, 3)
-                self.assertEqual(global_stats.autotune.num_get_miss, 1)
-                self.assertEqual(global_stats.autotune.num_put, 1)
+                self.assertEqual(global_stats.autotune_remote, Stats(1, 3, 1))
 
             global_stats.reset()
             for _ in range(4):
@@ -781,9 +779,7 @@ class TestMaxAutotuneRemoteCache(TestCase):
                     torch.compile(f, dynamic=dynamic)(x, y)
                 reset()
             global_stats.report()
-            self.assertEqual(global_stats.autotune.num_get_hit, 3)
-            self.assertEqual(global_stats.autotune.num_get_miss, 1)
-            self.assertEqual(global_stats.autotune.num_put, 1)
+            self.assertEqual(global_stats.autotune_remote, Stats(1, 3, 1))
 
 
 class TestBenchmarkRequest(BenchmarkRequest):
@@ -893,12 +889,14 @@ class TestPrologueFusion(TestCase):
                     "max_autotune": True,
                     "prologue_fusion": True,
                     "benchmark_epilogue_fusion": False,
+                    "shape_padding": False,
                 }
             )
         )
 
-    def test_upcast(self):
-        M = N = K = 256
+    @parametrize("size", (256, 249))
+    def test_upcast(self, size):
+        M = N = K = size
 
         x = torch.rand([M, K], dtype=torch.float16, device="cuda")
         y = torch.rand([M, K], dtype=torch.float, device="cuda")
@@ -932,6 +930,24 @@ class TestPrologueFusion(TestCase):
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         # two kernels
         FileCheck().check("def call").check_count(".run", 2, exactly=True).run(code[0])
+
+    @parametrize("size", (256,))
+    def test_multiple_fusions(self, size):
+        M = N = K = size
+
+        @torch.compile()
+        def foo(x, y):
+            return ((x + 0.5) @ (y - 0.5)) * 2
+
+        x = torch.rand([M, K], dtype=torch.float, device="cuda")
+        y = torch.rand([M, K], dtype=torch.float, device="cuda")
+
+        foo(x, y)
+
+        out, code = run_and_get_code(torch.compile(foo), x, y)
+        self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
+        breakpoint()
+        pass
 
 
 if __name__ == "__main__":

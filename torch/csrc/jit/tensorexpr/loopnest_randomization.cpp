@@ -480,7 +480,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
           }
 
           int index = rand() % (int)all_nested_loops.size();
-          auto nested_loops = all_nested_loops.at(index);
+          auto const& nested_loops = all_nested_loops.at(index);
           if (nested_loops.size() < 2) {
             break;
           }
@@ -554,7 +554,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
 
           // Randomly pick a set of consecutive loops to flatten
           int index = rand() % (int)all_nested_loops.size();
-          auto nested_loops = all_nested_loops.at(index);
+          auto const& nested_loops = all_nested_loops.at(index);
 
           // Generate a good history message
           std::vector<std::string> indices;
