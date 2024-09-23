@@ -592,7 +592,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         return ["elem"], None
 
     def tolist(self):
-        return self.trigger_wait().tolist()
+        return self.wait().tolist()
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
@@ -601,18 +601,15 @@ class AsyncCollectiveTensor(torch.Tensor):
         return AsyncCollectiveTensor(elem)
 
     def __repr__(self) -> str:  # type: ignore[override]
-        return f"AsyncCollectiveTensor({self.trigger_wait()})"
+        return f"AsyncCollectiveTensor({self.wait()})"
 
-    def trigger_wait(self):
+    def wait(self):
         if not self.completed:
             out = wait_tensor(self.elem)
             self.completed = True
             return out
         else:
             return self.elem
-
-    def wait(self) -> torch.Tensor:
-        return wait_tensor(self.elem)
 
     def _get_acs_underlying_tensor(self):
         """This method enables  _functional_collectives_impl to test if a tensor is an ACS"""
@@ -632,7 +629,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         def unwrap(e: AsyncCollectiveTensor):
             # wait_tensor is idepotent and will do stream sync only once
             if not is_view_op:
-                return e.trigger_wait()
+                return e.wait()
             return e.elem
 
         def wrap(e: torch.Tensor):
