@@ -99,6 +99,7 @@ from ._aot_autograd.subclass_utils import (  # noqa: F401
     create_metadata_for_subclass,
     requires_subclass_dispatch,
     unwrap_tensor_subclasses,
+    unwrap_tensor_subclasses_with_indices_to_original,
     wrap_tensor_subclasses,
     wrap_tensor_subclasses_maybe_joint,
 )
@@ -978,6 +979,10 @@ def aot_module_simplified(
 
     if tracing_context := torch._guards.TracingContext.try_get():
         tracing_context.params_flat = params_flat
+        (
+            tracing_context.params_flat_unwrap_subclasses,
+            tracing_context.params_unwrapped_to_flat_index,
+        ) = unwrap_tensor_subclasses_with_indices_to_original(params_flat)
 
     aot_autograd_arg_pos_to_source = None
     # Then, the params 1:1 mapped sources, if relevant.

@@ -190,10 +190,17 @@ def is_cpu_scalar(x: TensorLikeType) -> bool:
 
 
 def _safe_copy_out(
-    *, copy_from: TensorLikeType, copy_to: TensorLikeType, exact_dtype: bool = False
+    *,
+    copy_from: TensorLikeType,
+    copy_to: TensorLikeType,
+    copy_cpu_scalars: bool = True,
+    exact_dtype: bool = False,
 ):
     # Checks same device
-    if not is_cpu_scalar(copy_from) and copy_from.device != copy_to.device:
+    if (
+        not (is_cpu_scalar(copy_from) and copy_cpu_scalars)
+        and copy_from.device != copy_to.device
+    ):
         msg = (
             f"Attempting to copy from device {copy_from.device} "
             f"to device {copy_to.device}, but cross-device copies are not allowed!"
@@ -300,7 +307,12 @@ def out_wrapper(
                     _maybe_resize_out(
                         out, result.shape, maybe_compute_memory_format(result)  # type: ignore[union-attr]
                     )
-                    _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
+                    _safe_copy_out(
+                        copy_from=result,  # type: ignore[arg-type]
+                        copy_to=out,
+                        exact_dtype=exact_dtype,
+                        copy_cpu_scalars=False,
+                    )
                 else:
                     assert isinstance(out, Tuple)  # type: ignore[arg-type]
                     torch._check_type(
@@ -310,7 +322,12 @@ def out_wrapper(
                     for r, o in zip(result, out):  # type: ignore[arg-type]
                         # These two operations are done in-place
                         _maybe_resize_out(o, r.shape, maybe_compute_memory_format(r))
-                        _safe_copy_out(copy_from=r, copy_to=o, exact_dtype=exact_dtype)  # type: ignore[arg-type]
+                        _safe_copy_out(
+                            copy_from=r,
+                            copy_to=o,
+                            exact_dtype=exact_dtype,
+                            copy_cpu_scalars=False,
+                        )
             else:
                 out = result
             # mypy does not see through  the definition of out_type given that it's in a different scope
