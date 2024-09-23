@@ -232,7 +232,8 @@ def get_wrapper_codegen_for_device(device: str, cpp_wrapper: bool = False):
 def init_backend_registration():
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
-    from .cpp_wrapper_cuda import CppWrapperGpu
+    from .cpp_wrapper_cpu_array_ref import CppWrapperCpuArrayRef
+    from .cpp_wrapper_gpu import CppWrapperGpu
     from .cuda_combined_scheduling import CUDACombinedScheduling
     from .halide import HalideScheduling
     from .triton import TritonScheduling
@@ -244,7 +245,7 @@ def init_backend_registration():
             "cpu",
             lambda *args, **kwargs: cpu_backends[config.cpu_backend](*args, **kwargs),
             WrapperCodeGen,
-            CppWrapperCpu,
+            CppWrapperCpuArrayRef if config.allow_stack_allocation else CppWrapperCpu,
         )
 
     if get_scheduling_for_device("cuda") is None:
@@ -1420,6 +1421,7 @@ class KernelArgs:
             arg_defs.append("ws_ptr")
             call_args.append("workspace")
             precompile_args.append(self.workspace_arg)
+            arg_types.append(torch.uint8)
         return arg_defs, call_args, precompile_args, arg_types
 
     def aliases(self):
