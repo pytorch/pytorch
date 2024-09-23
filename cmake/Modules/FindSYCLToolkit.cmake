@@ -55,7 +55,7 @@ find_file(
 if(CMAKE_SYSTEM_NAME MATCHES "Linux")
   find_library(
     SYCL_LIBRARY
-    NAMES sycl-preview
+    NAMES sycl
     HINTS ${SYCL_LIBRARY_DIR}
     NO_DEFAULT_PATH
   )
