@@ -23,6 +23,8 @@ from torch.testing._internal.common_utils import find_free_port
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
+HAS_TLPARSE = shutil.which("tlparse") is not None
+requires_tlparse = unittest.skipUnless(HAS_TLPARSE, "requires tlparse")
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
@@ -213,6 +215,7 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
+    @requires_tlparse
     def test_recompiles(self):
         def fn(x, y):
             return torch.add(x, y)
@@ -257,6 +260,7 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
+    @requires_tlparse
     def test_example_fn(self):
         fn_opt = torch._dynamo.optimize("inductor")(example_fn)
         fn_opt(torch.ones(1000, 1000))
@@ -280,6 +284,7 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
+    @requires_tlparse
     def test_dynamo_error(self):
         try:
             fn_opt = torch._dynamo.optimize("inductor")(dynamo_error_fn)
@@ -293,12 +298,14 @@ class StructuredTraceTest(TestCase):
 {"describe_storage": {"id": 0, "describer_id": "ID", "size": 4000000}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"describe_tensor": {"id": 0, "ndim": 2, "dtype": "torch.float32", "device": "device(type='cpu')", "size": [1000, 1000], "is_leaf": true, "requires_grad": true, "stride": [1000, 1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"describe_source": {"describer_id": "ID", "id": 0, "source": "L['a']"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"artifact": {"name": "dynamo_error", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 """,  # noqa: B950
         )
 
         self.assertParses()
 
+    @requires_tlparse
     def test_inductor_error(self):
         import torch._inductor.lowering
 
@@ -331,6 +338,7 @@ class StructuredTraceTest(TestCase):
 {"aot_backward_graph": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "fx_graph_runnable", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_post_grad_graph": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"artifact": {"name": "dynamo_error", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 """,  # noqa: B950
         )
@@ -463,6 +471,7 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
+    @requires_tlparse
     def test_graph_breaks(self):
         @torch._dynamo.optimize("inductor")
         def fn(x):
@@ -496,6 +505,7 @@ class StructuredTraceTest(TestCase):
 
     # TODO: bring in the trace_source tests once we start emitting bytecode
 
+    @requires_tlparse
     def test_graph_sizes_dynamic(self):
         def fn(a, b):
             return a @ b
@@ -535,6 +545,7 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
+    @requires_tlparse
     def test_guards_recompiles(self):
         def fn(x, ys, zs):
             return inner(x, ys, zs)
@@ -606,6 +617,7 @@ def forward(self, x, y):
 """,  # noqa: B950
         )
 
+    @requires_tlparse
     @torch._inductor.config.patch("fx_graph_cache", True)
     def test_codecache(self):
         def fn(a):
@@ -648,6 +660,7 @@ def forward(self, x, y):
         )
         self.assertParses()
 
+    @requires_tlparse
     @torch._inductor.config.patch("fx_graph_cache", True)
     @show_chrome_events
     def test_chromium_event(self):
