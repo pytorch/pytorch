@@ -379,13 +379,7 @@ case "$image" in
     GCC_VERSION=11
     CONDA_CMAKE=yes
     HALIDE=yes
-    ;;
-  pytorch-linux-jammy-py3.12-triton-cpu)
-    CUDA_VERSION=12.4
-    ANACONDA_PYTHON_VERSION=3.12
-    GCC_VERSION=11
-    CONDA_CMAKE=yes
-    TRITON_CPU=yes
+    TRITON=yes
     ;;
   pytorch-linux-jammy-py3.12-triton-cpu)
     CUDA_VERSION=12.4
