@@ -118,7 +118,7 @@ class BenchmarkBase(ABC):
 
     def _verify_instruction_count(self, result):
         if not compare_results_with_expected:
-            return 
+            return
 
         def log(event_name):
             scribe.open_source_signpost(
