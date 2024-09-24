@@ -471,13 +471,14 @@ def partition_invoke_subgraphs(
                     )
                     subgraph_cache[subgraph_hash] = subgraph_attr_node
 
+                operands = [env[n] for n in node.args[3]]
                 env[node] = new_graph.call_function(
                     the_function=torch.ops.higher_order.invoke_subgraph,
                     args=(
                         subgraph_attr_node,
                         "_partitioned",
                         None,
-                        *(env[n] for n in node.args[3:]),
+                        tuple(operands),
                     ),
                 )
                 propagate_meta_info(new_fw_subgraph, env[node])
@@ -494,19 +495,18 @@ def partition_invoke_subgraphs(
             else:
                 # this is backward pass
                 new_bw_subgraph = new_fw_bw_invoke_subgraph[subgraph_identifier][1]
+                subgraph_hash = node.args[2]
                 if subgraph_hash in subgraph_cache:
                     subgraph_attr_node = subgraph_cache[subgraph_hash]
                 else:
                     subgraph_attr_node = new_graph.get_attr(
-                        add_subgraph(new_fw_subgraph)
+                        add_subgraph(new_bw_subgraph)
                     )
                     subgraph_cache[subgraph_hash] = subgraph_attr_node
 
                 num_saved_tensors = num_saved_tensors_in_fwd[subgraph_identifier]
                 num_original_outputs = num_original_fwd_outputs[subgraph_identifier]
                 num_tangents = num_original_outputs
-
-                total_inputs = len(node.args[2:])
 
                 # Old subgraph signature - (*tangents, *saved_tensors)
                 # len(tangents) = len(primals)
@@ -529,9 +529,7 @@ def partition_invoke_subgraphs(
                     ]
                     saved_tensors_nodes.append(getitem_node)
 
-                tangent_nodes = []
-                for idx in range(num_tangents):
-                    tangent_nodes.append(env[node.args[3 + idx]])
+                tangent_nodes = [env[n] for n in node.args[3][:num_tangents]]
 
                 env[node] = new_graph.call_function(
                     the_function=torch.ops.higher_order.invoke_subgraph,
@@ -539,7 +537,7 @@ def partition_invoke_subgraphs(
                         subgraph_attr_node,
                         "_partitioned",
                         None,
-                        *(saved_tensors_nodes + tangent_nodes),
+                        (saved_tensors_nodes + tangent_nodes),
                     ),
                 )
                 propagate_meta_info(new_bw_subgraph, env[node])
@@ -577,6 +575,25 @@ def aot_dispatch_autograd(
     fx_g, joint_inputs, maybe_subclass_meta = aot_dispatch_autograd_graph(
         flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
     )
+    if aot_config.enable_log:
+        aot_joint_log.info(
+            "%s",
+            lazy_format_graph_code(
+                "Joint graph",
+                fx_g,
+                aot_config.aot_id,
+                include_stride=True,
+                include_device=True,
+                colored=True,
+            ),
+        )
+        trace_structured(
+            "aot_joint_graph",
+            payload_fn=lambda: fx_g.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            ),
+        )
+
     # TODO(anijain2305) - this changes fx_g signature. But somehow it still
     # works. I don't understand why it works. There will be some place where we
     # let go of fx_g and use fw_module and bw_module. The question is - does

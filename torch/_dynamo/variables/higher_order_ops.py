@@ -2002,7 +2002,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         ) = speculate_subgraph(
             tx,
             args[0],  # function
-            [*args[3:]],
+            args[3].items,
             kwargs,
             description,
             source_target=self.value,
@@ -2030,7 +2030,9 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         # TODO(anijain2305) - This is questionable, but we need to figure out
         # how to handle this. Cache the Dynamo graphs so that later parts of the
         # stack dont retrace.
-        fake_inputs = [arg.as_proxy().node.meta["example_value"] for arg in args[3:]]
+        fake_inputs = [
+            arg.as_proxy().node.meta["example_value"] for arg in args[3].items
+        ]
 
         canonicalized_gmod = canonicalize(body_gmod, tx.output.nn_modules)
 
@@ -2092,7 +2094,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             p_args[0],
             args[1].as_proxy(),
             key,
-            *p_args[1:],
+            p_args[1:],
         )
         return _call_function_and_unflatten_output(
             tx, self.value, tuple(p_args), p_kwargs, flat_example_value, treespec

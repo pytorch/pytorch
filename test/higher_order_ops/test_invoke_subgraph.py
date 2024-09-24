@@ -34,15 +34,10 @@ class TestInvokeSubgraph(TestCase):
             return a
 
         def fn(x, y):
-            return (
-                x
-                * invoke_subgraph(gn, "start", None, x, y)
-                * y
-                * invoke_subgraph(gn, "start", None, x, y)
-            )
+            return x * invoke_subgraph(gn, "start", None, (x, y))
 
-        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
-        # opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        # opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
 
         x = torch.randn(8, requires_grad=True, device="cuda")
         y = torch.randn(8, requires_grad=True, device="cuda")
@@ -52,10 +47,10 @@ class TestInvokeSubgraph(TestCase):
 
     def test_multi_output(self):
         def gn(x, y):
-            return torch.cos(x), torch.sin(y)
+            return torch.sin(x), torch.cos(y)
 
         def fn(x, y):
-            a, b = invoke_subgraph(gn, "start", None, x, y)
+            a, b = invoke_subgraph(gn, "start", None, (x, y))
             return a + b
 
         # opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
@@ -73,7 +68,7 @@ class TestInvokeSubgraph(TestCase):
 
         def fn(x):
             for mod in mods:
-                x = invoke_subgraph(mod, "start", None, x)
+                x = invoke_subgraph(mod, "start", None, (x,))
             return x
 
         x = torch.randn(1, 1, requires_grad=True, device="cuda")
@@ -90,8 +85,8 @@ class TestInvokeSubgraph(TestCase):
             return torch.cos(x)
 
         def fn(x):
-            a = invoke_subgraph(gn, "start", None, x)
-            b = invoke_subgraph(gn, "start", None, x)
+            a = invoke_subgraph(gn, "start", None, (x,))
+            b = invoke_subgraph(gn, "start", None, (x,))
             return a + b
 
         # opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
