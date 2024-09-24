@@ -325,6 +325,7 @@ def get_default_build_root() -> str:
     """
     return os.path.realpath(torch._appdirs.user_cache_dir(appname='torch_extensions'))
 
+
 def check_compiler_ok_for_platform(compiler: str) -> bool:
     """
     Verify that the compiler is the expected one for the current platform.
@@ -1179,8 +1180,7 @@ def include_paths(device_type: str = "cpu") -> List[str]:
     Get the include paths required to build a C++ or CUDA or SYCL extension.
 
     Args:
-        cuda: If `True`, includes CUDA-specific include paths.
-
+        device_type: Defaults to "cpu".
     Returns:
         A list of include path strings.
     """
@@ -1220,7 +1220,7 @@ def library_paths(device_type: str = "cpu") -> List[str]:
     Get the library paths required to build a C++ or CUDA extension.
 
     Args:
-        cuda: If `True`, includes CUDA-specific library paths.
+        device_type: Defaults to "cpu".
 
     Returns:
         A list of library path strings.

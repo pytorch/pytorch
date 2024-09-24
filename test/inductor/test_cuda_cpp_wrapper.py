@@ -24,7 +24,7 @@ try:
             test_torchinductor_dynamic_shapes,
         )
     except ImportError:
-        import test_combo_kernels
+        import test_combo_kernels  # @manual=fbcode//caffe2/test/inductor:combo_kernels-library
 
         import test_foreach  # @manual=fbcode//caffe2/test/inductor:foreach-library
         import test_pattern_matcher  # @manual=fbcode//caffe2/test/inductor:pattern_matcher-library
@@ -188,6 +188,7 @@ if RUN_CUDA:
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
         BaseTest("test_unspec_inputs"),
+        BaseTest("test_consecutive_split_cumprod"),
         BaseTest("test_pointwise_hermite_polynomial_he"),
         BaseTest("test_pointwise_hermite_polynomial_h"),
         BaseTest(
