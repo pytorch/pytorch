@@ -3774,7 +3774,7 @@ def l1_loss(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-    **kwargs,
+    weight: Optional[Tensor] = None,
 ) -> Tensor:  # noqa: D400,D402
     r"""l1_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
@@ -3782,14 +3782,13 @@ def l1_loss(
 
     See :class:`~torch.nn.L1Loss` for details.
     """
-    weight = kwargs.get('weight', None)
-
+   
     args = (input, target, weight) if weight is not None else (input, target)
 
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
             l1_loss,
-            (input, target),
+            args,
             input,
             target,
             size_average=size_average,
