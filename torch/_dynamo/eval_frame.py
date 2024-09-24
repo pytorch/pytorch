@@ -72,7 +72,7 @@ from .code_context import code_context
 from .exc import CondOpArgsMismatchError, UserError, UserErrorType
 from .hooks import Hooks
 from .mutation_guard import install_generation_tagging_init
-from .utils import common_constant_types, compile_times
+from .utils import common_constant_types, compile_times, DuplicateWarningChecker
 
 
 if TYPE_CHECKING:
@@ -293,6 +293,9 @@ def make_set_enable_dynamic(enable: bool):
         )
 
 
+_compile_disable_dup_warning_checker = DuplicateWarningChecker()
+
+
 class _TorchDynamoContext:
     def __init__(
         self,
@@ -430,6 +433,33 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
+            from torch._C._dynamo.eval_frame import is_eval_frame_callback_enabled
+
+            # TODO eventually remove this check/warning in a future release
+            # If (as a pytorch dev) you need to currently take advantage of the new
+            # compile/disable behavior, and do not want to issue a warning you can
+            # add a hardcoded check here for now.
+            if not is_eval_frame_callback_enabled():
+                warnings.warn(
+                    """Detected a `torch.compile` call in a `torch.compiler.disable` region!
+Your code will not be compiled unless there is a `torch.compiler.enable` call.
+
+If you wish to always enable compile, you can suppress this warning by:
+(1) wrapping `torch.compiler.enable` around `torch.compile`:
+    opt_f = torch.compiler.enable(torch.compile(f, ...))
+
+OR (2) applying the `torch.compiler.enable` decorator above `torch.compile`:
+    @torch.compiler.enable
+    @torch.compile(...)
+    def f(...):
+        ...
+"""
+                )
+                compile_disable_warning = f"""`torch.compile` in `torch.compiler.disable` region detected with traceback
+{"".join(traceback.format_stack())}"""
+                if _compile_disable_dup_warning_checker.add(compile_disable_warning):
+                    log.warning(compile_disable_warning)
+
             if is_fx_tracing():
                 if config.error_on_nested_fx_trace:
                     raise RuntimeError(

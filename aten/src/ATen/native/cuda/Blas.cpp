@@ -95,7 +95,7 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
 
 struct cublasCommonArgs {
   cublasCommonArgs(const Tensor& mat1, const Tensor& mat2, Tensor& c) {
-    bool transpose_result, transpose_mat1, transpose_mat2;
+    bool transpose_result = false, transpose_mat1 = false, transpose_mat2 = false;
     result = prepare_matrix_for_cublas(c, transpose_result);
     mata = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_mat1, transpose_result);
     matb = prepare_matrix_for_cublas(transpose_result ? mat1 : mat2, transpose_mat2, transpose_result);
@@ -263,6 +263,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     "expected mat1 and mat2 to have the same dtype, but got: ", mat1.dtype(), " != ", mat2.dtype()
   )
 
+  // NOLINTNEXTLINE(*c-array*)
   TensorArg targs[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
   checkAllSameGPU(__func__, targs);
 
@@ -483,9 +484,11 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         });
     switch (activation) {
       case Activation::RELU:
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
         at::relu_(const_cast<Tensor&>(*args.result));
         break;
       case Activation::GELU:
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
         at::gelu_(const_cast<Tensor&>(*args.result), "tanh");
         break;
       default: break;
@@ -542,8 +545,8 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
   int64_t n = result_sizes[leading_dim];
   int64_t k = (transpose_result ? batch2 : batch1).sizes()[leading_dim];
 
-  int64_t lda, ldb, ldc;
-  bool transpose_batch1, transpose_batch2;
+  int64_t lda = 0, ldb = 0, ldc = 0;
+  bool transpose_batch1 = false, transpose_batch2 = false;
   auto batch1_ = prepare_batch_matrix_for_cublas(transpose_result ? batch2 : batch1, transpose_batch1, lda, transpose_result, m, k);
   auto batch2_ = prepare_batch_matrix_for_cublas(transpose_result ? batch1 : batch2, transpose_batch2, ldb, transpose_result, k, n);
 
@@ -593,14 +596,17 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
 } // anonymous namespace
 
 TORCH_IMPL_FUNC(addmm_out_cuda)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   addmm_out_cuda_impl(const_cast<Tensor&>(result), self, mat1, mat2, beta, alpha);
 }
 
 TORCH_IMPL_FUNC(addmm_activation_out_cuda)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, bool use_gelu, const Tensor& result) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   addmm_out_cuda_impl(const_cast<Tensor&>(result), self, mat1, mat2, beta, alpha, use_gelu ? Activation::GELU : Activation::RELU);
 }
 
 TORCH_IMPL_FUNC(mm_out_cuda)(const Tensor& self, const Tensor& mat2, const Tensor& result) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   addmm_out_cuda_impl(const_cast<Tensor&>(result), result, self, mat2, 0, 1);
 }
 
@@ -765,6 +771,7 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
       result.zero_();
     } else {
       at::mul_out(
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<Tensor&>(result),
           self,
           at::native::scalar_tensor(
@@ -772,6 +779,7 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
     }
   } else {
     if (!result.is_same(*self_) && betaval != 0.0) { //if beta is 0, result contents will be zeroed later
+                                                            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       at::native::copy_(const_cast<Tensor&>(result), *self_);
     }
     if (result.numel() != 0) {
@@ -1040,6 +1048,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     auto bias_ = bias.value_or(Tensor());
     auto scale_result_ = scale_result.value_or(Tensor());
 
+    // NOLINTNEXTLINE(*c-array*)
     TensorArg targs[]{{out, "out", 0}, {mat1, "mat1", 1}, {mat2, "mat2", 2},
                       {bias_, "bias", 3}, {scale_a, "scale_a", 4}, {scale_b, "scale_b", 5},
                       {scale_result_, "scale_result", 6}};

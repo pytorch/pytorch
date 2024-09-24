@@ -382,11 +382,13 @@ inline_inbuilt_nn_modules = not is_fbcode()
 record_compile_time_instruction_count = False
 
 
-# Re-enable old torch.compile/torch._dynamo.disable behavior,
+# Enable new torch.compile/torch._dynamo.disable behavior,
+# where disable/enable have higher precedence than compile.
+# Compare to the old compile/disale behavior,
 # where compile and disable have the same priority.
-# Killswitch in case internal breaks.
+# Set to False in case internal breaks.
 # See https://github.com/pytorch/pytorch/pull/132926.
-old_compile_disable_behavior = False
+new_compile_disable_behavior = True
 
 
 def default_debug_dir_root():

@@ -54,8 +54,8 @@ def run(fn=None):
 
 
 def _old_compile_disable_behavior():
-    return config.old_compile_disable_behavior or not justknobs_check(
-        "pytorch/compiler:compile_enable_disable"
+    return not config.new_compile_disable_behavior or not justknobs_check(
+        "pytorch/compiler:new_compile_disable_behavior"
     )
 
 
@@ -79,6 +79,7 @@ def disable(fn=None, recursive=True):
         )
         if fn is not None:
             if _old_compile_disable_behavior():
+                # skips subsequent compile/disable decorators
                 fn = innermost_fn(fn)
             assert callable(fn)
             return ctx(fn)  # type: ignore[operator]

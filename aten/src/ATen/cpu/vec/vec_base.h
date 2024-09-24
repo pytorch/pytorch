@@ -990,7 +990,7 @@ inline mask_gather(const Vectorized<T>& src, T const* base_addr,
       buffer[i] = src_arr[i];
     }
   }
-  mask = Vectorized<T>();  // "zero out" mask
+  mask = Vectorized<T>(static_cast<T>(0));  // "zero out" mask
   return Vectorized<T>::loadu(static_cast<void*>(buffer));
 }
 

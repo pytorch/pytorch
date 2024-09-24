@@ -134,8 +134,8 @@ def associative_scan(
 
     if not torch._dynamo.is_compiling():
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-            return torch.compile(
-                torch._dynamo.enable(associative_scan), fullgraph=True
+            return torch._dynamo.enable(
+                torch.compile(associative_scan, fullgraph=True)
             )(combine_fn, xs, dim, reverse=reverse, combine_mode=combine_mode)
 
     leaves, spec = pytree.tree_flatten(xs)

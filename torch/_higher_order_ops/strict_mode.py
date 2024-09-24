@@ -23,8 +23,8 @@ def strict_mode(callable, operands):
 
     with _set_compilation_env():
         with torch._dynamo.utils.disable_cache_limit():
-            return torch.compile(
-                torch._dynamo.enable(strict_mode_op), backend="eager", fullgraph=True
+            return torch._dynamo.enable(
+                torch.compile(strict_mode_op, backend="eager", fullgraph=True)
             )(callable, operands)
 
 

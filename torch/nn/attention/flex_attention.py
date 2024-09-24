@@ -806,9 +806,8 @@ def create_block_mask(
         Q_LEN (int): Sequence length of query.
         KV_LEN (int): Sequence length of key/value.
         device (str): Device to run the mask creation on.
-        KV_BLOCK_SIZE (int): Block size of block mask for each query.
-        Q_BLOCK_SIZE (int): Block size of block mask for each key/value.
-        _compile (bool): Whether to compile the mask creation.
+        BLOCK_SIZE (int or Tuple[int, int]): Block size for the block mask. If a single int is provided it is used for both query and key/value.
+        _compile (bool): Whether to compile the mask_mod function. Default is False.
 
     Returns:
         BlockMask:  A BlockMask object that contains the block mask information.
@@ -846,8 +845,8 @@ def create_block_mask(
         Q_LEN = _round_up_to_multiple(Q_LEN, Q_BLOCK_SIZE)
     KV_LEN = _round_up_to_multiple(KV_LEN, KV_BLOCK_SIZE)
     if _compile:
-        inner_func = torch.compile(
-            torch.compiler.enable(inner_func), fullgraph=True, dynamic=False
+        inner_func = torch.compiler.enable(
+            torch.compile(inner_func, fullgraph=True, dynamic=False)
         )
     with TransformGetItemToIndex():
         partial_block_mask, full_block_mask = inner_func(
@@ -1042,7 +1041,6 @@ def flex_attention(
 
     # Dynamo is expecting a callable with "__code__" attribute.
     # We cannot directly pass hop to it. So we wrap it in a dummy function.
-    @torch.compiler.enable
     def _flex_attention_hop_wrapper(*args, **kwargs):
         return flex_attention_hop(*args, **kwargs)
 
@@ -1056,8 +1054,10 @@ def flex_attention(
                         )
                     else:
                         backend = "eager"
-                    out, lse = torch.compile(
-                        _flex_attention_hop_wrapper, backend=backend, fullgraph=True
+                    out, lse = torch.compiler.enable(
+                        torch.compile(
+                            _flex_attention_hop_wrapper, backend=backend, fullgraph=True
+                        )
                     )(
                         query,
                         key,

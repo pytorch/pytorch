@@ -607,7 +607,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(e(torch.ones(3, 3)), torch.ones(3, 3) + 3)
 
-    @torch._dynamo.config.patch(old_compile_disable_behavior=True)
+    @torch._dynamo.config.patch(new_compile_disable_behavior=False)
     def test_old_compile_disable(self):
         @torch._dynamo.enable
         def a(x):
@@ -640,6 +640,56 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(b(torch.ones(3, 3)), torch.ones(3, 3))
         self.assertEqual(c(torch.ones(3, 3)), torch.ones(3, 3) + 4)
         self.assertEqual(d(torch.ones(3, 3)), torch.ones(3, 3) + 4)
+
+    # NOTE remove test when warning is removed
+    def test_disable_compile_warning(self):
+        import logging
+
+        @torch.compile(backend="eager")
+        def a(x):
+            return x + 1
+
+        @torch._dynamo.disable
+        def b(x):
+            return a(x) + 1
+
+        with self.assertLogs("torch._dynamo.eval_frame", logging.WARNING) as cm:
+            b(torch.ones(3, 3))
+
+        self.assertTrue(
+            any(
+                "`torch.compiler.disable` region detected with traceback" in output
+                for output in cm.output
+            )
+        )
+
+    # NOTE no need to test logging when warning is removed
+    def test_no_disable_compile_warning(self):
+        import logging
+
+        @torch._dynamo.enable
+        @torch.compile(backend="eager")
+        def a(x):
+            if torch._dynamo.is_compiling():
+                return x + 1
+            return x + 2
+
+        def b(x):
+            if torch._dynamo.is_compiling():
+                return x + 1
+            return x + 2
+
+        opt_b = torch._dynamo.enable(torch.compile(b, backend="eager"))
+
+        @torch._dynamo.disable()
+        def fn(x):
+            return a(x), opt_b(x)
+
+        with self.assertNoLogs("torch._dynamo.eval_frame", logging.WARNING):
+            result1, result2 = fn(torch.ones(3, 3))
+
+        self.assertEqual(result1, torch.ones(3, 3) + 1)
+        self.assertEqual(result2, torch.ones(3, 3) + 1)
 
     def _test_mark_static_address(self, guarded):
         # This test verifies that dynamo properly marks inputs as static

@@ -47,6 +47,9 @@ from torch.multiprocessing.reductions import StorageWeakRef
 def lazy_compile(**compile_kwargs):
     """Lazily wrap a function with torch.compile on the first call
 
+    NOTE: the torch.compile is forced - compilation will be enabled
+    even if the function is in a torch.compiler.disabled region.
+
     This avoids eagerly importing dynamo.
     """
 

@@ -171,7 +171,6 @@ def cond(pred, true_fn, false_fn, operands):
 
     # Dynamo is expecting a callable with "__code__" attribute.
     # We cannot directly pass cond_op to it. So we wrap it in a dummy function.
-    @torch._dynamo.enable
     def _cond_op_wrapper(*args, **kwargs):
         return cond_op(*args, **kwargs)
 
@@ -181,9 +180,9 @@ def cond(pred, true_fn, false_fn, operands):
                 backend = make_eager_backend_with_torch_function_mode(metadata_mode)
             else:
                 backend = "eager"
-            return torch.compile(_cond_op_wrapper, backend=backend, fullgraph=True)(
-                pred, true_fn, false_fn, operands
-            )
+            return torch._dynamo.enable(
+                torch.compile(_cond_op_wrapper, backend=backend, fullgraph=True)
+            )(pred, true_fn, false_fn, operands)
 
 
 def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
