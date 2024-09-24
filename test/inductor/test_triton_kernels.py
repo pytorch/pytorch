@@ -1697,6 +1697,7 @@ def forward(self, x_1, output_1):
 
         self.assertEqual(x * x, res)
 
+
 def make_mutation_test(fn):
     @requires_gpu
     def test_fn(self):
