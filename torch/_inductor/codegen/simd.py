@@ -17,6 +17,7 @@ from typing import (
     Dict,
     Iterable,
     List,
+    no_type_check,
     Optional,
     Sequence,
     Tuple,
@@ -29,7 +30,12 @@ import torch
 import torch._logging
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
-from torch.utils._sympy.symbol import free_symbol_is_type, prefix_to_symt, symbol_is_type, SymT
+from torch.utils._sympy.symbol import (
+    free_symbol_is_type,
+    prefix_str,
+    symbol_is_type,
+    SymT,
+)
 
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
@@ -41,6 +47,7 @@ from ..runtime.hints import ReductionHint
 from ..runtime.runtime_utils import green_text, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
+    cache_on_self,
     get_dtype_size,
     IndentedBuffer,
     Placeholder,
@@ -62,8 +69,10 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 
 pexpr = PythonPrinter().doprint
 
+
 def prefix_is_reduction(prefix: str) -> bool:
     return prefix[0] == "r"
+
 
 @dataclasses.dataclass
 class IterationRanges:
@@ -109,12 +118,15 @@ class IterationRanges:
     def is_reduction(self) -> bool:
         return prefix_is_reduction(self.prefix)
 
-    @property
-    def SymT(self) -> SymT:
-        return prefix_to_symt[self.prefix]
-
     def symbol(self):
         return sympy_index_symbol(self.name)
+
+    @property
+    @cache_on_self
+    @no_type_check
+    def symt(self) -> SymT:
+        prefix_to_symt = {prefix: symt for symt, prefix in prefix_str.items()}
+        return prefix_to_symt[self.prefix]
 
 
 class IterationRangesRoot(IterationRanges):
@@ -370,16 +382,16 @@ class SIMDKernel(Kernel):
         no_r_dim = not self.inside_reduction or self.numels[-1] == 1
 
         # TODO: add r1 for tiled reductions.
-        prefixes = ["z","y","x","r0_"]
+        prefixes = ["z", "y", "x", "r0_"]
         active_prefixes = prefixes[-len(self.numels) :]
 
-        grid_dims = ["x","y","z"]
+        grid_dims = ["x", "y", "z"]
         if self.no_x_dim:
             tensor_dims = ["r0_"]
         elif no_r_dim:
-            tensor_dims = ["x","y","z"]
+            tensor_dims = ["x", "y", "z"]
         else:
-            tensor_dims = ["x","y","z","r0_"]
+            tensor_dims = ["x", "y", "z", "r0_"]
 
         tensor_dims = [p for p in tensor_dims if p in active_prefixes]
 
@@ -1079,6 +1091,8 @@ class SIMDScheduling(BaseScheduling):
         # Writes with a reduced shape, meaning they are only present once the
         # reduction loop has ended
         not_ready_yet_nodes: OrderedSet[str] = OrderedSet()
+        current_loop_buffer_usage: OrderedSet[str] = OrderedSet()
+        maybe_split_index: Optional[int] = None
 
         def fits_in_main_body(n):
             _, (node_numel, node_rnumel) = n.group
@@ -1090,9 +1104,17 @@ class SIMDScheduling(BaseScheduling):
             _, (node_numel, node_rnumel) = n.group
             return node_numel == numel and node_rnumel == 1 and rnumel != 1
 
+        def expect_improved_memory_usage(n):
+            for read in n.read_writes.reads:
+                if read.name in current_loop_buffer_usage:
+                    return True
+            return False
+
         def schedule_node_in_loop(n):
             done.add(n)
             node_schedule.append(n)
+            current_loop_buffer_usage.update([x.name for x in n.read_writes.reads])
+
             # A scan is modelled as a reduction in the scheduler but has a
             # full sized output that can be used inside the loop body
             if (
@@ -1102,16 +1124,24 @@ class SIMDScheduling(BaseScheduling):
                 and not isinstance(n.node.data, ir.Scan)
             ):
                 not_ready_yet_nodes.add(n.get_name())
+            else:  # this node is available within the loop
+                current_loop_buffer_usage.update([x.name for x in n.read_writes.writes])
 
         @contextlib.contextmanager
         def end_current_reduction_loop():
+            nonlocal maybe_split_index
             if node_schedule and node_schedule[-1] is EnableReduction:
                 node_schedule.pop()
             else:
                 node_schedule.append(DisableReduction)
+            if maybe_split_index:
+                node_schedule.insert(maybe_split_index, DisableReduction)
+                node_schedule.insert(maybe_split_index + 1, EnableReduction)
+                maybe_split_index = None
             yield
             node_schedule.append(EnableReduction)
             not_ready_yet_nodes.clear()
+            current_loop_buffer_usage.clear()
 
         def requires_closing_previous_reduction(node, node_schedule):
             if rnumel == 1:
@@ -1132,6 +1162,13 @@ class SIMDScheduling(BaseScheduling):
                 if requires_closing_previous_reduction(node, node_schedule):
                     with end_current_reduction_loop():
                         pass  # need to start a new reduction loop
+
+                if current_loop_buffer_usage and not expect_improved_memory_usage(node):
+                    # If we don't improve memory usage, then it is better to split into two loops
+                    maybe_split_index = maybe_split_index or len(node_schedule)
+                else:
+                    # Memory usage got improved, cancel the loop split
+                    maybe_split_index = None
 
                 schedule_node_in_loop(node)
             elif fits_outside_reduction(node):
@@ -1615,8 +1652,9 @@ class SIMDScheduling(BaseScheduling):
 
     @staticmethod
     @functools.lru_cache(32)
-    def candidate_tilings(node) -> Iterable[tuple]: #TODO tuple type? (pointwise, reduction) ranges
-
+    def candidate_tilings(
+        node,
+    ) -> Iterable[tuple]:  # TODO tuple type? (pointwise, reduction) ranges
         def tile_ranges(ranges, rw) -> Tuple[tuple]:
             """
             Compute tiling candidates by dividing up the iteration ranges.
@@ -1636,7 +1674,8 @@ class SIMDScheduling(BaseScheduling):
             deps = [
                 dep
                 for dep in itertools.chain.from_iterable(dep_sources)
-                if dep.name not in V.graph.removed_buffers and isinstance(dep, MemoryDep)
+                if dep.name not in V.graph.removed_buffers
+                and isinstance(dep, MemoryDep)
             ]
             write_names = {dep.name for dep in rw.writes}
 
@@ -1655,10 +1694,12 @@ class SIMDScheduling(BaseScheduling):
 
                 except ValueError:
                     continue
-                tiled_groups.append((
-                    V.graph.sizevars.simplify(sympy_product(ranges[:split])),
-                    V.graph.sizevars.simplify(sympy_product(ranges[split:])),
-                ))
+                tiled_groups.append(
+                    (
+                        V.graph.sizevars.simplify(sympy_product(ranges[:split])),
+                        V.graph.sizevars.simplify(sympy_product(ranges[split:])),
+                    )
+                )
 
             return tiled_groups
 
@@ -1675,7 +1716,7 @@ class SIMDScheduling(BaseScheduling):
                 (
                     node.pointwise_read_writes(),
                     node.reduction_read_writes(),
-                )
+                ),
             )
         )
         tiled_groups = itertools.product(pointwise_tilings, reduction_tilings)
@@ -1759,7 +1800,6 @@ class SIMDScheduling(BaseScheduling):
                 new_tiling = (a0, FloorDiv(a1, b1), b1)
                 return new_tiling
 
-
             # Add one 3D tiling choice
             for i in range(1, len(ranked_tilings)):
                 # Merge pointwise and reduction tilings separately.
@@ -1769,16 +1809,14 @@ class SIMDScheduling(BaseScheduling):
                 )
 
                 # Quit if tiles were incompatible, or no tiles were converted to 3D.
-                #FIXME need to return the existing tiling (instead of None) for reductions?
-                if (
-                    any(tiling is None for tiling in new_tiling_group) or
-                    not any(len(tiling) == config.max_tiles for tiling in new_tiling_group)
+                # FIXME need to return the existing tiling (instead of None) for reductions?
+                if any(tiling is None for tiling in new_tiling_group) or not any(
+                    len(tiling) == config.max_tiles for tiling in new_tiling_group
                 ):
                     continue
 
                 ranked_tilings = [new_tiling_group] + ranked_tilings
                 break  # only 1 choice for now
-
 
         if len(ranked_tilings) > 1:
             perf_hint_log.info("possibly bad tiling: %s", ranked_tilings)
@@ -1791,14 +1829,20 @@ class SIMDScheduling(BaseScheduling):
                 for node in EnableReduction.filter(node_schedule)
                 if isinstance(node, scheduler.SchedulerNode)
             ]
-            new_tilings: OrderedSet[Tuple[Tuple[sympy.Expr], Tuple[sympy.Expr]]] = OrderedSet()
+            new_tilings: OrderedSet[
+                Tuple[Tuple[sympy.Expr], Tuple[sympy.Expr]]
+            ] = OrderedSet()
             for range_group in node_range_groups:
                 tiling = []
                 for node_range in range_group:
                     num_leading_dims = max(0, len(node_range) - config.triton.max_tiles)
                     first_trailing_dim = num_leading_dims + 1
-                    collapsed_leading_dim = sympy_product(node_range[:first_trailing_dim])
-                    tiling += [collapsed_leading_dim] + list(node_range[first_trailing_dim:])
+                    collapsed_leading_dim = sympy_product(
+                        node_range[:first_trailing_dim]
+                    )
+                    tiling += [collapsed_leading_dim] + list(
+                        node_range[first_trailing_dim:]
+                    )
                 new_tilings.add(tuple(tiling))
 
             # Rank tilings by the number of dimensions. E.g., prefer 2D to 1D.

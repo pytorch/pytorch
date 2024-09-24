@@ -12,7 +12,7 @@ from torch.profiler import record_function
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
 
-from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
+from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
     AllGatherResult,
     foreach_all_gather,
@@ -130,6 +130,7 @@ class FSDPParamGroup:
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
         self.mp_policy = mp_policy
+        self.offload_policy = offload_policy
         self._training_state = TrainingState.IDLE
         # Group's sharded state always matches its parameters' sharded states
         self._sharded_state = ShardedState.SHARDED
@@ -207,19 +208,10 @@ class FSDPParamGroup:
         if self.is_sharded and not self._reset_sharded_params:
             for fsdp_param in self.fsdp_params:
                 fsdp_param.reset_sharded_param()
+                fsdp_param._init_extensions()  # allow monkey patch after init
             self._reset_sharded_params = True
-        param_names_on_meta = [
-            fsdp_param._param_fqn
-            for fsdp_param in self.fsdp_params
-            if fsdp_param.sharded_param.device.type == "meta"
-        ]
-        if param_names_on_meta:
-            raise RuntimeError(
-                "FSDP parameters should be materialized from meta device before training, "
-                f"but the following were still on meta device: {param_names_on_meta}\n"
-                "For example, call module.to_empty(device) to materialize to device and "
-                "call module.reset_parameters() on each module to initialize values."
-            )
+        self._validate_no_meta_params()
+        self._validate_cpu_offload_params()
         # Initialize mixed precision attributes lazily in case the user changes
         # the parameter dtypes after construction time but before forward
         self._init_mp_dtypes()
@@ -487,9 +479,9 @@ class FSDPParamGroup:
     def _register_post_backward_hook(
         self, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
-        # Compile relies on `root_post_backward_callback` to call each
+        # Traceable FSDP2 relies on `root_post_backward_callback` to call each
         # `FSDPParamGroup.post_backward`
-        if ca.compiled_autograd_enabled:
+        if (not torch._dynamo.config.skip_fsdp_hooks) or ca.compiled_autograd_enabled:
             return args, kwargs
         if not torch.is_grad_enabled():
             return args, kwargs
@@ -580,6 +572,36 @@ class FSDPParamGroup:
     def __repr__(self):
         return f"FSDPParamGroup(fqn={self._module_fqn})"
 
+    def _validate_no_meta_params(self):
+        param_names_on_meta = [
+            fsdp_param._param_fqn
+            for fsdp_param in self.fsdp_params
+            if fsdp_param.sharded_param.device.type == "meta"
+        ]
+        if param_names_on_meta:
+            raise RuntimeError(
+                "FSDP parameters should be materialized from meta device before training, "
+                f"but the following were still on meta device: {param_names_on_meta}\n"
+                "For example, call module.to_empty(device) to materialize to device and "
+                "call module.reset_parameters() on each module to initialize values."
+            )
+
+    def _validate_cpu_offload_params(self):
+        if not isinstance(self.offload_policy, CPUOffloadPolicy):
+            return
+        fsdp_params_not_on_cpu = [
+            fsdp_param
+            for fsdp_param in self.fsdp_params
+            if fsdp_param.sharded_param.device.type != "cpu"
+        ]
+        if fsdp_params_not_on_cpu:
+            raise RuntimeError(
+                "FSDP parameters should be materialized on CPU when enabling CPU offloading. "
+                'For example, load a CPU state dict or call module.to_empty(device="cpu"). '
+                "Found following parameters on non-CPU device: "
+                f"{[(fsdp_param._param_fqn, fsdp_param.sharded_param.device) for fsdp_param in fsdp_params_not_on_cpu]}\n"
+            )
+
 
 def _get_param_module_infos(
     params: List[nn.Parameter], modules: Tuple[nn.Module, ...]
@@ -614,12 +636,26 @@ def _get_param_module_infos(
 
 class RegisterPostBackwardFunction(torch.autograd.Function):
     @staticmethod
+    def _assert_not_tracing_fsdp():
+        if ca.compiled_autograd_enabled:
+            # TODO: Find a way to print the offending FSDP2 module.
+            msg = """\
+When Traceable FSDP2 is enabled, we rely on `root_post_backward_callback` to call
+each `FSDPParamGroup.post_backward`, and we should not be calling into `RegisterPostBackwardFunction`.
+If you are here, it means the forward part of this FSDP2 instance is not compiled, and you must also
+compile the forward part if you want to use Traceable FSDP2."""
+            torch._dynamo.comptime.comptime.print(msg)
+            raise RuntimeError(msg)
+
+    @staticmethod
     def forward(ctx, param_group: FSDPParamGroup, *inputs: torch.Tensor):
         # All tensors in `inputs` should require gradient
+        RegisterPostBackwardFunction._assert_not_tracing_fsdp()
         ctx.param_group = param_group
         return inputs
 
     @staticmethod
     def backward(ctx, *grads: torch.Tensor):
+        RegisterPostBackwardFunction._assert_not_tracing_fsdp()
         ctx.param_group.post_backward()
         return (None,) + grads

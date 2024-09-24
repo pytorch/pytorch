@@ -28,12 +28,13 @@ import torch
 import torch._logging
 from torch._dynamo.utils import preserve_rng_state
 from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
+from torch._inductor.runtime.triton_heuristics import grid as default_grid_fn
 from torch._prims_common import is_integer_dtype
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._triton import has_triton_package
 
-from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, prefix_to_symt, symbol_is_type, SymT
+from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir
 from ..codecache import code_hash, get_path, PyCodeCache
@@ -68,6 +69,7 @@ from .common import (
 )
 from .simd import (
     constant_repr,
+    IterationRanges,
     IterationRangesEntry,
     IterationRangesRoot,
     pexpr,
@@ -129,18 +131,38 @@ def gen_common_triton_imports():
     )
     return imports.getvalue()
 
-reduction_types = OrderedSet([SymT.R0_INDEX, SymT.R1_INDEX])
-block_types = OrderedSet([SymT.XBLOCK, SymT.YBLOCK] + list(reduction_types))
 
-block_offsets = {
-    symt: sympy.Symbol(f"{prefix_str[symt]}offset", integer=True, nonnegative=True)
-    for symt in block_types
-}
+class TritonSymbols:
+    """
+    Stores sympy.Symbol instances and constants associated with triton codegen.
+    """
 
-block_sizes = {
-    symt: sympy.Symbol(f"{prefix_str[symt].upper()}BLOCK", integer=True, positive=True)
-    for symt in block_types
-}
+    reduction_types = OrderedSet([SymT.R0_INDEX, SymT.R1_INDEX])
+    block_types = OrderedSet([SymT.XBLOCK, SymT.YBLOCK] + list(reduction_types))
+
+    block_offsets = {
+        symt: sympy.Symbol(f"{prefix_str[symt]}offset", integer=True, nonnegative=True)
+        for symt in block_types
+    }
+
+    block_sizes = {
+        symt: sympy.Symbol(
+            f"{prefix_str[symt].upper()}BLOCK", integer=True, positive=True
+        )
+        for symt in block_types
+    }
+
+    @classmethod
+    def get_block_size(cls, tree: IterationRanges) -> sympy.Symbol:
+        return cls.block_sizes[tree.symt]
+
+    @classmethod
+    def get_block_offset(cls, tree: IterationRanges) -> sympy.Symbol:
+        return cls.block_offsets[tree.symt]
+
+    @classmethod
+    def max_block_size(cls, tree: IterationRanges) -> int:
+        return TRITON_MAX_BLOCK[tree.prefix.upper()]
 
 
 @dataclasses.dataclass
@@ -174,7 +196,9 @@ class BlockPtrOptions:
     constant_offset: sympy.Expr
     order: List[int]
     mask_vars: OrderedSet[str]
-    reshape_suffix: List[str]
+    broadcast_shape: List[sympy.Expr]
+    broadcasting_dims: List[bool]
+    final_shape: List[sympy.Expr]
 
     @property
     def shape(self) -> List[sympy.Expr]:
@@ -192,6 +216,50 @@ class BlockPtrOptions:
     def offsets(self) -> List[sympy.Expr]:
         return self.params.offsets
 
+    def codegen_broadcast_and_reshape(
+        self,
+        value: str,
+        initial_shape: List[sympy.Expr],
+        final_shape: List[sympy.Expr],
+        allow_implicit: bool,
+    ) -> str:
+        """
+        Generate a broadcast and a reshape for the block pointer.
+        This restores stride-0 dimensions which were removed from the block pointer.
+        """
+
+        # Reshape to add singletons.
+        pre_broadcast_shape = [
+            sympy.Integer(1) if is_broadcasting else dim
+            for dim, is_broadcasting in zip(
+                self.broadcast_shape, self.broadcasting_dims
+            )
+        ]
+        value = triton_reshape(value, initial_shape, pre_broadcast_shape)
+
+        # Broadcast singletons.
+        # For loads, we can often implicitly broadcast singleton dimensions.
+        # We need an explicit broadcast for stores, or if the final reshape does more
+        # than add singletons.
+        sizevars = V.graph.sizevars
+        if any(self.broadcasting_dims) and (
+            not allow_implicit
+            or len(pre_broadcast_shape) != len(final_shape)
+            or any(
+                not (
+                    sizevars.statically_known_equals(pre_dim, 1)
+                    or sizevars.statically_known_equals(pre_dim, post_dim)
+                )
+                for pre_dim, post_dim in zip(pre_broadcast_shape, final_shape)
+            )
+        ):
+            value = f"tl.broadcast_to({value}, {V.kernel.index_to_str(self.broadcast_shape)})"
+
+        # Reshape to the final shape.
+        value = triton_reshape(value, self.broadcast_shape, final_shape)
+
+        return value
+
     @staticmethod
     def create(
         *,
@@ -201,21 +269,61 @@ class BlockPtrOptions:
         mask_vars: OrderedSet[str],
     ) -> BlockPtrOptions:
         """Helper to create a  BlockPtrOptions instance"""
-        reshape_suffix = [f"{t.prefix.upper()}BLOCK" for t in range_trees]
 
-        # Only drop broadcast dims if the output has the same
-        # rank as the block. Otherwise, we will get shape errors.
-        drop_broadcasts = len(reshape_suffix) == len(params.strides)
+        sizevars = V.graph.sizevars
 
-        broadcasting_dim = [s == 0 for s in params.strides]
-        for i, is_broadcasting in enumerate(broadcasting_dim):
-            if is_broadcasting and drop_broadcasts:
-                # drop any stride==0 dimensions for performance
-                reshape_suffix[i] = "1"
+        def lookup_size(exprs: Iterable[sympy.Expr]) -> List[sympy.Expr]:
+            return [sizevars.lookup_precomputed_size(expr) for expr in exprs]
 
+        # Look up precomputed sizes
+        params.shape = lookup_size(params.shape)
+        params.strides = lookup_size(params.strides)
+
+        # Strip out dimensions of stride 0.
+        # These will be restored with tl.broadcast_to.
+        broadcasting_dims = [
+            sizevars.statically_known_equals(stride, 0) for stride in params.strides
+        ]
+
+        # Strip out dimensions of size 1.
+        # These will be restored by tl.reshape.
+        singleton_dims = [
+            sizevars.statically_known_equals(dim, 1) for dim in params.block_shape
+        ]
+        if all(singleton_dims):
+            # Handle a pure singletons, e.g. [1, 1]
+            singleton_dims[-1] = False
+
+        # Record the post-broadcast shape before broadcasting dims are removed.
+        # The pre-broadcast shape is identical to this, except broadcasting dims are
+        # replaced with 1.
+        broadcast_shape = [
+            dim
+            for dim, is_singleton in zip(params.block_shape, singleton_dims)
+            if not is_singleton
+        ]
+
+        # Combine all removable dims.
+        removable_dims = [any(dims) for dims in zip(singleton_dims, broadcasting_dims)]
+
+        def remove_dims(it):
+            """Removes any broadcasting or singleton dims from a given sequence"""
+            return [
+                item
+                for item, is_removable in zip(it, removable_dims)
+                if not is_removable
+            ]
+
+        # Drop removable dimensions from the input.
+        params = BlockParameters(
+            **{key: remove_dims(val) for key, val in dataclasses.asdict(params).items()}
+        )
+
+        # Compute the final shape, adjusting for special kernel types.
+        final_shape = [TritonSymbols.get_block_size(tree) for tree in range_trees]
         if V.kernel.no_x_dim:
             assert range_trees[0].prefix == "x"
-            reshape_suffix.pop(0)
+            final_shape.pop(0)
 
         if (
             not V.kernel.inside_reduction
@@ -223,43 +331,26 @@ class BlockPtrOptions:
             and V.kernel.numels[-1] != 1
         ):
             # Need to expand rank by 1 to match rank when self.inside_reduction=True
-            reshape_suffix.append("1")
-
-        def filter(it):
-            """Removes any broadcasting dims from a given sequence"""
-            assert len(it) == len(broadcasting_dim)
-            return [
-                item
-                for item, is_broadcasting in zip(it, broadcasting_dim)
-                if not is_broadcasting or not drop_broadcasts
-            ]
-
-        # Drop broadcasting dimensions from the input.
-        params = BlockParameters(
-            **{key: filter(val) for key, val in dataclasses.asdict(params).items()}
-        )
-
-        def lookup_size(exprs: Iterable[sympy.Expr]) -> List[sympy.Expr]:
-            return [V.graph.sizevars.lookup_precomputed_size(expr) for expr in exprs]
-
-        # Look up precomputed sizes
-        params.shape = lookup_size(params.shape)
-        params.strides = lookup_size(params.strides)
+            final_shape.append(sympy.Integer(1))
 
         return BlockPtrOptions(
             params=params,
             constant_offset=V.graph.sizevars.lookup_precomputed_size(constant_offset),
             order=list(reversed(range(len(params.shape)))),
             mask_vars=mask_vars,
-            reshape_suffix=reshape_suffix,
+            final_shape=final_shape,
+            broadcast_shape=broadcast_shape,
+            broadcasting_dims=broadcasting_dims,
         )
 
-    def replace_offset(self, expr: sympy.Expr, replacement: sympy.Expr, symt: SymT) -> sympy.Expr:
+    def replace_offset(
+        self, expr: sympy.Expr, replacement: sympy.Expr, symt: SymT
+    ) -> sympy.Expr:
         """
         Replaces instances of {symt}_offset with the new expression.
         """
-        offset = block_offsets[symt]
-        return sympy_subs(expr, {offset: replacement})
+        roffset = TritonSymbols.block_offsets[symt]
+        return sympy_subs(expr, {roffset: replacement})
 
     def format(self, name: str, roffset=True) -> str:
         """
@@ -272,17 +363,16 @@ class BlockPtrOptions:
         Returns:
             "tl.make_block_ptr(...)"
         """
+
         def remove_roffsets(expr: sympy.Expr) -> sympy.Expr:
-            for symt in reduction_types:
+            for symt in TritonSymbols.reduction_types:
                 expr = self.replace_offset(expr, sympy.Integer(0), symt)
             return expr
 
         f = V.kernel.index_to_str
         offsets = [*self.offsets]
         if not roffset:
-            offsets = [
-                remove_roffsets(offset) for offset in offsets
-            ]
+            offsets = [remove_roffsets(offset) for offset in offsets]
         args = [
             f"{name} + ({f(self.constant_offset)})"
             if self.constant_offset != 0
@@ -304,7 +394,7 @@ class BlockPtrOptions:
         # This works in multiple_of checks because block sizes are powers of 2.
         block_to_max: Dict[sympy.Expr, Any] = {
             block_size: TRITON_MAX_BLOCK[prefix_str[symt].upper()]
-            for symt, block_size in block_sizes.items()
+            for symt, block_size in TritonSymbols.block_sizes.items()
         }
 
         return [
@@ -322,7 +412,7 @@ class BlockPtrOptions:
                 )
                 and not (
                     V.kernel.no_x_dim
-                    and self.block_shape[idx] == block_sizes[SymT.XBLOCK]
+                    and self.block_shape[idx] == TritonSymbols.block_sizes[SymT.XBLOCK]
                 )
             )
         ]
@@ -336,7 +426,7 @@ class BlockPtrOptions:
         Since we expect rN_offset to vary in range(0, rN_numel, RN_BLOCK), the first
         iteration has rN_offset=0, while the second has rN_offset=RN_BLOCK.
         """
-        rblock = block_sizes[symt]
+        rblock = TritonSymbols.block_sizes[symt]
         advance = [
             (
                 self.replace_offset(offset, rblock, symt)
@@ -350,7 +440,10 @@ class BlockPtrOptions:
         return False  # block_ptr can't do indirect indexing
 
     def has_rindex(self) -> bool:
-        return any(free_symbol_is_type(expr, reduction_types) for expr in self.block_shape)
+        return any(
+            free_symbol_is_type(expr, TritonSymbols.reduction_types)
+            for expr in self.block_shape
+        )
 
     def has_rmask(self):
         return self.has_rindex()
@@ -362,9 +455,19 @@ class BlockPtrOptions:
         return bool(self.boundary_check())
 
 
-def triton_reshape(value: str, old_shape: List[str], new_shape: List[str]):
+def triton_reshape(
+    value: str, old_shape: List[sympy.Expr], new_shape: List[sympy.Expr]
+):
     """Workaround https://github.com/openai/triton/issues/2836"""
     assert isinstance(old_shape, list) and isinstance(new_shape, list)
+
+    def shape_to_str(shape: List[sympy.Expr]) -> List[str]:
+        return [str(dim) for dim in shape]
+
+    old_shape, new_shape = tuple(
+        shape_to_str(shape) for shape in (old_shape, new_shape)
+    )
+
     if old_shape == new_shape:
         return value
     if [s for s in new_shape if s != "1"] != old_shape:
@@ -1234,22 +1337,15 @@ class TritonKernel(SIMDKernel):
         self.min_elem_per_thread = min_elem_per_thread
         self.block_ptr_id = itertools.count()
         self.helper_functions = HelperFunctions()
-        self.pointer_advancements: Dict[SymT, List[DeferredLine]] = collections.defaultdict(list)
+        self.pointer_advancements: Dict[
+            SymT, List[DeferredLine]
+        ] = collections.defaultdict(list)
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints: OrderedSet[AutotuneHint] = OrderedSet()
         self.triton_meta: Optional[Dict[str, object]] = None
 
         self.codegen_range_tree()
-
-    def _get_block_size(self, tree: IterationRangesEntry) -> sympy.Symbol:
-        return block_sizes[tree.SymT]
-
-    def _get_block_offset(self, tree: IterationRangesEntry) -> sympy.Symbol:
-        return block_offsets[tree.SymT]
-
-    def _max_block_size(self, tree: IterationRangesEntry) -> int:
-        return TRITON_MAX_BLOCK[tree.prefix.upper()]
 
     def codegen_range_tree(self):
         for tree in self.range_trees:
@@ -1262,7 +1358,6 @@ class TritonKernel(SIMDKernel):
                 self.body.writeline(
                     f"{tree.prefix}base = {self.iteration_ranges_ranges_code(tree)}"
                 )
-
 
     def need_numel_args(self):
         r"""
@@ -1325,7 +1420,9 @@ class TritonKernel(SIMDKernel):
         mask_vars: OrderedSet[str] = OrderedSet()
         for var in index_vars:
             assert isinstance(var, sympy.Symbol)
-            has_rindex = has_rindex or symbol_is_type(var, reduction_types)
+            has_rindex = has_rindex or symbol_is_type(
+                var, TritonSymbols.reduction_types
+            )
             if override_mask:
                 pass
             elif symbol_is_type(var, SymT.TMP):
@@ -1348,10 +1445,8 @@ class TritonKernel(SIMDKernel):
                 # var is one of xN, yN, r0_N or r1_N
                 prefix_matches = [
                     prefix_str[symt]
-                    for symt in block_types
-                    if symbol_is_type(
-                        var, symt
-                    )
+                    for symt in TritonSymbols.block_types
+                    if symbol_is_type(var, symt)
                 ]
                 assert len(prefix_matches) == 1, f"Ambiguous type: {var.name}"
                 mask_vars.add(f"{prefix_matches[0]}mask")
@@ -1403,9 +1498,9 @@ class TritonKernel(SIMDKernel):
 
                 return BlockParameters(
                     shape=[range_tree.numel],
-                    block_shape=[self._get_block_size(range_tree)],
+                    block_shape=[TritonSymbols.get_block_size(range_tree)],
                     strides=[m[stride]],
-                    offsets=[self._get_block_offset(range_tree)],
+                    offsets=[TritonSymbols.get_block_offset(range_tree)],
                 )
 
             def match_mod_div_block(
@@ -1516,7 +1611,7 @@ class TritonKernel(SIMDKernel):
                 #     with n and m integers, then either numel is a multiple of XBLOCK, or numel
                 #     is less than XBLOCK. (If numel is less than XBLOCK, we round up to 1 below.)
                 #  2. Numels are multiples of the maximum possible block size.
-                max_block = self._max_block_size(range_tree)
+                max_block = TritonSymbols.max_block_size(range_tree)
                 if any(
                     not sizevars.statically_known_multiple_of(numel, max_block)
                     and not sizevars.statically_known_power_of_2(numel)
@@ -1532,7 +1627,7 @@ class TritonKernel(SIMDKernel):
                 # Non-leading dimensions are clamped to the size of the iteration range,
                 # while the leading dimension can exceed this to accomodate a larger
                 # block size.
-                linear_block_size = self._get_block_size(range_tree)
+                linear_block_size = TritonSymbols.get_block_size(range_tree)
                 block_shape: List[sympy.Expr] = [
                     CeilDiv(linear_block_size, slice_numels[0])
                 ] + [
@@ -1542,7 +1637,9 @@ class TritonKernel(SIMDKernel):
 
                 # Compute block offsets from {xyzr}offset and the matched expressions.
                 block_offsets: List[sympy.Expr] = [
-                    sympy_subs(expr, {index_var: self._get_block_offset(range_tree)})
+                    sympy_subs(
+                        expr, {index_var: TritonSymbols.get_block_offset(range_tree)}
+                    )
                     for expr in block_index_exprs
                 ]
 
@@ -1673,7 +1770,7 @@ class TritonKernel(SIMDKernel):
             )
 
             # Generate block pointer advancements, for later use.
-            for symt in reduction_types:
+            for symt in TritonSymbols.reduction_types:
                 advance_offsets = indexing.advance_roffset(symt)
 
                 # Ignore identity advancements.
@@ -1695,13 +1792,11 @@ class TritonKernel(SIMDKernel):
         return block_ptr, other
 
     def codegen_block_ptr_store_line(self, name, indexing, block_ptr, value, other=""):
-        # broadcasting is not implicit for block_ptrs
-        value = (
-            f"tl.broadcast_to({value}, {self.index_to_str(indexing.reshape_suffix)})"
+        # Stores require an explicit broadcast.
+        value = indexing.codegen_broadcast_and_reshape(
+            value, indexing.final_shape, indexing.block_shape, False
         )
-        # drop any extra size=1 dimensions
-        block_shape = [V.kernel.index_to_str(expr) for expr in indexing.block_shape]
-        value = triton_reshape(value, indexing.reshape_suffix, block_shape)
+
         # workaround https://github.com/openai/triton/issues/2814
         value = f"{value}.to({triton_store_type(V.graph.get_dtype(name))})"
         return f"tl.store({block_ptr}, {value}{other})"
@@ -1804,13 +1899,12 @@ class TritonKernel(SIMDKernel):
             line = var
         else:
             if isinstance(indexing, BlockPtrOptions):
-                block_ptr, other = self.codegen_block_ptr(
-                    name, var, indexing, other
-                )
+                block_ptr, other = self.codegen_block_ptr(name, var, indexing, other)
                 line = f"tl.load({block_ptr}{other}{ep})"
-                # add needed size=1 dimensions
-                block_shape = [str(dim) for dim in indexing.block_shape]
-                line = triton_reshape(line, block_shape, indexing.reshape_suffix)
+                line = indexing.codegen_broadcast_and_reshape(
+                    line, indexing.block_shape, indexing.final_shape, True
+                )
+
             elif isinstance(original_index, sympy.Integer):
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
@@ -1862,9 +1956,7 @@ class TritonKernel(SIMDKernel):
             self.stores.writeline(DeferredLine(name, "tl.debug_barrier()"))
 
         if isinstance(indexing, BlockPtrOptions):
-            block_ptr, other = self.codegen_block_ptr(
-                name, var, indexing
-            )
+            block_ptr, other = self.codegen_block_ptr(name, var, indexing)
             # block_ptr stores don't do implicit casting
             line = self.codegen_block_ptr_store_line(
                 name, indexing, block_ptr, value, other
@@ -1940,11 +2032,10 @@ class TritonKernel(SIMDKernel):
         # rmask = r0_mask & ... & rn_mask
         def string_and(x: str, y: str) -> str:
             return "{x} & {y}"
+
         self.indexing_code.splice(
-            "rmask = " + functools.reduce(
-                string_and,
-                (mask for mask in masks if mask[0] == "r")
-            )
+            "rmask = "
+            + functools.reduce(string_and, (mask for mask in masks if mask[0] == "r"))
         )
 
         self.filter_masks(masks)
@@ -1952,8 +2043,6 @@ class TritonKernel(SIMDKernel):
         if self._load_mask:
             masks.append(self._load_mask)
         reduction_range_prefix = self.range_trees[-1].prefix[0]
-
-
 
         # Say we have
         #     tmp0 = ops.constant(1, torch.int64)
@@ -2420,10 +2509,12 @@ class TritonKernel(SIMDKernel):
             for level, tree in enumerate(loop_trees):
                 # Write the loop header.
                 prefix = tree.prefix
-                self.body.writeline(f"for {prefix}offset in range(0, {prefix}numel, {prefix.upper()}BLOCK):")
+                self.body.writeline(
+                    f"for {prefix}offset in range(0, {prefix}numel, {prefix.upper()}BLOCK):"
+                )
 
                 # Indent and write the loop body.
-                with self.body.indent(offset=level+ 1):
+                with self.body.indent(offset=level + 1):
                     self.iteration_ranges_codegen_header(tree, self.body)
                     if tree == innermost_tree:
                         # The innermost loop performs the reduction.
@@ -2436,8 +2527,10 @@ class TritonKernel(SIMDKernel):
             for level, tree in sorted(enumerate(loop_trees), reverse=True):
                 with self.body.indent(offset=level + 1):
                     # Advance pointers at the end of each loop.
-                    for advancement in self.pointer_advancements[tree.SymT]:
-                        assert len(advancement) > 0, f"Missing advancement for type {symt}"
+                    for advancement in self.pointer_advancements[tree.symt]:
+                        assert (
+                            len(advancement) > 0
+                        ), f"Missing advancement for type {symt}"
                         self.body.writeline(advancement)
 
                 # Invalidate any cache entries that came from inside the loop.
@@ -2550,7 +2643,7 @@ class TritonKernel(SIMDKernel):
 
             result.writeline("args = get_args()")
             result.writeline(
-                "ms = benchmarker.benchmark_gpu(lambda: call(args), rep=40, fast_flush=True)"
+                "ms = benchmarker.benchmark_gpu(lambda: call(args), rep=40)"
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
@@ -2832,6 +2925,7 @@ class TritonKernel(SIMDKernel):
         a better signal to triton on how to unroll and do some static indexing. So, it's not so much that downstream
         knows that its a static numel, as that you just plop a constant into the kernel.
         """
+
         def is_static_integer(expr: sympy.Expr) -> bool:
             return isinstance(expr, (sympy.Integer, int))
 
@@ -2852,16 +2946,25 @@ class TritonKernel(SIMDKernel):
         if self.inside_reduction:
             # rnumel = r0_numel * ... * r(n-1)_numel
             reduction_trees = [tree for tree in self.range_trees if tree.is_reduction]
-            rnumel = int(V.graph.sizevars.simplify(sympy_product(tree.numel for tree in reduction_trees)))
+            rnumel = int(
+                V.graph.sizevars.simplify(
+                    sympy_product(tree.numel for tree in reduction_trees)
+                )
+            )
             if is_static_integer(rnumel):
                 code.writeline(f"rnumel = {int(rnumel)}")
 
             # RBLOCK = R0_BLOCK * ... * R(N-1)_BLOCK
-            rblock = sympy_product(block_sizes[tree.SymT] for tree in reduction_trees)
+            rblock = sympy_product(
+                TritonSymbols.block_sizes[tree.symt] for tree in reduction_trees
+            )
             code.writeline(f"RBLOCK: tl.constexpr = {rblock}")
 
-    def _get_grid_fn(self):
+    def _get_grid_fn_str(self):
         return "grid"
+
+    def _get_grid_fn(self):
+        return default_grid_fn
 
     def add_numel_to_call_args_and_grid(self, name, call_args, arg_types, grid):
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
@@ -2891,16 +2994,18 @@ class TritonKernel(SIMDKernel):
                 ws.nbytes, current_device, ws.zero_fill
             )
 
-        grid = wrapper.generate_default_grid(name, grid)
+        grid = wrapper.generate_default_grid(
+            name, grid, grid_callable=self._get_grid_fn()
+        )
         wrapper.generate_kernel_call(
             name,
             call_args,
             grid,
             current_device.index,
-            cuda=True,
+            gpu=True,
             triton=True,
             arg_types=arg_types,
-            grid_fn=self._get_grid_fn(),
+            grid_fn=self._get_grid_fn_str(),
             triton_meta=self.triton_meta,
         )
 

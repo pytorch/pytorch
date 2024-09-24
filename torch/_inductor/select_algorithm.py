@@ -1258,6 +1258,11 @@ class AlgorithmSelectorCache(PersistentCache):
             if timings:
                 return no_op
 
+            if config.search_autotune_cache and not (
+                config.max_autotune or config.max_autotune_gemm
+            ):
+                return no_op
+
             precompile_key = create_precompile_key(name, inputs_key, choices)
             if precompile_func := self.precompile_cache.get(precompile_key):
                 return precompile_func
@@ -1278,7 +1283,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
             def precompile_with_captured_stdout(choice):
                 with restore_stdout_stderr(initial_stdout, initial_stderr):
-                    return choice.precompile()
+                    start_time = time.time()
+                    choice.precompile()
+                    return time.time() - start_time
 
             executor = ThreadPoolExecutor(max_workers=num_workers)
 
@@ -1299,6 +1306,12 @@ class AlgorithmSelectorCache(PersistentCache):
                     if e := future.exception():
                         log.error(
                             "Exception %s for benchmark choice %s", e, futures[future]
+                        )
+                    else:
+                        log.info(
+                            "Precompiling benchmark choice %s took %.02fs",
+                            futures[future],
+                            future.result(),
                         )
 
                 executor.shutdown(wait=True)
