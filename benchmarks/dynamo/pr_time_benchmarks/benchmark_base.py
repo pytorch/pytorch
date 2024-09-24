@@ -130,18 +130,20 @@ class BenchmarkBase(ABC):
 
         if result > high:
             print(
-                f"**REGRESSION** benchmark {self.name()} failed, actual instruction count {result} is higher than expected {expected} with noise margin {noise_margin}\n",
-                "if this is an expected regression, please update the expected instruction count in the benchmark"
+                f"**REGRESSION** benchmark {self.name()} failed, actual instruction count {result} is higher than expected \
+{expected} with noise margin {noise_margin} \
+if this is an expected regression, please update the expected instruction count in the benchmark.",
             )
-        
+
             log("instruction_count_test_fail_regression")
 
         if result < low:
             print(
-                f"**WIN** benchmark {self.name()} failed, actual instruction count {result} is lower than expected {expected} with noise margin {noise_margin}\n",
-                "please update the expected instruction count in the benchmark"
+                f"**WIN** benchmark {self.name()} failed, actual instruction count {result} is lower than expected {expected} \
+with noise margin {noise_margin} \
+please update the expected instruction count in the benchmark.",
             )
-            # if the test is by passed 
+            # if the test is by passed
             log("instruction_count_test_fail_win")
 
     def _count_instructions(self):
@@ -152,9 +154,8 @@ class BenchmarkBase(ABC):
             id = i_counter.start()
             self._work()
             count = i_counter.end(id)
-            
+
             print(f"instruction count for iteration {i} is {count}")
-            self._verify_instruction_count(count)
             results.append(count)
         return min(results)
 
@@ -180,7 +181,6 @@ class BenchmarkBase(ABC):
                     )
                 print(f"compile time instruction count for iteration {i} is {count}")
                 results.append(count)
-                self._verify_instruction_count(count)
 
             config.record_compile_time_instruction_count = False
             return min(results)
@@ -217,6 +217,7 @@ class BenchmarkBase(ABC):
                 name=self.name(),
                 instruction_count=r,
             )
+            self._verify_instruction_count(r)
         if self._enable_compile_time_instruction_count:
             r = self._count_compile_time_instructions()
 
@@ -232,4 +233,6 @@ class BenchmarkBase(ABC):
                 name=self.name(),
                 instruction_count=r,
             )
+            self._verify_instruction_count(r)
+
         return self
