@@ -1004,6 +1004,17 @@ class PolyfilledFunctionVariable(VariableTracker):
     ) -> "VariableTracker":
         from torch._dynamo.variables.builder import SourcelessBuilder
 
+        if self.can_constant_fold_through() and check_unspec_or_constant_args(
+            args, kwargs
+        ):
+            result = (
+                self.fn(  # use the original function which is faster than the polyfill
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                )
+            )
+            return SourcelessBuilder.create(tx, result)
+
         # Special case for sum on tuple of floats and ints
         if (
             self.fn is builtins.sum
@@ -1032,17 +1043,6 @@ class PolyfilledFunctionVariable(VariableTracker):
                     )
                 ),
             )
-
-        if self.can_constant_fold_through() and check_unspec_or_constant_args(
-            args, kwargs
-        ):
-            result = (
-                self.fn(  # use the original function which is faster than the polyfill
-                    *[x.as_python_constant() for x in args],
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                )
-            )
-            return SourcelessBuilder.create(tx, result)
 
         traceable_function_variable = SourcelessBuilder.create(tx, self.traceable_fn)
         return traceable_function_variable.call_function(tx, args, kwargs)
