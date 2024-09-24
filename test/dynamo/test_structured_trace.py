@@ -661,6 +661,26 @@ def forward(self, x, y):
         self.assertParses()
 
     @requires_tlparse
+    def test_make_fx_fail_partial(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def f(x):
+            y = x + 1
+            raise RuntimeError("boo")
+
+        try:
+            make_fx(f)(torch.randn(2))
+        except RuntimeError:
+            pass
+
+        self.assertExpectedInline(
+            self.buffer.getvalue(),
+            """\
+{"artifact": {"name": "make_fx_fail_partial", "encoding": "string"}, "stack": "STACK", "has_payload": "HASH"}
+""",
+        )
+
+    @requires_tlparse
     @torch._inductor.config.patch("fx_graph_cache", True)
     @show_chrome_events
     def test_chromium_event(self):
