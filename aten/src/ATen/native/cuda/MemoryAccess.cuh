@@ -16,7 +16,7 @@
 // References:
 // https://devblogs.nvidia.com/cuda-pro-tip-increase-performance-with-vectorized-memory-access/
 
-namespace at { namespace native { namespace memory {
+namespace at::native::memory {
 
 namespace detail {
 
@@ -386,4 +386,4 @@ inline int can_vectorize_up_to(array_t pointers) {
   return result;
 }
 
-}}} // namespace at::native::memory
+} // namespace at::native::memory
