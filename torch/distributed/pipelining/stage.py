@@ -563,19 +563,22 @@ class _PipelineStageBase(ABC):
     ):
         """
         Perform forward pass on the stage with one microbatch.
-        `args` and `kwargs` are the inputs from *external* to this stage. They
-        applies only to the first stage in most cases.
+        `args` and `kwargs` are the inputs from *external* to this stage.
+        As of Sept 2024:
+        - `args` applies to the first stage only, other stages receives args
+          through activation transmission.
+        - `kwargs` can be passed to all stages via respective `step` calls.
         """
 
         if self.is_first:
             # First stage doesn't need to receive anything
             composite_args = args
-            composite_kwargs = kwargs or {}
         else:
             # Receive activations for this chunk
             # Activations only come in args form
             composite_args = self._retrieve_recv_activations(fwd_chunk_id)
-            composite_kwargs = {}
+
+        composite_kwargs = kwargs or {}
 
         self._validate_fwd_input(args, kwargs)
 
@@ -752,8 +755,9 @@ class _PipelineStageBase(ABC):
 
         if len(kwargs):
             # TODO- need a mapping of kwarg to position in self.args_recv_info
-            # without it, we just validate shapes for args and ignore kwargs
-            expected_args = expected_args[: len(expected_args) - len(kwargs)]
+            # Without it, we are not 100% sure how to match the args and
+            # expected_args.
+            return
 
         # TODO- need a mapping of kwarg to position in self.args_recv_info
         # maybe it's impossible to tell whether the len mismatches because

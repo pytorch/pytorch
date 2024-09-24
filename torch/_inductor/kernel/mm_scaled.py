@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import sympy
 
 import torch
+from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 
 from .. import config as inductor_config
 from ..ir import ChoiceCaller, Layout, StorageBox, TensorBox
@@ -15,7 +16,7 @@ from ..select_algorithm import (
     realize_inputs,
     TritonTemplate,
 )
-from ..utils import use_aten_gemm_kernels, use_triton_template
+from ..utils import use_aten_gemm_kernels, use_ck_template, use_triton_template
 from .mm import _is_static_problem  # TODO(yangsiyu) move to mm_common
 from .mm_common import mm_args, mm_grid, scaled_mm_configs
 
@@ -291,6 +292,9 @@ def tuned_scaled_mm(
                 layout=layout,
                 **kwargs,
             )
+
+    if is_nonzero and use_ck_template(layout, m, n, k):
+        CKGemmTemplate.add_ck_gemm_choices(choices, layout, input_nodes)
 
     if (
         len(choices) == 0
