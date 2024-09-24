@@ -5469,8 +5469,6 @@ class TestMatmul(MatmulCommon, TestCase):
         out = np.zeros((5, 2), dtype=np.complex128)
         c = self.matmul(a, b, out=out)
         assert_(c is out)
-        #      with suppress_warnings() as sup:
-        #          sup.filter(np.ComplexWarning, '')
         c = c.astype(tgt.dtype)
         assert_array_equal(c, tgt)
 
@@ -5852,9 +5850,16 @@ class TestWarnings(TestCase):
         x = np.array([1, 2])
         y = np.array([1 - 2j, 1 + 2j])
 
+        # np.ComplexWarning moved to np.exceptions in numpy>=2.0.0
+        # np.exceptions only available in numpy>=1.25.0
+        has_exceptions_ns = hasattr(np, "exceptions")
+        ComplexWarning = (
+            np.exceptions.ComplexWarning if has_exceptions_ns else np.ComplexWarning
+        )
+
         with warnings.catch_warnings():
-            warnings.simplefilter("error", np.ComplexWarning)
-            assert_raises(np.ComplexWarning, x.__setitem__, slice(None), y)
+            warnings.simplefilter("error", ComplexWarning)
+            assert_raises(ComplexWarning, x.__setitem__, slice(None), y)
             assert_equal(x, [1, 2])
 
 

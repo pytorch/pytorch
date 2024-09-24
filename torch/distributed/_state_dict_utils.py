@@ -556,7 +556,10 @@ def _distribute_tensors(
         shape, offset = compute_local_shape_and_global_offset(
             full_tensor.shape, local_state.device_mesh, local_state.placements
         )
-        slices = [slice(offset[i], shape[i] + offset[i]) for i in range(len(shape))]
+        slices = [
+            slice(cur_offset, cur_offset + cur_shape)
+            for cur_shape, cur_offset in zip(shape, offset)
+        ]
         local_tensor = full_tensor[slices]
         local_state_dict[key] = DTensor.from_local(
             local_tensor, local_state.device_mesh, local_state.placements
