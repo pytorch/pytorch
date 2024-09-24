@@ -428,7 +428,9 @@ PyObject* THCPModule_cudaCachingAllocator_raw_delete(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_cudaCachingAllocator_enable(PyObject* _unused, PyObject* arg) {
+PyObject* THCPModule_cudaCachingAllocator_enable(
+    PyObject* _unused,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPUtils_checkBool(arg),
@@ -1867,7 +1869,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_cudaCachingAllocator_raw_delete,
      METH_O,
      nullptr},
-    {"_cuda_cachingAllocator_enable",
+    {"_cuda_cudaCachingAllocator_enable",
      THCPModule_cudaCachingAllocator_enable,
      METH_O,
      nullptr},

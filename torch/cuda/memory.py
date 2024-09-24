@@ -29,9 +29,9 @@ from ._memory_viz import memory as _memory, segments as _segments
 __all__ = [
     "caching_allocator_alloc",
     "caching_allocator_delete",
+    "caching_allocator_enable",
     "set_per_process_memory_fraction",
     "empty_cache",
-    "enable_cache",
     "memory_stats",
     "memory_stats_as_nested_dict",
     "reset_accumulated_memory_stats",
