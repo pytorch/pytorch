@@ -651,7 +651,7 @@ static bool check_group_multicast_support(
 }
 
 static void init_multicast_for_block(
-    CUmemGenericAllocationHandle& mc_handle,
+    HandleType& mc_handle,
     void*& mc_addr,
     const c10::intrusive_ptr<Block>& block,
     IpcChannel& ipc_channel,
@@ -774,7 +774,7 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
   store_barrier(store, rank, world_size);
   close(block_fd);
 
-  CUmemGenericAllocationHandle mc_handle{};
+  HandleType mc_handle{};
   void* mc_addr = nullptr;
   bool group_has_multicast_support = check_group_multicast_support(reqs);
   if (group_has_multicast_support) {
