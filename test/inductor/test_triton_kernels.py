@@ -1622,6 +1622,34 @@ def forward(self, x_1, output_1):
         compiled_out = torch.compile(f, dynamic=True)(x)
         self.assertEqual(compiled_out, eager_out)
 
+    @requires_gpu
+    def test_constexpr_dynamic_shapes(self):
+        # https://github.com/pytorch/pytorch/issues/136504
+        @triton.jit
+        def triton_(x_ptr, y_ptr, NUMEL: tl.constexpr, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offsets = BLOCK_SIZE * pid + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < NUMEL
+
+            data = tl.load(x_ptr + offsets, mask)
+            result = data * data
+
+            tl.store(y_ptr + offsets, result, mask)
+
+        def fn(x):
+            y = torch.empty_like(x)
+            BLOCK_SIZE = 256
+            numel = x.numel()
+            grid = (triton.cdiv(numel, BLOCK_SIZE),)
+            triton_[grid](x, y, numel, BLOCK_SIZE)
+            return y
+
+        fn_c = torch.compile(fn, dynamic=True)
+
+        x = torch.randn(512 + 5, device=GPU_TYPE)
+        res = fn_c(x)
+
+        self.assertEqual(x * x, res)
 
 def make_mutation_test(fn):
     @requires_gpu
