@@ -1843,6 +1843,9 @@
     CompositeExplicitAutograd: count_nonzero
   autogen: count_nonzero.out
 
+- func: count_nonzero_dtype(Tensor self, int? dim=None, ScalarType? dtype=None) -> Tensor
+  variants: function, method
+
 - func: cov(Tensor self, *, int correction=1, Tensor? fweights=None, Tensor? aweights=None) -> Tensor
   variants: function, method
 

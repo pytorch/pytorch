@@ -2332,6 +2332,21 @@ Tensor count_nonzero(const Tensor& self, std::optional<int64_t> dim) {
   return at::count_nonzero(self, IntArrayRef{});
 }
 
+Tensor count_nonzero_dtype(const Tensor& self, std::optional<int64_t> dim, std::optional<ScalarType> dtype) {
+  Tensor ret_ten;
+  ScalarType src_type = self.scalar_type();
+  ScalarType ret_type = dtype.value_or(src_type);
+  if (dim) {
+      ret_ten = at::count_nonzero(self, IntArrayRef{*dim});
+  } else {
+      ret_ten = at::count_nonzero(self, IntArrayRef{});
+  }
+  if (src_type != ret_type) {
+      return ret_ten.toType(ret_type);
+  }
+  return ret_ten;
+}
+
 
 Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
   TORCH_CHECK(result.scalar_type() == kLong,
