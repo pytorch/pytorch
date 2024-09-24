@@ -39,7 +39,7 @@ class TORCH_API Context {
 
   const Generator& defaultGenerator(Device device) {
     c10::DeviceType device_type = device.type();
-    lazyInit(device_type);
+    lazyInitDevice(device_type);
 
     if (device_type == at::kCPU) {
       return at::detail::getDefaultCPUGenerator();
@@ -83,7 +83,7 @@ class TORCH_API Context {
   }
 
   Device getDeviceFromPtr(void* data, c10::DeviceType device_type) {
-    lazyInit(device_type);
+    lazyInitDevice(device_type);
 
     if (device_type == at::kCPU) {
       return c10::DeviceType::CPU;
@@ -117,10 +117,12 @@ class TORCH_API Context {
     return getAcceleratorHooksInterface(device_type).getPinnedMemoryAllocator();
   }
 
-  void lazyInit(c10::DeviceType device_type) {
-    c10::call_once(init_[static_cast<uint8_t>(device_type)], [&] {
-      getAcceleratorHooksInterface(device_type).init();
-    });
+  void lazyInitDevice(c10::DeviceType device_type) {
+    if (device_type != at::kCPU) {
+      c10::call_once(init_[static_cast<int8_t>(device_type)], [&] {
+        getAcceleratorHooksInterface(device_type).init();
+      });
+    }
   }
 
   static bool hasOpenMP();

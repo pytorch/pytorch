@@ -138,7 +138,7 @@ __managed__ int input[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
 
 TEST(InclusiveScanSplit, CubTest) {
   if (!at::cuda::is_available()) return;
-  at::globalContext().lazyInit(
+  at::globalContext().lazyInitDevice(
       c10::DeviceType::CUDA); // This is required to use PyTorch's caching
                               // allocator.
 
@@ -164,7 +164,7 @@ TEST(InclusiveScanSplit, CubTest) {
 
 TEST(ExclusiveScanSplit, CubTest) {
   if (!at::cuda::is_available()) return;
-  at::globalContext().lazyInit(
+  at::globalContext().lazyInitDevice(
       c10::DeviceType::CUDA); // This is required to use PyTorch's caching
                               // allocator.
 

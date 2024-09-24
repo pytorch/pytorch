@@ -875,7 +875,7 @@ PyObject* THCPModule_attachOutOfMemoryObserver(
     }
     Py_XDECREF(result);
   };
-  at::globalContext().lazyInit(c10::DeviceType::CUDA);
+  at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
   c10::cuda::CUDACachingAllocator::attachOutOfMemoryObserver(std::move(obs));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -1404,7 +1404,7 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   TORCH_INTERNAL_ASSERT(!in_bad_fork); // Handled at python level
   poison_fork();
-  at::globalContext().lazyInit(c10::DeviceType::CUDA);
+  at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
 
   auto m = THPObjectPtr(PyImport_ImportModule("torch.cuda"));
   if (!m)
