@@ -5970,6 +5970,26 @@ class TestAOTModuleSimplified(AOTTestCase):
         out = torch.compile(fn, backend="aot_eager", fullgraph=True)(inp)
         self.assertEqual(ref_out, out)
 
+    @torch._inductor.config.patch({"freezing": True})
+    def test_inductor_freezing_with_subclasses(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = TwoTensor(torch.randn(3, 4), torch.randn(3, 4))
+
+            def forward(self, x):
+                return (
+                    x.index_select(
+                        dim=0, index=torch.tensor([0, 2, 1], dtype=torch.int64)
+                    )
+                    + self.w
+                )
+
+        m = M()
+        inp = torch.randn(3, 4)
+        with torch.no_grad():
+            torch.compile(m, fullgraph=True)(inp)
+
     @torch._functorch.config.patch("aotd_debug_profile", True)
     def test_aotd_debug_profile_overhead_logging(self):
         last_fwd_runtime_wrapper_start_time = None
