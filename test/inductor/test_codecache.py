@@ -363,12 +363,65 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
     @requires_gpu()
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_flex_attention_caching(self):
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        block_mask = create_block_mask(
+            lambda b, h, q, kv: q >= kv, None, None, 2048, 2048
+        )
+
+        def score_mod(score, b, h, q, kv):
+            return score + (q - kv)
+
+        def fn(q, k, v):
+            return flex_attention(q, k, v, score_mod=score_mod, block_mask=block_mask)
+
+        def score_mod2(score, b, h, q, kv):
+            return score
+
+        def fn2(q, k, v):
+            return flex_attention(q, k, v, score_mod=score_mod2, block_mask=block_mask)
+
+        a, b, c = (torch.randn(1, 4, 512, 64).cuda() for _ in range(3))
+        compiled_fn = torch.compile(fn)
+        compiled_fn2 = torch.compile(fn2)
+
+        atol, rtol = 1e-4, 1e-4
+
+        # A first call should miss in the cache.
+        self.assertEqual(fn(a, b, c), compiled_fn(a, b, c), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
+
+        # A second call should hit. (First reset so in-memory guards
+        # don't prevent compilation).
+        for m in torch._inductor.codecache.PyCodeCache.cache.values():
+            os.remove(m.__file__)
+        self.reset()
+        self.assertEqual(fn(a, b, c), compiled_fn(a, b, c), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
+
+        # A third call with different score_mod should have a cache miss
+        for m in torch._inductor.codecache.PyCodeCache.cache.values():
+            os.remove(m.__file__)
+        self.reset()
+        self.assertEqual(fn2(a, b, c), compiled_fn2(a, b, c), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
+
+    @requires_gpu()
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
-    def test_higher_order_op_bypass(self):
+    def test_triton_higher_order_op_bypass(self):
         """
-        Verify that we bypass the cache when we have higher order ops.
+        Verify that we bypass the cache when we have a triton higher order ops.
         """
 
         def fn(x, y):
