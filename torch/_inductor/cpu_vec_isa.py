@@ -160,12 +160,16 @@ class VecNEON(VecISA):
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
+
 @dataclasses.dataclass
 class VecSVE(VecISA):
     # this function can be repurposed for SVE with variable vec length
     _bit_width = 256
-    _macro =  ["CPU_CAPABILITY_SVE", "CPU_CAPABILITY_SVE256"]
-
+    _macro = [
+        "CPU_CAPABILITY_SVE",
+        "CPU_CAPABILITY_SVE256",
+        "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+    ]
     _arch_flags = "-march=armv8-a+sve -msve-vector-bits=256"
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
@@ -318,6 +322,7 @@ def x86_isa_checker() -> List[str]:
 
     return supported_isa
 
+
 @functools.lru_cache(maxsize=None)
 def _is_arm_neoverse_v1() -> bool:
     # reference: https://github.com/ARM-software/ComputeLibrary/blob/main/src/common/cpuinfo/CpuModel.cpp
@@ -330,7 +335,7 @@ def _is_arm_neoverse_v1() -> bool:
                     return True
                 line = _cpuinfo.readline()
             return False
-    except:
+    except Exception:
         return False
 
 
