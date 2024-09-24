@@ -1,4 +1,5 @@
 import csv
+import gc
 from abc import ABC, abstractmethod
 
 from fbscribelogger import make_scribe_logger
@@ -60,6 +61,13 @@ class BenchmarkBase(ABC):
     # TODO is there other parts we need to add ?
     _enable_compile_time_instruction_count = False
 
+    # number of iterations used to run when collecting instruction_count or compile_time_instruction_count.
+    _num_iterations = 5
+
+    def with_iterations(self, value):
+        self._num_iterations = value
+        return self
+
     def enable_instruction_count(self):
         self._enable_instruction_count = True
         return self
@@ -88,7 +96,7 @@ class BenchmarkBase(ABC):
     def _count_instructions(self):
         print(f"collecting instruction count for {self.name()}")
         results = []
-        for i in range(10):
+        for i in range(self._num_iterations):
             self._prepare()
             id = i_counter.start()
             self._work()
@@ -98,26 +106,32 @@ class BenchmarkBase(ABC):
         return min(results)
 
     def _count_compile_time_instructions(self):
-        print(f"collecting compile time instruction count for {self.name()}")
-        config.record_compile_time_instruction_count = True
+        gc.disable()
 
-        results = []
-        for i in range(10):
-            self._prepare()
-            # CompileTimeInstructionCounter.record is only called on convert_frame._compile_inner
-            # hence this will only count instruction count spent in compile_inner.
-            CompileTimeInstructionCounter.clear()
-            self._work()
-            count = CompileTimeInstructionCounter.value()
-            if count == 0:
-                raise RuntimeError(
-                    "compile time instruction count is 0, please check your benchmarks"
-                )
-            print(f"compile time instruction count for iteration {i} is {count}")
-            results.append(count)
+        try:
+            print(f"collecting compile time instruction count for {self.name()}")
+            config.record_compile_time_instruction_count = True
 
-        config.record_compile_time_instruction_count = False
-        return min(results)
+            results = []
+            for i in range(self._num_iterations):
+                self._prepare()
+                gc.collect()
+                # CompileTimeInstructionCounter.record is only called on convert_frame._compile_inner
+                # hence this will only count instruction count spent in compile_inner.
+                CompileTimeInstructionCounter.clear()
+                self._work()
+                count = CompileTimeInstructionCounter.value()
+                if count == 0:
+                    raise RuntimeError(
+                        "compile time instruction count is 0, please check your benchmarks"
+                    )
+                print(f"compile time instruction count for iteration {i} is {count}")
+                results.append(count)
+
+            config.record_compile_time_instruction_count = False
+            return min(results)
+        finally:
+            gc.enable()
 
     def append_results(self, path):
         with open(path, "a", newline="") as csvfile:

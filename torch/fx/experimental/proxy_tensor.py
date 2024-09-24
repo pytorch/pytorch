@@ -17,7 +17,7 @@ import typing_extensions
 import warnings
 import weakref
 from collections import defaultdict
-from contextlib import contextmanager, ExitStack, nullcontext
+from contextlib import _GeneratorContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from typing import (
     Any,
@@ -596,6 +596,21 @@ def track_tensor_tree(
     constant: Optional[_NestedTensors],
     tracer: _ProxyTracer,
 ) -> T:
+    # NB: We call set_unbacked_bindings only on the *topmost* call to
+    # track_tensor_tree, not recursive calls.  This is because there must
+    # be only ONE unbacked_binding proxy call, and it should be the one
+    # where all of the unbacked SymInts actually first come into existence.
+    # If you call this again on the inner proxies for the tuple projections,
+    # you will have multiple unbacked_bindings for the same symbol, but
+    # they're not going to show up anywhere.
+    #
+    # I was briefly deceived into setting unbacked bindings recursively when
+    # working on https://github.com/pytorch/pytorch/pull/133585 because I
+    # observed that some extra unbacked bindings were needed to handle some
+    # higher order operator code.  But actually it looks like this was
+    # just an unrelated bug that needed to be fixed separately.
+    _set_unbacked_bindings(inner_res, proxy_res)
+
     def wrap_with_proxy(
         e: object, proxy: _NestedProxys, constant: Optional[_NestedTensors]
     ) -> None:
@@ -604,13 +619,11 @@ def track_tensor_tree(
             assert constant is None or isinstance(constant, Tensor)
             track_tensor(e, proxy, tracer=tracer, constant=constant)
             set_meta(proxy, e)
-            _set_unbacked_bindings(e, proxy)
         elif isinstance(e, py_sym_types):
             assert isinstance(proxy, Proxy)
             # NB: eagerly set meta here, so that the numbering is in order
             set_meta(proxy, e)
             set_proxy_slot(e, tracer, thunkify(tracer, lambda: proxy))
-            _set_unbacked_bindings(e, proxy)
         elif isinstance(e, _AnyScriptObject):
             assert isinstance(proxy, Proxy)
             set_proxy_slot(e, tracer, proxy)
@@ -1071,38 +1084,43 @@ class PythonKeyTracer(Tracer):
             return e
 
 
-@contextmanager
-def _temp_remove_pre_dispatch_torch_function_mode() -> Generator[None, None, None]:
-    from torch.overrides import _len_torch_function_stack, _pop_mode, _push_mode
+def _make_temp_remove_mode_context_manager(
+    mode_ty: Type[TorchFunctionMode],
+) -> Callable[[], _GeneratorContextManager[Optional[TorchFunctionMode]]]:
+    @contextmanager
+    def context_manager_fn() -> Generator[Optional[TorchFunctionMode], None, None]:
+        from torch.overrides import _len_torch_function_stack, _pop_mode, _push_mode
 
-    temp_elements = []
-    pre_dispatch_mode = None
+        temp_elements = []
+        removed_mode = None
 
-    while _len_torch_function_stack() > 0:
-        mode = _pop_mode()
-        if isinstance(mode, PreDispatchTorchFunctionMode):
-            pre_dispatch_mode = mode
-            break
-        else:
-            temp_elements.append(mode)
+        while _len_torch_function_stack() > 0:
+            mode = _pop_mode()
+            if isinstance(mode, mode_ty):
+                removed_mode = mode
+                break
+            else:
+                temp_elements.append(mode)
 
-    for mode in reversed(temp_elements):
-        _push_mode(mode)
+        for mode in reversed(temp_elements):
+            _push_mode(mode)
 
-    try:
-        yield
+        try:
+            yield removed_mode
 
-    finally:
-        if pre_dispatch_mode is not None:
-            count = len(temp_elements)
-            while count > 0:
-                mode = _pop_mode()
-                count -= 1
+        finally:
+            if removed_mode is not None:
+                count = len(temp_elements)
+                while count > 0:
+                    mode = _pop_mode()
+                    count -= 1
 
-            temp_elements.append(pre_dispatch_mode)
+                temp_elements.append(removed_mode)
 
-            for mode in reversed(temp_elements):
-                _push_mode(mode)
+                for mode in reversed(temp_elements):
+                    _push_mode(mode)
+
+    return context_manager_fn
 
 
 @torch._disable_dynamo
@@ -1217,6 +1235,11 @@ class TorchFunctionMetadataMode(TorchFunctionMode):
         return func(*args, **kwargs)
 
 
+_temp_remove_metadata_torch_function_mode = _make_temp_remove_mode_context_manager(
+    TorchFunctionMetadataMode
+)
+
+
 # This mode is **only** used for pre_dispatch tracing.
 # In particular, we need to make sure that autograd/autocast API's
 # that do not desugar into dispatcher operators stay in the graph.
@@ -1243,6 +1266,11 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             # Don't actually run the function! We just want to trace the calls
             # into a graph. We don't actualy want to change global autograd state.
         return func(*args, **kwargs)
+
+
+_temp_remove_pre_dispatch_torch_function_mode = _make_temp_remove_mode_context_manager(
+    PreDispatchTorchFunctionMode
+)
 
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
@@ -2187,8 +2215,6 @@ def get_isolated_graphmodule(
 def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     """A helper function for setting up unbacked_bindings on the destination FX graph."""
     from .symbolic_shapes import compute_unbacked_bindings
-
-    log.debug("_set_unbacked_bindings %s", out_proxy)
 
     # Can't use detect_fake_mode here,
     #

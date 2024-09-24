@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import platform
+import shutil
 from glob import glob
 
 from setuptools import distutils  # type: ignore[import]
@@ -86,3 +87,8 @@ def build_caffe2(
     if cmake_only:
         return
     cmake.build(my_env)
+    if build_python:
+        caffe2_proto_dir = os.path.join(cmake.build_dir, "caffe2", "proto")
+        for proto_file in glob(os.path.join(caffe2_proto_dir, "*.py")):
+            if proto_file != os.path.join(caffe2_proto_dir, "__init__.py"):
+                shutil.copy(proto_file, os.path.join("caffe2", "proto"))
