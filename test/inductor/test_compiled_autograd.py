@@ -487,10 +487,8 @@ main()
             x = torch.randn([1, 4])
 
             res = []
-            torch._dynamo.enter_warmup()
             for i in range(n_iters):
-                if i >= warmup_runs:
-                    torch._dynamo.exit_warmup()
+                torch._dynamo.enable_warmup(i < warmup_runs)
                 if compiled and not enable_ca_via_config:
                     ctx = compiled_autograd.enable(torch.compile)
                 else:

@@ -33,8 +33,7 @@ from .eval_frame import (
 from .external_utils import is_compiling
 from .mutation_guard import GenerationTracker
 from .utils import (
-    enter_warmup,
-    exit_warmup,
+    enable_warmup,
     graph_break_reasons,
     guard_failures,
     in_warmup_mode,

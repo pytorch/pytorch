@@ -2973,18 +2973,12 @@ def in_warmup_mode():
     return getattr(_in_warmup_mode_tls, "value", False)
 
 
-# When called, all torch.compile'd functions will be run in eager mode,
-# until `exit_warmup()` is called.
-def enter_warmup():
+# Controls whether to enable Dynamo warmup mode.
+# If `enabled=True`, all torch.compile'd functions will be run in eager mode.
+# If `enabled=False`, all torch.compile'd functions will be back to its normal (compiled) behavior.
+def enable_warmup(enabled=True):
     global _in_warmup_mode_tls
-    _in_warmup_mode_tls.value = True
-
-
-# When called, exits warmup mode and all torch.compile'd functions will be
-# back to its normal behavior.
-def exit_warmup():
-    global _in_warmup_mode_tls
-    _in_warmup_mode_tls.value = False
+    _in_warmup_mode_tls.value = enabled
 
 
 def invalid_removeable_handle():

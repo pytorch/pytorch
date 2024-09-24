@@ -425,10 +425,8 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         ):
             torch.manual_seed(42)
             losses = []
-            torch._dynamo.enter_warmup()
             for i in range(n_iter):
-                if i > 0:
-                    torch._dynamo.exit_warmup()
+                torch._dynamo.enable_warmup(i < 1)
                 inp = input_creation_fn()
                 if compiled_autograd_backend is not None:
                     maybe_compiled_autograd_ctx = compiled_autograd.enable(
