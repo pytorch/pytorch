@@ -20,9 +20,26 @@
 
 namespace {
 
-bool has_multicast_support() {
+bool device_has_multicast_support(int device_idx) {
 #if defined(CUDART_SUPPORTS_MULTICAST)
-  return c10::cuda::DriverAPI::get()->cuMulticastCreate_ != nullptr;
+  auto env_var = getenv("TORCH_SYMM_MEM_DISABLE_MULTICAST");
+  if (env_var != nullptr && std::string(env_var) != "0") {
+    return false;
+  }
+  // Multicast support requirements:
+  // - CUDA Runtime version >= 12030: Checked at compile time using
+  // CUDART_VERSION.
+  // - Driver version >= 535: Checked at runtime by verifying the existence of
+  // cuMulticastCreate_.
+  // - Device support: Determined by querying
+  // CU_DEVICE_ATTRIBUTE_MULTICAST_SUPPORTED at runtime.
+  auto driver_api = c10::cuda::DriverAPI::get();
+  int multicast_supported;
+  C10_CUDA_DRIVER_CHECK(driver_api->cuDeviceGetAttribute_(
+      &multicast_supported,
+      CU_DEVICE_ATTRIBUTE_MULTICAST_SUPPORTED,
+      device_idx));
+  return driver_api->cuMulticastCreate_ != nullptr && multicast_supported;
 #else
   return false;
 #endif
@@ -70,7 +87,12 @@ class IpcChannel {
     cmsg->cmsg_len = CMSG_LEN(sizeof(int));
     cmsg->cmsg_level = SOL_SOCKET;
     cmsg->cmsg_type = SCM_RIGHTS;
-    memcpy(CMSG_DATA(cmsg), &fd, sizeof(fd));
+
+    if (fd != -1) {
+      memcpy(CMSG_DATA(cmsg), &fd, sizeof(fd));
+    } else {
+      msg.msg_controllen = 0;
+    }
 
     TORCH_CHECK(
         sendmsg(socket_, &msg, 0) > 0, "Failed to send fd: ", strerror(errno));
@@ -93,6 +115,10 @@ class IpcChannel {
         recvmsg(socket_, &msg, 0) > 0,
         "Failed to receive fd: ",
         strerror(errno));
+
+    if (msg.msg_controllen == 0) {
+      return -1;
+    }
 
     auto cmsg = CMSG_FIRSTHDR(&msg);
     TORCH_CHECK(cmsg != NULL);
@@ -319,7 +345,7 @@ size_t CUDASymmetricMemory::get_signal_pad_size() {
 }
 
 bool CUDASymmetricMemory::has_multicast_support() {
-  return ::has_multicast_support();
+  return mc_addr_ != nullptr;
 }
 
 void* CUDASymmetricMemory::get_multicast_ptr() {
@@ -573,10 +599,11 @@ struct RendezvousRequest {
   size_t block_size;
   size_t buffer_size;
   size_t signal_pad_offset;
+  bool has_multicast_support;
 };
 
 void validate_rendezvous_requests(
-    const std::vector<RendezvousRequest> reqs,
+    const std::vector<RendezvousRequest>& reqs,
     int world_size) {
   TORCH_CHECK(reqs.size() == (size_t)world_size);
 
@@ -598,6 +625,92 @@ void validate_rendezvous_requests(
     TORCH_CHECK(reqs[r].buffer_size == reqs[0].buffer_size);
     TORCH_CHECK(reqs[r].signal_pad_offset == reqs[0].signal_pad_offset);
   }
+}
+
+static bool check_group_multicast_support(
+    const std::vector<RendezvousRequest>& reqs) {
+  std::vector<size_t> ranks_with_multicast_support;
+  for (size_t r = 0; r < reqs.size(); ++r) {
+    if (reqs[r].has_multicast_support) {
+      ranks_with_multicast_support.push_back(r);
+    }
+  }
+  if (ranks_with_multicast_support.size() == reqs.size()) {
+    return true;
+  } else {
+    // We don't expect this to happen. But we want to let the user to know if
+    // this happens.
+    if (ranks_with_multicast_support.size() != 0) {
+      LOG(WARNING)
+          << "Only a subset of ranks in the group has multicast support: "
+          << ranks_with_multicast_support << " (world_size=" << reqs.size()
+          << "). Skipping multicast initialization because this is unexpected.";
+    }
+    return false;
+  }
+}
+
+static void init_multicast_for_block(
+    CUmemGenericAllocationHandle& mc_handle,
+    void*& mc_addr,
+    const c10::intrusive_ptr<Block>& block,
+    IpcChannel& ipc_channel,
+    const std::vector<int>& pids,
+    const c10::intrusive_ptr<c10d::Store>& store,
+    int rank,
+    int world_size) {
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED) && \
+    defined(CUDART_SUPPORTS_MULTICAST)
+  auto driver_api = c10::cuda::DriverAPI::get();
+  if (rank == 0) {
+    CUmulticastObjectProp mc_prop{};
+    mc_prop.numDevices = world_size;
+    mc_prop.handleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+    mc_prop.size = block->block_size;
+
+    auto err = driver_api->cuMulticastCreate_(&mc_handle, &mc_prop);
+    if (err != CUDA_SUCCESS) {
+      const char* err_str;
+      CUresult get_error_str_err = driver_api->cuGetErrorString_(err, &err_str);
+      if (get_error_str_err != CUDA_SUCCESS) {
+        err_str = "unknown cuda driver error";
+      }
+      LOG(WARNING)
+          << "SymmetricMemory: cuMulticastCreate failed with: \"" << err_str
+          << "\". Gracefully skipping multicast initialization. "
+          << "However, this is unexpected. Please report the issue on GitHub.";
+      // Allow peers gracefully skip multicast initialization by sending -1
+      ipc_channel.broadcast_fds(rank, 0, pids, -1);
+      return;
+    }
+
+    int mc_fd;
+    C10_CUDA_DRIVER_CHECK(driver_api->cuMemExportToShareableHandle_(
+        &mc_fd, mc_handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0));
+    ipc_channel.broadcast_fds(rank, 0, pids, mc_fd);
+    // Ref count is incremented as soon as SCM_RIGHTS send happens
+    close(mc_fd);
+  } else {
+    int mc_fd = ipc_channel.broadcast_fds(rank, 0, pids, -1);
+    if (mc_fd == -1) {
+      return;
+    }
+    C10_CUDA_DRIVER_CHECK(driver_api->cuMemImportFromShareableHandle_(
+        &mc_handle,
+        (void*)(uintptr_t)mc_fd,
+        CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
+    close(mc_fd);
+  }
+
+  // All rank adds their physical allocation to the multicast object
+  C10_CUDA_DRIVER_CHECK(
+      driver_api->cuMulticastAddDevice_(mc_handle, block->device_idx));
+  C10_CUDA_DRIVER_CHECK(driver_api->cuMulticastBindMem_(
+      mc_handle, 0, block->handle, 0, block->block_size, 0));
+
+  map_block(&mc_addr, mc_handle, block->block_size, block->device_idx);
+  store_barrier(store, rank, world_size);
+#endif
 }
 
 c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
@@ -628,7 +741,8 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
       .pid = getpid(),
       .block_size = block->block_size,
       .buffer_size = block->buffer_size,
-      .signal_pad_offset = block->signal_pad_offset};
+      .signal_pad_offset = block->signal_pad_offset,
+      .has_multicast_support = device_has_multicast_support(block->device_idx)};
   auto reqs = store_all_gather(store, rank, world_size, local_req);
   validate_rendezvous_requests(reqs, world_size);
 
@@ -662,43 +776,11 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
 
   CUmemGenericAllocationHandle mc_handle{};
   void* mc_addr = nullptr;
-#if defined(CUDART_SUPPORTS_MULTICAST)
-  // We have to further check if the driver supports multicast
-  if (has_multicast_support()) {
-    // Rank 0 creates a multicast object and share it with peers
-    if (rank == 0) {
-      CUmulticastObjectProp mc_prop{};
-      mc_prop.numDevices = world_size;
-      mc_prop.handleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
-      mc_prop.size = block->block_size;
-
-      CUresult res = driver_api->cuMulticastCreate_(&mc_handle, &mc_prop);
-      TORCH_CHECK(res == CUDA_SUCCESS);
-
-      int mc_fd;
-      C10_CUDA_DRIVER_CHECK(driver_api->cuMemExportToShareableHandle_(
-          &mc_fd, mc_handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0));
-      ipc_channel.broadcast_fds(rank, 0, pids, mc_fd);
-      // Ref count is incremented as soon as SCM_RIGHTS send happens
-      close(mc_fd);
-    } else {
-      int mc_fd = ipc_channel.broadcast_fds(rank, 0, pids, -1);
-      C10_CUDA_DRIVER_CHECK(driver_api->cuMemImportFromShareableHandle_(
-          &mc_handle,
-          (void*)(uintptr_t)mc_fd,
-          CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
-      close(mc_fd);
-    }
-    // All rank adds their physical allocation to the multicast object
-    C10_CUDA_DRIVER_CHECK(
-        driver_api->cuMulticastAddDevice_(mc_handle, block->device_idx));
-    C10_CUDA_DRIVER_CHECK(driver_api->cuMulticastBindMem_(
-        mc_handle, 0, block->handle, 0, block->block_size, 0));
-
-    map_block(&mc_addr, mc_handle, block->block_size, block->device_idx);
-    store_barrier(store, rank, world_size);
+  bool group_has_multicast_support = check_group_multicast_support(reqs);
+  if (group_has_multicast_support) {
+    init_multicast_for_block(
+        mc_handle, mc_addr, block, ipc_channel, pids, store, rank, world_size);
   }
-#endif
 
   // Initializing CUDASymmetricMemory with an allocation transfers its
   // ownership to the CUDASymmetricMemory object. So that outstanding
@@ -732,7 +814,10 @@ bool CUDASymmetricMemoryAllocator::is_rendezvous_completed(void* ptr) {
 }
 
 bool CUDASymmetricMemoryAllocator::has_multicast_support() {
-  return ::has_multicast_support();
+  // Use 0 to prevent unexpected cuda context initialization.
+  // We generally expect multicast support to be uniform across all devices,
+  // but we'll still perform a check during rendezvous.
+  return device_has_multicast_support(0);
 }
 
 c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block(void* ptr) {
