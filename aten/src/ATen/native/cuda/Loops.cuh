@@ -12,7 +12,7 @@
 #include <ATen/native/cuda/MemoryAccess.cuh>
 
 
-namespace at { namespace native {
+namespace at::native {
 
 template<int N>
 static OffsetCalculator<N> make_input_offset_calculator(const TensorIteratorBase& iter) {
@@ -66,7 +66,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
   policy.store(results, idx);
 }
 
-}}  // namespace at::native
+}  // namespace at::native
 
 #include <ATen/native/cuda/CUDALoops.cuh>
 

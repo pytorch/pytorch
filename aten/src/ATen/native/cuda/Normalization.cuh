@@ -19,7 +19,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 // The maximum number of threads in a block
 #if defined(USE_ROCM)
@@ -1739,4 +1739,4 @@ at::Tensor batch_norm_backward_elemt_channels_last_cuda_template(
   return grad_input;
 }
 
-} } // namespace at::native
+} // namespace at::native
