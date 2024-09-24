@@ -536,7 +536,7 @@ def reorder_for_peak_memory(
     peak_memory_diff_methods.append(
         PeakMemoryResult(nodes, estimated_peak_memory, "baseline")
     )
-    torch_log.warning("Baseline peak memory: %d", estimated_peak_memory)
+    torch_log.info("Baseline peak memory: %d", estimated_peak_memory)
 
     # other methods
     for method in methods:
@@ -552,7 +552,7 @@ def reorder_for_peak_memory(
             peak_memory_diff_methods.append(
                 PeakMemoryResult(order, peak_memory, method.__name__)
             )
-            torch_log.warning("%s peak memory: %d", method.__name__, peak_memory)
+            torch_log.info("%s peak memory: %d", method.__name__, peak_memory)
         except Exception as e:
             torch_log.error("Failed to reorder for %s: %s", method.__name__, e)
 
