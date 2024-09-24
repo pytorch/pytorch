@@ -113,9 +113,9 @@ class IterationRanges:
     def symbol(self):
         return sympy_index_symbol(self.name)
 
-    @no_type_check
     @property
     @cache_on_self
+    @no_type_check
     def symt(self) -> SymT:
         prefix_to_symt = {prefix: symt for symt, prefix in prefix_str.items()}
         return prefix_to_symt[self.prefix]
