@@ -881,6 +881,9 @@ class OpInfo:
     # whether the op promotes integer inputs to float
     promotes_int_to_float: bool = False
 
+    # bogus name to demonstrate the issue
+    copies_scalar_tensors: bool = False
+
     # the following metadata relates to complex support and is checked in test_ops.py
 
     test_conjugated_samples: bool = True
