@@ -40,8 +40,8 @@ try:
     try:
         from . import test_cpu_repro, test_torchinductor
     except ImportError:
-        import test_cpu_repro
-        import test_torchinductor
+        import test_cpu_repro  # @manual=fbcode//caffe2/test/inductor:test_cpu_repro-library
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
