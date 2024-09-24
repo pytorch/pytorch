@@ -379,13 +379,7 @@ case "$image" in
     GCC_VERSION=11
     CONDA_CMAKE=yes
     HALIDE=yes
-    ;;
-  pytorch-linux-jammy-py3.12-triton-cpu)
-    CUDA_VERSION=12.4
-    ANACONDA_PYTHON_VERSION=3.12
-    GCC_VERSION=11
-    CONDA_CMAKE=yes
-    TRITON_CPU=yes
+    TRITON=yes
     ;;
   pytorch-linux-focal-linter)
     # TODO: Use 3.9 here because of this issue https://github.com/python/mypy/issues/13627.
@@ -516,7 +510,6 @@ docker build \
        --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
        --build-arg "CONDA_CMAKE=${CONDA_CMAKE}" \
        --build-arg "TRITON=${TRITON}" \
-       --build-arg "TRITON_CPU=${TRITON_CPU}" \
        --build-arg "ONNX=${ONNX}" \
        --build-arg "DOCS=${DOCS}" \
        --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \

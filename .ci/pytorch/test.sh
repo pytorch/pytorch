@@ -607,11 +607,6 @@ test_inductor_halide() {
   assert_git_not_dirty
 }
 
-test_inductor_triton_cpu() {
-  python test/run_test.py --include inductor/test_triton_cpu_backend.py --verbose
-  assert_git_not_dirty
-}
-
 test_dynamo_benchmark() {
   # Usage: test_dynamo_benchmark huggingface 0
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
@@ -1407,8 +1402,8 @@ test_linux_aarch64() {
        inductor/test_max_autotune inductor/test_memory_planning inductor/test_metrics inductor/test_multi_kernel inductor/test_pad_mm \
        inductor/test_pattern_matcher inductor/test_perf inductor/test_profiler inductor/test_select_algorithm inductor/test_smoke \
        inductor/test_split_cat_fx_passes inductor/test_standalone_compile inductor/test_torchinductor \
-       inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes \
-       --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose inductor/test_memory
+       inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes inductor/test_memory \
+       --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
@@ -1441,8 +1436,6 @@ elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
   test_inductor_halide
-elif [[ "${TEST_CONFIG}" == *inductor-triton-cpu* ]]; then
-  test_inductor_triton_cpu
 elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
   test_inductor_micro_benchmark
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
