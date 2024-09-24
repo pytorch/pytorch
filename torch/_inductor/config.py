@@ -72,6 +72,10 @@ sleep_sec_TESTING_ONLY: Optional[int] = None
 # then we assume the following applies.
 custom_op_default_layout_constraint = "needs_fixed_stride_order"
 
+# The default layout constraint for user-defined triton kernels.
+# See "The default layout constraint for custom operators" for options.
+triton_kernel_default_layout_constraint = "flexible_layout"
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
@@ -194,14 +198,7 @@ batch_fusion = True
 # merge_splits_pass
 # mutate_cat_pass
 # split_cat_pass
-pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {
-    "batch_linear": {},
-    "batch_linear_lhs": {},
-    "batch_layernorm": {},
-    "batch_tanh": {},
-    "batch_relu": {},
-    "batch_sigmoid": {},
-}
+pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {}
 
 # Post grad fusion and options, set to empty dict to disable fusion.
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
@@ -261,6 +258,9 @@ reorder_for_compute_comm_overlap_passes = [
     "sink_waits",
     "raise_comms",
 ]
+
+# enable operator reordering for peak memory optimization
+reorder_for_peak_memory = os.environ.get("TORCHINDUCTOR_REORDER_FOR_PEAK_MEMORY") == "1"
 
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
@@ -326,8 +326,8 @@ autotune_fallback_to_aten = (
 # that can appear in the input shapes (e.g., in autotuning)
 unbacked_symint_fallback = 8192
 
-# DEPRECATED, DO NOT USE
-search_autotune_cache = False
+# enable searching global and local cache regardless of `max_autotune`
+search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
 
 save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
@@ -908,7 +908,8 @@ class triton:
     autotune_cublasLt = True
 
     # Tune the generated Triton kernels at compile time instead of first time they run
-    autotune_at_compile_time = False
+    # Setting to None means uninitialized
+    autotune_at_compile_time: Optional[bool] = None
 
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
@@ -992,6 +993,7 @@ class aot_inductor:
     # 0: disable debug dumping
     # 1: enable saving intermediate tensor values
     # 2: enable printing intermediate tensor values
+    # 3: enable printing kernel names only (useful for pinpointing troublesome kernels)
     debug_intermediate_value_printer = os.environ.get(
         "AOT_INDUCTOR_DEBUG_INTERMEDIATE_VALUE_PRINTER", "0"
     )
@@ -1002,9 +1004,11 @@ class aot_inductor:
     )
 
     # Serialized tree spec for flattening inputs
+    # TODO: Move this into metadata
     serialized_in_spec = ""
 
     # Serialized tree spec for flattening outputs
+    # TODO: Move this into metadata
     serialized_out_spec = ""
 
     # flag to decide whether to create a submodule for constant graph.
@@ -1015,6 +1019,11 @@ class aot_inductor:
     force_mmap_weights: bool = False
 
     package: bool = False
+    package_cpp_only: bool = False
+
+    # Dictionary of metadata users might want to save to pass to the runtime.
+    # TODO: Move this somewhere else, since it's no longer really a config
+    metadata: Dict[str, str] = {}
 
 
 class cuda:
