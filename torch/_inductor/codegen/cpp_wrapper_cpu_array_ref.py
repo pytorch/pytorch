@@ -10,9 +10,22 @@ from .. import config, ir
 from ..virtualized import V
 from .cpp_utils import cexpr, DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
+from .wrapper import (
+    EnterSubgraphLine,
+    ExitSubgraphLine,
+    MemoryPlanningLine,
+    MemoryPlanningState,
+)
 
 
 BufferName = str
+
+# Default thread stack sizes vary by platform:
+# - Linux: 8 MB
+# - macOS: 512 KB
+# - Windows: 1 MB
+# Just pick something comfortably smaller than the smallest for now.
+MAX_STACK_ALLOCATION_SIZE = 1024 * 100
 
 
 class CppWrapperCpuArrayRef(CppWrapperCpu):
@@ -58,6 +71,51 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.expr_printer = cexpr
         self.allow_stack_allocation: Optional[bool] = None
         self.stack_allocated_buffers: Dict[BufferName, ir.Buffer] = {}
+
+    def memory_plan(self):
+        from .memory_planning import MemoryPlanner
+
+        self.lines = MemoryPlanner(self).plan(self.lines)
+        # TODO: integrate memory planning & stack allocation?
+        self.allow_stack_allocation = False
+
+    def memory_plan_reuse(self):
+        out_names = V.graph.get_output_names()
+
+        while (
+            self.lines
+            and isinstance(self.lines[-1], MemoryPlanningLine)
+            # TODO: this seems legit, NullLine has no node
+            and self.lines[-1].node.name not in out_names  # type: ignore[attr-defined]
+        ):
+            # these lines will be pointless
+            self.lines.pop()
+
+        # codegen allocations in two passes
+        planning_states = [MemoryPlanningState()]
+        past_planning_states = []
+        for i in range(len(self.lines)):
+            line = self.lines[i]
+            if isinstance(line, MemoryPlanningLine):
+                self.lines[i] = line.plan(planning_states[-1])
+            elif isinstance(line, EnterSubgraphLine):
+                planning_states.append(MemoryPlanningState())
+            elif isinstance(line, ExitSubgraphLine):
+                past_planning_states.append(planning_states.pop())
+        past_planning_states.append(planning_states.pop())
+        assert len(planning_states) == 0
+
+        # conservatively use the sum of all allocated buffer sizes
+        # in potentially nested scopes as the total allocated size
+        total_allocated_buffer_size = sum(
+            s.total_allocated_buffer_size for s in past_planning_states
+        )
+
+        self.allow_stack_allocation = (
+            self.allow_stack_allocation is not False
+            and config.allow_stack_allocation
+            and total_allocated_buffer_size <= MAX_STACK_ALLOCATION_SIZE
+        )
 
     def can_stack_allocate_buffer(self, buffer):
         return (
@@ -168,6 +226,26 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             f"{self.declare}{name} = {self.namespace}empty_strided("
             f"{size}, {stride}, at::TensorOptions({tensor_device}).dtype({dtype_code})){self.ending}"
         )
+
+    def make_buffer_reuse(self, old: ir.Buffer, new: ir.Buffer, delete_old: bool):
+        assert old.get_dtype() == new.get_dtype()
+        old_name = old.get_name()
+        new_name = new.get_name()
+        del_line = ";"
+        if old_name not in V.graph.get_output_names() and delete_old:
+            del_line = f"; {self.make_buffer_free(old)}"
+
+        if old.get_size() == new.get_size() and old.get_stride() == new.get_stride():
+            if old_name in self.stack_allocated_buffers:
+                self.stack_allocated_buffers[new_name] = new
+            return self.codegen_exact_buffer_reuse(old_name, new_name, del_line)
+
+        reinterpret_view = self.codegen_reinterpret_view(
+            old, new.get_size(), new.get_stride(), 0, self.wrapper_call
+        )
+        if reinterpret_view in self.stack_allocated_buffers:
+            self.stack_allocated_buffers[new_name] = new
+        return f"{self.declare_maybe_reference}{new_name} = {reinterpret_view}{del_line}  {self.comment} reuse"
 
     def generate_c_shim_extern_kernel_call(self, kernel, args):
         # In the abi_compatible mode, we call fallback aten ops through a C shim layer
