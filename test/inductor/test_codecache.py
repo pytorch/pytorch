@@ -877,13 +877,13 @@ class TestUtils(TestCase):
         b = torch.rand(10)
 
         with fresh_inductor_cache():
-            self.assertEqual(len(PyCodeCache.modules.keys()), 0)
+            self.assertEqual(len(PyCodeCache.modules), 0)
             res1 = torch.compile(fn)(a, b)
             cache_dir1 = cache_dir()
 
         torch._dynamo.reset()
         with fresh_inductor_cache():
-            self.assertEqual(len(PyCodeCache.modules.keys()), 0)
+            self.assertEqual(len(PyCodeCache.modules), 0)
             res2 = torch.compile(fn)(a, b)
             cache_dir2 = cache_dir()
 

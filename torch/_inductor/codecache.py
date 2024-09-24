@@ -2934,9 +2934,10 @@ def touch(filename: str):  # type: ignore[no-untyped-def]
 @clear_on_fresh_inductor_cache
 class PyCodeCache:
     # Track the loaded modules so we can remove the on-disk artifacts when
-    # clearing the cache. Note also that we may load the same module more
-    # than once, but assign different attributes.
-    modules: Dict[str, ModuleType] = {}
+    # clearing the cache. Note also that we may load the same path more
+    # than once, but attach different attributes, i.e., due to different
+    # constant values.
+    modules: List[ModuleType] = []
     linemaps: Dict[str, List[Tuple[Any, ...]]] = {}
 
     @classmethod
@@ -2979,14 +2980,15 @@ class PyCodeCache:
                 _reload_python_module_in_subproc, key, path
             )
 
-        cls.modules[path] = mod
+        cls.modules.append(mod)
         return mod
 
     @classmethod
-    def cache_clear(cls):
-        for path in cls.modules.keys():
+    def cache_clear(cls) -> None:
+        for mod in cls.modules:
             try:
-                os.remove(path)
+                assert mod.__file__
+                os.remove(mod.__file__)
             except FileNotFoundError:
                 pass
         cls.modules.clear()
