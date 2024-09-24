@@ -1450,6 +1450,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @inductor_config.patch({"freezing": False})
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
