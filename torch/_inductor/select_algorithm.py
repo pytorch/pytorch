@@ -354,6 +354,7 @@ class TritonTemplateKernel(TritonKernel):
         Args:
             subgraph_number (int): The index of the subgraph in self.subgraphs
         """
+        outer_self = self
         num = 0
         while f"mod_{subgraph_number}_{num}" in self.subgraph_bodies:
             num += 1
@@ -381,8 +382,9 @@ class TritonTemplateKernel(TritonKernel):
                     if name not in fixed_inputs:
                         # If it's not a fixed input, it's a load from a captured
                         # tensor
+                        index_str = outer_self.kexpr(index)
                         var = add_input(name)
-                        return f"tl.load({var} + {index})"
+                        return f"tl.load({var} + {index_str})"
 
                     return f"({fixed_inputs[name]})"
 
@@ -1419,22 +1421,24 @@ class AlgorithmSelectorCache(PersistentCache):
             }
             example_inputs = list(unique_example_inputs.values())
             example_inputs_extern = [
-                unique_example_inputs[input_node.get_name()]
-                if unique_example_inputs[input_node.get_name()].is_mkldnn
-                else torch.as_strided(
-                    unique_example_inputs[input_node.get_name()],
-                    V.graph.sizevars.size_hints(
-                        input_node.get_size(),
-                        fallback=config.unbacked_symint_fallback,
-                    ),
-                    V.graph.sizevars.size_hints(
-                        input_node.get_stride(),
-                        fallback=config.unbacked_symint_fallback,
-                    ),
-                    V.graph.sizevars.size_hint(
-                        input_node.get_layout().offset,
-                        fallback=config.unbacked_symint_fallback,
-                    ),
+                (
+                    unique_example_inputs[input_node.get_name()]
+                    if unique_example_inputs[input_node.get_name()].is_mkldnn
+                    else torch.as_strided(
+                        unique_example_inputs[input_node.get_name()],
+                        V.graph.sizevars.size_hints(
+                            input_node.get_size(),
+                            fallback=config.unbacked_symint_fallback,
+                        ),
+                        V.graph.sizevars.size_hints(
+                            input_node.get_stride(),
+                            fallback=config.unbacked_symint_fallback,
+                        ),
+                        V.graph.sizevars.size_hint(
+                            input_node.get_layout().offset,
+                            fallback=config.unbacked_symint_fallback,
+                        ),
+                    )
                 )
                 for input_node in input_nodes
             ]
