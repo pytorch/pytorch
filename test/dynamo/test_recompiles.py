@@ -315,6 +315,25 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             model(x)
         self.assertEqual(counter.frame_count, 2)
 
+    @patch.object(torch._dynamo.config, "cache_size_limit", 2)
+    def test_no_recursive_compile_after_cache_limit_hit(self):
+        def f(x, n):
+            x = x + n
+            return g(x, n)
+
+        def g(x, n):
+            x = x + n
+            return h(x, n)
+
+        def h(x, n):
+            return x + n
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_f = torch.compile(f, backend=counter, dynamic=False)
+        for i in range(10):
+            opt_f(torch.ones(3), i)
+        self.assertEqual(counter.frame_count, 2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

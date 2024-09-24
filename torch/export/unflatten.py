@@ -3,6 +3,7 @@ import abc
 import copy
 import operator
 from collections import defaultdict
+from contextlib import contextmanager
 from copy import deepcopy
 from enum import Enum
 from typing import Any, cast, Dict, List, Optional, Set, Tuple, Union
@@ -34,6 +35,20 @@ class _AttrKind(Enum):
     PARAMETER = "parameter"
     BUFFER = "buffer"
     CONSTANT = "constant"
+
+
+RUN_WITH_INTERPRETER = True
+
+
+@contextmanager
+def _disable_interpreter():
+    global RUN_WITH_INTERPRETER
+    old_flag = RUN_WITH_INTERPRETER
+    RUN_WITH_INTERPRETER = False
+    try:
+        yield
+    finally:
+        RUN_WITH_INTERPRETER = old_flag
 
 
 # Assign attribute 'from_obj' to the qualified name 'target' on 'to_module
@@ -87,13 +102,18 @@ class InterpreterModule(torch.nn.Module):
         super().__init__()
         self.graph = graph
         self.graph.owning_module = self
+        self._run_with_interpeter = RUN_WITH_INTERPRETER
 
     def forward(self, *args, **kwargs):
         assert self.graph_module is not None, "Didn't finalize this InterpreterModule"
-        if torch.compiler.is_dynamo_compiling():
+        if not is_fx_tracing() and (
+            torch.compiler.is_dynamo_compiling() or not self._run_with_interpeter
+        ):
             # Dynamo cannot trace through torch.fx.Interpreter, so fall back to
             # GraphModule codegen in this instance.
-            return self.graph_module(*args, **kwargs)
+            # Patch the codegened forward to run with this InterpreterModule,
+            # so attribute accesses, etc. are on this module instead.
+            return type(self.graph_module).forward(self, *args, **kwargs)
         else:
             if kwargs:
                 # Handle **kwargs. FX only natively supports positional
@@ -182,10 +202,12 @@ class UnflattenedModule(torch.nn.Module):
         export_graph = deepcopy(export_module.graph)
         self.graph_signature = deepcopy(export_module.graph_signature)
         self.graph = torch.fx.Graph()
+        self.graph.owning_module = self
         self.module_call_graph = deepcopy(export_module.module_call_graph)
         self.flat_args_adapter = flat_args_adapter
         # Flag to indicate whether args have been adapted.
         self.adapted = False
+        self._run_with_interpeter = RUN_WITH_INTERPRETER
 
         _inplace_buffer_mutations(export_graph, self.graph_signature)
         _outline_submodules(export_graph, self)
@@ -480,9 +502,12 @@ class UnflattenedModule(torch.nn.Module):
             _check_input_constraints_for_graph(
                 self.input_placeholders, new_flat_args_with_path, self.range_constraints
             )
-        tree_out = torch.fx.Interpreter(self, graph=self.graph).run(
-            *flat_args, enable_io_processing=False
-        )
+        if torch.compiler.is_dynamo_compiling() and not self._run_with_interpreter:
+            tree_out = torch.fx.GraphModule(self, self.graph)(*flat_args)
+        else:
+            tree_out = torch.fx.Interpreter(self, graph=self.graph).run(
+                *flat_args, enable_io_processing=False
+            )
         return pytree.tree_unflatten(tree_out, signature.out_spec)
 
     def print_readable(
@@ -524,6 +549,8 @@ def unflatten(
         An instance of :class:`UnflattenedModule`, which has the same module
         hierarchy as the original eager module pre-export.
     """
+    if module.verifier.dialect == "TRAINING":
+        raise RuntimeError("Unflattener doesn't support non-functional training IR yet")
     module = _remove_effect_tokens(module)
     return UnflattenedModule(module, flat_args_adapter)
 
@@ -866,7 +893,15 @@ class _ModuleFrame:
                     self.parent_call_module.insert_arg(0, self.parent.remap_input(x))
             return self.node_to_placeholder[x]
         elif x.op == "call_function" and (
-            x.target == torch.ops.aten.sym_size.int
+            x.target
+            in (
+                torch.ops.aten.sym_size.int,
+                torch.ops.aten.item.default,
+                torch.ops.aten.unbind.int,
+                torch.ops.aten.sum.dim_IntList,
+                torch.ops.aten.view.default,
+                torch.ops.aten.diff.default,
+            )
             or (hasattr(x.target, "__module__") and x.target.__module__ == "_operator")
         ):
             # export deduplicates sym_size nodes, and may need to re-copy them

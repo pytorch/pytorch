@@ -200,7 +200,8 @@ class Match:
     def __repr__(self) -> str:
         return f"Match(..., {self.args}, {self.kwargs})"
 
-    def erase_nodes(self, graph: torch.fx.Graph) -> None:
+    def erase_nodes(self) -> None:
+        graph = self.graph
         for n in reversed(self.nodes):
             if not n._erased and not n.users:
                 graph.erase_node(n)
@@ -1009,7 +1010,7 @@ class LoweringPatternEntry(PatternEntry):
             replacement.meta.update(node.meta)
             node.replace_all_uses_with(replacement)
         assert match.nodes[-1] is node
-        match.erase_nodes(graph)
+        match.erase_nodes()
 
 
 @dataclasses.dataclass
@@ -1036,9 +1037,6 @@ class ReplacementPatternEntry(PatternEntry):
         replacement_graph: Union[torch.fx.Graph, torch.fx.GraphModule],
         args: Sequence[torch.fx.Node],
     ) -> None:
-        output_nodes = match.output_nodes()
-        first_node = output_nodes[0]
-
         class Replacer(torch.fx.Interpreter):
             call_method = None  # type: ignore[assignment]
             call_module = None  # type: ignore[assignment]
@@ -1180,7 +1178,7 @@ class ReplacementPatternEntry(PatternEntry):
                 assert len(output_nodes) == 1
                 replace(output_nodes[0], replacement)
 
-        match.erase_nodes(graph)
+        match.erase_nodes()
 
     def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node) -> None:
         assert match.replacement_graph is not None

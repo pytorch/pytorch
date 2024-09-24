@@ -27,6 +27,7 @@ import torch
 import torch._logging
 from torch._dynamo.utils import preserve_rng_state
 from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
+from torch._inductor.runtime.triton_heuristics import grid as default_grid_fn
 from torch._prims_common import is_integer_dtype
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
@@ -384,6 +385,12 @@ class TritonPrinter(PythonPrinter):
         return (
             f"libdevice.trunc({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
         )
+
+    def _print_Float(self, expr):
+        # Use a tensor here to get float64. Otherwise the constant is
+        # truncated to float32.
+        ret = f"tl.full([1], {expr}, tl.float64)"
+        return ret
 
     def _print_ToFloat(self, expr):
         assert len(expr.args) == 1
@@ -2496,7 +2503,7 @@ class TritonKernel(SIMDKernel):
 
             result.writeline("args = get_args()")
             result.writeline(
-                "ms = benchmarker.benchmark_gpu(lambda: call(args), rep=40, fast_flush=True)"
+                "ms = benchmarker.benchmark_gpu(lambda: call(args), rep=40)"
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
@@ -2624,6 +2631,20 @@ class TritonKernel(SIMDKernel):
                 mutated_args.add(self.args.inplace_buffers[mutation].inner_name)
             if mutation in self.args.output_buffers:
                 mutated_args.add(self.args.output_buffers[mutation])
+
+        # workspace arguments are mutated, but are not marked as mutations in self.mutations
+        # because their buffers are added during codegen, and aren't tracked during
+        # lowering/scheduling. So we add them as mutated_args explicitly below.
+        #
+        # In the logic below, we only mark the workspaces a mutated if they are marked with
+        # zero_fill: that's because, if we don't expect the buffer to be pre-filled with
+        # zeros, then, although we still mutate the data, we don't care about those
+        # mutations because we don't make any assumptions about the contents of the
+        # workspace buffer.
+        for argname, arg in zip(argdefs, signature):
+            if isinstance(arg, WorkspaceArg) and arg.zero_fill:
+                mutated_args.add(argname)
+
         mutated_args = sorted(mutated_args)
 
         triton_meta_signature = signature_to_meta(
@@ -2777,8 +2798,11 @@ class TritonKernel(SIMDKernel):
             if tree.prefix == "x" and self.no_x_dim:
                 code.writeline("XBLOCK: tl.constexpr = 1")
 
-    def _get_grid_fn(self):
+    def _get_grid_fn_str(self):
         return "grid"
+
+    def _get_grid_fn(self):
+        return default_grid_fn
 
     def add_numel_to_call_args_and_grid(self, name, call_args, arg_types, grid):
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
@@ -2808,16 +2832,18 @@ class TritonKernel(SIMDKernel):
                 ws.nbytes, current_device, ws.zero_fill
             )
 
-        grid = wrapper.generate_default_grid(name, grid)
+        grid = wrapper.generate_default_grid(
+            name, grid, grid_callable=self._get_grid_fn()
+        )
         wrapper.generate_kernel_call(
             name,
             call_args,
             grid,
             current_device.index,
-            cuda=True,
+            gpu=True,
             triton=True,
             arg_types=arg_types,
-            grid_fn=self._get_grid_fn(),
+            grid_fn=self._get_grid_fn_str(),
             triton_meta=self.triton_meta,
         )
 
@@ -3046,7 +3072,9 @@ class TritonScheduling(SIMDScheduling):
         return kernel_name
 
     def benchmark_fused_nodes(self, nodes):
-        with preserve_rng_state():
+        with preserve_rng_state(), torch.cuda.device(
+            self.scheduler.get_current_device_or_throw()
+        ):
             src_code = self.generate_kernel_code_from_nodes(
                 nodes, benchmark_kernel=True
             )
@@ -3110,9 +3138,10 @@ class TritonScheduling(SIMDScheduling):
                 # in the case of mutating/in-placeable second fusion
                 # TODO - would be better as a hook in triton do_bench that reset
                 # the input values between benchmarking
-                ms = ms - benchmarker.benchmark_gpu(
-                    lambda: wrapped_jit_function.clone_args(*args)
-                )
+                if len(wrapped_jit_function.mutated_arg_names) > 0:
+                    ms = ms - benchmarker.benchmark_gpu(
+                        lambda: wrapped_jit_function.clone_args(*args)
+                    )
 
             log.debug(
                 "The fused kernel for %s took %.3f ms to run",
