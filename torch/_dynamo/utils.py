@@ -2968,15 +2968,20 @@ def maybe_enable_compiled_autograd(should_enable, fullgraph=True, dynamic=True):
 _in_warmup_mode_tls = threading.local()
 
 
+# Checks whether we are in Dynamo warmup mode (which runs all compiled functions in eager).
 def in_warmup_mode():
     return getattr(_in_warmup_mode_tls, "value", False)
 
 
+# When called, all torch.compile'd functions will be run in eager mode,
+# until `exit_warmup()` is called.
 def enter_warmup():
     global _in_warmup_mode_tls
     _in_warmup_mode_tls.value = True
 
 
+# When called, exits warmup mode and all torch.compile'd functions will be
+# back to its normal behavior.
 def exit_warmup():
     global _in_warmup_mode_tls
     _in_warmup_mode_tls.value = False
