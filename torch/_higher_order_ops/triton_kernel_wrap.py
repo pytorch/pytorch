@@ -884,6 +884,7 @@ class TritonHOPifier:
         )
 
     def call_triton_kernel(self, variable, args, kwargs, tx):
+        from triton import JITFunction
         from triton.runtime.autotuner import autotune, Autotuner, Config
 
         from torch._dynamo.variables.constant import ConstantVariable
@@ -963,10 +964,17 @@ class TritonHOPifier:
             else:
                 return x
 
+        if isinstance(variable.kernel, JITFunction):
+            constexprs = variable.kernel.constexprs
+        else:
+            assert isinstance(variable.kernel, Autotuner)
+            constexprs = variable.kernel.fn.constexprs
+
         for idx, arg_name in enumerate(variable.kernel.arg_names):
-            if idx in variable.kernel.constexprs:
-                assert arg_name in combined_args_raw
-                if isinstance(combined_args_raw[arg_name], SymNodeVariable):
+            if idx in constexprs:
+                if arg_name in combined_args_raw and isinstance(
+                    combined_args_raw[arg_name], SymNodeVariable
+                ):
                     # This arg is marked as tl.constexpr. That means that triton will recompile every time
                     # this value changes.
                     # https://github.com/pytorch/pytorch/issues/136504
