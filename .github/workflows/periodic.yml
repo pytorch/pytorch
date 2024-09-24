@@ -226,17 +226,18 @@ jobs:
       sync-tag: ios-build-test
       test-matrix: |
         { include: [
-          { config: "default",
-            shard: 1,
-            num_shards: 1,
-            runner: "macos-14-xlarge",
-            ios_platform: "SIMULATOR",
-            ios_arch: "arm64",
-            use_lite_interpreter: 1,
-            use_metal: 0,
-            use_coreml: 1,
-            use_custom_op_list: ""
-          },
+          # Has been broken for a while, see https://github.com/pytorch/pytorch/issues/136284
+          # { config: "default",
+          #   shard: 1,
+          #   num_shards: 1,
+          #   runner: "macos-14-xlarge",
+          #   ios_platform: "SIMULATOR",
+          #   ios_arch: "arm64",
+          #   use_lite_interpreter: 1,
+          #   use_metal: 0,
+          #   use_coreml: 1,
+          #   use_custom_op_list: ""
+          # },
           { config: "default",
             shard: 1,
             num_shards: 1,
