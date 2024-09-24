@@ -46,19 +46,16 @@ std::vector<Tensor> foreach_binary_op(
   tensor_lists.emplace_back(std::move(vec_res));
 
   using opmath_t = at::opmath_type<T>;
-  DISPATCH_MULTI_TENSOR_APPLY([&]() {
-    multi_tensor_apply<2>(
-        tensor_lists,
-        BinaryOpScalarTensorFunctor<
-            T,
-            /* depth */ 2,
-            /* r_args_depth */ 1,
-            /* res_arg_index */ 1,
-            large_kernel_arg>(),
-        Op<opmath_t>(),
-        scalar.data_ptr<T>(),
-        alpha.to<opmath_t>());
-  });
+  multi_tensor_apply<2>(
+      tensor_lists,
+      BinaryOpScalarTensorFunctor<
+          T,
+          /* depth */ 2,
+          /* r_args_depth */ 1,
+          /* res_arg_index */ 1>(),
+      Op<opmath_t>(),
+      scalar.data_ptr<T>(),
+      alpha.to<opmath_t>());
   return tensor_lists[1];
 }
 
@@ -84,19 +81,16 @@ void foreach_binary_op_(
   tensor_lists.emplace_back(tensors.vec());
 
   using opmath_t = at::opmath_type<T>;
-  DISPATCH_MULTI_TENSOR_APPLY([&]() {
-    multi_tensor_apply<1>(
-        tensor_lists,
-        BinaryOpScalarTensorFunctor<
-            T,
-            /* depth */ 1,
-            /* r_args_depth */ 1,
-            /* res_arg_index */ 0,
-            large_kernel_arg>(),
-        Op<opmath_t>(),
-        scalar.data_ptr<T>(),
-        alpha.to<opmath_t>());
-  });
+  multi_tensor_apply<1>(
+      tensor_lists,
+      BinaryOpScalarTensorFunctor<
+          T,
+          /* depth */ 1,
+          /* r_args_depth */ 1,
+          /* res_arg_index */ 0>(),
+      Op<opmath_t>(),
+      scalar.data_ptr<T>(),
+      alpha.to<opmath_t>());
   increment_version(tensors);
 }
 

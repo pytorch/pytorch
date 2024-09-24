@@ -325,7 +325,7 @@ static void isin_default_kernel_cpu(
     .check_all_same_dtype(false)
     .build();
   // Dispatch based on promoted type.
-  AT_DISPATCH_ALL_TYPES(iter.dtype(1), "isin_default_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.dtype(1), "isin_default_cpu", [&]() {
     cpu_kernel(iter, [&](scalar_t element_val) -> bool {
       const auto* test_element_data = test_elements_flat.const_data_ptr<scalar_t>();
       for (const auto j : c10::irange(test_elements_flat.numel())) {

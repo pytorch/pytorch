@@ -469,7 +469,7 @@ class PyCodegen:
                     lambda: self.extend_output(
                         [
                             self.create_load_python_module(torch),
-                            self.create_load_attr("as_tensor"),
+                            self.create_load_attr("_as_tensor_fullprec"),
                         ]
                     )
                 )

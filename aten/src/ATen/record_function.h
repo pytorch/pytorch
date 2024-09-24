@@ -319,7 +319,7 @@ struct TORCH_API RecordFunction {
     if (!isActive()) {
       return;
     }
-    kwinputs_ = std::unordered_map<std::string, IValue>(*kwargs);
+    kwinputs_ = *kwargs;
     before(std::move(fn), args, current_sequence_nr);
   }
 
