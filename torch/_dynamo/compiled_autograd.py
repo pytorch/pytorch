@@ -8,6 +8,7 @@ from torch._dynamo.external_utils import (
     call_backward,
     call_hook,
     FakeCompiledAutogradEngine,
+    fill_uninitialized,
 )
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import counters, lazy_format_graph_code, set_locals_to_steal
@@ -58,6 +59,9 @@ def maybe_clone(x):
     return x
 
 
+next_op = 0
+
+
 class AutogradCompilerInstance:
     def __init__(self, compiler_fn) -> None:
         self.compiler_fn = compiler_fn
@@ -94,7 +98,7 @@ class AutogradCompilerInstance:
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
         self.fx_tracer.tensor_attrs = {}
-        args_proxy, sizes_proxy, scalars_proxy, self.hooks_proxy = (
+        args_proxy, sizes_proxy, self.scalars_proxy, self.hooks_proxy = (
             self.fx_tracer.create_proxy("placeholder", name, (), {})
             for name in self.graph_placeholders
         )
@@ -137,7 +141,7 @@ class AutogradCompilerInstance:
                 )
             else:
                 raise AssertionError("Unexpected scalar type: ", type(val))
-        self.bind_tensors_to_proxies(scalars, scalars_proxy)
+        self.bind_tensors_to_proxies(scalars, self.scalars_proxy)
 
         # TODO(jansel): are all these modes needed?
         self.stack.enter_context(decompose({}))
@@ -146,6 +150,85 @@ class AutogradCompilerInstance:
         self.stack.enter_context(disable_autocast_cache())
         self.stack.enter_context(preserve_node_meta())
         return inputs, sizes, scalars
+
+    def proxy_call_lambda(
+        self,
+        idx,
+        inputs,
+        output_metadatas: List[Optional[Any]],
+    ):
+        with disable_proxy_modes_tracing():
+            # create fake Tensors
+            grad_ins: List[Optional[torch.Tensor]] = []
+            for output_metadata in output_metadatas:
+                if output_metadata is None:
+                    continue
+
+                layout, device, dtype, size = output_metadata
+                grad_ins.append(
+                    torch.empty(size=size, dtype=dtype, layout=layout, device=device)
+                )
+
+            global next_op
+
+            @torch.library.custom_op(  # type: ignore[misc]
+                f"compiled_autograd::cpp_node_op_{next_op}", mutates_args=()
+            )
+            def cpp_node_op_i(
+                inputs: List[torch.Tensor], idx: int
+            ) -> List[torch.Tensor]:
+                print(f"Calling lifted c++ node at idx={idx}")
+                outs = torch._C._dynamo.compiled_autograd.call_lambda(inputs, idx)
+                device = None
+                for out in outs:
+                    if out is not None:
+                        device = out.device
+                        break
+                assert device is not None
+
+                # gradient layout contract doesn't enforce output strides to match input strides
+                return [
+                    out.clone().contiguous()
+                    if out is not None
+                    else torch.empty(0, device=device)
+                    for out in outs
+                ]
+
+            def _(inputs, idx):
+                grad_ins: List[torch.Tensor] = []
+                for output_metadata in output_metadatas:
+                    if output_metadata is None:
+                        # eager semantics is to not return grads for tensors not requiring them
+                        continue
+
+                    layout, device, dtype, size = output_metadata
+                    grad_ins.append(
+                        torch.empty(
+                            size=size, dtype=dtype, layout=layout, device=device
+                        )
+                    )
+                return grad_ins
+
+            cpp_node_op_i.register_fake(_)
+
+            next_op += 1
+
+        # torch.empty for all undefined inputs
+        proxies = self.fx_tracer.create_proxy(
+            kind="call_function",
+            target=fill_uninitialized,
+            args=(self.to_proxy(inputs),),
+            kwargs={},
+        )
+        with disable_proxy_modes_tracing():
+            processed_inputs = [maybe_clone(x) for x in inputs]
+            self.bind_tensors_to_proxies(processed_inputs, proxies)
+
+        cpp_node_proxies = cpp_node_op_i(proxies, self.scalars_proxy[idx])
+        with disable_proxy_modes_tracing():
+            self.bind_tensors_to_proxies(grad_ins, cpp_node_proxies)
+
+        return grad_ins
 
     def proxy_call_backward(
         self,
@@ -531,3 +614,4 @@ def reset() -> None:
     assert not in_compiled_autograd_region
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
     torch._C._dynamo.compiled_autograd.set_verbose_logger(None)
+    torch._C._dynamo.compiled_autograd.clear_cache()
