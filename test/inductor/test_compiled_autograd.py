@@ -486,16 +486,15 @@ main()
             optim = torch.optim.SGD(model.parameters(), lr=1e-4)
             x = torch.randn([1, 4])
 
-            if compiled and not enable_ca_via_config:
-                ctx = compiled_autograd.enable(torch.compile)
-            else:
-                ctx = contextlib.nullcontext()
-
             res = []
             torch._dynamo.utils.enter_warmup()
             for i in range(n_iters):
                 if i >= warmup_runs:
                     torch._dynamo.utils.exit_warmup()
+                if compiled and not enable_ca_via_config:
+                    ctx = compiled_autograd.enable(torch.compile)
+                else:
+                    ctx = contextlib.nullcontext()
                 with ctx:
                     res += iter_fn(model, x)
                 optim.step()
