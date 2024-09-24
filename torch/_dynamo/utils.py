@@ -804,6 +804,7 @@ class CompilationMetrics:
     possibly_missed_reinplacing_opportunities: Optional[int]
     remote_cache_time_saved_s: Optional[float]
     structured_logging_overhead_s: Optional[float]
+    config_suppress_errors: Optional[bool]
 
 
 @dataclasses.dataclass
@@ -2962,6 +2963,23 @@ def maybe_enable_compiled_autograd(should_enable, fullgraph=True, dynamic=True):
 
         with torch._dynamo.compiled_autograd.enable(compiler_fn) as ctx:
             yield ctx
+
+
+_in_warmup_mode_tls = threading.local()
+
+
+def in_warmup_mode():
+    return getattr(_in_warmup_mode_tls, "value", False)
+
+
+def enter_warmup():
+    global _in_warmup_mode_tls
+    _in_warmup_mode_tls.value = True
+
+
+def exit_warmup():
+    global _in_warmup_mode_tls
+    _in_warmup_mode_tls.value = False
 
 
 def invalid_removeable_handle():

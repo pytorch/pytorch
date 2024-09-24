@@ -499,12 +499,12 @@ in_compiled_autograd_region = False
 class _EnableContext:
     def __init__(self, compiler_fn):
         self.compiler_fn = compiler_fn
-        self.warmup_count = 0
         self.prior = None
         self.set_multithreading_enabled_ctx_mgr = None
 
     def __enter__(self):
-        if self.warmup_count >= torch._dynamo.config.warmup_runs:
+        # TODO(yf225): can we further simplify this?
+        if not torch._dynamo.utils.in_warmup_mode():
             self.prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
                 functools.partial(AutogradCompilerInstance, self.compiler_fn)
             )
@@ -520,9 +520,7 @@ class _EnableContext:
             self.set_multithreading_enabled_ctx_mgr.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.warmup_count < torch._dynamo.config.warmup_runs:  # type: ignore[attr-defined]
-            self.warmup_count += 1  # type: ignore[attr-defined]
-        else:
+        if not torch._dynamo.utils.in_warmup_mode():
             if self.set_multithreading_enabled_ctx_mgr:
                 self.set_multithreading_enabled_ctx_mgr.__exit__(
                     exc_type, exc_val, exc_tb

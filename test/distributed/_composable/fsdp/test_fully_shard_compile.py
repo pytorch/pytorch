@@ -425,16 +425,17 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         ):
             torch.manual_seed(42)
             losses = []
-            if compiled_autograd_backend is not None:
-                # Compiled autograd context must be reused across iterations
-                # in order to track # of warmup runs.
-                maybe_compiled_autograd_ctx = compiled_autograd.enable(
-                    compiler_fn(compiled_autograd_backend)
-                )
-            else:
-                maybe_compiled_autograd_ctx = contextlib.nullcontext()
+            torch._dynamo.utils.enter_warmup()
             for i in range(n_iter):
+                if i > 0:
+                    torch._dynamo.utils.exit_warmup()
                 inp = input_creation_fn()
+                if compiled_autograd_backend is not None:
+                    maybe_compiled_autograd_ctx = compiled_autograd.enable(
+                        compiler_fn(compiled_autograd_backend)
+                    )
+                else:
+                    maybe_compiled_autograd_ctx = contextlib.nullcontext()
                 with maybe_compiled_autograd_ctx:
                     out = model(inp)
                     loss = out.sum()
@@ -474,7 +475,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             compiled_autograd=False,
             inline_inbuilt_nn_modules=True,
             skip_fsdp_hooks=False,
-            warmup_runs=1,
         ), torch._functorch.config.patch(
             enable_autograd_cache=False,
             recompute_views=True,

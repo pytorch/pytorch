@@ -81,7 +81,7 @@ class AutotuneCache:
             return
 
         cache_filename = os.path.splitext(filename)[0] + ".best_config"
-        local_cache = RemoteCache(_LocalAutotuneCacheBackend(), RemoteCacheJsonSerde())
+        local_cache = LocalAutotuneCache()
         self.local_cache = (local_cache, cache_filename)
 
     # Set up remote caching information
@@ -235,3 +235,10 @@ class _LocalAutotuneCacheBackend(RemoteCacheBackend[bytes]):
     def put(self, key: str, data: bytes) -> None:
         with open(key, "wb") as fd:
             fd.write(data)
+
+
+class LocalAutotuneCache(RemoteCache[JsonDataTy]):
+    def __init__(self) -> None:
+        backend = _LocalAutotuneCacheBackend()
+        serde = RemoteCacheJsonSerde()
+        super().__init__(backend, serde)

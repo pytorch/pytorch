@@ -317,7 +317,6 @@ class _TorchDynamoContext:
         self.compiler_config = compiler_config
         self.cleanup_fns: List[Callable[[], Any]] = []
         self.enter_exit_hooks = []
-        self.warmup_count = 0
         patch_fn()
 
         # Save the backends so that we can reset them during torch._dynamo.reset
@@ -346,7 +345,7 @@ class _TorchDynamoContext:
 
     def maybe_warmup(self, callback, state):
         assert state in ["enter", "exit"]
-        if config.warmup_runs == 0:
+        if not torch._dynamo.utils.in_warmup_mode():
             return callback
         else:
             if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
@@ -354,10 +353,8 @@ class _TorchDynamoContext:
                 return callback
             else:
                 if state == "enter":
-                    return None if self.warmup_count < config.warmup_runs else callback
+                    return None  # run eager since we are in warmup mode
                 elif state == "exit":
-                    if self.warmup_count < config.warmup_runs:
-                        self.warmup_count += 1
                     return callback
 
     def __enter__(self):
