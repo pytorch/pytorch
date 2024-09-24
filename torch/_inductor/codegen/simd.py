@@ -1654,7 +1654,7 @@ class SIMDScheduling(BaseScheduling):
     @functools.lru_cache(32)
     def candidate_tilings(
         node,
-    ) -> Iterable[tuple]:  # TODO tuple type? (pointwise, reduction) ranges
+    ) -> Iterable[CandidateTiling]:
         def tile_ranges(ranges, rw) -> Tuple[tuple]:
             """
             Compute tiling candidates by dividing up the iteration ranges.

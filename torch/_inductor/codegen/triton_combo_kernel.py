@@ -36,7 +36,7 @@ from .common import (
     WorkspaceArg,
 )
 from .simd import SIMDScheduling
-from .triton import gen_common_triton_imports, reduction_types, TritonKernel
+from .triton import gen_common_triton_imports, TritonKernel, TritonSymbols
 from .triton_utils import config_of, signature_to_meta
 
 
@@ -729,7 +729,7 @@ class ComboKernel(Kernel):
     def codegen_blocks(self, code: IndentedBuffer) -> None:
         for block in self.block_args:
             assert (
-                block in TritonSymobls.block_types
+                block in TritonSymbols.block_types
             ), f"{block} is not supported without autotuning"
         if "YBLOCK" in self.block_args:
             code.splice(f"XBLOCK: tl.constexpr = {self.block_size_2d}")
@@ -763,7 +763,7 @@ class ComboKernel(Kernel):
         # Check that the reductions are 1D. Otherwise, block_size_reduce would be
         # ambiguous.
         reduction_block_args = [
-            symt for symt in self.block_args if symt in reduction_types
+            symt for symt in self.block_args if symt in TritonSymbols.reduction_types
         ]
         if len(reduction_block_args) > 1:
             raise NotImplementedError("Tiled reductions are not yet supported")

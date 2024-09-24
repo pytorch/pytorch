@@ -1002,7 +1002,7 @@ class SchedulerNode(BaseSchedulerNode):
             raise
 
     def pointwise_or_reduction_read_writes(
-        self, pointwise=True
+        self, pointwise: bool = True
     ) -> dependencies.ReadWrites:
         """
         Get the memory dependencies in either the pointwise or the reduction axes.

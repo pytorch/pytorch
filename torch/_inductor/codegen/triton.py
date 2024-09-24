@@ -2530,7 +2530,7 @@ class TritonKernel(SIMDKernel):
                     for advancement in self.pointer_advancements[tree.symt]:
                         assert (
                             len(advancement) > 0
-                        ), f"Missing advancement for type {symt}"
+                        ), f"Missing advancement for type {tree.symt}"
                         self.body.writeline(advancement)
 
                 # Invalidate any cache entries that came from inside the loop.
