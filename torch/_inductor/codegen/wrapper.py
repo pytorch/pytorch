@@ -1287,7 +1287,10 @@ class WrapperCodeGen(CodeGen):
                 continue
             arg = kwargs[key]
             if idx in kernel.constexprs:
-                constants[idx] = arg
+                if isinstance(arg, sympy.Expr):
+                    constants[idx] = V.graph.sizevars.size_hint(arg)
+                else:
+                    constants[idx] = arg
             else:
                 non_constant_indices.append(idx)
                 if isinstance(arg, ir.Buffer):

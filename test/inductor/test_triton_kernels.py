@@ -1694,8 +1694,11 @@ def forward(self, x_1, output_1):
 
         x = torch.randn(512 + 5, device=GPU_TYPE)
         res = fn_c(x)
-
         self.assertEqual(x * x, res)
+
+        x2 = torch.randn(1024 + 5, device=GPU_TYPE)
+        res2 = fn_c(x2)
+        self.assertEqual(x2 * x2, res2)
 
 
 def make_mutation_test(fn):
