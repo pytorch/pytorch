@@ -5316,3 +5316,46 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
         s = re.sub(r"Cannot export model.+\n\n", "", s)
     s = re.sub(r" +$", "", s, flags=re.MULTILINE)
     return s
+
+
+@contextmanager
+def check_leaked_tensors(limit=1):
+    """Wrap around operations you want to ensure are not leaking tensor memory.
+
+    This code intentionally ignores other reference cycles, which can be benign and which we (sadly) have plenty
+    of in pytorch code.  It focuses on any reference cycles that directly or indirectly result holding a Tensor alive,
+    since this is likely a more serious leak than typical python refcycles.
+
+    limit specifies how many tensors to dump debug graphs for (default=1)
+    """
+    try:
+        gc.collect()
+        gc.set_debug(gc.DEBUG_SAVEALL)
+
+        # run the user code, after cleaning any existing refcycles
+        yield
+
+        gc.collect()
+        garbage_tensors = sum(int(isinstance(g, torch.Tensor)) for g in gc.garbage)
+        if garbage_tensors > 0:
+            warnings.warn(
+                f"{garbage_tensors} tensors were found in the garbage. Did you introduce a reference cycle?"
+            )
+            try:
+                import objgraph
+
+                warnings.warn(
+                    f"Dumping first {limit} objgraphs of leaked tensors rendered to png"
+                )
+                dumped = 0
+                for g in gc.garbage:
+                    if isinstance(g, torch.Tensor):
+                        objgraph.show_backrefs([g], max_depth=10)
+                        dumped += 1
+                        if dumped == limit:
+                            break
+            except ImportError:
+                warnings.warn("`pip install objgraph` to enable memory leak debugging")
+
+    finally:
+        gc.set_debug(0)
