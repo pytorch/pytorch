@@ -1287,6 +1287,8 @@ class MultiheadAttention(Module):
                 why_not_fast_path = "some Tensor argument has_torch_function"
             elif _is_make_fx_tracing():
                 why_not_fast_path = "we are running make_fx tracing"
+            elif torch._dynamo.is_compiling():
+                why_not_fast_path = "we are running dynamo tracing"
             elif not all(_check_arg_device(x) for x in tensor_args):
                 why_not_fast_path = (
                     "some Tensor argument's device is neither one of "
