@@ -280,8 +280,9 @@ if HAS_PYDOT:
             # print file:lineno code
             if parse_stack_trace and node.stack_trace is not None:
                 parsed_stack_trace = _parse_stack_trace(node.stack_trace)
-                fname = self._shorten_file_name(parsed_stack_trace.file)
-                label += f"|file={fname}:{parsed_stack_trace.lineno} {parsed_stack_trace.code}" + r"\n"
+                if parsed_stack_trace is not None:
+                    fname = self._shorten_file_name(parsed_stack_trace.file)
+                    label += f"|file={fname}:{parsed_stack_trace.lineno} {parsed_stack_trace.code}" + r"\n"
 
 
             return label + "}"
