@@ -1,7 +1,5 @@
 # mypy: allow-untyped-defs
 import inspect
-import time
-from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Type, Union
 
 import torch
@@ -297,51 +295,6 @@ class XpuInterface(DeviceInterface):
         return torch.xpu.is_bf16_supported()
 
 
-@dataclass
-class CpuDeviceProperties:
-    multi_processor_count: int
-
-
-class CpuInterface(DeviceInterface):
-    class Event(_EventBase):
-        def __init__(self, enable_timing=True):
-            self.time = 0.0
-
-        def elapsed_time(self, end_event) -> float:
-            return (end_event.time - self.time) * 1000
-
-        def record(self):
-            self.time = time.perf_counter()
-
-    @staticmethod
-    def is_available() -> bool:
-        return True
-
-    @staticmethod
-    def get_compute_capability(device: _device_t = None) -> str:
-        return ""
-
-    @staticmethod
-    def get_raw_stream(device_idx) -> int:
-        return 0
-
-    @staticmethod
-    def current_device():
-        return 0
-
-    @staticmethod
-    def synchronize(device: _device_t = None):
-        pass
-
-    class Worker:
-        @staticmethod
-        def get_device_properties(device: _device_t = None):
-            import multiprocessing
-
-            cpu_count = multiprocessing.cpu_count()
-            return CpuDeviceProperties(cpu_count)
-
-
 device_interfaces: Dict[str, Type[DeviceInterface]] = {}
 _device_initialized = False
 
@@ -379,7 +332,5 @@ def init_device_reg():
     register_interface_for_device("xpu", XpuInterface)
     for i in range(torch.xpu.device_count()):
         register_interface_for_device(f"xpu:{i}", XpuInterface)
-
-    register_interface_for_device("cpu", CpuInterface)
 
     _device_initialized = True
