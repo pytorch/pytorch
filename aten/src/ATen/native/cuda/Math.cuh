@@ -3226,7 +3226,7 @@ static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
 
 template <typename T>
 C10_HOST_DEVICE inline
-    typename std::enable_if<std::is_same<double, T>::value, std::tuple<const T*, size_t>>::type
+    typename std::enable_if_t<std::is_same_v<double, T>, std::tuple<const T*, size_t>>
     chebyshev_coefficients_i1e_A() {
   /* Chebyshev coefficients for exp(-x) I1(x)
    * in the interval [0,8].
@@ -3255,7 +3255,7 @@ C10_HOST_DEVICE inline
 
 template <typename T>
 C10_HOST_DEVICE inline
-    typename std::enable_if<std::is_same<float, T>::value, std::tuple<const T*, size_t>>::type
+    typename std::enable_if_t<std::is_same_v<float, T>, std::tuple<const T*, size_t>>
     chebyshev_coefficients_i1e_A() {
   /* Chebyshev coefficients for exp(-x) I1(x)
    * in the interval [0,8].
@@ -3285,7 +3285,7 @@ C10_HOST_DEVICE inline
 
 template <typename T>
 C10_HOST_DEVICE inline
-    typename std::enable_if<std::is_same<double, T>::value, std::tuple<const T*, size_t>>::type
+    typename std::enable_if_t<std::is_same_v<double, T>, std::tuple<const T*, size_t>>
     chebyshev_coefficients_i1e_B() {
   /* Chebyshev coefficients for exp(-x) sqrt(x) I1(x)
    * in the inverted interval [8,infinity].
@@ -3312,7 +3312,7 @@ C10_HOST_DEVICE inline
 
 template <typename T>
 C10_HOST_DEVICE inline
-    typename std::enable_if<std::is_same<float, T>::value, std::tuple<const T*, size_t>>::type
+    typename std::enable_if_t<std::is_same_v<float, T>, std::tuple<const T*, size_t>>
     chebyshev_coefficients_i1e_B() {
   /* Chebyshev coefficients for exp(-x) sqrt(x) I1(x)
    * in the inverted interval [8,infinity].

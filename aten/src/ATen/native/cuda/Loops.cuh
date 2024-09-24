@@ -204,7 +204,7 @@ void opmath_symmetric_gpu_kernel_with_scalars(TensorIteratorBase& iter, const fu
   static_assert(
       traits::arity == 2,
       "gpu_kernel_with_scalars only supports two input arguments");
-  static_assert(std::is_same<opmath_arg_t, typename traits::template arg<1>::type>::value,
+  static_assert(std::is_same_v<opmath_arg_t, typename traits::template arg<1>::type>,
                 "f is not symmetric");
 
   OptionalDeviceGuard device_guard;
