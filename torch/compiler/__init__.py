@@ -217,22 +217,45 @@ def assume_constant_result(fn):
 
 def disable(fn=None, recursive=True):
     """
-    This function provides a decorator manager to disable compilation on a function
-    It also provides the option of recursively disabling called functions
+    Decorator to disable compilation on a function.
+
+    If ``recursive=True``, compilation is skipped on the decorated function
+    frame as well as any recursively invoked functions.
+
+    If ``recursive=False``, compilation is skipped only on frames associated with the
+    function code. Recursively invoked frames are still compiled.
+
+    Example::
+
+        @torch.compiler.disable
+        def a(...):
+            ...
+
+        def b(...):
+            ...
+
+        b_disable = torch.compiler.disable(b)
+
+        @torch.compile
+        def c(...):
+            # calls to `a` and `b_disable` will not be compiled
+            a(...)
+            b_disable(...)
+
+        c(...)
 
     .. note::
-        Interaction between `compile`, `disable`, and `enable`
+        Interaction between ``compile``, recursive ``disable``, and ``enable``
 
-        `compile` is is a "marker" that Dynamo should attempt to compile the function
-        and its nested calls.
+        ``compile`` is is a "marker" that Dynamo should attempt to compile the function
+        and its nested calls. It should generally be applied to only the top-level function.
 
-        `disable` is higher-priority - it signifies that a function (and its nested
-        calls in the case recursive=True) should not be compiled.
+        Recursive ``disable`` and ``enable`` are higher-priority - they set an internal Dynamo flag
+        that controls whether Dynamo should actually trace code.
 
-        In particular, `disable` overrides `compile` - if you want to re-enable compilation,
-        use `enable`. `disable` and `enable` have the same priority.
+        In particular, ``disable`` overrides ``compile`` - if you want to re-enable compilation, use ``enable``.
 
-        e.g.
+        Example::
 
             @enable
             def a(x):
@@ -253,15 +276,19 @@ def disable(fn=None, recursive=True):
                 c(x)
                 ...
 
-        Calling `a`  will result in no compilation.
-        Calling `b` will result in no compilation
-        Calling `c` will result in `c` and `a` being compiled.
-            A graph break will occur when `b` is called.
-        Calling `d` will result in `a` being compiled.
+        Calling ``a``  will result in no compilation.
+
+        Calling ``b`` will result in no compilation
+
+        Calling ``c`` will result in ``c`` and ``a`` being compiled.
+        A graph break will occur when ``b`` is called.
+
+        Calling ``d`` will result in ``a`` being compiled.
 
     Args:
         fn (optional): The function to disable
         recursive (optional): A boolean value indicating whether the disabling should be recursive.
+            Defaults to ``True``.
 
     """
     import torch._dynamo
@@ -274,6 +301,21 @@ def enable(fn=None):
     Decorator to re-enable compilation - inverse of `disable`.
 
     Compilation will only occur if there was a previous `compile` call.
+
+    `enable` is useful for finegrained compiilation control. See the note in `disable` for
+    more details.
+
+    `enable` can also be used write kernels in Python that should always be compiled.
+
+    Example::
+
+        @torch.compiler.enable
+        @torch.compile
+        def my_kernel(x):
+            ...
+
+    Args:
+        fn (optional): The function to enable
     """
     import torch._dynamo
 

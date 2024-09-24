@@ -8,8 +8,8 @@
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <opcode.h>
+#include <pthread.h>
 #include <stdbool.h>
-#include <threads.h>
 
 PyObject* guard_error_hook = NULL;
 const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
@@ -17,7 +17,7 @@ const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
 static int active_dynamo_threads = 0;
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
-static thread_local bool eval_frame_callback_enabled = true;
+static __thread bool eval_frame_callback_enabled = true;
 
 inline static PyObject* eval_frame_callback_get(void) {
   void* result = PyThread_tss_get(&eval_frame_callback_key);

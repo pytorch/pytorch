@@ -2,6 +2,8 @@
 import functools
 import operator
 import os
+import sys
+import unittest
 import unittest.mock as mock
 from unittest.mock import patch
 
@@ -664,6 +666,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         )
 
     # NOTE no need to test logging when warning is removed
+    @unittest.skipIf(sys.version_info < (3, 10), "assertNoLogs is 3.10+")
     def test_no_disable_compile_warning(self):
         import logging
 

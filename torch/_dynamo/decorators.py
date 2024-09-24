@@ -63,13 +63,7 @@ def disable(fn=None, recursive=True):
     """
     Decorator to disable TorchDynamo.
 
-    See note on torch.compiler.disable for details about the compile/disable/enable interaction.
-
-    If recursive=True, Dynamo is completely skipped on the decorated function
-    frame as well as the recursively invoked functions.
-
-    If recursive=False, Dynamo skips frames associated with the function code,
-    but still process recursively invoked frames.
+    See torch.compiler.disable for details.
     """
     if recursive:
         ctx = (
@@ -92,7 +86,7 @@ def enable(fn=None):
     """
     Decorator to re-enable TorchDynamo - inverse of `disable`.
 
-    Compilation will only occur if there was a previous `compile` call.
+    See torch.compiler.enable for more details.
     """
     if _old_compile_disable_behavior():
         return fn
