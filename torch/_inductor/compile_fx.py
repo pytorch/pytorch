@@ -56,6 +56,7 @@ from torch._inductor.utils import (
     InputType,
     is_gpu,
     should_assume_input_aligned,
+    should_use_remote_fx_graph_cache,
     tensor_is_aligned,
 )
 from torch._logging import trace_structured
@@ -419,27 +420,6 @@ def fake_tensor_prop(
                 )
 
     return fake_mode
-
-
-def should_use_remote_fx_graph_cache():
-    if config.fx_graph_remote_cache is not None:
-        return config.fx_graph_remote_cache
-    if not config.is_fbcode():
-        return False
-
-    if torch._utils_internal.is_fb_unit_test():
-        return False
-
-    try:
-        from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
-    except ModuleNotFoundError:
-        return False
-
-    jk_name = "pytorch/remote_cache:fx_graph_memcache_version"
-    if torch.version.hip is not None:
-        jk_name = "pytorch/remote_cache:fx_graph_memcache_version_amd"
-
-    return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(jk_name)
 
 
 # pass config dict back to user
@@ -1246,6 +1226,18 @@ def fw_compiler_freezing(
     return wrapper
 
 
+def get_cpp_wrapper_config():
+    return {
+        # Set autotune_at_compile_time to True as default if the option is not explicitly set
+        "triton.autotune_at_compile_time": config.triton.autotune_at_compile_time
+        if config.triton.autotune_at_compile_time is not None
+        else True,
+        "triton.autotune_cublasLt": False,
+        "triton.cudagraphs": False,  # TODO: to be removed
+        "triton.store_cubin": True,
+    }
+
+
 def compile_fx(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
@@ -1268,18 +1260,8 @@ def compile_fx(
         if config.cpp_wrapper:
             with config.patch(
                 {
-                    "cpp_wrapper": False,
-                    # For triton.autotune_at_compile_time, disable by default for
-                    # FBCode, but enabled by default for OSS.
-                    "triton.autotune_at_compile_time": config.triton.autotune_at_compile_time
-                    if config.is_fbcode()
-                    else os.environ.get(
-                        "TORCHINDUCTOR_TRITON_AUTOTUNE_AT_COMPILE_TIME", "1"
-                    )
-                    == "1",
-                    "triton.autotune_cublasLt": False,
-                    "triton.cudagraphs": False,
-                    "triton.store_cubin": True,
+                    "cpp_wrapper": False,  # reset to break recursive call to compile_fx
+                    **get_cpp_wrapper_config(),
                 }
             ), V.set_real_inputs(example_inputs_):
                 inputs_ = example_inputs_
@@ -1470,16 +1452,19 @@ def compile_fx(
                         n.name for n in model_outputs if isinstance(n, torch.fx.Node)
                     )
                 fixed = count_tangents(model)
-                return inner_compile(
-                    model,
-                    example_inputs,
-                    static_input_idxs=list(range(fixed)),
-                    cudagraphs=cudagraphs,
-                    is_backward=True,
-                    graph_id=graph_id,
-                    boxed_forward_device_index=forward_device,
-                    user_visible_outputs=user_visible_outputs,
-                )
+                with config.patch(
+                    get_cpp_wrapper_config()
+                ) if config.cpp_wrapper else contextlib.nullcontext():
+                    return inner_compile(
+                        model,
+                        example_inputs,
+                        static_input_idxs=list(range(fixed)),
+                        cudagraphs=cudagraphs,
+                        is_backward=True,
+                        graph_id=graph_id,
+                        boxed_forward_device_index=forward_device,
+                        user_visible_outputs=user_visible_outputs,
+                    )
 
         # TODO: can add logging before/after the call to create_aot_dispatcher_function
         # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
