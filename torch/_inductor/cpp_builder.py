@@ -514,14 +514,18 @@ def _get_ffast_math_flags() -> List[str]:
     # -ffast-math -fno-unsafe-math-optimizations because the flags for runtime
     # are added by linking in crtfastmath.o. This is done by the spec file which
     # only does globbing for -ffast-math.
-    return [
+    flags = [
         "fno-trapping-math",
         "funsafe-math-optimizations",
         "ffinite-math-only",
         "fno-signed-zeros",
         "fno-math-errno",
-        "fexcess-precision=fast",
     ]
+
+    if is_gcc():
+        flags.append("fexcess-precision=fast")
+
+    return flags
 
 
 def _get_optimization_cflags() -> List[str]:
