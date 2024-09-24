@@ -523,7 +523,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
             symm_mem.stream_write_value32(
                 int(tensor.data_ptr()) + i * tensor.element_size(), 1
             )
-            self.assertTrue(torch.allclose(tensor, expect[i]))
+            torch.testing.assert_close(tensor, expect[i])
 
 
 if __name__ == "__main__":
