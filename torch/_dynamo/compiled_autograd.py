@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-import logging
 from typing import Any, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -37,7 +36,6 @@ if TYPE_CHECKING:
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
-log = logging.getLogger(__name__)
 
 
 def snapshot_verbose_logging_enabled():
@@ -498,7 +496,7 @@ in_compiled_autograd_region = False
 
 @contextlib.contextmanager
 def enable(compiler_fn):
-    if torch._dynamo.utils.in_warmup_mode():
+    if torch._dynamo.in_warmup_mode():
         yield
         return
     else:

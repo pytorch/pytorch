@@ -345,7 +345,7 @@ class _TorchDynamoContext:
 
     def maybe_warmup(self, callback, state):
         assert state in ["enter", "exit"]
-        if not torch._dynamo.utils.in_warmup_mode():
+        if not torch._dynamo.in_warmup_mode():
             return callback
         else:
             if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
