@@ -193,6 +193,11 @@ torch_compile_graph_format = os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
 # Used for tests
 strict_autograd_cache = False
 
+# Enables AOTD runtime logging to chromium event logger.
+# Profiling is targeted to measure tracing and runtime performance of AOTD.
+# This is an optional flag to not affect runtime performance.
+aotd_debug_profile: bool = os.environ.get("PYTORCH_AOTD_DEBUG_PROFILE", "0") == "1"
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
@@ -201,5 +206,3 @@ from torch.utils._config_module import install_config_module
 
 # adds patch, save_config, invalid config checks, etc
 install_config_module(sys.modules[__name__])
-
-aotd_debug_profile: bool = os.environ.get("PYTORCH_AOTD_DEBUG_PROFILE", "0") == "1"

@@ -1511,11 +1511,23 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
             @staticmethod
             def forward(ctx, *deduped_flat_tensor_args):
+                if torch._functorch.config.aotd_debug_profile:
+                    get_chromium_event_logger().log_event_start(
+                        f"{CompiledFunction.backward.__module__}.CompiledFunction.forward",
+                        time.time_ns(),
+                    )
+
                 args = deduped_flat_tensor_args
                 if backward_state_indices:
                     bw_state = args[backward_state_indices[0]]
                     assert isinstance(bw_state, BackwardState)
                     ctx._compiled_autograd_backward_state = bw_state
+
+                if torch._functorch.config.aotd_debug_profile:
+                    get_chromium_event_logger().log_event_start(
+                        f"{CompiledFunction.backward.__module__}.CompiledFunction.forward.compiled_module",
+                        time.time_ns(),
+                    )
 
                 # There is a pretty complicated calling convention around what the compiled fw returns.
                 # The full list of outputs and their relative order is:
@@ -1529,6 +1541,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     args,
                     disable_amp=disable_amp,
                 )
+                if torch._functorch.config.aotd_debug_profile:
+                    get_chromium_event_logger().log_event_end(
+                        f"{CompiledFunction.backward.__module__}.CompiledFunction.forward.compiled_module",
+                        time.time_ns(),
+                    )
 
                 num_outputs = CompiledFunction.metadata.num_outputs
                 num_outputs_aliased = CompiledFunction.metadata.num_outputs_aliased
@@ -1632,6 +1649,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 ]
                 ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
                 ctx._materialize_non_diff_grads = False
+                if torch._functorch.config.aotd_debug_profile:
+                    get_chromium_event_logger().log_event_end(
+                        f"{CompiledFunction.backward.__module__}.CompiledFunction.forward",
+                        time.time_ns(),
+                    )
                 return tuple(raw_returns)
 
             @staticmethod
@@ -1915,14 +1937,14 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                         if torch._functorch.config.aotd_debug_profile:
                             get_chromium_event_logger().log_event_start(
-                                f"{CompiledFunction.backward.__module__}.CompiledFunction.backward.compiled_bw_module",
+                                f"{CompiledFunction.backward.__module__}.CompiledFunction.backward.compiled_module",
                                 time.time_ns(),
                             )
                         with context():
                             out = normalize_as_list(bw_module(*all_args))
                         if torch._functorch.config.aotd_debug_profile:
                             get_chromium_event_logger().log_event_end(
-                                f"{CompiledFunction.backward.__module__}.CompiledFunction.backward.compiled_bw_module",
+                                f"{CompiledFunction.backward.__module__}.CompiledFunction.backward.compiled_module",
                                 time.time_ns(),
                             )
 
@@ -1998,7 +2020,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         )
                     if torch._functorch.config.aotd_debug_profile:
                         get_chromium_event_logger().log_event_start(
-                            f"{CompiledFunction.backward.__module__}.CompiledFunction.backward.compiled_bw_module",
+                            f"{CompiledFunction.backward.__module__}.CompiledFunction.backward.compiled_module",
                             time.time_ns(),
                         )
                     out = call_func_at_runtime_with_args(
@@ -2009,7 +2031,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     )
                     if torch._functorch.config.aotd_debug_profile:
                         get_chromium_event_logger().log_event_end(
-                            f"{CompiledFunction.backward.__module__}.CompiledFunction.backward.compiled_bw_module",
+                            f"{CompiledFunction.backward.__module__}.CompiledFunction.backward.compiled_module",
                             time.time_ns(),
                         )
 

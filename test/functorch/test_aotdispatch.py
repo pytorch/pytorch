@@ -19,6 +19,7 @@ from common_utils import decorate, decorateForModules, skip, skipOps, xfail
 
 import torch
 import torch._dynamo as torchdynamo
+import torch._functorch.config
 import torch.nn as nn
 import torch.utils._pytree as pytree
 from functorch import grad, jacrev, make_fx, vjp, vmap
@@ -5969,67 +5970,75 @@ class TestAOTModuleSimplified(AOTTestCase):
         out = torch.compile(fn, backend="aot_eager", fullgraph=True)(inp)
         self.assertEqual(ref_out, out)
 
-    @torch._inductor.config.patch({"freezing": True})
-    def test_inductor_freezing_with_subclasses(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.w = TwoTensor(torch.randn(3, 4), torch.randn(3, 4))
-
-            def forward(self, x):
-                return (
-                    x.index_select(
-                        dim=0, index=torch.tensor([0, 2, 1], dtype=torch.int64)
-                    )
-                    + self.w
-                )
-
-        m = M()
-        inp = torch.randn(3, 4)
-        with torch.no_grad():
-            torch.compile(m, fullgraph=True)(inp)
-
+    @torch._functorch.config.patch("aotd_debug_profile", True)
     def test_aotd_debug_profile_overhead_logging(self):
-        last_backward_start_time = None
-        last_backward_compiled_bw_module_start_time = None
-        last_backward_compiled_bw_module_duration = None
+        last_fwd_start_time = None
+        last_fwd_compiled_module_start_time = None
+        last_fwd_compiled_module_duration = None
 
-        backward_overheads_ns = []
-        backward_compiled_module_duration_ns = []
-        backward_total_duration_ns = []
+        last_bwd_start_time = None
+        last_bwd_compiled_module_start_time = None
+        last_bwd_compiled_module_duration = None
+
+        fwd_overheads_ns = []
+        fwd_compiled_module_durations_ns = []
+        fwd_total_durations_ns = []
+
+        bwd_overheads_ns = []
+        bwd_compiled_module_durations_ns = []
+        bwd_total_durations_ns = []
+
+        EVENT_NAME_PREFIX = (
+            "torch._functorch._aot_autograd.runtime_wrappers.CompiledFunction"
+        )
 
         def on_event(event):
             event_name = event["name"]
             event_ph = event["ph"]
-            if (
-                event_name
-                == "torch._functorch._aot_autograd.runtime_wrappers.CompiledFunction.backward.compiled_bw_module"
-            ):
+            if event_name == f"{EVENT_NAME_PREFIX}.forward.compiled_module":
                 if event_ph == "B":
-                    nonlocal last_backward_compiled_bw_module_start_time
-                    last_backward_compiled_bw_module_start_time = event["ts"]
+                    nonlocal last_fwd_compiled_module_start_time
+                    last_fwd_compiled_module_start_time = event["ts"]
                 elif event_ph == "E":
-                    nonlocal last_backward_compiled_bw_module_duration
-                    last_backward_compiled_bw_module_duration = (
-                        event["ts"] - last_backward_compiled_bw_module_start_time
+                    nonlocal last_fwd_compiled_module_duration
+                    last_fwd_compiled_module_duration = (
+                        event["ts"] - last_fwd_compiled_module_start_time
                     )
-                    backward_compiled_module_duration_ns.append(
-                        last_backward_compiled_bw_module_duration
+                    fwd_compiled_module_durations_ns.append(
+                        last_fwd_compiled_module_duration
                     )
-            elif (
-                event_name
-                == "torch._functorch._aot_autograd.runtime_wrappers.CompiledFunction.backward"
-            ):
+            elif event_name == f"{EVENT_NAME_PREFIX}.backward.compiled_module":
                 if event_ph == "B":
-                    nonlocal last_backward_start_time
-                    last_backward_start_time = event["ts"]
+                    nonlocal last_bwd_compiled_module_start_time
+                    last_bwd_compiled_module_start_time = event["ts"]
                 elif event_ph == "E":
-                    last_backward_duration = event["ts"] - last_backward_start_time
-                    backward_overheads_ns.append(
-                        last_backward_duration
-                        - last_backward_compiled_bw_module_duration
+                    nonlocal last_bwd_compiled_module_duration
+                    last_bwd_compiled_module_duration = (
+                        event["ts"] - last_bwd_compiled_module_start_time
                     )
-                    backward_total_duration_ns.append(last_backward_duration)
+                    bwd_compiled_module_durations_ns.append(
+                        last_bwd_compiled_module_duration
+                    )
+            elif event_name == f"{EVENT_NAME_PREFIX}.forward":
+                if event_ph == "B":
+                    nonlocal last_fwd_start_time
+                    last_fwd_start_time = event["ts"]
+                elif event_ph == "E":
+                    last_forward_duration = event["ts"] - last_fwd_start_time
+                    fwd_overheads_ns.append(
+                        last_forward_duration - last_fwd_compiled_module_duration
+                    )
+                    fwd_total_durations_ns.append(last_forward_duration)
+            elif event_name == f"{EVENT_NAME_PREFIX}.backward":
+                if event_ph == "B":
+                    nonlocal last_bwd_start_time
+                    last_bwd_start_time = event["ts"]
+                elif event_ph == "E":
+                    last_backward_duration = event["ts"] - last_bwd_start_time
+                    bwd_overheads_ns.append(
+                        last_backward_duration - last_bwd_compiled_module_duration
+                    )
+                    bwd_total_durations_ns.append(last_backward_duration)
 
         chromium_logger = torch._dynamo.utils.get_chromium_event_logger()
         chromium_logger.add_listener(on_event)
@@ -6069,16 +6078,37 @@ class TestAOTModuleSimplified(AOTTestCase):
             outs = torch.compile(m, backend="aot_eager", fullgraph=True)(*inps)
             outs[0].sum().backward()
 
-        assert len(backward_compiled_module_duration_ns) == num_iters
-        assert len(backward_overheads_ns) == num_iters
-        assert len(backward_total_duration_ns) == num_iters
+        def _assert_len():
+            for l in [
+                fwd_compiled_module_durations_ns,
+                fwd_overheads_ns,
+                fwd_total_durations_ns,
+                bwd_compiled_module_durations_ns,
+                bwd_overheads_ns,
+                bwd_total_durations_ns,
+            ]:
+                assert len(l) == num_iters
+
+        _assert_len()
 
         def _print_stat(s: str):
-            bwd_compiled_module_duration_avg_ns = (
-                sum(backward_compiled_module_duration_ns) / num_iters
+            fwd_compiled_module_duration_avg_ns = (
+                sum(fwd_compiled_module_durations_ns) / num_iters
             )
-            bwd_aotd_overhead_avg_ns = sum(backward_overheads_ns) / num_iters
-            bwd_total_duration_avg_ns = sum(backward_total_duration_ns) / num_iters
+            fwd_aotd_overhead_avg_ns = sum(fwd_overheads_ns) / num_iters
+            fwd_total_duration_avg_ns = sum(fwd_total_durations_ns) / num_iters
+            print(
+                f"{s} FW_aotd_overhead_avg:{fwd_aotd_overhead_avg_ns:.3f}ns "
+                f"{100 * fwd_aotd_overhead_avg_ns / fwd_compiled_module_duration_avg_ns:.3f}% "
+                f"of fwd_compiled_module_duration_avg:{fwd_compiled_module_duration_avg_ns:.3f}ns "
+                f"fwd_total_duration_avg:{fwd_total_duration_avg_ns:.3f}ns"
+            )
+
+            bwd_compiled_module_duration_avg_ns = (
+                sum(bwd_compiled_module_durations_ns) / num_iters
+            )
+            bwd_aotd_overhead_avg_ns = sum(bwd_overheads_ns) / num_iters
+            bwd_total_duration_avg_ns = sum(bwd_total_durations_ns) / num_iters
             print(
                 f"{s} BW_aotd_overhead_avg:{bwd_aotd_overhead_avg_ns:.3f}ns "
                 f"{100 * bwd_aotd_overhead_avg_ns / bwd_compiled_module_duration_avg_ns:.3f}% "
@@ -6086,11 +6116,16 @@ class TestAOTModuleSimplified(AOTTestCase):
                 f"bwd_total_duration_avg:{bwd_total_duration_avg_ns:.3f}ns"
             )
 
+        # Uncomment for adhoc aotd overhead perf experimentation
         _print_stat("   SUBCLASS")
 
-        backward_compiled_module_duration_ns.clear()
-        backward_overheads_ns.clear()
-        backward_total_duration_ns.clear()
+        fwd_compiled_module_durations_ns.clear()
+        fwd_overheads_ns.clear()
+        fwd_total_durations_ns.clear()
+
+        bwd_compiled_module_durations_ns.clear()
+        bwd_overheads_ns.clear()
+        bwd_total_durations_ns.clear()
 
         class M2(torch.nn.Module):
             def __init__(self) -> None:
@@ -6120,8 +6155,8 @@ class TestAOTModuleSimplified(AOTTestCase):
             outs = torch.compile(m2, backend="aot_eager", fullgraph=True)(*inps)
             outs[0].sum().backward()
 
-        assert len(backward_compiled_module_duration_ns) == 100
-        assert len(backward_overheads_ns) == 100
+        _assert_len()
+        # Uncomment for adhoc aotd overhead perf experimentation
         _print_stat("NO_SUBCLASS")
 
 
@@ -6524,14 +6559,14 @@ class MockFXGraphCache:
             gm._fx_graph_cache_key = key
             return gm
 
-    def _lookup_graph(self, key, inputs, local, remote_cache):
+    def load_with_key(self, key, debug_lines, inputs, local, remote_cache, is_backward):
         gm = self.cache.get(key)
         if gm is not None:
             gm = make_boxed_func(gm)
-        return gm
+        return gm, {}
 
     def post_compile(self, gm, inputs, cudagraphs):
-        pass
+        return gm
 
 
 # The following tests fail in strict caching mode (i.e. they bypass or
@@ -6602,8 +6637,8 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
         self.inductor_cache = MockFXGraphCache()
         AOTAutogradCache.clear()
         with patch(
-            "torch._inductor.codecache.FxGraphCache._lookup_graph",
-            new=self.inductor_cache._lookup_graph,
+            "torch._inductor.codecache.FxGraphCache.load_with_key",
+            new=self.inductor_cache.load_with_key,
         ), patch(
             "torch._inductor.codecache.FxGraphCache.post_compile",
             new=self.inductor_cache.post_compile,
