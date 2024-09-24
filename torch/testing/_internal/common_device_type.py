@@ -1657,13 +1657,13 @@ def expectedFailureHPU(fn):
 def expectedFailureMPS(fn):
     return expectedFailure("mps")(fn)
 
-def expectedFailureMPSIfVersionLessThan(versions: Tuple[int, int] = None):
+def expectedFailureMPSIfVersionLessThan(versions: float = None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
             import platform
-            version = platform.mac_ver()[0].split('.')[:2]
-            if not version:  # cpu or other unsupported device
+            version = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
+            if not version or version < 1.0:  # cpu or other unsupported device
                 return fn(self, *args, **kwargs)
             if version < versions:
                 reason = f"test skipped for MPS versions < {version}"
