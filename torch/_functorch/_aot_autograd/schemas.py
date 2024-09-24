@@ -289,7 +289,9 @@ class SubclassCreationMeta:
         self.original_subclass_type = type(self.original_subclass)
         self.original_subclass = None
         self.outer_size = tuple([_make_size_runtime_safe(x) for x in self.outer_size])
-        self.outer_stride = tuple([_make_size_runtime_safe(x) for x in self.outer_stride])
+        self.outer_stride = tuple(
+            [_make_size_runtime_safe(x) for x in self.outer_stride]
+        )
         # Recurse on nested subclass info
         for creation_meta in self.attrs.values():
             if creation_meta is not None:
