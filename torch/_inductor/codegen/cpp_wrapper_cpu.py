@@ -74,8 +74,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         call_args,
         grid=None,
         device_index=None,
-        gpu=True,
-        triton=True,
+        gpu=False,
+        triton=False,
         arg_types=None,
         raw_args=None,
         grid_fn: str = "grid",
@@ -92,40 +92,25 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 Otherwise it uses the CUDA language for codegen.
                 Only valid when cuda == True.
         """
-        if gpu:
-            return super().generate_kernel_call(
-                kernel_name,
-                call_args,
-                grid,
-                device_index,
-                gpu,
-                triton,
-                arg_types,
-                raw_args,
-                grid_fn,
-                triton_meta,
-                autotune_configs,
-                grid_extra_kwargs,
-            )
+
+        assert not gpu, "CppWrapperCpu.geneerate_kernel_call does not support GPU"
+
+        if config.abi_compatible:
+            assert arg_types is not None and len(call_args) == len(
+                arg_types
+            ), "Mismatch call_args and arg_types in generate_kernel_call"
+            new_args = []
+            for idx, arg in enumerate(call_args):
+                if "*" in arg_types[idx]:
+                    var_name = f"var_{next(self.arg_var_id)}"
+                    self.writeline(f"auto* {var_name} = get_data_ptr_wrapper({arg});")
+                    new_args.append(f"({arg_types[idx]})({var_name})")
+                else:
+                    # arg is a scalar
+                    new_args.append(arg)
+            self.writeline(self.wrap_kernel_call(kernel_name, new_args))
         else:
-            if config.abi_compatible:
-                assert arg_types is not None and len(call_args) == len(
-                    arg_types
-                ), "Mismatch call_args and arg_types in generate_kernel_call"
-                new_args = []
-                for idx, arg in enumerate(call_args):
-                    if "*" in arg_types[idx]:
-                        var_name = f"var_{next(self.arg_var_id)}"
-                        self.writeline(
-                            f"auto* {var_name} = get_data_ptr_wrapper({arg});"
-                        )
-                        new_args.append(f"({arg_types[idx]})({var_name})")
-                    else:
-                        # arg is a scalar
-                        new_args.append(arg)
-                self.writeline(self.wrap_kernel_call(kernel_name, new_args))
-            else:
-                self.writeline(self.wrap_kernel_call(kernel_name, call_args))
+            self.writeline(self.wrap_kernel_call(kernel_name, call_args))
 
     def write_constant(self, name, hashed):
         # include a hash so our code cache gives different constants different files
@@ -919,9 +904,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.prefix = cached_dtypes_buffer
 
     def define_kernel(
-        self, name: str, kernel: str, metadata: Optional[str] = None, gpu=False
+        self,
+        kernel_name: str,
+        kernel_body: str,
+        metadata: Optional[str] = None,
+        gpu=False,
     ):
-        self.header.splice(f"\n{kernel}\n")
+        self.header.splice(f"\n{kernel_body}\n")
 
     def codegen_scalar_to_tensor(self, output: str):
         name = f"scalar_to_tensor_{next(self.scalar_to_tensor_id)}"
@@ -963,9 +952,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
     @cache_on_self
     def get_output_refs(self):
         return [
-            f"torch::tensor({x.codegen_reference(self.wrapper_call)})"
-            if isinstance(x, ir.ShapeAsConstantBuffer) and not config.abi_compatible
-            else x.codegen_reference(self.wrapper_call)
+            (
+                f"torch::tensor({x.codegen_reference(self.wrapper_call)})"
+                if isinstance(x, ir.ShapeAsConstantBuffer) and not config.abi_compatible
+                else x.codegen_reference(self.wrapper_call)
+            )
             for x in V.graph.graph_outputs
         ]
 
@@ -1169,9 +1160,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             outputs_str = "output_tensors"
         else:
             outputs = [
-                f"output_tensors[{i}]"
-                if self.output_is_tensor[i]
-                else f"output_tensors[{i}].item()"
+                (
+                    f"output_tensors[{i}]"
+                    if self.output_is_tensor[i]
+                    else f"output_tensors[{i}].item()"
+                )
                 for i in range(len(V.graph.graph_outputs))
             ]
             outputs_str = f"[{', '.join(outputs)}]"
@@ -1326,9 +1319,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
             cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
             inputs_wrapped = [
-                f"convert_arrayref_tensor_to_tensor({x})"
-                if isinstance(x, str)
-                else str(x)
+                (
+                    f"convert_arrayref_tensor_to_tensor({x})"
+                    if isinstance(x, str)
+                    else str(x)
+                )
                 for x in inputs
             ]
             line = f"{cpp_kernel_name}(convert_arrayref_tensor_to_tensor({output}), {','.join(inputs_wrapped)}"

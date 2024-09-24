@@ -202,10 +202,14 @@ class CppWrapperGpu(CppWrapperCpu):
         return name
 
     def define_kernel(
-        self, name: str, kernel: str, metadata: Optional[str] = None, gpu=True
+        self,
+        kernel_name: str,
+        kernel_body: str,
+        metadata: Optional[str] = None,
+        gpu=False,
     ):
         if not gpu:
-            return super().define_kernel(name, kernel, metadata, gpu)
+            return super().define_kernel(kernel_name, kernel_body, metadata, gpu)
 
     def generate(self, is_inference):
         self.prefix.writeline("\n")
@@ -266,13 +270,15 @@ class CppWrapperGpu(CppWrapperCpu):
         self.writeline(
             DeferredGpuKernelLine(
                 kernel_name,
-                """    """
-                + kernel_var_name
-                + """ = loadKernel("%s", "%s", %s, this->cubin_dir_);"""
-                if V.graph.aot_mode
-                else """    """
-                + kernel_var_name
-                + """ = loadKernel("%s", "%s", %s);""",
+                (
+                    """    """
+                    + kernel_var_name
+                    + """ = loadKernel("%s", "%s", %s, this->cubin_dir_);"""
+                    if V.graph.aot_mode
+                    else """    """
+                    + kernel_var_name
+                    + """ = loadKernel("%s", "%s", %s);"""
+                ),
                 keys,
             )
         )
@@ -375,7 +381,8 @@ class CppWrapperGpu(CppWrapperCpu):
 
         if not gpu:
             # Even in CppWrapperGpu, we may see cpp kernels
-            return super().generate_kernel_call(
+            return CppWrapperCpu.generate_kernel_call(
+                self,
                 kernel_name,
                 call_args,
                 grid,
