@@ -5972,9 +5972,11 @@ class TestAOTModuleSimplified(AOTTestCase):
 
     @torch._functorch.config.patch("aotd_debug_profile", True)
     def test_aotd_debug_profile_overhead_logging(self):
+        last_fwd_runtime_wrapper_start_time = None
         last_fwd_start_time = None
         last_fwd_compiled_module_start_time = None
         last_fwd_compiled_module_duration = None
+        last_fwd_runtime_wrapper_duration = None
 
         last_bwd_start_time = None
         last_bwd_compiled_module_start_time = None
@@ -5983,31 +5985,56 @@ class TestAOTModuleSimplified(AOTTestCase):
         fwd_overheads_ns = []
         fwd_compiled_module_durations_ns = []
         fwd_total_durations_ns = []
+        fwd_runtime_wrapper_durations_ns = []
 
         bwd_overheads_ns = []
         bwd_compiled_module_durations_ns = []
         bwd_total_durations_ns = []
 
-        EVENT_NAME_PREFIX = (
-            "torch._functorch._aot_autograd.runtime_wrappers.CompiledFunction"
-        )
+        EVENT_NAME_PREFIX = "torch._functorch._aot_autograd.runtime_wrappers"
 
         def on_event(event):
             event_name = event["name"]
             event_ph = event["ph"]
-            if event_name == f"{EVENT_NAME_PREFIX}.forward.compiled_module":
+            if event_name == f"{EVENT_NAME_PREFIX}.runtime_wrapper":
+                if event_ph == "B":
+                    nonlocal last_fwd_runtime_wrapper_start_time
+                    assert last_fwd_runtime_wrapper_start_time is None
+                    last_fwd_runtime_wrapper_start_time = event["ts"]
+                elif event_ph == "E":
+                    assert last_fwd_runtime_wrapper_start_time is not None
+                    last_fwd_runtime_wrapper_duration = (
+                        event["ts"] - last_fwd_runtime_wrapper_start_time
+                    )
+                    fwd_runtime_wrapper_durations_ns.append(
+                        last_fwd_runtime_wrapper_duration
+                    )
+                    nonlocal last_fwd_compiled_module_duration
+                    fwd_overheads_ns.append(
+                        last_fwd_runtime_wrapper_duration
+                        - last_fwd_compiled_module_duration
+                    )
+                    last_fwd_runtime_wrapper_start_time = None
+            if (
+                event_name
+                == f"{EVENT_NAME_PREFIX}.CompiledFunction.forward.compiled_module"
+            ):
                 if event_ph == "B":
                     nonlocal last_fwd_compiled_module_start_time
                     last_fwd_compiled_module_start_time = event["ts"]
                 elif event_ph == "E":
-                    nonlocal last_fwd_compiled_module_duration
+                    assert last_fwd_compiled_module_start_time != -1
                     last_fwd_compiled_module_duration = (
                         event["ts"] - last_fwd_compiled_module_start_time
                     )
+                    last_fwd_compiled_module_start_time = -1
                     fwd_compiled_module_durations_ns.append(
                         last_fwd_compiled_module_duration
                     )
-            elif event_name == f"{EVENT_NAME_PREFIX}.backward.compiled_module":
+            elif (
+                event_name
+                == f"{EVENT_NAME_PREFIX}.CompiledFunction.backward.compiled_module"
+            ):
                 if event_ph == "B":
                     nonlocal last_bwd_compiled_module_start_time
                     last_bwd_compiled_module_start_time = event["ts"]
@@ -6019,17 +6046,14 @@ class TestAOTModuleSimplified(AOTTestCase):
                     bwd_compiled_module_durations_ns.append(
                         last_bwd_compiled_module_duration
                     )
-            elif event_name == f"{EVENT_NAME_PREFIX}.forward":
+            elif event_name == f"{EVENT_NAME_PREFIX}.CompiledFunction.forward":
                 if event_ph == "B":
                     nonlocal last_fwd_start_time
                     last_fwd_start_time = event["ts"]
                 elif event_ph == "E":
                     last_forward_duration = event["ts"] - last_fwd_start_time
-                    fwd_overheads_ns.append(
-                        last_forward_duration - last_fwd_compiled_module_duration
-                    )
                     fwd_total_durations_ns.append(last_forward_duration)
-            elif event_name == f"{EVENT_NAME_PREFIX}.backward":
+            elif event_name == f"{EVENT_NAME_PREFIX}.CompiledFunction.backward":
                 if event_ph == "B":
                     nonlocal last_bwd_start_time
                     last_bwd_start_time = event["ts"]
@@ -6043,8 +6067,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         chromium_logger = torch._dynamo.utils.get_chromium_event_logger()
         chromium_logger.add_listener(on_event)
 
-        num_iters = 100
-        warmup_iters = 20
+        num_iters = 30
 
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -6079,29 +6102,32 @@ class TestAOTModuleSimplified(AOTTestCase):
             outs[0].sum().backward()
 
         def _assert_len():
-            for l in [
-                fwd_compiled_module_durations_ns,
-                fwd_overheads_ns,
-                fwd_total_durations_ns,
-                bwd_compiled_module_durations_ns,
-                bwd_overheads_ns,
-                bwd_total_durations_ns,
-            ]:
-                assert len(l) == num_iters
+            assert len(fwd_compiled_module_durations_ns) == num_iters
+            assert len(fwd_overheads_ns) == num_iters
+            assert len(fwd_total_durations_ns) == num_iters
+            assert len(bwd_compiled_module_durations_ns) == num_iters
+            assert len(bwd_overheads_ns) == num_iters
+            assert len(bwd_total_durations_ns) == num_iters
+            assert len(fwd_runtime_wrapper_durations_ns) == num_iters
 
         _assert_len()
 
         def _print_stat(s: str):
+            fwd_runtime_wrapper_avg_ns = (
+                sum(fwd_runtime_wrapper_durations_ns) / num_iters
+            )
             fwd_compiled_module_duration_avg_ns = (
                 sum(fwd_compiled_module_durations_ns) / num_iters
             )
             fwd_aotd_overhead_avg_ns = sum(fwd_overheads_ns) / num_iters
-            fwd_total_duration_avg_ns = sum(fwd_total_durations_ns) / num_iters
+            fwd_runtime_wrapper_duration_avg_ns = (
+                sum(fwd_runtime_wrapper_durations_ns) / num_iters
+            )
             print(
                 f"{s} FW_aotd_overhead_avg:{fwd_aotd_overhead_avg_ns:.3f}ns "
                 f"{100 * fwd_aotd_overhead_avg_ns / fwd_compiled_module_duration_avg_ns:.3f}% "
-                f"of fwd_compiled_module_duration_avg:{fwd_compiled_module_duration_avg_ns:.3f}ns "
-                f"fwd_total_duration_avg:{fwd_total_duration_avg_ns:.3f}ns"
+                f"of fwd_compiled_module_duration_avg_ns:{fwd_compiled_module_duration_avg_ns:.3f}ns "
+                f"fwd_runtime_wrapper_duration_avg_ns:{fwd_runtime_wrapper_duration_avg_ns:.3f}ns"
             )
 
             bwd_compiled_module_duration_avg_ns = (
@@ -6122,6 +6148,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         fwd_compiled_module_durations_ns.clear()
         fwd_overheads_ns.clear()
         fwd_total_durations_ns.clear()
+        fwd_runtime_wrapper_durations_ns.clear()
 
         bwd_compiled_module_durations_ns.clear()
         bwd_overheads_ns.clear()

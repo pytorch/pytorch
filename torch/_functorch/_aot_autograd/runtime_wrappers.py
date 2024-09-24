@@ -284,6 +284,12 @@ def _create_runtime_wrapper(
         )
 
     def runtime_wrapper(args: List[Any]):
+        if torch._functorch.config.aotd_debug_profile:
+            get_chromium_event_logger().log_event_start(
+                f"{_create_runtime_wrapper.__module__}.runtime_wrapper",
+                time.time_ns(),
+            )
+
         # stash a ref to each input tensor we plan to use after the compiled function
         orig_inputs = {i: args[i] for i in epilogue_args_idx}
 
@@ -432,6 +438,12 @@ def _create_runtime_wrapper(
                     t._dynamo_weak_dynamic_indices = o.dynamic_dims.copy()
         if runtime_metadata.grad_enabled_mutation is not None:
             torch._C._set_grad_enabled(runtime_metadata.grad_enabled_mutation)
+
+        if torch._functorch.config.aotd_debug_profile:
+            get_chromium_event_logger().log_event_end(
+                f"{_create_runtime_wrapper.__module__}.runtime_wrapper",
+                time.time_ns(),
+            )
         return ret_outs
 
     return runtime_wrapper
