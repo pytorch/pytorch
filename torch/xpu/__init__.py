@@ -238,7 +238,9 @@ def get_device_capability(device: Optional[_device_t] = None) -> Dict[str, Any]:
     # to fix Triton tests.
     # This field appears after updating pybind to 2.13.6.
     return {
-        prop: getattr(props, prop) for prop in dir(props) if not prop.startswith(("__", "_pybind11_"))
+        prop: getattr(props, prop)
+        for prop in dir(props)
+        if not prop.startswith(("__", "_pybind11_"))
     }
 
 
