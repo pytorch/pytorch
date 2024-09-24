@@ -52,9 +52,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         Clear unrelated caches, like dynamo and PyCodeCache
         """
         torch._dynamo.reset()
-        for m in torch._inductor.codecache.PyCodeCache.cache.values():
-            os.remove(m.__file__)
-        torch._inductor.codecache.PyCodeCache.cache_clear()
+        PyCodeCache.cache_clear()
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)

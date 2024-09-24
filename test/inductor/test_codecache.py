@@ -151,9 +151,13 @@ class TestFxGraphCache(TestCase):
 
         # A second call should hit. (First reset so in-memory guards
         # don't prevent compilation).
-        for m in torch._inductor.codecache.PyCodeCache.cache.values():
-            os.remove(m.__file__)
         self.reset()
+
+        # Also test the path where the PyCodeCache artifact does not exist
+        # on disk to make sure we recreate it from the code stored with
+        # the cache entry. (Relevant for remote caching).
+        PyCodeCache.cache_clear()
+
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
@@ -334,18 +338,18 @@ class TestFxGraphCache(TestCase):
     @parametrize("device", (GPU_TYPE, "cpu"))
     def test_constant_handling(self, device):
         """
-        Test that different constants are recognized correctly.
+        Test that different (inlined) constants are recognized correctly.
         """
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
 
         def fn1(x):
-            return x + torch.tensor(list(range(0, 12)), device=device)
+            return x + torch.tensor(list(range(0, 8)), device=device)
 
         def fn2(x):
-            return x + torch.tensor(list(range(1, 13)), device=device)
+            return x + torch.tensor(list(range(1, 9)), device=device)
 
-        a = torch.rand(12, device=device)
+        a = torch.rand(8, device=device)
 
         compiled_fn1 = torch.compile(fn1)
         compiled_fn2 = torch.compile(fn2)
@@ -611,7 +615,7 @@ class TestFxGraphCacheHashing(TestCase):
         """
         Test the hashing of tensor constants.
         """
-        data = FxGraphCachePickler.dumps(torch.tensor(list(range(9))))
+        data = FxGraphCachePickler.dumps(torch.tensor(list(range(8))))
         self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)
 
     def test_hash_fake_tensors(self):
@@ -873,13 +877,13 @@ class TestUtils(TestCase):
         b = torch.rand(10)
 
         with fresh_inductor_cache():
-            self.assertEqual(len(PyCodeCache.cache.keys()), 0)
+            self.assertEqual(len(PyCodeCache.modules.keys()), 0)
             res1 = torch.compile(fn)(a, b)
             cache_dir1 = cache_dir()
 
         torch._dynamo.reset()
         with fresh_inductor_cache():
-            self.assertEqual(len(PyCodeCache.cache.keys()), 0)
+            self.assertEqual(len(PyCodeCache.modules.keys()), 0)
             res2 = torch.compile(fn)(a, b)
             cache_dir2 = cache_dir()
 
