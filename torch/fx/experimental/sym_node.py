@@ -456,8 +456,12 @@ class SymNode:
         else:
             out_hint = sum(size_hints)
 
+        fx_node, _ = self.shape_env._create_fx_call_function(
+            torch.sym_add, tuple(a.fx_node for a in args)
+        )
+
         # NB: Only for integers!
-        return SymNode(out, self.shape_env, int, out_hint)
+        return SymNode(out, self.shape_env, int, out_hint, fx_node=fx_node)
 
     # You can manually trigger a guard with this function
     def guard_int(self, file, line):

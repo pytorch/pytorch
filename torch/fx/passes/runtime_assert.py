@@ -105,7 +105,7 @@ def insert_deferred_runtime_asserts(
         resolve_unbacked_bindings,
     )
     from torch.utils._sympy.numbers import int_oo
-    from torch.utils._sympy.reference import PythonReferenceAnalysis
+    from torch.utils._sympy.reference import PythonReferenceAnalysis, OptimizedPythonReferenceAnalysis
     from torch.utils._sympy.value_ranges import ValueRanges
 
     # TODO: Request simplification on runtime asserts before emitting them
@@ -182,6 +182,8 @@ def insert_deferred_runtime_asserts(
     added_asserts: Set[sympy.Expr] = set()
     constrained_unbacked_symbols: Set[sympy.Symbol] = set()
 
+    Analysis = PythonReferenceAnalysis if export else OptimizedPythonReferenceAnalysis
+
     def _sympy_interp(expr_to_proxy, expr):
         # sympy_interp() with hash consing
         from sympy import Integer, Number, Symbol
@@ -194,11 +196,11 @@ def insert_deferred_runtime_asserts(
             return expr_to_proxy[expr]
         # base cases, don't cache
         if isinstance(expr, (Integer, Number, Symbol, BooleanAtom)):
-            return sympy_interp(PythonReferenceAnalysis, expr_to_proxy, expr)
+            return sympy_interp(Analysis, expr_to_proxy, expr)
 
         # hash cons on arguments, run expr handler
         expr_to_proxy[expr] = _run_sympy_handler(
-            PythonReferenceAnalysis,
+            Analysis,
             [_sympy_interp(expr_to_proxy, arg) for arg in expr.args],
             expr,
         )
