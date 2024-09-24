@@ -503,6 +503,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @skipIfRocm
+    @skip_if_lt_x_gpu(2)
     def test_stream_write_value(self):
         self._init_process()
         group_name = dist.group.WORLD.group_name
