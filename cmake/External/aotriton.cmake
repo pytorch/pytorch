@@ -5,6 +5,28 @@ if(NOT __AOTRITON_INCLUDED)
   set(__AOTRITON_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/aotriton/build")
   set(__AOTRITON_INSTALL_DIR "${PROJECT_SOURCE_DIR}/torch")
   add_library(__caffe2_aotriton INTERFACE)
+
+  # AOTriton package information from GitHub Release Pages
+  # Replaces .ci/docker/aotriton_version.txt
+  set(__AOTRITON_VER "0.7b")
+  list(JOIN
+       "manylinux_2_17"  # rocm6.1
+       "manylinux_2_17"  # rocm6.2
+       ";"
+       __AOTRITON_MANYLINUX_LIST)
+  list(JOIN
+       "rocm6.1"
+       "rocm6.2"
+       ";"
+       __AOTRITON_ROCM_LIST)
+  set(__AOTRITON_CI_INFO "9be04068c3c0857a4cfd17d7e39e71d0423ebac2")
+  list(JOIN
+       "006f4d982c9a9c768f31f0095128705fecb792136827e2456241fe79764de7a4"  # rocm6.1
+       "3e9e1959d23b93d78a08fcc5f868125dc3854dece32fd9458be9ef4467982291"  # rocm6.2
+       ";"
+       __AOTRITON_SHA256_LIST)
+  set(__AOTRITON_Z "gz")
+
   # Note it is INSTALL"ED"
   if(DEFINED ENV{AOTRITON_INSTALLED_PREFIX})
     install(DIRECTORY
@@ -14,8 +36,6 @@ if(NOT __AOTRITON_INCLUDED)
     set(__AOTRITON_INSTALL_DIR "$ENV{AOTRITON_INSTALLED_PREFIX}")
     message(STATUS "Using Preinstalled AOTriton at ${__AOTRITON_INSTALL_DIR}")
   elseif(DEFINED ENV{AOTRITON_INSTALL_FROM_SOURCE})
-    file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/.ci/docker/aotriton_version.txt" __AOTRITON_CI_INFO)
-    list(GET __AOTRITON_CI_INFO 3 __AOTRITON_CI_COMMIT)
     ExternalProject_Add(aotriton_external
       GIT_REPOSITORY https://github.com/ROCm/aotriton.git
       GIT_TAG ${__AOTRITON_CI_COMMIT}
@@ -38,13 +58,6 @@ if(NOT __AOTRITON_INCLUDED)
     add_dependencies(__caffe2_aotriton aotriton_external)
     message(STATUS "Using AOTriton compiled from source directory ${__AOTRITON_SOURCE_DIR}")
   else()
-    file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/.ci/docker/aotriton_version.txt" __AOTRITON_CI_INFO)
-    list(GET __AOTRITON_CI_INFO 0 __AOTRITON_VER)
-    list(GET __AOTRITON_CI_INFO 1 __AOTRITON_MANYLINUX_LIST)
-    list(GET __AOTRITON_CI_INFO 2 __AOTRITON_ROCM_LIST)
-    list(GET __AOTRITON_CI_INFO 3 __AOTRITON_COMMIT)
-    list(GET __AOTRITON_CI_INFO 4 __AOTRITON_SHA256_LIST)
-    list(GET __AOTRITON_CI_INFO 5 __AOTRITON_Z)
     list(GET __AOTRITON_ROCM_LIST 0 __AOTRITON_ROCM_LOW_STR)
     list(GET __AOTRITON_ROCM_LIST -1 __AOTRITON_ROCM_HIGH_STR)
     # len("rocm") == 4
@@ -81,7 +94,7 @@ if(NOT __AOTRITON_INCLUDED)
     )
     add_dependencies(__caffe2_aotriton aotriton_external)
     message(STATUS "Using AOTriton from pre-compiled binary ${__AOTRITON_URL}.\
-    Set env variables AOTRITON_INSTALL_FROM_SOURCE=1 to build from source.")
+    Set env variable AOTRITON_INSTALL_FROM_SOURCE=1 to build from source.")
   endif()
   target_link_libraries(__caffe2_aotriton INTERFACE ${__AOTRITON_INSTALL_DIR}/lib/libaotriton_v2.so)
   target_include_directories(__caffe2_aotriton INTERFACE ${__AOTRITON_INSTALL_DIR}/include)
