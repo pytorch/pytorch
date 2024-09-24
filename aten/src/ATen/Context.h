@@ -118,7 +118,7 @@ class TORCH_API Context {
   }
 
   void lazyInit(c10::DeviceType device_type) {
-    c10::call_once(th_init[static_cast<uint8_t>(device_type)], [&] {
+    c10::call_once(init_[static_cast<uint8_t>(device_type)], [&] {
       getAcceleratorHooksInterface(device_type).init();
     });
   }
@@ -348,12 +348,7 @@ class TORCH_API Context {
 
  private:
   static bool checkCuBLASConfigDeterministic();
-  std::array<c10::once_flag, at::COMPILE_TIME_MAX_DEVICE_TYPES> th_init;
-  c10::once_flag thc_init;
-  c10::once_flag thh_init;
-  c10::once_flag thx_init;
-  c10::once_flag th_mtia_init;
-  c10::once_flag thp_init;
+  std::array<c10::once_flag, at::COMPILE_TIME_MAX_DEVICE_TYPES> init_;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool deterministic_mkldnn = false;
