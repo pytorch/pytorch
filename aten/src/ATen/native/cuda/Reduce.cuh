@@ -19,7 +19,7 @@
 
 #include <ATen/native/cuda/jit_utils.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 using at::detail::Array;
 
@@ -1356,4 +1356,4 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
       jiterator_mutex, cache, desc, vt0, config, &reduce);
 }
 
-}} // namespace at::native
+} // namespace at::native

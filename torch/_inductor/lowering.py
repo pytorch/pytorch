@@ -2215,8 +2215,6 @@ make_fallback(aten._cdist_forward)  # p=2 should be feasible
 make_fallback(aten._cdist_backward)
 
 # 2) Medium
-make_fallback(aten.max_unpool2d)
-make_fallback(aten.max_unpool3d)
 make_fallback(aten._trilinear)
 
 
@@ -6265,7 +6263,7 @@ def _sink_tokens(tokens):
     return None
 
 
-@register_lowering(torch.ops.higher_order.with_effects)
+@register_lowering(torch.ops.higher_order.with_effects, type_promotion_kind=None)
 def with_effects(token, op, *args, **kwargs):
     result = ir.EffectfulKernel.create(op, *args, **kwargs)
 
