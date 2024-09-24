@@ -57,7 +57,7 @@ struct TorchBenchmarkCompileTimeLogEntry {
 
 # This is enabled only for OSS runs, we always run on the same machine, when running locally
 # expected values are different so by default this is not enabled.
-compare_results_with_expected = os.environ.get("PR_TIME_BENCHMARKS_TEST", "1") == "1"
+compare_results_with_expected = os.environ.get("PR_TIME_BENCHMARKS_TEST", "0") == "1"
 
 
 class BenchmarkBase(ABC):
@@ -118,7 +118,7 @@ class BenchmarkBase(ABC):
 
     def _verify_instruction_count(self, result):
         if not compare_results_with_expected:
-            return False
+            return 
 
         def log(event_name):
             scribe.open_source_signpost(
@@ -147,7 +147,7 @@ if this is an expected regression, please update the expected instruction count 
         if result < low:
             print(
                 f"**WIN** benchmark {self.name()} failed, \
-actual instruction count {result} is lower than expected {expected} with noise margin {noise_margin}\
+actual instruction count {result} is lower than expected {expected} with noise margin {noise_margin} \
 please update the expected instruction count in the benchmark",
             )
             # if the test is by passed
