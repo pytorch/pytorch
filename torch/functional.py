@@ -10,7 +10,6 @@ from torch import _VF, Tensor
 from torch._C import _add_docstr
 from torch._jit_internal import _overload as overload, boolean_dispatch
 from torch._lowrank import pca_lowrank, svd_lowrank
-from torch._torch_docs import reduceops_common_args
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
@@ -2059,12 +2058,14 @@ def cumsum(
         y_i = x_1 + x_2 + x_3 + \dots + x_i
 
     Args:
-        {input}
+        input (Tensor): the input tensor.
         dim  (int): the dimension to do the operation over
 
     Keyword args:
-        {dtype}
-        {out}
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+            If specified, the input tensor is casted to :attr:`dtype` before the operation
+            is performed. This is useful for preventing data type overflows. Default: None.
+        out (Tensor, optional): the output tensor.
 
     Example::
 
@@ -2073,8 +2074,7 @@ def cumsum(
         tensor([13,  7,  3, 10, 13,  3, 15, 10,  9, 10])
         >>> torch.cumsum(a, dim=0)
         tensor([13, 20, 23, 33, 46, 49, 64, 74, 83, 93])
-    """.format(**reduceops_common_args)
-
+    """
     if axis is not None and dim is not None:
         raise RuntimeError("expected either 'dim' or 'axis' to be given, not both")
     if axis is not None:
