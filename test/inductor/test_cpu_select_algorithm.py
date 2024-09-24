@@ -1478,6 +1478,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         counters.clear()
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
         mod = M(bias=bias).to(dtype=dtype).eval()
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        torch.manual_seed(0)
         with verify(dtype) as (atol, rtol), torch.no_grad():
             expected = mod(v)
             actual = AOTIRunnerUtil.run(
@@ -1486,6 +1489,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 (v,),
             )
             self.assertEqual(actual, expected, atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
