@@ -642,26 +642,26 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 self.linear2 = torch.nn.Linear(out_features, out_features2, bias)
 
             def forward(self, arg7_1):
-                addmm_3: f32[s0, 1024] = self.linear(arg7_1)
-                relu_2: f32[s0, 1024] = torch.ops.aten.relu.default(addmm_3)
+                addmm_3 = self.linear(arg7_1)
+                relu_2 = torch.ops.aten.relu.default(addmm_3)
 
-                addmm_4: f32[s0, 1024] = self.linear1(relu_2)
-                relu_3: f32[s0, 1024] = torch.ops.aten.relu.default(addmm_4)
+                addmm_4 = self.linear1(relu_2)
+                relu_3 = torch.ops.aten.relu.default(addmm_4)
 
-                addmm_5: f32[s0, 2] = self.linear2(relu_3)
+                addmm_5 = self.linear2(relu_3)
 
                 split_1 = torch.ops.aten.split.Tensor(addmm_5, 1, 1)
-                getitem_2: f32[s0, 1] = split_1[0]
-                getitem_3: f32[s0, 1] = split_1[1]
+                getitem_2 = split_1[0]
+                getitem_3 = split_1[1]
 
-                tanh_1: f32[s0, 1] = torch.ops.aten.tanh.default(getitem_3)
+                tanh_1 = torch.ops.aten.tanh.default(getitem_3)
 
-                add_62: f32[s0, 1] = torch.ops.aten.add.Tensor(tanh_1, 1)
+                add_62 = torch.ops.aten.add.Tensor(tanh_1, 1)
 
-                mul_36: f32[s0, 1] = torch.ops.aten.mul.Tensor(add_62, 6.0)
-                add_69: f32[s0, 1] = torch.ops.aten.add.Tensor(mul_36, -10.0)
+                mul_36 = torch.ops.aten.mul.Tensor(add_62, 6.0)
+                add_69 = torch.ops.aten.add.Tensor(mul_36, -10.0)
 
-                exp_1: f32[s0, 1] = torch.ops.aten.exp.default(add_69)
+                exp_1 = torch.ops.aten.exp.default(add_69)
                 return (getitem_2, exp_1)
 
         counters.clear()
