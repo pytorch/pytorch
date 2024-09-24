@@ -1,4 +1,4 @@
-#include <torch/csrc/api/include/torch/types.h>
+#include <torch/csrc/api/include/torch/types.h>  // @manual=fbcode//caffe2:libtorch
 
 #include <cstdint>
 #include <iostream>

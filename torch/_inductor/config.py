@@ -9,20 +9,21 @@ def is_fbcode() -> bool:
     return not hasattr(torch.version, "git_version")
 
 
-def fx_graph_remote_cache_default() -> Optional[bool]:
-    if os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "1":
+def _get_tristate_env(name: str) -> Optional[bool]:
+    value = os.environ.get(name)
+    if value == "1":
         return True
-    if os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "0":
+    if value == "0":
         return False
     return None
+
+
+def fx_graph_remote_cache_default() -> Optional[bool]:
+    return _get_tristate_env("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE")
 
 
 def autotune_remote_cache_default() -> Optional[bool]:
-    if os.environ.get("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE") == "1":
-        return True
-    if os.environ.get("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE") == "0":
-        return False
-    return None
+    return _get_tristate_env("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE")
 
 
 # Enable auto_functionalized_v2 (enabled by default)
@@ -70,7 +71,11 @@ sleep_sec_TESTING_ONLY: Optional[int] = None
 # (that is, one of {"needs_fixed_stride_order", "flexible_layout"}),
 # If the custom op does not have a layout constraint tag already
 # then we assume the following applies.
-custom_op_default_layout_constraint = "flexible_layout"
+custom_op_default_layout_constraint = "needs_fixed_stride_order"
+
+# The default layout constraint for user-defined triton kernels.
+# See "The default layout constraint for custom operators" for options.
+triton_kernel_default_layout_constraint = "flexible_layout"
 
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
@@ -194,14 +199,7 @@ batch_fusion = True
 # merge_splits_pass
 # mutate_cat_pass
 # split_cat_pass
-pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {
-    "batch_linear": {},
-    "batch_linear_lhs": {},
-    "batch_layernorm": {},
-    "batch_tanh": {},
-    "batch_relu": {},
-    "batch_sigmoid": {},
-}
+pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {}
 
 # Post grad fusion and options, set to empty dict to disable fusion.
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
@@ -261,6 +259,9 @@ reorder_for_compute_comm_overlap_passes = [
     "sink_waits",
     "raise_comms",
 ]
+
+# enable operator reordering for peak memory optimization
+reorder_for_peak_memory = os.environ.get("TORCHINDUCTOR_REORDER_FOR_PEAK_MEMORY") == "1"
 
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
@@ -326,8 +327,8 @@ autotune_fallback_to_aten = (
 # that can appear in the input shapes (e.g., in autotuning)
 unbacked_symint_fallback = 8192
 
-# DEPRECATED, DO NOT USE
-search_autotune_cache = False
+# enable searching global and local cache regardless of `max_autotune`
+search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
 
 save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
@@ -514,9 +515,18 @@ optimize_scatter_upon_const_tensor = (
 # The multiprocessing start method to use for inductor workers in the codecache.
 # Can be "subprocess" or "fork".
 def decide_worker_start_method() -> str:
-    start_method = os.environ.get(
-        "TORCHINDUCTOR_WORKER_START", "fork" if is_fbcode() else "subprocess"
-    )
+    # TODO: For internal rollout, we use a killswitch to disable the "subprocess"
+    # start method. The justknob check should not be performed at import, however,
+    # so for fbcode, we assign worker_start_method to None below and call this method
+    # lazily in async_compile.py. Remove this after "subprocess" rollout completes.
+    if "TORCHINDUCTOR_WORKER_START" in os.environ:
+        start_method = os.environ["TORCHINDUCTOR_WORKER_START"]
+    elif is_fbcode() and not torch._utils_internal.justknobs_check(
+        "pytorch/inductor:subprocess_parallel_compile"
+    ):
+        start_method = "fork"
+    else:
+        start_method = "subprocess"
     assert start_method in (
         "subprocess",
         "fork",
@@ -524,7 +534,10 @@ def decide_worker_start_method() -> str:
     return start_method
 
 
-worker_start_method = decide_worker_start_method()
+# TODO: Set start method directly after internal rollout of "subprocess".
+worker_start_method: Optional[str] = (
+    None if is_fbcode() else decide_worker_start_method()
+)
 
 # Flags to turn on all_reduce fusion. These 2 flags should be automaticaly turned
 # on by DDP and should not be set by the users.
@@ -589,7 +602,7 @@ if is_fbcode():
             )
         else:
             global_cache_dir = parutil.get_dir_path("fb/cache")
-    except (ValueError, ModuleNotFoundError):
+    except (ValueError, ImportError):
         global_cache_dir = None
 
 else:
@@ -896,7 +909,8 @@ class triton:
     autotune_cublasLt = True
 
     # Tune the generated Triton kernels at compile time instead of first time they run
-    autotune_at_compile_time = False
+    # Setting to None means uninitialized
+    autotune_at_compile_time: Optional[bool] = None
 
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
@@ -980,6 +994,7 @@ class aot_inductor:
     # 0: disable debug dumping
     # 1: enable saving intermediate tensor values
     # 2: enable printing intermediate tensor values
+    # 3: enable printing kernel names only (useful for pinpointing troublesome kernels)
     debug_intermediate_value_printer = os.environ.get(
         "AOT_INDUCTOR_DEBUG_INTERMEDIATE_VALUE_PRINTER", "0"
     )
@@ -990,9 +1005,11 @@ class aot_inductor:
     )
 
     # Serialized tree spec for flattening inputs
+    # TODO: Move this into metadata
     serialized_in_spec = ""
 
     # Serialized tree spec for flattening outputs
+    # TODO: Move this into metadata
     serialized_out_spec = ""
 
     # flag to decide whether to create a submodule for constant graph.
@@ -1003,6 +1020,11 @@ class aot_inductor:
     force_mmap_weights: bool = False
 
     package: bool = False
+    package_cpp_only: bool = False
+
+    # Dictionary of metadata users might want to save to pass to the runtime.
+    # TODO: Move this somewhere else, since it's no longer really a config
+    metadata: Dict[str, str] = {}
 
 
 class cuda:
@@ -1228,6 +1250,7 @@ _cache_config_ignore_prefix = [
     # uses absolute path
     "cuda.cutlass_dir",
     # not relevant
+    "worker_start_method",
     "compile_threads",
 ]
 
