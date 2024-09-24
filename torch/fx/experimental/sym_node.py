@@ -424,9 +424,9 @@ class SymNode:
 
     # This one is currently done by hand, but if we add other variadic
     # functions consider factoring it out to be metaprogrammed too.  Note that
-    # some load bearing logic is directly in torch.sym_add
+    # some load bearing logic is directly in torch.sym_sum
 
-    def sym_add(self, *args) -> "SymNode":
+    def sym_sum(self, args) -> "SymNode":
         import sympy
 
         # Inner impl
@@ -439,8 +439,8 @@ class SymNode:
             return to_node(
                 self,
                 handle_sym_dispatch(
-                    torch.sym_add,
-                    tuple(wrap_node(a) for a in args),
+                    torch.sym_sum,
+                    (tuple(wrap_node(a) for a in args),),
                     {},
                 ),
             )
@@ -457,7 +457,7 @@ class SymNode:
             out_hint = sum(size_hints)
 
         fx_node, _ = self.shape_env._create_fx_call_function(
-            torch.sym_add, tuple(a.fx_node for a in args)
+            torch.sym_sum, (tuple(a.fx_node for a in args),)
         )
 
         # NB: Only for integers!

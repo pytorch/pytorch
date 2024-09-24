@@ -127,13 +127,13 @@ __all__ = [
     "set_warn_always",
     "split",
     "stack",
-    "sym_add",
     "sym_float",
     "sym_int",
     "sym_ite",
     "sym_max",
     "sym_min",
     "sym_not",
+    "sym_sum",
     "typename",
     "unravel_index",
     "use_deterministic_algorithms",
@@ -841,13 +841,13 @@ def sym_min(a, b):
         return builtins.min(a, b)
 
 
-def sym_add(*args):
+def sym_sum(args):
     """
     N-ary add which is faster to compute for long lists than iterated binary
     addition.  Only does something special for integers.
     """
     if overrides.has_torch_function(args):
-        return overrides.handle_torch_function(sym_add, args, *args)
+        return overrides.handle_torch_function(sym_sum, args, args)
 
     found = None
     for a in args:
@@ -860,7 +860,7 @@ def sym_add(*args):
 
     from torch.fx.experimental.sym_node import to_node, wrap_node
 
-    return wrap_node(found.sym_add(*(to_node(found, a) for a in args)))
+    return wrap_node(found.sym_sum(tuple(to_node(found, a) for a in args)))
 
 
 # Drop in replacement for math.sqrt, math.sin, math.cos etc

@@ -143,7 +143,7 @@ class ReferenceAnalysis:
         return _keep_float(operator.add)(a, b)
 
     @classmethod
-    def sym_add(cls, *args):
+    def sym_sum(cls, args):
         return sympy.Add(*args)
 
     @staticmethod
@@ -211,7 +211,7 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
         return torch.sym_not(a)
 
     @classmethod
-    def sym_add(cls, *args):
+    def sym_sum(cls, args):
         if len(args) == 0:
             return 0
         if len(args) == 1:
@@ -303,8 +303,8 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
 # operators to make things faster
 class OptimizedPythonReferenceAnalysis(PythonReferenceAnalysis):
     @staticmethod
-    def sym_add(*args):
-        return torch.sym_add(*args)
+    def sym_sum(args):
+        return torch.sym_sum(args)
 
 
 def _to_dtype(x: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
