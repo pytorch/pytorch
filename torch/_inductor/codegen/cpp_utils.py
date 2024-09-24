@@ -46,6 +46,8 @@ DTYPE_TO_CPP = {
     torch.complex64: "c10::complex<float>",
     torch.float8_e4m3fn: "float8_e4m3fn",
     torch.float8_e5m2: "float8_e5m2",
+    torch.float8_e4m3fnuz: "float8_e4m3fnuz",
+    torch.float8_e5m2fnuz: "float8_e5m2fnuz",
 }
 
 DTYPE_TO_ATEN = {
