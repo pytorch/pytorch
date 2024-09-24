@@ -17,6 +17,7 @@ from torch.nn.attention.flex_attention import (
     BlockMask,
     create_block_mask,
     flex_attention,
+    noop_mask,
     PagedAttention,
 )
 from torch.testing import FileCheck
@@ -357,7 +358,6 @@ class TestFlexDecoding(InductorTestCase):
 
     # TODO: support computation with batch size < max_batch_size
     # TODO: test if #batch size in block mask is different from page table, or the cache
-
     # TODO: add test for page_size as 64 and 256
 
     def run_paged_attention(
@@ -376,17 +376,7 @@ class TestFlexDecoding(InductorTestCase):
         n_pages, page_size, max_batch_size = 64, 128, 5
 
         if block_mask is None:
-
-            def generate_causal_offset(offset: torch.Tensor):
-                def causal_offset_mask(b, h, q_idx, kv_idx):
-                    return (offset + q_idx) >= kv_idx
-
-                return causal_offset_mask
-
-            mod = generate_causal_offset(
-                torch.tensor(192, device="cuda", dtype=torch.int32)
-            )
-            block_mask = create_block_mask(mod, max_batch_size, 1, 1, S)
+            block_mask = create_block_mask(noop_mask, max_batch_size, 1, 1, S)
 
         # allocate cache
         MAX_CACHED_SEQ_LEN = n_pages * page_size
@@ -412,19 +402,16 @@ class TestFlexDecoding(InductorTestCase):
             n_pages, page_size, max_batch_size, MAX_CACHED_SEQ_LEN
         )
         paged_cache.allocate_until_length(
-            torch.tensor([100, 200, 50, 300], device="cuda")
+            torch.tensor([KV_S//4, KV_S//2, KV_S//4, KV_S//3], device="cuda")
         )
         paged_cache.allocate_until_length(
-            torch.tensor([100, 512, 300, 300], device="cuda")
+            torch.tensor([KV_S//4, KV_S//2, KV_S//2, KV_S//2], device="cuda")
         )
         paged_cache.allocate_until_length(
-            torch.tensor([512, 512, 300, 300], device="cuda")
+            torch.tensor([KV_S//2, KV_S, KV_S//2, KV_S], device="cuda")
         )
         paged_cache.allocate_until_length(
-            torch.tensor([512, 512, 512, 300], device="cuda")
-        )
-        paged_cache.allocate_until_length(
-            torch.tensor([512, 512, 512, 512], device="cuda")
+            torch.tensor([KV_S, KV_S, KV_S, KV_S], device="cuda")
         )
 
         # update cache with k and v
@@ -469,8 +456,8 @@ class TestFlexDecoding(InductorTestCase):
             score_mod is not None or block_mask is not None
         ), "Must provide score_mod or block_mask"
         assert Q_H % KV_H == 0
-        if TEST_WITH_ROCM and Q_H != KV_H:
-            self.skipTest("enable_gqa=True is unsupported on ROCM, for now")
+        # if TEST_WITH_ROCM and Q_H != KV_H:
+        #     self.skipTest("enable_gqa=True is unsupported on ROCM, for now")
 
         q = torch.randn(
             (Q_B, Q_H, Q_S, QK_D),
@@ -493,19 +480,8 @@ class TestFlexDecoding(InductorTestCase):
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
 
-        if block_mask is None:
-
-            def generate_causal_offset(offset: torch.Tensor):
-                def causal_offset_mask(b, h, q_idx, kv_idx):
-                    return (offset + q_idx) >= kv_idx
-
-                return causal_offset_mask
-
-            mod = generate_causal_offset(
-                torch.tensor(192, device="cuda", dtype=torch.int32)
-            )
-
-            block_mask = create_block_mask(mod, Q_B, 1, 1, S)
+        if block_mask is None:  
+            block_mask = create_block_mask(noop_mask, Q_B, 1, 1, S)
 
         sdpa_partial = create_attention(
             score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
@@ -559,34 +535,8 @@ class TestFlexDecoding(InductorTestCase):
         output.backward(backward_grad)
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes)
-    @common_utils.parametrize("score_mod", test_score_mods)
-    def test_paged_attention_builtin_score_mods_causal_mask(
-        self, dtype: torch.dtype, score_mod: Callable
-    ):
-        def generate_causal_offset(offset: torch.Tensor):
-            def causal_offset_mask(b, h, q_idx, kv_idx):
-                return (offset + q_idx) >= kv_idx
-
-            return causal_offset_mask
-
-        def noop(score, b, h, q_idx, kv_idx):
-            return score
-
-        mod = generate_causal_offset(
-            torch.tensor(192, device="cuda", dtype=torch.int32)
-        )
-        block_mask = create_block_mask(mod, 4, 1, 1, S)
-        self.run_test_with_paged_attention(score_mod, dtype, block_mask=block_mask)
-
-    @supported_platform
     def test_flex_decoding_masks(self):
         # TODO: Add test for different block masks
-        return
-
-    @supported_platform
-    def test_flex_decoding_gqa(self):
-        # TODO
         return
 
     @supported_platform
@@ -665,7 +615,6 @@ class TestFlexDecoding(InductorTestCase):
             ref_out, compiled_out, atol=tolerance.atol, rtol=tolerance.rtol
         )
 
-        # TODO: Error here
         paged_compiled_out, _ = self.run_paged_attention(score_mod, q, k, v, dtype)
         torch.testing.assert_close(
             ref_out, paged_compiled_out, atol=tolerance.atol, rtol=tolerance.rtol

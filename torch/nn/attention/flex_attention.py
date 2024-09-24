@@ -916,6 +916,9 @@ class PagedAttention:
         Add docs
         """
         # batch_idx: [B] input_pos: [S], val: [B, H, S, D], cache: [1, H, MAX_S, D]
+        if val.requires_grad:
+            raise RuntimeError("val must not require gradient")
+
         B, H, S, D = val.shape
         # TODO: Change to runtime error
         assert B <= batch_idx.shape[0]
@@ -925,7 +928,7 @@ class PagedAttention:
         device = val.device
 
         if not val.is_contiguous():
-            val = val.contiguous()
+            val = val.detach().contiguous()
 
         # find address
         logical_block_idx = input_pos // self.page_size  # [S]
