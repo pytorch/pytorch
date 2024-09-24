@@ -1000,9 +1000,12 @@ class TestCommon(TestCase):
                 arg = op_out.args and op_out.args[0]
 
                 if (
-                    (op.is_factory_function and sample.kwargs.get("device", None) is None)
-                    or (op.copies_scalar_tensors
-                        and arg and not arg.shape and str(arg.device) == "cpu")
+                    op.is_factory_function and sample.kwargs.get("device", None) is None
+                ) or (
+                    op.copies_scalar_tensors
+                    and arg
+                    and not arg.shape
+                    and str(arg.device) == "cpu"
                 ):
                     op_out(out=out)
                 else:
