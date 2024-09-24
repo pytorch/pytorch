@@ -1093,8 +1093,7 @@ static PyObject * THPVariable_bool_scalar(PyObject* self, PyObject* args) {
     END_HANDLE_TH_ERRORS
   }
   jit::tracer::warn("Converting a tensor to a Python boolean", jit::tracer::WARN_PYTHON_DATAFLOW);
-  const Tensor& self_ = THPVariable_Unpack(self);
-  return py::cast(self_.item().toBool()).release().ptr();
+  return THPVariable_is_nonzero(self, args);
 }
 
 static PyObject * THPVariable___eq__(PyObject* self_, PyObject* args, PyObject* kwargs)
