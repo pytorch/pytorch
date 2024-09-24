@@ -883,13 +883,7 @@ class TritonHOPifier:
             tx,
         )
 
-    def call_triton_kernel(
-        self,
-        variable,
-        args,
-        kwargs,
-        tx,
-    ):
+    def call_triton_kernel(self, variable, args, kwargs, tx):
         from triton.runtime.autotuner import autotune, Autotuner, Config
 
         if "num_ctas" in kwargs:
