@@ -959,7 +959,7 @@ def constant_pad_nd(
     value: torch.types.Number = 0,
 ) -> Union[torch.Tensor, type]:
     if input.device.type == "cpu":
-        # The generated code fails on gcc-9 and gcc-10 due to a codegen bug.
+        # The generated code fails on gcc-9 and gcc-10 due to a codegen bug in gcc.
         return NotImplemented
 
     return decomp_constant_pad_nd(input, pad, value)

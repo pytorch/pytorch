@@ -2850,7 +2850,7 @@ def conj(input: TensorLikeType) -> TensorLikeType:
 
 
 # This replicates at::constant_pad_nd, defined in ATen/native/PadNd.cpp
-# Not registering here as there's a better decomposition using
+# Not registering here as there's a better decomposition in
 # torch._decomp.decompositions using the private method _unsafe_masked_index.
 @out_wrapper()
 def constant_pad_nd(
