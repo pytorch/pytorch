@@ -1,11 +1,9 @@
+#ifdef USE_C10D_XCCL
+
 #include <torch/csrc/distributed/c10d/ProcessGroupXCCL.hpp>
 #include <fstream>
-#include <mutex>
-#include <sstream>
-
-#ifdef USE_C10D_XCCL
-#include <exception>
 #include <map>
+#include <sstream>
 #include <stdexcept>
 #include <tuple>
 #include <unordered_set>
@@ -13,15 +11,7 @@
 
 #include <ATen/detail/FunctionTraits.h>
 #include <c10/core/DeviceType.h>
-#include <c10/util/CallOnce.h>
-#include <c10/util/Exception.h>
-#include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
-#include <c10/util/irange.h>
-#include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
-#include <torch/csrc/distributed/c10d/TraceUtils.h>
-#include <torch/csrc/distributed/c10d/Utils.hpp>
-#include <torch/torch.h>
 
 namespace c10d {
 
@@ -44,36 +34,6 @@ std::map<at::ScalarType, ccl::datatype> xcclDatatypes = {
     {at::kBFloat16, ccl::datatype::bfloat16},
     {at::kBool, ccl::datatype::uint8},
 };
-
-XCCL_KVS kvs;
-std::mutex kvs_mutex;
-
-XCCL_KVS get_kvs(int rank, c10d::Store& store) {
-  std::lock_guard<std::mutex> lock(kvs_mutex);
-  if (kvs)
-    return kvs;
-  std::string storeKey = "xccl_kvs";
-
-  // Rank 0 broadcast the bootstrap network information to other ranks
-  if (rank == 0) {
-    kvs = ccl::create_main_kvs();
-    ccl::kvs::address_type main_addr = kvs->get_address();
-    auto ccl_kvs_addr =
-        std::vector<uint8_t>(main_addr.begin(), main_addr.end());
-    store.set(storeKey, ccl_kvs_addr);
-  } else {
-    auto ccl_kvs_addr = store.get(storeKey);
-    if (ccl_kvs_addr.size() != ccl::kvs::address_max_size) {
-      throw std::runtime_error("Unexpected ccl kvs addr from the store\n");
-    }
-    ccl::kvs::address_type main_addr;
-    std::copy_n(
-        ccl_kvs_addr.begin(), ccl::kvs::address_max_size, main_addr.begin());
-    kvs = ccl::create_kvs(main_addr);
-  }
-
-  return kvs;
-}
 
 void check_xpu_single_tensor(const at::Tensor& tensor) {
   if (!tensor.is_xpu() || tensor.is_sparse()) {
@@ -106,23 +66,9 @@ ccl::reduction getXcclReduceOp(const ReduceOp& reduceOp, at::Tensor& input) {
     }
     return xcclOps.at(reduceOp);
   } catch (const std::out_of_range&) {
-    switch (reduceOp) {
-      case ReduceOp::AVG:
-        C10_THROW_ERROR(ValueError, "Cannot use ReduceOp AVG with XCCL");
-        break;
-      case ReduceOp::BAND:
-        C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BAND with XCCL");
-        break;
-      case ReduceOp::BOR:
-        C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BOR with XCCL");
-        break;
-      case ReduceOp::BXOR:
-        C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BXOR with XCCL");
-        break;
-      default:
-        C10_THROW_ERROR(ValueError, "Unhandled ReduceOp");
-        break;
-    }
+    C10_THROW_ERROR(
+        ValueError,
+        "Cannot use ReduceOp." + reduce_op_to_string(reduceOp) + " with XCCL");
   }
 }
 
@@ -153,20 +99,6 @@ ProcessGroupXCCL::WorkXCCL::WorkXCCL(const WorkXCCL& w)
 
 ProcessGroupXCCL::WorkXCCL::~WorkXCCL() = default;
 
-bool ProcessGroupXCCL::WorkXCCL::checkTimeout(
-    std::optional<std::chrono::milliseconds> timeout) {
-  auto currentTimepoint = std::chrono::steady_clock::now();
-  auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-      currentTimepoint - workStartTime_);
-  std::chrono::milliseconds opTimeout = std::chrono::milliseconds(60000);
-
-  auto workTimeout = timeout ? *timeout : opTimeout;
-
-  if (timeElapsed < workTimeout)
-    return false;
-  return true;
-}
-
 bool ProcessGroupXCCL::WorkXCCL::isCompleted() {
   if (xcclEndEvent_ && xcclEndEvent_->query()) {
     return true;
@@ -178,23 +110,23 @@ void ProcessGroupXCCL::WorkXCCL::synchronize() {
   synchronizeInternal(kNoTimeout);
 }
 
-void ProcessGroupXCCL::WorkXCCL::synchronizeStream() {
-  auto currentStream = at::xpu::getCurrentXPUStream(device_.index());
-  // Block the current stream on the XCCL stream
-  xcclEndEvent_->block(currentStream);
-}
-
 void ProcessGroupXCCL::WorkXCCL::synchronizeInternal(
     std::chrono::milliseconds timeout) {
-  synchronizeStream();
-
+  auto currentStream = at::xpu::getCurrentXPUStream(device_.index());
+  xcclEndEvent_->block(currentStream);
   if (blockingWait_) {
     while (!isCompleted()) {
-      bool timedOut = checkTimeout(
-          timeout == kNoTimeout ? std::nullopt : std::make_optional(timeout));
-      if (timedOut) {
-        break;
+      auto currentTimepoint = std::chrono::steady_clock::now();
+      auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+          currentTimepoint - workStartTime_);
+      if (timeElapsed >= timeout) {
+        std::string exceptionMsg = c10::str(
+            "Work ran for ",
+            timeElapsed.count(),
+            " milliseconds before timing out.");
+        TORCH_CHECK(false, exceptionMsg)
       }
+
       std::this_thread::sleep_for(
           std::chrono::milliseconds(kSynchronizeBusyWaitMillis));
     }

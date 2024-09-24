@@ -28,42 +28,7 @@
 #include <c10/xpu/XPUCachingAllocator.h>
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
-#include <torch/csrc/distributed/c10d/Store.hpp>
 namespace c10d {
-
-namespace {
-int getXCCLEnvVar(std::string envVarName) {
-  char* stringValue = std::getenv(envVarName.c_str());
-  if (stringValue != nullptr) {
-    try {
-      int val = std::stoi(stringValue);
-      return val;
-    } catch (std::exception& e) {
-      TORCH_CHECK(
-          false,
-          "Invalid value for environment variable: " + std::string(envVarName));
-    }
-  } else {
-    return -1;
-  }
-}
-
-template <typename T>
-void setXCCLEnvVar(const std::string& envVarName, T val) {
-  if constexpr (std::is_same_v<T, int>) {
-    setenv(envVarName.c_str(), std::to_string(val).c_str(), 1);
-  } else if constexpr (std::is_same_v<T, std::string>) {
-    setenv(envVarName.c_str(), val.c_str(), 1);
-  }
-}
-
-bool with_mpirun() {
-  return (getenv("MPI_LOCALRANKID") || getenv("MPI_LOCALNRANKS") ||
-          getenv("PMI_RANK") || getenv("PMI_SIZE") || getenv("PMIX_RANK"))
-      ? true
-      : false;
-}
-} // namespace
 
 static std::vector<std::string> TORCH_XCCL_BLOCKING_WAIT = {
     "TORCH_XCCL_BLOCKING_WAIT",
@@ -98,8 +63,6 @@ class TORCH_API ProcessGroupXCCL : public Backend {
 
     void synchronize() override;
 
-    void synchronizeStream();
-
     bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
 
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
@@ -109,9 +72,6 @@ class TORCH_API ProcessGroupXCCL : public Backend {
     std::vector<at::Tensor> result() override {
       TORCH_CHECK(false, "ProcessGroupXCCL::WorkXCCL::result not implemented");
     }
-
-    bool checkTimeout(
-        std::optional<std::chrono::milliseconds> timeout = std::nullopt);
 
    protected:
     at::Device device_;
@@ -302,7 +262,70 @@ class TORCH_API ProcessGroupXCCL : public Backend {
   c10::intrusive_ptr<Store> store_;
   std::mutex mutex_;
   bool blockingWait_ = false;
+
+ private:
+  XCCL_KVS kvs;
+  std::mutex kvs_mutex;
+  XCCL_KVS get_kvs(int rank, c10d::Store& store) {
+    std::lock_guard<std::mutex> lock(kvs_mutex);
+    if (kvs)
+      return kvs;
+    std::string storeKey = "xccl_kvs";
+    // Rank 0 broadcast the bootstrap network information to other ranks
+    if (rank == 0) {
+      kvs = ccl::create_main_kvs();
+      ccl::kvs::address_type main_addr = kvs->get_address();
+      auto ccl_kvs_addr =
+          std::vector<uint8_t>(main_addr.begin(), main_addr.end());
+      store.set(storeKey, ccl_kvs_addr);
+    } else {
+      auto ccl_kvs_addr = store.get(storeKey);
+      if (ccl_kvs_addr.size() != ccl::kvs::address_max_size) {
+        throw std::runtime_error("Unexpected ccl kvs addr from the store\n");
+      }
+      ccl::kvs::address_type main_addr;
+      std::copy_n(
+          ccl_kvs_addr.begin(), ccl::kvs::address_max_size, main_addr.begin());
+      kvs = ccl::create_kvs(main_addr);
+    }
+    return kvs;
+  }
 };
+
+namespace {
+int getXCCLEnvVar(std::string envVarName) {
+  char* stringValue = std::getenv(envVarName.c_str());
+  if (stringValue != nullptr) {
+    try {
+      int val = std::stoi(stringValue);
+      return val;
+    } catch (std::exception& e) {
+      TORCH_CHECK(
+          false,
+          "Invalid value for environment variable: " + std::string(envVarName));
+    }
+  } else {
+    return -1;
+  }
+}
+
+template <typename T>
+void setXCCLEnvVar(const std::string& envVarName, T val) {
+  if constexpr (std::is_same_v<T, int>) {
+    setenv(envVarName.c_str(), std::to_string(val).c_str(), 1);
+  } else if constexpr (std::is_same_v<T, std::string>) {
+    setenv(envVarName.c_str(), val.c_str(), 1);
+  }
+}
+
+bool with_mpirun() {
+  return (getenv("MPI_LOCALRANKID") || getenv("MPI_LOCALNRANKS") ||
+          getenv("PMI_RANK") || getenv("PMI_SIZE") || getenv("PMIX_RANK"))
+      ? true
+      : false;
+}
+
+} // namespace
 } // namespace c10d
 
 #endif // USE_C10D_XCCL
