@@ -1480,7 +1480,8 @@ class CppWrapperCpu(WrapperCodeGen):
             'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>());'
         )
 
-    def write_triton_header_once(self):
+    @cache_on_self
+    def write_triton_header_once(self) -> None:
         pass
 
     def generate_start_graph(self):
@@ -1683,11 +1684,11 @@ class CppWrapperCpu(WrapperCodeGen):
         stride = self.codegen_shape_tuple(stride_list)
         offset = self.codegen_sizevar(offset)
         call_strs = []
-        if config.abi_compatible:
-            final_tmp_name = None
-            final_tmp_name_is_RAIIAtenTensorHandle = False
+        final_tmp_name = None
+        final_tmp_name_is_RAIIAtenTensorHandle = False
 
-            def create_reinterpret_call():
+        def create_reinterpret_call() -> Tuple[str, str]:
+            if config.abi_compatible:
                 tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
                 args = [
                     f"{data.get_name()}",
@@ -1714,8 +1715,12 @@ class CppWrapperCpu(WrapperCodeGen):
                     f"auto {tmp_name} = reinterpret_tensor_wrapper({', '.join(args)});"
                 )
                 return tmp_name, call_str
+            else:
+                args = [data.get_name(), size, stride, offset]
+                return f"reinterpret_tensor({', '.join(args)})", ""
 
-            def create_dtypeview_call(reinterpret_call):
+        def create_dtypeview_call(reinterpret_call: str) -> Tuple[str, List[str]]:
+            if config.abi_compatible:
                 tmp_AtenTensorHandle = (
                     f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
                 )
@@ -1735,38 +1740,40 @@ class CppWrapperCpu(WrapperCodeGen):
                     f"RAIIAtenTensorHandle {tmp_RAIIAtenTensorHandle}({tmp_AtenTensorHandle});"
                 )
                 return tmp_RAIIAtenTensorHandle, call_strs
-
-            if (
-                size_list == data.layout.size
-                and stride_list == data.layout.stride
-                and original_offset == data.layout.offset
-            ):
-                # pure dtypeview
-                if dtype is not None and dtype != data.dtype:
-                    tmp_output_name, tmp_call_strs = create_dtypeview_call(
-                        data.get_name()
-                    )
-                    call_strs.extend(tmp_call_strs)
-                    final_tmp_name = tmp_output_name
-                    final_tmp_name_is_RAIIAtenTensorHandle = True
-                else:
-                    return f"{data.get_name()}"
             else:
-                # firstly create reinterpretview
-                final_tmp_name, reinterpret_call = create_reinterpret_call()
-                call_strs.append(reinterpret_call)
+                return f"{reinterpret_call}.view({self.codegen_dtype(dtype)})", []
 
-                if dtype is not None and dtype != data.dtype:
-                    # wrap it with dtypeview
-                    final_tmp_name, tmp_call_strs = create_dtypeview_call(
-                        reinterpret_call
-                    )
-                    call_strs.extend(tmp_call_strs)
-            # Because the memory planning is done in two passes (see the implementation
-            # of self.generate), the writeline behavior is different in the two passes.
-            if writer is None:
-                writer = self
-            writer.writelines(call_strs)
+        if (
+            size_list == data.layout.size
+            and stride_list == data.layout.stride
+            and original_offset == data.layout.offset
+        ):
+            # pure dtypeview
+            if dtype is not None and dtype != data.dtype:
+                tmp_output_name, tmp_call_strs = create_dtypeview_call(data.get_name())
+                call_strs.extend(tmp_call_strs)
+                final_tmp_name = tmp_output_name
+                final_tmp_name_is_RAIIAtenTensorHandle = True
+            else:
+                return f"{data.get_name()}"
+        else:
+            # firstly create reinterpretview
+            final_tmp_name, reinterpret_call = create_reinterpret_call()
+            call_strs.append(reinterpret_call)
+
+            if dtype is not None and dtype != data.dtype:
+                # wrap it with dtypeview
+                final_tmp_name, tmp_call_strs = create_dtypeview_call(reinterpret_call)
+                call_strs.extend(tmp_call_strs)
+
+        if writer is None:
+            writer = self
+
+        # Because the memory planning is done in two passes (see the implementation
+        # of self.generate), the writeline behavior is different in the two passes.
+        writer.writelines(call_strs)
+
+        if config.abi_compatible:
             if (
                 self.can_stack_allocate_buffer(data)
                 and self.is_statically_known_list_of_ints(size_list)
@@ -1809,8 +1816,7 @@ class CppWrapperCpu(WrapperCodeGen):
             else:
                 return final_tmp_name
         else:
-            args = [data.get_name(), size, stride, offset]
-            return f"reinterpret_tensor({', '.join(args)})"
+            return final_tmp_name
 
     def codegen_device_copy(self, src, dst):
         if config.abi_compatible:
@@ -2122,8 +2128,7 @@ class CppWrapperCpu(WrapperCodeGen):
 
         def extract_output_name(out):
             if out is None:
-                # Because out is not a MultiOutput, we assume the kernel returns a single output
-                return [buf_name]
+                return None
             elif isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
                 return out.get_name()
             elif isinstance(out, (list, tuple)):
@@ -2134,9 +2139,13 @@ class CppWrapperCpu(WrapperCodeGen):
         # output_args has the same pytree structure as outputs
         output_args = None
         if config.abi_compatible:
-            output_args = extract_output_name(outputs)
-            if isinstance(output_args, str):
-                output_args = [output_args]
+            if outputs is None:
+                # outputs is not specified, the default is to write to buf_name
+                output_args = [buf_name]
+            else:
+                output_args = extract_output_name(outputs)
+                if isinstance(output_args, str):
+                    output_args = [output_args]
 
         if V.graph.aot_mode and config.abi_compatible:
             assert op_overload is not None
@@ -2347,13 +2356,16 @@ if (py_{buf_name}.get() == NULL) {{
             else:
                 # result is a tuple of tensors
                 for idx, output_arg in enumerate(output_args):
+                    if output_arg is None:
+                        continue
                     lines += f"""
 {output_arg} =
     reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}.get(), {idx}), NULL));"""
 
             declarations_before_scope = [
                 f"RAIIAtenTensorHandle {output_arg};"
-                for idx, output_arg in enumerate(output_args)
+                for output_arg in output_args
+                if output_arg is not None
             ]
             scope_gil_acquire = self.generate_scoped_gil_acquire(
                 declarations_before_scope, lines

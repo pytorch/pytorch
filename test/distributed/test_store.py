@@ -136,7 +136,8 @@ class StoreTestBase:
 
     def _test_append(self, store):
         if not store.has_extended_api():
-            self.skipTest("Store doesn't support extended APIs")
+            # Just return for stores that don't support extended APIs.
+            return
         store.set("foo", "po")
         store.append("foo", "tato")
         store.append("bar", "po")
@@ -149,7 +150,8 @@ class StoreTestBase:
 
     def _test_multi_set(self, store):
         if not store.has_extended_api():
-            self.skipTest("Store doesn't support extended APIs")
+            # Just return for stores that don't support extended APIs.
+            return
         store.multi_set(["foo", "bar"], ["po", "tato"])
         self.assertEqual(b"po", store.get("foo"))
         self.assertEqual(b"tato", store.get("bar"))
@@ -159,7 +161,8 @@ class StoreTestBase:
 
     def _test_multi_get(self, store):
         if not store.has_extended_api():
-            self.skipTest("Store doesn't support extended APIs")
+            # Just return for stores that don't support extended APIs.
+            return
         store.set("foo", "po")
         store.set("bar", "tato")
         v0, v1 = store.multi_get(["foo", "bar"])
