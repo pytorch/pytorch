@@ -1186,15 +1186,14 @@ def fw_compiler_freezing(
     )
 
     static_input_idxs = list(range(num_fixed))
-    wrapper_new_args_unwrapped_indices: List[int] = []
     # constant params will be real tensors, not fake
     tracing_context = torch._guards.TracingContext.try_get()
     if tracing_context is not None:
-        assert tracing_context.params_flat_unwrap_subclasses is not None
-        params_flat_unwrap = tracing_context.params_flat_unwrap_subclasses
-        for i in range(len(params_flat_unwrap)):
+        assert tracing_context.params_flat is not None
+        params_flat = tracing_context.params_flat
+        for i in range(len(params_flat)):
             if i not in preserved_arg_indices:
-                params_flat_unwrap[i] = None
+                params_flat[i] = None
 
         if tracing_context.fw_metadata:
             static_input_idxs += tracing_context.fw_metadata.static_input_indices
