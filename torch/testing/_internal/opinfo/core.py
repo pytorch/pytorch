@@ -1430,7 +1430,7 @@ class OpInfo:
                 else self.backward_dtypesIfCUDA
             )
         elif device_type == "hpu":
-            backward_dtype = self.backward_dtypesIfHpu
+            backward_dtypes = self.backward_dtypesIfHpu
         else:
             backward_dtypes = self.backward_dtypes
 
