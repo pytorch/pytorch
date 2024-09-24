@@ -35,11 +35,13 @@ class BenchmarkConfig:
     max_samples: int
     repeat: int
     metrics: List[Metrics]
+    channels_last: bool
+    mode: str
 
 
 class Phase(Enum):
     FORWARD = "forward"
-    BACKWARD = "backward"
+    # BACKWARD = "backward"
     FULL = "full"
 
 

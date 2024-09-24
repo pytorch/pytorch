@@ -340,3 +340,6 @@ class OperatorInputsLoader:
             else:
                 union.merge(OperatorInputsLoader(path))
         return union
+
+def to_channels_last(ten):
+    return ten if ten.ndim != 4 else ten.to(memory_format=torch.channels_last)

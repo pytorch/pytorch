@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-
+# Yueming: This file is going to be deprecated.
 from contextlib import nullcontext
 
 import click
@@ -87,10 +87,6 @@ def convert_to_jit(gm, gm_args):
     except Exception:
         pass
     return torch.jit.trace(gm, gm_args)
-
-
-def to_channels_last(ten):
-    return ten if ten.ndim != 4 else ten.to(memory_format=torch.channels_last)
 
 
 def microbenchmark(

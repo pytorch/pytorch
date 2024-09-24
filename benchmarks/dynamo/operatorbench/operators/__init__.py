@@ -2,9 +2,18 @@ import importlib
 import os
 import pathlib
 from typing import List
+import types
+import sys
+import torch
 
 from utils.common import BenchmarkConfig
-from operator_inp_utils import OperatorInputsLoader
+from .operator_inp_utils import OperatorInputsLoader, to_channels_last
+from typing import Optional
+from torch.utils._pytree import tree_map_only
+from torch._inductor.utils import gen_gm_and_inputs
+from torch._dynamo.backends.cudagraphs import cudagraphs_inner
+from torch._inductor.compile_fx import compile_fx
+from utils.metrics import Device
 
 class OperatorNotFoundError(RuntimeError):
     pass
@@ -23,10 +32,21 @@ class BaseOperator:
     variant = None
     benchmark_config = None
     full_name = None
-
+    example_inputs_list = []
+    
     def __init__(self, benchmark_config: BenchmarkConfig):
         self.benchmark_config = benchmark_config
-        self.full_name = f"{self.name}.{self.variant}"
+        if self.full_name is None:
+            self.full_name = f"{self.name}.{self.variant}"
+
+    @classmethod
+    def get_inputs(cls, benchmark_config: Optional[BenchmarkConfig] = None):
+        if not cls.example_inputs_list:
+            assert (
+                benchmark_config is not None
+            ), "Benchmark config is required to generate inputs"
+            cls.generate_inputs(benchmark_config)
+        return cls.example_inputs_list
 
     def forward(self):
         raise NotImplementedError("Subclasses must implement this method.")
@@ -41,12 +61,8 @@ class BaseOperator:
         """For the first input size"""
         raise NotImplementedError("Subclasses must implement this method.")
 
-class NativeOperator(BaseOperator):
-    def __init__(self, benchmark_config: BenchmarkConfig):
-        super().__init__(benchmark_config)
-        self.operator_inputs_loader = OperatorInputsLoader(self.full_name)
-
-
+    def prepare_input_and_functions(self, input):
+        return input
 
 def dir_contains_file(dir, file_name) -> bool:
     # Use a generator expression instead of map
@@ -105,7 +121,7 @@ def _load_valid_operators(module_path: str, operator_name: str) -> List:
     return loaded_operators
 
 
-def list_operators():
+def list_operators(benchmark_config: BenchmarkConfig):
     # This list is used to store all the operator classes, not instances
     operators = []
     for operator_path in _list_operator_paths():
@@ -113,4 +129,117 @@ def list_operators():
         module_path = f"operators.{operator_name}"
         loaded_operators = _load_valid_operators(module_path, operator_name)
         operators.extend(loaded_operators)
+    operators.extend(dynamically_create_native_operator_classes(benchmark_config))
+    return operators
+
+
+def dynamically_create_native_operator_classes(benchmark_config: BenchmarkConfig):
+    """
+    To keep same with custom operators, we dynamically create operator classes here.
+    """
+    timm_loader = OperatorInputsLoader.get_timm_loader()
+    huggingface_loader = OperatorInputsLoader.get_huggingface_loader()
+    torchbench_loader = OperatorInputsLoader.get_torchbench_loader()
+    all_ops = list(timm_loader.get_all_ops()) + list(huggingface_loader.get_all_ops()) + \
+        list(torchbench_loader.get_all_ops())
+    # remove duplicate operators
+    all_ops = list(set(all_ops))
+
+    def merge_inputs(cls, benchmark_config: BenchmarkConfig):
+        """
+        We don't differentiate inputs for different suite any more.
+        """
+        op_eval = cls.op_eval
+        inps_gens = []
+        if str(op_eval) in timm_loader.operator_db:
+            inps_gens.append(timm_loader.get_inputs_for_operator(
+                op_eval, dtype=benchmark_config.dtype, device=benchmark_config.device.value))
+        if str(op_eval) in huggingface_loader.operator_db:
+            inps_gens.append(huggingface_loader.get_inputs_for_operator(
+                op_eval, dtype=benchmark_config.dtype, device=benchmark_config.device.value))
+        if str(op_eval) in torchbench_loader.operator_db:
+            inps_gens.append(torchbench_loader.get_inputs_for_operator(
+                op_eval, dtype=benchmark_config.dtype, device=benchmark_config.device.value))
+        input_list = []
+        num_samples = min(benchmark_config.max_samples, 1000000)
+        index = 0
+        while index < num_samples:
+            for inp_gen in inps_gens:
+                try:
+                    inps = next(inp_gen)
+                    input_list.append((inps, None))
+                    index += 1
+                except StopIteration:
+                    break
+        cls.example_inputs_list = input_list
+
+    def prepare_input_and_functions(self, input):
+        input0 = input[0]
+        args, kwargs = input0
+        if self.benchmark_config.channels_last:
+            args, kwargs = tree_map_only(
+                torch.Tensor, to_channels_last, (args, kwargs)
+            )
+
+        gm, gm_args = gen_gm_and_inputs(self.op_eval, args, kwargs)
+        torch.jit._builtins._register_builtin(
+            torch.ops.aten.convolution_backward.default, "aten::convolution_backward"
+        )
+        if self.benchmark_config.device == Device.CUDA:
+            if self.variant == "Eager":
+                cudagraphs_eager = cudagraphs_inner(
+                    gm, gm_args, copy_outputs=False, copy_inputs=False
+                )
+                self.forward = cudagraphs_eager
+                self.full = cudagraphs_eager
+            elif self.variant == "Inductor":
+                compiled_fn = compile_fx(gm, gm_args)
+                cudagraphs_compiled = cudagraphs_inner(
+                    compiled_fn, gm_args, copy_outputs=False, copy_inputs=False
+                )
+                self.forward = cudagraphs_compiled
+                self.full = cudagraphs_compiled
+        else:
+            if self.variant == "Eager":
+                self.forward = gm
+                self.full = gm
+            elif self.variant == "Inductor":
+                compiled_fn = compile_fx(gm, gm_args)
+                self.forward = compiled_fn
+                self.full = compiled_fn
+        return gm_args
+
+    operators = []
+    for op_eval in all_ops:
+        class_name = f"native_{str(op_eval).replace('.', '_')}"
+        # create a new module for each operator
+        op_name_module = types.ModuleType(f'operators.{class_name}')
+        sys.modules[f'operators.{class_name}'] = op_name_module
+        # create a new module for each varient to help with code organization and printing
+        eager_module = types.ModuleType(f'operators.{class_name}.Eager')
+        sys.modules[f'operators.{class_name}.Eager'] = eager_module
+        inductor_module = types.ModuleType(f'operators.{class_name}.Inductor')
+        sys.modules[f'operators.{class_name}.Inductor'] = inductor_module
+        # the new class for operator, and it is the parent class for all its variants
+        new_op_class = type(class_name, (BaseOperator,), {})
+        # need the loaders to generate inputs for the same operator
+        new_op_class.huggingface_loader = huggingface_loader
+        new_op_class.torchbench_loader = torchbench_loader
+        new_op_class.timm_loader = timm_loader
+        new_op_class.op_eval = op_eval
+        new_op_class.name = str(op_eval)
+        new_op_class.generate_inputs = classmethod(merge_inputs)
+        # create eager and inductor variants classes
+        new_eager_op_class = type(f"{class_name}.Eager.Operator", (new_op_class,), {})
+        new_eager_op_class.variant = "Eager"
+        new_eager_op_class.full_name = f"{new_eager_op_class.name}.Eager"
+        new_eager_op_class.prepare_input_and_functions = prepare_input_and_functions
+        eager_module.Operator = new_eager_op_class
+        new_inductor_op_class = type(f"{class_name}.Inductor.Operator", (new_op_class,), {})
+        new_inductor_op_class.variant = "Inductor"
+        new_inductor_op_class.full_name = f"{new_inductor_op_class.name}.Inductor"
+        new_inductor_op_class.prepare_input_and_functions = prepare_input_and_functions
+        inductor_module.Operator = new_inductor_op_class
+        operators.append(new_eager_op_class)
+        operators.append(new_inductor_op_class)
     return operators
