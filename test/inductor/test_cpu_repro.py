@@ -4162,6 +4162,7 @@ class CPUReproTests(TestCase):
                 self.common(fn, (x,))
                 check_metrics_vec_kernel_count(1)
 
+    @requires_vectorization
     def test_consistent_remove_buffers(self):
         def fn(x):
             z = x + x
