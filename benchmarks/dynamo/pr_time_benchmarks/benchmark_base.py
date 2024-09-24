@@ -163,7 +163,6 @@ please update the expected instruction count in the benchmark",
             count = i_counter.end(id)
 
             print(f"instruction count for iteration {i} is {count}")
-            self._verify_instruction_count(count)
             results.append(count)
         return min(results)
 
@@ -189,7 +188,6 @@ please update the expected instruction count in the benchmark",
                     )
                 print(f"compile time instruction count for iteration {i} is {count}")
                 results.append(count)
-                self._verify_instruction_count(count)
 
             config.record_compile_time_instruction_count = False
             return min(results)
@@ -226,6 +224,8 @@ please update the expected instruction count in the benchmark",
                 name=self.name(),
                 instruction_count=r,
             )
+            self._verify_instruction_count(r)
+
         if self._enable_compile_time_instruction_count:
             r = self._count_compile_time_instructions()
 
@@ -241,4 +241,5 @@ please update the expected instruction count in the benchmark",
                 name=self.name(),
                 instruction_count=r,
             )
+            self._verify_instruction_count(r)
         return self
