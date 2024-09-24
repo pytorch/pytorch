@@ -43,6 +43,9 @@ class IntermediateValueDebuggingLevel(Enum):
     SAVE_ONLY = "1"
     # LEVEL 2: Print all intermediate tensor values by default to the console. No debug saving will be performed.
     PRINT_ONLY = "2"
+    # LEVEL 3: Print all kernel names to the console only. No debug saving/printing for input tensor value info will be performed.
+    # This mode can be helpful in cases when you just want to pinpointing what kernel is running into a CUDA IMA issue, etc.
+    PRINT_KERNEL_NAMES_ONLY = "3"
 
 
 class DebugPrinterManager:
@@ -103,6 +106,16 @@ class DebugPrinterManager:
                 self.kernel_name,
                 before_launch,
                 arg_signatures=self.arg_signatures,
+            )
+        if (
+            self.debug_printer_level
+            == IntermediateValueDebuggingLevel.PRINT_KERNEL_NAMES_ONLY
+        ):
+            # Print all kernel names to the console only
+            self.codegen_intermediate_tensor_value_print(
+                [],
+                self.kernel_name,
+                before_launch,
             )
 
     @functools.lru_cache  # noqa: B019
@@ -191,6 +204,22 @@ class DebugPrinterManager:
         before_launch=True,
         arg_signatures: Optional[List[type]] = None,
     ) -> None:
+        launch_prefix = "before_launch" if before_launch else "after_launch"
+
+        # if the debug printing level is PRINT_KERNEL_NAMES_ONLY
+        # we only print the kernel name to the console
+        if (
+            self.debug_printer_level
+            == IntermediateValueDebuggingLevel.PRINT_KERNEL_NAMES_ONLY
+        ):
+            if V.graph.cpp_wrapper:
+                if config.abi_compatible:
+                    V.graph.wrapper_code.writeline(
+                        f'printf("[ {launch_prefix}: {kernel_name} ]");'
+                    )
+                    V.graph.wrapper_code.writeline('printf("\\n");')
+            return
+
         for i, arg in enumerate(args_to_print):
             if arg_signatures is not None and not isinstance(
                 arg_signatures[i], torch_dtype
@@ -202,12 +231,10 @@ class DebugPrinterManager:
                 # check if filtered kernel name list is provided
                 if (
                     len(self.filtered_kernel_names_to_print) > 0
-                    and kernel_name not in self.filtered_kernel_names_to_print
+                    and kernel_name.lower() not in self.filtered_kernel_names_to_print
                 ):
                     continue
 
-            launch_prefix = "before_launch" if before_launch else "after_launch"
-            if V.graph.cpp_wrapper:
                 if config.abi_compatible:
                     V.graph.wrapper_code.writeline(
                         f'aoti_torch_print_tensor_handle({arg}, "{launch_prefix} - {kernel_name} - {arg}");'
