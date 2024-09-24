@@ -727,10 +727,9 @@ class SkipFunctionVariable(VariableTracker):
                     torch._dynamo.utils.warn_once(msg)
             if self.value.__qualname__ == "allow_in_graph":
                 msg = (
-                    "Graph break due to usage of an arbitrary function with "
-                    "allow_in_graph decorator. Usage of an arbitrary function "
-                    "allowed in the graph doesn't guarantee that the code being "
-                    "traced is represented by the full FX graph."
+                    "Found an allow_in+graph decorator to a function which "
+                    "is created inside the parent function that is getting "
+                    "compiled. This is not supported for now."
                 )
             msg += f"', {self.reason}'" if self.reason else ""
             unimplemented(msg)
