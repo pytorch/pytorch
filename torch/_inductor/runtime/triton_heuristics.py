@@ -69,12 +69,14 @@ if triton is not None:
     except ImportError:
         GPUTarget = None
 else:
+    from types import ModuleType
+
     Config = object
     KernelInterface = object
     OutOfResources = object
     ASTSource = None
     GPUTarget = None
-    triton_helpers = object
+    triton_helpers = ModuleType("triton_helpers")
 
 try:
     autograd_profiler = torch.autograd.profiler
