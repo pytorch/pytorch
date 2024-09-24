@@ -573,6 +573,38 @@ class TestFxGraphCache(TestCase):
 
         self.assertNotEqual(a, b)
 
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @config.patch({"freezing": True})
+    @parametrize("device", (GPU_TYPE, "cpu"))
+    def test_freezing(self, device):
+        class MM(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(8, 8))
+
+            def forward(self, x):
+                return x @ self.param
+
+        counters.clear()
+
+        dtype = torch.float16
+        mod = MM().to(device=device, dtype=dtype)
+        with torch.no_grad():
+            x = torch.rand(8, 8).to(device=device, dtype=dtype)
+            out0 = mod(x)
+            out1 = torch.compile(mod)(x)
+            self.assertEqual(out0, out1)
+
+        mod = MM().to(device=device, dtype=dtype)
+        with torch.no_grad():
+            x = torch.rand(8, 8).to(device=device, dtype=dtype)
+            out0 = mod(x)
+            out1 = torch.compile(mod)(x)
+            self.assertEqual(out0, out1)
+
+        self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
 
 class TestFxGraphCacheHashing(TestCase):
     def test_tensor_constants(self):
