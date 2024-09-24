@@ -4259,8 +4259,13 @@ class TestSerialization(TestCase, SerializationMixin):
         if not materialize_fake:
             ft = converter.from_real_tensor(mode, torch.randn(2, device=t_device))
             with self.assertRaisesRegex(AttributeError, "Can't pickle local object 'WeakValueDictionary.__init__.<locals>.remove'"):
-                with skip_data(), BytesIOContext() as f:
-                    torch.save(ft, f)
+                try:
+                    with skip_data(), BytesIOContext() as f:
+                        torch.save(ft, f)
+                except Exception as e:
+                    import traceback
+                    traceback.print_exception(e)
+                    raise
 
     @parametrize("materialize_fake", (True, False))
     def test_skip_data_serialization_preserves_views(self, materialize_fake):
