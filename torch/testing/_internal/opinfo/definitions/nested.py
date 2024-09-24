@@ -249,6 +249,64 @@ def sample_inputs_masked_select(
         )
 
 
+def sample_inputs_nn_functional_embedding_bag(
+    op_info, device, dtype, requires_grad, **kwargs
+):
+    for generate_per_sample_weight in (True, False):
+        for mode in ("sum", "mean", "max"):
+            # per_sample_weights is only supported for mode='sum'
+            if mode != "sum" and generate_per_sample_weight:
+                continue
+
+            NUM_EMBEDDINGS = 10
+            EMBEDDING_DIM = 32
+            weight = torch.randn(
+                NUM_EMBEDDINGS, EMBEDDING_DIM, dtype=dtype, device=device
+            )
+
+            njt = torch.nested.nested_tensor(
+                [
+                    torch.randint(0, NUM_EMBEDDINGS, size=(2,)),
+                    torch.randint(0, NUM_EMBEDDINGS, size=(3,)),
+                    torch.randint(0, NUM_EMBEDDINGS, size=(4,)),
+                ],
+                layout=torch.jagged,
+                dtype=torch.int64,
+                device=device,
+            )
+
+            per_sample_weights = None
+            if generate_per_sample_weight:
+                per_sample_weights = torch.randn_like(njt, dtype=dtype)
+
+            # NB: the OpInfo entry for embedding_bag expects weight first so the gradients
+            # can be checked
+            yield SampleInput(
+                weight,
+                args=(njt,),
+                kwargs={
+                    "mode": mode,
+                    "per_sample_weights": per_sample_weights,
+                },
+            )
+
+
+def reference_nn_functional_embedding_bag(op, sample):
+    # run reference on a single bag at a time
+    new_kwargs = dict(sample.kwargs)
+    new_kwargs.update(
+        {"offsets": torch.tensor([0], dtype=torch.int64, device=sample.input.device)}
+    )
+    # flip input / weight back to what unbind_reference() expects
+    sample = SampleInput(sample.args[0], args=(sample.input,), kwargs=new_kwargs)
+    old_op = op.op
+    op.op = torch.nn.functional.embedding_bag
+    output = unbind_reference(op, sample, wrap_output_as_njt=False)
+    op.op = old_op
+    # concat bag outputs to get final output
+    return torch.cat(output, dim=0)
+
+
 def sample_inputs_nn_functional_rms_norm(
     op_info, device, dtype, requires_grad, **kwargs
 ):
@@ -289,11 +347,16 @@ sample_inputs_nn_functional_threshold = partial(
 njt_sample_inputs = {
     "clone": sample_inputs_clone,
     **{f"mvlgamma.mvlgamma_p_{p}": sample_inputs_mvl_gamma(p=1) for p in (1, 3, 5)},
+    "nn.functional.embedding_bag": sample_inputs_nn_functional_embedding_bag,
     "nn.functional.rms_norm": sample_inputs_nn_functional_rms_norm,
     "nn.functional.threshold": sample_inputs_nn_functional_threshold,
     **{f"polygamma.polygamma_n_{n}": sample_inputs_polygamma_n(n=n) for n in range(5)},
     "special.polygamma.special_polygamma_n_0": sample_inputs_special_polygamma_n(n=0),
     "masked_select": sample_inputs_masked_select,
+}
+
+njt_references = {
+    "nn.functional.embedding_bag": reference_nn_functional_embedding_bag,
 }
 
 
@@ -304,8 +367,7 @@ def translate_opinfo(op):
 
     if op.full_name in njt_sample_inputs:
         new_op.sample_inputs_func = njt_sample_inputs[op.full_name]
-        # TODO: make the reference customizeable
-        new_op.ref = unbind_reference
+        new_op.ref = njt_references.get(op.full_name, unbind_reference)
     elif isinstance(op, UnaryUfuncInfo):
         new_op.sample_inputs_func = partial(
             sample_inputs_elementwise_njt_unary, op_kwargs=None
