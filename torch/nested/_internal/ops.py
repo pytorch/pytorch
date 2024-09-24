@@ -1424,7 +1424,7 @@ def native_layer_norm_backward_default(func, *args, **kwargs):
     return (NestedTensor(d_input, **extract_kwargs(inp)), d_gamma, d_beta)
 
 
-@register_jagged_func(torch.ops.aten.select.int, "self: jt, dim: any, index: any")
+@register_jagged_func(torch.ops.aten.select.int, "self: jt_all, dim: any, index: any")
 def select_int(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -1439,6 +1439,11 @@ def select_int(func, *args, **kwargs):
     # TODO: make this more efficient
     if new_kwargs["dim"] == 0:
         return inp.unbind()[new_kwargs["index"]]
+
+    if inp._lengths is not None:
+        raise ValueError(
+            "select(): not yet supported on dim != 0 for non-contiguous nested tensor with holes"
+        )
 
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
