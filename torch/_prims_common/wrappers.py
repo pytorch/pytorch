@@ -54,12 +54,12 @@ def _maybe_convert_to_dtype(a, dtype):
         return utils.dtype_to_type_ctor(dtype)(a)  # type: ignore[arg-type]
     if isinstance(a, Sequence):
         return tuple(_maybe_convert_to_dtype(x, dtype) for x in a)
-    # Passthrough None because some functions wrapped with type promotion
-    # wrapper might have optional args
     if a is None:
         return None
 
-    raise ValueError(f"Received type {type(a)} that is neither a tensor or a number!")
+    # Improved error message for unsupported types
+    raise ValueError(f"Received unsupported type {type(a)} in `_maybe_convert_to_dtype`. Expected Tensor, Number, or Sequence of these types.")
+
 
 
 def _maybe_convert_to_type(a: NumberType, typ: type) -> NumberType:
