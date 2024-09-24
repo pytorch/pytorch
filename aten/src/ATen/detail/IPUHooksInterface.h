@@ -10,7 +10,7 @@
 namespace at {
 
 struct TORCH_API IPUHooksInterface: AcceleratorHooksInterface {
-  virtual ~IPUHooksInterface() = default;
+  ~IPUHooksInterface() override = default;
 
   void init() const override {
     TORCH_CHECK(false, "Cannot initialize IPU without ATen_ipu library.");
