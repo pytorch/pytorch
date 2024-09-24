@@ -516,7 +516,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                         # CUDA requires special handling
                         if is_cuda_dispatch_key(self.backend_index.dispatch_key):
                             device_guard = (
-                                f"globalContext().lazyInitCUDA();\n{device_guard}"
+                                f"globalContext().lazyInit(c10::DeviceType::CUDA);\n{device_guard}"
                             )
                     else:
                         # kernel is operating on existing tensors

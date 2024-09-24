@@ -31,7 +31,7 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
 
   ~MTIAHooksInterface() override = default;
 
-  virtual void initMTIA() const {
+  void init() const override {
     // Avoid logging here, since MTIA needs init devices first then it will know
     // how many devices are available. Make it as no-op if mtia extension is not
     // dynamically loaded.
