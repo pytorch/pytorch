@@ -55,7 +55,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
     _DEFAULT_ALG_ID: int = 0
     _DTYPE_SHAPE_CONSTRAINTS: Dict[torch.dtype, _SEMI_STRUCTURED_SPARSE_CONFIG]
-    _FORCE_CUTLASS: bool = True
+    _FORCE_CUTLASS: bool = False
     _FUSE_TRANSPOSE: bool = False
     _PROTOTYPE_WARNING_SHOWN: bool = False
 
@@ -260,8 +260,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         # check dtype
         if original_tensor.dtype not in cls._DTYPE_SHAPE_CONSTRAINTS:
             raise RuntimeError(
-                f"Error original_tensor.dtype {original_tensor.dtype} is not a supported dtype! "
-                "dtype must be one of: {cls._DTYPE_SHAPE_CONSTRAINTS}"
+                f"Error original_tensor.dtype {original_tensor.dtype} is not a supported dtype for {cls}!"
             )
 
         # check shape
