@@ -7441,6 +7441,9 @@ BACKWARD_FAILURES = {
     "clamp_min",
     "copysign",
     "float_power",
+    # fmax() backward formula requires broadcasting with bool dtype and
+    # _padded_dense_to_jagged_forward doesn't support bool yet
+    "fmax",
     "max.binary",
     "maximum",
     "min.binary",
@@ -7465,9 +7468,6 @@ COMPILE_FORWARD_FAILURES = {
     # clone() on non-contiguous with holes NJTs currently use unbind(), leading to
     # data-dependent error in torch.compile
     "clone",
-    # torch._dynamo.exc.Unsupported: data dependent operator: aten._local_scalar_dense.default
-    # for inputs where min / max seqlen are not cached
-    "sum",
 }
 
 COMPARE_TENSOR_COMPONENT_EQUALITY = {
