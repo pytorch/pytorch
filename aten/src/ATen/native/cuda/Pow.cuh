@@ -2,7 +2,7 @@
 #include <ATen/native/Pow.h>
 #include <c10/core/Scalar.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -55,4 +55,4 @@ static inline __host__ __device__ c10::complex<T> pow_(c10::complex<T> base, c10
 }
 
 } // namespace
-}} // namespace at::native
+} // namespace at::native
