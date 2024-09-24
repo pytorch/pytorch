@@ -4506,7 +4506,7 @@ class CppScheduling(BaseScheduling):
         ):
             if not epilogue_nodes:
                 return False
-            
+
             assert template_buffer.get_name() in outputs_by_name
             users = outputs_by_name[template_buffer.get_name()].users
             return not all(
