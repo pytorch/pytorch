@@ -128,17 +128,16 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
   float beta = 0.0;
   cudaDataType input_type;
   cudaDataType output_type;
+  cudaDataType C_type;
   cusparseComputeType compute_type;
   auto compression_factor = 9;
-
-  auto C_type = CUDA_R_16F;
-
 
   switch(compressed_A.scalar_type())
   {
     case at::ScalarType::Char:
         input_type = CUDA_R_8I;
         output_type = CUDA_R_8I;
+        C_type = CUDA_R_8I;
         compute_type = CUSPARSE_COMPUTE_32I;
         compression_factor = 10;
         break;
@@ -148,16 +147,19 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
     case at::ScalarType::Half:
         input_type = CUDA_R_16F;
         output_type = CUDA_R_16F;
+        C_type = CUDA_R_16F;
         compute_type = CUSPARSE_COMPUTE_32F;
         break;
     case at::ScalarType::BFloat16:
         input_type = CUDA_R_16BF;
         output_type = CUDA_R_16BF;
+        C_type = CUDA_R_16BF;
         compute_type = CUSPARSE_COMPUTE_32F;
         break;
     case at::ScalarType::Float:
         input_type = CUDA_R_32F;
         output_type = CUDA_R_32F;
+        C_type = CUDA_R_32F;
         compute_type = CUSPARSE_COMPUTE_32F;
         break;
 // if cuSPARSELt >= 6.2.3, we can add Float8 support
@@ -165,6 +167,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
     case at::ScalarType::Float8_e4m3fn:
         input_type = CUDA_R_8F_E4M3;
         output_type = CUDA_R_8F_E4M3;
+        C_type = CUDA_R_16F;
         compute_type = CUSPARSE_COMPUTE_32F;
         break;
 #endif
@@ -173,16 +176,19 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
     case at::ScalarType::Half:
         input_type = CUDA_R_16F;
         output_type = CUDA_R_16F;
+        C_type = CUDA_R_16F;
         compute_type = CUSPARSE_COMPUTE_16F;
         break;
     case at::ScalarType::BFloat16:
         input_type = CUDA_R_16BF;
         output_type = CUDA_R_16BF;
+        C_type = CUDA_R_16BF;
         compute_type = CUSPARSE_COMPUTE_16F;
         break;
     case at::ScalarType::Float:
         input_type = CUDA_R_32F;
         output_type = CUDA_R_32F;
+        C_type = CUDA_R_32F;
         compute_type = CUSPARSE_COMPUTE_TF32;
         break;
 #endif
@@ -200,12 +206,15 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         switch (out_dtype)
         {
             case at::ScalarType::Half:
+                C_type = CUDA_R_16F;
                 output_type = CUDA_R_16F;
                 break;
             case at::ScalarType::BFloat16:
+                C_type = CUDA_R_16BF;
                 output_type = CUDA_R_16BF;
                 break;
             case at::ScalarType::Int:
+                C_type = CUDA_R_32I;
                 output_type = CUDA_R_32I;
                 break;
             default:

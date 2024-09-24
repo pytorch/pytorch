@@ -411,7 +411,7 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
             sparse_tensor_cutlass,
             meta_tensor_cutlass,
         ) = sparse_semi_structured_from_dense_cutlass(original_tensor)
-        cls(
+        return cls(
             original_tensor.shape,
             packed=sparse_tensor_cutlass,
             meta=meta_tensor_cutlass,
