@@ -111,7 +111,7 @@ ONNXProgram(
 
     @property
     def model_proto(self) -> onnx.ModelProto:
-        """Compatibility property for `torch.onnx.ONNXProgram.model_proto`."""
+        """Return the ONNX ``ModelProto`` object."""
         return ir.serde.serialize_model(self.model)
 
     def save(
@@ -152,7 +152,7 @@ ONNXProgram(
             external_data: Whether to save the weights as external data in a separate file.
 
         Raises:
-            TypeError: If `external_data` is `True` and `destination` is not a file path.
+            TypeError: If ``external_data`` is ``True`` and ``destination`` is not a file path.
         """
         original_initializers = copy.copy(self.model.graph.initializers)
         original_inputs = copy.copy(self.model.graph.inputs)
