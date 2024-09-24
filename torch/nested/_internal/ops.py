@@ -1645,12 +1645,19 @@ def to_padded_tensor_default(func, *args, **kwargs):
     elif values.dim() == 1:
         values = values.unsqueeze(-1)
 
+    # NB: The CUDA kernel for jagged -> padded dense conversion does not support
+    # integer / bool types; work around this by casting to half.
+    is_bool = values.dtype is torch.bool
+    if is_bool and values.is_cuda:
+        values = values.to(torch.half)
     padded_out = torch.ops.aten._jagged_to_padded_dense_forward(
         values,
         [inp._offsets],
         [max_seq_len],
         new_kwargs["padding"],
     )
+    if is_bool and padded_out.is_cuda:
+        padded_out = padded_out.to(torch.bool)
 
     # shape gymnastics part 2
     if len(values_shape) > 2:
@@ -1684,9 +1691,16 @@ def _nested_from_padded_tensor_default(func, *args, **kwargs):
     elif padded.dim() < 3:
         padded = padded.unsqueeze(-1)
 
+    # NB: The CUDA kernel for padded dense -> jagged conversion does not support
+    # integer / bool types; work around this by casting to half.
+    is_bool = padded.dtype is torch.bool
+    if is_bool and padded.is_cuda:
+        padded = padded.to(torch.half)
     values = torch.ops.aten._padded_dense_to_jagged_forward(
         padded, [offsets], new_kwargs["sum_S"]
     )
+    if is_bool and values.is_cuda:
+        values = values.to(torch.bool)
 
     # shape gymnastics part 2
     if len(padded_shape) > 3:

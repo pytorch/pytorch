@@ -7181,10 +7181,14 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         check(nt)
 
-    @dtypes(torch.float32, torch.double, torch.half)
+    @dtypes(torch.float32, torch.double, torch.half, torch.bool)
     @parametrize("nt_dim", [2, 3, 4])
     @parametrize("requires_grad", [False, True])
     def test_to_padded_tensor(self, device, dtype, nt_dim, requires_grad):
+        if dtype is torch.bool and requires_grad:
+            # grads not supported for bool
+            return
+
         if nt_dim == 2:
             post_seq_len_shape = ()
         elif nt_dim == 3:
@@ -7194,7 +7198,9 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         nt = torch.nested.nested_tensor(
             [
-                torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                torch.randint(2, (n, *post_seq_len_shape), device=device, dtype=dtype)
+                if dtype is torch.bool
+                else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
                 for n in range(2, 9)
             ],
             layout=torch.jagged,
@@ -7215,7 +7221,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         nt2 = nested_from_padded(padded, nt.offsets())
         self.assertEqual(nt, nt2)
 
-        if requires_grad:
+        if requires_grad and dtype is not torch.bool:
             # ensure gradients flow through conversions
             nt2.backward(torch.ones_like(nt2))
             self.assertEqual(nt.grad, torch.ones_like(nt))
@@ -7230,6 +7236,10 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @parametrize("nt_dim", [2, 3, 4])
     @parametrize("requires_grad", [False, True])
     def test_to_padded_tensor_compile(self, device, dtype, nt_dim, requires_grad):
+        if dtype is torch.bool and requires_grad:
+            # grads not supported for bool
+            return
+
         if nt_dim == 2:
             post_seq_len_shape = ()
         elif nt_dim == 3:
@@ -7239,7 +7249,9 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         nt = torch.nested.nested_tensor(
             [
-                torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                torch.randint(2, (n, *post_seq_len_shape), device=device, dtype=dtype)
+                if dtype is torch.bool
+                else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
                 for n in range(2, 9)
             ],
             layout=torch.jagged,
@@ -7441,9 +7453,6 @@ BACKWARD_FAILURES = {
     "clamp_min",
     "copysign",
     "float_power",
-    # fmax() backward formula requires broadcasting with bool dtype and
-    # _padded_dense_to_jagged_forward doesn't support bool yet
-    "fmax",
     "max.binary",
     "maximum",
     "min.binary",
