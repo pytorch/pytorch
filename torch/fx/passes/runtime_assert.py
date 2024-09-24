@@ -105,7 +105,10 @@ def insert_deferred_runtime_asserts(
         resolve_unbacked_bindings,
     )
     from torch.utils._sympy.numbers import int_oo
-    from torch.utils._sympy.reference import PythonReferenceAnalysis, OptimizedPythonReferenceAnalysis
+    from torch.utils._sympy.reference import (
+        OptimizedPythonReferenceAnalysis,
+        PythonReferenceAnalysis,
+    )
     from torch.utils._sympy.value_ranges import ValueRanges
 
     # TODO: Request simplification on runtime asserts before emitting them
