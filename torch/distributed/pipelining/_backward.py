@@ -284,13 +284,12 @@ def stage_backward(
         # stage_output may be a composite datatype like dict. Extract all individual
         # tensor values here
         stage_output_tensors: List[torch.Tensor] = []
-        output_grad_tensors: List[torch.Tensor] = []
+        output_grad_tensors: List[Optional[torch.Tensor]] = []
 
         def extract_tensors_with_grads(
             output_val,
             grad_val,
-            stage_output_tensors,
-            output_grad_tensors,
+            # Don't delete me- see [Note: ref cycle]
             extract_tensors_with_grads,
         ):
             if isinstance(output_val, torch.Tensor):
@@ -312,8 +311,6 @@ def stage_backward(
                     extract_tensors_with_grads(
                         ov,
                         gv,
-                        stage_output_tensors,
-                        output_grad_tensors,
                         extract_tensors_with_grads,
                     )
             elif isinstance(output_val, dict):
@@ -323,30 +320,22 @@ def stage_backward(
                 assert set(output_val.keys()) == set(grad_val.keys())
                 for k in output_val.keys():
                     extract_tensors_with_grads(
-                        output_val[k],
-                        grad_val[k],
-                        stage_output_tensors,
-                        output_grad_tensors,
-                        extract_tensors_with_grads,
+                        output_val[k], grad_val[k], extract_tensors_with_grads
                     )
             else:
                 # Output is a non-tensor type; just ignore it
                 pass
 
-        # Note: break a ref cycle that would keep tensors alive until GC runs
+        # Note: ref cycle
+        # break a ref cycle that would keep tensors alive until GC runs
         # 1. extract_tensors_with_grads refers to a cell that holds refs to any vars defined in stage_backward
         #    and used in extract_tensors_with_grads
         # 2. extract_tensors_with_grads referred to both stage_output_tensors, output_grad_tensors,
         #    and to itself (extract_tensors_with_grads) since it makes a recursive call
         # 3. stage_output_tensors was kept alive by the above refcycle, and it holds activation tensors, which is bad
-        # -> explicitly pass in those lists, so the lists don't show up in the cell.
-        # -> also pass in the ref to the fn, so there is no gc cycle anymore
+        # fix -> explictly pass in the ref to the fn, so there is no gc cycle anymore
         extract_tensors_with_grads(
-            stage_output,
-            output_grads,
-            stage_output_tensors,
-            output_grad_tensors,
-            extract_tensors_with_grads,
+            stage_output, output_grads, extract_tensors_with_grads
         )
 
         torch.autograd.backward(
