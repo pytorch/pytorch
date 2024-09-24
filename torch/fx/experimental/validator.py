@@ -165,6 +165,9 @@ try:
         def to_int(x: z3.ArithRef) -> z3.ArithRef:
             return x if x.is_int() else z3.ToInt(x)
 
+        def sym_add(self, *args: z3.ArithRef) -> z3.ArithRef:
+            return sum(args)
+
         # Implements Python division semantics.
         def div(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
             self.validator.add_assertion(denominator != 0)  # type: ignore[arg-type]
@@ -293,6 +296,7 @@ try:
             torch.sym_float: lift(ops.to_real),
             torch.sym_max: lift(ops.max),
             torch.sym_min: lift(ops.min),
+            torch.sym_add: lift(ops.sym_add),
             torch.sym_ite: lift(lambda b, t, f: t if b else f),
             torch._sym_sqrt: lift(ops.sqrt),  # type: ignore[attr-defined]
             # Not lifted because we only use this function as a
