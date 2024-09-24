@@ -729,7 +729,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 file_check.run(bwd_code)
 
     @skipIfRocm
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_inductor_fullgraph_False(self):
         _, triton_codes = run_and_get_code(
             lambda: self._test_traceable_fsdp(
@@ -943,7 +943,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 file_check.run(bwd_code)
 
     @skipIfRocm
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_inductor_fullgraph_False(self):
