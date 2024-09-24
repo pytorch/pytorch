@@ -146,18 +146,34 @@ class TestTritonHeuristics(TestCase):
             autotuner = CachingAutotuner(**args)
 
     def test_autotune_hints_to_configs(self):
-        device_props = (DeviceProperties.create(torch.device("cuda")),)
-        device_props.warp_size = 8
+        device_props = DeviceProperties.create(torch.device("cuda"))
+        device_props = device_props._replace(warp_size=8)
 
         hints = {AutotuneHint.ONE_ELEMENT_PER_THREAD}
         size_hints = (1024,)
         block_size = 256
 
-        cfgs = autotune_hints_to_configs(hints, size_hints, block_size, device_props)
-        self.assertTrue(
-            any(cfg.num_elements_per_warp == 8 for cfg in cfgs),
-            "Expect at least one config to have 8 elements per warp",
-        )
+        seen_num_elements_per_warp = set()
+
+        def mock_triton_config(
+            size_hints,
+            x,
+            y=None,
+            z=None,
+            num_stages=None,
+            num_elements_per_warp=None,
+            min_elem_per_thread=None,
+        ):
+            seen_num_elements_per_warp.add(num_elements_per_warp)
+            return None
+
+        with unittest.mock.patch(
+            "torch._inductor.runtime.triton_heuristics.triton_config",
+            mock_triton_config,
+        ):
+            _ = autotune_hints_to_configs(hints, size_hints, block_size, device_props)
+
+        self.assertTrue(8 in seen_num_elements_per_warp)
 
 
 if __name__ == "__main__":

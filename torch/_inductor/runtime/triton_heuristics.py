@@ -103,10 +103,7 @@ def autotune_hints_to_configs(
     configs = []
 
     for hint in hints:
-        if (
-            hint == AutotuneHint.ONE_ELEMENT_PER_THREAD
-            or hint == AutotuneHint.ELEMENTS_PER_WARP_32
-        ):
+        if hint == AutotuneHint.ONE_ELEMENT_PER_THREAD:
             if len(size_hints) == 1:
                 xyz_options = ((block_size // 4, None, None),)
             elif len(size_hints) == 2:
