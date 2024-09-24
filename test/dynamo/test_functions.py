@@ -950,33 +950,28 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             if x.is_inference():
                 return x + 1
             else:
-                return x + 2
+                return x - 1
+
+        with torch.inference_mode():
+            x_inference = torch.randn(2, 2)
+
+        eager_result = fn(x_inference)
 
         cnts = torch._dynamo.testing.CompileCounter()
         fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
 
         x = torch.randn(2, 2)
-        dynamo_result = fn(x)
+        fn(x)
 
-        with torch.no_grad():
-            x = torch.randn(2, 2)
-            fn(x)
+        self.assertEqual(eager_result, fn(x_inference))
 
-        self.assertEqual(cnts.frame_count, 2)  # Recompile! requires_grad changed
+        self.assertEqual(cnts.frame_count, 2)  # Recompile! inference_mode changed
 
-        with torch.inference_mode():
-            x = torch.randn(2, 2)
-            fn(x)
+        fn(x_inference)
+        fn(x_inference)
+        fn(x_inference)
 
-        self.assertEqual(cnts.frame_count, 3)  # Recompile! inference_mode changed
-
-        with torch.inference_mode():
-            x = torch.randn(2, 2)
-            fn(x)
-            fn(x)
-            fn(x)
-
-        self.assertEqual(cnts.frame_count, 3)  # no more recompiles
+        self.assertEqual(cnts.frame_count, 2)  # no more recompiles
 
     @make_test
     def test_get_privateuse1_name(x):
