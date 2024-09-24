@@ -2,9 +2,17 @@ import importlib
 import os
 import pathlib
 from typing import List
+import types
+import sys
+import torch
 
 from utils.common import BenchmarkConfig
-
+from typing import Optional
+from torch.utils._pytree import tree_map_only
+from torch._inductor.utils import gen_gm_and_inputs
+from torch._dynamo.backends.cudagraphs import cudagraphs_inner
+from torch._inductor.compile_fx import compile_fx
+from utils.metrics import Device
 
 class OperatorNotFoundError(RuntimeError):
     pass
@@ -23,10 +31,21 @@ class BaseOperator:
     variant = None
     benchmark_config = None
     full_name = None
-
+    example_inputs_list = []
+    
     def __init__(self, benchmark_config: BenchmarkConfig):
         self.benchmark_config = benchmark_config
-        self.full_name = f"{self.name}.{self.variant}"
+        if self.full_name is None:
+            self.full_name = f"{self.name}.{self.variant}"
+
+    @classmethod
+    def get_inputs(cls, benchmark_config: Optional[BenchmarkConfig] = None):
+        if not cls.example_inputs_list:
+            assert (
+                benchmark_config is not None
+            ), "Benchmark config is required to generate inputs"
+            cls.generate_inputs(benchmark_config)
+        return cls.example_inputs_list
 
     def forward(self):
         raise NotImplementedError("Subclasses must implement this method.")

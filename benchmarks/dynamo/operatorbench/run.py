@@ -41,12 +41,6 @@ def benchmark_operator(operator: BaseOperator, benchmark_config: BenchmarkConfig
     repeat = benchmark_config.repeat
     device = benchmark_config.device
     metrics = benchmark_config.metrics
-    if phase == Phase.FORWARD:
-        phase_fn = operator.forward
-    elif phase == Phase.BACKWARD:
-        phase_fn = operator.backward
-    else:
-        phase_fn = operator.full
     num_samples = min(max_samples, len(operator.get_inputs(benchmark_config)))
 
     metric_result = MetricResult()
@@ -69,25 +63,23 @@ def benchmark_operator(operator: BaseOperator, benchmark_config: BenchmarkConfig
     )
     with profiler_context:
         for i in range(num_samples):
-            input_target = operator.get_inputs(benchmark_config)[i]
-            input = input_target[0]
-            target = input_target[1]
-            metric_result.input.append(input_target)
+            input = operator.get_inputs(benchmark_config)[i]
+            if phase == Phase.FORWARD:
+                phase_fn = operator.forward
+            else:
+                phase_fn = operator.full
+            metric_result.input.append(input)
             execution_time = []
             record_sample_context = (
                 torch.profiler.record_function(f"sample_{i}")
                 if enable_profile
                 else nullcontext()
             )
+            
             with record_sample_context:
                 for repeat_idx in range(repeat):
-                    if phase == Phase.BACKWARD:
-                        grad_to_none = [input]
-                    else:
-                        grad_to_none = None
-
                     def fn():
-                        return phase_fn(input, target)
+                        return phase_fn(input)
 
                     record_repeat_context = (
                         torch.profiler.record_function(f"repeat_{repeat_idx}")
@@ -99,7 +91,7 @@ def benchmark_operator(operator: BaseOperator, benchmark_config: BenchmarkConfig
                             execution_time.append(
                                 get_execution_time(
                                     fn,
-                                    grad_to_none=grad_to_none,
+                                    grad_to_none=None,
                                     device=device,
                                 )
                             )
@@ -146,6 +138,27 @@ def run_benchmarks(
 ):
     global enable_profile
     enable_profile = profile
+    # process arguments and generate benchmark config
+    dtype = dtype_mapping.get(dtype, torch.float32)  # Default to float32 if not found
+    metrics = [
+        Metrics[metric.strip().upper()]
+        for metric in metrics.split(",")
+        if metric.strip().upper() in Metrics.__members__
+    ]
+    device = Device[device.upper()]
+    if device != Device.CUDA and Metrics.GPU_PEAK_MEM in metrics:
+        print(f"{Metrics.GPU_PEAK_MEM.value} is only supported on cuda")
+        metrics.remove(Metrics.GPU_PEAK_MEM)
+    phase = Phase[phase.upper()]
+    benchmark_config = BenchmarkConfig(
+        device=device,
+        dtype=dtype,
+        phase=phase,
+        max_samples=max_samples,
+        repeat=repeat,
+        metrics=metrics,
+    )
+
     # This is a list of classes, not instances
     operator_class_list: list[BaseOperator] = operators.list_operators()
     name_to_variant_list = defaultdict(list)
@@ -157,30 +170,13 @@ def run_benchmarks(
     else:
         desired_op_names = name_to_variant_list.keys()
 
-    dtype = dtype_mapping.get(dtype, torch.float32)  # Default to float32 if not found
-    metrics = [
-        Metrics[metric.strip().upper()]
-        for metric in metrics.split(",")
-        if metric.strip().upper() in Metrics.__members__
-    ]
-    device = Device[device.upper()]
-    if device != Device.CUDA and Metrics.GPU_PEAK_MEM in metrics:
-        print(f"{Metrics.GPU_PEAK_MEM.value} is only supported on cuda")
-        metrics.remove(Metrics.GPU_PEAK_MEM)
     skip_variants = skip_variants.split(",")
     skip_variants = [
         variant.lower().strip() for variant in skip_variants if variant.strip()
     ]
-    phase = Phase[phase.upper()]
+
     operator_metric_results = {}
-    benchmark_config = BenchmarkConfig(
-        device=device,
-        dtype=dtype,
-        phase=phase,
-        max_samples=max_samples,
-        repeat=repeat,
-        metrics=metrics,
-    )
+
     operator_instances = create_operator_instances(
         desired_op_names, name_to_variant_list, benchmark_config, skip_variants
     )

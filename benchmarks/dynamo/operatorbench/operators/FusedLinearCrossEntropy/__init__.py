@@ -22,19 +22,11 @@ class FusedLinearCrossEntropyOperator(BaseOperator):
     name = "FusedLinearCrossEntropy"
     # The variant placeholder. No need to set in the base operator class
     variant = None
-    example_inputs_list = []
 
     def __init__(self, benchmark_config: BenchmarkConfig):
         super().__init__(benchmark_config)
 
-    @classmethod
-    def get_inputs(cls, benchmark_config: Optional[BenchmarkConfig] = None):
-        if not cls.example_inputs_list:
-            assert (
-                benchmark_config is not None
-            ), "Benchmark config is required to generate inputs"
-            cls.generate_inputs(benchmark_config)
-        return cls.example_inputs_list
+
 
     @classmethod
     def generate_inputs(cls, benchmark_config: BenchmarkConfig):
@@ -50,22 +42,23 @@ class FusedLinearCrossEntropyOperator(BaseOperator):
             target = torch.randint(
                 V, (BT, 1), dtype=torch.long, device=benchmark_config.device.value
             ).squeeze(1)
+            # This operator needs two inputs
             cls.example_inputs_list.append((_input, target))
 
-    def forward(self, *input):
-        return self.operator(*input)
+    def forward(self, inputs):
+        return self.operator(inputs)
 
-    def backward(self, *input):
-        y = self.forward(*input)
+    def backward(self, inputs):
+        y = self.forward(inputs)
         return lambda: y.backward(retain_graph=True)
 
-    def full(self, *input):
+    def full(self, input):
         def f():
-            y = self.forward(*input)
+            y = self.forward(input)
             y.backward()
 
         return f()
 
     # single run with a specific input
-    def single_run(self, fn, *inputs):
-        fn(*inputs)
+    def single_run(self, fn, inputs):
+        fn(inputs)
