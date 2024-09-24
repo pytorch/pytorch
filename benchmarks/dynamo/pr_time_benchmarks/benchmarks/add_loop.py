@@ -53,15 +53,13 @@ def main():
         (Benchmark("eager"), 2833936140),
         (Benchmark("eager", dynamic=True), 5528276080),
         (Benchmark("inductor"), 24143868403),
-        (Benchmark("inductor", is_gpu=True) ,22167788845),
+        (Benchmark("inductor", is_gpu=True), 22167788845),
         (Benchmark("inductor", is_gpu=True, dynamic=True), 39409457613),
     ]
 
-    
-
-    for (benchmark, excepted_value) in all:
+    for benchmark, excepted_value in all:
         benchmark.enable_compile_time_instruction_count(
-            expected=excepted_value, noise_margin=0.015 # 1.5% for all
+            expected=excepted_value, noise_margin=0.015  # 1.5% for all
         ).collect_all().append_results(result_path)
 
 
