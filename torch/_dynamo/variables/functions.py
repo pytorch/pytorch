@@ -727,7 +727,7 @@ class SkipFunctionVariable(VariableTracker):
                     torch._dynamo.utils.warn_once(msg)
             if self.value.__qualname__ == "allow_in_graph":
                 msg = (
-                    "Found an allow_in+graph decorator to a function which "
+                    "Found an allow_in_graph decorator to a function which "
                     "is created inside the parent function that is getting "
                     "compiled. This is not supported for now."
                 )
