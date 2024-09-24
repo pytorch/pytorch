@@ -308,10 +308,8 @@ class CompiledNodeArgs {
       std::function<variable_list(variable_list)>&& lambda,
       const std::vector<bool>& is_variable_input,
       const std::vector<VariableInfo>& output_metas) {
-    std::cout << "HELLO FROM COLLECT" << std::endl;
     at::IValue* ptr = _compiler.collect(
         *this, fn, std::move(lambda), is_variable_input, output_metas);
-    std::cout << "COLLECTED PTR" << std::endl;
     TORCH_INTERNAL_ASSERT(ptr->isInt(), "WTF");
     _compiler.lifted_ivalue_args.args.emplace_back(ptr);
   }
@@ -337,7 +335,6 @@ class CompiledNodeArgs {
         !nested &&
         (iv.isInt() || iv.isSymInt() || iv.isDouble() || iv.isSymFloat())) {
       // can't lift ivalues nested in collections
-      std::cout << "COLLECTED: " << iv << std::endl;
       _compiler.lifted_ivalue_args.args.emplace_back(&iv);
     } else {
       try {

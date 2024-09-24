@@ -197,7 +197,6 @@ struct CppNode : public Node {
     args.collect(std::string(typeid(T).name()));
 
     // TODO: pass some things by copy
-    std::cout << "COLLECT FROM CPPNODE" << std::endl;
     std::function<variable_list(variable_list)> lambda =
         [&](variable_list&& inputs) { return apply(std::move(inputs)); };
     args.collect(this, std::move(lambda), is_variable_input_, input_info_);
@@ -303,12 +302,6 @@ auto Function<T>::apply(Args&&... args)
   node->is_variable_input_.reserve(num_inputs);
   // TODO Add tracing here
   extract_vars(node->is_variable_input_, input_vars, args...);
-  std::cout << "Function<T>::apply with " << input_vars.size() << " inputs"
-            << std::endl;
-  int i = 0;
-  for (const auto& var : node->is_variable_input_) {
-    std::cout << "is_variable_input[" << i++ << "]: " << var << std::endl;
-  }
 
   bool is_executable =
       GradMode::is_enabled() && any_variable_requires_grad(input_vars);
@@ -380,16 +373,10 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
   auto num_inputs = inputs.size();
   variable_list backward_inputs;
   backward_inputs.reserve(num_inputs);
-  std::cout << "CppNode<T>::apply with " << inputs.size() << " inputs"
-            << std::endl;
   for (const auto i : c10::irange(num_inputs)) {
     if (inputs[i].defined() || !ctx_.materialize_grads_) {
-      std::cout << "inputs[" << i << "] is defined, or not materialize grads"
-                << std::endl;
       backward_inputs.emplace_back(std::move(inputs[i]));
     } else {
-      std::cout << "inputs[" << i << "] is not defined" << std::endl;
-      // need to pass in undefined tensors!
       backward_inputs.emplace_back(output_info_[i].zeros(_device_guard));
     }
   }
@@ -404,11 +391,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
 
   const auto num_forward_inputs =
       static_cast<int64_t>(is_variable_input_.size());
-  std::cout << "CppNode<T>::apply num_forward_inputs: " << num_forward_inputs
-            << std::endl;
   auto num_outputs = static_cast<int64_t>(outputs.size());
-  std::cout << "CppNode<T>::apply with " << num_outputs << " outputs"
-            << std::endl;
   // Returning too many results is ok, but only as long as they're all
   // undefined. Truncate the result vector in that case.
   if (num_outputs > num_forward_inputs) {
@@ -434,8 +417,6 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
   results.reserve(num_outputs);
   for (const auto i : c10::irange(num_outputs)) {
     if (!is_variable_input_[i]) {
-      std::cout << "skipping input " << i << " since it is not a variable"
-                << std::endl;
       if (outputs[i].defined()) {
         std::string msg("function ");
         msg += name() +
@@ -447,12 +428,6 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
       continue;
     }
     results.emplace_back(outputs[i]);
-  }
-  std::cout << "CppNode<T>::apply returning " << results.size()
-            << " final outputs" << std::endl;
-  for (const auto i : c10::irange(num_outputs)) {
-    std::cout << "defined? results[" << i << "]: " << results[i].defined()
-              << std::endl;
   }
   return results;
 }

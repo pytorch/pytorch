@@ -93,12 +93,12 @@ class TestCompiledAutograd(TestCase):
             counters["compiled_autograd"].clear()
             torch.manual_seed(123)
             expected = list(fn())
-            print(f"expected={expected}")
+            # print(f"expected={expected}")
             torch.manual_seed(123)
             with compiled_autograd.enable(compiler_fn):
                 opt_fn = torch.compile(fn) if compile_fn else fn
                 actual = list(opt_fn())
-                print(f"actual={actual}")
+                # print(f"actual={actual}")
             self.assertEqual(expected, actual)
             self.assertEqual(counters["compiled_autograd"]["captures"], captures)
             self.assertEqual(counters["compiled_autograd"]["compiles"], compiles)
@@ -1639,7 +1639,6 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
   static torch::autograd::variable_list backward(
       torch::autograd::AutogradContext *ctx,
       torch::autograd::variable_list grad_output) {
-    std::cout << "executing cppnode backward" << std::endl;
     torch::autograd::variable_list grad_inputs(2);
     grad_inputs[0] = ctx->get_saved_variables()[0] * grad_output[0];
     return grad_inputs;
@@ -1696,7 +1695,6 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
   static torch::autograd::variable_list backward(
       torch::autograd::AutogradContext *ctx,
       torch::autograd::variable_list grad_output) {
-    std::cout << "executing cppnode backward" << std::endl;
     torch::autograd::variable_list grad_inputs(2);
     grad_inputs[0] = ctx->get_saved_variables()[0] * grad_output[0];
     return grad_inputs;

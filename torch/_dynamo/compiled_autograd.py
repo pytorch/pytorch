@@ -77,10 +77,6 @@ class AutogradCompilerInstance:
         self.proxy_mode = ProxyTorchDispatchMode(self.fx_tracer, "symbolic")
         self.hooks_proxy: Optional[Proxy] = None
         self.graph_placeholders = ["inputs", "sizes", "scalars", "hooks"]
-        self.hack = torch.tensor(0)
-
-    def get_hack(self):
-        return self.hack.clone().detach()
 
     def wrap_fake(self, x, source):
         assert isinstance(x, torch.Tensor)
@@ -128,7 +124,6 @@ class AutogradCompilerInstance:
         for idx, val in enumerate(scalars):
             source = self.source("scalars", idx)
             if isinstance(val, int):
-                print(f"begin_capture found int: {val}")
                 scalars[idx] = self.shape_env.create_unspecified_symint_and_symbol(
                     val,
                     source,
@@ -182,7 +177,7 @@ class AutogradCompilerInstance:
             def cpp_node_op_i(
                 inputs: List[torch.Tensor], idx: int
             ) -> List[torch.Tensor]:
-                print(f"CALLING CPP_NODE_OP_I: {idx}")
+                print(f"Calling lifted c++ node at idx={idx}")
                 outs = torch._C._dynamo.compiled_autograd.call_lambda(inputs, idx)
                 device = None
                 for out in outs:
@@ -218,7 +213,7 @@ class AutogradCompilerInstance:
 
             next_op += 1
 
-        # define inputs
+        # torch.empty for all undefined inputs
         proxies = self.fx_tracer.create_proxy(
             kind="call_function",
             target=fill_uninitialized,

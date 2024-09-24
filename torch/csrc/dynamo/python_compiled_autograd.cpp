@@ -407,16 +407,11 @@ static at::IValue* lambda_collect(
       output_info_for_vars.emplace_back(output_info[next_output_idx++]);
     }
   }
-  std::cout << "output_info_for_vars size: " << output_info_for_vars.size()
-            << std::endl;
   auto idx = custom_op_impls->impls.size();
   custom_op_impls->impls.emplace_back(CustomOpImpl{
-      .lambda = std::move(lambda),
-      .idx = std::make_unique<at::IValue>(static_cast<int64_t>(idx)),
-      .output_info = std::move(output_info_for_vars),
-  });
-  std::cout << "custom_op_impls->impls[i].output_info "
-            << custom_op_impls->impls[idx].output_info.size() << std::endl;
+      std::move(lambda),
+      std::make_unique<at::IValue>(static_cast<int64_t>(idx)),
+      std::move(output_info_for_vars)});
 
   std::shared_ptr<Node> node = args.get_node_call()->node;
   auto& lifted_nodes = custom_op_impls->lifted_nodes;
@@ -436,8 +431,6 @@ static at::IValue* lambda_collect(
       args.collect(output_info[i].size);
     }
   }
-  std::cout << "WTF: " << custom_op_impls->impls[idx].idx->tagKind()
-            << std::endl;
   return custom_op_impls->impls[idx].idx.get();
 }
 
@@ -471,9 +464,6 @@ static variable_list lambda_lift(
   THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
   auto& lambda_output_info =
       custom_op_impls->impls[next_lambdas_idx].output_info;
-  std::cout << "lookup index: " << next_lambdas_idx << std::endl;
-  std::cout << "found lambda with output infos: " << lambda_output_info.size()
-            << std::endl;
   THPObjectPtr pyoutputmetas(
       PyTuple_New(static_cast<Py_ssize_t>(lambda_output_info.size())));
   for (auto i : c10::irange(lambda_output_info.size())) {
@@ -518,12 +508,8 @@ static PyObject* call_lambda(PyObject* dummy, PyObject* args) {
   // TODO: clear the list
   // NEED TO KNOW HOW MANY UNDEFINED TENSORS TO CREATE
   variable_list cppinputs = THPVariable_UnpackList(inputs);
-  for (auto& inp : cppinputs) {
-    std::cout << "RUNTIME call_lambda inp=" << inp << std::endl;
-  }
   TORCH_INTERNAL_ASSERT(PyLong_Check(idx));
   size_t cppidx = PyLong_AsSize_t(idx);
-  std::cout << "RUNTIME call_lambda idx=" << cppidx << std::endl;
   auto& impl = custom_op_impls->impls[cppidx];
   variable_list outs = impl.lambda(std::move(cppinputs));
   auto it = custom_op_impls->lifted_nodes.find(cppidx);
@@ -558,8 +544,6 @@ static struct PyModuleDef _module = {
 
 PyObject* wrap_lifted_ivalue_args(
     const std::vector<LiftedIValueArg>& lifted_ivalue_args) {
-  std::cout << "wrap_lifted_ivalue_args size:" << lifted_ivalue_args.size()
-            << std::endl;
   PyObject* pyivalueargs =
       PyList_New(static_cast<Py_ssize_t>(lifted_ivalue_args.size()));
   size_t idx = 0;
@@ -571,7 +555,6 @@ PyObject* wrap_lifted_ivalue_args(
       PyList_SET_ITEM(
           pyivalueargs, idx++, PyFloat_FromDouble(arg.actual_ptr->toDouble()));
     } else {
-      std::cout << "WTF: " << arg.actual_ptr->tagKind() << std::endl;
       TORCH_INTERNAL_ASSERT(false, "Unexpected lifted ivalue type");
     }
   }
@@ -686,7 +669,6 @@ CacheNode* _compiled_autograd_impl(
       CompiledNodeArgs node_args(compiler_call, call);
       node_args.collect(call);
       if (node_args.cond(call.needed)) {
-        std::cout << "compiled_args on " << fn->name() << std::endl;
         fn->compiled_args(node_args);
         node_args.collect(call.node->next_edges());
       }
