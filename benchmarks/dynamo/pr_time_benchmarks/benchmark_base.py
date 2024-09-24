@@ -57,7 +57,11 @@ struct TorchBenchmarkCompileTimeLogEntry {
 
 # This is enabled only for OSS runs, we always run on the same machine, when running locally
 # expected values are different so by default this is not enabled.
+<<<<<<< HEAD
 compare_results_with_expected = os.environ.get("PR_TIME_BENCHMARKS_TEST", "0") == "1"
+=======
+compare_results_with_expected = os.environ.get("PR_TIME_BENCHMARKS_TEST", "1") == "1"
+>>>>>>> 6e74d64ebac (enable failing diffs on regression)
 
 
 class BenchmarkBase(ABC):
@@ -147,7 +151,11 @@ if this is an expected regression, please update the expected instruction count 
         if result < low:
             print(
                 f"**WIN** benchmark {self.name()} failed, \
+<<<<<<< HEAD
 actual instruction count {result} is lower than expected {expected} with noise margin {noise_margin} \
+=======
+actual instruction count {result} is lower than expected {expected} with noise margin {noise_margin}\
+>>>>>>> 6e74d64ebac (enable failing diffs on regression)
 please update the expected instruction count in the benchmark",
             )
             # if the test is by passed
