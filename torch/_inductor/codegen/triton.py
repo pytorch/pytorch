@@ -66,6 +66,7 @@ from .common import (
 )
 from .simd import (
     constant_repr,
+    IterationRanges,
     IterationRangesEntry,
     IterationRangesRoot,
     pexpr,
@@ -128,32 +129,34 @@ def gen_common_triton_imports():
     return imports.getvalue()
 
 
-block_offsets = {
-    symt: sympy.Symbol(f"{prefix_str[symt]}offset", integer=True, nonnegative=True)
-    for symt in [SymT.XBLOCK, SymT.YBLOCK, SymT.RINDEX]
-}
+class TritonSymbols:
+    """
+    Stores sympy.Symbol instances and constants associated with triton codegen.
+    """
 
-block_sizes = {
-    symt: sympy.Symbol(f"{prefix_str[symt].upper()}BLOCK", integer=True, positive=True)
-    for symt in [SymT.XBLOCK, SymT.YBLOCK, SymT.RINDEX]
-}
+    block_offsets = {
+        symt: sympy.Symbol(f"{prefix_str[symt]}offset", integer=True, nonnegative=True)
+        for symt in [SymT.XBLOCK, SymT.YBLOCK, SymT.RINDEX]
+    }
 
+    block_sizes = {
+        symt: sympy.Symbol(
+            f"{prefix_str[symt].upper()}BLOCK", integer=True, positive=True
+        )
+        for symt in [SymT.XBLOCK, SymT.YBLOCK, SymT.RINDEX]
+    }
 
-def get_symt(tree: IterationRangesEntry) -> SymT:
-    prefix_to_symt = {prefix: symt for symt, prefix in prefix_str.items()}
-    return prefix_to_symt[tree.prefix]
+    @classmethod
+    def get_block_size(cls, tree: IterationRanges) -> sympy.Symbol:
+        return cls.block_sizes[tree.symt]
 
+    @classmethod
+    def get_block_offset(cls, tree: IterationRanges) -> sympy.Symbol:
+        return cls.block_offsets[tree.symt]
 
-def get_block_size(tree: IterationRangesEntry) -> sympy.Symbol:
-    return block_sizes[get_symt(tree)]
-
-
-def get_block_offset(tree: IterationRangesEntry) -> sympy.Symbol:
-    return block_offsets[get_symt(tree)]
-
-
-def max_block_size(tree: IterationRangesEntry) -> int:
-    return TRITON_MAX_BLOCK[tree.prefix.upper()]
+    @classmethod
+    def max_block_size(cls, tree: IterationRanges) -> int:
+        return TRITON_MAX_BLOCK[tree.prefix.upper()]
 
 
 @dataclasses.dataclass
@@ -260,7 +263,6 @@ class BlockPtrOptions:
         mask_vars: OrderedSet[str],
     ) -> BlockPtrOptions:
         """Helper to create a  BlockPtrOptions instance"""
-        final_shape = [get_block_size(tree) for tree in range_trees]
 
         sizevars = V.graph.sizevars
 
@@ -286,6 +288,33 @@ class BlockPtrOptions:
             # Handle a pure singletons, e.g. [1, 1]
             singleton_dims[-1] = False
 
+        # Record the post-broadcast shape before broadcasting dims are removed.
+        # The pre-broadcast shape is identical to this, except broadcasting dims are
+        # replaced with 1.
+        broadcast_shape = [
+            dim
+            for dim, is_singleton in zip(params.block_shape, singleton_dims)
+            if not is_singleton
+        ]
+
+        # Combine all removable dims.
+        removable_dims = [any(dims) for dims in zip(singleton_dims, broadcasting_dims)]
+
+        def remove_dims(it):
+            """Removes any broadcasting or singleton dims from a given sequence"""
+            return [
+                item
+                for item, is_removable in zip(it, removable_dims)
+                if not is_removable
+            ]
+
+        # Drop removable dimensions from the input.
+        params = BlockParameters(
+            **{key: remove_dims(val) for key, val in dataclasses.asdict(params).items()}
+        )
+
+        # Compute the final shape, adjusting for special kernel types.
+        final_shape = [TritonSymbols.get_block_size(tree) for tree in range_trees]
         if V.kernel.no_x_dim:
             assert range_trees[0].prefix == "x"
             final_shape.pop(0)
@@ -297,27 +326,6 @@ class BlockPtrOptions:
         ):
             # Need to expand rank by 1 to match rank when self.inside_reduction=True
             final_shape.append(sympy.Integer(1))
-
-        def remove_dims(it):
-            """Removes any broadcasting or singleton dims from a given sequence"""
-            assert len(it) == len(broadcasting_dims)
-            return [
-                item
-                for item, is_broadcasting, is_singleton in zip(
-                    it, broadcasting_dims, singleton_dims
-                )
-                if not (is_broadcasting or is_singleton)
-            ]
-
-        # Drop broadcasting dimensions from the input.
-        broadcast_shape = [
-            dim
-            for dim, is_singleton in zip(params.block_shape, singleton_dims)
-            if not is_singleton
-        ]
-        params = BlockParameters(
-            **{key: remove_dims(val) for key, val in dataclasses.asdict(params).items()}
-        )
 
         return BlockPtrOptions(
             params=params,
@@ -333,7 +341,7 @@ class BlockPtrOptions:
         """
         Replaces instances of roffset with the new expression.
         """
-        roffset = block_offsets[SymT.RINDEX]
+        roffset = TritonSymbols.block_offsets[SymT.RINDEX]
         return sympy_subs(expr, {roffset: replacement})
 
     def format(self, name: str, roffset=True) -> str:
@@ -374,7 +382,7 @@ class BlockPtrOptions:
         # This works in multiple_of checks because block sizes are powers of 2.
         block_to_max: Dict[sympy.Expr, Any] = {
             block_size: TRITON_MAX_BLOCK[prefix_str[symt].upper()]
-            for symt, block_size in block_sizes.items()
+            for symt, block_size in TritonSymbols.block_sizes.items()
         }
 
         return [
@@ -392,7 +400,7 @@ class BlockPtrOptions:
                 )
                 and not (
                     V.kernel.no_x_dim
-                    and self.block_shape[idx] == block_sizes[SymT.XBLOCK]
+                    and self.block_shape[idx] == TritonSymbols.block_sizes[SymT.XBLOCK]
                 )
             )
         ]
@@ -406,7 +414,7 @@ class BlockPtrOptions:
         Since we expect roffset to vary in range(0, rnumel, RBLOCK), the first
         iteration has roffset=0, while the second has roffset=RBLOCK.
         """
-        rblock = block_sizes[SymT.RINDEX]
+        rblock = TritonSymbols.block_sizes[SymT.RINDEX]
         advance = [
             (
                 self.replace_roffset(offset, rblock)
@@ -1467,9 +1475,9 @@ class TritonKernel(SIMDKernel):
 
                 return BlockParameters(
                     shape=[range_tree.numel],
-                    block_shape=[get_block_size(range_tree)],
+                    block_shape=[TritonSymbols.get_block_size(range_tree)],
                     strides=[m[stride]],
-                    offsets=[get_block_offset(range_tree)],
+                    offsets=[TritonSymbols.get_block_offset(range_tree)],
                 )
 
             def match_mod_div_block(
@@ -1580,7 +1588,7 @@ class TritonKernel(SIMDKernel):
                 #     with n and m integers, then either numel is a multiple of XBLOCK, or numel
                 #     is less than XBLOCK. (If numel is less than XBLOCK, we round up to 1 below.)
                 #  2. Numels are multiples of the maximum possible block size.
-                max_block = max_block_size(range_tree)
+                max_block = TritonSymbols.max_block_size(range_tree)
                 if any(
                     not sizevars.statically_known_multiple_of(numel, max_block)
                     and not sizevars.statically_known_power_of_2(numel)
@@ -1596,7 +1604,7 @@ class TritonKernel(SIMDKernel):
                 # Non-leading dimensions are clamped to the size of the iteration range,
                 # while the leading dimension can exceed this to accomodate a larger
                 # block size.
-                linear_block_size = get_block_size(range_tree)
+                linear_block_size = TritonSymbols.get_block_size(range_tree)
                 block_shape: List[sympy.Expr] = [
                     CeilDiv(linear_block_size, slice_numels[0])
                 ] + [
@@ -1606,7 +1614,9 @@ class TritonKernel(SIMDKernel):
 
                 # Compute block offsets from {xyzr}offset and the matched expressions.
                 block_offsets: List[sympy.Expr] = [
-                    sympy_subs(expr, {index_var: get_block_offset(range_tree)})
+                    sympy_subs(
+                        expr, {index_var: TritonSymbols.get_block_offset(range_tree)}
+                    )
                     for expr in block_index_exprs
                 ]
 
