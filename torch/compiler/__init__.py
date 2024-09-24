@@ -250,8 +250,8 @@ def disable(fn=None, recursive=True):
         ``compile`` is is a "marker" that Dynamo should attempt to compile the function
         and its nested calls. It should generally be applied to only the top-level function.
 
-        Recursive ``disable`` and ``enable`` are higher-priority - they set an internal Dynamo flag
-        that controls whether Dynamo should actually trace code.
+        Recursive ``disable`` and ``enable`` are higher-priority - they control a flag
+        that determines whether Dynamo should actually trace code.
 
         In particular, ``disable`` overrides ``compile`` - if you want to re-enable compilation, use ``enable``.
 
