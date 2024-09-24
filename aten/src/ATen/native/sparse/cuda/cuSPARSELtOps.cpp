@@ -163,7 +163,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         compute_type = CUSPARSE_COMPUTE_32F;
         break;
 // if cuSPARSELt >= 6.2.3, we can add Float8 support
-#if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602 
+#if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602
     case at::ScalarType::Float8_e4m3fn:
         input_type = CUDA_R_8F_E4M3;
         output_type = CUDA_R_8F_E4M3;
