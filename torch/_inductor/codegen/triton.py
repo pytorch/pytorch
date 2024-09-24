@@ -2602,6 +2602,11 @@ class TritonKernel(SIMDKernel):
 
         if name is None:
             code.splice(gen_common_triton_imports())
+            device_type = V.graph.scheduler.get_current_device_or_throw().type
+            if device_type == "cpu":
+                code.splice("triton_helpers.set_driver_to_cpu()")
+            else:
+                code.splice("triton_helpers.set_driver_to_gpu()")
 
             if config.benchmark_kernel:
                 code.splice(self.imports_for_benchmark_kernel())
@@ -2834,7 +2839,7 @@ class TritonKernel(SIMDKernel):
             call_args,
             grid,
             current_device.index,
-            gpu=True,
+            gpu=current_device.type != "cpu",
             triton=True,
             arg_types=arg_types,
             grid_fn=self._get_grid_fn(),
