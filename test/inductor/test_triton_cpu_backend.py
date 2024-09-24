@@ -25,8 +25,16 @@ if HAS_CPU and TRITON_HAS_CPU:
         pass
 
     @config.patch(cpu_backend="triton")
-    class CpuTritonTests(test_torchinductor.CpuTests):
-        pass
+    class CpuTritonTests(test_torchinductor.TestCase):
+        common = test_torchinductor.check_model
+        device = "cpu"
+
+    test_torchinductor.copy_tests(
+        test_torchinductor.CommonTemplate,
+        CpuTritonTests,
+        "cpu",
+        xfail_prop="_expected_failure_triton_cpu",
+    )
 
 
 if __name__ == "__main__":
