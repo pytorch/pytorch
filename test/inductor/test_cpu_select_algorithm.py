@@ -31,6 +31,8 @@ from torch.testing._internal.common_utils import (
     TEST_MKL,
 )
 
+from .test_aot_inductor_utils import AOTIRunnerUtil
+
 
 log = logging.getLogger(__name__)
 
@@ -1447,6 +1449,42 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (16,))
+    @parametrize("in_features", (128,))
+    @parametrize("out_features", (64,))
+    @parametrize("bias", (True,))
+    @dtypes(
+        torch.float,
+    )
+    def test_aoti_linear(self, batch_size, in_features, out_features, bias, dtype):
+        class M(torch.nn.Module):
+            def __init__(self, bias=bias) -> None:
+                super().__init__()
+                self.mlp = torch.nn.Sequential(
+                    torch.nn.Linear(in_features, out_features, bias=bias),
+                    torch.nn.ReLU(),
+                )
+
+            def forward(self, x):
+                return self.mlp(x)
+
+        assert torch._inductor.config.freezing is False
+
+        counters.clear()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        mod = M(bias=bias).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol), torch.no_grad():
+            expected = mod(v)
+            actual = AOTIRunnerUtil.run(
+                "cpu",
+                mod,
+                (v,),
+            )
+            self.assertEqual(actual, expected, atol=atol, rtol=rtol)
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})

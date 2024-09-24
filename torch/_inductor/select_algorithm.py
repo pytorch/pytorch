@@ -1651,7 +1651,9 @@ class AlgorithmSelectorCache(PersistentCache):
         if isinstance(node, ir.Layout):
             node = ir.Buffer("fake", node)
         # triton templates want the base tensor.
-        if isinstance(node, ir.BaseView):
+        if isinstance(node, ir.BaseView) and not (
+            isinstance(node, ir.ReinterpretView) and node.layout.device.type == "cpu"
+        ):
             node = node.unwrap_view()
         return AlgorithmSelectorCache.generate_example_value(
             V.graph.sizevars.size_hints(
