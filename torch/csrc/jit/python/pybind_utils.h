@@ -1073,7 +1073,11 @@ inline py::object createPyObjectForStack(Stack&& stack) {
     return_values[ret] = toPyObject(std::move(stack[ret]));
   }
 
+#if defined(__clang__)
   return std::move(return_values);
+#else
+  return return_values;
+#endif
 }
 
 // TODO: Remove once we clean up the GraphExecutor usage.
