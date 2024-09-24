@@ -1288,7 +1288,15 @@ class WrapperCodeGen(CodeGen):
             arg = kwargs[key]
             if idx in kernel.constexprs:
                 if isinstance(arg, sympy.Expr):
-                    constants[idx] = V.graph.sizevars.size_hint(arg)
+                    # This arg is marked as tl.constexpr. That means that triton will recompile every time
+                    # this value changes.
+                    # https://github.com/pytorch/pytorch/issues/136504
+                    # One option is to correctly pass the symints in so that the symbolic expressions are defined
+                    # when the triton code is being executed.
+                    # But since triton will have to recompile either way, we instead just specialize on the value.
+                    val = V.graph.sizevars.size_hint(arg)
+                    V.graph.sizevars.guard_equals(arg, val)
+                    constants[idx] = val
                 else:
                     constants[idx] = arg
             else:
