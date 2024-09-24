@@ -127,7 +127,6 @@ __all__ = [
     "set_warn_always",
     "split",
     "stack",
-    "sym_add",
     "sym_float",
     "sym_int",
     "sym_ite",
@@ -841,28 +840,6 @@ def sym_min(a, b):
         return builtins.min(a, b)
 
 
-def sym_add(*args):
-    """
-    N-ary add which is faster to compute for long lists than iterated binary
-    addition.  Only does something special for integers.
-    """
-    if overrides.has_torch_function(args):
-        return overrides.handle_torch_function(sym_add, args, *args)
-
-    found = None
-    for a in args:
-        if not isinstance(a, (SymInt, builtins.int)):
-            return builtins.sum(args)
-        if isinstance(a, SymInt):
-            found = a.node
-    if found is None:
-        return builtins.sum(args)
-
-    from torch.fx.experimental.sym_node import to_node, wrap_node
-
-    return wrap_node(found.sym_add(*(to_node(found, a) for a in args)))
-
-
 # Drop in replacement for math.sqrt, math.sin, math.cos etc
 def _get_sym_math_fn(name):
     def fn(a):
@@ -1258,7 +1235,6 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.put_` with ``accumulate=True`` when called on a CPU
           tensor
         * :func:`torch.Tensor.scatter_add_` when called on a CUDA tensor
-        * :func:`torch.cumsum` when called on a CUDA tensor
         * :func:`torch.gather` when called on a CUDA tensor that requires grad
         * :func:`torch.index_add` when called on CUDA tensor
         * :func:`torch.index_select` when attempting to differentiate a CUDA tensor
@@ -1305,6 +1281,7 @@ def use_deterministic_algorithms(
         * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
+        * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
@@ -2687,3 +2664,17 @@ def _is_device_backend_autoload_enabled() -> builtins.bool:
 
 if _is_device_backend_autoload_enabled():
     _import_device_backends()
+
+
+def _as_tensor_fullprec(t):
+    """
+    Like torch.as_tensor, but when given Python data types it will keep
+    them in full precision.  Used for calling convention for Dynamo.
+    """
+    ty = type(t)
+    if ty is builtins.float:
+        return torch.as_tensor(t, dtype=torch.float64)
+    elif ty is builtins.int:
+        return torch.as_tensor(t, dtype=torch.int64)
+    else:
+        return torch.as_tensor(t)
