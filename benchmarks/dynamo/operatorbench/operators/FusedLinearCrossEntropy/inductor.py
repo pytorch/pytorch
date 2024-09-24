@@ -22,5 +22,3 @@ class Operator(FusedLinearCrossEntropyOperator):
             H=H, V=V, dtype=self.benchmark_config.dtype
         ).to(self.benchmark_config.device.value)
 
-    def forward(self, x, y):
-        return self.operator(x, y)

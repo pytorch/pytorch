@@ -20,8 +20,8 @@ class LigerLMHeadCE(torch.nn.Module):
             ignore_index=ignore_index, reduction="mean"
         )
 
-    def forward(self, x, y):
-        return self.ce_loss(self.lin.weight, x, y)
+    def forward(self, inputs):
+        return self.ce_loss(self.lin.weight, *inputs)
 
 
 class Operator(FusedLinearCrossEntropyOperator):

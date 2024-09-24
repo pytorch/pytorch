@@ -27,7 +27,8 @@ class TorchLMHeadCE(torch.nn.Module):
             ignore_index=ignore_index, reduction="mean"
         )
 
-    def forward(self, x, y):
+    def forward(self, inputs):
+        x, y = inputs
         logits = self.lin(x)
         return self.ce_loss(logits, y)
 

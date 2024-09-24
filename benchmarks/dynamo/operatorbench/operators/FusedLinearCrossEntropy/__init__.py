@@ -45,20 +45,20 @@ class FusedLinearCrossEntropyOperator(BaseOperator):
             # This operator needs two inputs
             cls.example_inputs_list.append((_input, target))
 
-    def forward(self, *input):
-        return self.operator(*input)
+    def forward(self, inputs):
+        return self.operator(inputs)
 
-    def backward(self, *input):
-        y = self.forward(*input)
+    def backward(self, inputs):
+        y = self.forward(inputs)
         return lambda: y.backward(retain_graph=True)
 
     def full(self, input):
         def f():
-            y = self.forward(*input)
+            y = self.forward(input)
             y.backward()
 
         return f()
 
     # single run with a specific input
-    def single_run(self, fn, *inputs):
-        fn(*inputs)
+    def single_run(self, fn, inputs):
+        fn(inputs)

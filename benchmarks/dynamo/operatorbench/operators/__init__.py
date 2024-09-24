@@ -167,15 +167,15 @@ def dynamically_create_native_operator_classes(benchmark_config: BenchmarkConfig
             for inp_gen in inps_gens:
                 try:
                     inps = next(inp_gen)
-                    input_list.append((inps, None))
+                    # the second element is kwargs and it has to be an empty dict
+                    input_list.append(inps)
                     index += 1
                 except StopIteration:
                     break
         cls.example_inputs_list = input_list
 
     def prepare_input_and_functions(self, input):
-        input0 = input[0]
-        args, kwargs = input0
+        args, kwargs = input
         if self.benchmark_config.channels_last:
             args, kwargs = tree_map_only(
                 torch.Tensor, to_channels_last, (args, kwargs)
