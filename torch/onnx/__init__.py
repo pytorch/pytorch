@@ -68,7 +68,6 @@ from ._internal.onnxruntime import (
 from ._type_utils import JitScalarType
 from .errors import OnnxExporterError
 from .utils import (
-    _optimize_graph,
     _run_symbolic_function,
     _run_symbolic_method,
     export_to_pretty_string,
