@@ -828,7 +828,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.ID_MATCH)
             stream_proxy = self.tx.output.create_proxy(
                 "call_function",
-                torch.cuda.Stream,
+                type(value),
                 (),
                 {
                     "stream_id": value.stream_id,
