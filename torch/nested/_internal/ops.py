@@ -346,6 +346,29 @@ def jagged_torch_function(func, *args, **kwargs):
 
         return inp.reshape(*new_shape)
 
+    # Handle nested-specific input validation for CompositeImplicit rms_norm
+    if func.__name__ == "rms_norm":
+
+        def _rms_norm_sig(input, normalized_shape, weight=None, eps=None):
+            pass
+
+        _, new_kwargs = normalize_function(  # type: ignore[misc]
+            _rms_norm_sig, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+        )
+
+        inp = new_kwargs.pop("input")
+        normalized_shape = new_kwargs.pop("normalized_shape")
+
+        # can't normalize over the ragged dim (yet)
+        max_normalizable = inp.dim() - inp._ragged_idx - 1
+        if len(normalized_shape) > max_normalizable:
+            raise ValueError(
+                "rms_norm(): Normalization over the ragged dim not supported for nested tensors"
+            )
+
+        with torch._C.DisableTorchFunctionSubclass():
+            return func(*args, **kwargs)
+
     raise NotImplementedError(func)
 
 
@@ -395,7 +418,7 @@ def prim_layout_default(func, *args, **kwargs):
 def tensor_attr_unsupported_getter(func, *args, **kwargs):
     if func == torch.ops.aten.size.default:
         raise RuntimeError(
-            "NestedTensors does not support directly calling torch.ops.aten.size "
+            "NestedTensor does not support directly calling torch.ops.aten.size; "
             "please use `nested_tensor.size()` instead."
         )
 
@@ -1017,6 +1040,17 @@ def is_same_size_default(func, *args, **kwargs):
     return args[0]._size == args[1]._size
 
 
+@register_jagged_func(torch.ops.aten.sum.default, "self: jt_all, dtype: any?")
+def sum_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+
+    return func(inp._values, **new_kwargs)
+
+
 @register_jagged_func(
     torch.ops.aten.sum.dim_IntList,
     "self: jt_all, dim: any?, keepdim: any?, dtype: any?",
@@ -1097,8 +1131,7 @@ def sum_dim_IntList(func, *args, **kwargs):
             )  # need to read offsets --> pad jagged dimension and apply sum
 
         if new_kwargs["keepdim"]:
-            # TODO: Fix this; it's a bug. should be unsqueezing on ragged_idx
-            out = out.unsqueeze(0)
+            out = out.unsqueeze(inp._ragged_idx)
         return out
     else:  # raggedness preserved --> return nested tensor
         if (
@@ -1424,12 +1457,15 @@ def mean_dim(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    if len(new_kwargs["dim"]) > 1:
-        raise RuntimeError(
-            "mean(): not supported across multiple dimensions for NestedTensor"
-        )
-
     inp = new_kwargs.pop("input")
+
+    if len(new_kwargs["dim"]) > 1 and (
+        inp._ragged_idx in new_kwargs["dim"] or 0 in new_kwargs["dim"]
+    ):
+        raise RuntimeError(
+            "mean(): not supported across multiple dimensions for NestedTensor "
+            "when either the batch dim or ragged dim is included"
+        )
 
     (
         new_kwargs["dim"],
@@ -1463,8 +1499,10 @@ def mean_dim(func, *args, **kwargs):
         # for every non-batch dimension,
         #   unsqueeze lengths into the same shape as the PyTorch sum,
         #   as the extra dimensions must all be divided by the same length
+        # Note: keepdim=True is on at this point so lengths has to be unsqueezed for
+        # that 1-size dim as well.
         lengths = inp._offsets.diff()
-        for _ in range(inp.dim() - 2):
+        for _ in range(inp.dim() - 1):
             lengths = lengths.unsqueeze(-1)
 
         return torch_sum / lengths.broadcast_to(torch_sum.shape)
