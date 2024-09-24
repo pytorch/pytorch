@@ -61,18 +61,17 @@ compare_results_with_expected = os.environ.get("PR_TIME_BENCHMARKS_TEST", "1") =
 
 
 class BenchmarkBase(ABC):
-    # measure total number of instruction spent in _work.
-    # Garbage collection is NOT disabled during the work.
+    # Measure total number of instruction spent in _work.
+    # Garbage collection is NOT disabled during _work().
     _enable_instruction_count = False
 
-    # measure total number of instruction spent in convert_frame.compile_inner
-    # Garbage collection is disabled during the work function to avoid noise.
-    # TODO is there other parts we need to add ?
+    # Measure total number of instruction spent in convert_frame.compile_inner
+    # Garbage collection is disabled during _work() to avoid noise.
     _enable_compile_time_instruction_count = False
 
     # A pair of (expected, noise_margin) to compare with the actual instruction count.
-    # margin is a percentage that represent acceptable noise margin.
-    # for example(100, 0.1(10%)) means the actual instruction count should be between 90 and 110.
+    # Margin is a percentage that represent acceptable noise margin.
+    # For example(100, 0.1(10%)) means that the actual instruction count should be between 90 and 110.
 
     # The same variable is used for both instruction_count and compile_time_instruction_count
     # because we do not allow both of them to be enabled at the same time now since they both log to the same scuba field.
