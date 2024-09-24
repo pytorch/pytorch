@@ -1,6 +1,7 @@
 import csv
 import gc
 import json
+import os
 from abc import ABC, abstractmethod
 
 from fbscribelogger import make_scribe_logger
@@ -53,6 +54,10 @@ struct TorchBenchmarkCompileTimeLogEntry {
 }
 """,  # noqa: B950
 )
+
+# This is enabled only for OSS runs, we always run on the same machine, when running locally
+# expected values are different so by default this is not enabled.
+compare_results_with_expected = os.environ.get("PR_TIME_BENCHMARKS_TEST", "1") == "1"
 
 
 class BenchmarkBase(ABC):
@@ -113,6 +118,9 @@ class BenchmarkBase(ABC):
         pass
 
     def _verify_instruction_count(self, result):
+        if not compare_results_with_expected:
+            return False
+
         def log(event_name):
             scribe.open_source_signpost(
                 subsystem="pr_time_benchmarks",
@@ -130,18 +138,18 @@ class BenchmarkBase(ABC):
 
         if result > high:
             print(
-                f"**REGRESSION** benchmark {self.name()} failed, actual instruction count {result} is higher than expected \
-{expected} with noise margin {noise_margin} \
-if this is an expected regression, please update the expected instruction count in the benchmark.",
+                f"**REGRESSION** benchmark {self.name()} failed, \
+actual instruction count {result} is higher than expected {expected} with noise margin {noise_margin} \
+if this is an expected regression, please update the expected instruction count in the benchmark",
             )
 
             log("instruction_count_test_fail_regression")
 
         if result < low:
             print(
-                f"**WIN** benchmark {self.name()} failed, actual instruction count {result} is lower than expected {expected} \
-with noise margin {noise_margin} \
-please update the expected instruction count in the benchmark.",
+                f"**WIN** benchmark {self.name()} failed, \
+actual instruction count {result} is lower than expected {expected} with noise margin {noise_margin}\
+please update the expected instruction count in the benchmark",
             )
             # if the test is by passed
             log("instruction_count_test_fail_win")
@@ -156,6 +164,7 @@ please update the expected instruction count in the benchmark.",
             count = i_counter.end(id)
 
             print(f"instruction count for iteration {i} is {count}")
+            self._verify_instruction_count(count)
             results.append(count)
         return min(results)
 
@@ -181,6 +190,7 @@ please update the expected instruction count in the benchmark.",
                     )
                 print(f"compile time instruction count for iteration {i} is {count}")
                 results.append(count)
+                self._verify_instruction_count(count)
 
             config.record_compile_time_instruction_count = False
             return min(results)
@@ -217,7 +227,6 @@ please update the expected instruction count in the benchmark.",
                 name=self.name(),
                 instruction_count=r,
             )
-            self._verify_instruction_count(r)
         if self._enable_compile_time_instruction_count:
             r = self._count_compile_time_instructions()
 
@@ -233,6 +242,4 @@ please update the expected instruction count in the benchmark.",
                 name=self.name(),
                 instruction_count=r,
             )
-            self._verify_instruction_count(r)
-
         return self
