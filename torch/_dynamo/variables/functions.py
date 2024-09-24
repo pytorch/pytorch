@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import builtins
 import collections
 import functools
 import inspect
@@ -22,6 +23,7 @@ from ..utils import (
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
+    proxy_args_kwargs,
 )
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
@@ -1001,6 +1003,35 @@ class PolyfilledFunctionVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from torch._dynamo.variables.builder import SourcelessBuilder
+
+        # Special case for sum on tuple of floats and ints
+        if (
+            self.fn is builtins.sum
+            and len(args) == 1
+            and not kwargs
+            and isinstance(args[0], (variables.ListVariable, variables.TupleVariable))
+            and all(
+                (isinstance(x, variables.ConstantVariable) and isinstance(x.value, int))
+                or (isinstance(x, variables.SymNodeVariable) and x.python_type() is int)
+                for x in args[0].items
+            )
+        ):
+            return variables.SymNodeVariable.create(
+                tx,
+                tx.output.create_proxy(
+                    "call_function",
+                    torch.sym_add,
+                    *proxy_args_kwargs(args[0].items, {}),
+                ),
+                sym_num=torch.sym_add(
+                    *(
+                        x.value
+                        if isinstance(x, variables.ConstantVariable)
+                        else x.sym_num
+                        for x in args[0].items
+                    )
+                ),
+            )
 
         if self.can_constant_fold_through() and check_unspec_or_constant_args(
             args, kwargs
