@@ -7,9 +7,7 @@
 #include <optional>
 #include <vector>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 using torch::jit::Operator;
 
@@ -21,11 +19,11 @@ using torch::jit::Operator;
 class TORCH_API ScriptCall : public RpcCommandBase {
  public:
   // Constructor for builitin operator call.
-  ScriptCall(std::shared_ptr<Operator> op, std::vector<at::IValue>&& stack);
+  ScriptCall(std::shared_ptr<Operator> op, std::vector<at::IValue> stack);
   // Constructor for TorchScript function call.
   ScriptCall(
       const c10::QualifiedName& qualifiedName,
-      std::vector<at::IValue>&& stack,
+      std::vector<at::IValue> stack,
       const bool isAsyncExecution = false);
 
   bool hasOp() const;
@@ -66,6 +64,4 @@ class TORCH_API ScriptCall : public RpcCommandBase {
   const bool isAsyncExecution_;
 };
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc
