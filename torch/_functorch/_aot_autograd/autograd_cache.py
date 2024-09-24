@@ -109,6 +109,7 @@ def check_node_safe(node: Node):
         method_target = node.args[0]
         # Only support method calls on base tensors
         if not is_tensor(method_target):
+            breakpoint()
             raise BypassAOTAutogradCache(
                 f"Unsupported call_method target {method_target}"
             )

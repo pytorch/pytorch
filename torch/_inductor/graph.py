@@ -458,6 +458,8 @@ class GraphLowering(torch.fx.Interpreter):
         # Below field is related to printing debug intermediate tensor values info for debugging
         self.all_codegen_kernel_names: OrderedSet[str] = OrderedSet()
 
+        self.cached_subgraphs = {}
+
     def has_feature(
         self, device: Union[torch._inductor.ir.IRNode, device], feature: BackendFeature
     ) -> bool:
@@ -1038,7 +1040,12 @@ class GraphLowering(torch.fx.Interpreter):
         value = getattr_recursive(self.module, target)  # type: ignore[arg-type]
 
         if isinstance(value, torch.fx.GraphModule):
-            return ir.Subgraph(name=target, graph_module=value)
+            if target in self.cached_subgraphs:
+                return self.cached_subgraphs[target]
+
+            out = ir.Subgraph(name=target, graph_module=value)
+            self.cached_subgraphs[target] = out
+            return out
 
         if isinstance(value, torch._C.ScriptObject):
             self.torchbind_constants[target] = value

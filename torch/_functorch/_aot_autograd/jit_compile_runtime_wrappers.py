@@ -440,6 +440,7 @@ def partition_invoke_subgraphs(
                 new_node.meta[key] = value
 
     new_partitioned_fw_subgraph_node = {}
+    subgraph_cache = {}
 
     for node in joint_gm.graph.nodes:
         if (
@@ -459,14 +460,24 @@ def partition_invoke_subgraphs(
                 seen_subgraph_identifiers.add(subgraph_identifier)
 
                 new_fw_subgraph = new_fw_bw_invoke_subgraph[subgraph_identifier][0]
-                subgraph_attr_node = new_graph.get_attr(add_subgraph(new_fw_subgraph))
+
+                subgraph_hash = node.args[2]
+
+                if subgraph_hash in subgraph_cache:
+                    subgraph_attr_node = subgraph_cache[subgraph_hash]
+                else:
+                    subgraph_attr_node = new_graph.get_attr(
+                        add_subgraph(new_fw_subgraph)
+                    )
+                    subgraph_cache[subgraph_hash] = subgraph_attr_node
 
                 env[node] = new_graph.call_function(
                     the_function=torch.ops.higher_order.invoke_subgraph,
                     args=(
                         subgraph_attr_node,
                         "_partitioned",
-                        *(env[n] for n in node.args[2:]),
+                        None,
+                        *(env[n] for n in node.args[3:]),
                     ),
                 )
                 propagate_meta_info(new_fw_subgraph, env[node])
@@ -483,7 +494,13 @@ def partition_invoke_subgraphs(
             else:
                 # this is backward pass
                 new_bw_subgraph = new_fw_bw_invoke_subgraph[subgraph_identifier][1]
-                subgraph_attr_node = new_graph.get_attr(add_subgraph(new_bw_subgraph))
+                if subgraph_hash in subgraph_cache:
+                    subgraph_attr_node = subgraph_cache[subgraph_hash]
+                else:
+                    subgraph_attr_node = new_graph.get_attr(
+                        add_subgraph(new_fw_subgraph)
+                    )
+                    subgraph_cache[subgraph_hash] = subgraph_attr_node
 
                 num_saved_tensors = num_saved_tensors_in_fwd[subgraph_identifier]
                 num_original_outputs = num_original_fwd_outputs[subgraph_identifier]
@@ -514,13 +531,14 @@ def partition_invoke_subgraphs(
 
                 tangent_nodes = []
                 for idx in range(num_tangents):
-                    tangent_nodes.append(env[node.args[2 + idx]])
+                    tangent_nodes.append(env[node.args[3 + idx]])
 
                 env[node] = new_graph.call_function(
                     the_function=torch.ops.higher_order.invoke_subgraph,
                     args=(
                         subgraph_attr_node,
                         "_partitioned",
+                        None,
                         *(saved_tensors_nodes + tangent_nodes),
                     ),
                 )

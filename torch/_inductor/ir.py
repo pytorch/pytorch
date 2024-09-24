@@ -6426,6 +6426,9 @@ class Subgraph(IRNode):
     graph_module: torch.fx.GraphModule
     graph: Optional[GraphLowering] = None
 
+    def __post_init__(self):
+        pass
+
 
 def _has_aliased_buffers(buffers: Sequence[IRNode]) -> bool:
     buffers = [
@@ -6462,7 +6465,7 @@ class InvokeSubgraph(ExternKernel):
         operands = [cls.realize_input(x) for x in operands]
 
         # TODO(anijain2305) - If we decided to change *args to operands, we will need to update this.
-        fx_operands = V.graph.current_node.args[2:]
+        fx_operands = V.graph.current_node.args[3:]
         fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
 
         if subgraph.graph is None:

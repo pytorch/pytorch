@@ -44,6 +44,9 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+invoke_subgraph_cache = {}
+
+
 def raise_hard_error_if_graph_break(reason):
     def deco(fn):
         @functools.wraps(fn)
@@ -1959,6 +1962,29 @@ class AutoFunctionalizeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
+def canonicalize(gmod, root_gmod):
+    new_graph = torch.fx.Graph()
+    env = {}
+
+    placeholder_name = 0
+
+    def next_placeholder_name():
+        nonlocal placeholder_name
+        placeholder_name += 1
+        return f"placeholder_{placeholder_name}"
+
+    for node in gmod.graph.nodes:
+        if node.op == "placeholder":
+            env[node] = new_graph.placeholder(next_placeholder_name())
+        else:
+            env[node] = new_graph.node_copy(node, lambda x: env[x])
+        env[node].meta = node.meta
+
+    new_graph.lint()
+    new_gmod = torch.fx.GraphModule(root_gmod, new_graph)
+    return new_gmod
+
+
 # TODO(anijin2305) - Refactor the base class - WrapHigherOrderVariable - to share code
 # This is the copy/paste of WrapHigherOrderVariable because invoke_subgraph has an identifier arg
 class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
@@ -1966,6 +1992,8 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         self, tx: "InstructionTranslator", args, kwargs, description
     ):
         # See NOTE [HigherOrderOperator tracing design] for more details
+        from torch._functorch._aot_autograd.autograd_cache import autograd_cache_key
+        from torch._functorch._aot_autograd.schemas import AOTConfig
 
         (
             (body_r, treespec),
@@ -1974,7 +2002,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         ) = speculate_subgraph(
             tx,
             args[0],  # function
-            [*args[2:]],
+            [*args[3:]],
             kwargs,
             description,
             source_target=self.value,
@@ -1982,13 +2010,44 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         )
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
-        body_name = add_subgraph(
-            tx,
-            "wrap_body",
-            body_gmod,
+
+        config = AOTConfig(
+            fw_compiler=None,
+            bw_compiler=None,
+            inference_compiler=None,
+            partition_fn=None,
+            decompositions={},
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=False,
+            dynamic_shapes=True,
+            aot_autograd_arg_pos_to_source=None,
+            is_export=False,
+            no_tangents=False,
+            enable_log=False,
         )
 
-        body_node = make_attr(tx, body_name)
+        # TODO(anijain2305) - This is questionable, but we need to figure out
+        # how to handle this. Cache the Dynamo graphs so that later parts of the
+        # stack dont retrace.
+        fake_inputs = [arg.as_proxy().node.meta["example_value"] for arg in args[3:]]
+
+        canonicalized_gmod = canonicalize(body_gmod, tx.output.nn_modules)
+
+        key, lines = autograd_cache_key(canonicalized_gmod, fake_inputs, config, {})
+
+        global invoke_subgraph_cache
+        if key in invoke_subgraph_cache:
+            body_node = invoke_subgraph_cache[key]
+        else:
+            body_name = add_subgraph(
+                tx,
+                "wrap_body",
+                body_gmod,
+            )
+
+            body_node = make_attr(tx, body_name)
+            invoke_subgraph_cache[key] = body_node
 
         # Since, we call `speculate_subgraph` with `set_subgraph_inputs="automatic`,
         # all the arguments are lifted.
@@ -2001,7 +2060,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             body_r.as_proxy(),
         )
 
-        return proxy_args, {}, example_value, body_r, treespec, body_gmod
+        return proxy_args, {}, example_value, body_r, treespec, body_gmod, key
 
     def call_function(
         self,
@@ -2010,9 +2069,15 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # This flattens the kwargs into lifted args
-        p_args, p_kwargs, example_value, body_r, treespec, _ = self.create_wrapped_node(
-            tx, args, kwargs, "wrap"
-        )
+        (
+            p_args,
+            p_kwargs,
+            example_value,
+            body_r,
+            treespec,
+            _,
+            key,
+        ) = self.create_wrapped_node(tx, args, kwargs, "wrap")
 
         if len(p_kwargs) > 0:
             unimplemented("kwargs should have been flattened into lifted args")
@@ -2026,6 +2091,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         p_args = (
             p_args[0],
             args[1].as_proxy(),
+            key,
             *p_args[1:],
         )
         return _call_function_and_unflatten_output(

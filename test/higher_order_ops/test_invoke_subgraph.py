@@ -36,9 +36,9 @@ class TestInvokeSubgraph(TestCase):
         def fn(x, y):
             return (
                 x
-                * invoke_subgraph(gn, "start", x, y)
+                * invoke_subgraph(gn, "start", None, x, y)
                 * y
-                * invoke_subgraph(gn, "start", x, y)
+                * invoke_subgraph(gn, "start", None, x, y)
             )
 
         opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
@@ -55,11 +55,11 @@ class TestInvokeSubgraph(TestCase):
             return torch.cos(x), torch.sin(y)
 
         def fn(x, y):
-            a, b = invoke_subgraph(gn, "start", x, y)
+            a, b = invoke_subgraph(gn, "start", None, x, y)
             return a + b
 
-        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
-        # opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        # opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
 
         x = torch.randn(8, requires_grad=True, device="cuda")
         y = torch.randn(8, requires_grad=True, device="cuda")
@@ -68,22 +68,38 @@ class TestInvokeSubgraph(TestCase):
         out.sum().backward()
 
     def test_linear(self):
-        n_layers = 1
+        n_layers = 12
         mods = [torch.nn.Linear(1, 1, bias=False).cuda() for _ in range(n_layers)]
 
         def fn(x):
             for mod in mods:
-                x = invoke_subgraph(mod, "start", x)
+                x = invoke_subgraph(mod, "start", None, x)
             return x
 
         x = torch.randn(1, 1, requires_grad=True, device="cuda")
 
         ref = fn(x)
 
-        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition")
-        # opt_fn = torch.compile(fn)
+        # opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition")
+        opt_fn = torch.compile(fn)
 
         res = opt_fn(x)
+
+    def test_multiple(self):
+        def gn(x):
+            return torch.cos(x)
+
+        def fn(x):
+            a = invoke_subgraph(gn, "start", None, x)
+            b = invoke_subgraph(gn, "start", None, x)
+            return a + b
+
+        # opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        x = torch.randn(8, requires_grad=True, device="cuda")
+        out = opt_fn(x)
+        print(out)
 
 
 if __name__ == "__main__":
