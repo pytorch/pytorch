@@ -6,6 +6,7 @@ import itertools
 import math
 import sys
 import unittest
+from contextlib import nullcontext
 from functools import partial
 from typing import Optional, Tuple
 
@@ -4337,12 +4338,14 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             out_expected = torch.cat(
                 [func(t, dim=(reduce_dim[0] - 1)).unsqueeze(0) for t in nt.unbind()]
             )
+            if keepdim:
+                out_expected = out_expected.unsqueeze(reduce_dim[0])
 
             self.assertFalse(
                 out_actual.is_nested,
                 f"{op_name}(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
             )  # output is a dense tensor
-            self.assertTrue(torch.allclose(out_actual, out_expected))
+            self.assertEqual(out_actual, out_expected)
 
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
@@ -4602,12 +4605,14 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                         for t in nt_transposed.unbind()
                     ]
                 )
+                if keepdim:
+                    out_expected = out_expected.unsqueeze(reduce_dim[0])
 
                 self.assertFalse(
                     out_actual.is_nested,
                     f"{op_name}(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
                 )  # output is a dense tensor
-                self.assertTrue(torch.allclose(out_actual, out_expected, rtol=1e-4))
+                self.assertEqual(out_actual, out_expected)
 
     @dtypes(torch.float32)
     @parametrize(
@@ -5070,11 +5075,12 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     ):
         """
         Mean on NestedTensor fails when trying to reduce across multiple dimensions
+        only if the batch or ragged dims are included
         """
         tensor_lists = self._get_example_tensor_lists(
             include_list_of_lists=False, include_requires_grad=components_require_grad
         )
-        reduce_dims = ((0, 1), (2, 3), (2, 3, 4))
+        reduce_dims = ((0, 1), (2, 3), (2, 3, 4), (0, 3), (1, 2))
 
         for tensor_list, reduce_dim in itertools.product(tensor_lists, reduce_dims):
             nt = torch.nested.nested_tensor(
@@ -5086,10 +5092,20 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             )
 
             if nt.dim() > reduce_dim[-1]:
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "not supported across multiple dimensions for NestedTensor",
-                ):
+                ragged_or_batch_included = (
+                    nt._ragged_idx in reduce_dim or 0 in reduce_dim
+                )
+
+                context = (
+                    self.assertRaisesRegex(
+                        RuntimeError,
+                        "not supported across multiple dimensions for NestedTensor",
+                    )
+                    if ragged_or_batch_included
+                    else nullcontext()
+                )
+
+                with context:
                     out = torch.mean(nt, dim=reduce_dim, keepdim=keepdim)
 
     @dtypes(torch.float32)
@@ -7439,8 +7455,6 @@ FORWARD_FAILURES = {
     "jiterator_binary",
     "jiterator_binary_return_by_ref",
     "jiterator_unary",
-    # Bug found: sum() with keepdim=True returns invalid shape
-    "sum",
     # RuntimeError: prod(): keepdim=True must be set for NestedTensor
     "prod",
     # RuntimeError: "jagged_to_padded_dense" not implemented for 'Bool'
@@ -7474,6 +7488,8 @@ BACKWARD_FAILURES = {
     "clone",
     # Calling into torch.ops.aten.size directly
     "masked_select",
+    # NotImplementedError: aten._nested_sum_backward.default. Need to fix the backward pass.
+    "sum",
 }
 
 COMPILE_FORWARD_FAILURES = {
@@ -7481,6 +7497,9 @@ COMPILE_FORWARD_FAILURES = {
     # clone() on non-contiguous with holes NJTs currently use unbind(), leading to
     # data-dependent error in torch.compile
     "clone",
+    # torch._dynamo.exc.Unsupported: data dependent operator: aten._local_scalar_dense.default
+    # for inputs where min / max seqlen are not cached
+    "sum",
 }
 
 COMPARE_TENSOR_COMPONENT_EQUALITY = {
