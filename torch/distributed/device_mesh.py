@@ -506,7 +506,11 @@ else:
                 default_group = _get_default_group()
                 ranks = list(range(get_world_size()))
                 dim_group = (
-                    new_group(backend="cpu:gloo,cuda:nccl", ranks=ranks)
+                    new_group(
+                        backend="cpu:gloo,cuda:nccl",
+                        ranks=ranks,
+                        group_desc="mesh_dim_world",
+                    )
                     if torch.cuda.is_available()
                     and get_backend(default_group) == "gloo"
                     else default_group
@@ -548,6 +552,7 @@ else:
                             ranks=subgroup_ranks,
                             backend=backend,
                             pg_options=pg_options,
+                            group_desc=f"mesh_dim_{self.mesh_dim_names[dim]}",
                         )
 
                         # only add to dim_groups if the current rank in the subgroup
