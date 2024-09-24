@@ -559,7 +559,7 @@ static void upsample_bicubic2d_out_template(const Tensor& input,
                                             std::optional<double> scale_h_opt,
                                             std::optional<double> scale_w_opt,
                                             const Tensor& output) {
-  if (input.numel() == 0) {
+  if (output.numel() == 0) {
     return;
   }
   std::array<float, 2> scales = {
@@ -596,6 +596,9 @@ static void upsample_bicubic2d_backward_out_template(const Tensor& grad_input,
                                                      std::optional<double> scale_h_opt,
                                                      std::optional<double> scale_w_opt) {
   grad_input.zero_();
+  if (grad_output.numel() == 0) {
+    return;
+  }
   std::array<float, 2> scales = {
       area_pixel_compute_scale<float>(grad_input.size(3), grad_output.size(3), align_corners, scale_w_opt),
       area_pixel_compute_scale<float>(grad_input.size(2), grad_output.size(2), align_corners, scale_h_opt)};
