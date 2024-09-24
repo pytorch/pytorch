@@ -18,12 +18,12 @@ using torch::jit::Operator;
 // to the TorchScript function schema name and a list of arguments.
 class TORCH_API ScriptCall : public RpcCommandBase {
  public:
-  // Constructor for builitin operator call.
-  ScriptCall(std::shared_ptr<Operator> op, std::vector<at::IValue> stack);
+  // Constructor for builtin operator call.
+  ScriptCall(std::shared_ptr<Operator> op, std::vector<at::IValue>&& stack);
   // Constructor for TorchScript function call.
   ScriptCall(
       const c10::QualifiedName& qualifiedName,
-      std::vector<at::IValue> stack,
+      std::vector<at::IValue>&& stack,
       const bool isAsyncExecution = false);
 
   bool hasOp() const;
