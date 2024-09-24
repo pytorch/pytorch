@@ -76,8 +76,8 @@ try:
         )
         from .test_torchinductor import copy_tests, requires_multigpu, TestFailure
     except ImportError:
-        from test_aot_inductor_utils import (
-            AOTIRunnerUtil,  # @manual=fbcode//caffe2/test/inductor:aot_inductor_utils-library
+        from test_aot_inductor_utils import (  # @manual=fbcode//caffe2/test/inductor:aot_inductor_utils-library
+            AOTIRunnerUtil,
         )
         from test_control_flow import (  # @manual=fbcode//caffe2/test/inductor:control_flow-library
             CondModels,
