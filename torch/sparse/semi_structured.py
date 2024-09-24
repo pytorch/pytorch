@@ -632,8 +632,15 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
         if bias is not None and bias.dtype != self.dtype:
             raise NotImplementedError(
                 f"`{self.__class__.__name__}` matmul: trying to do `A={tuple(self.shape)} @ B={tuple(B.shape)} + C`, "
-                "with A.dtype=B.dtype={self.dtype} and C.dtype={B.dtype}. "
+                f"with A.dtype=B.dtype={self.dtype} and C.dtype={B.dtype}. "
                 "This operation is only supported when A, B and C have the same data type."
+            )
+        # Force fp8 mm to error to be consistent with torch
+        if self.dtype == torch.float8_e4m3fn:
+            raise NotImplementedError(
+                f"`{self.__class__.__name__}` matmul: trying to do `A={tuple(self.shape)} @ B={tuple(B.shape)}`, "
+                f"with A.dtype=B.dtype={self.dtype}. "
+                "mm is not supported for float8_e4m3fn, please use `torch._scaled_mm` instead."
             )
         if self.packed is None:
             raise NotImplementedError(
