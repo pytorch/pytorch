@@ -124,7 +124,7 @@ ONNXProgram(
     ):
         """Save the ONNX model to the specified destination.
 
-        When :param:`external_data` is ``True`` or the model is larger than 2GB,
+        When ``external_data`` is ``True`` or the model is larger than 2GB,
         the weights are saved as external data in a separate file.
 
         Initializer (model weights) serialization behaviors:
