@@ -3,6 +3,7 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/sve/sve_helper.h>
+#include <c10/util/irange.h>
 #include <cmath>
 #if defined(__aarch64__) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
 #include <sleef.h>
@@ -503,11 +504,15 @@ Vectorized<double> inline Vectorized<double>::le(const Vectorized<double>& other
 template <>
 inline void convert(const double* src, double* dst, int64_t n) {
   const int64_t fraction = n % Vectorized<double>::size();
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (int64_t i = 0; i < n - fraction; i += Vectorized<double>::size()) {
     svst1_f64(ptrue, dst + i, svldnt1_f64(ptrue, src + i));
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (int64_t i = n - fraction; i < n; i += Vectorized<double>::size()) {
     svbool_t pg = svwhilelt_b64(i, n);
     svst1_f64(pg, dst + i, svldnt1_f64(pg, src + i));

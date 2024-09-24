@@ -8,12 +8,11 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/sve/sve_helper.h>
 
-#if defined(CPU_CAPABILITY_SVE)
 #include <ATen/cpu/vec/sve/vec_float.h>
 #include <ATen/cpu/vec/sve/vec_double.h>
 #include <ATen/cpu/vec/sve/vec_int.h>
 #include <ATen/cpu/vec/sve/vec_qint.h>
-#endif
+#include <ATen/cpu/vec/sve/vec_bfloat16.h>
 
 
 namespace at::vec {
@@ -26,6 +25,33 @@ namespace at::vec {
 // namespace` which changes the name mangling, but can still be
 // accessed as `at::vec`.
 inline namespace CPU_CAPABILITY {
+
+inline std::ostream& operator<<(std::ostream& stream, const c10::qint32& val) {
+  stream << val.val_;
+  return stream;
+}
+inline std::ostream& operator<<(std::ostream& stream, const c10::qint8& val) {
+  stream << static_cast<int>(val.val_);
+  return stream;
+}
+inline std::ostream& operator<<(std::ostream& stream, const c10::quint8& val) {
+  stream << static_cast<unsigned int>(val.val_);
+  return stream;
+}
+template <typename T>
+std::ostream& operator<<(std::ostream& stream, const Vectorized<T>& vec) {
+  T buf[Vectorized<T>::size()];
+  vec.store(buf);
+  stream << "vec[";
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
+    if (i != 0) {
+      stream << ", ";
+    }
+    stream << buf[i];
+  }
+  stream << "]";
+  return stream;
+}
 
 #if defined(CPU_CAPABILITY_SVE)
 
@@ -63,15 +89,19 @@ DEFINE_FLOAT_INT_CAST(int16_t, 16, float, 32)
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<double>>
 inline gather(const double* base_addr, const Vectorized<int64_t>& vindex_) {
-  svint64_t vindex = svasrd_n_s64_x(ptrue, svmul_s64_x(ptrue, vindex_, svdup_n_s64(scale)), 3);
-  return svld1_gather_s64index_f64(ptrue, base_addr, vindex);
+    // Get the number of elements that fit in a vector (e.g., 4 for 256-bit vector with double)
+    const int64_t element_count = svcntd(); // Count of 64-bit elements in a vector
+    svint64_t vindex = svasr_n_s64_x(ptrue, svmul_s64_x(ptrue, vindex_, svdup_n_s64(scale)), log2(element_count));
+    return svld1_gather_s64index_f64(ptrue, base_addr, vindex);
 }
 
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<float>>
 inline gather(const float* base_addr, const Vectorized<int32_t>& vindex_) {
-  svint32_t vindex = svasrd_n_s32_x(ptrue, svmul_s32_x(ptrue, vindex_, svdup_n_s32(scale)), 2);
-  return svld1_gather_s32index_f32(ptrue, base_addr, vindex);
+    // Get the number of elements that fit in a vector (e.g., 8 for 256-bit vector with float)
+    const int64_t element_count = svcntw(); // Count of 32-bit elements in a vector
+    svint32_t vindex = svasr_n_s32_x(ptrue, svmul_s32_x(ptrue, vindex_, svdup_n_s32(scale)), log2(element_count));
+    return svld1_gather_s32index_f32(ptrue, base_addr, vindex);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MASK GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -80,20 +110,20 @@ template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<double>>
 inline mask_gather(const Vectorized<double>& src, const double* base_addr,
                    const Vectorized<int64_t>& vindex_, const Vectorized<double>& mask_) {
-  svbool_t mask = svcmpeq_s64(ptrue, svreinterpret_s64_f64(mask_),
-                              ALL_S64_TRUE_MASK);
-  svint64_t vindex = svasrd_n_s64_x(ptrue, svmul_s64_x(ptrue, vindex_, svdup_n_s64(scale)), 3);
-  return svsel_f64(mask, svld1_gather_s64index_f64(mask, base_addr, vindex), src);
+    const int64_t element_count = svcntd(); // Count of 64-bit elements in a vector
+    svbool_t valid_mask = svcmpeq_s64(ptrue, svreinterpret_s64_f64(mask_), ALL_S64_TRUE_MASK);
+    svint64_t vindex = svasr_n_s64_x(ptrue, svmul_s64_x(ptrue, vindex_, svdup_n_s64(scale)), log2(element_count));
+    return svsel_f64(valid_mask, svld1_gather_s64index_f64(valid_mask, base_addr, vindex), src);
 }
 
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<float>>
 inline mask_gather(const Vectorized<float>& src, const float* base_addr,
                    const Vectorized<int32_t>& vindex_, const Vectorized<float>& mask_) {
-  svbool_t mask = svcmpeq_s32(ptrue, svreinterpret_s32_f32(mask_),
-                              ALL_S32_TRUE_MASK);
-  svint32_t vindex = svasrd_n_s32_x(ptrue, svmul_s32_x(ptrue, vindex_, svdup_n_s32(scale)), 2);
-  return svsel_f32(mask, svld1_gather_s32index_f32(mask, base_addr, vindex), src);
+    const int64_t element_count = svcntw(); // Count of 32-bit elements in a vector
+    svbool_t valid_mask = svcmpeq_s32(ptrue, svreinterpret_s32_f32(mask_), ALL_S32_TRUE_MASK);
+    svint32_t vindex = svasr_n_s32_x(ptrue, svmul_s32_x(ptrue, vindex_, svdup_n_s32(scale)), log2(element_count));
+    return svsel_f32(valid_mask, svld1_gather_s32index_f32(valid_mask, base_addr, vindex), src);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONVERT ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -169,6 +199,50 @@ inline deinterleave2<float>(const Vectorized<float>& a, const Vectorized<float>&
   //          {b0, b1, b2, b3, b4, b5, b6, b7}
   return std::make_pair(Vectorized<float>(svuzp1_f32(a, b)),
                         Vectorized<float>(svuzp2_f32(a, b)));
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FLIP ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+template<>
+inline Vectorized<float> flip(const Vectorized<float> & v) {
+  svbool_t pg = svptrue_b32();
+  svuint32_t idx = svindex_u32(0, 1);
+  idx = svrevb_u32_x(pg, idx);
+  return Vectorized<float>(svtbl(v, idx));
+}
+template<>
+inline Vectorized<double> flip(const Vectorized<double> & v) {
+  svbool_t pg = svptrue_b64();
+  svuint64_t idx = svindex_u64(0, 1);
+  idx = svrevb_u64_x(pg, idx);
+  return Vectorized<double>(svtbl(v, idx));
+}
+template<>
+inline Vectorized<int64_t> flip(const Vectorized<int64_t> & v) {
+  svbool_t pg = svptrue_b64();
+  svuint64_t idx = svindex_u64(0, 1);
+  idx = svrevb_u64_x(pg, idx);
+  return Vectorized<int64_t>(svtbl(v, idx));
+}
+template<>
+inline Vectorized<int32_t> flip(const Vectorized<int32_t> & v) {
+  svbool_t pg = svptrue_b32();
+  svuint32_t idx = svindex_u32(0, 1);
+  idx = svrevb_u32_x(pg, idx);
+  return Vectorized<int32_t>(svtbl(v, idx));
+}
+template<>
+inline Vectorized<int16_t> flip(const Vectorized<int16_t> & v) {
+  svbool_t pg = svptrue_b16();
+  svuint16_t idx = svindex_u16(0, 1);
+  idx = svrevb_u16_x(pg, idx);
+  return Vectorized<int16_t>(svtbl(v, idx));
+}
+template<>
+inline Vectorized<int8_t> flip(const Vectorized<int8_t> & v) {
+  svbool_t pg = svptrue_b8();
+  svuint8_t idx = svindex_u8(0, 1);
+  idx = svreinterpret_u8(svrevb_s32_x(pg, svreinterpret_s32_u8(idx)));
+  return Vectorized<int8_t>(svtbl(v, idx));
 }
 
 #endif // defined(CPU_CAPABILITY_SVE)

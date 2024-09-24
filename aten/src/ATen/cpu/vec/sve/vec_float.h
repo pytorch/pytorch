@@ -3,6 +3,7 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/sve/sve_helper.h>
+#include <c10/util/irange.h>
 #include <cmath>
 #if defined(__aarch64__) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
 #include <sleef.h>
@@ -502,11 +503,15 @@ Vectorized<float> inline Vectorized<float>::le(const Vectorized<float>& other) c
 template <>
 inline void convert(const float* src, float* dst, int64_t n) {
   const int64_t fraction = n % Vectorized<float>::size();
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (int64_t i = 0; i < n - fraction; i += Vectorized<float>::size()) {
     svst1_f32(ptrue, dst + i, svldnt1_f32(ptrue, src + i));
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (int64_t i = n - fraction; i < n; i += Vectorized<float>::size()) {
     svbool_t pg = svwhilelt_b32(i, n);
     svst1_f32(pg, dst + i, svldnt1_f32(pg, src + i));
@@ -518,13 +523,17 @@ inline void convert(const float *src, at::Half *dst, int64_t n) {
   const int64_t fraction = n % Vectorized<float>::size();
   svbool_t pg_16 = svwhilelt_b16(0ull, Vectorized<float>::size());
   svbool_t pg_32 = svwhilelt_b32(0ull, Vectorized<float>::size());
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (int64_t i = 0; i < n - fraction; i += Vectorized<float>::size()) {
     svfloat16_t src_vec = svuzp1_f16(svcvt_f16_f32_x(ptrue, svldnt1_f32(pg_32, src + i)),
                                     ZERO_F16);
     svst1_f16(pg_16, reinterpret_cast<float16_t*>(dst) + i, src_vec);
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (int64_t i = n - fraction; i < n; i += Vectorized<float>::size()) {
     pg_16 = svwhilelt_b16(i, n);
     pg_32 = svwhilelt_b32(i, n);
@@ -539,13 +548,17 @@ inline void convert(const at::Half *src, float *dst, int64_t n) {
   const int64_t fraction = n % Vectorized<float>::size();
   svbool_t pg_16 = svwhilelt_b16(0ull, Vectorized<float>::size());
   svbool_t pg_32 = svwhilelt_b32(0ull, Vectorized<float>::size());
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (int64_t i = 0; i < n - fraction; i += Vectorized<float>::size()) {
     svfloat16_t src_vec = svzip1_f16(svldnt1_f16(pg_16, reinterpret_cast<const float16_t*>(src) + i),
                                     ZERO_F16);
     svst1_f32(pg_32, dst + i, svcvt_f32_f16_x(ptrue, src_vec));
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (int64_t i =  n - fraction; i < n; i += Vectorized<float>::size()) {
     pg_16 = svwhilelt_b16(i, n);
     pg_32 = svwhilelt_b32(i, n);
@@ -560,14 +573,18 @@ inline void convert(const bool *src, float *dst, int64_t n) {
   const int64_t fraction = n % Vectorized<float>::size();
   svbool_t pg_8 = svwhilelt_b8(0ull, Vectorized<float>::size());
   svbool_t pg_32 = svwhilelt_b32(0ull, Vectorized<float>::size());
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (int64_t i = 0; i < n - fraction; i += Vectorized<float>::size()) {
     svuint8_t src_vec_u8 = svldnt1_u8(pg_8, reinterpret_cast<const uint8_t*>(src) + i);
     svuint32_t src_vec_u32 = svunpklo_u32(svunpklo_u16(src_vec_u8));
     svbool_t mask = svcmpne_u32(pg_32, src_vec_u32, ZERO_U32);
     svst1_f32(pg_32, dst + i, svsel_f32(mask, ONE_F32, ZERO_F32));
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (int64_t i = n - fraction; i < n; i += Vectorized<float>::size()) {
     pg_8 = svwhilelt_b8(i, n);
     pg_32 = svwhilelt_b32(i, n);

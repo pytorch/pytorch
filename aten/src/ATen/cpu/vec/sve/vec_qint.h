@@ -6,11 +6,13 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/native/quantized/AffineQuantizerBase.h>
+#include <c10/util/irange.h>
 #include <c10/util/qint32.h>
 #include <c10/util/qint8.h>
 #include <c10/util/quint8.h>
 
 #include <array>
+#include <cmath>
 
 // This file defines Vectorized<> for the quantized types.
 //
