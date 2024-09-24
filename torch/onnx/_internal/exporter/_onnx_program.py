@@ -129,19 +129,19 @@ ONNXProgram(
 
         Initializer (model weights) serialization behaviors:
         * include_initializers=True, keep_initializers_as_inputs=False (default):
-            The initializers are included in the saved model.
+        The initializers are included in the saved model.
         * include_initializers=True, keep_initializers_as_inputs=True:
-            The initializers are included in the saved model and kept as model inputs.
-            Choose this option if you want the ability to override the model weights
-            during inference.
+        The initializers are included in the saved model and kept as model inputs.
+        Choose this option if you want the ability to override the model weights
+        during inference.
         * include_initializers=False, keep_initializers_as_inputs=False:
-            The initializers are not included in the saved model and are not listed
-            as model inputs. Choose this option if you want to attach the initializers
-            to the ONNX model in a separate, post-processing, step.
+        The initializers are not included in the saved model and are not listed
+        as model inputs. Choose this option if you want to attach the initializers
+        to the ONNX model in a separate, post-processing, step.
         * include_initializers=False, keep_initializers_as_inputs=True:
-            The initializers are not included in the saved model but are listed as model
-            inputs. Choose this option if you want to supply the initializers during
-            inference and want to minimize the size of the saved model.
+        The initializers are not included in the saved model but are listed as model
+        inputs. Choose this option if you want to supply the initializers during
+        inference and want to minimize the size of the saved model.
 
         Args:
             destination: The path to save the ONNX model to.
