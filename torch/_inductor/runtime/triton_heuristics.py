@@ -470,7 +470,7 @@ class CachingAutotuner(KernelInterface):
                 log.exception(
                     "Triton compilation failed: %s\n%s\nmetadata: %s",
                     self.inductor_meta.get("kernel_name", "triton_"),
-                    self.fn.src,
+                    getattr(self.fn, "src", "No source code available for triton"),
                     compile_meta,
                 )
                 raise
