@@ -9,20 +9,21 @@ def is_fbcode() -> bool:
     return not hasattr(torch.version, "git_version")
 
 
-def fx_graph_remote_cache_default() -> Optional[bool]:
-    if os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "1":
+def _get_tristate_env(name: str) -> Optional[bool]:
+    value = os.environ.get(name)
+    if value == "1":
         return True
-    if os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "0":
+    if value == "0":
         return False
     return None
+
+
+def fx_graph_remote_cache_default() -> Optional[bool]:
+    return _get_tristate_env("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE")
 
 
 def autotune_remote_cache_default() -> Optional[bool]:
-    if os.environ.get("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE") == "1":
-        return True
-    if os.environ.get("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE") == "0":
-        return False
-    return None
+    return _get_tristate_env("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE")
 
 
 # Enable auto_functionalized_v2 (enabled by default)
