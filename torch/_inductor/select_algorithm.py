@@ -1308,6 +1308,8 @@ class AlgorithmSelectorCache(PersistentCache):
         # first to benchmark it. share a single precompilation function for all lowerings
         # of a particular key
         self.precompile_cache: Dict[str, Callable[[], None]] = {}
+        # cache for avoiding precompiling same choice source file coming from different ops
+        self.choice_precompile_cache: Dict[str, bool] = {}
         # list of callbacks that are called after benchmarking
         self.feedback_saver_fns: List[
             Callable[
@@ -1433,14 +1435,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 with restore_stdout_stderr(initial_stdout, initial_stderr):
                     start_time = time.time()
 
-                    if self.lookup(
-                        [choice],
-                        name,
-                        inputs_key,
-                        benchmark=None,
-                    ):
-                        return time.time() - start_time
-
+                    if self.choice_precompile_cache.get(choice.hash_key()):
+                        return float(0)
+                    self.choice_precompile_cache[choice.hash_key()] = True
                     choice.precompile()
                     return time.time() - start_time
 
