@@ -2202,9 +2202,6 @@ coverage_ignore_classes = [
     "Error",
     "Future",
     "ScriptFunction",
-    # torch.onnx
-    "CheckerError",
-    "ExportTypes",
     # torch.backends
     "ContextProp",
     "PropModule",
