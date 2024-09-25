@@ -1527,7 +1527,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                 num_tensors = pickle_module.load(f, **pickle_load_args)
                 for _ in range(num_tensors):
                     args = pickle_module.load(f, **pickle_load_args)
-                    key, storage_id, _ = args
+                    key, storage_id, _original_tensor_type = args
                     storage = deserialized_objects[storage_id]
                     (ndim,) = struct.unpack("<i", f.read(4))
                     # skip next 4 bytes; legacy encoding treated ndim as 8 bytes

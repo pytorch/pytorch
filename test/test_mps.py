@@ -739,7 +739,7 @@ def mps_ops_modifier(ops):
         'nn.functional.adaptive_avg_pool3d': None,
         'nn.functional.adaptive_max_pool3d': None,
         'nn.functional.interpolatearea': None,
-        'nn.functional.interpolatebicubic': None,
+        'nn.functional.interpolatebicubic': [torch.uint8],
         'nn.functional.interpolatetrilinear': None,
         'nn.functional.max_unpool1dgrad': None,
         'nn.functional.max_unpool2dgrad': None,

@@ -51,7 +51,7 @@ def _trace_and_get_graph_from_model(model, args):
     # No perf impact for when there are reused weights since https://github.com/pytorch/pytorch/pull/85665
     prev_autocast_cache_enabled = torch.is_autocast_cache_enabled()
     torch.set_autocast_cache_enabled(False)
-    trace_graph, torch_out, _ = torch.jit._get_trace_graph(
+    trace_graph, torch_out, _inputs_states = torch.jit._get_trace_graph(
         model,
         args,
         strict=False,
@@ -954,7 +954,7 @@ class TS2FXGraphConverter:
 
     def convert_aten_to(self, node: torch._C.Node):
         target = get_op_overload(node)
-        args, _ = self.get_args_kwargs(node, target._schema)
+        args, _kwargs = self.get_args_kwargs(node, target._schema)
 
         # special handle aten.to.dtype and aten.to.prim_dtype followed by inplace_mutation_op
         # coz aten.to + inplace_mutation_op pattern would trigger
@@ -1004,7 +1004,7 @@ class TS2FXGraphConverter:
         if target == torch.ops.aten.add.t:
             # special handle python list/tuple add: "aten::add.t(t[] a, t[] b) -> t[]" for
             # RuntimeError: aten::add() Expected a value of type 'List[t]' for argument 'a' but instead found type 'immutable_list'.
-            args, _ = self.get_args_kwargs(node, target._schema)
+            args, _kwargs = self.get_args_kwargs(node, target._schema)
             output_name = node.output().debugName()
             self.name_to_node[output_name] = self.fx_graph.call_function(list_add, args)
         else:
@@ -1185,7 +1185,7 @@ class TS2FXGraphConverter:
         target = get_op_overload(node)
         schema = target._schema
 
-        args, _ = self.get_args_kwargs(node, schema)
+        args, _kwargs = self.get_args_kwargs(node, schema)
 
         output_name = node.output().debugName()
         self.name_to_node[output_name] = args[0]

@@ -71,6 +71,7 @@ from .cpp_utils import (
     INDEX_TYPE,
     LocalBufferContext,
     promote_args,
+    template_fusion_with_epilogues_supported,
     unify_mask_base_type,
     value_to_cpp,
 )
@@ -2528,7 +2529,7 @@ class CppVecKernel(CppKernel):
                 n_idx = self._get_num_vectors(torch.int64)
                 cdtype = DTYPE_TO_CPP[dtype]
                 index = ops.index_expr(index, torch.int64).value
-                assert index.is_vec
+                assert isinstance(index, CppCSEVariable) and index.is_vec
                 line = f"atomic_add_vec<{cdtype}, {n_idx}, {n_src}>({var}, {index}, {value});"
                 self.stores.writeline(DeferredLine(name, line))
         else:
@@ -3393,7 +3394,7 @@ class TilingSelect:
                             call_ranges[tiling_indice], fallback=0
                         )
                         if call_range < factor_lowp:
-                            V.graph.sizevars.guard_lt(call_range, factor_lowp)
+                            V.graph.sizevars.guard_lt(call_range, factor_lowp)  # type: ignore[arg-type]
                             tiling_factor = factor_lowp // 2
                             break
                     elif call_ranges[tiling_indice] < factor_lowp:
@@ -4148,7 +4149,10 @@ class CppScheduling(BaseScheduling):
             # TODO(jgong5): support pre-op fusion with template
             return False
         if node1.is_template():
-            return not node2.is_reduction()
+            template_fusion_supported, _ = template_fusion_with_epilogues_supported(
+                node1, [node2]
+            )
+            return not node2.is_reduction() and template_fusion_supported
         return (
             self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
         ) or self.can_fuse_vertical_outer_loop(node1, node2)
@@ -4598,7 +4602,7 @@ class KernelGroup:
         new_kernel.codegen_loops(code, ws)
 
     def get_num_args(self):
-        arg_defs, _, _ = self.args.cpp_argdefs()
+        arg_defs, _call_args, _arg_types = self.args.cpp_argdefs()
         args_num = len(arg_defs)
         return args_num
 

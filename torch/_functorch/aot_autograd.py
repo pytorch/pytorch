@@ -22,6 +22,7 @@ from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils.weak import TensorWeakRef
 
 
 static_inputs_log = torch._logging.getArtifactLogger(
@@ -980,9 +981,12 @@ def aot_module_simplified(
     if tracing_context := torch._guards.TracingContext.try_get():
         tracing_context.params_flat = params_flat
         (
-            tracing_context.params_flat_unwrap_subclasses,
+            params_flat_unwrap_subclasses,
             tracing_context.params_unwrapped_to_flat_index,
         ) = unwrap_tensor_subclasses_with_indices_to_original(params_flat)
+        tracing_context.params_flat_unwrap_subclasses = [
+            TensorWeakRef(p) for p in params_flat_unwrap_subclasses
+        ]
 
     aot_autograd_arg_pos_to_source = None
     # Then, the params 1:1 mapped sources, if relevant.
@@ -1068,7 +1072,7 @@ def aot_module_simplified(
         return compiled_fn
 
     # Autograd cache stuff
-    if config.enable_autograd_cache:
+    if config.enable_autograd_cache and not torch._inductor.config.force_disable_caches:
         compiled_fn = AOTAutogradCache.load(
             dispatch_and_compile, mod, fake_flat_args, aot_config, cudagraphs
         )
@@ -1402,7 +1406,7 @@ def aot_export_joint_simple(
 
     if config.debug_assert:
         # Smoke test that after partitioning, we can run the forward without any calling convention changes.
-        fw_module, _ = aot_config.default_partition(  # noqa: F821
+        fw_module, _bw_module = aot_config.default_partition(  # noqa: F821
             fx_g, args, num_fwd_outputs=len(fw_metadata.output_infos)  # noqa: F821
         )
         # Attempt to run the fw_module with the original user inputs

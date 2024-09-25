@@ -319,7 +319,7 @@ def cuda_allocation_context():
         addr = seg['address']
         for blk in seg['blocks']:
             if blk['state'] == 'active_allocated':
-                frames, _ = _block_extra(blk)
+                frames, _real_size = _block_extra(blk)
                 addr_to_frame[addr] = frames
             addr += blk['size']
 
