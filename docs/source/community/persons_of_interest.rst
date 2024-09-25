@@ -227,9 +227,9 @@ Build + CI
 -  Alban Desmaison (`alband <https://github.com/alband>`__)
 -  Andrey Talman (`atalman <https://github.com/atalman>`__)
 -  Zain Rizvi (`ZainRizvi <https://github.com/ZainRizvi>`__)
--  (emeritys) Mikey Dagitses (`dagitses <https://github.com/dagitses>`__)
--  (emeritys) Omkar Salpekar (`osalpekar <https://github.com/osalpekar>`__)
--  (emeritys) Nirav Mehta (`mehtanirav <https://github.com/mehtanirav>`__)
+-  (emeritus) Mikey Dagitses (`dagitses <https://github.com/dagitses>`__)
+-  (emeritus) Omkar Salpekar (`osalpekar <https://github.com/osalpekar>`__)
+-  (emeritus) Nirav Mehta (`mehtanirav <https://github.com/mehtanirav>`__)
 -  (emeritus) Zhuojie Zhou (`zhouzhuojie <https://github.com/zhouzhuojie>`__)
 -  (emeritus) Edward Yang (`ezyang <https://github.com/ezyang>`__)
 -  (emeritus) Karl Ostmo (`kostmo <https://github.com/kostmo>`__)
@@ -309,7 +309,7 @@ Apple M1/MPS/Metal
 PowerPC
 ~~~~~~~
 
--  Alfredo Mendoza (`avmgithub <https://github.com/avmgithub>`__)
+-  (emeritus) Alfredo Mendoza (`avmgithub <https://github.com/avmgithub>`__)
 
 AArch64 CPU
 ~~~~~~~~~~~~
