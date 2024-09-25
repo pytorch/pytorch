@@ -346,28 +346,6 @@ def skipDtypeChecking(func):
     return wrapper
 
 
-def skip_if_fake_model_and_inititalizer(reason: Optional[str] = None):
-    """skip test with models using ExportedProgram as input.
-
-    Args:
-        reason: The reason for skip the ONNX export test.
-
-    Returns:
-        A decorator for skip tests.
-    """
-
-    def skip_dec(func):
-        @functools.wraps(func)
-        def wrapper(self, *args, **kwargs):
-            if kwargs["use_fake_mode"] and kwargs["include_initializer"]:
-                return unittest.SkipTest(reason)
-            return func(self, *args, **kwargs)
-
-        return wrapper
-
-    return skip_dec
-
-
 def xfail_if_model_type_is_exportedprogram(
     error_message: str, reason: Optional[str] = None
 ):

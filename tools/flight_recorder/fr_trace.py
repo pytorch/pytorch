@@ -21,7 +21,7 @@ Known Issues
   collective easily enough and report that.
 
 Usage
-python fr_trace.py -d <dump dir containing trace files> [-o <output file>]
+python fr_trace.py <dump dir containing trace files> [-o <output file>]
 
 - Omitting the optional output file will still yield analysis information to stdout
 - The output file is a pickle of the flat DB, which may change in format in the future.
@@ -40,7 +40,8 @@ from tools.flight_recorder.components.types import types
 def main(args: Optional[Sequence[str]] = None) -> None:
     config = JobConfig()
     args = config.parse_args(args)
-    details, version = read_dir(args.prefix, args.dir)
+    assert args.trace_dir, "Trace directory trace_dir is required"
+    details, version = read_dir(args.prefix, args.trace_dir)
     db = build_db(details, args, version)
     if args.output:
         with open(args.output, "wb") as f:

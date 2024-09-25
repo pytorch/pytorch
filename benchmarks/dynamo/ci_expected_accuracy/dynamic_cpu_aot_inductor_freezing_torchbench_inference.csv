@@ -114,6 +114,10 @@ hf_Bert_large,pass,0
 
 
 
+hf_BigBird,pass,0
+
+
+
 hf_DistilBert,pass,0
 
 
@@ -123,6 +127,10 @@ hf_GPT2,pass,0
 
 
 hf_GPT2_large,pass_due_to_skip,0
+
+
+
+hf_T5,pass,0
 
 
 
@@ -151,6 +159,10 @@ maml,pass_due_to_skip,0
 
 
 maml_omniglot,pass,0
+
+
+
+mnasnet1_0,pass,0
 
 
 
@@ -223,6 +235,10 @@ resnet50_quantized_qat,fail_to_run,0
 
 
 resnext50_32x4d,pass,0
+
+
+
+shufflenet_v2_x1_0,pass,0
 
 
 
