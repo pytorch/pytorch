@@ -227,7 +227,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                     )
 
                     # Insert another node that handles type promotion
-                    target_dtype = node.meta['val'].dtype
+                    target_dtype = node.meta["val"].dtype
                     type_promotion_node = graph.call_function(
                         torch.ops.prims.convert_element_type.default,
                         (res2, target_dtype),
