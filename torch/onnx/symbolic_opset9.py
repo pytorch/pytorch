@@ -3715,24 +3715,12 @@ def slice(g: jit_utils.GraphContext, self, *args):
             or ((not is_end_none) and (not is_end_onnx_const))
             or dim.node().kind() != "onnx::Constant"
         ):
-            if GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX:
-                raise errors.SymbolicValueError(
-                    "Unsupported: ONNX export of Slice with dynamic inputs. DynamicSlice "
-                    "is a deprecated experimental op. Please use statically allocated "
-                    "variables or export to a higher opset version.",
-                    self,
-                )
-            else:
-                start_unsqueezed = symbolic_helper._unsqueeze_helper(g, start, [0])
-                end_unsqueezed = symbolic_helper._unsqueeze_helper(g, end, [0])
-                dim_unsqueezed = symbolic_helper._unsqueeze_helper(g, dim, [0])
-                return g.op(
-                    "DynamicSlice",
-                    self,
-                    start_unsqueezed,
-                    end_unsqueezed,
-                    dim_unsqueezed,
-                )
+            raise errors.SymbolicValueError(
+                "Unsupported: ONNX export of Slice with dynamic inputs. DynamicSlice "
+                "is a deprecated experimental op. Please use statically allocated "
+                "variables or export to a higher opset version.",
+                self,
+            )
         else:
             start = 0 if is_start_none else symbolic_helper._parse_arg(start, "i")
             end = (
@@ -6387,7 +6375,6 @@ def prim_loop(g: jit_utils.GraphContext, *inputs, **attrs) -> list[_C.Value]:
     values_in_env = g.values_in_env
     params_dict = g.params_dict
 
-    operator_export_type = GLOBALS.operator_export_type
     opset_version = GLOBALS.export_onnx_opset_version
 
     old_blocks = tuple(node.blocks())
@@ -6417,7 +6404,7 @@ def prim_loop(g: jit_utils.GraphContext, *inputs, **attrs) -> list[_C.Value]:
         torch._C._jit_pass_onnx_block(
             old_block,
             new_block_context.block,
-            operator_export_type,
+            _C_onnx.OperatorExportTypes.ONNX,
             env,
             values_in_env,
             False,
@@ -6441,7 +6428,6 @@ def prim_if(g: jit_utils.GraphContext, *inputs, **attrs) -> list[_C.Value]:
     values_in_env = g.values_in_env
     params_dict = g.params_dict
 
-    operator_export_type = GLOBALS.operator_export_type
     opset_version = GLOBALS.export_onnx_opset_version
 
     static_if = inputs[0].node().kind() == "onnx::Constant"
@@ -6480,7 +6466,7 @@ def prim_if(g: jit_utils.GraphContext, *inputs, **attrs) -> list[_C.Value]:
         env = torch._C._jit_pass_onnx_block(
             current_b,
             block,
-            operator_export_type,
+            _C_onnx.OperatorExportTypes.ONNX,
             env,
             values_in_env,
             True,
@@ -6508,7 +6494,7 @@ def prim_if(g: jit_utils.GraphContext, *inputs, **attrs) -> list[_C.Value]:
             torch._C._jit_pass_onnx_block(
                 old_block,
                 new_block_context.block,
-                operator_export_type,
+                _C_onnx.OperatorExportTypes.ONNX,
                 env,
                 values_in_env,
                 False,

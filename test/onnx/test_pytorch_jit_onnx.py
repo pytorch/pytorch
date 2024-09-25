@@ -4,12 +4,13 @@ import pytorch_test_common
 from pytorch_test_common import skipIfNoCuda
 
 import torch
+import torch._C._onnx as _C_onnx
 from torch.onnx import verification
 from torch.onnx._globals import GLOBALS
 from torch.testing._internal import common_utils
 
 
-def _jit_graph_to_onnx_model(graph, operator_export_type, opset_version):
+def _jit_graph_to_onnx_model(graph, opset_version):
     r"""
     This function exports torch::jit::Graph object
     to serialized ONNX ModelProto.
@@ -20,15 +21,13 @@ def _jit_graph_to_onnx_model(graph, operator_export_type, opset_version):
     """
 
     GLOBALS.export_onnx_opset_version = opset_version
-    graph = torch.onnx.utils._optimize_graph(
-        graph, operator_export_type, params_dict={}
-    )
+    graph = torch.onnx.utils._optimize_graph(graph, params_dict={})
     proto, _, _, _ = graph._export_onnx(
         {},
         opset_version,
         {},
         False,
-        operator_export_type,
+        _C_onnx.OperatorExportTypes.ONNX,
         False,
         False,
         {},
@@ -57,9 +56,7 @@ class _TestJITIRToONNX:
         graph = torch._C.parse_ir(graph_ir, parse_tensor_constants)
         jit_outs = torch._C._jit_interpret_graph(graph, example_inputs)
 
-        onnx_proto = _jit_graph_to_onnx_model(
-            graph, torch.onnx.OperatorExportTypes.ONNX, self.opset_version
-        )
+        onnx_proto = _jit_graph_to_onnx_model(graph, self.opset_version)
         ort_sess = onnxruntime.InferenceSession(
             onnx_proto, providers=self.ort_providers
         )

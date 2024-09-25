@@ -18,7 +18,6 @@ class ExportOptions:
     training: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL
     input_names: Optional[Sequence[str]] = None
     output_names: Optional[Sequence[str]] = None
-    operator_export_type: _C_onnx.OperatorExportTypes = _C_onnx.OperatorExportTypes.ONNX
     opset_version: Optional[int] = None
     do_constant_folding: bool = True
     dynamic_axes: Optional[Mapping[str, Union[Mapping[int, str], Sequence[int]]]] = None
