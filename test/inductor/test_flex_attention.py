@@ -26,6 +26,7 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
     noop_mask,
     or_masks,
+    PagedAttention,
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -257,6 +258,24 @@ class TestFlexAttention(InductorTestCase):
             msg = f"{name} Compiled error {compiled_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
             self.assertTrue(False, msg)
 
+    def _check_out(
+        self,
+        golden_out: torch.Tensor,
+        ref_out: torch.Tensor,
+        compiled_out: torch.Tensor,
+    ):
+        dtype = ref_out.dtype
+        with torch.no_grad():
+            # Note, it seems like we really are less accurate than the float32
+            # computation, likely due to the online softmax
+            if dtype == torch.float32:
+                fudge_factor = 10.0
+            else:
+                fudge_factor = 1.1
+
+            # Checkout output
+            self._check_equal(golden_out, ref_out, compiled_out, fudge_factor, "Out")
+
     def _check_out_and_grad(
         self,
         golden_out: torch.Tensor,
@@ -360,6 +379,148 @@ class TestFlexAttention(InductorTestCase):
             v_gold,
             v_ref,
             v,
+        )
+
+    def run_paged_attention(
+        self,
+        score_mod: Optional[Callable],
+        q: Tensor,
+        k: Tensor,
+        v: Tensor,
+        dtype: torch.dtype = torch.float16,
+        block_mask: Optional[BlockMask] = None,
+    ):
+        _, Q_H, Q_S, _ = q.shape
+        KV_B, KV_H, KV_S, QK_D = k.shape
+        _, _, _, V_D = v.shape
+
+        n_pages, page_size, max_batch_size = 32, 128, 5
+
+        if block_mask is None:
+
+            def causal_mask(b, h, q, kv):
+                return q >= kv
+
+            block_mask = create_block_mask(causal_mask, max_batch_size, 1, Q_S, KV_S)
+
+        # allocate cache
+        MAX_CACHED_SEQ_LEN = n_pages * page_size
+        k_cache = torch.zeros(
+            1,
+            KV_H,
+            MAX_CACHED_SEQ_LEN,
+            QK_D,
+            device="cuda",
+            dtype=dtype,
+        )
+        v_cache = torch.zeros(
+            1,
+            KV_H,
+            MAX_CACHED_SEQ_LEN,
+            V_D,
+            device="cuda",
+            dtype=dtype,
+        )
+
+        # "randomly" initialize the page table
+        paged_cache = PagedAttention(
+            n_pages, page_size, max_batch_size, MAX_CACHED_SEQ_LEN
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([100, 200, 50, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([100, 512, 300, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([512, 512, 300, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([512, 512, 512, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([512, 512, 512, 512], device="cuda")
+        )
+
+        # update cache with k and v
+        input_pos = torch.tensor(range(0, KV_S), device="cuda", dtype=torch.int32)
+        paged_cache.update(input_pos, k, k_cache)
+        paged_cache.update(input_pos, v, v_cache)
+
+        # convert block mask and score mod
+        new_block_mask = paged_cache.convert_logical_block_mask(
+            block_mask, MAX_CACHED_SEQ_LEN
+        )
+        compiled_sdpa = torch.compile(
+            create_attention(
+                paged_cache.get_score_mod(score_mod),
+                block_mask,
+                enable_gqa=(not Q_H == KV_H),
+            )
+        )
+
+        # compute
+        compiled_out, compiled_lse = compiled_sdpa(
+            q, k_cache, v_cache, return_lse=True, block_mask=new_block_mask
+        )
+        return compiled_out, compiled_lse
+
+    def run_test_with_paged_attention(
+        self,
+        score_mod: Optional[Callable],
+        dtype: torch.dtype = torch.float16,
+        Q_B: int = B,
+        Q_H: int = H,
+        Q_S: int = S,
+        QK_D: int = D,
+        KV_B: int = B,
+        KV_H: int = H,
+        KV_S: int = S,
+        V_D: int = D,
+        block_mask: Optional[BlockMask] = None,
+    ):
+        if TEST_WITH_ROCM and Q_H != KV_H:
+            self.skipTest("enable_gqa=True is unsupported on ROCM, for now")
+
+        q = torch.randn(
+            (Q_B, Q_H, Q_S, QK_D), dtype=dtype, device="cuda", requires_grad=True
+        )
+        k = torch.randn(
+            (KV_B, KV_H, KV_S, QK_D), dtype=dtype, device="cuda", requires_grad=True
+        )
+        v = torch.randn(
+            (KV_B, KV_H, KV_S, V_D), dtype=dtype, device="cuda", requires_grad=True
+        )
+        q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
+
+        if block_mask is None:
+
+            def causal_mask(b, h, q, kv):
+                return q >= kv
+
+            # TODO: change batch size
+            block_mask = create_block_mask(causal_mask, 4, 1, Q_S, KV_S)
+
+        sdpa_partial = create_attention(
+            score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
+        )
+        golden_out, golden_lse = sdpa_partial(q_gold, k_gold, v_gold, return_lse=True)
+        ref_out, ref_lse = sdpa_partial(q_ref, k_ref, v_ref, return_lse=True)
+
+        compiled_out, compiled_lse = self.run_paged_attention(
+            score_mod, q, k, v, dtype, block_mask
+        )
+
+        self._check_out(
+            golden_out,
+            ref_out,
+            compiled_out,
+        )
+        self._check_out(
+            golden_lse,
+            ref_lse,
+            compiled_lse,
         )
 
     def run_test_with_call(
@@ -2544,10 +2705,405 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         torch.testing.assert_close(causal_mask_out, sdpa_mask_out, atol=5e-3, rtol=0.0)
 
 
+class TestPagedAttention(InductorTestCase):
+    def _check_equal(
+        self,
+        golden_out: torch.Tensor,
+        ref_out: torch.Tensor,
+        compiled_out: torch.Tensor,
+        fudge_factor: float,
+        tensor_name: Optional[str] = None,
+    ):
+        compiled_error = (golden_out - compiled_out).abs().mean()
+        ref_error = (golden_out - ref_out).abs().mean()
+        if torch.isnan(compiled_error).any() or torch.isnan(ref_error).any():
+            self.assertTrue(False, "Output/Grad with NaN")
+        if compiled_error > ref_error * fudge_factor:
+            name = tensor_name if tensor_name is not None else ""
+            msg = f"{name} Compiled error {compiled_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
+            self.assertTrue(False, msg)
+
+    def allocate_page_cache(self, n_pages: int, page_size: int):
+        n_heads, head_dim, max_batch_size, max_seq_len = 4, 8, 3, 128
+        paged_cache = PagedAttention(
+            n_pages, page_size, head_dim, max_batch_size, max_seq_len, n_heads
+        )
+        return paged_cache
+
+    def cdiv(self, x, y):
+        return (x + y - 1) // y
+
+    def roundup(self, x, y):
+        return (x + y - 1) // y * y
+
+    @supported_platform
+    def test_page_allocation(self):
+        n_pages, page_size = 12, 4
+        paged_cache = self.allocate_page_cache(n_pages, page_size)
+
+        num_pages_to_allocate = torch.tensor([2, 6, 4])
+        paged_cache.allocate(num_pages_to_allocate)
+
+        with self.assertRaisesRegex(
+            AssertionError, "requested 2 pages but there are only 0 empty pages"
+        ):
+            paged_cache.allocate(torch.tensor([2]))
+
+        paged_cache.deallocate(batch=torch.tensor([1]))
+        paged_cache.allocate(num_pages_to_allocate=torch.tensor([4]))
+
+    @supported_platform
+    def test_allocate_until_length(self):
+        n_pages, page_size = 12, 4
+        paged_cache = self.allocate_page_cache(n_pages, page_size)
+
+        target_seq_len = torch.tensor([3, 11, 8])
+        paged_cache.allocate_until_length(target_seq_len)
+
+        expected_allocated_pages = self.cdiv(target_seq_len, page_size).sum()
+        self.assertEqual(
+            paged_cache.allocated_seq_len, self.roundup(target_seq_len, page_size)
+        )
+        self.assertEqual(
+            len(paged_cache.empty_pages), n_pages - expected_allocated_pages
+        )
+
+        # deallocate batch 1
+        paged_cache.deallocate(batch=torch.tensor([1]))
+        target_seq_len = torch.tensor([3, 0, 8])
+        expected_allocated_pages = self.cdiv(target_seq_len, page_size).sum()
+        self.assertEqual(
+            paged_cache.allocated_seq_len, self.roundup(target_seq_len, page_size)
+        )
+        self.assertEqual(
+            len(paged_cache.empty_pages), n_pages - expected_allocated_pages
+        )
+
+        # re-allocate
+        target_seq_len = torch.tensor([7, 2, 10])
+        paged_cache.allocate_until_length(target_seq_len)
+        expected_allocated_pages = self.cdiv(target_seq_len, page_size).sum()
+        self.assertEqual(
+            paged_cache.allocated_seq_len, self.roundup(target_seq_len, page_size)
+        )
+        self.assertEqual(
+            len(paged_cache.empty_pages), n_pages - expected_allocated_pages
+        )
+
+        # deallocate all batches
+        paged_cache.deallocate(batch=torch.tensor([0, 1, 2]))
+        self.assertEqual(paged_cache.allocated_seq_len, torch.tensor([0, 0, 0]))
+        self.assertEqual(len(paged_cache.empty_pages), n_pages)
+
+    @supported_platform
+    def test_convert_logical_block_mask(self):
+        n_pages, page_size, max_batch_size, max_seq_len = 16, 128, 2, 512
+        paged_cache = PagedAttention(n_pages, page_size, max_batch_size, max_seq_len)
+        MAX_CACHED_SEQ_LEN = n_pages * page_size
+
+        paged_cache.allocate_until_length(torch.tensor([100, 200], device="cuda"))
+        paged_cache.allocate_until_length(torch.tensor([150, 300], device="cuda"))
+        paged_cache.allocate_until_length(torch.tensor([300, 512], device="cuda"))
+        paged_cache.allocate_until_length(torch.tensor([512, 512], device="cuda"))
+
+        expected_page_table = torch.tensor(
+            [[0, 3, 5, 7], [2, 1, 4, 6]],
+            device="cuda",
+        )
+        self.assertEqual(
+            paged_cache.allocated_seq_len,
+            torch.tensor([512, 512], device="cuda"),
+        )
+        self.assertEqual(paged_cache.page_table, expected_page_table)
+
+        # Get a block mask
+        def causal_mask(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(
+            causal_mask, max_batch_size, 1, max_seq_len, max_seq_len
+        )
+        new_block_mask = paged_cache.convert_logical_block_mask(
+            block_mask, MAX_CACHED_SEQ_LEN
+        )
+
+        # Check that the new block mask is correct
+        expected_kv_num_blocks = torch.tensor(
+            [[[1, 1, 1, 1]], [[1, 1, 1, 1]]], device="cuda", dtype=torch.int32
+        )
+        expected_kv_indices = torch.tensor(
+            [
+                [[[0, 3, 5, 7], [3, 0, 5, 7], [5, 0, 3, 7], [7, 0, 3, 5]]],
+                [[[2, 1, 4, 6], [1, 2, 4, 6], [4, 2, 1, 6], [6, 2, 1, 4]]],
+            ],
+            device="cuda",
+            dtype=torch.int32,
+        )
+        expected_full_kv_num_blocks = torch.tensor(
+            [[[0, 1, 2, 3]], [[0, 1, 2, 3]]], device="cuda:0", dtype=torch.int32
+        )
+        expected_full_kv_indices = torch.tensor(
+            [
+                [[[0, 3, 5, 7], [0, 3, 5, 7], [0, 3, 5, 7], [0, 3, 5, 7]]],
+                [[[2, 1, 4, 6], [2, 1, 4, 6], [2, 1, 4, 6], [2, 1, 4, 6]]],
+            ],
+            device="cuda",
+            dtype=torch.int32,
+        )
+        self.assertEqual(new_block_mask.kv_num_blocks, expected_kv_num_blocks)
+        self.assertEqual(new_block_mask.kv_indices, expected_kv_indices)
+        self.assertEqual(new_block_mask.full_kv_num_blocks, expected_full_kv_num_blocks)
+        self.assertEqual(new_block_mask.full_kv_indices, expected_full_kv_indices)
+
+    @supported_platform
+    def test_convert_mask_mod(self):
+        n_pages, page_size, max_batch_size, max_seq_len = 9, 128, 2, 512
+        paged_cache = PagedAttention(n_pages, page_size, max_batch_size, max_seq_len)
+
+        paged_cache.allocate_until_length(torch.tensor([100, 200], device="cuda"))
+        paged_cache.allocate_until_length(torch.tensor([150, 300], device="cuda"))
+        paged_cache.allocate_until_length(torch.tensor([300, 512], device="cuda"))
+        paged_cache.allocate_until_length(torch.tensor([512, 512], device="cuda"))
+
+        expected_page_table = torch.tensor(
+            [[0, 3, 5, 7], [2, 1, 4, 6]],
+            device="cuda",
+        )
+        self.assertEqual(
+            paged_cache.allocated_seq_len,
+            torch.tensor([512, 512], device="cuda"),
+        )
+        self.assertEqual(paged_cache.page_table, expected_page_table)
+
+        expected_physical_to_logical = torch.tensor(
+            [[0, -1, -1, 1, -1, 2, -1, 3, -1], [-1, 1, 0, -1, 2, -1, 3, -1, -1]],
+            device="cuda",
+        )
+        self.assertEqual(paged_cache.physical_to_logical, expected_physical_to_logical)
+
+        # Get a block mask
+        def causal_mask(b, h, q, kv):
+            return q >= kv
+
+        converted_causal_mask = paged_cache.get_mask_mod(causal_mask)
+
+        # Equivalent to: causal_mask(0, 0, 256, 128)
+        self.assertEqual(converted_causal_mask(0, 0, 256, 384), True)
+        # Equivalent to: causal_mask(0, 1, 256, 128)
+        self.assertEqual(converted_causal_mask(0, 1, 256, 384), True)
+        # Not found corresponding logical block
+        self.assertEqual(converted_causal_mask(1, 0, 256, 384), False)
+        # Equivalent to: causal_mask(1, 0, 64, 14)
+        self.assertEqual(converted_causal_mask(1, 0, 64, 270), True)
+
+
+    @supported_platform
+    def test_update(self):
+        dtype = torch.float32
+
+        n_pages, page_size, max_batch_size, max_seq_len = 6, 2, 2, 6
+        paged_cache = PagedAttention(n_pages, page_size, max_batch_size, max_seq_len)
+
+        n_heads, head_dim = 2, 3
+        cache_shape = (1, n_heads, n_pages * page_size, head_dim)
+        cache = torch.zeros(cache_shape, dtype=dtype, device="cuda")
+        paged_cache.allocate_until_length(torch.tensor([1, 3], device="cuda"))
+        paged_cache.allocate_until_length(torch.tensor([4, 5], device="cuda"))
+        paged_cache.allocate_until_length(torch.tensor([6, 6], device="cuda"))
+
+        expected_page_table = torch.tensor(
+            [[0, 3, 5], [2, 1, 4]],
+            device="cuda",
+        )
+        self.assertEqual(paged_cache.page_table, expected_page_table)
+
+        input_pos = torch.arange(max_seq_len, device="cuda", dtype=torch.int32)
+        k = torch.arange(
+            max_batch_size * n_heads * max_seq_len * head_dim,
+            device="cuda",
+            dtype=dtype,
+        ).view(max_batch_size, n_heads, max_seq_len, head_dim)
+
+        paged_cache.update(input_pos, k, cache)
+
+        expected_cache = torch.tensor(
+            [
+                [
+                    # h = 0
+                    [
+                        # page = 0
+                        [0.0, 1.0, 2.0],
+                        [3.0, 4.0, 5.0],
+                        # page = 1
+                        [42.0, 43.0, 44.0],
+                        [45.0, 46.0, 47.0],
+                        # page = 2
+                        [36.0, 37.0, 38.0],
+                        [39.0, 40.0, 41.0],
+                        # page = 3
+                        [6.0, 7.0, 8.0],
+                        [9.0, 10.0, 11.0],
+                        # page = 4
+                        [48.0, 49.0, 50.0],
+                        [51.0, 52.0, 53.0],
+                        # page = 5
+                        [12.0, 13.0, 14.0],
+                        [15.0, 16.0, 17.0],
+                    ],
+                    # h = 1
+                    [
+                        # page = 0
+                        [18.0, 19.0, 20.0],
+                        [21.0, 22.0, 23.0],
+                        # page = 1
+                        [60.0, 61.0, 62.0],
+                        [63.0, 64.0, 65.0],
+                        # page = 2
+                        [54.0, 55.0, 56.0],
+                        [57.0, 58.0, 59.0],
+                        # page = 3
+                        [24.0, 25.0, 26.0],
+                        [27.0, 28.0, 29.0],
+                        # page = 4
+                        [66.0, 67.0, 68.0],
+                        [69.0, 70.0, 71.0],
+                        # page = 5
+                        [30.0, 31.0, 32.0],
+                        [33.0, 34.0, 35.0],
+                    ],
+                ]
+            ],
+            device="cuda",
+            dtype=dtype,
+        )
+        self.assertEqual(cache, expected_cache)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_paged_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
+        n_pages, page_size, max_batch_size, max_seq_len = 32, 128, 4, 512
+        n_heads, head_dim = 4, 16
+
+
+        def causal_mask(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(
+            causal_mask, max_batch_size, 1, max_seq_len, max_seq_len
+        )
+        q = torch.randn(
+            max_batch_size,
+            n_heads,
+            max_seq_len,
+            head_dim,
+            device="cuda",
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        k = torch.randn(
+            max_batch_size,
+            n_heads,
+            max_seq_len,
+            head_dim,
+            device="cuda",
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        v = torch.randn(
+            max_batch_size,
+            n_heads,
+            max_seq_len,
+            head_dim,
+            device="cuda",
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+
+        q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
+
+        sdpa_partial = create_attention(score_mod, block_mask, enable_gqa=False)
+
+        golden_out = sdpa_partial(q_gold, k_gold, v_gold)
+        ref_out = sdpa_partial(q_ref, k_ref, v_ref)
+
+        MAX_CACHED_SEQ_LEN = n_pages * page_size
+        k_cache = torch.zeros(
+            1,
+            n_heads,
+            MAX_CACHED_SEQ_LEN,
+            head_dim,
+            device="cuda",
+            dtype=torch.float16,
+        )
+        v_cache = torch.zeros(
+            1,
+            n_heads,
+            MAX_CACHED_SEQ_LEN,
+            head_dim,
+            device="cuda",
+            dtype=torch.float16,
+        )
+
+        paged_cache = PagedAttention(n_pages, page_size, max_batch_size, max_seq_len)
+
+        paged_cache.allocate_until_length(
+            torch.tensor([100, 200, 50, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([100, 512, 300, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([512, 512, 300, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([512, 512, 512, 300], device="cuda")
+        )
+        paged_cache.allocate_until_length(
+            torch.tensor([512, 512, 512, 512], device="cuda")
+        )
+
+        input_pos = torch.tensor(
+            range(0, max_seq_len), device="cuda", dtype=torch.int32
+        )
+        paged_cache.update(input_pos, k, k_cache)
+        paged_cache.update(input_pos, v, v_cache)
+
+        new_block_mask = paged_cache.convert_logical_block_mask(
+            block_mask, MAX_CACHED_SEQ_LEN
+        )
+
+        compiled_sdpa = torch.compile(
+            create_attention(
+                paged_cache.get_score_mod(score_mod), block_mask, enable_gqa=False
+            )
+        )
+        paged_out = compiled_sdpa(q, k_cache, v_cache, block_mask=new_block_mask)
+
+        with torch.no_grad():
+            dtype = ref_out.dtype
+            if dtype == torch.float32:
+                fudge_factor = 10.0
+            else:
+                fudge_factor = 1.1
+
+            # Checkout output
+            self._check_equal(golden_out, ref_out, paged_out, fudge_factor, "Out")
+
+    @supported_platform
+    def test_flex_attention_gqa(self):
+        # flex_attention(q, k, v, block_mask=causal_mask, enable_gqa=True) works with paged cache
+        return
+
+
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
 common_utils.instantiate_parametrized_tests(TestBlockMask)
+common_utils.instantiate_parametrized_tests(TestPagedAttention)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     run_tests()
+
+# TODO: Add test for batch_idx in convert_logical_block_mask

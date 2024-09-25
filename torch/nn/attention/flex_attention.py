@@ -28,6 +28,7 @@ from torch.utils._pytree import tree_map_only
 
 __all__ = [
     "BlockMask",
+    "PagedAttention",
     "flex_attention",
     "create_block_mask",
     "create_mask",
@@ -606,6 +607,10 @@ def _round_up_to_multiple(x, multiple):
     return (x + multiple - 1) // multiple * multiple
 
 
+def _cdiv(x, multiple):
+    return (x + multiple - 1) // multiple
+
+
 def _convert_mask_to_block_mask(
     mask: Tensor,
     KV_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
@@ -868,6 +873,238 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
         kv_indices=torch.zeros([1, 1, 1, 1], dtype=torch.int32, device=device),
         BLOCK_SIZE=_LARGE_SPARSE_BLOCK_SIZE,
     )
+
+
+class PagedAttention:
+    r"""
+    TODO: Add docs
+    """
+
+    def __init__(
+        self,
+        n_pages: int,
+        page_size: int,
+        max_batch_size: int,
+        max_seq_len: int,
+        device: str = "cuda",
+    ):
+        super().__init__()
+        self.page_size = page_size
+
+        # page table: [batch, logical_block_idx] -> physical_page_idx
+        max_seq_pages = _cdiv(max_seq_len, page_size)
+        page_table_shape = (max_batch_size, max_seq_pages)
+        self.page_table = -torch.ones(
+            page_table_shape, dtype=torch.int64, device=device
+        )
+
+        # current allocated sequence length for a specific batch index
+        self.allocated_seq_len = torch.zeros(
+            max_batch_size, dtype=torch.int64, device=device
+        )
+
+        # index of empty pages that is available for allocation
+        self.empty_pages = list(range(n_pages - 1, -1, -1))
+
+        # mapping from physical page index to logical page index
+        self.physical_to_logical = -torch.ones(
+            (max_batch_size, n_pages), dtype=torch.int64, device=device
+        )
+
+    def update(self, batch_idx: Tensor, input_pos: Tensor, val: Tensor, cache: Tensor):
+        """
+        Add docs
+        """
+        # batch_idx: [B] input_pos: [S], val: [B, H, S, D], cache: [1, H, MAX_S, D]
+        if val.requires_grad:
+            raise RuntimeError("val must not require gradient")
+
+        B, H, S, D = val.shape
+        # TODO: Change to runtime error
+        assert B <= batch_idx.shape[0]
+        assert H == cache.shape[1]
+        assert S == input_pos.shape[0]
+        assert D == cache.shape[3]
+        device = val.device
+
+        if not val.is_contiguous():
+            val = val.detach().contiguous()
+
+        # find address
+        logical_block_idx = input_pos // self.page_size  # [S]
+        logical_block_offset = input_pos % self.page_size  # [S]
+        physical_block_idx = self.page_table[batch_idx][:, logical_block_idx]  # [B, S]
+
+        addr = (
+            physical_block_idx * self.page_size + logical_block_offset[None, :]
+        )  # [B, S]
+        addr = addr.unsqueeze(1).expand(B, H, S)  # [B, H, S]
+
+        head_range = (
+            (torch.arange(H, dtype=torch.int, device=device) * cache.shape[2])
+            .view(1, H, 1)
+            .expand(B, H, S)
+        )
+        addr = (addr + head_range).view(-1)
+
+        # update
+        cache.view(-1, D)[addr] = val.view(-1, D)
+
+    def convert_logical_block_mask(
+        self,
+        block_mask: BlockMask,
+        max_cached_seq_len: int,
+        batch_idx: Optional[Tensor] = None,
+    ) -> BlockMask:
+        B, H, ROWS, MAX_BLOCKS_IN_COL = block_mask.kv_indices.shape
+        assert block_mask.BLOCK_SIZE[1] == self.page_size
+        assert B <= self.page_table.size(0)
+        MAX_CACHED_BLOCKS_IN_COL = _cdiv(max_cached_seq_len, self.page_size)
+        device = block_mask.kv_num_blocks.device
+
+        if batch_idx is None:
+            batch_idx = torch.arange(B, device=device)
+        page_table = self.page_table[batch_idx]
+
+        new_kv_num_blocks = block_mask.kv_num_blocks.clone()
+
+        new_kv_indices = torch.empty(
+            (B, H, ROWS, MAX_CACHED_BLOCKS_IN_COL), dtype=torch.int32, device=device
+        )
+        new_kv_indices[:, :, :, :MAX_BLOCKS_IN_COL] = (
+            torch.gather(
+                page_table, 1, block_mask.kv_indices.view(B, -1).to(torch.int64)
+            )
+            .view(block_mask.kv_indices.shape)
+            .to(torch.int32)
+        )
+
+        new_full_kv_indices, new_full_kv_num_blocks = None, None
+        if block_mask.full_kv_num_blocks is not None:
+            assert block_mask.full_kv_indices is not None
+            new_full_kv_num_blocks = block_mask.full_kv_num_blocks.clone()
+            new_full_kv_indices = torch.empty(
+                (B, H, ROWS, MAX_CACHED_BLOCKS_IN_COL), dtype=torch.int32, device=device
+            )
+            new_full_kv_indices[:, :, :, :MAX_BLOCKS_IN_COL] = (
+                torch.gather(
+                    page_table,
+                    1,
+                    block_mask.full_kv_indices.view(B, -1).to(torch.int64),
+                )
+                .view(block_mask.full_kv_indices.shape)
+                .to(torch.int32)
+            )
+
+        new_mask_mod = self.get_mask_mod(block_mask.mask_mod)
+
+        return BlockMask.from_kv_blocks(
+            new_kv_num_blocks,
+            new_kv_indices,
+            new_full_kv_num_blocks,
+            new_full_kv_indices,
+            block_mask.BLOCK_SIZE,
+            new_mask_mod,
+        )
+
+    def get_mask_mod(
+        self, mask_mod: Optional[_mask_mod_signature]
+    ) -> _mask_mod_signature:
+        if mask_mod is None:
+            mask_mod = noop_mask
+
+        def new_mask_mod(b, h, q_idx, physical_kv_idx):
+            physical_kv_block = physical_kv_idx // self.page_size
+            physical_kv_offset = physical_kv_idx % self.page_size
+            logical_block_idx = self.physical_to_logical[b, physical_kv_block]
+            logical_kv_idx = logical_block_idx * self.page_size + physical_kv_offset
+            return torch.where(
+                logical_block_idx >= 0, mask_mod(b, h, q_idx, logical_kv_idx), False
+            )
+
+        return new_mask_mod
+
+    def get_score_mod(
+        self, score_mod: Optional[_score_mod_signature]
+    ) -> _score_mod_signature:
+        if score_mod is None:
+            score_mod = _identity
+
+        def new_score_mod(score, b, h, q_idx, physical_kv_idx):
+            physical_kv_block = physical_kv_idx // self.page_size
+            physical_kv_offset = physical_kv_idx % self.page_size
+            logical_block_idx = self.physical_to_logical[b, physical_kv_block]
+            logical_kv_idx = logical_block_idx * self.page_size + physical_kv_offset
+            return torch.where(
+                logical_block_idx >= 0,
+                score_mod(score, b, h, q_idx, logical_kv_idx),
+                float("-inf"),
+            )
+
+        return new_score_mod
+
+    def get_num_pages_to_allocate(self, target_seq_len: Tensor) -> Tensor:
+        (B,) = target_seq_len.shape
+        num_tokens_to_allocate = torch.maximum(
+            target_seq_len - self.allocated_seq_len[:B],
+            torch.zeros(B, dtype=torch.int64, device=target_seq_len.device),
+        )
+        return _cdiv(num_tokens_to_allocate, self.page_size)  # [B]
+
+    def allocate_single_seq(self, batch_idx: Tensor, num_pages_to_allocate: Tensor):
+        # batch_idx: [1], num_pages_to_allocate: [1]
+        if num_pages_to_allocate == 0:
+            return
+
+        assert (
+            len(self.empty_pages) >= num_pages_to_allocate
+        ), f"requested {num_pages_to_allocate} pages but there are only {len(self.empty_pages)} empty pages"
+        start_page_idx = self.allocated_seq_len[batch_idx] // self.page_size
+        end_page_idx = start_page_idx + num_pages_to_allocate
+
+        # find empty physical pages
+        allocated_pages = torch.tensor(
+            self.empty_pages[-num_pages_to_allocate:],
+            device=num_pages_to_allocate.device,
+        )
+        self.empty_pages = self.empty_pages[:-num_pages_to_allocate]
+
+        # update page table
+        self.page_table[
+            batch_idx,
+            start_page_idx:end_page_idx,
+        ] = allocated_pages
+
+        # update metadata
+        self.physical_to_logical[batch_idx][allocated_pages] = torch.arange(
+            start_page_idx, end_page_idx, device=num_pages_to_allocate.device
+        )
+        self.allocated_seq_len[batch_idx] += num_pages_to_allocate * self.page_size
+
+    def allocate(self, num_pages_to_allocate: Tensor):
+        # num_pages_to_allocate: [B]
+        (B,) = num_pages_to_allocate.shape
+        for b in range(B):
+            self.allocate_single_seq(
+                torch.tensor(b),
+                num_pages_to_allocate[b],
+            )
+
+    def allocate_until_length(self, target_seq_len: Tensor):
+        num_pages_to_allocate = self.get_num_pages_to_allocate(target_seq_len)
+        self.allocate(num_pages_to_allocate)
+
+    def deallocate(self, batch: Tensor):
+        # batch: [1]
+        # find allocated pages
+        allocated_page_idx = self.page_table[batch, :] != -1
+        allocated_pages = self.page_table[batch][allocated_page_idx]
+
+        # clean metadata
+        self.allocated_seq_len[batch] = 0
+        self.empty_pages += allocated_pages.tolist()
+        self.physical_to_logical[batch][allocated_pages] = -1
+        self.page_table[batch] = -1
 
 
 def _apply_kernel_options(
