@@ -90,10 +90,12 @@ def freeze(
 
     if tracing_context := torch._guards.TracingContext.try_get():
         fw_metadata = tracing_context.fw_metadata
-        assert tracing_context.params_flat is not None
-        assert fw_metadata is not None
+        assert tracing_context.params_flat_unwrap_subclasses is not None
+        params_flat = tracing_context.params_flat_unwrap_subclasses
+        assert fw_metadata is not None and params_flat is not None
+
         preserved_arg_indices = replace_params_with_constants(
-            aot_autograd_gm, tracing_context.params_flat, fw_metadata
+            aot_autograd_gm, params_flat, fw_metadata
         )
     else:
         inputs = aot_autograd_gm.graph.find_nodes(op="placeholder")

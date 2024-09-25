@@ -1186,14 +1186,36 @@ def fw_compiler_freezing(
     )
 
     static_input_idxs = list(range(num_fixed))
+    wrapper_new_args_unwrapped_indices: List[int] = []
     # constant params will be real tensors, not fake
     tracing_context = torch._guards.TracingContext.try_get()
+    unwrapped_args_offsets = [0]
+    max_offset_idx = 0
     if tracing_context is not None:
-        assert tracing_context.params_flat is not None
-        params_flat = tracing_context.params_flat
-        for i in range(len(params_flat)):
+        assert tracing_context.params_flat_unwrap_subclasses is not None
+        params_flat_unwrap = tracing_context.params_flat_unwrap_subclasses
+        max_offset_idx = max(0, len(params_flat_unwrap) - 1)
+        preserved_indices_params_flat = set()
+        unwrapped_idxs = tracing_context.params_unwrapped_to_flat_index
+        assert unwrapped_idxs is not None
+        current_offset = 0
+        if len(params_flat_unwrap) > 0:
+            unwrapped_args_offsets = []
+
+        for i in range(len(params_flat_unwrap)):
             if i not in preserved_arg_indices:
-                params_flat[i] = None
+                params_flat_unwrap[i] = None
+                if i > 0 and unwrapped_idxs[i] == unwrapped_idxs[i - 1]:
+                    current_offset += 1
+            else:
+                preserved_indices_params_flat.add(unwrapped_idxs[i])
+            unwrapped_args_offsets.append(current_offset)
+
+        # Deallocate wrapped params, if all subelements were deallocated
+        assert tracing_context.params_flat is not None
+        for i in range(len(tracing_context.params_flat)):
+            if i not in preserved_indices_params_flat:
+                tracing_context.params_flat[i] = None
 
         if tracing_context.fw_metadata:
             static_input_idxs += tracing_context.fw_metadata.static_input_indices
@@ -1217,7 +1239,10 @@ def fw_compiler_freezing(
         return optimized_function
 
     def wrapper(args):
-        args_new = [args[i] for i in preserved_arg_indices]
+        args_new = [
+            args[i - unwrapped_args_offsets[min(i, max_offset_idx)]]
+            for i in preserved_arg_indices
+        ]
         args.clear()
         return optimized_function(args_new)
 
