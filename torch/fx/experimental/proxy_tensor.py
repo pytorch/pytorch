@@ -2060,11 +2060,11 @@ class _MakefxTracer:
                         "name": "make_fx_fail_partial",
                         "encoding": "string",
                     },
-                    payload_fn=lambda: self.fx_tracer.graph.python_code(
+                    payload_fn=lambda: self.fx_tracer.graph.python_code(  # type: ignore[union-attr]
                         root_module="self",
                         verbose=True,
                         include_stride=True,
-                        include_device=True
+                        include_device=True,
                     ).src,
                 )
                 raise
