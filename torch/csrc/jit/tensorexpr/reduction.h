@@ -34,13 +34,13 @@ class TORCH_API Reducer {
   }
 
   ExprHandle operator()(
-      BufHandle result_buf,
+      const BufHandle& result_buf,
       ExprHandle body,
       const std::vector<ExprHandle>& output,
       const std::vector<VarHandle>& inner) const;
 
   ReduceOpPtr operator()(
-      BufPtr result_buf,
+      const BufPtr& result_buf,
       ExprPtr body,
       const std::vector<ExprPtr>& output,
       const std::vector<VarPtr>& inner) const;
@@ -138,7 +138,6 @@ class TORCH_API Reducer {
 // This is intended to be expanded in the loopnest and not make it to codegen.
 class TORCH_API ReduceOp : public ExprNode<ReduceOp> {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ReduceOp(
       const ExprPtr& body,
       std::vector<VarPtr> reduce_args,

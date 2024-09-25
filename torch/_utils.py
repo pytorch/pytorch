@@ -3,12 +3,11 @@ import copyreg
 import functools
 import logging
 import sys
-import threading
 import traceback
 import warnings
 from collections import defaultdict
 from typing import Any, Callable, DefaultDict, Generic, List, Optional
-from typing_extensions import deprecated, ParamSpec
+from typing_extensions import ParamSpec
 
 import torch
 
@@ -109,16 +108,13 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
     return kwargs["async"]
 
 
-_thread_local_state = threading.local()
-
-
 def _get_restore_location(device):
     """Return the map_location location.
 
     Used for rebuild functions where the tensor device is distinct from the storage
     """
 
-    map_location = getattr(_thread_local_state, "map_location", None)
+    map_location = torch.serialization._serialization_tls.map_location
     if map_location is None:
         return device
     else:
@@ -868,10 +864,6 @@ def classproperty(func):
     return _ClassPropertyDescriptor(func)
 
 
-@deprecated(
-    "`torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.",
-    category=FutureWarning,
-)
 def is_compiling() -> bool:
     """
     Indicates whether we are tracing/compiling with torch.compile() or torch.export().

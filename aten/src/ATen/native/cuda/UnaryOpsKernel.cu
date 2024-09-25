@@ -262,7 +262,7 @@ void nan_to_num_kernel_cuda(
 }
 
 void frexp_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half,
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
     // The iter.dtype() here is the dtype of mantissa output.
     // It's a floating point type and must be the same as the input's dtype.
     iter.dtype(),

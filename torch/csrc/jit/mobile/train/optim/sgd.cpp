@@ -5,11 +5,7 @@
 
 #include <ATen/ATen.h>
 
-#include <functional>
-
-namespace torch {
-namespace jit {
-namespace mobile {
+namespace torch::jit::mobile {
 
 bool SGDParamGroup::has_options() const {
   return options_ != nullptr;
@@ -17,12 +13,12 @@ bool SGDParamGroup::has_options() const {
 
 SGDOptions& SGDParamGroup::options() {
   TORCH_CHECK(has_options());
-  return *options_.get();
+  return *options_;
 }
 
 const SGDOptions& SGDParamGroup::options() const {
   TORCH_CHECK(has_options());
-  return *options_.get();
+  return *options_;
 }
 
 void SGDParamGroup::set_options(std::unique_ptr<SGDOptions> options) {
@@ -126,6 +122,4 @@ Tensor SGD::step(const LossClosure& closure) {
   }
   return loss;
 }
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile

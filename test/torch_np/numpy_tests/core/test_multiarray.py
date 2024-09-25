@@ -373,7 +373,7 @@ class TestAttributes(TestCase):
 
     def test_dtypeattr(self):
         assert_equal(self.one.dtype, np.dtype(np.int_))
-        assert_equal(self.three.dtype, np.dtype(np.float_))
+        assert_equal(self.three.dtype, np.dtype(np.float64))
         assert_equal(self.one.dtype.char, "l")
         assert_equal(self.three.dtype.char, "d")
         assert_(self.three.dtype.str[0] in "<>")
@@ -690,12 +690,15 @@ class TestAssignment(TestCase):
         assert_raises(ValueError, operator.setitem, u, 0, bad_sequence())
         assert_raises(ValueError, operator.setitem, b, 0, bad_sequence())
 
-    @skip(reason="longdouble")
+    @skipif(
+        "torch._numpy" == np.__name__,
+        reason="torch._numpy does not support extended floats and complex dtypes",
+    )
     def test_longdouble_assignment(self):
         # only relevant if longdouble is larger than float
         # we're looking for loss of precision
 
-        for dtype in (np.longdouble, np.longcomplex):
+        for dtype in (np.longdouble, np.clongdouble):
             # gh-8902
             tinyb = np.nextafter(np.longdouble(0), 1).astype(dtype)
             tinya = np.nextafter(np.longdouble(0), -1).astype(dtype)
@@ -1396,7 +1399,7 @@ class TestBool(TestCase):
 
     @xfail  # (reason="See gh-9847")
     def test_cast_from_unicode(self):
-        self._test_cast_from_flexible(np.unicode_)
+        self._test_cast_from_flexible(np.str_)
 
     @xfail  # (reason="See gh-9847")
     def test_cast_from_bytes(self):
@@ -1827,7 +1830,7 @@ class TestMethods(TestCase):
         a = np.array(["aaaaaaaaa" for i in range(100)])
         assert_equal(a.argsort(kind="m"), r)
         # unicode
-        a = np.array(["aaaaaaaaa" for i in range(100)], dtype=np.unicode_)
+        a = np.array(["aaaaaaaaa" for i in range(100)], dtype=np.str_)
         assert_equal(a.argsort(kind="m"), r)
 
     @xpassIfTorchDynamo  # (reason="TODO: searchsorted with nans differs in pytorch")
@@ -3486,6 +3489,16 @@ class TestNewaxis(TestCase):
         assert_almost_equal(res.ravel(), 250 * sk)
 
 
+_sctypes = {
+    "int": [np.int8, np.int16, np.int32, np.int64],
+    "uint": [np.uint8, np.uint16, np.uint32, np.uint64],
+    "float": [np.float32, np.float64],
+    "complex": [np.complex64, np.complex128]
+    # no complex256 in torch._numpy
+    + ([np.clongdouble] if hasattr(np, "clongdouble") else []),
+}
+
+
 class TestClip(TestCase):
     def _check_range(self, x, cmin, cmax):
         assert_(np.all(x >= cmin))
@@ -3506,7 +3519,7 @@ class TestClip(TestCase):
         if expected_max is None:
             expected_max = clip_max
 
-        for T in np.sctypes[type_group]:
+        for T in _sctypes[type_group]:
             if sys.byteorder == "little":
                 byte_orders = ["=", ">"]
             else:
@@ -5456,8 +5469,6 @@ class TestMatmul(MatmulCommon, TestCase):
         out = np.zeros((5, 2), dtype=np.complex128)
         c = self.matmul(a, b, out=out)
         assert_(c is out)
-        #      with suppress_warnings() as sup:
-        #          sup.filter(np.ComplexWarning, '')
         c = c.astype(tgt.dtype)
         assert_array_equal(c, tgt)
 
@@ -5839,9 +5850,16 @@ class TestWarnings(TestCase):
         x = np.array([1, 2])
         y = np.array([1 - 2j, 1 + 2j])
 
+        # np.ComplexWarning moved to np.exceptions in numpy>=2.0.0
+        # np.exceptions only available in numpy>=1.25.0
+        has_exceptions_ns = hasattr(np, "exceptions")
+        ComplexWarning = (
+            np.exceptions.ComplexWarning if has_exceptions_ns else np.ComplexWarning
+        )
+
         with warnings.catch_warnings():
-            warnings.simplefilter("error", np.ComplexWarning)
-            assert_raises(np.ComplexWarning, x.__setitem__, slice(None), y)
+            warnings.simplefilter("error", ComplexWarning)
+            assert_raises(ComplexWarning, x.__setitem__, slice(None), y)
             assert_equal(x, [1, 2])
 
 
@@ -6410,7 +6428,7 @@ class TestConversion(TestCase):
             # gh-9972
             assert_equal(4, int_func(np.array("4")))
             assert_equal(5, int_func(np.bytes_(b"5")))
-            assert_equal(6, int_func(np.unicode_("6")))
+            assert_equal(6, int_func(np.str_("6")))
 
             # The delegation of int() to __trunc__ was deprecated in
             # Python 3.11.

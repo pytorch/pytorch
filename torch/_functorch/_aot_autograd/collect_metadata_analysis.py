@@ -9,6 +9,7 @@ a functionalized version of the graph under compilation.
 """
 
 import collections
+import contextlib
 import logging
 from functools import wraps
 from typing import Callable, DefaultDict, Dict, List, Optional
@@ -17,6 +18,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._guards import detect_fake_mode
+from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
@@ -51,6 +53,7 @@ from .utils import _get_autocast_states, KNOWN_TYPES, strict_zip
 zip = strict_zip
 
 log = logging.getLogger(__name__)
+static_input_logger = getArtifactLogger("torch._dynamo", "cudagraph_static_inputs")
 
 
 # Note [Tangents must be contiguous]
@@ -160,16 +163,20 @@ def run_functionalized_fw_and_collect_metadata(
         # It doesn't matter if we run this under predispatch or not because it is
         # only for figuring out metadata
         mode = FunctionalTensorMode(_allow_token_discovery=True)
-        with disable_above, mode:
+        suppress_pending = contextlib.nullcontext()
+        fake_mode = detect_fake_mode()
+        if fake_mode and (shape_env := fake_mode.shape_env):
+            suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
+        with disable_above, mode, suppress_pending:
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_outs = f(*flat_f_args)
             # We didn't do any tracing, so we don't need to process the
             # unbacked symbols, they will just disappear into the ether.
             # Also, prevent memoization from applying.
-            if (fake_mode := detect_fake_mode()) and (shape_env := fake_mode.shape_env):
-                shape_env.pending_fresh_unbacked_symbols.clear()
+            if fake_mode:
                 fake_mode.epoch += 1
+                fake_mode.reset_nt_tensor_id_counter()
 
         if prior_autocast_states != _get_autocast_states():
             raise RuntimeError(
@@ -678,6 +685,10 @@ from a multi-output view call"
                 for i, arg in enumerate(flat_args)
                 if (isinstance(arg, torch.nn.Parameter) or i in passed_indices)
             ]
+
+        static_input_logger.debug(
+            "static input indices metadata analysis: %s", static_input_indices
+        )
 
         f_mutated_inputs = [
             inp

@@ -5,6 +5,18 @@ The core of pytorch does not depend on Python. A
 CMake-based build system compiles the C++ source code into a shared
 object, libtorch.so.
 
+AMD ROCm Support
+------------------------------
+If you're compiling for AMD ROCm then first run this command:
+::
+   cd <pytorch_root>
+
+   # Only run this if you're compiling for ROCm
+   python tools/amd_build/build_amd.py
+
+Additional information about ROCm support can be found in the top-level
+`README <https://github.com/pytorch/pytorch/blob/main/README.md>`_.
+
 Building libtorch using Python
 ------------------------------
 

@@ -150,7 +150,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   void set__impl(const FunctionalTensorWrapper* other);
 
   // Custom implementation of resize_storage_bytes_(self, new_size)
-  void storage_resize_(c10::SymInt new_size);
+  void storage_resize_(const c10::SymInt& new_size);
 
   // Returns whether the current tensor's data was ever mutated
   bool has_data_mutation();
@@ -159,6 +159,16 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // experienced a set_() call.
   bool was_storage_changed() {
     return was_storage_changed_;
+  }
+
+  void set_storage_changed() {
+    was_storage_changed_ = true;
+  }
+
+  // A FunctionalTensor is considered a base if its not a view of another
+  // tensor.
+  bool isBaseTensor() const {
+    return view_metas_.empty();
   }
 
   c10::SymInt get_storage_size(bool before) {
@@ -285,6 +295,8 @@ TORCH_API inline FunctionalTensorWrapper* unsafeGetFunctionalWrapper(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functional_impl != nullptr);
   return functional_impl;
 }
+
+TORCH_API bool isBaseTensor(const at::Tensor& tensor);
 
 TORCH_API bool isFunctionalTensor(const at::Tensor& tensor);
 TORCH_API bool isFunctionalTensor(const std::optional<Tensor>& t);

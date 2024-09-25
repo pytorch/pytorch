@@ -21,6 +21,12 @@ enum class C10_API_ENUM ActivityType {
   NUM_KINETO_ACTIVITIES, // must be the last one
 };
 
+inline std::string actToString(ActivityType t) {
+  const std::string ActivityTypeNames[] = {
+      "CPU", "XPU", "CUDA", "MTIA", "PrivateUse1"};
+  return ActivityTypeNames[static_cast<int>(t)];
+}
+
 enum class C10_API_ENUM ProfilerState {
   Disabled = 0,
   CPU, // CPU-only profiling

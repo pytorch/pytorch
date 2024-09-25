@@ -959,6 +959,9 @@ tensor with a different dtype or device then it's copied as if using
 If :attr:`data` is a NumPy array (an ndarray) with the same dtype and device then a
 tensor is constructed using :func:`torch.from_numpy`.
 
+If :attr:`data` is a CuPy array, the returned tensor will be located on the same device as the CuPy array unless
+specifically overwritten by :attr:`device` or a default device.
+
 .. seealso::
 
     :func:`torch.tensor` never shares its data and creates a new "leaf tensor" (see :doc:`/notes/autograd`).
@@ -1693,22 +1696,21 @@ Example::
     >>> x
     tensor([[ 0.3367,  0.1288,  0.2345],
             [ 0.2303, -1.1229, -0.1863]])
-    >>> x = torch.stack((x, x)) # same as torch.stack((x, x), dim=0)
-    >>> x
+    >>> torch.stack((x, x)) # same as torch.stack((x, x), dim=0)
     tensor([[[ 0.3367,  0.1288,  0.2345],
              [ 0.2303, -1.1229, -0.1863]],
 
             [[ 0.3367,  0.1288,  0.2345],
              [ 0.2303, -1.1229, -0.1863]]])
-    >>> x.size()
+    >>> torch.stack((x, x)).size()
     torch.Size([2, 2, 3])
-    >>> x = torch.stack((x, x), dim=1)
+    >>> torch.stack((x, x), dim=1)
     tensor([[[ 0.3367,  0.1288,  0.2345],
              [ 0.3367,  0.1288,  0.2345]],
 
             [[ 0.2303, -1.1229, -0.1863],
              [ 0.2303, -1.1229, -0.1863]]])
-    >>> x = torch.stack((x, x), dim=2)
+    >>> torch.stack((x, x), dim=2)
     tensor([[[ 0.3367,  0.3367],
              [ 0.1288,  0.1288],
              [ 0.2345,  0.2345]],
@@ -1716,7 +1718,7 @@ Example::
             [[ 0.2303,  0.2303],
              [-1.1229, -1.1229],
              [-0.1863, -0.1863]]])
-    >>> x = torch.stack((x, x), dim=-1)
+    >>> torch.stack((x, x), dim=-1)
     tensor([[[ 0.3367,  0.3367],
              [ 0.1288,  0.1288],
              [ 0.2345,  0.2345]],
@@ -2274,7 +2276,7 @@ add_docstr(
     r"""
 cat(tensors, dim=0, *, out=None) -> Tensor
 
-Concatenates the given sequence of :attr:`seq` tensors in the given dimension.
+Concatenates the given sequence of tensors in :attr:`tensors` in the given dimension.
 All tensors must either have the same shape (except in the concatenating
 dimension) or be a 1-D empty tensor with size ``(0,)``.
 
@@ -3312,38 +3314,6 @@ Example::
     >>> torch.cumprod(a, dim=0)
     tensor([ 0.6001,  0.1241, -0.0238, -0.0233, -0.0157, -0.0000, -0.0000,
              0.0000, -0.0000, -0.0000])
-""".format(**reduceops_common_args),
-)
-
-add_docstr(
-    torch.cumsum,
-    r"""
-cumsum(input, dim, *, dtype=None, out=None) -> Tensor
-
-Returns the cumulative sum of elements of :attr:`input` in the dimension
-:attr:`dim`.
-
-For example, if :attr:`input` is a vector of size N, the result will also be
-a vector of size N, with elements.
-
-.. math::
-    y_i = x_1 + x_2 + x_3 + \dots + x_i
-
-Args:
-    {input}
-    dim  (int): the dimension to do the operation over
-
-Keyword args:
-    {dtype}
-    {out}
-
-Example::
-
-    >>> a = torch.randint(1, 20, (10,))
-    >>> a
-    tensor([13,  7,  3, 10, 13,  3, 15, 10,  9, 10])
-    >>> torch.cumsum(a, dim=0)
-    tensor([13, 20, 23, 33, 46, 49, 64, 74, 83, 93])
 """.format(**reduceops_common_args),
 )
 
@@ -10663,7 +10633,7 @@ Keyword args:
 Example::
 
     >>> torch.nansum(torch.tensor([1., float("nan")]))
-    1.0
+    tensor(1.)
     >>> a = torch.tensor([[1, 2], [3., float("nan")]])
     >>> torch.nansum(a)
     tensor(6.)
@@ -12461,7 +12431,7 @@ ready to be used as a periodic window with functions like
 :meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
 above formula is in fact :math:`\text{window\_length} + 1`. Also, we always have
 ``torch.blackman_window(L, periodic=True)`` equal to
-``torch.blackman_window(L + 1, periodic=False)[:-1])``.
+``torch.blackman_window(L + 1, periodic=False)[:-1]``.
 
 .. note::
     If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.

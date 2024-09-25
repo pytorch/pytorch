@@ -626,6 +626,20 @@ void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
       module_.get());
 #endif
 
+  {
+    // Work around UBSAN crashes which reads 8 byte in front of every function.
+    // Otherwise, if the function was placed at the beginning of a page, reading
+    // 8B before the page could trigger a wild-addr-read ASAN failure if the
+    // page before this function was not mapped.
+    // - https://reviews.llvm.org/D148665
+    // - https://github.com/llvm/llvm-project/issues/65253
+    // Place the variable just before the function,
+    // the optimizer might otherwise disable this workaround.
+    // https://llvm.org/docs/LangRef.html#prefix-data
+    wrapper->setPrefixData(llvm::Constant::getNullValue(
+        llvm::ArrayType::get(llvm::Type::getInt8Ty(getContext()), 8)));
+  }
+
   auto wrapBB = llvm::BasicBlock::Create(getContext(), "wrapBB", wrapper);
   irb_.SetInsertPoint(wrapBB);
   llvm::SmallVector<llvm::Value*, 6> wrappedArgs;
@@ -2754,7 +2768,11 @@ void LLVMCodeGenImpl::optimize(llvm::Module& M) {
   // options.
   llvm::PassBuilder PB(&TM);
 
+#if LLVM_VERSION_MAJOR >= 18 && LLVM_VERSION_MAJOR < 19
+  TM.registerPassBuilderCallbacks(PB, false);
+#else
   TM.registerPassBuilderCallbacks(PB);
+#endif
 
   // Register all the basic analyses with the managers.
   PB.registerModuleAnalyses(MAM);

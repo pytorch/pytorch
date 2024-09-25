@@ -29,7 +29,6 @@ class RendezvousBackendTestMixin(ABC):
     @abstractmethod
     def _corrupt_state(self) -> None:
         """Corrupts the state stored in the backend."""
-        pass
 
     def _set_state(
         self, state: bytes, token: Optional[Any] = None

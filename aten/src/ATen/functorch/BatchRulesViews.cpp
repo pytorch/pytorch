@@ -259,7 +259,7 @@ std::tuple<Tensor, std::optional<int64_t>> squeeze_dim_batch_rule(
 
 std::tuple<Tensor, std::optional<int64_t>> select_batching_rule(const Tensor& self, std::optional<int64_t> bdim, int64_t dim, c10::SymInt index) {
   if (!bdim) {
-    return std::make_tuple(self.select_symint(dim, std::move(index)), nullopt);
+    return std::make_tuple(self.select_symint(dim, std::move(index)), std::nullopt);
   }
 
   auto _self = moveBatchDimToFront(self, bdim);

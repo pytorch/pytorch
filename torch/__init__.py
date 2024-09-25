@@ -308,6 +308,7 @@ def _load_global_deps() -> None:
             "cuda_runtime": "libcudart.so.*[0-9]",
             "cuda_cupti": "libcupti.so.*[0-9]",
             "cufft": "libcufft.so.*[0-9]",
+            "cufile": "libcufile.so.*[0-9]",
             "curand": "libcurand.so.*[0-9]",
             "nvjitlink": "libnvJitLink.so.*[0-9]",
             "cusparse": "libcusparse.so.*[0-9]",
@@ -943,15 +944,22 @@ if not TYPE_CHECKING:
     # non-standard, and attributes of those submodules cannot be pickled since
     # pickle expect to be able to import them as "from _C.sub import attr"
     # which fails with "_C is not a package
-    def _import_extension_to_sys_modules(module, module_name):
+    def _import_extension_to_sys_modules(module, memo=None):
+        if memo is None:
+            memo = set()
+        if module in memo:
+            return
+        memo.add(module)
+        module_name = module.__name__
         for name in dir(module):
             member = getattr(module, name)
-            if inspect.ismodule(member):
-                sys.modules.setdefault(f"{module_name}.{name}", member)
+            member_name = getattr(member, "__name__", "")
+            if inspect.ismodule(member) and member_name.startswith(module_name):
+                sys.modules.setdefault(member_name, member)
                 # Recurse for submodules (e.g., `_C._dynamo.eval_frame`)
-                _import_extension_to_sys_modules(member, f"{module_name}.{name}")
+                _import_extension_to_sys_modules(member, memo)
 
-    _import_extension_to_sys_modules(_C, f"{__name__}._C")
+    _import_extension_to_sys_modules(_C)
     del _import_extension_to_sys_modules
 
 ################################################################################
@@ -1227,6 +1235,7 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.put_` with ``accumulate=True`` when called on a CPU
           tensor
         * :func:`torch.Tensor.scatter_add_` when called on a CUDA tensor
+        * :func:`torch.cumsum` when called on a CUDA tensor
         * :func:`torch.gather` when called on a CUDA tensor that requires grad
         * :func:`torch.index_add` when called on CUDA tensor
         * :func:`torch.index_select` when attempting to differentiate a CUDA tensor
@@ -1273,7 +1282,6 @@ def use_deterministic_algorithms(
         * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
-        * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
@@ -2172,10 +2180,6 @@ class _TorchCompileInductorWrapper:
         self.apply_mode(mode)
         self.apply_options(options)
 
-        # Stash the compiler_fn to be used for backend match guard.
-        from torch._inductor.compile_fx import compile_fx
-
-        self.compiler_fn = compile_fx
         if self.config.get("triton.cudagraphs", False):
             os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
             # FIXME: CUDA Graph does not work well with CUPTI teardown.
@@ -2374,8 +2378,9 @@ def compile(
           There are other circumstances where CUDA graphs are not applicable; use TORCH_LOG=perf_hints
           to debug.
 
-        - "max-autotune" is a mode that leverages Triton based matrix multiplications and convolutions
-          It enables CUDA graphs by default.
+        - "max-autotune" is a mode that leverages Triton or template based matrix multiplications
+          on supported devices and Triton based convolutions on GPU.
+          It enables CUDA graphs by default on GPU.
 
         - "max-autotune-no-cudagraphs" is a mode similar to "max-autotune" but without CUDA graphs
 

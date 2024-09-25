@@ -134,7 +134,7 @@ static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {
 
 static PyTypeObject THPPyInterpreterFrameType = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "torch._C.dynamo.eval_frame._PyInterpreterFrame",
+    .tp_name = "torch._C._dynamo.eval_frame._PyInterpreterFrame",
     .tp_basicsize = sizeof(THPPyInterpreterFrame),
     .tp_flags = Py_TPFLAGS_DEFAULT,
     .tp_getset = THPPyInterpreterFrame_properties,
@@ -518,6 +518,8 @@ static PyObject* _custom_eval_frame_shim(
   return result;
 }
 
+static PyObject* skip_code_recursive_flag;
+
 // NOTE: In 3.12+, the frame evaluation function (callee) is responsible for clearing/popping
 // the frame, meaning that unless we default evaluate the original frame,
 // we are responsible for clearing it - via clear_old_frame_if_python_312_plus.
@@ -576,6 +578,13 @@ static PyObject* _custom_eval_frame(
   if (extra == SKIP_CODE || (callback == Py_False && extra == NULL)) {
     DEBUG_TRACE("skip %s", get_frame_name(frame));
     return eval_frame_default(tstate, frame, throw_flag);
+  }
+  if (extra == SKIP_CODE_RECURSIVE) {
+    DEBUG_TRACE("skip recursive %s", get_frame_name(frame));
+    eval_frame_callback_set(Py_None);
+    PyObject* result = eval_frame_default(tstate, frame, throw_flag);
+    eval_frame_callback_set(callback);
+    return result;
   }
 
   if (extra == NULL) {
@@ -665,6 +674,14 @@ static PyObject* _custom_eval_frame(
     // inside the torch.compile block we won't try to Dynamo anything else.
     *should_clear_frame = 1;
     return NULL;
+  } else if (result == skip_code_recursive_flag) {
+    // Dynamo returned skip_code_recursive_flag, so we should recursively skip code.
+    DEBUG_TRACE("create skip recursive %s", get_frame_name(frame));
+    set_extra_state(F_CODE(frame), SKIP_CODE_RECURSIVE);
+    PyObject* r = eval_frame_default(tstate, frame, throw_flag);
+    // Re-enable custom behavior
+    eval_frame_callback_set(callback);
+    return r;
   } else if (result != Py_None) {
     DEBUG_TRACE("create cache %s", get_frame_name(frame));
 
@@ -709,7 +726,7 @@ static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {NULL};
 
 static PyTypeObject THPPyInterpreterFrameType = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "torch._C.dynamo.eval_frame._PyInterpreterFrame",
+    .tp_name = "torch._C._dynamo.eval_frame._PyInterpreterFrame",
     .tp_basicsize = sizeof(THPPyInterpreterFrame),
     .tp_flags = Py_TPFLAGS_DEFAULT,
     .tp_getset = THPPyInterpreterFrame_properties,
@@ -864,6 +881,14 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
     return NULL;
   }
 #endif
+
+  skip_code_recursive_flag = PyObject_New(PyObject, &PyBaseObject_Type);
+  if (skip_code_recursive_flag == NULL) {
+    return NULL;
+  }
+  if (PyModule_AddObject(module, "skip_code_recursive_flag", skip_code_recursive_flag) != 0) {
+    return NULL;
+  }
 
   return module;
 }

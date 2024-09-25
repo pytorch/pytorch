@@ -33,7 +33,8 @@
     "torch.nn.quantizable": "torch.ao.nn.quantizable",
     "torch.nn.quantizable.modules": "torch.ao.nn.quantizable.modules",
     "torch.nn.quantizable.modules.activation": "torch.ao.nn.quantizable.modules.activation",
-    "torch.nn.quantizable.modules.rnn": "torch.ao.nn.quantizable.modules.rnn"
+    "torch.nn.quantizable.modules.rnn": "torch.ao.nn.quantizable.modules.rnn",
+    "torch.distributed.tensor.device_mesh": "torch.distributed.device_mesh"
   },
   "torch.backends": [
     "contextmanager"
@@ -1926,7 +1927,6 @@
     "get_torch_dispatch_modes",
     "has_proxy_slot",
     "is_sym_node",
-    "maybe_disable_fake_tensor_mode",
     "maybe_handle_decomp",
     "proxy_call",
     "set_meta",

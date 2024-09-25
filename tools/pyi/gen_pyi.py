@@ -136,6 +136,7 @@ blocklist = [
     "requires_grad",
     "range",
     # defined in functional
+    "cumsum",
     "einsum",
     # Somehow, these are defined in both _C and in functional. Ick!
     "broadcast_tensors",
@@ -466,6 +467,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                             "dropout_p: float = 0.0",
                             "is_causal: bool = False",
                             "scale: Optional[float] = None",
+                            "enable_gqa: bool = False",
                         ]
                     )
                 )
@@ -780,6 +782,9 @@ def gen_pyi(
             "_is_functional_tensor": [
                 "def _is_functional_tensor(t: Tensor) -> _bool: ..."
             ],
+            "_is_functional_tensor_base": [
+                "def _is_functional_tensor_base(t: Tensor) -> _bool: ..."
+            ],
             "_from_functional_tensor": [
                 "def _from_functional_tensor(t: Tensor) -> Tensor: ..."
             ],
@@ -791,6 +796,9 @@ def gen_pyi(
             ],
             "_functionalize_commit_update": [
                 "def _functionalize_commit_update(t: Tensor) -> None: ..."
+            ],
+            "_functionalize_unsafe_set": [
+                "def _functionalize_unsafe_set(dst: Tensor, src: Tensor) -> None: ..."
             ],
             "_functionalize_mark_mutation_hidden_from_autograd": [
                 "def _functionalize_mark_mutation_hidden_from_autograd(t: Tensor) -> None: ..."
@@ -807,6 +815,9 @@ def gen_pyi(
             "_functionalize_sync": ["def _functionalize_sync(t: Tensor) -> None: ..."],
             "_functionalize_was_storage_changed": [
                 "def _functionalize_was_storage_changed(tensor: Tensor) -> _bool: ..."
+            ],
+            "_functionalize_set_storage_changed": [
+                "def _functionalize_set_storage_changed(tensor: Tensor) -> _bool: ..."
             ],
             "_functionalize_has_metadata_mutation": [
                 "def _functionalize_has_metadata_mutation(tensor: Tensor) -> _bool: ..."

@@ -31,7 +31,7 @@ extern template int register_conv_params<3>();
 // TODO: there is a table from input dtype and weight dtype to operator qdtype,
 // we can derive the operator dtype based on input dtype
 cudnn_frontend::ConvDesc_v8 getConvDescriptor(cudnnDataType_t dataType, c10::IntArrayRef padding, c10::IntArrayRef stride, c10::IntArrayRef dilation) {
-  uint64_t convDim = stride.size();
+  int64_t convDim = static_cast<int64_t>(stride.size());
   return cudnn_frontend::ConvDescBuilder()
     .setDataType(dataType)
     .setMathMode(CUDNN_CROSS_CORRELATION)
@@ -88,7 +88,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   }
 
   cudnnHandle_t handle = at::native::getCudnnHandle();
-  CacheKey key;
+  CacheKey key{};
   // memset is needed here because there is implicit packing added for CacheKey, and this can result in uninitialized padded values that are
   // used for hashing (see how at::native::ParamsHash is defined). without memset, we can potentially come across a situation where two
   // CacheKey objects have the same user defined parameters, but
@@ -108,7 +108,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   key.output_alignment = cudnn_utils::getAlignment(quantized_output);
   key.weight_alignment = cudnn_utils::getAlignment(maybe_padded_weight_);
   if (bias_.has_value()) {
-    key.bias_alignment = cudnn_utils::getAlignment(broadcasted_bias.value());
+    key.bias_alignment = static_cast<int8_t>(cudnn_utils::getAlignment(broadcasted_bias.value()));
   } else {
     key.bias_alignment = -1;
   }
@@ -129,8 +129,8 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     }
     auto variantPack = cudnn_frontend::VariantPackBuilder()
       .setWorkspacePointer(workspace_size ? workspace_ptr.get() : nullptr)
-      .setDataPointers(uids.size(), data_ptrs.data())
-      .setUids(uids.size(), uids.data())
+      .setDataPointers(static_cast<int64_t>(uids.size()), data_ptrs.data())
+      .setUids(static_cast<int64_t>(uids.size()), uids.data())
       .build();
     auto variant_pack_desc = variantPack.get_raw_desc();
     AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan_desc.get_raw_desc(), variant_pack_desc));
@@ -223,7 +223,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
 
   auto opGraph = cudnn_frontend::OperationGraphBuilder()
       .setHandle(handle)
-      .setOperationGraph(ops.size(), ops.data())
+      .setOperationGraph(static_cast<int64_t>(ops.size()), ops.data())
       .build();
   // std::cout << "opGraph: " << opGraph.describe() << std::endl;
 
@@ -252,7 +252,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
       run(plan);
       execution_plan_cache.emplace(key, plan);
       return;
-    } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << std::endl;} catch(c10::CuDNNError &e) { std::cout << "other error" << e.what() << std::endl;}
+    } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << '\n';} catch(c10::CuDNNError &e) { std::cout << "other error" << e.what() << '\n';}
   }
 
   TORCH_CHECK(false, "Unable to find an engine to execute this computation in Quantized Conv2D Cudnn");
