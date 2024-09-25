@@ -77,9 +77,11 @@ void pythonFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_
         tensors_with_python_key_present = true;
       }
 
-      auto* t_interpreter = t->pyobj_slot()->pyobj_interpreter();
-      if (!interpreter && t_interpreter) {
-        interpreter = t_interpreter;
+      if (!interpreter) {
+        auto* t_interpreter = t->pyobj_slot()->pyobj_interpreter();
+        if (t_interpreter) {
+          interpreter = t_interpreter;
+        }
       }
     } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
       // NB: use toListRef as it doesn't induce refcount bumps (toTensorListRef
@@ -94,9 +96,11 @@ void pythonFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_
           tensors_with_python_key_present = true;
         }
 
-        auto* t_interpreter = t->pyobj_slot()->pyobj_interpreter();
-        if (!interpreter && t_interpreter) {
-          interpreter = t_interpreter;
+        if (!interpreter) {
+          auto* t_interpreter = t->pyobj_slot()->pyobj_interpreter();
+          if (t_interpreter) {
+            interpreter = t_interpreter;
+          }
         }
       }
     }
@@ -107,9 +111,17 @@ void pythonFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_
       (*interpreter)->dispatch(op, stack);
     } else {
       // At this point, there are no modes in the stack and no tensors with the python key.
-      // so remove and disable the python key before redispatching.
-      c10::impl::ExcludeDispatchKeyGuard no_python_guard(c10::DispatchKey::Python);
+      // so disable the python key before redispatching.
+      // See https://github.com/pytorch/pytorch/issues/136565
       c10::DispatchKeySet keyset = dispatch_keys.remove(c10::DispatchKey::Python);
+
+      // Remove Python key from the included set as well (modes add it there).
+      c10::impl::LocalDispatchKeySet local_keyset = c10::impl::tls_local_dispatch_key_set();
+      c10::impl::ForceDispatchKeyGuard no_python_guard(
+        local_keyset.included_.remove(c10::DispatchKey::Python),
+        local_keyset.excluded_
+      );
+
       op.redispatchBoxed(keyset, stack);
     }
     return;
