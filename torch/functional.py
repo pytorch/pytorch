@@ -2085,7 +2085,10 @@ def cumsum(
         if torch.are_deterministic_algorithms_enabled() and self.is_cuda:
             ref_func = importlib.import_module("torch._refs").cumsum
             return ref_func(self, dim, dtype=dtype, out=out)
-    return _VF.cumsum(self, dim, dtype=dtype, out=out)  # type: ignore[attr-defined]
+    if out is None:
+        return _VF.cumsum(self, dim, dtype=dtype)  # type: ignore[attr-defined]
+    else:
+        return _VF.cumsum(self, dim, dtype=dtype, out=out)  # type: ignore[attr-defined]
 
 
 def _lu_impl(A, pivot=True, get_infos=False, out=None):
