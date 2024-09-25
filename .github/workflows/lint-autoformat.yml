@@ -10,7 +10,6 @@ on:
     branches: [gh/**/base]
 
 jobs:
-  # NB: This doesn't work with forked PR https://github.com/parkerbxyz/suggest-changes/issues/33 :(
   lintrunner-autoformat:
     permissions:
       contents: read
