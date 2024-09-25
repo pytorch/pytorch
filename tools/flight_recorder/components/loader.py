@@ -68,6 +68,7 @@ def read_dir(
     details = {}
     t0 = time.time()
     version = ""
+    assert os.path.isdir(folder), f"folder {folder} does not exist"
     for root, _, files in os.walk(folder):
         if prefix is None:
             prefix = _determine_prefix(files)
@@ -78,5 +79,6 @@ def read_dir(
             if not version:
                 version = str(details[f]["version"])
     tb = time.time()
+    assert len(details) > 0, f"no files loaded from {folder} with prefix {prefix}"
     print(f"loaded {len(files)} files in {tb - t0}s")
     return details, version
