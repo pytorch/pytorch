@@ -545,6 +545,45 @@ class DTensorTest(DTensorTestBase):
             reloaded_st = torch.load(buffer, weights_only=True)
             self.assertEqual(sharded_tensor, reloaded_st)
 
+    @with_comms
+    def test_shard(self):
+        ws = self.world_size
+        device_mesh = DeviceMesh(self.device_type, list(range(ws)))
+        full_tensor = torch.arange(ws * ws).reshape(ws, ws)
+
+        # Shard by row
+        placements = [Shard(0)]
+        sharded_tensor = DTensor.shard(full_tensor, placements, device_mesh)
+        self.assertEqual(sharded_tensor.size(), torch.Size([ws, ws]))
+        self.assertEqual(sharded_tensor.placements, placements)
+        local_tensor = sharded_tensor.to_local()
+        self.assertEqual(local_tensor, full_tensor[range(self.rank, self.rank + 1), :])
+
+        # Shard by column
+        placements = [Shard(1)]
+        sharded_tensor = DTensor.shard(full_tensor, placements, device_mesh)
+        self.assertEqual(sharded_tensor.size(), torch.Size([ws, ws]))
+        self.assertEqual(sharded_tensor.placements, placements)
+        local_tensor = sharded_tensor.to_local()
+        self.assertEqual(local_tensor, full_tensor[:, range(self.rank, self.rank + 1)])
+
+        # assert full tensor is not changed
+        self.assertEqual(full_tensor, torch.arange(ws * ws).reshape(ws, ws))
+
+    @with_comms
+    def test_shard_2d(self):
+        ws = self.world_size
+        full_tensor = torch.arange(ws).reshape(2, ws // 2)
+        device_mesh = DeviceMesh(self.device_type, full_tensor)
+
+        # Shard by row and column
+        placements = [Shard(0), Shard(1)]
+        sharded_tensor = DTensor.shard(full_tensor, placements, device_mesh)
+        self.assertEqual(sharded_tensor.size(), torch.Size([2, ws // 2]))
+        self.assertEqual(sharded_tensor.placements, placements)
+        local_tensor = sharded_tensor.to_local()
+        self.assertEqual(local_tensor.item(), self.rank)
+
 
 class DTensorMeshTest(DTensorTestBase):
     @property
