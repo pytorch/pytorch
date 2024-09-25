@@ -2672,6 +2672,8 @@ class Scheduler:
 
         buffer_names_grouping = collections.defaultdict(list)
         for node in nodes:
+            if self.unfusable_node(node):
+                continue
             for buf in node.used_buffer_names():
                 buffer_names_grouping[buf].append(node)
         for node_grouping in buffer_names_grouping.values():
@@ -2894,6 +2896,15 @@ class Scheduler:
             )
 
         return self.score_fusion_memory(node1, node2) > 0
+
+    def unfusable_node(self, node: BaseSchedulerNode) -> bool:
+        """
+        Is this node unfusable under any conditions.
+        """
+        return (
+            isinstance(node, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
+            and not node.is_template()
+        )
 
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
         """
