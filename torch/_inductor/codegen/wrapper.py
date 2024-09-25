@@ -1945,6 +1945,7 @@ class PythonWrapperCodegen(CodeGen):
         assert buffer_reuse_key(input_buffer) == buffer_reuse_key(output_buffer)
         self.codegen_allocation(input_buffer)
         self.freed.add(input_buffer.get_name())
+        self.allocated.remove(input_buffer.get_name())
         self.allocated.add(output_buffer.get_name())
         self.reuses[output_buffer.get_name()] = input_buffer.get_name()
         self.writeline(ReuseLine(self, input_buffer, output_buffer))
