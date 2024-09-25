@@ -1,12 +1,12 @@
 import types
-from typing import Dict, Any
+from typing import Any, Dict
 
 from .utils import ExactWeakKeyDictionary
 
 
 class CodeContextDict:
     def __init__(self) -> None:
-        self.code_context: ExactWeakKeyDictionary[types.CodeType, Dict[str, Any]] = ExactWeakKeyDictionary()
+        self.code_context: ExactWeakKeyDictionary = ExactWeakKeyDictionary()
 
     def has_context(self, code: types.CodeType) -> bool:
         return code in self.code_context
