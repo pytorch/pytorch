@@ -270,7 +270,7 @@ try:
             @functools.wraps(func)
             def wrapper(*args):
                 # Lifts the arguments into a list of Z3 inhabitants.
-                if len(args) == 1 and isinstance(args, (list, tuple)):
+                if len(args) == 1 and isinstance(args[0], (list, tuple)):
                     wrapped_args = (tuple(wrap(a) for a in args[0]),)
                 else:
                     wrapped_args = tuple(wrap(a) for a in args)

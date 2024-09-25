@@ -165,10 +165,12 @@ def insert_deferred_runtime_asserts(
         stack_trace: Optional[str] = None,
         nn_module_stack: Optional[Dict[str, Any]] = None,
     ) -> None:
-        fake_args = [
-            _get_example_value(arg) if isinstance(arg, torch.fx.Node) else arg
-            for arg in node.args
-        ]
+        fake_args = pytree.tree_map(
+            lambda arg: _get_example_value(arg)
+            if isinstance(arg, torch.fx.Node)
+            else arg,
+            node.args,
+        )
         try:
             node.meta[val_key] = node.target(*fake_args)  # type: ignore[operator]
         except NotImplementedError:
