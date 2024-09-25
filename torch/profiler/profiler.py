@@ -871,7 +871,7 @@ class ExecutionTraceObserver(_ITraceObserver):
 
             kernel_files = [
                 v.__file__
-                for v in PyCodeCache.cache.values()
+                for v in PyCodeCache.modules
                 if getattr(v, "__file__", None) is not None
             ]
             work_dir, file_name = os.path.split(self._output_file_path)

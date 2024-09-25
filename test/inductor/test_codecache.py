@@ -582,6 +582,9 @@ class TestFxGraphCache(TestCase):
     @config.patch({"freezing": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
     def test_freezing(self, device):
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
         class MM(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
