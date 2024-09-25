@@ -42,6 +42,8 @@ def average_parameters(
     # Make sure the allreduce will not conflict with any other ongoing process group.
     if torch.cuda.is_available():
         torch.cuda.synchronize()
+    elif torch.xpu.is_available():
+        torch.xpu.synchronize()
     dist.all_reduce(flat_params, group=group_to_use)
 
     offset = 0
