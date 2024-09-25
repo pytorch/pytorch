@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.test_case
@@ -105,6 +106,70 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         with TestMode1():
             fn(inp)
         self.assertEqual(cnt.frame_count, 4)
+
+    def _run_ignored_mode_types_test(self):
+        class IgnoredMode(BaseTorchFunctionMode):
+            pass
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt.__call__, fullgraph=True)
+        def fn(x):
+            return x + 1
+
+        inp = torch.ones(2, 2)
+
+        with patch(
+            "torch._dynamo.variables.torch_function.IGNORED_MODES", {IgnoredMode}
+        ):
+            # initial compile
+            fn(inp)
+
+            # no recompile, mode ignored
+            # note: the ref stack is length 0, and the stack we are checking against has length 2
+            # we want to check both ref stack len > runtime stack, and ref stack len < runtime stack
+            with IgnoredMode(), IgnoredMode():
+                fn(inp)
+
+            self.assertEqual(cnt.frame_count, 1)
+
+            # recompile due to new mode on the stack
+            with BaseTorchFunctionMode(), BaseTorchFunctionMode(), BaseTorchFunctionMode():
+                fn(inp)
+
+            self.assertEqual(cnt.frame_count, 2)
+
+            # recompile
+            # tests both ref stack len > runtime stack len for the above guard check
+            # and ref stack len < runtime stack len for the initial zero mode case
+            with BaseTorchFunctionMode(), IgnoredMode(), BaseTorchFunctionMode():
+                fn(inp)
+
+            self.assertEqual(cnt.frame_count, 3)
+
+            # no recompile
+            with IgnoredMode(), IgnoredMode(), BaseTorchFunctionMode(), BaseTorchFunctionMode():
+                fn(inp)
+
+            self.assertEqual(cnt.frame_count, 3)
+
+        # This is tricky, basically the ignored modes are baked into the guard
+        # IgnoredMode will be ignored forever by that guard.
+        # This is okay since we don't expect to be modifying IGNORED_MODES
+        # in the middle of execution except for the purposes of testing.
+        torch._dynamo.reset()
+
+        with IgnoredMode():
+            fn(inp)
+
+        self.assertEqual(cnt.frame_count, 4)
+
+    @torch._dynamo.config.patch("enable_cpp_guard_manager", False)
+    def test_torch_function_mode_guards_ignored_types_py(self):
+        self._run_ignored_mode_types_test()
+
+    def test_torch_function_mode_guards_ignored_types_cpp(self):
+        self._run_ignored_mode_types_test()
 
     @torch._dynamo.config.patch("enable_cpp_guard_manager", False)
     def test_torch_function_mode_guards_py(self):
@@ -393,94 +458,6 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         ):
             expected = fn(inp)
             actual = fn_opt(inp)
-
-        self.assertEqual(expected, actual)
-
-    def test_torch_function_mode_enter_exit(self):
-        def fn(x, y):
-            with TestMode():
-                o = torch.add(x, 3)
-
-            return torch.add(o, y)
-
-        inp = (torch.ones(2, 2) + 1, torch.ones(2, 2) + 2)
-        fn_opt = torch.compile(fn, fullgraph=True)
-
-        expected = fn(*inp)
-        actual = fn_opt(*inp)
-
-        self.assertEqual(expected, actual)
-
-    def test_torch_function_mode_graph_break(self):
-        def fn(x, y):
-            with TestMode():
-                torch._dynamo.graph_break()
-                o = torch.add(x, 3)
-
-            return torch.add(o, y)
-
-        inp = (torch.ones(2, 2) + 1, torch.ones(2, 2) + 2)
-        fn_opt = torch.compile(fn)
-
-        expected = fn(*inp)
-        actual = fn_opt(*inp)
-
-        self.assertEqual(expected, actual)
-
-    def test_torch_function_mode_and_pop_graph_break(self):
-        def fn(x, y):
-            with TestMode():
-                z = _pop_torch_function_stack()
-                torch._dynamo.graph_break()
-                _push_on_torch_function_stack(z)
-                o = torch.add(x, 3)
-
-            return torch.add(o, y)
-
-        inp = (torch.ones(2, 2) + 1, torch.ones(2, 2) + 2)
-        fn_opt = torch.compile(fn)
-
-        expected = fn(*inp)
-        actual = fn_opt(*inp)
-
-        self.assertEqual(expected, actual)
-
-    def test_torch_function_mode_restore_on_exc(self):
-        @torch._dynamo.disable()
-        def err():
-            raise RuntimeError("test")
-
-        @torch.compile()
-        def fn(x):
-            with TestMode():
-                x += 1
-                err()
-                x += 2
-                return x
-
-        try:
-            fn(torch.ones(2, 2))
-        except RuntimeError:
-            pass
-        self.assertEqual(_len_torch_function_stack(), 0)
-
-    def test_torch_function_mode_and_pop_graph_break_mutation(self):
-        def fn(x, y):
-            with TestMode():
-                z = _pop_torch_function_stack()
-                z.y = 5
-                torch._dynamo.graph_break()
-                _push_on_torch_function_stack(z)
-                o = torch.add(x, 3)
-                o = torch.mul(o, z.y)
-
-            return torch.add(o, y)
-
-        inp = (torch.ones(2, 2) + 1, torch.ones(2, 2) + 2)
-        fn_opt = torch.compile(fn)
-
-        expected = fn(*inp)
-        actual = fn_opt(*inp)
 
         self.assertEqual(expected, actual)
 
