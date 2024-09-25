@@ -5048,6 +5048,10 @@ class TestMemPool(TestCase):
         # pool should point to the same allocator as the one passed into it
         self.assertEqual(allocator.allocator(), pool.allocator)
 
+        # pool's use count should be 1 at this point as MemPool object
+        # holds a reference
+        self.assertEqual(pool.use_count(), 1)
+
         # no allocations happened yet, so called_dummy_alloc should be 0
         alloc_lib = ctypes.CDLL(dummy_allocator)
         called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
@@ -5056,21 +5060,20 @@ class TestMemPool(TestCase):
         with torch.cuda.use_mem_pool(pool):
             out_0 = torch.randn(1, device="cuda")
 
+            # pool's use count should be 2 at this point as use_mem_pool
+            # holds a reference
+            self.assertEqual(pool.use_count(), 2)
+
+        # pool's use count should be back to 1 at this point as use_mem_pool
+        # released its reference
+        self.assertEqual(pool.use_count(), 1)
+
         # called_dummy_alloc should be 123 if dummy_alloc was used to allocate
         # out tensor
         self.assertEqual(called_dummy_alloc.value, 123)
 
         with torch.cuda.use_mem_pool(pool):
             out_1 = torch.randn(1, device="cuda")
-
-        # pool's use count should be 2, since there are two use_mem_pools
-        # using it above
-        self.assertEqual(pool.use_count(), 2)
-
-        pool.release()
-        # pool's use count should now be 0, since release() calls releasePool
-        # twice based on the use_count()
-        self.assertEqual(pool.use_count(), 0)
 
     def test_mempool_context(self):
         active_pool = torch.cuda.MemPoolContext.active_pool()
