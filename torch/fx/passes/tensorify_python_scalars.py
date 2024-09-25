@@ -211,7 +211,13 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                         transform = True
                         # TODO: populate meta on these
                         try:
-                            res = _sympy_interp(zf.node.expr).node
+                            res = graph.call_function(
+                                torch.ops.prims.convert_element_type.default,
+                                (
+                                    _sympy_interp(zf.node.expr).node,
+                                    node.meta["val"].dtype,
+                                ),
+                            )
                         except NotImplementedError:
                             transform = False
                             break
@@ -226,14 +232,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                         tuple(args),
                     )
 
-                    # Insert another node that handles type promotion
-                    target_dtype = node.meta["val"].dtype
-                    type_promotion_node = graph.call_function(
-                        torch.ops.prims.convert_element_type.default,
-                        (res2, target_dtype),
-                    )
-
-                    node.replace_all_uses_with(type_promotion_node, propagate_meta=True)
+                    node.replace_all_uses_with(res2, propagate_meta=True)
                     graph.erase_node(node)
 
     # DCE symbols (which are guaranteed to be pure) only
