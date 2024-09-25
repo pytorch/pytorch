@@ -189,23 +189,21 @@ def is_cpu_scalar(x: TensorLikeType) -> bool:
     return x.dim() == 0 and x.device.type == "cpu"
 
 
-def _safe_copy_out(
-    *,
-    copy_from: TensorLikeType,
-    copy_to: TensorLikeType,
-    copy_cpu_scalars: bool = True,
-    exact_dtype: bool = False,
-):
-    # Checks same device
-    if (
-        not (is_cpu_scalar(copy_from) and copy_cpu_scalars)
-        and copy_from.device != copy_to.device
-    ):
+def check_copy_devices(*, copy_from: TensorLikeType, copy_to: TensorLikeType) -> None:
+    if copy_from.device != copy_to.device:
         msg = (
             f"Attempting to copy from device {copy_from.device} "
             f"to device {copy_to.device}, but cross-device copies are not allowed!"
         )
         raise RuntimeError(msg)
+
+
+def _safe_copy_out(
+    *, copy_from: TensorLikeType, copy_to: TensorLikeType, exact_dtype: bool = False
+):
+    # Checks same device
+    if not is_cpu_scalar(copy_from):
+        check_copy_devices(copy_from=copy_from, copy_to=copy_to)
 
     # Checks safe cast
     if exact_dtype:
@@ -274,6 +272,12 @@ def out_wrapper(
                     out_attr = getattr(out, k)
                     if k not in kwargs:
                         kwargs[k] = out_attr
+            if isinstance(out, TensorLike):
+                check_copy_devices(copy_from=args[0], copy_to=out)
+            elif isinstance(out, (tuple, list)):
+                for o in out:
+                    check_copy_devices(copy_from=args[0], copy_to=o)
+
             if pass_is_out:
                 result = fn(*args, is_out=(out is not None), **kwargs)  # type: ignore[arg-type]
             else:
@@ -307,12 +311,7 @@ def out_wrapper(
                     _maybe_resize_out(
                         out, result.shape, maybe_compute_memory_format(result)  # type: ignore[union-attr]
                     )
-                    _safe_copy_out(
-                        copy_from=result,  # type: ignore[arg-type]
-                        copy_to=out,
-                        exact_dtype=exact_dtype,
-                        copy_cpu_scalars=False,
-                    )
+                    _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
                 else:
                     assert isinstance(out, Tuple)  # type: ignore[arg-type]
                     torch._check_type(
@@ -322,12 +321,7 @@ def out_wrapper(
                     for r, o in zip(result, out):  # type: ignore[arg-type]
                         # These two operations are done in-place
                         _maybe_resize_out(o, r.shape, maybe_compute_memory_format(r))
-                        _safe_copy_out(
-                            copy_from=r,
-                            copy_to=o,
-                            exact_dtype=exact_dtype,
-                            copy_cpu_scalars=False,
-                        )
+                        _safe_copy_out(copy_from=r, copy_to=o, exact_dtype=exact_dtype)  # type: ignore[arg-type]
             else:
                 out = result
             # mypy does not see through  the definition of out_type given that it's in a different scope
