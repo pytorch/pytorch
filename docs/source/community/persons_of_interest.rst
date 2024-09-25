@@ -34,8 +34,8 @@ NN APIs (torch.nn)
 ~~~~~~~~~~~~~~~~~~
 
 -  Mikayla Gawarecki (`mikaylagawarecki <https://github.com/mikaylagawarecki>`__)
--  Joel Schlosser (`jbschlosser <https://github.com/jbschlosser>`__)
 -  Alban Desmaison (`albanD <https://github.com/albanD>`__)
+-  Joel Schlosser (`jbschlosser <https://github.com/jbschlosser>`__)
 -  (emeritus) Greg Chanan (`gchanan <https://github.com/gchanan>`__)
 -  (emeritus) Soumith Chintala (`soumith <https://github.com/soumith>`__)
 -  (emeritus) Sam Gross (`colesbury <https://github.com/colesbury>`__)
@@ -54,17 +54,17 @@ Optimizers (torch.optim)
 Autograd (torch.autograd)
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
--  Edward Yang (`ezyang <https://github.com/ezyang>`__)
--  Alban Desmaison (`alband <https://github.com/alband>`__)
 -  Jeffrey Wan (`soulitzer <https://github.com/soulitzer>`__)
+-  Alban Desmaison (`alband <https://github.com/alband>`__)
+-  Edward Yang (`ezyang <https://github.com/ezyang>`__)
 -  (emeritus) Adam Paszke (`apaszke <https://github.com/apaszke>`__)
 
 TorchDynamo
 ~~~~~~~~~~~
 
+-  Animesh Jain (`anijain2305 <https://github.com/anijain2305>`__)
 -  Jason Ansel (`jansel <https://github.com/jansel>`__)
 -  Edward Yang (`ezyang <https://github.com/ezyang>`__)
--  Animesh Jain (`anijain2305 <https://github.com/anijain2305>`__)
 
 TorchInductor
 ~~~~~~~~~~~~~
@@ -82,8 +82,8 @@ Cudagraph Tree
 PT2 Dispatcher
 ~~~~~~~~~~~~~~
 
--  Richard Zou (`zou3519 <https://github.com/zou3519>`__)
 -  Brian Hirsh (`bdhirsh <https://github.com/bdhirsh>`__)
+-  Richard Zou (`zou3519 <https://github.com/zou3519>`__)
 -  Horace He (`Chillee <https://github.com/Chillee>`__)
 -  Edward Yang (`ezyang <https://github.com/ezyang>`__)
 
@@ -97,8 +97,8 @@ AOT Inductor (AOTI) & AOTI Runtime
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  Bin Bao (`desertfire <https://github.com/desertfire>`__)
--  Yang Chen (`chenyang78 <https://github.com/chenyang78>`__)
 -  Angela Yi (`angelayi <https://github.com/angelayi>`__)
+-  Yang Chen (`chenyang78 <https://github.com/chenyang78>`__)
 
 Compilers (JIT / TorchScript / Package / Deploy)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -123,11 +123,11 @@ Distributions & RNG
 Distributed
 ~~~~~~~~~~~
 -  Will Constable (`wconstab <https://github.com/wconstab>`__)
+-  Howard Huang (`H-Huang <https://github.com/H-Huang>`__)
 -  Wanchao Liang (`wanchaol <https://github.com/wanchaol>`__)
--  Tristan Rice (`d4l3k <https://github.com/d4l3k>`__)
 -  Ke Wen (`kwen2501 <https://github.com/kwen2501>`__)
 -  Chien-Chin Huang (`fegin <https://github.com/fegin>`__)
--  Howard Huang (`H-Huang <https://github.com/H-Huang>`__)
+-  Tristan Rice (`d4l3k <https://github.com/d4l3k>`__)
 -  (emeritus) Shen Li (`mrshenli <https://github.com/mrshenli>`__)
 -  (emeritus) Pritam Damania (`pritamdamania87 <https://github.com/pritamdamania87>`__)
 -  (emeritus) Yanli Zhao (`zhaojuanmao <https://github.com/zhaojuanmao>`__)
@@ -167,11 +167,11 @@ Sparse (torch.sparse)
 NestedTensor (torch.nested)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
--  Alban Desmaison (`albanD <https://github.com/albanD>`__)
+-  Joel Schlosser (`jbschlosser <https://github.com/jbschlosser>`__)
 -  Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
 -  Driss Guessous (`drisspg <https://github.com/drisspg>`__)
--  Joel Schlosser (`jbschlosser <https://github.com/jbschlosser>`__)
 -  Mikayla Gawarecki (`mikaylagawarecki <https://github.com/mikaylagawarecki>`__)
+-  Alban Desmaison (`albanD <https://github.com/albanD>`__)
 -  (emeritus) Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
 
 MaskedTensor (torch.masked)
@@ -189,9 +189,9 @@ Fast Fourier Transform (torch.fft)
 MKLDNN
 ~~~~~~
 
+-  Xiaobing Zhang (`XiaobingSuper <https://github.com/XiaobingSuper>`__)
 -  Mingfei Ma (`mingfeima <https://github.com/mingfeima>`__)
 -  Jiong Gong (`jgong5 <https://github.com/jgong5>`__)
--  Xiaobing Zhang (`XiaobingSuper <https://github.com/XiaobingSuper>`__)
 -  (emeritus) Xiaoqiang Zheng (`zheng-xq <https://github.com/zheng-xq>`__)
 -  (emeritus) Sam Gross (`colesbury <https://github.com/colesbury>`__)
 -  (emeritus) Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
@@ -215,8 +215,8 @@ CUDA
 AMD/ROCm/HIP
 ~~~~~~~~~~~~
 
--  Jithun Nair (`jithunnair-amd <https://github.com/jithunnair-amd>`__)
 -  Jeff Daily (`jeffdaily <https://github.com/jeffdaily>`__)
+-  Jithun Nair (`jithunnair-amd <https://github.com/jithunnair-amd>`__)
 -  (emeritus) Junjie Bai (`bddppq <https://github.com/bddppq>`__)
 
 Build + CI
@@ -237,9 +237,6 @@ Build + CI
 Performance Tools
 ~~~~~~~~~~~~~~~~~
 
--  Shivam Raikundalia (`sraikund <https://github.com/sraikund>`__)
--  Adnan Aziz (`adnanaziz <https://github.com/adnanaziz>`__)
--  CK Luk (`ckluk <https://github.com/ckluk>`__)
 -  Taylor Robie (`robieta <https://github.com/robieta>`__)
 -  Xu Zhao (`xuzhao9 <https://github.com/xuzhao9>`__)
 -  (emeritus) Victor Bittorf (`bitfort <https://github.com/bitfort>`__)
@@ -290,7 +287,6 @@ Quantization (torch/ao)
 -  Mark Saroufim (`msaroufim <https://github.com/msaroufim>`__)
 -  Vasiliy Kuznetsov (`vkuzo <https://github.com/vkuzo>`__)
 -  Jerry Zhang (`jerryzh168 <https://github.com/jerryzh168>`__)
--  Supriya Rao (`supriyar <https://github.com/supriyar>`__)
 -  (emeritus) Zafar Takhirov (`z-a-f <https://github.com/z-a-f>`__)
 -  (emeritus) Raghuraman Krishnamoorthi (`raghuramank100 <https://github.com/raghuramank100>`__)
 
@@ -384,8 +380,8 @@ TorchAudio
 TorchRec
 ~~~~~~~~
 
--  Paul Zhang (`PaulZhang12 <https://github.com/PaulZhang12>`__)
 -  Colin Taylor (`colin2328 <https://github.com/colin2328>`__)
+-  Paul Zhang (`PaulZhang12 <https://github.com/PaulZhang12>`__)
 -  (emeritus) Dmytro Ivchenko (`divchenko <https://github.com/divchenko>`__)
 
 TorchX
@@ -410,16 +406,16 @@ ExecuTorch (Edge, Mobile)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  Mergen Nachin (`mergennachin <https://github.com/mergennachin>`__)
--  Martin Yuan (`iseeyuan <https://github.com/iseeyuan>`__)
 -  Kimish Patel (`kimishpatel <https://github.com/kimishpatel>`__)
 -  Dave Bort (`dbort <https://github.com/dbort>`__)
+-  Martin Yuan (`iseeyuan <https://github.com/iseeyuan>`__)
 
 TorchTune
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+-  Kartikay Khandelwal (`kartikayk <https://github.com/kartikayk>`__)
 -  Evan Smothers (`ebsmothers <https://github.com/ebsmothers>`__)
 -  Joe Cummings (`joecummings <https://github.com/joecummings>`__)
--  Kartikay Khandelwal (`kartikayk <https://github.com/kartikayk>`__)
 
 TorchChat
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -432,5 +428,5 @@ TorchCodec
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  Nicolas Hug (`nicolashug <https://github.com/nicolashug>`__)
--  Ahmad Sharif (`ahmads <https://github.com/ahmads>`__)
--  Scott Schneider (`scottas <https://github.com/scottas>`__)
+-  Ahmad Sharif (`ahmadsharif1 <https://github.com/ahmadsharif1>`__)
+-  Scott Schneider (`scotts <https://github.com/scotts>`__)
