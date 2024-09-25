@@ -330,7 +330,7 @@ def _get_closure_vars():
             "utils_device": torch.utils._device,
             "device": torch.device,
             "___from_numpy": from_numpy,
-            "___as_tensor": torch.as_tensor,
+            "___as_tensor": torch._as_tensor_fullprec,
             "torch": torch,
             "inspect": inspect,
         }
