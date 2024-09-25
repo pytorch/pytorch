@@ -70,7 +70,6 @@
 #include <utility>
 #include <vector>
 
-
 namespace torch::lazy {
 
 // Copied from ATen/native/utils/ParamUtils.h, which aparently I can't include
@@ -1110,7 +1109,8 @@ std::vector<Shape> compute_shape_stack(at::TensorList tensors, int64_t dim) {
   }
 
   auto result_sizes = tensors[0].sizes().vec();
-  result_sizes.insert(result_sizes.begin() + wrapped_dim, static_cast<long>(tensors.size()));
+  result_sizes.insert(
+      result_sizes.begin() + wrapped_dim, static_cast<long>(tensors.size()));
   return {Shape(tensors[0].scalar_type(), result_sizes)};
 }
 
@@ -1338,7 +1338,12 @@ std::vector<Shape> compute_shape_slice_scatter_symint(
       /*pin_memory=*/::std::nullopt);
   auto out_meta =
       at::compositeexplicitautogradnonfunctional::slice_scatter_symint(
-          self_meta, src_meta, dim, std::move(start), std::move(end), std::move(step));
+          self_meta,
+          src_meta,
+          dim,
+          std::move(start),
+          std::move(end),
+          std::move(step));
   return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
 
@@ -1387,4 +1392,3 @@ std::vector<Shape> compute_shape_uniform(
 }
 
 } // namespace torch::lazy
-
