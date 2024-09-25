@@ -12,6 +12,10 @@ namespace py = pybind11;
 
 extern "C" {
 
+#else
+
+#include <stdbool.h>
+
 #endif
 
 // Flag to just run a frame normally
@@ -40,6 +44,7 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   std::list<CacheEntry> cache_entry_list;
   // Frame state to detect dynamic shape dims
   py::dict frame_state;
+  bool cache_limit_hit{false};
 
   CacheEntry* get_first_entry();
   void move_to_front(CacheEntry* cache_entry);
@@ -67,6 +72,18 @@ CacheEntry* extract_cache_entry(ExtraState* extra_state);
 // return
 //  - extra_state->frame_state: Borrowed.
 FrameState* extract_frame_state(ExtraState* extra_state);
+
+// Returns if this extra_state is marked as cache limit hit.
+// Ownership contract
+// args
+//  - extra_state: Borrowed
+bool extra_state_cache_limit_hit(ExtraState* extra_state);
+
+// Mark that extra_state has hit its cache limit hit.
+// Ownership contract
+// args
+//  - extra_state: Borrowed
+void set_extra_state_cache_limit_hit(ExtraState* extra_state, bool value);
 
 // Ownership contract
 // args

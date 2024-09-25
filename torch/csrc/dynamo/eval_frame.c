@@ -519,6 +519,7 @@ static PyObject* _custom_eval_frame_shim(
 }
 
 static PyObject* skip_code_recursive_flag;
+static PyObject* cache_limit_hit_flag;
 
 // NOTE: In 3.12+, the frame evaluation function (callee) is responsible for clearing/popping
 // the frame, meaning that unless we default evaluate the original frame,
@@ -609,7 +610,9 @@ static PyObject* _custom_eval_frame(
 
   // A callback of Py_False indicates "run only" mode, the cache is checked, but
   // we never compile.
-  if (callback == Py_False) {
+  // Also, if extra is marked as "cache_limit_hit", run in "run only" mode
+  // and skip code recursively if no cache entry is found.
+  if (callback == Py_False || extra_state_cache_limit_hit(extra)) {
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
     _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
     PyObject* maybe_cached_code = lookup(extra, locals, backend);
@@ -623,7 +626,16 @@ static PyObject* _custom_eval_frame(
       return NULL;
     } else if (maybe_cached_code == Py_None) {
       DEBUG_TRACE("cache miss %s", get_frame_name(frame));
-      return eval_frame_default(tstate, frame, throw_flag);
+      if (extra_state_cache_limit_hit(extra)) {
+        // skip code recursively
+        DEBUG_TRACE("skip recursive %s", get_frame_name(frame));
+        eval_frame_callback_set(Py_None);
+      }
+      PyObject *ret = eval_frame_default(tstate, frame, throw_flag);
+      if (extra_state_cache_limit_hit(extra)) {
+        eval_frame_callback_set(callback);
+      }
+      return ret;
     }
     PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
     // used cached version
@@ -678,6 +690,14 @@ static PyObject* _custom_eval_frame(
     // Dynamo returned skip_code_recursive_flag, so we should recursively skip code.
     DEBUG_TRACE("create skip recursive %s", get_frame_name(frame));
     set_extra_state(F_CODE(frame), SKIP_CODE_RECURSIVE);
+    PyObject* r = eval_frame_default(tstate, frame, throw_flag);
+    // Re-enable custom behavior
+    eval_frame_callback_set(callback);
+    return r;
+  } else if (result == cache_limit_hit_flag) {
+    // Dynamo returned cache_limit_hit_flag, so we should recursively skip code.
+    DEBUG_TRACE("create cache limit hit %s", get_frame_name(frame));
+    set_extra_state_cache_limit_hit(extra, true);
     PyObject* r = eval_frame_default(tstate, frame, throw_flag);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
@@ -887,6 +907,14 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
     return NULL;
   }
   if (PyModule_AddObject(module, "skip_code_recursive_flag", skip_code_recursive_flag) != 0) {
+    return NULL;
+  }
+
+  cache_limit_hit_flag = PyObject_New(PyObject, &PyBaseObject_Type);
+  if (cache_limit_hit_flag == NULL) {
+    return NULL;
+  }
+  if (PyModule_AddObject(module, "cache_limit_hit_flag", cache_limit_hit_flag) != 0) {
     return NULL;
   }
 
