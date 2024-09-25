@@ -102,7 +102,7 @@ class TestTritonHeuristics(TestCase):
             tl.store(out_ptr0 + (x0), tmp1, xmask)
 
         triton_meta = {
-            "signature": {0: "*fp32", 1: "*fp32", 2: "i32"},
+            "signature": {"in_ptr0": "*fp32", "out_ptr0": "*fp32", "xnumel": "i32"},
             "device": DeviceProperties.create(torch.device("cuda")),
             "constants": {},
             "configs": [AttrsDescriptor(divisible_by_16=(0, 1, 2), equal_to_1=())],
