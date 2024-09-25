@@ -10,7 +10,8 @@
 #include <torch/csrc/lazy/ts_backend/ops/generic.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 struct TorchScriptIrBuilder : IrBuilder {
   NodePtr MakeDeviceData(
@@ -66,4 +67,5 @@ struct TorchScriptIrBuilder : IrBuilder {
   }
 };
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

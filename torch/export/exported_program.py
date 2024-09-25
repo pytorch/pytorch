@@ -141,6 +141,19 @@ def _fx_collection_equivalence_fn(
     return spec1_type is spec2_type and spec1_context == spec2_context
 
 
+def _register_cia_to_meta(*args, **kwargs):
+    kernel = kwargs["kernel"]
+    del kwargs["kernel"]
+
+    assert torch._C._dispatch_has_kernel_for_dispatch_key(
+        kernel.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+    )
+
+    return kernel._op_dk(
+        torch._C.DispatchKey.CompositeImplicitAutograd, *args, **kwargs
+    )
+
+
 # This list is compiled from DispatchKey.cpp.
 # The idea is that we use these keys to override
 # CIA decomp in export
@@ -176,22 +189,19 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
     # replace their CompositeImplicitAutograd kernels with NotImplemented.
     # The only current users of this mode are variants of aten::to that we will
     # replace with aten::_to_copy in FunctionalTensorMode.__torch_dispatch__.
-    from torch._decomp import _get_decomp_for_cia
 
     saved_tables = {}
     patched_ops = set()
     for op_overload, decomp_callable in cia_ops_to_callable.items():
         saved_tables[op_overload] = op_overload.py_kernels.copy()
         patched_ops.add(op_overload)
+
         for override_dispatch_key in _AUTOGRAD_ALIAS_BACKEND_KEYS_TO_OVERRIDE:
             if override_dispatch_key not in op_overload.py_kernels:
                 # TODO (tmanlaibaatar)https://github.com/pytorch/pytorch/issues/129430
                 op_overload.py_impl(override_dispatch_key)(
                     autograd_not_implemented(op_overload, deferred_error=True)
                 )
-        # See NOTE: Registering old CIA to Meta kernel
-        # It is important that we cache this before we override py_kernels.
-        orig_cia_callable = _get_decomp_for_cia(op_overload)
         if torch._C.DispatchKey.CompositeImplicitAutograd in op_overload.py_kernels:
             del op_overload.py_kernels[torch._C.DispatchKey.CompositeImplicitAutograd]
 
@@ -202,15 +212,9 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
 
         # For fake tensor prop, we do want to register meta kernel directly
         if torch._C.DispatchKey.Meta not in op_overload.py_kernels:
-            # [NOTE] Registering old CIA to Meta kernel
-            # We always register original CIA behavior to the Meta kernel
-            # The reason is when we are fake tensor prop-ing, we end up calling
-            # an operator on Meta backend, which in python dispatcher, will resolve
-            # into CIA key. (see resolve_key in torch/_ops.py) As a result, this CIA
-            # now will call into the custom user defined CIA which can cause a problem.
-            # Since we only run meta impl for shape prop, we should always use the default
-            # behavior.
-            op_overload.py_impl(torch._C.DispatchKey.Meta)(orig_cia_callable)
+            op_overload.py_impl(torch._C.DispatchKey.Meta)(
+                functools.partial(_register_cia_to_meta, kernel=op_overload)
+            )
 
     try:
         yield

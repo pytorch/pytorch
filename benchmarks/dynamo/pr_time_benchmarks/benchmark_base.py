@@ -40,7 +40,7 @@ struct TorchBenchmarkCompileTimeLogEntry {
   # The weight of the record according to current sampling rate
   25: optional i64 weight;
 
-  # The name of the current job. Derived from JOB_NAME, e.g., linux-jammy-py3.8-gcc11 / test (default, 3, 4, linux.2xlarge).
+  # The name of the current job. Derived from JOB_NAME, e.g., linux-jammy-py3.8-gcc11 / test (default, 3, 4, amz2023.linux.2xlarge).
   26: optional string github_job;
 
   # The GitHub user who triggered the job.  Derived from GITHUB_TRIGGERING_ACTOR.

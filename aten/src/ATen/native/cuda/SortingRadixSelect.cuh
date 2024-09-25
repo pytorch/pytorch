@@ -4,7 +4,8 @@
 #include <ATen/cuda/AsmUtils.cuh>
 #include <c10/macros/Macros.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 template <typename scalar_t>
 struct TopKTypeConfig {};
@@ -424,4 +425,5 @@ __device__ void radixSelect(
   // matching `desired` exactly
   *topK = TopKTypeConfig<scalar_t>::deconvert(desired);
 }
-} // namespace at::native
+} // namespace native
+} // namespace at

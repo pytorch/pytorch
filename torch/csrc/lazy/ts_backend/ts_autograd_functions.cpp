@@ -3,11 +3,12 @@
 #include <torch/csrc/lazy/ts_backend/ts_autograd_functions.h>
 #include <torch/csrc/lazy/ts_backend/ts_eager_fallback.h>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 at::Tensor MaxPool3dAutogradFunctionTS::forward(
     torch::autograd::AutogradContext* ctx,
-    const at::Tensor& self,
+    at::Tensor self,
     at::IntArrayRef kernel_size,
     at::IntArrayRef stride,
     at::IntArrayRef padding,
@@ -34,9 +35,9 @@ torch::autograd::variable_list MaxPool3dAutogradFunctionTS::backward(
   auto dilation = ctx->saved_data["dilation"].toIntList().vec();
   auto ceil_mode = ctx->saved_data["ceil_mode"].toBool();
   auto saved = ctx->get_saved_variables();
-  const auto& self = saved[0];
+  auto self = saved[0];
   at::Tensor grad;
-  const auto& indices = saved[1];
+  auto indices = saved[1];
   grad = at::native::call_fallback_fn<
       &ltc_eager_fallback,
       ATEN_OP(max_pool3d_with_indices_backward)>::
@@ -56,4 +57,5 @@ torch::autograd::variable_list MaxPool3dAutogradFunctionTS::backward(
   return grad_inputs;
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

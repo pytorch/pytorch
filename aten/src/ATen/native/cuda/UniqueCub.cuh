@@ -1,6 +1,8 @@
 #include <ATen/core/Tensor.h>
 
-namespace at::native::internal {
+namespace at {
+namespace native {
+namespace internal {
 
 template <typename scalar_t>
 std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
@@ -9,4 +11,6 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
     const bool return_inverse,
     const bool return_counts);
 
-} // namespace at::native::internal
+} // namespace internal
+} // namespace at
+} // namespace native

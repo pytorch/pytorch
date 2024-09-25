@@ -6296,10 +6296,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         # Compute tolerances
         output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
-        # fudge factor of 1.7 for smaller GPUs e.g., A2, A16
-        grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(
-            grads_ref[0], grads_lp_ref[0], 1.7
-        )
+        grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(grads_ref[0], grads_lp_ref[0])
         grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(grads_ref[1], grads_lp_ref[1])
         grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(grads_ref[2], grads_lp_ref[2])
         grad_atols = [grad_q_ref_atol, grad_k_ref_atol, grad_v_ref_atol]
@@ -6729,16 +6726,12 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         loss_nt_compile.backward()
 
         self.assertEqual(v32_dense_eager.grad, v32_dense_compile.grad)
-        self.assertEqual(v32_dense_eager.grad, v32_nt_eager.grad, atol=1e-4, rtol=1e-4)
-        self.assertEqual(
-            v32_dense_eager.grad, v32_nt_compile.grad, atol=1e-4, rtol=1e-4
-        )
+        self.assertEqual(v32_dense_eager.grad, v32_nt_eager.grad)
+        self.assertEqual(v32_dense_eager.grad, v32_nt_compile.grad)
 
         self.assertEqual(v16_dense_eager.grad, v16_dense_compile.grad)
-        self.assertEqual(v16_dense_eager.grad, v16_nt_eager.grad, atol=1e-5, rtol=5e-3)
-        self.assertEqual(
-            v16_dense_eager.grad, v16_nt_compile.grad, atol=1e-5, rtol=5e-3
-        )
+        self.assertEqual(v16_dense_eager.grad, v16_nt_eager.grad)
+        self.assertEqual(v16_dense_eager.grad, v16_nt_compile.grad)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
@@ -7188,14 +7181,10 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         check(nt)
 
-    @dtypes(torch.float32, torch.double, torch.half, torch.bool)
+    @dtypes(torch.float32, torch.double, torch.half)
     @parametrize("nt_dim", [2, 3, 4])
     @parametrize("requires_grad", [False, True])
     def test_to_padded_tensor(self, device, dtype, nt_dim, requires_grad):
-        if dtype is torch.bool and requires_grad:
-            # grads not supported for bool
-            return
-
         if nt_dim == 2:
             post_seq_len_shape = ()
         elif nt_dim == 3:
@@ -7205,9 +7194,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         nt = torch.nested.nested_tensor(
             [
-                torch.randint(2, (n, *post_seq_len_shape), device=device, dtype=dtype)
-                if dtype is torch.bool
-                else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
                 for n in range(2, 9)
             ],
             layout=torch.jagged,
@@ -7228,7 +7215,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         nt2 = nested_from_padded(padded, nt.offsets())
         self.assertEqual(nt, nt2)
 
-        if requires_grad and dtype is not torch.bool:
+        if requires_grad:
             # ensure gradients flow through conversions
             nt2.backward(torch.ones_like(nt2))
             self.assertEqual(nt.grad, torch.ones_like(nt))
@@ -7243,10 +7230,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @parametrize("nt_dim", [2, 3, 4])
     @parametrize("requires_grad", [False, True])
     def test_to_padded_tensor_compile(self, device, dtype, nt_dim, requires_grad):
-        if dtype is torch.bool and requires_grad:
-            # grads not supported for bool
-            return
-
         if nt_dim == 2:
             post_seq_len_shape = ()
         elif nt_dim == 3:
@@ -7256,9 +7239,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         nt = torch.nested.nested_tensor(
             [
-                torch.randint(2, (n, *post_seq_len_shape), device=device, dtype=dtype)
-                if dtype is torch.bool
-                else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
                 for n in range(2, 9)
             ],
             layout=torch.jagged,
@@ -7484,6 +7465,9 @@ COMPILE_FORWARD_FAILURES = {
     # clone() on non-contiguous with holes NJTs currently use unbind(), leading to
     # data-dependent error in torch.compile
     "clone",
+    # torch._dynamo.exc.Unsupported: data dependent operator: aten._local_scalar_dense.default
+    # for inputs where min / max seqlen are not cached
+    "sum",
 }
 
 COMPARE_TENSOR_COMPONENT_EQUALITY = {

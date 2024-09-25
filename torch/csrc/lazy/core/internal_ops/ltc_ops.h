@@ -7,7 +7,8 @@
 #include <mutex>
 #include <string>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 class TORCH_API OpKindWrapper {
  public:
@@ -47,4 +48,5 @@ const OpKindWrapper ltc_replication_pad_backward(
     "lazy_tensors::replication_pad_backward");
 const OpKindWrapper ltc_tensor_data("lazy_tensors::tensor_data");
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

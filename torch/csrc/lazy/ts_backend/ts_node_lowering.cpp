@@ -13,25 +13,26 @@
 #include <torch/csrc/lazy/ts_backend/ir_builder.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 static TSOpVector LowerBuiltin(
     const torch::lazy::Node* node,
-    const std::shared_ptr<torch::jit::GraphFunction>& function,
+    std::shared_ptr<torch::jit::GraphFunction> function,
     const std::vector<torch::jit::NamedValue>& arguments,
     const std::vector<torch::jit::NamedValue>& kwarguments = {}) {
   return LowerTSBuiltin(function, node->op().op, arguments, kwarguments);
 }
 static TSOpVector LowerBuiltin(
     c10::Symbol sym,
-    const std::shared_ptr<torch::jit::GraphFunction>& function,
+    std::shared_ptr<torch::jit::GraphFunction> function,
     const std::vector<torch::jit::NamedValue>& arguments,
     const std::vector<torch::jit::NamedValue>& kwarguments = {}) {
   return LowerTSBuiltin(function, sym, arguments, kwarguments);
 }
 
 TSOpVector LowerTSBuiltin(
-    const std::shared_ptr<torch::jit::GraphFunction>& function,
+    std::shared_ptr<torch::jit::GraphFunction> function,
     c10::Symbol sym,
     const std::vector<torch::jit::NamedValue>& arguments,
     const std::vector<torch::jit::NamedValue>& kwarguments) {
@@ -55,7 +56,7 @@ TSOpVector LowerTSBuiltin(
 
 static torch::jit::Value* GenerateClone(
     torch::jit::Value* val,
-    const std::shared_ptr<torch::jit::GraphFunction>& function) {
+    std::shared_ptr<torch::jit::GraphFunction> function) {
   std::vector<torch::jit::NamedValue> clone_arguments;
   clone_arguments.emplace_back(val);
   TSOpVector cloned = LowerBuiltin(at::aten::clone, function, clone_arguments);
@@ -67,7 +68,6 @@ static torch::jit::Value* GenerateClone(
 
 // Default node lowering
 TSOpVector TsNode::Lower(
-    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::shared_ptr<torch::jit::GraphFunction> function,
     TSLoweringContext* loctx) const {
   std::vector<torch::jit::NamedValue> arguments;
@@ -95,7 +95,7 @@ torch::lazy::TSOpVector DeviceData::Lower(
       (torch::lazy::LazyGraphExecutor::DeviceDataInfo*)infoptr;
   if (GRAPH_DUMP_ENABLED) {
     LOG(ERROR) << "Lowering device data node, tensor id "
-               << deviceDataInfoPtr->tensor_id << '\n';
+               << deviceDataInfoPtr->tensor_id << std::endl;
   }
   return {loctx->GetParameter(data_)};
 }
@@ -128,4 +128,5 @@ torch::lazy::TSOpVector Scalar::Lower(
   return {loctx->graph()->insertConstant(at::scalar_tensor(value, options))};
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

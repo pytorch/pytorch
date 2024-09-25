@@ -3,14 +3,13 @@
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
-#include <utility>
-
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 TSLoweringContext::TSLoweringContext(
     const std::string& name,
     BackendDevice device)
-    : torch::lazy::LoweringContext(name, std::move(device)),
+    : torch::lazy::LoweringContext(name, device),
       graph_(std::make_shared<torch::jit::Graph>()),
       function_(
           std::make_shared<torch::jit::GraphFunction>(name, graph_, nullptr)) {}
@@ -20,11 +19,7 @@ TSLoweringContext::TSLoweringContext(
     BackendDevice device,
     c10::ArrayRef<const Node*> post_order,
     Util::EmissionMap emit_status)
-    : torch::lazy::LoweringContext(
-          name,
-          std::move(device),
-          post_order,
-          std::move(emit_status)),
+    : torch::lazy::LoweringContext(name, device, post_order, emit_status),
       graph_(std::make_shared<torch::jit::Graph>()),
       function_(
           std::make_shared<torch::jit::GraphFunction>(name, graph_, nullptr)) {
@@ -60,7 +55,7 @@ void TSLoweringContext::AssignOutputOp(
   emitted_outputs_[output] = op;
 }
 
-torch::jit::Value* TSLoweringContext::GetParameter(const BackendDataPtr& data) {
+torch::jit::Value* TSLoweringContext::GetParameter(BackendDataPtr data) {
   const auto ts_data = std::static_pointer_cast<TSData>(data);
   BackendData::Handle handle = ts_data->GetHandle();
   auto it = parameters_map_.find(handle);
@@ -86,4 +81,5 @@ torch::jit::Value* TSLoweringContext::GetParameter(const BackendDataPtr& data) {
   return it->second.param;
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

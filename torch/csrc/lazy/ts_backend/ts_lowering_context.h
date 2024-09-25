@@ -8,7 +8,8 @@
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/ts_backend/ts_node_lowering.h>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 using TSOpVector = std::vector<torch::jit::Value*>;
 
@@ -22,7 +23,7 @@ class TORCH_API TSComputation : public Computation {
   }
 
   int parameters_size() const override {
-    return static_cast<int>(parameter_names_.size());
+    return parameter_names_.size();
   }
 
   const std::vector<Shape>& parameter_shapes() const override {
@@ -123,7 +124,7 @@ class TORCH_API TSLoweringContext : public LoweringContext {
   // If a parameter associated with data has already been declared, it will be
   // returned. Otherwise a new one will be created, associated with the tensor
   // held in data.
-  torch::jit::Value* GetParameter(const BackendDataPtr& data);
+  torch::jit::Value* GetParameter(BackendDataPtr data);
 
   std::shared_ptr<torch::jit::Graph> graph() const {
     return graph_;
@@ -136,7 +137,7 @@ class TORCH_API TSLoweringContext : public LoweringContext {
   };
 
   size_t AddResult(torch::jit::Value* op) {
-    root_tuple_.push_back(op);
+    root_tuple_.push_back(std::move(op));
     return root_tuple_.size() - 1;
   }
 
@@ -147,4 +148,5 @@ class TORCH_API TSLoweringContext : public LoweringContext {
   OutputMap<torch::jit::Value*> emitted_outputs_;
 };
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

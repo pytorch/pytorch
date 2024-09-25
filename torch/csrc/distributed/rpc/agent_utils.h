@@ -3,7 +3,9 @@
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/rpc/utils.h>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 // All RPC peers should call into this function at the same time. Each peer
 // provides its own id and name, and this function uses the given Store to
@@ -39,4 +41,6 @@ TORCH_API int syncCallCount(
     const int worldSize,
     int activeCalls = 0);
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

@@ -896,8 +896,6 @@ class OpInfo:
 
     is_factory_function: bool = False
 
-    skip_correctness_check_compile_vs_eager: bool = False
-
     def __post_init__(self):
         self._original_opinfo_args = asdict(self).copy()
 
@@ -1432,7 +1430,7 @@ class OpInfo:
                 else self.backward_dtypesIfCUDA
             )
         elif device_type == "hpu":
-            backward_dtypes = self.backward_dtypesIfHpu
+            backward_dtype = self.backward_dtypesIfHpu
         else:
             backward_dtypes = self.backward_dtypes
 

@@ -389,10 +389,7 @@ class TritonPrinter(PythonPrinter):
     def _print_Float(self, expr):
         # Use a tensor here to get float64. Otherwise the constant is
         # truncated to float32.
-        if config.is_fbcode() and torch.version.hip:
-            ret = f"{expr}"
-        else:
-            ret = f"tl.full([1], {expr}, tl.float64)"
+        ret = f"tl.full([1], {expr}, tl.float64)"
         return ret
 
     def _print_ToFloat(self, expr):
@@ -1880,8 +1877,8 @@ class TritonKernel(SIMDKernel):
         # Triton performance for bucketize_binary_search is much better when the number
         # of threads equals the number of elements.
         # If we're trying to use a bucketize kernel, we should make sure that an
-        # autotuning config with num_elements_per_warp=(warp_size) exists.
-        self.autotune_hints.add(AutotuneHint.ONE_ELEMENT_PER_THREAD)
+        # autotuning config with num_elements_per_warp=32 exists.
+        self.autotune_hints.add(AutotuneHint.ELEMENTS_PER_WARP_32)
 
         offsets_ptr = self.args.input(offsets_name)
         block_size = self.dense_size_str()
@@ -2651,7 +2648,7 @@ class TritonKernel(SIMDKernel):
         mutated_args = sorted(mutated_args)
 
         triton_meta_signature = signature_to_meta(
-            signature, size_dtype=self.index_dtype, argdefs=argdefs
+            signature, size_dtype=self.index_dtype
         )
         triton_meta = {
             "signature": triton_meta_signature,
@@ -2679,7 +2676,7 @@ class TritonKernel(SIMDKernel):
         for tree in self.active_range_trees():
             sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
             signature.append(sizearg)
-            triton_meta_signature[sizearg.name] = signature_of(
+            triton_meta_signature[len(argdefs)] = signature_of(
                 sizearg, size_dtype=self.index_dtype
             )
             argdefs.append(f"{tree.prefix}numel")
@@ -2697,7 +2694,7 @@ class TritonKernel(SIMDKernel):
         # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
         # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
         for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
-            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index]
+            triton_meta["constants"][arg_num] = 1  # type: ignore[index]
 
         self.triton_meta = triton_meta
 

@@ -176,8 +176,7 @@ class MatchState(Enum):
         return self
 
     def __str__(self) -> str:
-        details = f", {self.culprit}" if self.culprit else ""
-        return f"Error type: {self.name}{details}"
+        return f"Error type: {self.name}, Detail finding {self.culprit if self.culprit else ''}"
 
 
 class Op:
@@ -277,12 +276,12 @@ class Op:
         elif self.type in COLLECTIVES:
             if self.type != other.type:
                 return MatchState.COLLECTIVE_TYPE_MISMATCH(
-                    f"Expected collective type: '{self.type}' does not match found collective type: '{other.type}'"
+                    f"Type '{self.type}' and '{other.type}' do not match"
                 )
             if self.state != other.state:
                 # MatchState()
                 return MatchState.COLLECTIVE_STATE_MISMATCH(
-                    f"Expected state: '{self.state}' does not match found state: '{other.state}'"
+                    f"States '{self.state}' '{other.state}' do not match"
                 )
             if (
                 other.input_dtypes != other.output_dtypes
@@ -290,24 +289,21 @@ class Op:
                 or self.output_dtypes != other.output_dtypes
             ):
                 return MatchState.COLLECTIVE_DTYPE_MISMATCH(
-                    f"Expected dtypes: '{self.input_dtypes}/{other.input_dtypes}' does not "
-                    f"match found dtype: '{self.output_dtypes}/{other.output_dtypes}'",
+                    f"Dtypes '{self.input_dtypes}/{other.input_dtypes}' '{self.output_dtypes}/{other.output_dtypes}' do not match"
                 )
             if self.type == "all_to_all":
                 return MatchState.UNDECIDED
             if self.type != "scatter" and self.input_sizes != other.input_sizes:
                 return MatchState.SIZE_OR_SYNTAX_MISMATCH(
-                    f"Expected input sizes: '{self.input_sizes}' does not match found input sizes: "
-                    f"'{other.input_sizes}'",
+                    f"Input sizes '{self.input_sizes}' '{other.input_sizes}' do not match"
                 )
             if self.type != "gather" and self.output_sizes != other.output_sizes:
                 return MatchState.SIZE_OR_SYNTAX_MISMATCH(
-                    f"Expected output sizes: '{self.output_sizes}' does not match found output sizes: "
-                    f"'{other.output_sizes}'"
+                    f"Output sizes '{self.output_sizes}' '{other.output_sizes}' do not match"
                 )
             if self.type == "all_reduce" and self.input_sizes != other.output_sizes:
                 return MatchState.SIZE_OR_SYNTAX_MISMATCH(
-                    f"Expected input sizes: '{self.input_sizes}' does not match found output sizes: '{other.output_sizes}'"
+                    f"Input sizes '{self.input_sizes}' do not match output sizes '{other.output_sizes}'"
                 )
             # TODO: need to consider uneven sharding for all-gather.
             # TODO: need to consider all_gather_into_tensor_coalesced (coalesced related)
@@ -319,8 +315,8 @@ class Op:
                 == math.prod(self.input_sizes[0]) * self.pg_size
             ):
                 return MatchState.SIZE_OR_SYNTAX_MISMATCH(
-                    f"Found input numel '{math.prod(other.input_sizes[0])} * pg size {self.pg_size}' "
-                    f"does not match output numel '{math.prod(other.output_sizes[0])}'",
+                    f"Input numel '{math.prod(other.input_sizes[0])} * pg size {self.pg_size}' "
+                    f"do not match output numel '{math.prod(other.output_sizes[0])}'",
                 )
             if self.type in [
                 "reduce_scatter",
@@ -330,7 +326,7 @@ class Op:
                 == math.prod(self.output_sizes[0]) * self.pg_size
             ):
                 return MatchState.SIZE_OR_SYNTAX_MISMATCH(
-                    f"Found input numel '{math.prod(other.input_sizes[0])}' does not match output numel "
+                    f"Input numel '{math.prod(other.input_sizes[0])}' do not match output numel "
                     f"'{math.prod(other.output_sizes[0])} * pg size {self.pg_size}'",
                 )
         elif self.type == "coalesced":

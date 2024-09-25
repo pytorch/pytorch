@@ -13,7 +13,8 @@ namespace c10 {
 struct Device;
 }
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 // Backend should extend it and define their own supported hardware types.
 struct TORCH_API BackendDeviceType {
@@ -95,4 +96,5 @@ std::optional<BackendDevice> GetBackendDevice(
   return GetBackendDevice(forward_tensors...);
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

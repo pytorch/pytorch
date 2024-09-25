@@ -159,11 +159,7 @@ class ROCmTemplate(KernelTemplate):
                 #define PT_EXPORT
                 #endif
                 #endif
-
-                // as long as there is no custom arithmetic it's fine
-                using bfloat16 = uint16_t;
-                using float8_e4m3fnuz = uint8_t;
-                using float8_e5m2fnuz = uint8_t;
+                using bfloat16 = hip_bfloat16;
             """
         )
         return res

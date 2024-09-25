@@ -2,9 +2,8 @@
 
 #include <torch/csrc/lazy/backend/backend_interface.h>
 
-#include <utility>
-
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 class TORCH_API TSData : public torch::lazy::BackendData {
  public:
@@ -13,10 +12,10 @@ class TORCH_API TSData : public torch::lazy::BackendData {
         scalar(scalar) {}
 
   TSData(
-      at::Tensor data,
+      const at::Tensor& data,
       const torch::lazy::Shape& shape,
       const torch::lazy::BackendDevice& device)
-      : torch::lazy::BackendData(device, shape), data_(std::move(data)) {}
+      : torch::lazy::BackendData(device, shape), data_(data) {}
 
   TSData(
       const torch::lazy::Shape& shape,
@@ -49,4 +48,5 @@ TORCH_API torch::lazy::BackendImplInterface* GetTSBackendImpl();
 
 TORCH_API void InitTorchScriptBackend();
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

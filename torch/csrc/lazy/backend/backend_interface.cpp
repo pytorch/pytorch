@@ -1,9 +1,8 @@
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 
-#include <utility>
-
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 namespace {
 std::atomic<const BackendImplInterface*> backend_impl_registry;
@@ -36,7 +35,7 @@ std::unique_ptr<LoweringContext> LoweringContext::Create(
     c10::ArrayRef<const Node*> post_order,
     Util::EmissionMap emit_status) {
   return getBackend()->CreateLoweringContext(
-      name, std::move(device), post_order, std::move(emit_status));
+      name, std::move(device), post_order, emit_status);
 }
 
 std::unique_ptr<LoweringContext> LoweringContext::Create(
@@ -45,4 +44,5 @@ std::unique_ptr<LoweringContext> LoweringContext::Create(
   return getBackend()->CreateLoweringContext(name, std::move(device));
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch
