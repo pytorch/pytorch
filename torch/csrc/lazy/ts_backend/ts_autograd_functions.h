@@ -9,7 +9,7 @@ struct MaxPool3dAutogradFunctionTS
     : public torch::autograd::Function<MaxPool3dAutogradFunctionTS> {
   static at::Tensor forward(
       torch::autograd::AutogradContext* ctx,
-      at::Tensor self,
+      const at::Tensor& self,
       at::IntArrayRef kernel_size,
       at::IntArrayRef stride,
       at::IntArrayRef padding,

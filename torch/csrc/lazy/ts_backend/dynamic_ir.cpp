@@ -1,11 +1,13 @@
 #include <torch/csrc/lazy/ts_backend/dynamic_ir.h>
 
+#include <utility>
+
 static const torch::lazy::DimensionNode* DimCast(torch::lazy::Output output) {
   return dynamic_cast<const torch::lazy::DimensionNode*>(output.node);
 }
 
-namespace torch {
-namespace lazy {
+
+namespace torch::lazy {
 
 TSOpVector SizeNode::Lower(
     std::shared_ptr<torch::jit::GraphFunction> function,
@@ -25,7 +27,7 @@ TSOpVector SizeNode::Lower(
 SizeNode::SizeNode(Value input, size_t dim)
     : TsNode(
           OpKind{c10::Symbol::fromQualString("aten::size")},
-          {input},
+          {std::move(input)},
           std::vector<Shape>{},
           1,
           MHash(dim)),
@@ -50,7 +52,7 @@ std::string SizeNode::ToString() const {
 SizeAdd::SizeAdd(Value a, Value b)
     : TsNode(
           OpKind{c10::Symbol::fromQualString("aten::add")},
-          {a, b},
+          {std::move(a), std::move(b)},
           std::vector<Shape>{},
           1){};
 
@@ -70,7 +72,7 @@ std::string SizeAdd::ToString() const {
 SizeMul::SizeMul(Value a, Value b)
     : TsNode(
           OpKind{c10::Symbol::fromQualString("aten::mul")},
-          {a, b},
+          {std::move(a), std::move(b)},
           std::vector<Shape>{},
           1){};
 
@@ -90,7 +92,7 @@ std::string SizeMul::ToString() const {
 SizeDiv::SizeDiv(Value a, Value b)
     : TsNode(
           OpKind{c10::Symbol::fromQualString("aten::div")},
-          {a, b},
+          {std::move(a), std::move(b)},
           std::vector<Shape>{},
           1){};
 
@@ -110,5 +112,5 @@ std::string SizeDiv::ToString() const {
   return "SizeDiv";
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy
+

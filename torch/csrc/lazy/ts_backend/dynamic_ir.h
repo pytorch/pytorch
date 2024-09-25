@@ -4,12 +4,8 @@
 
 #include <functional>
 #include <memory>
-#include <set>
 #include <string>
-#include <unordered_map>
-#include <unordered_set>
 #include <utility>
-#include <vector>
 
 #include <c10/core/ScalarType.h>
 #include <c10/util/Flags.h>

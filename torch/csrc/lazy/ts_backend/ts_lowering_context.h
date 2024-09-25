@@ -124,7 +124,7 @@ class TORCH_API TSLoweringContext : public LoweringContext {
   // If a parameter associated with data has already been declared, it will be
   // returned. Otherwise a new one will be created, associated with the tensor
   // held in data.
-  torch::jit::Value* GetParameter(BackendDataPtr data);
+  torch::jit::Value* GetParameter(const BackendDataPtr& data);
 
   std::shared_ptr<torch::jit::Graph> graph() const {
     return graph_;

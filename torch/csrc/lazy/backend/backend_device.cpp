@@ -7,8 +7,7 @@
 #include <torch/csrc/lazy/core/tensor.h>
 #include <optional>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 BackendDevice::BackendDevice()
     : type_(getBackend()->GetDefaultDeviceType()),
@@ -86,5 +85,4 @@ std::optional<BackendDevice> GetBackendDevice() {
   return std::nullopt;
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

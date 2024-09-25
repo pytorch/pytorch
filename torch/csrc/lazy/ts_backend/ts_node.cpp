@@ -13,8 +13,8 @@ std::string GetFirstUserFrameInPythonIfEnabled() {
 }
 } // namespace
 
-namespace torch {
-namespace lazy {
+
+namespace torch::lazy {
 
 static hash_t OperandHashes(
     const OpList& operands,
@@ -101,5 +101,5 @@ TSOpVector TensorList::Lower(
   return {listnode->output()};
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy
+
