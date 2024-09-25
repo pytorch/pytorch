@@ -4301,7 +4301,7 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
 
     if not (t1.ndim >= 3 and t2.ndim <= 2):
         return False
-    if t2.requires_grad and not is_out:
+    if torch.is_grad_enabled() and t2.requires_grad and not is_out:
         return True
     if tensor1.ndim == 2:
         return False

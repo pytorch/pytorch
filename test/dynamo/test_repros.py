@@ -6012,8 +6012,8 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             y_view = y.view(-1, 4)
             return x_view * y_view
 
-        x = torch.randn(4, device="cuda")
-        y = torch.randn(8, device="cuda")
+        x = torch.randn(4)
+        y = torch.randn(8)
         out_ref = fn(x, y)
         out_test = torch.compile(fn, dynamic=True)(x, y)
         breakpoint()
