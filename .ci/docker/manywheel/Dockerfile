@@ -15,6 +15,7 @@ ARG DEVTOOLSET_VERSION=9
 RUN sed -i s/mirror.centos.org/vault.centos.org/g /etc/yum.repos.d/*.repo
 RUN sed -i s/^#.*baseurl=http/baseurl=http/g /etc/yum.repos.d/*.repo
 RUN sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/*.repo
+RUN yum update -y
 RUN yum install -y wget curl perl util-linux xz bzip2 git patch which perl zlib-devel
 # Just add everything as a safe.directory for git since these will be used in multiple places with git
 RUN git config --global --add safe.directory '*'
@@ -32,10 +33,12 @@ ENV LD_LIBRARY_PATH=/opt/rh/devtoolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt
 RUN yum --enablerepo=extras install -y epel-release
 
 # cmake-3.18.4 from pip
+RUN yum update -y
 RUN yum install -y python3-pip && \
     python3 -mpip install cmake==3.18.4 && \
     ln -s /usr/local/bin/cmake /usr/bin/cmake
 
+RUN yum update -y
 RUN yum install -y autoconf aclocal automake make sudo
 
 FROM base as openssl
@@ -55,9 +58,9 @@ RUN cp $(which patchelf) /patchelf
 
 FROM patchelf as python
 # build python
-#COPY manywheel/build_scripts /build_scripts
-#ADD ./common/install_cpython.sh /build_scripts/install_cpython.sh
-#RUN bash build_scripts/build.sh && rm -r build_scripts
+COPY manywheel/build_scripts /build_scripts
+ADD ./common/install_cpython.sh /build_scripts/install_cpython.sh
+RUN bash build_scripts/build.sh && rm -r build_scripts
 
 FROM base as cuda
 ARG BASE_CUDA_VERSION=10.2
