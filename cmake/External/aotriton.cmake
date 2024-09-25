@@ -48,7 +48,7 @@ if(NOT __AOTRITON_INCLUDED)
     set(__AOTRITON_ARCH ${CMAKE_HOST_SYSTEM_PROCESSOR})
     string(CONCAT __AOTRITON_FILE "aotriton-"
                                   "${__AOTRITON_VER}-${__AOTRITON_MANYLINUX}"
-                                  "_${__AOTRITON_ARCH}-rocm${__AOTRITON_ROCM}"
+                                  "_${__AOTRITON_ARCH}-${__AOTRITON_ROCM}"
                                   "-shared.tar.gz")
     string(CONCAT __AOTRITON_URL "https://github.com/ROCm/aotriton/releases/download/"
                                  "${__AOTRITON_VER}/${__AOTRITON_FILE}")
