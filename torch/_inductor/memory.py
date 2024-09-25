@@ -556,7 +556,6 @@ def reorder_for_peak_memory(
         except Exception as e:
             torch_log.error("Failed to reorder for %s: %s", method.__name__, e)
 
-    # logging to scuba table (fb internal)
     signpost_event(
         category="inductor",
         name="memory",
