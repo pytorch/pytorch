@@ -138,7 +138,7 @@ class TestTritonHeuristics(TestCase):
             cfg.pre_hook = pre_hook
 
         with self.assertRaisesRegex(AssertionError, "pre_hook"):
-            autotuner = CachingAutotuner(**args)
+            CachingAutotuner(**args)
 
 
 if __name__ == "__main__":

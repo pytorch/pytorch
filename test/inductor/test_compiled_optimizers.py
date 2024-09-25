@@ -407,7 +407,7 @@ def make_test(
                 scheduler_eager.last_epoch = 1
 
             with torch.set_grad_enabled(False):
-                for i in range(2):
+                for _ in range(2):
                     compiled_step()
                     opt_eager.step()
                     if scheduler_cls:

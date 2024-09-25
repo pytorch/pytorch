@@ -920,7 +920,7 @@ def _verify_stack_trace(graph_module: torch.fx.GraphModule) -> None:
         - None or non-empty str for 'call_function', 'get_attr'
         - None for 'placeholder', 'output'
     """
-    for i, mod in enumerate([graph_module] + list(graph_module.modules())):
+    for mod in [graph_module, *graph_module.modules()]:
         if not isinstance(mod, torch.fx.GraphModule):
             continue
         for node in graph_module.graph.nodes:

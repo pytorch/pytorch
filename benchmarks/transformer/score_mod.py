@@ -98,8 +98,6 @@ def generate_inputs(
 
     assert q_heads % kv_heads == 0
 
-    num_h_groups = q_heads // kv_heads
-
     make_q = partial(
         torch.rand, q_shape, device=device, dtype=dtype, requires_grad=requires_grad
     )

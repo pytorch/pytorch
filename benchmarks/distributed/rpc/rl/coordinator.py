@@ -72,7 +72,7 @@ class CoordinatorBase:
             print(f"Episode {ep} - ", end="")
 
             n_steps = episode_steps
-            agent_start_time = time.time()
+            agent_start_time = time.time()  # noqa: F841
 
             futs = []
             for ob_rref in self.ob_rrefs:

@@ -864,7 +864,7 @@ def preprocessor(
     def mk_repl(templ, include_current_dir=True):
         def repl(m):
             f = m.group(1)
-            dirpath, filename = os.path.split(f)
+            filename = os.path.basename(f)
             if (
                 f.startswith(("ATen/cuda",
                               "ATen/native/cuda",

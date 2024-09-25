@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: quantization"]
+# ruff: noqa: F841
 import copy
 import unittest
 from typing import Any, Dict

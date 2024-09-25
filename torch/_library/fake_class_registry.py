@@ -236,7 +236,9 @@ def register_fake_class(qualname, fake_class: Optional[HasStaticMethodFromReal] 
         ns, name = parse_namespace(qualname)
 
         # This also checks whether the refered torch::class_ exists.
-        torchbind_class = torch._C._get_custom_class_python_wrapper(ns, name)
+        torchbind_class = torch._C._get_custom_class_python_wrapper(  # noqa: F841
+            ns, name
+        )
 
         from_method = getattr(fake_class, _CONVERT_FROM_REAL_NAME, None)
         if not from_method:
@@ -279,8 +281,7 @@ def _full_qual_class_name(qualname: str) -> str:
 # Return the namespace and class name from fully qualified name.
 def _ns_and_class_name(full_qualname: str) -> Tuple[str, str]:
     splits = full_qualname.split(".")
-    assert len(splits) == 5
-    _torch, torch_ns, classes, ns, class_name = splits
+    _torch, _torch_ns, _classes, ns, class_name = splits
     return ns, class_name
 
 

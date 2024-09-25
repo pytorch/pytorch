@@ -568,7 +568,7 @@ def foreach_run_and_map_input_device(fake_mode, func, *args, **kwargs):
     try:
         with in_kernel_invocation_manager(fake_mode):
             out_meta = func(*args, **kwargs)
-    except NotImplementedError as not_implemented_error:
+    except NotImplementedError:
         return NotImplemented
 
     if not out_meta:
@@ -630,7 +630,7 @@ def multi_device_op_default(fake_mode, func, *args, **kwargs):
 @register_op_impl(aten.slice_scatter.out)
 def multi_device_op_out(fake_mode, func, *args, **kwargs):
     with in_kernel_invocation_manager(fake_mode):
-        out = func(*args, **kwargs)
+        func(*args, **kwargs)
 
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -846,15 +846,9 @@ def make_fast_binary_impl(slow_ref):
         operands = args
 
         # compute_shape
-        has_scalars = False
-        has_tensors = False
         final_shape = None
         for op in operands:
             shape = op.shape if isinstance(op, torch.Tensor) else ()
-            if len(shape) == 0:
-                has_scalars = True
-            else:
-                has_tensors = True
             if final_shape is None:
                 final_shape = shape
             # TODO: Minor optimization: track if the shapes
@@ -881,7 +875,6 @@ def make_fast_binary_impl(slow_ref):
         cpu = torch.device("cpu")
         common_device = cpu
         common_dtype = None
-        output_dtype = None
         has_different_input_dtypes = False
         for op in operands:
             if not isinstance(op, torch.Tensor):

@@ -13,7 +13,7 @@ def fn_creator():
         torch._dynamo.graph_break()
         x = x + var1
 
-        def inner_fn():
+        def inner_fn():  # noqa: F841
             return var2
 
         return x

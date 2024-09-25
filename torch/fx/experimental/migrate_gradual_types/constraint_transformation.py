@@ -251,7 +251,7 @@ def generate_binconstraint_t(constraint, counter):
         disj = [BinConstraintT(constraint.lhs, Dyn, op_eq)]
         for i in range(1, constraint.rhs + 1):
             dims = []
-            for j in range(1, i + 1):
+            for _ in range(1, i + 1):
                 dim_var, counter = gen_dvar(counter)
                 dims.append(dim_var)
             disj.append(BinConstraintT(constraint.lhs, TensorType(dims), op_eq))

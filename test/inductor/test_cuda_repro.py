@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+# ruff: noqa: F841
 import gc
 import math
 import sys

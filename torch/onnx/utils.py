@@ -1124,7 +1124,7 @@ def _model_to_graph(
             input_names=input_names,
             module=module,
         )
-    except Exception as e:
+    except Exception:
         _C._jit_onnx_log("Torch IR graph at exception: ", graph)
         raise
 
@@ -1258,7 +1258,7 @@ def export_to_pretty_string(
             do_constant_folding, operator_export_type, training
         )
         args = _decide_input_format(model, args)
-        graph, params_dict, torch_out = _model_to_graph(
+        graph, params_dict, _torch_out = _model_to_graph(
             model,
             args,
             verbose,
@@ -1602,8 +1602,8 @@ def _export(
                 (
                     proto,
                     export_map,
-                    val_use_external_data_format,
-                    node_names,
+                    _val_use_external_data_format,
+                    _node_names,
                 ) = graph._export_onnx(  # type: ignore[attr-defined]
                     params_dict,
                     opset_version,
@@ -1621,8 +1621,8 @@ def _export(
                 (
                     proto,
                     export_map,
-                    val_use_external_data_format,
-                    node_names,
+                    _,
+                    _,
                 ) = graph._export_onnx(  # type: ignore[attr-defined]
                     {},
                     opset_version,

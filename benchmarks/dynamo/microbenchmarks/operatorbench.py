@@ -260,7 +260,7 @@ def benchmark(
             if profile_enabled
             else nullcontext()
         )
-        with profiler_context as prof:
+        with profiler_context:
             for i, inps in enumerate(inputs_list):
                 if inps is None:
                     break

@@ -37,7 +37,7 @@ class TestTritonWrapper(TestCase):
         N = 10
         x = torch.rand(N).to(device=GPU_TYPE)
         y = torch.rand(N).to(device=GPU_TYPE)
-        out = f(x, y)
+        out = f(x, y)  # noqa: F841
         compiled_module = self.get_compiled_module()
 
         # now run the compiled module in subprocess and check its output

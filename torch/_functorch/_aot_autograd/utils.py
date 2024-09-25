@@ -225,7 +225,6 @@ def maybe_to_fresh_input(idx, t, meta):
         return t
     if idx in meta.mutated_inp_runtime_indices:
         # We only need to bother cloning mutated inputs that participate in autograd.
-        mutated_inp_idx = meta.mutated_inp_runtime_indices.index(idx)
         if meta.input_info[idx].requires_grad and meta.input_info[idx].mutates_data:
             # Make sure the primal we pass to autograd.grad()
             # sees the tensor before the mutation
@@ -304,7 +303,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
         with_effect_nodes = []
         output_token_nodes = []
         other_output_nodes = []
-        for i, node in enumerate(module.graph.nodes):
+        for node in module.graph.nodes:
             if node.op == "placeholder":
                 input_nodes.append(node)
             elif is_with_effects(node):

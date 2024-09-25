@@ -147,9 +147,6 @@ def create_synthetic_base_metadata(
             else m.input_info[outer_indices[0]].mutates_metadata
         )
         requires_grad = any(m.input_info[x].requires_grad for x in outer_indices)
-        mutations_hidden_from_autograd = all(
-            m.input_info[x].mutations_hidden_from_autograd for x in outer_indices
-        )
         mutations_under_no_grad_or_inference_mode = all(
             m.input_info[x].mutations_under_no_grad_or_inference_mode
             for x in outer_indices

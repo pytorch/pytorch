@@ -40,7 +40,7 @@ def cuda_sync(func, *args, **kwargs):
 class TestBenchNetwork:
     # See 'modeldef' fixture, which provides the things to benchmark
     def test_forward(self, modeldef, benchmark):
-        forward_output = benchmark(cuda_sync, modeldef.forward, *modeldef.inputs)
+        benchmark(cuda_sync, modeldef.forward, *modeldef.inputs)
 
     def test_backward(self, modeldef, benchmark):
         backward_input = modeldef.forward(*modeldef.inputs)

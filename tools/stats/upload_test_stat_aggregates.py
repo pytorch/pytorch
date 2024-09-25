@@ -31,7 +31,7 @@ def get_oncall_from_testfile(testfile: str) -> list[str] | None:
                         )  # noqa: TRY002
                     oncalls = ast.literal_eval(possible_lists[0])
                     return list(oncalls)
-    except Exception as e:
+    except Exception:
         if "." in testfile:
             return [f"module: {testfile.split('.')[0]}"]
         else:
@@ -42,12 +42,10 @@ def get_oncall_from_testfile(testfile: str) -> list[str] | None:
 def get_test_stat_aggregates(date: datetime.date) -> Any:
     # Initialize the Rockset client with your API key
     rockset_api_key = os.environ["ROCKSET_API_KEY"]
-    rockset_api_server = "api.rs2.usw2.rockset.com"
     iso_date = date.isoformat()
     rs = rockset.RocksetClient(host="api.usw2a1.rockset.com", api_key=rockset_api_key)
 
     # Define the name of the Rockset collection and lambda function
-    collection_name = "commons"
     lambda_function_name = "test_insights_per_daily_upload"
     query_parameters = [
         rockset.models.QueryParameter(name="startTime", type="string", value=iso_date)
