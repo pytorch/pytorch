@@ -961,7 +961,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(2, 2)
 
         self.assertEqual(fn(x), opt_fn(x))
-        self.assertEqual(cnts.frame_count, 1) 
+        self.assertEqual(cnts.frame_count, 1)
 
         self.assertEqual(fn(x_inference), opt_fn(x_inference))
         self.assertEqual(cnts.frame_count, 2)  # Recompiles
