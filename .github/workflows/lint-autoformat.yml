@@ -11,6 +11,7 @@ jobs:
     permissions: read-all
     runs-on: lf.linux.2xlarge
     if: ${{ github.repository_owner == 'pytorch' }}
+    continue-on-error: true
     outputs:
       lintrunner-script: ${{ steps.store-lintrunner-script.outputs.lintrunner-script }}
     steps:
@@ -28,6 +29,7 @@ jobs:
       contents: read
       pull-requests: write
     runs-on: lf.linux.2xlarge
+    continue-on-error: true
     if: ${{ github.repository_owner == 'pytorch' }}
     steps:
       - name: Checkout pytorch
