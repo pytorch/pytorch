@@ -330,7 +330,7 @@ c10::List<at::Tensor> cloneSparseTensors(
     auto storageSize = t.storage().nbytes();
     auto usefulSize = t.element_size() * t.numel();
     constexpr size_t kMinMultiple = 2;
-    constexpr size_t kMinRecopyBytes = 8 * 1024;
+    constexpr size_t kMinRecopyBytes = 8ull * 1024;
     return storageSize >= kMinRecopyBytes &&
         storageSize >= usefulSize * kMinMultiple;
   };
@@ -564,7 +564,7 @@ void populateRemoteProfiledEvents(
         if (e.kind() == EventKind::PopRange) {
           auto it = startEvents.find(e.handle());
           if (it != startEvents.end()) {
-            e.setCudaUs(it->second->cudaElapsedUs(e));
+            e.setCudaUs(static_cast<int64_t>(it->second->cudaElapsedUs(e)));
           } else {
             TORCH_WARN("Found a pop event without a corresponding push event");
             e.setCudaUs(0);
