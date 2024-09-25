@@ -113,7 +113,6 @@ mm_template = TritonTemplate(
         {% if B_PROLOGUE_CAST_TYPE %} # TODO - replace with prologue fusion
         b = b.to(B_PROLOGUE_CAST_TYPE)
         {% endif %}
-
         acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
 
     # rematerialize rm and rn to save registers

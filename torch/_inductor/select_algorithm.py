@@ -113,10 +113,16 @@ class SubgraphInfo:
     body: IndentedBuffer
     template_mask: Optional[str] = None
     template_out: Optional[str] = None
+    compute: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
+    indexing_code: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
+    loads: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
+    stores: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
     ops_handler: Optional[V.WrapperHandler] = None
 
-    def __iter__(self):
-        return iter(getattr(self, field.name) for field in dataclasses.fields(self))
+    def to_dict(self):
+        return {
+            field.name: getattr(self, field.name) for field in dataclasses.fields(self)
+        }
 
 
 class TritonTemplateKernel(TritonKernel):
@@ -164,35 +170,38 @@ class TritonTemplateKernel(TritonKernel):
         # For Templated Attention this can be a list of ir.Subgraph
         self.subgraphs: Optional[List[ir.ComputedBuffer]] = subgraphs
 
-        # The following attributes (body, template_mask, output_val) are all
-        # used for triton kernel codegen.
-        # They are swapped onto the TritonTemplateKernel object by
-        # `set_subgraph_body`
         self.subgraph_bodies: Dict[str, SubgraphInfo] = {}
-
-        self.body: IndentedBuffer = FakeIndentedBuffer()
-        self.template_mask: Optional[str] = None
-        self.template_out: Optional[str] = None
-        self.ops_handler: Optional[V.WrapperHandler] = None
 
         self.prologue_replaced_args = []
         self._inputs_with_prologue_fusion: OrderedSet[str] = OrderedSet()
 
+        # The following attributes are all used for triton kernel codegen.
+        # They are swapped onto the TritonTemplateKernel object by
+        # `set_subgraph_body`
+        # NB: the names here must match the fields in SubgraphInfo
+        self.body: IndentedBuffer = FakeIndentedBuffer()
+        self.compute: IndentedBuffer = FakeIndentedBuffer()
+        self.indexing_code: IndentedBuffer = FakeIndentedBuffer()
+        self.loads: IndentedBuffer = FakeIndentedBuffer()
+        self.stores: IndentedBuffer = FakeIndentedBuffer()
+        self.template_mask: Optional[str] = None
+        self.template_out: Optional[str] = None
+        self.ops_handler: Optional[V.WrapperHandler] = None
+
     @contextlib.contextmanager
     def set_subgraph_body(self, body_name: str):
-        old_body, old_mask, old_out, old_ops_handler = (
-            self.body,
-            self.template_mask,
-            self.template_out,
-            self.ops_handler,
+        assert all(
+            hasattr(self, field.name) for field in dataclasses.fields(SubgraphInfo)
         )
+        old_state = {
+            key.name: getattr(self, key.name)
+            for key in dataclasses.fields(SubgraphInfo)
+        }
         assert body_name in self.subgraph_bodies, body_name
-        (
-            self.body,
-            self.template_mask,
-            self.template_out,
-            self.ops_handler,
-        ) = self.subgraph_bodies[body_name]
+
+        for key, value in self.subgraph_bodies[body_name].to_dict().items():
+            setattr(self, key, value)
+
         context = (
             contextlib.nullcontext
             if not self.ops_handler
@@ -201,20 +210,21 @@ class TritonTemplateKernel(TritonKernel):
         with context():
             yield
         self.subgraph_bodies[body_name] = SubgraphInfo(
-            self.body, self.template_mask, self.template_out, self.ops_handler
+            **{
+                key.name: getattr(self, key.name)
+                for key in dataclasses.fields(SubgraphInfo)
+            }
         )
-        self.body, self.template_mask, self.template_out, self.ops_handler = (
-            old_body,
-            old_mask,
-            old_out,
-            old_ops_handler,
-        )
+        for key, value in old_state.items():
+            setattr(self, key, value)
 
     @contextlib.contextmanager
     def create_subgraph_body(self, body_name: str):
         assert body_name not in self.subgraph_bodies
         self.subgraph_bodies[body_name] = SubgraphInfo(
-            IndentedBuffer(), None, None, None
+            IndentedBuffer(),
+            None,
+            None,
         )
         with self.set_subgraph_body(body_name):
             yield
@@ -548,6 +558,7 @@ class TritonTemplateKernel(TritonKernel):
 
         def hook():
             with self.set_subgraph_body(hook_key):
+                self.cse.invalidate(set())
                 self.codegen_body()
                 self.cse.invalidate(set())  # type: ignore[arg-type]
                 if not prologue_called:
@@ -624,10 +635,12 @@ class TritonTemplateKernel(TritonKernel):
                 self.epilogue_fn(*epilogue_args),
             )
             self.codegen_body()
+            self.cse.invalidate(set())
 
         def hook():
             # more stuff might have been added since the codegen_body above
             self.codegen_body()
+            self.cse.invalidate(set())
 
             return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
 

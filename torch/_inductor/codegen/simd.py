@@ -1490,6 +1490,7 @@ class SIMDScheduling(BaseScheduling):
 
         buf_name_to_prologue_node = {}
         for prologue in prologue_nodes:
+            # assert False
             names = prologue.get_buffer_names()
             assert len(names) == 1
             if not only_gen_src_code:
@@ -1508,10 +1509,11 @@ class SIMDScheduling(BaseScheduling):
 
             partial_code = render()
 
-            # NB: the kernel has state that is added to written to when
-            # we codegen prologue and epilogue. we immediately finalize
-            # the hook subsequent to codegen which writes out the code
-            # and also clears shared state.
+            with kernel.set_subgraph_body("<STORE_OUTPUT>"):
+                for node in epilogue_nodes:
+                    node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
+                kernel.cse.invalidate(set())
+
             for input_name, buffer in kernel.named_input_nodes.items():
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
                 if prologue_node := buf_name_to_prologue_node.get(
@@ -1524,23 +1526,20 @@ class SIMDScheduling(BaseScheduling):
                             prologue_node.codegen(
                                 kernel.split_and_set_ranges(prologue_node.get_ranges())
                             )
-                with V.set_kernel_handler(kernel):
-                    partial_code.finalize_hook(subgraph_name, strict=False)
-
-            with kernel.set_subgraph_body("<STORE_OUTPUT>"):
-                for node in epilogue_nodes:
-                    node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
+                            kernel.cse.invalidate(set())
+                            # breakpoint()
 
         if not isinstance(partial_code, str):
             partial_code.finalize_hook("<DEF_KERNEL>")
             partial_code.finalize_hook("<ARGDEFS>", strict=False)
         # finalize must be called after adding epilogue above
+
         with V.set_kernel_handler(kernel):
             # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
 
-            # for input_name in kernel.named_input_nodes.keys():
-            #     subgraph_name = f"<LOAD_INPUT_{input_name}>"
-            #     partial_code.finalize_hook(subgraph_name, strict=False)
+            for input_name in kernel.named_input_nodes.keys():
+                subgraph_name = f"<LOAD_INPUT_{input_name}>"
+                partial_code.finalize_hook(subgraph_name, strict=False)
 
             with kernel.set_subgraph_body("<STORE_OUTPUT>"):
                 if isinstance(partial_code, str):

@@ -890,6 +890,7 @@ class TestPrologueFusion(TestCase):
                     "prologue_fusion": True,
                     "benchmark_epilogue_fusion": False,
                     "shape_padding": False,
+                    "max_autotune_gemm_backends": "TRITON",
                 }
             )
         )
@@ -932,23 +933,21 @@ class TestPrologueFusion(TestCase):
         FileCheck().check("def call").check_count(".run", 2, exactly=True).run(code[0])
 
     @parametrize("size", (256,))
+    @config.patch(force_disable_caches=True)
     def test_multiple_fusions(self, size):
         M = N = K = size
+        torch._inductor.metrics.generated_kernel_count = 0
 
-        @torch.compile()
         def foo(x, y):
-            return ((x + 0.5) @ (y - 0.5)) * 2
+            return ((x - 2) @ (y + 2)) * 2
 
         x = torch.rand([M, K], dtype=torch.float, device="cuda")
         y = torch.rand([M, K], dtype=torch.float, device="cuda")
 
-        foo(x, y)
-
         out, code = run_and_get_code(torch.compile(foo), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
-        breakpoint()
-        pass
 
+        FileCheck().check("def call").check_count(".run", 1, exactly=True).run(code[0])
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
