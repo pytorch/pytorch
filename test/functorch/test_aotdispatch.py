@@ -5989,6 +5989,18 @@ class TestAOTModuleSimplified(AOTTestCase):
         with torch.no_grad():
             torch.compile(m, fullgraph=True)(inp)
 
+    def test_rrelu(self):
+        def fn(x):
+            return torch.rrelu(x, training=True)
+
+        def fn_(x):
+            torch.rrelu_(x, training=True)
+            return x
+
+        x = torch.randn(4, 4)
+        torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        torch.compile(fn_, backend="inductor", fullgraph=True)(x)
+
 
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)
@@ -6141,6 +6153,7 @@ def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
                 self.assertEqual,
                 check_gradients=True,
                 try_check_data_specialization=try_check_data_specialization,
+                skip_correctness_check=op.skip_correctness_check_compile_vs_eager,
             )
         except DynamicOutputShapeException:
             self.skipTest("Dynamic output shape operation in trace")
@@ -6389,14 +6402,14 @@ class MockFXGraphCache:
             gm._fx_graph_cache_key = key
             return gm
 
-    def _lookup_graph(self, key, inputs, local, remote_cache):
+    def load_with_key(self, key, debug_lines, inputs, local, remote_cache, is_backward):
         gm = self.cache.get(key)
         if gm is not None:
             gm = make_boxed_func(gm)
-        return gm
+        return gm, {}
 
     def post_compile(self, gm, inputs, cudagraphs):
-        pass
+        return gm
 
 
 # The following tests fail in strict caching mode (i.e. they bypass or
@@ -6467,8 +6480,8 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
         self.inductor_cache = MockFXGraphCache()
         AOTAutogradCache.clear()
         with patch(
-            "torch._inductor.codecache.FxGraphCache._lookup_graph",
-            new=self.inductor_cache._lookup_graph,
+            "torch._inductor.codecache.FxGraphCache.load_with_key",
+            new=self.inductor_cache.load_with_key,
         ), patch(
             "torch._inductor.codecache.FxGraphCache.post_compile",
             new=self.inductor_cache.post_compile,
