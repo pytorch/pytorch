@@ -1565,7 +1565,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
     def test_meta_for_data_dependent_shape_operation(self):
         x = torch.randn(10, device="meta")
-        with self.assertRaisesRegex(RuntimeError, "data-dependent output shape"):
+        with self.assertRaisesRegex(RuntimeError, "data-dependent shape"):
             numpy_nonzero(x)
 
     def test_basic_make_fx(self):
