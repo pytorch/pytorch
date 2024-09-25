@@ -21,6 +21,7 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
+from torch.fx.experimental.symbolic_shapes import guard_scalar
 
 
 log = logging.getLogger("torch._dynamo")
@@ -978,6 +979,9 @@ class TritonHOPifier:
                     # One option is to correctly pass the symints in so that the symbolic expressions are defined
                     # when the triton code is being executed.
                     # But since triton will have to recompile either way, we instead just specialize on the value.
+                    #
+                    # Depending on the type of `variable` we might expect different types for the symbolic args:
+                    # either SymNodeVariables (for TritonKernelVariables) or SymInts (TracingTritonKernelWrapper)
                     combined_args_raw[arg_name] = variable.try_specialize(
                         combined_args_raw[arg_name]
                     )
@@ -1071,6 +1075,6 @@ class TraceableTritonKernelWrapper:
 
     def try_specialize(self, arg: Any) -> Any:
         # See [Note: Specialize tl.constexpr args in user-defined triton kernels]
-        if isinstance(arg, (torch.SymInt)):
-            return int(arg)
+        if isinstance(arg, (torch.SymInt, torch.SymBool, torch.SymFloat)):
+            return guard_scalar(arg)
         return arg
