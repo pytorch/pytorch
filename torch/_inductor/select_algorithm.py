@@ -537,14 +537,24 @@ class TritonTemplateKernel(TritonKernel):
 
             self.ops_handler = StoreOutputSubstitution
 
-            output_index = self.named_input_nodes[input_name].make_indexer()(
-                index_symbols
-            )
+            input_node = self.named_input_nodes[input_name]
+            output_index = input_node.make_indexer()(index_symbols)
+
+            # in def_kernel above we define the inputs with the storage offset adjusted
+            # creating the load in input_node.make_indexer() will also adjust by storage offset
+            # so subtract here to not double increment
+            if not V.graph.sizevars.statically_known_equals(
+                input_node.layout.offset, 0
+            ):
+                output_index = output_index - self.rename_indexing(
+                    input_node.get_layout().offset
+                )
+
             output_index = self.rename_indexing(output_index)
             if output_index == contiguous_index:
                 output_index = sympy.Symbol("xindex", integer=True)
             else:
-                output_index = f"{output_index}.broadcast_to(xindex.shape)"
+                output_index = f"({output_index}).broadcast_to(xindex.shape)"
 
             # Generate load code
             load_code = f"{output_name} = tl.load({input_name} + ({output_index})"

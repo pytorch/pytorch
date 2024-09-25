@@ -949,6 +949,7 @@ class TestPrologueFusion(TestCase):
 
         FileCheck().check("def call").check_count(".run", 1, exactly=True).run(code[0])
 
+
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
 
