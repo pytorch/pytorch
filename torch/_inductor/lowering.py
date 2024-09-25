@@ -64,6 +64,7 @@ from .utils import (
     is_dynamic,
     is_gpu,
     is_pointwise_use,
+    is_statically_one,
     needs_fallback_due_to_atomic_add_limitations,
     pad_listlike,
     sympy_product,
@@ -400,9 +401,9 @@ def broadcast_symbolic_shapes(a, b):
     for x, y in itertools.zip_longest(
         reversed(a), reversed(b), fillvalue=sympy.Integer(1)
     ):
-        if y == 1:
+        if is_statically_one(V.graph.sizevars.shape_env, y):
             output.append(x)
-        elif x == 1:
+        elif is_statically_one(V.graph.sizevars.shape_env, x):
             output.append(y)
         else:
             V.graph.sizevars.guard_equals(x, y)
@@ -816,10 +817,15 @@ def broadcast_tensors(*inputs):
         broadcast_symbolic_shapes, [x.get_size() for x in inputs], []
     )
     outputs = []
+    env = V.graph.sizevars.shape_env
     for x in inputs:
         sizes = x.get_size()
         if len(sizes) != len(target) or any(
-            ((a == 1 and b != 1) or (a != 1 and b == 1)) for a, b in zip(sizes, target)
+            (
+                (is_statically_one(env, a) and b != 1)
+                or (a != 1 and is_statically_one(env, b))
+            )
+            for a, b in zip(sizes, target)
         ):
             x = expand(x, target)
         outputs.append(x)
