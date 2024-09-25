@@ -6339,6 +6339,19 @@ def forward(self, x, b_t, y):
         ep = export(m, (inp,))
         self.assertEqual(ep.module()(torch.ones(4, 4)), m(torch.ones(4, 4)))
 
+    def test_double_lifted_constants(self):
+        class EmptyM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self):
+                return (torch.tensor([1, 2, 3]), torch.tensor([4, 5, 6]))
+
+        m = EmptyM()
+        ep = torch.export.export(m, ())
+        for out, real_out in zip(ep.module()(), m()):
+            self.assertTrue(torch.allclose(out, real_out))
+
     def test_trace_under_fake(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
