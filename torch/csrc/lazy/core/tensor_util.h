@@ -8,7 +8,8 @@
 #include <string>
 #include <vector>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 TORCH_API std::vector<int64_t> ComputeArrayStrides(
     c10::ArrayRef<int64_t> sizes);
@@ -73,4 +74,5 @@ inline const at::Tensor& maybe_unwrap_functional(const at::Tensor& tensor) {
   }
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

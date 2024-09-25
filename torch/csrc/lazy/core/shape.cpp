@@ -2,14 +2,13 @@
 #include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/core/tensor.h>
 
-#include <utility>
-
 C10_DEFINE_bool(
     ltc_enable_symbolic_shapes,
     false,
     "Enables calculation of if dims are symbolic");
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 Shape::Shape(
     at::ScalarType scalar_type,
@@ -52,7 +51,7 @@ hash_t Shape::hash(bool bakeInSizes) const {
 Shape Shape::with_symbolic_dims(
     std::optional<std::vector<bool>> symbolic_dims) const {
   Shape copy = *this;
-  copy.is_symbolic_ = std::move(symbolic_dims);
+  copy.is_symbolic_ = symbolic_dims;
   return copy;
 }
 
@@ -130,4 +129,5 @@ void applySymbolicShapesOnLT(
   }
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

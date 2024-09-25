@@ -14,7 +14,8 @@
 #include <string_view>
 #include <vector>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 using size_t = std::size_t;
 
@@ -60,7 +61,9 @@ static inline hash_t StringHash(const char* data) {
 }
 
 // Automatic templated implementation for 'arithmetic' types
-template <typename T, std::enable_if_t<std::is_arithmetic_v<T>>* = nullptr>
+template <
+    typename T,
+    typename std::enable_if<std::is_arithmetic<T>::value>::type* = nullptr>
 hash_t Hash(const T& value) {
   return DataHash(&value, sizeof(value));
 }
@@ -242,4 +245,5 @@ hash_t MHash(T value, Targs... Fargs) {
   return HashCombine(Hash(value), MHash(Fargs...));
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

@@ -8,7 +8,8 @@
 #include <torch/csrc/lazy/core/ir_builder.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 namespace {
 
 // LTCGuardImpl is used by CompositeExplicitAutograd ops or eager fallbacks to
@@ -215,4 +216,5 @@ bool LTCTensorImpl::is_contiguous_custom(c10::MemoryFormat _unused) const {
   return true;
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

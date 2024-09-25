@@ -4163,9 +4163,9 @@ class CppScheduling(BaseScheduling):
         When one of the indexing_exprs contains a division, we eliminate the division by splitting the loop
         to avoid non-contiguous loads, subject to the following conditions:
             1. No reduction and no mudular index for all nodes.
-            2. The indexing_exprs of all nodes contain only one (or more, but all the same) division,
-               where the divisor is an integer, the dividend is one of the iter_vars, and this var,
-               i.e. the dimension that needs to be split, is contiguous in all other indexing_exprs.
+            2. Only one node's one indexing_exprs contains a division, according to this indexing_exprs,
+               we can get the dimension that needs to be split, and the split dimension is contiguous
+               in all other indexing_exprs.
 
         For example, if the node's var_ranges: {z0: 2, z1: 9216, z2: 960} and indexing_exprs:
         {'index0': 8847360*z0 + 960*z1 + z2, 'index1': 32*z0 + (z2//30), 'index2': z2},
@@ -4186,8 +4186,8 @@ class CppScheduling(BaseScheduling):
 
         split_var = None
         split_number = None
+        divide_index_name = None
         num_div = 0
-        div_expr_ = None
         match_div = False
         matched_node = None
 
@@ -4195,27 +4195,25 @@ class CppScheduling(BaseScheduling):
             assert isinstance(node.node, ir.ComputedBuffer)
             _, original_body, _ = node.node.get_default_sizes_body()
             for name, expr in original_body.indexing_exprs.items():
-                for div_expr in expr.find(FloorDiv):
+                num_div += expr.count(FloorDiv)
+                if num_div > 1:
+                    return nodes
+                if expr.count(FloorDiv) == 1:
+                    div_expr = expr.find(FloorDiv).pop()
+                    split_var = div_expr.args[0]
+                    split_number = div_expr.args[1]
+                    divide_index_name = name
                     if (
-                        any(div_expr.has(var) for var in original_body.iter_vars)
-                        and div_expr != div_expr_
-                    ):
-                        div_expr_ = div_expr
-                        num_div += 1
-                    if num_div > 1:
-                        return nodes
-                    if (
-                        isinstance(div_expr.args[1], sympy.core.numbers.Integer)
-                        and div_expr.args[0] in original_body.iter_vars
-                        and name is not None
+                        isinstance(split_number, sympy.core.numbers.Integer)
+                        and isinstance(split_var, sympy.core.symbol.Symbol)
+                        and split_var in original_body.iter_vars
+                        and divide_index_name is not None
                         and all(
-                            stride_at_vec_range(expr_, div_expr.args[0]) in (0, 1)
-                            for name_, expr_ in original_body.indexing_exprs.items()
-                            if name_ != name
+                            stride_at_vec_range(expr, split_var) == 1
+                            for name, expr in original_body.indexing_exprs.items()
+                            if name != divide_index_name
                         )
                     ):
-                        split_var = div_expr.args[0]
-                        split_number = div_expr.args[1]
                         match_div = True
                         matched_node = node
 

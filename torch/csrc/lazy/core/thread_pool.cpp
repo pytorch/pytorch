@@ -12,7 +12,8 @@
 #include <mutex>
 #include <thread>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 namespace {
 
 class ThreadPool {
@@ -163,4 +164,5 @@ Completion ScheduleIoClosureWithCompletion(std::function<void()> closure) {
   return Completion(std::move(data));
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch
