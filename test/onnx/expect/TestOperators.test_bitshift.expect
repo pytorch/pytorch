@@ -1,0 +1,116 @@
+ir_version: 6
+producer_name: "pytorch"
+producer_version: "CURRENT_VERSION"
+graph {
+  node {
+    output: "onnx::BitShift_7"
+    name: "Constant_2"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 2
+        raw_data: "\001"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::BitShift_0"
+    input: "onnx::BitShift_7"
+    output: "3"
+    name: "BitShift_3"
+    op_type: "BitShift"
+    attribute {
+      name: "direction"
+      s: "RIGHT"
+      type: STRING
+    }
+  }
+  node {
+    output: "onnx::BitShift_8"
+    name: "Constant_4"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 2
+        raw_data: "\002"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::BitShift_0"
+    input: "onnx::BitShift_8"
+    output: "6"
+    name: "BitShift_5"
+    op_type: "BitShift"
+    attribute {
+      name: "direction"
+      s: "RIGHT"
+      type: STRING
+    }
+  }
+  name: "main_graph"
+  input {
+    name: "onnx::BitShift_0"
+    type {
+      tensor_type {
+        elem_type: 2
+        shape {
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 4
+          }
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "3"
+    type {
+      tensor_type {
+        elem_type: 2
+        shape {
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 4
+          }
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "6"
+    type {
+      tensor_type {
+        elem_type: 2
+        shape {
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 4
+          }
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 11
+}
