@@ -12,6 +12,7 @@ jobs:
     runs-on: lf.linux.2xlarge
     if: ${{ github.repository_owner == 'pytorch' }}
     continue-on-error: true
+    shell: bash
     outputs:
       lintrunner-script: ${{ steps.store-lintrunner-script.outputs.lintrunner-script }}
     steps:
