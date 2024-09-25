@@ -4,8 +4,6 @@
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/jit/serialization/pickler.h>
-#include <vector>
-
 namespace torch::distributed::rpc {
 
 class TORCH_API PythonRemoteCall : public RpcCommandBase {
@@ -37,8 +35,11 @@ class TORCH_API PythonRemoteCall : public RpcCommandBase {
 
  private:
   SerializedPyObj serializedPyObj_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const at::IValue retRRefId_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const at::IValue retForkId_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const bool isAsyncExecution_;
 };
 

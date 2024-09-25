@@ -224,12 +224,12 @@ observed_exception_map = {
 }
 
 
-def raise_observed_exception(e, tx, vt):
+def raise_observed_exception(e, tx):
     from .variables import BuiltinVariable
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
-    exception_vt = BuiltinVariable(e).call_function(vt, [], {})
+    exception_vt = BuiltinVariable(e).call_function(tx, [], {})
     tx.exn_vt_stack.append(exception_vt)
     raise observed_exception_map[e]
 
