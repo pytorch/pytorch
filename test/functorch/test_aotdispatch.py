@@ -6001,6 +6001,31 @@ class TestAOTModuleSimplified(AOTTestCase):
         torch.compile(fn, backend="inductor", fullgraph=True)(x)
         torch.compile(fn_, backend="inductor", fullgraph=True)(x)
 
+    def test_non_aot_bw_compile_saved_symints(self):
+        def fn(x):
+            return x.clone()
+
+        def inps_fn():
+            return (torch.randn(3, requires_grad=True),)
+
+        ref_inps = inps_fn()
+
+        ref_out = fn(*ref_inps)
+
+        inps = inps_fn()
+        torch._dynamo.mark_dynamic(inps[0], 0)
+
+        print("XXX COMPILE_SAVED_SYMINTS")
+        out = torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=True)(
+            *inps
+        )
+        out.sum().backward()
+
+        print("XXX COMPILE_NO_SAVED_SYMINTS")
+        torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=False)(
+            *inps_fn()
+        ).sum().backward()
+
 
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)

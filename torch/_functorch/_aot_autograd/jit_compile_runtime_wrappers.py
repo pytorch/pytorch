@@ -671,7 +671,9 @@ def aot_dispatch_autograd(
                     placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_stride)
 
             compiled_bw_func = None
+            print(f"XXX_CHECK: num_symints_saved_for_bw:{num_symints_saved_for_bw}")
             if num_symints_saved_for_bw > 0:
+                # XXX Ahead of time compilation of backward for dynamic shapes when some symints were saved for Backward
                 context = torch._C._DisableAutocast if disable_amp else nullcontext
                 with context():
                     try:

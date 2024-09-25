@@ -1493,6 +1493,10 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
         try_save_cache_entry: Optional[Callable],  # Save cache entry after compilation
     ):
+        print(
+            f"XXX runtime_wrappers.py:1496:AOTDispatchAutograd.post_compile compiled_bw_func:{compiled_bw_func}"
+        )
+
         class CompiledFunction(torch.autograd.Function):
             compiled_fw = compiled_fw_func
             compiled_bw = compiled_bw_func
