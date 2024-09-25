@@ -1027,7 +1027,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         (
             inputs,
             constant_args,
-            _,
+            _kernel_layout,
             req_stride_order,
         ) = _prepare_convolution_fusion_create(
             cls,
@@ -1184,8 +1184,8 @@ class LinearUnary(ExternKernelAlloc):
         x = cls.require_contiguous(cls.realize_input(x))
         w = cls.require_contiguous(cls.realize_input(w))
 
-        *m, _ = x.get_size()
-        oc, _ = w.get_size()
+        *m, _ic = x.get_size()
+        oc, _ic = w.get_size()
         inputs = [x, w]
         constant_args = [attr, scalars if scalars else [-1], algorithm]
         if B is not None:
@@ -1250,8 +1250,8 @@ class LinearBinary(ExternKernelAlloc):
         y = cls.require_contiguous(cls.realize_input(y))
         w = cls.require_contiguous(cls.realize_input(w))
 
-        *m, _ = x.get_size()
-        oc, _ = w.get_size()
+        *m, _ic = x.get_size()
+        oc, _ic = w.get_size()
 
         inputs = [x, y, w]
         constant_args = [attr]

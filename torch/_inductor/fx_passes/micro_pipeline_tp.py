@@ -687,7 +687,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
         restride_A_for_fused_matmul_reduce_scatter,
     )
 
-    input_node, _, rs_res_node, reduce_op, scatter_dim, group_name = (
+    input_node, _rs_node, rs_res_node, reduce_op, scatter_dim, group_name = (
         reduce_scatter.input_node,
         reduce_scatter.rs_node,
         reduce_scatter.res_node,

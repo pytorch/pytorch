@@ -44,8 +44,8 @@ def check_mm_compatible_shapes(f_name, lhs, rhs):
         f"but got lhs.dim() == {lhs.dim()} and rhs.dim() == {rhs.dim()}.",
     )
 
-    _, kl = lhs.shape[-2:]
-    kr, _ = rhs.shape[-2:]
+    _m, kl = lhs.shape[-2:]
+    kr, _n = rhs.shape[-2:]
 
     check(
         kl == kr,
@@ -360,13 +360,13 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
     indices_format = indices_data[0]
 
     assert blocks.ndim == 3
-    _, Ms, Ks = blocks.shape
+    _P, Ms, Ks = blocks.shape
 
     if indices_format == "scatter_mm":
         c_offsets, pq = indices_data[1:]
 
         assert others.ndim == 3
-        _, Ks_, Ns = others.shape
+        _Q, Ks_, Ns = others.shape
         assert Ks == Ks_
 
         if accumulators is None:
@@ -1709,7 +1709,7 @@ if has_triton():
         meta: Optional[dict] = None,
     ):
         f_name = "bsr_dense_mm"
-        m, _ = bsr.shape[-2:]
+        m, _kl = bsr.shape[-2:]
         if not skip_checks:
             check_bsr_layout(f_name, bsr)
             check_device(f_name, bsr, dense.device)
@@ -1724,7 +1724,7 @@ if has_triton():
                 f"{f_name}(): dense.size(-1) == {n} should be divisible by 16",
             )
         else:
-            _, n = dense.shape[-2:]
+            _kr, n = dense.shape[-2:]
 
         original_batch_dims_broadcasted = broadcast_batch_dims(f_name, bsr, dense)
 
@@ -2038,8 +2038,8 @@ if has_triton():
         pq_indices: torch.Tensor,
         accumulators: torch.Tensor,
     ):
-        _, M, K = blocks.shape
-        _, _, N = others.shape
+        _P, M, K = blocks.shape
+        _Q, _, N = others.shape
 
         meta = dict(
             TILE_M=max(16, M // 4), TILE_N=max(16, N // 4), num_stages=1, num_warps=2
@@ -2211,9 +2211,9 @@ if has_triton():
         force_contiguous: bool = True,
     ):
         SPLIT_N = meta["SPLIT_N"]
-        _, Ms, Ks = blocks.shape
-        B, _, N = others.shape
-        B_, _, N_ = accumulators.shape
+        _P, Ms, Ks = blocks.shape
+        B, _K, N = others.shape
+        B_, _M, N_ = accumulators.shape
         assert N_ == N
         Ns = N // SPLIT_N
         assert B_ == B

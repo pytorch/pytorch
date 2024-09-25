@@ -26,10 +26,10 @@ from .cpp_utils import (
     DTYPE_TO_CPP,
     LAYOUT_TO_ATEN,
 )
-from .wrapper import EnterSubgraphLine, ExitSubgraphLine, WrapperCodeGen
+from .wrapper import EnterSubgraphLine, ExitSubgraphLine, PythonWrapperCodegen
 
 
-class CppWrapperCpu(WrapperCodeGen):
+class CppWrapperCpu(PythonWrapperCodegen):
     """
     Generates cpp wrapper for running on CPU and calls cpp kernels
     """
@@ -633,7 +633,7 @@ class CppWrapperCpu(WrapperCodeGen):
             )
         else:
             # Note that we don't have a corresponding class method from
-            # the WrapperCodeGen since this method is used for asserting AOTI
+            # the PythonWrapperCodegen since this method is used for asserting AOTI
             # cpp wrapper code.
             code.writeline(f"auto {name}_dtype = {name}.dtype();")
 

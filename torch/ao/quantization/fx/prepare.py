@@ -1264,7 +1264,13 @@ def _maybe_propagate_dtype_for_node(
     node.meta["target_dtype_info"]["input_act_obs_or_fq_ctr"] = None
     node.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"] = None
     # if this is a copy node, propagate to first arg
-    (_, _, _, qhandler, _) = node_name_to_match_result_with_qconfig.get(
+    (
+        _root_node,
+        _,
+        _pattern,
+        qhandler,
+        _qconfig,
+    ) = node_name_to_match_result_with_qconfig.get(
         node.name, (None, None, None, None, None)
     )
     # TODO: probably need to remove `is_general_tensor_value_op`
@@ -1915,7 +1921,7 @@ def _run_prepare_fx_on_standalone_modules(
     for (
         root_node,
         _,
-        _,
+        _pattern,
         qhandler,
         qconfig,
     ) in node_name_to_match_result_with_qconfig.values():

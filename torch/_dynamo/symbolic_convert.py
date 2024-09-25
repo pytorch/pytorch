@@ -3324,7 +3324,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             if isinstance(value, RemovableHandleVariable):
                 unimplemented("Storing handles in globals - NYI")
             name = inst.argval
-            _, fglobals_vt, _ = self.get_globals_source_and_value(name)
+            _fglobals_value, fglobals_vt, _ = self.get_globals_source_and_value(name)
             self.output.side_effects.store_attr(fglobals_vt, name, value)
 
 

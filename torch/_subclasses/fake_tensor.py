@@ -1214,7 +1214,10 @@ class FakeTensorMode(TorchDispatchMode):
             assert not torch.cuda._is_compiled()
             return not torch.xpu.is_available()
 
-        return not torch.cuda.is_available()
+        return not (
+            torch.cuda.is_available()
+            or (hasattr(torch, "hpu") and torch.hpu.is_available())
+        )
 
     @property
     def stack(self) -> str:

@@ -664,7 +664,7 @@ def _lower_static_weighted_ref_module(
         matching_modules = list(STATIC_LOWER_MODULE_MAP.keys()) + list(
             STATIC_LOWER_FUSED_MODULE_MAP.keys()
         )
-        (q_node, _, ref_node) = _match_static_pattern(
+        q_node, _relu_node, ref_node = _match_static_pattern(
             n, modules, qconfig_map, matching_modules, dequantize_node_arg_indices=[0]  # type: ignore[arg-type]
         )
         if q_node is None:

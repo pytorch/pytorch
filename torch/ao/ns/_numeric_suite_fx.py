@@ -586,7 +586,7 @@ def _extract_logger_info_one_model(
     torch._C._log_api_usage_once(
         "quantization_api._numeric_suite_fx._extract_logger_info_one_model"
     )
-    for _, mod in model.named_modules():
+    for _gm_name, mod in model.named_modules():
         # TODO(future PR): better check when scripted
         is_logger = isinstance(mod, logger_cls) or (  # type: ignore[arg-type]
             isinstance(mod, torch.jit.RecursiveScriptModule)
@@ -1078,7 +1078,7 @@ def loggers_set_save_activations(
     """
     Sets the `save_activations` setting on a `model`'s loggers
     """
-    for _, child in model.named_modules():
+    for _name, child in model.named_modules():
         if isinstance(child, OutputLogger):
             child.save_activations = save_activations
 

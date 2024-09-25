@@ -337,7 +337,8 @@ class AutogradCompilerInstance:
                 for i in runtime_inputs_to_move:
                     inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
-                return compiled_fn(inputs, sizes, scalars, hooks)
+                with disable():
+                    return compiled_fn(inputs, sizes, scalars, hooks)
             finally:
                 in_compiled_autograd_region = False
 
