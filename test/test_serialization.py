@@ -4260,7 +4260,7 @@ class TestSerialization(TestCase, SerializationMixin):
             ft = converter.from_real_tensor(mode, torch.randn(2, device=t_device))
             with self.assertRaisesRegex(
                 AttributeError,
-                "Can't (pickle|get) local object 'WeakValueDictionary.__init__.<locals>.remove'"
+                "Can't (get|pickle) local object 'WeakValueDictionary.__init__.<locals>.remove'"
             ):
                 with skip_data(), BytesIOContext() as f:
                     torch.save(ft, f)
