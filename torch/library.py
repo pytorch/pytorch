@@ -631,11 +631,13 @@ def register_kernel(
     This API may be used as a decorator.
 
     Args:
-        fn (Callable): The function to register as the implementation for
-            the given device types.
+        op (str | OpOverload): The operator to register an impl to.
         device_types (None | str | Sequence[str]): The device_types to register an impl to.
             If None, we will register to all device types -- please only use
             this option if your implementation is truly device-type-agnostic.
+        func (Callable): The function to register as the implementation for
+            the given device types.
+        lib (Optional[Library]): If provided, the lifetime of this registration
 
     Examples::
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)

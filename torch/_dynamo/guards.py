@@ -79,6 +79,7 @@ from .eval_frame import set_guard_error_hook
 from .source import (
     AttrProxySource,
     AttrSource,
+    CallFunctionNoArgsSource,
     ChainedSource,
     ConstDictKeySource,
     DefaultsSource,
@@ -97,6 +98,7 @@ from .source import (
     ScriptObjectQualifiedNameSource,
     ShapeEnvSource,
     SubclassAttrListSource,
+    TorchFunctionModeStackSource,
     TupleIteratorGetItemSource,
     TypeSource,
     UnspecializedBuiltinNNModuleSource,
@@ -110,6 +112,7 @@ from .utils import (
     dict_keys_repr,
     get_custom_getattr,
     get_torch_function_mode_stack,
+    get_torch_function_mode_stack_at,
     guard_failures,
     istype,
     key_is_id,
@@ -313,6 +316,7 @@ CLOSURE_VARS = {
     "___dict_contains": lambda a, b: a in b,
     "___tuple_iterator_len": tuple_iterator_len,
     "___tuple_iterator_getitem": tuple_iterator_getitem,
+    "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
     "__math_isnan": math.isnan,
     "__numpy_isnan": None if np is None else np.isnan,
     "inf": float("inf"),
@@ -320,7 +324,7 @@ CLOSURE_VARS = {
     "utils_device": torch.utils._device,
     "device": torch.device,
     "___from_numpy": from_numpy,
-    "___as_tensor": torch.as_tensor,
+    "___as_tensor": torch._as_tensor_fullprec,
     "torch": torch,
     "inspect": inspect,
 }
@@ -900,6 +904,15 @@ class GuardBuilder(GuardBuilderBase):
         ):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager
+        elif istype(source, TorchFunctionModeStackSource):
+            out = root_guard_manager.lambda_manager(
+                python_lambda=lambda _: get_torch_function_mode_stack_at(
+                    source._get_index()
+                ),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, GradSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.grad_manager(
@@ -1093,9 +1106,16 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
-        elif isinstance(source, WeakRefCallSource):
+        elif istype(source, WeakRefCallSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.weakref_call_manager(
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, CallFunctionNoArgsSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.call_function_no_args_manager(
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
@@ -1474,12 +1494,12 @@ class GuardBuilder(GuardBuilderBase):
         )
 
         if torch.distributed.is_available():
-            from torch.distributed._tensor.placement_types import (
+            from torch.distributed.device_mesh import DeviceMesh
+            from torch.distributed.tensor.placement_types import (
                 Partial,
                 Replicate,
                 Shard,
             )
-            from torch.distributed.device_mesh import DeviceMesh
 
             ok_types = ok_types + (
                 Shard,
@@ -2206,6 +2226,8 @@ class CheckFunctionManager:
         self.output_graph = output_graph
         w_builder = None
 
+        # NB: Until we trace device contexts, we need to use the stack recorded at the beginning of tracing
+        # in case a set default device call was made in the graph.
         self.torch_function_mode_stack = (
             output_graph.torch_function_mode_stack if output_graph else None
         )
@@ -2322,15 +2344,12 @@ class CheckFunctionManager:
         )
 
         if config.enable_cpp_guard_manager:
-            from .variables.torch_function import IGNORED_MODES
-
             # Insert the global_state guard
             assert self.guard_manager  # to make mypy happy
             self.guard_manager.root.add_global_state_guard(["___check_global_state()"])
 
             self.guard_manager.root.add_torch_function_mode_stack_guard(
                 self.torch_function_mode_stack,
-                list(IGNORED_MODES),
                 ["___check_torch_function_mode_stack()"],
             )
             # Clear references to torch_function modes held in the list
@@ -2637,16 +2656,14 @@ def is_recompiles_verbose_enabled():
 # this will only be used if cpp guards are disabled
 def make_torch_function_mode_stack_guard(intial_stack):
     types = [type(x) for x in intial_stack]
-    from .variables.torch_function import IGNORED_MODES
 
     def check_torch_function_mode_stack():
         cur_stack = get_torch_function_mode_stack()
+
         if len(cur_stack) != len(types):
             return False
 
         for ty, mode in zip(types, cur_stack):
-            if ty in IGNORED_MODES:
-                continue
             if ty != type(mode):
                 return False
 
