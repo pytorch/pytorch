@@ -477,7 +477,7 @@ def _profile_to_snapshot(profile):
     kv_to_elem = {}
 
     # create the device trace
-    for _, action, (tensor_key, version), size in memory_profile.timeline:
+    for _time, action, (tensor_key, version), size in memory_profile.timeline:
         if not isinstance(tensor_key, TensorKey):
             continue
         if action == Action.CREATE:

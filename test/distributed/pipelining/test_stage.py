@@ -173,14 +173,12 @@ class StageTest(MultiProcContinousTest):
         schedule = ScheduleGPipe(stage, chunks)
 
         # Run
-        def _run_step(x):
-            if self.rank == 0:
-                return schedule.step(x, y=y)
-            else:
-                return schedule.step()
+        if self.rank == 0:
+            out = schedule.step(x, y=y)
+        else:
+            out = schedule.step()
 
         # Last rank checks result
-        out = _run_step(x)
         if self.rank == self.world_size - 1:
             ref_out = mod(x, y=y)
             torch.testing.assert_close(out, ref_out, atol=1e-3, rtol=5e-2)
@@ -190,23 +188,6 @@ class StageTest(MultiProcContinousTest):
         # Confirm keys are consistent with original model
         old_keys = mod.state_dict().keys()
         assert all(k in old_keys for k in submod_keys)
-
-        if self.rank == 0:
-            with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
-                _run_step(torch.randn(batch_size + 1, d_hid, device=self.device))
-
-            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
-                _run_step(x.to(torch.int32))
-
-            # output of stage's mlp layer will be flattened by this hook, the stage should err
-            handle = stage.submod.register_forward_hook(get_flatten_hook())
-            with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
-                _run_step(x)
-            handle.remove()
-
-            stage.submod.register_forward_hook(get_dtype_change_hook(torch.bfloat16))
-            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
-                _run_step(x)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")

@@ -233,9 +233,7 @@ NHWC_STRIDE_ORDER = [3, 0, 2, 1]
 NHWDC_STRIDE_ORDER = [4, 0, 3, 2, 1]
 
 
-def stride_order2fill_order(
-    order: Sequence[Union[int, Integer]]
-) -> Sequence[Union[int, Integer]]:
+def stride_order2fill_order(order: Sequence[Union[int, Integer]]) -> Sequence[int]:
     """
     Convert stride order to fill order
     For channel last format,
@@ -2089,7 +2087,7 @@ def is_storage_and_layout(x: IRNode) -> bool:
 
 def is_contiguous_storage_and_layout(x: IRNode) -> bool:
     try:
-        _, layout = as_storage_and_layout(x, freeze=False)
+        _buffer, layout = as_storage_and_layout(x, freeze=False)
         # pad the stride here so we will NOT claim an tensor as contiguous
         # if a padding is gonna happen.
         if layout.should_pad_strides():
@@ -2158,7 +2156,7 @@ def is_stride_order_storage_and_layout(
     x: IRNode, stride_order: Sequence[Union[int, Integer]]
 ) -> bool:
     try:
-        _, layout = as_storage_and_layout(x, freeze=False)
+        _buffer, layout = as_storage_and_layout(x, freeze=False)
         return layout.is_stride_ordered(stride_order)
     except NotImplementedError:
         return False
@@ -3788,7 +3786,7 @@ class ComputedBuffer(OperationBuffer):
             x_vars = reindex0(x_vars)
 
             if simplify_loops:
-                sizes, reindex2, _ = V.graph.sizevars._simplify_loops(
+                sizes, reindex2, _prune = V.graph.sizevars._simplify_loops(
                     x_vars,
                     sizes,
                     index_prevent_reordering(index_formulas, x_vars, sizes),
@@ -4447,7 +4445,7 @@ class ExternKernel(InputsKernel):
             self.freeze_layout()
 
     def codegen_comment(self, wrapper):
-        origin_str, _ = get_kernel_metadata(self, wrapper)
+        origin_str, _detailed_origin_str = get_kernel_metadata(self, wrapper)
         if origin_str:
             wrapper.writeline(origin_str)
 
@@ -4784,7 +4782,7 @@ class ExternKernel(InputsKernel):
                         want_contiguous=False,
                         stride_order=None,
                         allow_padding=allow_padding,
-                        exact_strides=exact_strides,
+                        exact_strides=exact_strides,  # type: ignore[arg-type]  # int|Expr vs int|Integer
                     )
                     return x
             elif isinstance(x.get_layout(), FixedLayout) and (
@@ -4854,7 +4852,7 @@ class ExternKernel(InputsKernel):
             want_contiguous=False,
             stride_order=order,
             allow_padding=allow_padding,
-            exact_strides=exact_strides,
+            exact_strides=exact_strides,  # type: ignore[arg-type]  # int|Expr vs int|Integer
         )
         if order:
             assert is_stride_order_storage_and_layout(x, order)
@@ -5018,7 +5016,7 @@ class ExternKernel(InputsKernel):
         indexer = self.make_indexer()
         index = indexer(index_vars)
 
-        new_sizes, reindex, _ = V.graph.sizevars._simplify_loops(
+        new_sizes, reindex, _prune = V.graph.sizevars._simplify_loops(
             index_vars, sizes, [index]
         )
 
@@ -5349,7 +5347,7 @@ class InplaceCopyFallback(ExternKernel):
     """
 
     def codegen(self, wrapper):
-        dst, src, _ = self.codegen_args()
+        dst, src, _non_blocking = self.codegen_args()
         wrapper.codegen_device_copy(src, dst)
 
     def should_allocate(self):
@@ -6778,7 +6776,7 @@ class _CollectiveKernel(FallbackKernel):
     ) -> None:
         with V.graph.fake_mode:
             (
-                _,
+                _example_output,
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
@@ -6905,7 +6903,7 @@ class _WaitKernel(_CollectiveKernel):
     def create_wait(cls, kernel, inp: TensorBox) -> None:
         with V.graph.fake_mode:
             (
-                _,
+                _example_output,
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,

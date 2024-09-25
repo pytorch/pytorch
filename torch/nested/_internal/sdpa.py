@@ -744,10 +744,10 @@ def jagged_scaled_dot_product_attention(
 
         (
             attention,
-            _,
-            _,
-            _,
-            _,
+            _logsumexp,
+            _philox_seed,
+            _philox_offset,
+            _debug_attn_mask,
         ) = torch.ops.aten._flash_attention_forward(
             query_buffer_reshaped,
             key_buffer_reshaped,
@@ -783,10 +783,10 @@ def jagged_scaled_dot_product_attention(
         ) = _sdpa_nested_preprocessing(query, key, value)
         (
             attention,
-            _,
-            _,
-            _,
-            _,
+            log_sumexp,
+            seed,
+            offset,
+            max_seqlen_q,
             max_seqlen_batch_kv,
         ) = torch.ops.aten._efficient_attention_forward(
             query_reshaped.unsqueeze(0),

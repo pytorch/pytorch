@@ -68,7 +68,7 @@ class CubeGenVmap(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output, grad_saved):
-        _, dinput = ctx.saved_tensors
+        _input, dinput = ctx.saved_tensors
         result = grad_output * dinput + 6 * dinput
         return result
 
@@ -221,7 +221,7 @@ class NumpySort(torch.autograd.Function):
 
     @staticmethod
     def setup_context(ctx, inputs, output):
-        _, dim = inputs
+        _x, dim = inputs
         _, ind, ind_inv = output
         ctx.mark_non_differentiable(ind, ind_inv)
         ctx.save_for_backward(ind, ind_inv)
@@ -258,7 +258,7 @@ class SortGenVmap(torch.autograd.Function):
 
     @staticmethod
     def setup_context(ctx, inputs, outputs):
-        _, dim = inputs
+        x, dim = inputs
         _, ind, ind_inv = outputs
         ctx.mark_non_differentiable(ind, ind_inv)
         ctx.save_for_backward(ind, ind_inv)
@@ -299,7 +299,7 @@ class NumpyTake(torch.autograd.Function):
 
     @staticmethod
     def setup_context(ctx, inputs, output):
-        _, ind, ind_inv, dim = inputs
+        _x, ind, ind_inv, dim = inputs
         ctx.save_for_backward(ind, ind_inv)
         ctx.save_for_forward(ind, ind_inv)
         ctx.dim = dim
@@ -345,7 +345,7 @@ class TakeGenVmap(torch.autograd.Function):
 
     @staticmethod
     def setup_context(ctx, inputs, outputs):
-        _, ind, ind_inv, dim = inputs
+        _x, ind, ind_inv, dim = inputs
         ctx.save_for_backward(ind, ind_inv)
         ctx.save_for_forward(ind, ind_inv)
         ctx.dim = dim

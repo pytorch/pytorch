@@ -5551,7 +5551,7 @@ def meta_scaled_mm(
             scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32,
             lambda: "Both scale_a and scale_b must be float (fp32) tensors.",
         )
-        m, _ = self.shape
+        m, _k = self.shape
         n = mat2.size(1)
         if scale_a.numel() == 1 and scale_b.numel() == 1:
             # tensorwise scaling

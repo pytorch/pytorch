@@ -676,7 +676,7 @@ class ModelReportVisualizer:
             return None
 
         # get the x and y data and if per channel
-        _, y_data, data_per_channel = self._get_plottable_data(
+        _x_data, y_data, data_per_channel = self._get_plottable_data(
             feature_filter, module_fqn_filter
         )
 
@@ -694,7 +694,7 @@ class ModelReportVisualizer:
             for channel_info in y_data:
                 all_data.extend(channel_info)
 
-            _, bins, _ = plt.hist(
+            _val, bins, _ = plt.hist(
                 all_data,
                 bins=num_bins,
                 stacked=True,
@@ -702,7 +702,7 @@ class ModelReportVisualizer:
             )
             plt.xticks(bins)
         else:
-            _, bins, _ = plt.hist(
+            _val, bins, _ = plt.hist(
                 y_data,
                 bins=num_bins,
                 stacked=False,

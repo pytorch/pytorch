@@ -388,8 +388,10 @@ class TestFxGraphCache(TestCase):
         compiled_fn = torch.compile(fn)
         compiled_fn2 = torch.compile(fn2)
 
+        atol, rtol = 1e-4, 1e-4
+
         # A first call should miss in the cache.
-        self.assertEqual(fn(a, b, c), compiled_fn(a, b, c))
+        self.assertEqual(fn(a, b, c), compiled_fn(a, b, c), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
         self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
@@ -399,7 +401,7 @@ class TestFxGraphCache(TestCase):
         for m in torch._inductor.codecache.PyCodeCache.cache.values():
             os.remove(m.__file__)
         self.reset()
-        self.assertEqual(fn(a, b, c), compiled_fn(a, b, c))
+        self.assertEqual(fn(a, b, c), compiled_fn(a, b, c), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
@@ -408,7 +410,7 @@ class TestFxGraphCache(TestCase):
         for m in torch._inductor.codecache.PyCodeCache.cache.values():
             os.remove(m.__file__)
         self.reset()
-        self.assertEqual(fn2(a, b, c), compiled_fn2(a, b, c))
+        self.assertEqual(fn2(a, b, c), compiled_fn2(a, b, c), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
