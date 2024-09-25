@@ -816,7 +816,7 @@ bool CUDASymmetricMemoryAllocator::is_rendezvous_completed(void* ptr) {
   return block->symm_mem != nullptr;
 }
 
-bool CUDASymmetricMemoryAllocator::has_multicast_support() {
+bool CUDASymmetricMemoryAllocator::has_multicast_support(int device_idx) {
   // Use 0 to prevent unexpected cuda context initialization.
   // We generally expect multicast support to be uniform across all devices,
   // but we'll still perform a check during rendezvous.
