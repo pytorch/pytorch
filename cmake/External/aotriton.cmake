@@ -13,7 +13,7 @@ if(NOT __AOTRITON_INCLUDED)
             DESTINATION ${__AOTRITON_INSTALL_DIR})
     set(__AOTRITON_INSTALL_DIR "$ENV{AOTRITON_INSTALLED_PREFIX}")
     message(STATUS "Using Preinstalled AOTriton at ${__AOTRITON_INSTALL_DIR}")
-  else(DEFINED ENV{AOTRITON_INSTALL_FROM_SOURCE})
+  elseif(DEFINED ENV{AOTRITON_INSTALL_FROM_SOURCE})
     file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/.ci/docker/aotriton_version.txt" __AOTRITON_CI_INFO)
     list(GET __AOTRITON_CI_INFO 3 __AOTRITON_CI_COMMIT)
     ExternalProject_Add(aotriton_external
@@ -58,7 +58,7 @@ if(NOT __AOTRITON_INCLUDED)
       CONFIGURE_COMMAND ""
       BUILD_COMMAND ""
       INSTALL_COMMAND ${CMAKE_COMMAND} -E copy_directory
-      "${CMAKE_CURRENT_BINARY_DIR}/aotriton_tarball/aotriton"
+      "${CMAKE_CURRENT_BINARY_DIR}/aotriton_tarball"
       "${__AOTRITON_INSTALL_DIR}"
       BUILD_BYPRODUCTS "${__AOTRITON_INSTALL_DIR}/lib/libaotriton_v2.so"
     )
