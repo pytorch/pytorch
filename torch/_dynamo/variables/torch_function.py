@@ -56,6 +56,12 @@ banned_attrs = [
     if is_tensor_base_attr_getter(fn)
 ]
 
+# Today set default device is placed in the graph and guarded on separately
+# so we should not trace through it. In the future we can trace it once
+# mode tracing is implemented and not put in the graph, but this is more
+# of a BE project and can be evaluated later
+IGNORED_MODES = {DeviceContext}
+
 
 class SymbolicTorchFunctionState:
     def __init__(self, py_stack):

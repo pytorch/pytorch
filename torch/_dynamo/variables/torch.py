@@ -11,7 +11,6 @@ import torch._C
 import torch._refs
 import torch.fx
 import torch.nn
-import torch.onnx.operators
 from torch._guards import TracingContext
 from torch._logging import warning_once
 from torch._streambase import _StreamBase
@@ -97,7 +96,6 @@ supported_ctx_manager_classes = dict.fromkeys(
 
 REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
     [
-        torch.onnx.operators.shape_as_tensor,
         torch._shape_as_tensor,
     ]
 )
