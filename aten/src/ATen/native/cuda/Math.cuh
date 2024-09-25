@@ -5,8 +5,7 @@
 #include <c10/macros/Macros.h>
 #include <ATen/native/cuda/jit_utils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 // See note [Jiterator]
 // TODO: elaborate in this comment on the structure of math.cuh
 #if AT_USE_JITERATOR()
@@ -3371,5 +3370,4 @@ static inline C10_HOST_DEVICE scalar_t calc_i1e(scalar_t _x) {
 
 #endif // AT_USE_JITERATOR() (this closes the "else" branch of a if/else preprocessor directive)
 
-} // namespace native
-} // namespace at
+} // namespace at::native
