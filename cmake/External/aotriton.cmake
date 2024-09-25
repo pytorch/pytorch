@@ -50,7 +50,7 @@ if(NOT __AOTRITON_INCLUDED)
     ${__AOTRITON_VER}/aotriton-\
     ${__AOTRITON_VER}-${__AOTRITON_MANY}\
     _${__AOTRITON_ARCH}-${__AOTRITON_ROCM}-shared.tar.${__AOTRITON_Z}")
-    set(__AOTRITON_ARCH "x86_64"
+    set(__AOTRITON_ARCH ${CMAKE_HOST_SYSTEM_PROCESSOR})
     ExternalProject_Add(aotriton_external
       URL "${__AOTRITON_URL}"
       URL_HASH SHA256=${__AOTRITON_SHA256}
