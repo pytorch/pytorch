@@ -1134,6 +1134,38 @@ def forward(self, p_linear_weight, p_linear_bias, x):
         ]
         self.assertEqual(actual_torch_fns, exp_torch_fns)
 
+    def test_duplicate_modules_with_non_persistent_buffers(self):
+        class FooWithBuf(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.randn(4), persistent=False)
+
+            def forward(self, x):
+                return x + self.buf
+
+        class BarWithFoo(torch.nn.Module):
+            def __init__(self, foo):
+                super().__init__()
+                self.foo = foo
+
+            def forward(self, x):
+                return self.foo(x)
+
+        class ModWith2Bars(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                foo = FooWithBuf()
+                self.b1 = BarWithFoo(foo)
+                self.b2 = BarWithFoo(foo)
+
+            def forward(self, x):
+                return self.b1(x) + self.b2(x)
+
+        mod = ModWith2Bars()
+        inputs = (torch.randn(4),)
+        ep = export(mod, inputs)
+        self.assertTrue(torch.allclose(ep.module()(*inputs), mod(*inputs)))
+
     def test_derived_dim_basic(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
