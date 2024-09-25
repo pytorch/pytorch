@@ -12,6 +12,7 @@
 #include <ATen/ops/clamp_max_native.h>
 #include <ATen/ops/clamp_min_native.h>
 #include <ATen/ops/clamp_native.h>
+#include <ATen/ops/eq.h>
 #include <ATen/ops/isin_native.h>
 #include <ATen/ops/nan_to_num_native.h>
 #include <ATen/ops/ones_like_native.h>
@@ -335,6 +336,26 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
   }
 }
 
+static void is_posneginf_helper(TensorIteratorBase& iter, bool is_neg) {
+  const auto& self = iter.input(0);
+  auto& out = iter.output(0);
+  @autoreleasepool {
+    auto cachedGraph = LookUpOrCreateCachedGraph<MPSUnaryCachedGraph>(
+        __func__ + std::to_string(is_neg) + getTensorsStringKey(self), [&](auto mpsGraph, auto newCachedGraph) {
+          auto infTensor = [mpsGraph constantWithScalar:is_neg ? -std::numeric_limits<float>::infinity()
+                                                               : std::numeric_limits<float>::infinity()
+                                               dataType:getMPSScalarType(self)];
+          newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, self);
+          newCachedGraph->outputTensor_ = [mpsGraph equalWithPrimaryTensor:newCachedGraph->inputTensor_
+                                                           secondaryTensor:infTensor
+                                                                      name:nil];
+        });
+    auto selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
+    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
+    runMPSGraph(
+        getCurrentMPSStream(), cachedGraph->graph(), dictionaryFromPlaceholders(selfPlaceholder), outputPlaceholder);
+  }
+}
 } // namespace mps
 
 // APIs exposed to at::native scope
@@ -541,6 +562,16 @@ Tensor& nan_to_num_out_mps(const Tensor& self,
   return result;
 }
 
+static void isneginf_kernel_mps(TensorIteratorBase& iter) {
+  mps::is_posneginf_helper(iter, true);
+}
+
+static void isposinf_kernel_mps(TensorIteratorBase& iter) {
+  mps::is_posneginf_helper(iter, false);
+}
+
 REGISTER_DISPATCH(where_kernel, &where_kernel_mps);
+REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_mps);
+REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_mps);
 
 } // namespace at::native
