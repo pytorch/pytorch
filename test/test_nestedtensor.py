@@ -7185,10 +7185,14 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         check(nt)
 
-    @dtypes(torch.float32, torch.double, torch.half)
+    @dtypes(torch.float32, torch.double, torch.half, torch.bool)
     @parametrize("nt_dim", [2, 3, 4])
     @parametrize("requires_grad", [False, True])
     def test_to_padded_tensor(self, device, dtype, nt_dim, requires_grad):
+        if dtype is torch.bool and requires_grad:
+            # grads not supported for bool
+            return
+
         if nt_dim == 2:
             post_seq_len_shape = ()
         elif nt_dim == 3:
@@ -7198,7 +7202,9 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         nt = torch.nested.nested_tensor(
             [
-                torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                torch.randint(2, (n, *post_seq_len_shape), device=device, dtype=dtype)
+                if dtype is torch.bool
+                else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
                 for n in range(2, 9)
             ],
             layout=torch.jagged,
@@ -7219,7 +7225,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         nt2 = nested_from_padded(padded, nt.offsets())
         self.assertEqual(nt, nt2)
 
-        if requires_grad:
+        if requires_grad and dtype is not torch.bool:
             # ensure gradients flow through conversions
             nt2.backward(torch.ones_like(nt2))
             self.assertEqual(nt.grad, torch.ones_like(nt))
@@ -7234,6 +7240,10 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @parametrize("nt_dim", [2, 3, 4])
     @parametrize("requires_grad", [False, True])
     def test_to_padded_tensor_compile(self, device, dtype, nt_dim, requires_grad):
+        if dtype is torch.bool and requires_grad:
+            # grads not supported for bool
+            return
+
         if nt_dim == 2:
             post_seq_len_shape = ()
         elif nt_dim == 3:
@@ -7243,7 +7253,9 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         nt = torch.nested.nested_tensor(
             [
-                torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                torch.randint(2, (n, *post_seq_len_shape), device=device, dtype=dtype)
+                if dtype is torch.bool
+                else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
                 for n in range(2, 9)
             ],
             layout=torch.jagged,
@@ -7469,9 +7481,6 @@ COMPILE_FORWARD_FAILURES = {
     # clone() on non-contiguous with holes NJTs currently use unbind(), leading to
     # data-dependent error in torch.compile
     "clone",
-    # torch._dynamo.exc.Unsupported: data dependent operator: aten._local_scalar_dense.default
-    # for inputs where min / max seqlen are not cached
-    "sum",
 }
 
 COMPARE_TENSOR_COMPONENT_EQUALITY = {
