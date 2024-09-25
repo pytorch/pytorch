@@ -45,11 +45,13 @@ if(NOT __AOTRITON_INCLUDED)
     list(GET __AOTRITON_CI_INFO 2 __AOTRITON_ROCM)
     list(GET __AOTRITON_CI_INFO 3 __AOTRITON_COMMIT)
     list(GET __AOTRITON_CI_INFO 4 __AOTRITON_SHA256)
-    set(__AOTRITON_URL "https://github.com/ROCm/aotriton/releases/download/\
-    ${__AOTRITON_VER}/aotriton-\
-    ${__AOTRITON_VER}-${__AOTRITON_MANYLINUX}\
-    _${__AOTRITON_ARCH}-${__AOTRITON_ROCM}-shared.tar.gz")
     set(__AOTRITON_ARCH ${CMAKE_HOST_SYSTEM_PROCESSOR})
+    string(CONCAT __AOTRITON_FILE "aotriton-"
+                                  "${__AOTRITON_VER}-${__AOTRITON_MANYLINUX}"
+                                  "_${__AOTRITON_ARCH}-rocm${__AOTRITON_ROCM}"
+                                  "-shared.tar.gz")
+    string(CONCAT __AOTRITON_URL "https://github.com/ROCm/aotriton/releases/download/"
+                                 "${__AOTRITON_VER}/${__AOTRITON_FILE}")
     ExternalProject_Add(aotriton_external
       URL "${__AOTRITON_URL}"
       URL_HASH SHA256=${__AOTRITON_SHA256}
