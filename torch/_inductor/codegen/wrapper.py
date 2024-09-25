@@ -1279,15 +1279,15 @@ class PythonWrapperCodegen(CodeGen):
         from .common import KernelArgType, SizeArg, TensorArg
 
         signature: List[KernelArgType] = []
-        constants: Dict[int, Any] = {}
+        constants: Dict[str, Any] = {}
         non_constant_indices = []
-        equal_to_1_arg_idx: List[int] = []
+        equal_to_1_args: List[str] = []
         for idx, key in enumerate(kernel.arg_names):
             if key not in kwargs:
                 continue
             arg = kwargs[key]
             if idx in kernel.constexprs:
-                constants[idx] = arg
+                constants[key] = arg
             else:
                 non_constant_indices.append(idx)
                 if isinstance(arg, ir.Buffer):
@@ -1317,13 +1317,14 @@ class PythonWrapperCodegen(CodeGen):
                     ) and V.graph.sizevars.statically_known_equals(
                         arg, 1  # type: ignore[arg-type]
                     ):
-                        equal_to_1_arg_idx.append(idx)
+                        equal_to_1_args.append(key)
         index_dtype = "tl.int32"
         triton_meta = {
             "signature": signature_to_meta(
                 signature,
                 size_dtype=index_dtype,
                 indices=non_constant_indices,
+                argdefs=kernel.arg_names,
             ),
             "device": DeviceProperties.create(
                 V.graph.scheduler.get_current_device_or_throw()
@@ -1337,7 +1338,7 @@ class PythonWrapperCodegen(CodeGen):
             # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
             "constants": {
                 **constants,
-                **dict.fromkeys(equal_to_1_arg_idx, 1),
+                **dict.fromkeys(equal_to_1_args, 1),
             },
             "configs": [
                 config_of(
