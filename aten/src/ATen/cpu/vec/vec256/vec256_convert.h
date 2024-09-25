@@ -208,8 +208,27 @@ struct VecConvert<
             (is_reduced_floating_point_v<src_t> && is_8bit_integer_v<dst_t>),
         void>> {
   static inline VectorizedN<dst_t, 1> apply(const VectorizedN<src_t, 1>& src) {
-    VectorizedN<float, 1> tmp_fp32 = VecConvert<float, 1, src_t, 1>::apply(src);
-    return VecConvert<dst_t, 1, float, 1>::apply(tmp_fp32);
+    VectorizedN<float, 2> tmp_fp32 = VecConvert<float, 2, src_t, 1>::apply(src);
+    return VecConvert<dst_t, 1, float, 2>::apply(tmp_fp32);
+  }
+};
+
+template <typename dst_t>
+struct VecConvert<
+    dst_t,
+    1,
+    float,
+    2,
+    typename std::enable_if_t<is_8bit_integer_v<dst_t>,
+        void>> {
+  static inline VectorizedN<dst_t, 1> apply(const VectorizedN<float, 2>& src) {
+    at::vec::Vectorized<dst_t> vec1 = convert_float_to_int8<dst_t>(src[0]);
+    at::vec::Vectorized<dst_t> vec2 = convert_float_to_int8<dst_t>(src[1]);
+    __m128 lane2 = _mm256_castps256_ps128(_mm256_castsi256_ps(vec2));
+    __m256 combined = _mm256_insertf128_ps(_mm256_castsi256_ps(vec1), lane2, 1);
+    // Shuffle [191:128] bit from combined in to [127:64] bit of result
+    __m256i result = _mm256_permute4x64_epi64(_mm256_castps_si256(combined), 0b11011000);
+    return at::vec::Vectorized<dst_t>(result);
   }
 };
 
@@ -226,6 +245,25 @@ struct VecConvert<
   }
 };
 
+template <typename src_t>
+struct VecConvert<
+    float,
+    2,
+    src_t,
+    1,
+    typename std::enable_if_t<is_8bit_integer_v<src_t>,
+        void>> {
+  static inline VectorizedN<float, 2> apply(const VectorizedN<src_t, 1>& src) {
+    // Shuffle [127:64] bit from src[0] in to [191:128] bit of shuffled
+    __m256i shuffled = _mm256_permute4x64_epi64(src[0], 0b11011000);
+    __m256i src2 = _mm256_castsi128_si256(
+      _mm_castps_si128(
+        _mm256_extractf128_ps(_mm256_castsi256_ps(shuffled), 1) // Extract the second 128-bit lane
+      )
+    );
+    return VectorizedN<float, 2>(convert_int8_to_float<src_t>(src[0]), convert_int8_to_float<src_t>(src2));
+  }
+};
 
 template <typename dst_t>
 struct VecConvert<
