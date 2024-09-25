@@ -1366,7 +1366,6 @@ TORCH_IMPL_FUNC(mean_out)
         dim_prod *= self.size(d);
       }
     }
-    auto& result_mut = const_cast<Tensor&>(result);
     // For accuracy reasons, BF16/FP16 mean should be computed via the
     // following approach:
     //  cast_fp32 -> sum -> div -> cast_bf16_or_fp16
@@ -1378,7 +1377,7 @@ TORCH_IMPL_FUNC(mean_out)
     // which, in turn, does not produce as accurate results.
     bool is_half_type = (dtype == kHalf || dtype == kBFloat16);
     auto sum_out_dtype = is_half_type ? ScalarType::Float : dtype;
-    result_mut = is_half_type ? result_mut.to(sum_out_dtype) : result_mut;
+    auto result_temp = is_half_type ? result.to(sum_out_dtype) : result;
     // If dtype is FP16 or BF16, self (input tensor) will initially be cast to
     // FP32 in sum_out. This results in having to read that FP32 tensor again,
     // but maybe in the future, we could revise the implementation to not
@@ -1386,9 +1385,14 @@ TORCH_IMPL_FUNC(mean_out)
     // require some modifications in binary_kernel_reduce_vec(),
     // TensorIteratorBase::for_each(), and
     // TensorIteratorBase::serial_for_each(), apart from sum kernel for CPU.
-    at::sum_out(result_mut, self, opt_dim, keepdim, sum_out_dtype).div_(dim_prod);
-    // After sum & div, cast result_mut back to BF16 or FP16, if required.
-    result_mut = is_half_type ? result_mut.to(dtype) : result_mut;
+    at::sum_out(result_temp, self, opt_dim, keepdim, sum_out_dtype).div_(dim_prod);
+    // After sum & div, cast result_temp back to BF16 or FP16, if required.
+    // It cannot be avoided copy_() if we promotion the out of sum op, because of
+    // the result needs to be update and the storage of result tensor cannot be reused
+    // by sum op. We do not need explicit call to(dtype) func as copy_() do it.
+    if (is_half_type) {
+      result.copy_(result_temp);
+    }
   } else {
     // device is not CPU
     auto iter = at::meta::make_reduction_from_out_ty(
