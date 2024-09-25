@@ -5048,6 +5048,10 @@ class TestMemPool(TestCase):
         # pool should point to the same allocator as the one passed into it
         self.assertEqual(allocator.allocator(), pool.allocator)
 
+        # pool's use count should be 1 at this point as MemPool object
+        # holds a reference
+        self.assertEqual(pool.use_count(), 1)
+
         # no allocations happened yet, so called_dummy_alloc and
         # called_dummy_free should be 0
         alloc_lib = ctypes.CDLL(dummy_allocator)
@@ -5059,6 +5063,14 @@ class TestMemPool(TestCase):
         with torch.cuda.use_mem_pool(pool):
             out_0 = torch.randn(1, device="cuda")
 
+            # pool's use count should be 2 at this point as use_mem_pool
+            # holds a reference
+            self.assertEqual(pool.use_count(), 2)
+
+        # pool's use count should be back to 1 at this point as use_mem_pool
+        # released its reference
+        self.assertEqual(pool.use_count(), 1)
+
         # called_dummy_alloc should be 123 if dummy_alloc was used to allocate
         # out tensor
         self.assertEqual(called_dummy_alloc.value, 123)
@@ -5066,22 +5078,12 @@ class TestMemPool(TestCase):
         with torch.cuda.use_mem_pool(pool):
             out_1 = torch.randn(1, device="cuda")
 
-        # pool's use count should be 2, since there are two use_mem_pools
-        # using it above
-        self.assertEqual(pool.use_count(), 2)
-
-        pool.release()
-        # pool's use count should now be 0, since release() calls releasePool
-        # twice based on the use_count()
-        self.assertEqual(pool.use_count(), 0)
-
         # pool should have 2 segments since we made two allocations above in
         # in the same pool
         self.assertEqual(len(pool.snapshot()), 2)
 
-        del out_0, out_1
-        pool.empty_cache()
-        # pool now should have 0 segments if empty_cache() reclaimed all the
+        del out_0, out_1, pool
+        # pool now should have 0 segments if del pool reclaimed all the
         # memory
         self.assertEqual(len(pool.snapshot()), 0)
 

@@ -1035,27 +1035,6 @@ class MemPool(_MemPool):
         )
         return _cuda_getPoolUseCount(device_index, self.id)
 
-    def release(self, device: Union[Device, int] = None):
-        r"""Convenience function that attempts to release a pool, and mark its memory
-        to be free'd.
-
-        Note that the memory in a pool can only be free'd when its use count is 0.
-        When the use count is 0, :func:`~torch.cuda.empty_cache` will restore memory
-        back to the system.
-
-        Args:
-            device (torch.device or int, optional): selected device. Attempts
-                to release a pool on the current device, given by
-                :func:`~torch.cuda.current_device`, if :attr:`device` is ``None``
-                (default).
-
-        """
-        device_index = (
-            torch.cuda.current_device() if device is None else _get_device_index(device)
-        )
-        for _ in range(self.use_count()):
-            _cuda_releasePool(device_index, self.id)
-
     def snapshot(self):
         r"""Return a snapshot of the CUDA memory allocator pool state across all
         devices.
@@ -1071,17 +1050,6 @@ class MemPool(_MemPool):
         snapshot = torch.cuda.memory_snapshot()
         del ctx
         return snapshot
-
-    def empty_cache(self):
-        r"""Convenience function that attempts to restore memory back to the system.
-
-        Note that the memory in a pool can only be free'd when its use count is 0.
-        When the use count is 0, :func:`~torch.cuda.empty_cache` will restore memory
-        back to the system. Use release() function to mark a pool as freeable.
-        """
-        ctx = MemPoolContext(self)
-        torch.cuda.empty_cache()
-        del ctx
 
 
 @contextlib.contextmanager
@@ -1105,4 +1073,5 @@ def use_mem_pool(pool: MemPool, device: Union[Device, int] = None):
         yield
     finally:
         _cuda_endAllocateCurrentStreamToPool(device_index, pool.id)
+        _cuda_releasePool(device_index, pool.id)
         del ctx
