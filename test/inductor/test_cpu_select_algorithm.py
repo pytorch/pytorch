@@ -1,8 +1,6 @@
 # Owner(s): ["oncall: cpu inductor"]
 import contextlib
 import functools
-import logging
-import os
 import sys
 import unittest
 from typing import Optional
@@ -31,9 +29,6 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     TEST_MKL,
 )
-
-
-log = logging.getLogger(__name__)
 
 
 try:
@@ -275,19 +270,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             def forward(self, x):
                 return self.epilogue(self.linear(x))
 
-        # TODO: debug utils, safe to remove in Oct 2024
-        if inductor_config.is_fbcode():
-            log.warning(
-                f"DEBUG: torch.backends.mkl.is_available() is {torch.backends.mkl.is_available()}, "  # noqa: G004
-                f"torch.ops.mkldnn._is_mkldnn_fp16_supported() is {torch.ops.mkldnn._is_mkldnn_fp16_supported()}, "
-                f"torch.ops.mkldnn._is_mkldnn_bf16_supported() is {torch.ops.mkldnn._is_mkldnn_bf16_supported()}, "
-                f"inductor_config.freezing is {inductor_config.freezing}, "
-                f"mkldnn._is_mkldnn_acl_supported() is {torch.ops.mkldnn._is_mkldnn_acl_supported()}, "
-                f"torch._C.has_mkl is {torch._C.has_mkl}, "
-                f"PYTORCH_TEST_FBCODE is {os.getenv('PYTORCH_TEST_FBCODE')}, "
-                f"PYTORCH_TEST_REMOTE_GPU is {os.getenv('PYTORCH_TEST_REMOTE_GPU')}, "
-            )
-
         counters.clear()
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
         u = torch.randn(batch_size, out_features).to(dtype=dtype)
@@ -297,7 +279,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         if (
             (
-                dtype == torch.bfloat16
+                (
+                    dtype == torch.bfloat16
+                    and torch.ops.mkldnn._is_mkldnn_bf16_supported()
+                )
                 or (
                     dtype == torch.float16
                     and torch.ops.mkldnn._is_mkldnn_fp16_supported()
@@ -305,7 +290,11 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             )
             and epilogue != "mul"
             and epilogue != "div"
-            or (dtype == torch.half and epilogue == "add" and not bias)
+            or (
+                dtype in (torch.float16, torch.bfloat16)
+                and epilogue == "add"
+                and not bias
+            )
             or (
                 dtype == torch.float32
                 and epilogue == "add"
@@ -319,7 +308,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             #    not fused via scheduler. This will also be true for float16 when
             #    hardware has the float16 instruction. The exception is mul or
             #    div fusion which is not supported for oneDNN linear.
-            # 2. For float16, since oneDNN linear is not applied, linear w/o bias
+            # 2. For bfloat16/float16, when oneDNN linear is not applied, linear w/o bias
             #    plus epilogue add is treated as linear w/ bias.
             # 3. For float32, when dynamic shapes is enabled, mkl linear is not applied.
             #    and linear w/o bias plus epilogue add is treated as addmm.
@@ -1528,7 +1517,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @set_num_threads(1)
-    @parametrize("batch_size", (1024,))
+    @parametrize("batch_size", (512,))
     @parametrize("in_features", (1024,))
     @parametrize("out_features", (1024,))
     @parametrize("bias", (True, False))
