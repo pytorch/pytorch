@@ -36,7 +36,7 @@ jobs:
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT"
+        export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT --all-files"
         export CLANG=1
         .github/scripts/lintrunner.sh
 
@@ -53,41 +53,8 @@ jobs:
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        export ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT"
+        export ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT --all-files"
         .github/scripts/lintrunner.sh
-
-  # NB: This doesn't work with forked PR https://github.com/parkerbxyz/suggest-changes/issues/33 :(
-  lintrunner-autoformat:
-    permissions:
-      contents: read
-      pull-requests: write
-    runs-on: "lf.linux.2xlarge"
-    if: ${{ github.event_name == 'pull_request' && github.repository_owner == 'pytorch' }}
-    steps:
-      - name: Checkout pytorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-      - name: Setup miniconda
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
-        with:
-          python-version: "3.10"
-      - name: Run lintrunner (nonretryable)
-        continue-on-error: true
-        run: |
-          export ADDITIONAL_LINTRUNNER_ARGS="format"
-          .github/scripts/lintrunner.sh
-      - name: Check for changes
-        id: git-check
-        run: |
-          git diff --exit-code || echo "changes=true" >> $GITHUB_OUTPUT
-      - name: Suggest changes
-        continue-on-error: true
-        if: steps.git-check.outputs.changes == 'true'
-        uses: parkerbxyz/suggest-changes@v1
-        with:
-          comment: "Please commit the suggested changes from pytorch's linter."
 
   quick-checks:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
