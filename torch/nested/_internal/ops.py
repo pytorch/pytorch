@@ -283,8 +283,7 @@ def jagged_binary_pointwise(func, *args, **kwargs):
         lhs, rhs = (nt._values, t_squeezed) if a_is_nt else (t_squeezed, nt._values)
         return NestedTensor(func(lhs, rhs, *args[2:], **kwargs), **extracted_kwargs)
 
-    # Harder case: do manual broadcasting over unbound components
-    # when NT dim == non-NT dim
+    # Harder case: do manual broadcasting when NT dim == non-NT dim
     # ex: (B, j0, D_0, D_1) + (B, 1, D_0, D_1) -> (B, j0, D_0, D_1)
     if a.dim() == b.dim():
         # ex: (B, j0, D_0, D_1) + (1, 1, D_0, D_1) -> should
@@ -294,14 +293,39 @@ def jagged_binary_pointwise(func, *args, **kwargs):
                 mismatch_error_msg.format(func.__name__, a.shape, b.shape)
             )
 
-        # need to use offsets to broadcast across ragged dim properly
-        # NB: inefficient fallback here; Triton codegen can help this
-        # TODO: Make this work with autograd
-        outputs = []
-        for a_comp, b_comp in zip(a.unbind(), b.unbind()):
-            outputs.append(func(a_comp, b_comp, *args[2:], **kwargs))
-        new_values = torch.cat(outputs, dim=0)
-        return NestedTensor(new_values, **extracted_kwargs)
+        from .nested_tensor import _load_val_from_tensor, nested_from_padded
+
+        # handle broadcasting via padded dense -> jagged conversion
+        min_seqlen = None
+        if nt._min_seqlen_tensor is not None:
+            min_seqlen = _load_val_from_tensor(nt._min_seqlen_tensor)
+
+        max_seqlen = None
+        if nt._max_seqlen_tensor is not None:
+            max_seqlen = _load_val_from_tensor(nt._max_seqlen_tensor)
+
+        padded_max_S = max_seqlen
+        total_L = nt._values.shape[nt._ragged_idx - 1]
+        if padded_max_S is None:
+            # use upper bound on max seqlen if it's not present
+            padded_max_S = total_L
+
+        # convert dense tensor -> jagged
+        t = t.expand(
+            [x if i != nt._ragged_idx else padded_max_S for i, x in enumerate(t.shape)]
+        )
+        t_as_nt = nested_from_padded(
+            t,
+            offsets=nt._offsets,
+            ragged_idx=nt._ragged_idx,
+            sum_S=total_L,
+            min_seqlen=min_seqlen,
+            max_seqlen=max_seqlen,
+        )
+
+        # function call with two NJTs
+        lhs, rhs = (nt, t_as_nt) if a_is_nt else (t_as_nt, nt)
+        return func(lhs, rhs, *args[2:], **kwargs)
 
     # ex: (B, j0, D_0, D_1) + (A, B, 1, D_0, D_1) -> error because this breaks the invariant
     # that ragged dim is wrt left-most batch dim
@@ -1106,15 +1130,19 @@ def sum_dim_IntList(func, *args, **kwargs):
 
             # _jagged_to_padded_dense_forward requires values to be a 2D tensor
             # with the ragged dimension as the 0th dimension
+            max_seqlen = inp._values.shape[inp._ragged_idx - 1]
+            if inp._max_seqlen_tensor is not None:
+                max_seqlen = inp._max_seqlen
+
             padded = torch.ops.aten._jagged_to_padded_dense_forward(
                 values_ragged_dim_outer.reshape(values_ragged_dim_outer.shape[0], -1),
                 [inp._offsets],
-                max_lengths=[inp._max_seqlen],
+                max_lengths=[max_seqlen],
             )
 
             padded_ragged_dim_original = padded.view(
                 padded.shape[0],
-                inp._max_seqlen,
+                max_seqlen,
                 *values_ragged_dim_outer.shape[
                     1:
                 ],  # expand non-batch dimensions of padded tensor
@@ -1396,7 +1424,7 @@ def native_layer_norm_backward_default(func, *args, **kwargs):
     return (NestedTensor(d_input, **extract_kwargs(inp)), d_gamma, d_beta)
 
 
-@register_jagged_func(torch.ops.aten.select.int, "self: jt, dim: any, index: any")
+@register_jagged_func(torch.ops.aten.select.int, "self: jt_all, dim: any, index: any")
 def select_int(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -1411,6 +1439,11 @@ def select_int(func, *args, **kwargs):
     # TODO: make this more efficient
     if new_kwargs["dim"] == 0:
         return inp.unbind()[new_kwargs["index"]]
+
+    if inp._lengths is not None:
+        raise ValueError(
+            "select(): not yet supported on dim != 0 for non-contiguous nested tensor with holes"
+        )
 
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
@@ -1617,12 +1650,19 @@ def to_padded_tensor_default(func, *args, **kwargs):
     elif values.dim() == 1:
         values = values.unsqueeze(-1)
 
+    # NB: The CUDA kernel for jagged -> padded dense conversion does not support
+    # integer / bool types; work around this by casting to half.
+    is_bool = values.dtype is torch.bool
+    if is_bool and values.is_cuda:
+        values = values.to(torch.half)
     padded_out = torch.ops.aten._jagged_to_padded_dense_forward(
         values,
         [inp._offsets],
         [max_seq_len],
         new_kwargs["padding"],
     )
+    if is_bool and padded_out.is_cuda:
+        padded_out = padded_out.to(torch.bool)
 
     # shape gymnastics part 2
     if len(values_shape) > 2:
@@ -1656,9 +1696,16 @@ def _nested_from_padded_tensor_default(func, *args, **kwargs):
     elif padded.dim() < 3:
         padded = padded.unsqueeze(-1)
 
+    # NB: The CUDA kernel for padded dense -> jagged conversion does not support
+    # integer / bool types; work around this by casting to half.
+    is_bool = padded.dtype is torch.bool
+    if is_bool and padded.is_cuda:
+        padded = padded.to(torch.half)
     values = torch.ops.aten._padded_dense_to_jagged_forward(
         padded, [offsets], new_kwargs["sum_S"]
     )
+    if is_bool and values.is_cuda:
+        values = values.to(torch.bool)
 
     # shape gymnastics part 2
     if len(padded_shape) > 3:
@@ -1789,6 +1836,24 @@ def masked_select_default(func, *args, **kwargs):
         values=res_values,
         **args,
     )
+
+
+@register_jagged_func(
+    torch.ops.aten._nested_select_backward.default,
+    "grad_output: t, self: jt, dim: any, index: any",
+)
+def _nested_select_backward_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    grad_output = new_kwargs.pop("grad_output")
+
+    grad_input = torch.zeros_like(inp, dtype=grad_output.dtype)
+    grad_input.select(new_kwargs["dim"], new_kwargs["index"]).copy_(grad_output)
+
+    return grad_input
 
 
 # Make the dummy available on the C++ side.
