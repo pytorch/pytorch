@@ -1,6 +1,6 @@
-from typing import Optional
+from typing import Any, List, Callable
 
-from utils.common import BenchmarkConfig
+from utils.common import BenchmarkConfig, Phase
 
 import torch
 
@@ -25,8 +25,7 @@ class FusedLinearCrossEntropyOperator(BaseOperator):
 
     def __init__(self, benchmark_config: BenchmarkConfig):
         super().__init__(benchmark_config)
-
-
+        self.forward_output = None
 
     @classmethod
     def generate_inputs(cls, benchmark_config: BenchmarkConfig):
@@ -45,21 +44,20 @@ class FusedLinearCrossEntropyOperator(BaseOperator):
             # This operator needs two inputs
             cls.example_inputs_list.append((_input, target))
 
-    def forward(self, inputs):
-        return self.operator(inputs)
+    def forward(self, input: Any):
+        return self.operator(input)
 
-    def backward(self, inputs, forward_output):
-        return forward_output.backward(retain_graph=True)
+    # backward doesn't need inputs, but we need to pass it to match the interface
+    def backward(self, input: Any):
+        assert self.forward_output is not None
+        return self.forward_output.backward(retain_graph=True)
 
-    def full(self, input):
+    def full(self, input: Any):
         y = self.forward(input)
         y.backward()
         return y
 
-    # single run with a specific input
-    def single_run(self, fn, inputs):
-        fn(inputs)
-
-    def prepare_input_and_functions(self, input):
-        self.forward_output = self.forward(input)
+    def prepare_input_and_functions(self, input: Any, phase: Phase):
+        if phase == Phase.BACKWARD:
+            self.forward_output = self.forward(input)
         return input

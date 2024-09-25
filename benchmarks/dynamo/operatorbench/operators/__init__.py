@@ -99,15 +99,6 @@ class BaseOperator:
         """Perform the full (forward + backward) pass of the operator."""
         raise NotImplementedError("Subclasses must implement this method.")
 
-    def single_run(self):
-        """
-        Perform a single run of the operator for the first input size.
-        
-        This function is the entry point for each iteration. We don't call
-        the forward, backward, or full method directly.
-        """
-        raise NotImplementedError("Subclasses must implement this method.")
-
     def prepare_input_and_functions(self, input):
         """
         If needed, process the input before running the operator. This can be

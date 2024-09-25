@@ -64,6 +64,7 @@ def benchmark_operator(operator: BaseOperator, benchmark_config: BenchmarkConfig
     with profiler_context:
         for i in range(num_samples):
             input = operator.get_inputs(benchmark_config)[i]
+            input = operator.prepare_input_and_functions(input, phase)
             if phase == Phase.FORWARD:
                 phase_fn = operator.forward
             elif phase == Phase.BACKWARD:
