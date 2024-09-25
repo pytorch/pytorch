@@ -114,11 +114,11 @@ def visualize_rec(graph, value_map, name_prefix, pb_graph, executors_it=None):
         return kind, name_prefix + kind + '_' + str(op_id_counter[kind])
 
     def add_fusion_group(node):
-        _op, name = name_for(node)
+        op, name = name_for(node)
         inline_graph(node.g('Subgraph'), name + '/', node)
 
     def add_graph_executor(node):
-        _,op name = name_for(node)
+        op, name = name_for(node)
         if executors_it is None:
             add_node(node)
         else:
