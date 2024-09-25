@@ -23,7 +23,6 @@ from ..utils import (
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
-    proxy_args_kwargs,
 )
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
@@ -1032,7 +1031,8 @@ class PolyfilledFunctionVariable(VariableTracker):
                 tx.output.create_proxy(
                     "call_function",
                     torch.sym_sum,
-                    *proxy_args_kwargs((args[0].items,), {}),
+                    (tuple(a.as_proxy() for a in args[0].items),),
+                    {},
                 ),
                 sym_num=torch.sym_sum(
                     [
