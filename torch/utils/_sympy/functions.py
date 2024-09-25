@@ -577,6 +577,7 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
             args = cls._collapse_arguments(args, **assumptions)
             # find local zeros
             args = cls._find_localzeros(args, **assumptions)
+
         args = frozenset(args)
 
         if not args:
@@ -766,14 +767,23 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
         do generic is connected test pairwise which is slow
         """
         if len(values) == 2:
+            ix = 1 if cls is Max else 0
             if values[0] in (0.0, 0) and values[1].is_nonnegative:
-                return {values[1]}
+                return {values[ix]}
             elif values[1] in (0.0, 0) and values[0].is_nonnegative:
-                return {values[0]}
+                return {values[1 - ix]}
             elif values[1] == 1 and values[0].is_positive:
-                return {values[0]}
+                return {values[1 - ix]}
             elif values[0] == 1 and values[1].is_positive:
-                return {values[1]}
+                return {values[ix]}
+
+        if all(arg.is_Number for arg in values):
+            if cls is Max:
+                return {max(values)}
+            elif cls is Min:
+                return {min(values)}
+            else:
+                raise AssertionError(f"impossible {cls}")
 
         return set(values)
 
