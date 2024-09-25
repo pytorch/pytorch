@@ -7222,8 +7222,6 @@ def forward(self, x, y):
             if node.op == "call_function":
                 self.assertTrue(False)
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T200904004
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_istft_op(self):
         class istft_class(torch.nn.Module):
             def forward(self, spec):
@@ -7241,6 +7239,41 @@ def forward(self, x, y):
         imaginary_part = torch.randn(1, 513, 282, dtype=torch.float32)
         spec = torch.complex(real_part, imaginary_part)
         export(model, (spec,))
+
+    def test_export_linear_preserve_dynamic_shape(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        mod = M()
+        ep = export(
+            mod,
+            (torch.randn(8, 4),),
+            dynamic_shapes={
+                "x": {
+                    0: Dim("x"),
+                }
+            },
+        )
+
+        if IS_FBCODE:
+            ep = ep.run_decompositions(
+                {}, _preserve_ops=(torch.ops.aten.linear.default,)
+            )
+        else:
+            table = torch.export.core_aten_decompositions()
+            del table[torch.ops.aten.linear.default]
+            ep = ep.run_decompositions(table)
+
+        comp_mod = ep.module()
+        inp1 = torch.randn(3, 4)
+        inp2 = torch.randn(7, 4)
+        self.assertTrue(torch.allclose(comp_mod(inp1), mod(inp1)))
+        self.assertTrue(torch.allclose(comp_mod(inp2), mod(inp2)))
 
     def test_automatic_dynamic_shapes_simple_equality(self):
         # The next 3 test cases tests for automatic dynamic shapes specs, verifying that automatic dynamism
