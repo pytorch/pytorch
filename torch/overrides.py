@@ -553,7 +553,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.cummax: lambda input, dim, out=None: -1,
         torch.cummin: lambda input, dim, out=None: -1,
         torch.cumprod: lambda input, dim, out=None, dtype=None: -1,
-        torch.cumsum: lambda input, dim, out=None, dtype=None: -1,
+        torch.cumsum: lambda input, dim, out=None, dtype=None, axis=None: -1,
         torch.cumulative_trapezoid: lambda y, x=None, dim=-1: -1,
         torch.logcumsumexp: lambda input, dim, out=None: -1,
         torch.deg2rad: lambda input, out=None: -1,
