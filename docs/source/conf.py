@@ -731,6 +731,8 @@ coverage_ignore_functions = [
     "is_algebraic_expression",
     "is_bool_expr",
     "is_dim",
+    # torch.fx.passes.tensorify_python_scalars
+    "tensorify_python_scalars",
     # torch.fx.experimental.migrate_gradual_types.constraint_generator
     "adaptive_inference_rule",
     "add_layer_norm_constraints",

@@ -285,7 +285,7 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
 
 
 def _to_dtype(x: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
-    return torch.ops.aten._to_copy(x, dtype=dtype)
+    return torch.ops.prims.convert_element_type.default(x, dtype)
 
 
 # Suppose we have some int/float arguments.  This diagram commutes:
@@ -452,6 +452,42 @@ class TensorReferenceAnalysis:
     @staticmethod
     def sqrt(x):
         return torch.ops.aten.sqrt.default(x)
+
+    @staticmethod
+    def sin(x):
+        return torch.ops.aten.sin.default(x)
+
+    @staticmethod
+    def cos(x):
+        return torch.ops.aten.cos.default(x)
+
+    @staticmethod
+    def tanh(x):
+        return torch.ops.aten.tanh.default(x)
+
+    @staticmethod
+    def sinh(x):
+        return torch.ops.aten.sinh.default(x)
+
+    @staticmethod
+    def cosh(x):
+        return torch.ops.aten.cosh.default(x)
+
+    @staticmethod
+    def tan(x):
+        return torch.ops.aten.tan.default(x)
+
+    @staticmethod
+    def acos(x):
+        return torch.ops.aten.acos.default(x)
+
+    @staticmethod
+    def atan(x):
+        return torch.ops.aten.atan.default(x)
+
+    @staticmethod
+    def asin(x):
+        return torch.ops.aten.asin.default(x)
 
     @staticmethod
     def pow(a, b):
