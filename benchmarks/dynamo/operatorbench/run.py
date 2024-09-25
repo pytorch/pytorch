@@ -78,9 +78,10 @@ def benchmark_operator(operator: BaseOperator, benchmark_config: BenchmarkConfig
                 if enable_profile
                 else nullcontext()
             )
-            
+
             with record_sample_context:
                 for repeat_idx in range(repeat):
+
                     def fn():
                         return phase_fn(input)
 

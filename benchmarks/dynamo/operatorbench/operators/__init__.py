@@ -1,22 +1,22 @@
 import importlib
 import os
 import pathlib
-from typing import List
-import types
 import sys
-import torch
+import types
+from typing import List, Optional
 
 from utils.common import BenchmarkConfig
-from typing import Optional
-from torch.utils._pytree import tree_map_only
-from torch._inductor.utils import gen_gm_and_inputs
+from utils.metrics import Device
+
+import torch
 from torch._dynamo.backends.cudagraphs import cudagraphs_inner
 from torch._inductor.compile_fx import compile_fx
-from utils.metrics import Device
+from torch._inductor.utils import gen_gm_and_inputs
+from torch.utils._pytree import tree_map_only
+
 
 class OperatorNotFoundError(RuntimeError):
     """Custom exception raised when an operator is not found."""
-    pass
 
 
 class BaseOperator:
@@ -31,7 +31,8 @@ class BaseOperator:
         name (str): The main name of the operator, e.g. "FusedLinearCrossEntropy".
         variant (str): The variant of the operator, e.g. "baseline".
         benchmark_config (BenchmarkConfig): Configuration for the benchmark.
-        full_name (str): The full name of the operator (name.variant). It is only valid for variants. It can be either assigned in the operator file or generated from name and variant.
+        full_name (str): The full name of the operator (name.variant). It is only valid for variants.
+            It can be either assigned in the operator file or generated from name and variant.
         example_inputs_list (list): List of example inputs for the operator.
     """
 
@@ -40,7 +41,7 @@ class BaseOperator:
     benchmark_config = None
     full_name = None
     example_inputs_list = []
-    
+
     def __init__(self, benchmark_config: BenchmarkConfig):
         """
         Initialize the BaseOperator.
@@ -112,7 +113,7 @@ class BaseOperator:
             The processed input.
         """
         return input
-        
+
 
 def _list_operator_paths() -> List[str]:
     """

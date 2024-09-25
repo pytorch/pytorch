@@ -1,4 +1,4 @@
-from typing import Any, List, Callable
+from typing import Any, Callable, List
 
 from utils.common import BenchmarkConfig, Phase
 
