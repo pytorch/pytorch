@@ -46,8 +46,6 @@ struct TensorMetadata {
   std::vector<int64_t> strides_;
   // requires grad
   bool requires_grad_ = false;
-  // is_inference
-  bool is_inference_ = false;
   // TensorCheck for the tensor
   std::optional<dynamo::TensorCheck> tensor_check_;
 
@@ -64,8 +62,7 @@ struct TensorMetadata {
       c10::DispatchKeySet dispatch_key_set,
       std::vector<int64_t> sizes,
       std::vector<int64_t> strides,
-      bool requires_grad = false,
-      bool is_inference = false);
+      bool requires_grad = false);
 
   // Build TensorCheck for the tensor by using the data fields in TensorMetadata
   void build_guard(const dynamo::LocalState& local_state);

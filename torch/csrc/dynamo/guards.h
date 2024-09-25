@@ -52,7 +52,6 @@ class TensorCheck {
       at::ScalarType dtype,
       at::DeviceIndex device_index,
       bool requires_grad,
-      bool is_inference,
       std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
       std::vector<std::optional<c10::SymInt>> dynamic_dims_strides);
 
@@ -64,8 +63,7 @@ class TensorCheck {
       const c10::Device& device,
       const c10::SymIntArrayRef& dynamic_dims_sizes,
       const c10::SymIntArrayRef& dynamic_dims_strides,
-      const bool& requires_grad,
-      const bool& is_inference);
+      const bool& requires_grad);
   std::string check_verbose(
       const LocalState& state,
       const at::Tensor& v,
@@ -81,7 +79,6 @@ class TensorCheck {
   // necessarily capture device indices correctly.
   at::DeviceIndex device_index_;
   bool requires_grad_;
-  bool is_inference_;
   // NB: These are unset if dynamic shapes is enabled.
   std::vector<std::optional<c10::SymInt>> sizes_;
   std::vector<std::optional<c10::SymInt>> strides_;
