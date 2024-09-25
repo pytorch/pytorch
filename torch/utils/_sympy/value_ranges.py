@@ -1063,6 +1063,24 @@ def bound_sympy(
     # If there's a tracing context, augment available constrained ranges.
     context = torch._guards.TracingContext.try_get()
     if context and context.fake_mode.shape_env:
-        ranges = {**context.fake_mode.shape_env.var_to_range, **ranges}
+        if ranges:
+            ranges = {**context.fake_mode.shape_env.var_to_range, **ranges}
+        else:
+            ranges = context.fake_mode.shape_env.var_to_range
 
-    return sympy_interp(SymPyValueRangeAnalysis, ranges, expr)
+    def missing_handler(s):
+        if s.is_integer:  # type: ignore[attr-defined]
+            if s.is_positive:  # type: ignore[attr-defined]
+                vr = ValueRanges(1, int_oo)
+            elif s.is_nonnegative:  # type: ignore[attr-defined]
+                vr = ValueRanges(0, int_oo)
+            else:
+                vr = ValueRanges.unknown_int()
+        else:
+            # Don't bother trying very hard here
+            vr = ValueRanges.unknown()
+        return vr
+
+    return sympy_interp(
+        SymPyValueRangeAnalysis, ranges, expr, missing_handler=missing_handler
+    )
