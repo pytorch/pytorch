@@ -328,7 +328,7 @@ class BlockPtrOptions:
         if (
             not V.kernel.inside_reduction
             and len(params.strides) == len(V.kernel.numels) - 1
-            and V.kernel.numels[-1] != 1
+            and V.kernel.total_reduction_numel != 1
         ):
             # Need to expand rank by 1 to match rank when self.inside_reduction=True
             final_shape.append(sympy.Integer(1))
@@ -1386,15 +1386,14 @@ class TritonKernel(SIMDKernel):
         # to pick the faster one.
         if config.triton.multi_kernel:
             threshold *= 16
-        last_numel = self.numels[-1]
-        return V.graph.sizevars.statically_known_leq(last_numel, threshold)  # type: ignore[arg-types]
+        return V.graph.sizevars.statically_known_leq(self.total_reduction_numel, threshold)  # type: ignore[arg-types]
 
     def want_no_x_dim(self):
         return (
             self.reduction_hint == ReductionHint.INNER
             and self.persistent_reduction
             and len(self.numels) == 2
-            and V.graph.sizevars.statically_known_geq(self.numels[-1], 256)  # type: ignore[arg-types]
+            and V.graph.sizevars.statically_known_geq(self.total_reduction_numel, 256)  # type: ignore[arg-types]
         )
 
     @property
@@ -2015,9 +2014,22 @@ class TritonKernel(SIMDKernel):
         if ndims == 1:
             return f"triton_helpers.promote_to_tensor({value})"
 
-        sizes = [":"] * ndims
-        sizes[-1] = "None"
+        nreduce = self.num_reduction_dims
+        sizes = [":"] * (ndims - nreduce) + ["None"] * nreduce
         return f"{value}[{', '.join(sizes)}]"
+
+    def reduction_collapse_dims(self, buffer, value: str) -> CSEVariable:
+        """
+        Reshape to RBLOCK, collapsing all reduction dims.
+        """
+        #TODO refactor ndim calculations to reduce duplication among other reductions
+        target_ndim = self.triton_tensor_ndim() - self.num_reduction_dims
+        initial_shape = self.dense_size_list()
+        target_shape = initial_shape[:target_ndim] + ["RBLOCK"]
+        return self.cse.generate(
+            buffer,
+            triton_reshape(value, initial_shape, target_shape)
+        )
 
     def reduction(
         self,
@@ -2031,7 +2043,7 @@ class TritonKernel(SIMDKernel):
 
         # rmask = r0_mask & ... & rn_mask
         def string_and(x: str, y: str) -> str:
-            return "{x} & {y}"
+            return f"{x} & {y}"
 
         self.indexing_code.splice(
             "rmask = "
@@ -2058,10 +2070,13 @@ class TritonKernel(SIMDKernel):
             value,
         )
 
-        dim: int
+        dim: int = self.triton_tensor_ndim() - self.num_reduction_dims
         root_op: str
 
+
         def final_reduction(value):
+            #TODO refactor to the same signature as final_argreduce, so we can move collapse_dims
+            # into this function with the benefit of CSE
             use_helper = reduction_type in {"any", "max", "min", "prod"}
             module = "triton_helpers" if use_helper else "tl"
             if reduction_type in {"max", "min"}:
@@ -2071,6 +2086,7 @@ class TritonKernel(SIMDKernel):
             return self.reduction_resize(f"{module}.{reduction_type}({value}, {dim})")
 
         def final_argreduce(buffer, result_var, value, index):
+            value = self.reduction_collapse_dims(buffer, value)
             buffer.splice(
                 f"""\
                 _, {result_var}_tmp = triton_helpers.{root_op}_with_index({value}, {index}, {dim})
@@ -2082,7 +2098,6 @@ class TritonKernel(SIMDKernel):
         if cache_key in self.cse.reduction_cache:
             return self.cse.reduction_cache[cache_key]
 
-        dim = self.triton_tensor_ndim() - 1
         acc_type = triton_acc_type(src_dtype)
         result_var: Any = self.cse.newvar()
         result_var.mask_vars = OrderedSet(var for var in masks if var[0] != "r")
@@ -2104,6 +2119,9 @@ class TritonKernel(SIMDKernel):
                 masked_value = [_mask_value(v, d) for v, d in zip(value, default)]
             else:
                 masked_value = _mask_value(value, default)
+
+            # Reshape before the final reduction
+            masked_value = self.reduction_collapse_dims(self.compute, masked_value)
 
             if reduction_type in {"argmax", "argmin"}:
                 accumulator_index = str(
