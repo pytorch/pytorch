@@ -5319,41 +5319,41 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
 
 
 @contextmanager
-def check_leaked_tensors(limit=1):
+def check_leaked_tensors(limit=1, matched_type=torch.Tensor):
     """Wrap around operations you want to ensure are not leaking tensor memory.
 
-    This code intentionally ignores other reference cycles, which can be benign and which we (sadly) have plenty
+    This code intentionally ignores other reference cycles, which can be benign and which we have plenty
     of in pytorch code.  It focuses on any reference cycles that directly or indirectly result holding a Tensor alive,
     since this is likely a more serious leak than typical python refcycles.
 
     limit specifies how many tensors to dump debug graphs for (default=1)
     """
+    def match_obj(obj):
+        return isinstance(obj, matched_type)
+
     try:
         gc.collect()
         gc.set_debug(gc.DEBUG_SAVEALL)
+        garbage_objs = []
 
-        # run the user code, after cleaning any existing refcycles
-        yield
+        # run the user code, after cleaning any existing refcycles, and then check for new ones
+        # also allow usercode to check the garbage objs (e.g. for assertion) after exiting ctxmgr
+        yield garbage_objs
 
         gc.collect()
-        garbage_tensors = sum(int(isinstance(g, torch.Tensor)) for g in gc.garbage)
-        if garbage_tensors > 0:
+        garbage_objs.extend(filter(match_obj, gc.garbage))
+        num_garbage_objs = len(garbage_objs)
+        if num_garbage_objs > 0:
             warnings.warn(
-                f"{garbage_tensors} tensors were found in the garbage. Did you introduce a reference cycle?"
+                f"{num_garbage_objs} tensors were found in the garbage. Did you introduce a reference cycle?"
             )
             try:
                 import objgraph
-
                 warnings.warn(
-                    f"Dumping first {limit} objgraphs of leaked tensors rendered to png"
+                    f"Dumping first {limit} objgraphs of leaked {matched_type}s rendered to png"
                 )
-                dumped = 0
-                for g in gc.garbage:
-                    if isinstance(g, torch.Tensor):
-                        objgraph.show_backrefs([g], max_depth=10)
-                        dumped += 1
-                        if dumped == limit:
-                            break
+                for g in garbage_objs[:limit]:
+                    objgraph.show_backrefs([g], max_depth=10)
             except ImportError:
                 warnings.warn("`pip install objgraph` to enable memory leak debugging")
 

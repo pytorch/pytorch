@@ -458,7 +458,7 @@ class ScheduleTest(MultiProcContinousTest):
                     self.assertEqual(a, b)
 
         # Run
-        with check_leaked_tensors():
+        with check_leaked_tensors() as garbage_tensors:
             for _ in range(2):
                 # Zero gradients
                 for stage_module in stage_modules:
@@ -470,7 +470,11 @@ class ScheduleTest(MultiProcContinousTest):
                     out = schedule.step(target=target, losses=losses)
                 else:
                     schedule.step()
-
+        self.assertEqual(
+            len(garbage_tensors),
+            0,
+            "Found leaked tensors, check logs above for debug info",
+        )
         dist.barrier()
 
         # Last rank checks result
@@ -558,7 +562,7 @@ class ScheduleTest(MultiProcContinousTest):
             ref_loss = loss_fn(ref_out, target)
             ref_loss.backward()
 
-        with check_leaked_tensors():
+        with check_leaked_tensors() as garbage_tensors:
             # Run pipelined stages
             for _ in range(num_steps):
                 if self.rank == 0:
@@ -568,6 +572,11 @@ class ScheduleTest(MultiProcContinousTest):
                     out = schedule.step(target=target, losses=losses)
                 else:
                     schedule.step()
+        self.assertEqual(
+            len(garbage_tensors),
+            0,
+            "Found leaked tensors, check logs above for debug info",
+        )
 
         # Every rank checks parameters compared with the reference model
         for stage_module, submod_name in zip(stage_modules, submod_names):
