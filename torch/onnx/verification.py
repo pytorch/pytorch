@@ -612,9 +612,9 @@ def _onnx_graph_from_model(
         onnx_graph, _, _ = utils._model_to_graph(
             model,
             export_inputs,
-            input_names,
-            output_names,
-            do_constant_folding,
+            input_names=input_names,
+            output_names=output_names,
+            do_constant_folding=do_constant_folding,
             training=training,
             dynamic_axes=dynamic_axes,
         )

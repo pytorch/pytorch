@@ -487,6 +487,7 @@ def _split_tensor_list_constants(g, block):
 
 def _optimize_graph(
     graph: _C.Graph,
+    *,
     _disable_torch_constant_prop: bool = False,
     fixed_batch_size: bool = False,
     params_dict=None,
@@ -969,6 +970,7 @@ def _pre_trace_quant_model(model, args):
 def _model_to_graph(
     model,
     args,
+    *,
     input_names=None,
     output_names=None,
     do_constant_folding=True,
@@ -1363,10 +1365,9 @@ def _export(
             graph, params_dict, torch_out = _model_to_graph(
                 model,
                 args,
-                verbose,
-                input_names,
-                output_names,
-                do_constant_folding,
+                input_names=input_names,
+                output_names=output_names,
+                do_constant_folding=do_constant_folding,
                 fixed_batch_size=fixed_batch_size,
                 training=training,
                 dynamic_axes=dynamic_axes,
