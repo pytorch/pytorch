@@ -526,6 +526,7 @@ class CppMicroGemmAMX(CppMicroGemm):
                     A + m * lda,
                     B + n,
                     C + m * ldc + n,
+                    m,
                     K,
                     lda,
                     ldb,
@@ -542,6 +543,7 @@ class CppMicroGemmAMX(CppMicroGemm):
                     A + m_tail * lda,
                     B + n,
                     C + m_tail * ldc + n,
+                    m,
                     K,
                     lda,
                     ldb,
@@ -561,6 +563,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
     const {{input_t}}* {{restrict_keyword}} A,
     const {{input2_t}}* {{restrict_keyword}} B,
     {{output_t}}* {{restrict_keyword}} C,
+    int64_t m,
     int64_t K,
     int64_t lda,
     int64_t ldb,
@@ -603,7 +606,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
 
 {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
     // create a buffer for tiles of B.
-    alignas(64) {{input_t}} bf16_weights_buf[512];
+    alignas(4096) {{input_t}} bf16_weights_buf[(K / 16) * 512];
 
     int num_b_rows = (last_k_offset > 0) ? 16 : (tail_k_size * sizeof({{input_t}})) / 4;
     int b_tile_ptr_stride = ldb * {{vnni_size}};
@@ -618,12 +621,13 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
          }
     };
 
-    auto load_B_in_buf = [&]({{input2_t}}* B_ptr) {
+    auto load_B_in_buf = [&]({{input2_t}}* B_ptr, int idx) {
+        {{input_t}}* base_addr = &bf16_weights_buf[idx];
         {{kernel.unroll_pragma(8)}}
         for (int i = 0; i < num_b_rows; i++) {
             load_B_row(
                 B_ptr + i * b_tile_ptr_stride,
-                bf16_weights_buf + i * 32
+                base_addr + i * 32
             );
         }
     };
@@ -642,8 +646,11 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         {%- endif %}
         {%- if tile_row == 0 %}
             {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
-        load_B_in_buf(const_cast<{{input2_t}}*>(B) + k * ldb + {{tile_col * 16 * vnni_size}});
-        _tile_loadd({{tile_idx_b}}, bf16_weights_buf, 64);
+        if C10_UNLIKELY(m == 0) {
+          load_B_in_buf(const_cast<{{input2_t}}*>(B) + k * ldb + {{tile_col * 16 * vnni_size}}, (k/16 + {{tile_col}}) * 512);
+        }
+        // We duplicate (k/16 + {{tile_col}}) * 512 because a variable holding it would have been declared twice
+        _tile_loadd({{tile_idx_b}}, &bf16_weights_buf[(k/16 + {{tile_col}}) * 512], 64);
             {%- else %}
         _tile_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * vnni_size}}, ldb * {{vnni_size}} * sizeof({{input_t}}));
             {%- endif %}

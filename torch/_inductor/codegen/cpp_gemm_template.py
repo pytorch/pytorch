@@ -436,8 +436,10 @@ class CppPackedGemmTemplate(CppTemplate):
             def get_num_byte(dtype):
                 return torch.tensor([], dtype=dtype).element_size()
 
-            num_byte_A = get_num_byte(self.input_nodes[0].get_dtype())
-            num_byte_B = get_num_byte(self.input_nodes[1].get_dtype())
+            dtype_A = self.input_nodes[0].get_dtype()
+            dtype_B = self.input_nodes[1].get_dtype()
+            num_byte_A = get_num_byte(dtype_A)
+            num_byte_B = get_num_byte(dtype_B)
 
             # NOTE [CPP GEMM Cache Blocking Algorithm]
             # Our overall strategy is to
@@ -449,6 +451,9 @@ class CppPackedGemmTemplate(CppTemplate):
 
             # Step 1: Decide Kc assuming B block is L1-reside.
             size_cache_B = Kr * Kt_blocks * Nr * num_byte_B
+            if dtype_A is torch.bfloat16 and dtype_B is torch.int8:
+                # We will cache dequantized weights (BF16) in L1D
+                size_cache_B = size_cache_B * 2
             Kc_blocks = Kt_blocks
             if size_cache_B > L1:
                 Kc_blocks = math.floor(L1 / (Kr * Nr * num_byte_B))
