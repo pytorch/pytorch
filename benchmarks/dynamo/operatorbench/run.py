@@ -66,6 +66,8 @@ def benchmark_operator(operator: BaseOperator, benchmark_config: BenchmarkConfig
             input = operator.get_inputs(benchmark_config)[i]
             if phase == Phase.FORWARD:
                 phase_fn = operator.forward
+            elif phase == Phase.BACKWARD:
+                phase_fn = operator.backward
             else:
                 phase_fn = operator.full
             metric_result.input.append(input)

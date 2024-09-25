@@ -9,8 +9,6 @@ from .baseline import TorchLMHeadCE
 class TorchLMHeadCECompiled(TorchLMHeadCE):
     def __init__(self, H: int, V: int, dtype: torch.dtype, ignore_index: int = -100):
         super().__init__(H, V, dtype, ignore_index)
-        self.lin = torch.compile(self.lin)
-        self.ce_loss = torch.compile(self.ce_loss)
 
 
 class Operator(FusedLinearCrossEntropyOperator):
@@ -21,4 +19,5 @@ class Operator(FusedLinearCrossEntropyOperator):
         self.operator = TorchLMHeadCECompiled(
             H=H, V=V, dtype=self.benchmark_config.dtype
         ).to(self.benchmark_config.device.value)
+        self.operator = torch.compile(self.operator)
 

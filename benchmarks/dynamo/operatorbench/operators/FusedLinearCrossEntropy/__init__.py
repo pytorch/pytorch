@@ -48,17 +48,18 @@ class FusedLinearCrossEntropyOperator(BaseOperator):
     def forward(self, inputs):
         return self.operator(inputs)
 
-    def backward(self, inputs):
-        y = self.forward(inputs)
-        return lambda: y.backward(retain_graph=True)
+    def backward(self, inputs, forward_output):
+        return forward_output.backward(retain_graph=True)
 
     def full(self, input):
-        def f():
-            y = self.forward(input)
-            y.backward()
-
-        return f()
+        y = self.forward(input)
+        y.backward()
+        return y
 
     # single run with a specific input
     def single_run(self, fn, inputs):
         fn(inputs)
+
+    def prepare_input_and_functions(self, input):
+        self.forward_output = self.forward(input)
+        return input
