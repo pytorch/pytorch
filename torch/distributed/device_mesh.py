@@ -458,7 +458,7 @@ else:
             # process (we need to know if the current global rank is in the mesh
             # or not).
             if _init_backend:
-                self._get_or_create_default_group(device_type)
+                self._get_or_create_default_group()
                 # Create the subgroups for each dimension of the mesh.
                 self._init_process_groups()
 
@@ -473,17 +473,17 @@ else:
                 rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
             )
 
-        def _get_or_create_default_group(self, device_type: str) -> ProcessGroup:
+        def _get_or_create_default_group(self) -> ProcessGroup:
             if is_initialized():
                 # User has already initialized the process group, let's check if
                 # the process group is compatible with the device type.
                 backend_config = get_backend_config()
-                if device_type not in backend_config.device_backend_map:
+                if self.device_type not in backend_config.device_backend_map:
                     raise ValueError(
                         f"It seems you have initialized the default process group, "
-                        f"however, it does not support device type {device_type}. "
+                        f"however, it does not support device type {self.device_type}. "
                         f"Supported device types are {backend_config.device_backend_map.keys()}. "
-                        f"Please `init_process_group` with device type {device_type}, "
+                        f"Please `init_process_group` with device type {self.device_type}, "
                         f"or pass a supported device type to DeviceMesh."
                     )
                 # Check world size.
@@ -502,19 +502,19 @@ else:
                 "DeviceMesh will try to create one for you (but cannot "
                 "guarantee it would be successful). "
             )
-            backend = Backend.default_device_backend_map.get(device_type)
+            backend = Backend.default_device_backend_map.get(self.device_type)
             if backend is None:
                 raise ValueError(
                     "Oops, we don't know what communication backend to use for "
-                    f"device type {device_type}. Please `init_process_group` "
+                    f"device type {self.device_type}. Please `init_process_group` "
                     "with a supporting backend. "
                 )
             try:
-                init_process_group(f"{device_type}:{backend}")
+                init_process_group(f"{self.device_type}:{backend}")
             except Exception as e:
                 logger.error(
                     "DeviceMesh failed to initialize the default process group for you. "  # noqa: G004
-                    f"Config used: {device_type}:{backend}. "
+                    f"Config used: {self.device_type}:{backend}. "
                     "Please call `init_process_group` with a correct config. "
                 )
                 raise e
