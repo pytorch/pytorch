@@ -9816,7 +9816,6 @@ class TestNNDeviceType(NNTestCase):
         )
         torch.testing.assert_close(output_f32, output_ui8, atol=1, rtol=0)
 
-    @expectedFailureMPS  # NotImplementedError: aten::upsample_bicubic2d.out https://github.com/pytorch/pytorch/issues/77764
     def test_upsamplingBicubic2d_correctness(self, device):
         # test output against known input: align_corners=False result must match opencv
         in_t = torch.arange(8., device=device).view(1, 2, 2, 2)
