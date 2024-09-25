@@ -843,7 +843,7 @@ def create_block_mask(
         KV_BLOCK_SIZE = BLOCK_SIZE
     else:
         Q_BLOCK_SIZE, KV_BLOCK_SIZE = BLOCK_SIZE
-
+    breakpoint()
     if Q_LEN < 128:
         Q_BLOCK_SIZE = Q_LEN
     else:

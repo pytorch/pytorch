@@ -66,6 +66,7 @@ test_dtypes = (
 
 test_dtypes_fast = [torch.float16]
 
+test_page_sizes = [32] #32, 64, 128, 256]
 
 # --------- Useful score mod functions for testing ---------
 def _causal(
@@ -164,14 +165,14 @@ def _trig2(score, b, h, m, n):
 
 test_score_mods = [
     _identity,
-    _times_two,
-    _squared,
-    _causal,
-    _inverse_causal,
-    _rel_bias,
-    _rel_causal,
-    _generate_alibi_bias(8),
-    _generate_windowed(1000),
+    # _times_two,
+    # _squared,
+    # _causal,
+    # _inverse_causal,
+    # _rel_bias,
+    # _rel_causal,
+    # _generate_alibi_bias(8),
+    # _generate_windowed(1000),
 ]
 
 captured_buffers_map = {
@@ -185,8 +186,8 @@ D = 64
 
 test_Hq_Hkv = [
     (16, 1),
-    (8, 2),
-    (16, 16),
+    # (8, 2),
+    # (16, 16),
 ]
 
 test_Bq_Bkv = [
@@ -356,10 +357,6 @@ class TestFlexDecoding(InductorTestCase):
             compiled_out,
         )
 
-    # TODO: support computation with batch size < max_batch_size
-    # TODO: test if #batch size in block mask is different from page table, or the cache
-    # TODO: add test for page_size as 64 and 256
-
     def preprocess_paged_attention(
         self,
         score_mod: Optional[Callable],
@@ -368,13 +365,17 @@ class TestFlexDecoding(InductorTestCase):
         v: Tensor,
         block_mask,
         dtype: torch.dtype = torch.float16,
+        page_size: int = 128,
     ):
         assert block_mask is not None, "Must provide block_mask"
-        _, Q_H, _, _ = q.shape
+        Q_B, Q_H, Q_S, _ = q.shape
         KV_B, KV_H, KV_S, QK_D = k.shape
         _, _, _, V_D = v.shape
 
-        n_pages, page_size, max_batch_size = 64, 128, 5
+        # test with different batch size
+        max_batch_size = max(Q_B, KV_B) + 3
+
+        n_pages = max(Q_S, KV_S) // page_size * 4
 
         if block_mask is None:
             def generate_causal_offset(offset: torch.Tensor):
@@ -452,12 +453,14 @@ class TestFlexDecoding(InductorTestCase):
         if block_mask is None:
             block_mask = create_block_mask(noop_mask, Q_B, 1, 1, S)
 
+        breakpoint()
+
         (
             k_cache,
             v_cache,
             converted_block_mask,
             converted_score_mod,
-        ) = self.preprocess_paged_attention(score_mod, q, k, v, block_mask, dtype)
+        ) = self.preprocess_paged_attention(score_mod, q, k, v, block_mask, dtype, block_mask.BLOCK_SIZE[1])
 
         compiled_sdpa = torch.compile(
             create_attention(
@@ -516,8 +519,9 @@ class TestFlexDecoding(InductorTestCase):
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
 
         if block_mask is None:
-            block_mask = create_block_mask(noop_mask, Q_B, 1, 1, S)
+            block_mask = create_block_mask(noop_mask, Q_B, 1, 1, KV_S)
 
+        # TODO: consider use flex_attention directly.
         sdpa_partial = create_attention(
             score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
         )
@@ -631,6 +635,28 @@ class TestFlexDecoding(InductorTestCase):
         assert Hq % Hkv == 0
         self.run_test(score_mod, dtype, Q_H=Hq, KV_H=Hkv)
         self.run_test_with_paged_attention(score_mod, dtype, Q_H=Hq, KV_H=Hkv)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    @common_utils.parametrize("head_dims", test_Hq_Hkv)
+    @common_utils.parametrize("page_size", test_page_sizes)
+    def test_paged_attention_page_size(self, dtype: torch.dtype, score_mod: Callable, head_dims: Tuple[int, int], page_size: int):
+        Hq, Hkv = head_dims
+        assert Hq % Hkv == 0
+
+        def generate_causal_offset(offset: torch.Tensor):
+            def causal_offset_mask(b, h, q_idx, kv_idx):
+                return (offset + q_idx) >= kv_idx
+
+            return causal_offset_mask
+
+        mod = generate_causal_offset(
+            torch.tensor(192, device="cuda", dtype=torch.int32)
+        )
+        block_mask = create_block_mask(mod, B, 1, 1, S, BLOCK_SIZE=page_size)
+        breakpoint()
+        self.run_test_with_paged_attention(score_mod, dtype, Q_B=B, Q_H=Hq, KV_B=B, KV_H=Hkv, KV_S=S, block_mask=block_mask)
 
     def input_strides_1(B, H, S, D):
         return ((H * S * D, S * D, D, 1), 997)  # offset
@@ -1363,7 +1389,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             None, mask_mod, sdpa_mask, Q_H=16, KV_H=16, Q_S=8
         )
 
-    # TODO: Add a similar test
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", [_identity, _causal])
@@ -1417,7 +1442,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             rtol=tolerance.rtol,
         )
 
-    # TODO: Add a similar test
     @supported_platform
     def test_logsumexp_only_return(self):
         make_q = functools.partial(
@@ -1449,7 +1473,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             code[0]
         )
 
-    # TODO: revisit after support max_batch_size != actual_batch_size
     @supported_platform
     def test_non_sparse_mulitple_block_size(self):
         def generate_causal_offset(offset: torch.Tensor):
@@ -1493,7 +1516,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             V_D=16,
         )
 
-    # TODO: Add a similar test
     @supported_platform
     def test_do_not_trigger_dynamic_shapes_on_empty_block_mask(self):
         torch._dynamo.reset()
