@@ -16,7 +16,7 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
 from torch._inductor.codegen.cpp_gemm_template import CppPackedGemmTemplate
 from torch._inductor.virtualized import V
 
-from .. import config as inductor_config
+from .. import config as inductor_config, ir
 from ..codegen.common import BackendFeature
 from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
@@ -141,6 +141,10 @@ def _is_int8_mat(mat):
     return mat.get_dtype() in (torch.int8, torch.uint8)
 
 
+def _is_large_block_for_cpu(m, n, k):
+    return m * n > 2**13
+
+
 def bias_addmm(inp, mat1, mat2, *, out=None, alpha=1, beta=1):
     """
     Giving torch.addmm a 1D tensor calls a different (faster) cublasLt
@@ -172,7 +176,11 @@ def tuned_mm(mat1, mat2, *, layout=None):
     )
     static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
     if is_nonzero and use_triton_template(layout):
-        for config in mm_configs(m, n, k):
+        if ir.get_device_type(mat1) == "cpu":
+            configs = mm_configs(m, n, k, scale=2, exclude=_is_large_block_for_cpu)
+        else:
+            configs = mm_configs(m, n, k)
+        for config in configs:
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
