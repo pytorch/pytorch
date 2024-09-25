@@ -1,5 +1,4 @@
-namespace at {
-namespace cuda {
+namespace at::cuda {
 //windows doesn't like large string literals, so split in two
 const std::string reduction_template_0 = R"ESCAPE(
   #define C10_HOST_DEVICE __host__ __device__
@@ -678,4 +677,4 @@ const std::string &get_reduction_template() {
   return reduction_template;
 }
 
-}}
+} // namespace at::cuda
