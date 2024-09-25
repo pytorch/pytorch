@@ -22,8 +22,7 @@ namespace {
 
 bool device_has_multicast_support(int device_idx) {
 #if defined(CUDART_SUPPORTS_MULTICAST)
-  auto env_var = getenv("TORCH_SYMM_MEM_DISABLE_MULTICAST");
-  if (env_var != nullptr && std::string(env_var) != "0") {
+  if (c10::utils::check_env("TORCH_SYMM_MEM_DISABLE_MULTICAST") == true) {
     return false;
   }
   // Multicast support requirements:
@@ -89,7 +88,11 @@ class IpcChannel {
     cmsg->cmsg_type = SCM_RIGHTS;
 
     if (fd != -1) {
-      memcpy(CMSG_DATA(cmsg), &fd, sizeof(fd));
+      // memcpy(CMSG_DATA(cmsg), &fd, sizeof(fd));
+      std::copy(
+          reinterpret_cast<const char*>(&fd),
+          reinterpret_cast<const char*>(&fd) + sizeof(fd),
+          reinterpret_cast<char*>(CMSG_DATA(cmsg)));
     } else {
       msg.msg_controllen = 0;
     }
