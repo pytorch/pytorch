@@ -177,7 +177,8 @@ class SubclassCreationMeta:
     # both of its inner elements are TwoTensors, then the
     # arg_count of the outer-most sublass will be 4
     arg_count: int
-    # Mark where or not symints were included
+    # Mark where or not symints were included. This flag is only used in one assertion
+    # in "unwrap_tensor_subclasses"
     included_subclass_symints: bool
     # meta and attrs are produced by the subclass's __tensor_flatten__.
     # We need to keep them around along with outer_size / outer_stride to plumb them

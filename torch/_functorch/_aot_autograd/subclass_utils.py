@@ -36,7 +36,7 @@ def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
     return any_subclass_args or any_subclass_outputs
 
 
-def create_subclass_metadata(a: object, start_idx: int, count_symints: bool):
+def create_subclass_metadata(a: Any, start_idx: int, count_symints: bool):
     if not is_traceable_wrapper_subclass(a):
         return None, start_idx + 1
 
