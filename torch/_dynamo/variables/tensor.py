@@ -859,28 +859,28 @@ class TensorVariable(VariableTracker):
             # unless we find that we need to make it work.
             unimplemented("Tensor.set_.source_Tensor_storage_offset")
 
-    def method_add_(self, other, *, alpha=None):
-        if alpha is not None:
-            from ..symbolic_convert import InstructionTranslator
+    # def method_add_(self, other, *, alpha=None):
+    #     if alpha is not None:
+    #         from ..symbolic_convert import InstructionTranslator
 
-            tx = InstructionTranslator.current_tx()
-            result = variables.TorchInGraphFunctionVariable(torch.mul).call_function(
-                tx, [other, alpha], {}
-            )
-            return self.call_method(tx, "add_", [result], {})
+    #         tx = InstructionTranslator.current_tx()
+    #         result = variables.TorchInGraphFunctionVariable(torch.mul).call_function(
+    #             tx, [other, alpha], {}
+    #         )
+    #         return self.call_method(tx, "add_", [result], {})
 
-    def method_addcdiv_(self, tensor1, tensor2, *, value=None):
-        from ..symbolic_convert import InstructionTranslator
+    # def method_addcdiv_(self, tensor1, tensor2, *, value=None):
+    #     from ..symbolic_convert import InstructionTranslator
 
-        tx = InstructionTranslator.current_tx()
-        if value is not None:
-            result = variables.TorchInGraphFunctionVariable(torch.div).call_function(
-                tx, [tensor1, tensor2], {}
-            )
-            result = variables.TorchInGraphFunctionVariable(torch.mul).call_function(
-                tx, [result, value], {}
-            )
-            return self.call_method(tx, "add_", [result], {})
+    #     tx = InstructionTranslator.current_tx()
+    #     if value is not None:
+    #         result = variables.TorchInGraphFunctionVariable(torch.div).call_function(
+    #             tx, [tensor1, tensor2], {}
+    #         )
+    #         result = variables.TorchInGraphFunctionVariable(torch.mul).call_function(
+    #             tx, [result, value], {}
+    #         )
+    #         return self.call_method(tx, "add_", [result], {})
 
     def method___contains__(self, arg):
         from ..symbolic_convert import InstructionTranslator
