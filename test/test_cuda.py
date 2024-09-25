@@ -228,7 +228,7 @@ class TestCuda(TestCase):
         oom_regex = (
             "would exceed allowed memory"
             if TEST_CUDAMALLOCASYNC
-            else "Tried to allocate 800000000.00 GiB"
+            else f"Tried to allocate 800000000.00 GiB. GPU {tensor.device.index} has a total capacity of"
         )
         with self.assertRaisesRegex(RuntimeError, oom_regex):
             torch.empty(1024 * 1024 * 1024 * 800000000, dtype=torch.int8, device="cuda")
