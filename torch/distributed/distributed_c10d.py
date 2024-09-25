@@ -552,7 +552,7 @@ _pg_map: Dict[ProcessGroup, Tuple[str, Store]] = {}
 _pg_names: Dict[ProcessGroup, str] = {}
 _pg_group_ranks: Dict[ProcessGroup, Dict[int, int]] = {}
 # For a pg, it is a map from ProcessGroup to BackendConfig
-_pg_backend_config: Dict[ProcessGroup, str] = {}
+_pg_backend_config: Dict[ProcessGroup, BackendConfig] = {}
 _group_count = 0
 _tags_to_pg: Dict[str, List[ProcessGroup]] = {}
 _pg_to_tag: Dict[ProcessGroup, str] = {}
@@ -622,7 +622,7 @@ class _World:
         return _pg_group_ranks
 
     @property
-    def pg_backend_config(self) -> Dict[ProcessGroup, str]:
+    def pg_backend_config(self) -> Dict[ProcessGroup, BackendConfig]:
         """
         Process group's backend config.
 
@@ -680,7 +680,7 @@ class _World:
                 {
                     "pg_name": self.pg_names[pg],
                     "pg_desc": pg.group_desc,
-                    "backend_config": self.pg_backend_config[pg],
+                    "backend_config": str(self.pg_backend_config[pg]),
                     "ranks": list(ranks.keys())
                     if len(ranks) != default_pg_size
                     else [],  # 'ranks' is an empty list when all ranks are involved in a pg
@@ -1176,7 +1176,7 @@ def _update_default_pg(pg) -> None:
     torch._C._distributed_c10d._set_global_rank(rank)
 
 
-def get_backend_config(group: Optional[ProcessGroup] = None) -> str:
+def get_backend_config(group: Optional[ProcessGroup] = None) -> BackendConfig:
     """
     Return the backend configuration of the given process group.
 
@@ -1186,14 +1186,16 @@ def get_backend_config(group: Optional[ProcessGroup] = None) -> str:
             is specified, the calling process must be part of :attr:`group`.
 
     Returns:
-        The backend configuration of the given process group as a lower case string.
+        The backend configuration of the given process group.
 
     """
     pg = group or _get_default_group()
     if _rank_not_in_group(pg):
         raise ValueError("Invalid process group specified")
     backend_config = _world.pg_backend_config.get(pg)
-    return str(not_none(backend_config))
+    if backend_config is None:
+        raise ValueError("Backend config is not set for the given process group")
+    return backend_config
 
 
 def get_backend(group: Optional[ProcessGroup] = None) -> Backend:
@@ -1880,7 +1882,7 @@ def _new_process_group_helper(
     _world.pg_names[pg] = group_name
     _register_process_group(group_name, pg)
 
-    _world.pg_backend_config[pg] = str(backend_config)
+    _world.pg_backend_config[pg] = backend_config
     # "" is the default tag for user PGs
     if pg_tag in [None, ""]:
         pg_tag = f"ptd:{group_name}"
@@ -4504,7 +4506,7 @@ def split_group(
     _world.pg_map[pg] = (backend, prefix_store)
     _world.pg_names[pg] = group_name
     _register_process_group(group_name, pg)
-    _world.pg_backend_config[pg] = str(backend_config)
+    _world.pg_backend_config[pg] = backend_config
     pg_tag = f"ptd:{group_name}"
     _world.tags_to_pg.setdefault(pg_tag, []).append(pg)
     _world.pg_to_tag[pg] = pg_tag

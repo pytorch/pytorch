@@ -237,7 +237,9 @@ class DeviceMeshVariable(DistributedVariable):
         if name == "get_group":
             return ConstantVariable.create(self.value.get_group())
         if name == "_get_or_create_default_group":
-            return ProcessGroupVariable(self.value._get_or_create_default_group())
+            return ProcessGroupVariable(
+                self.value._get_or_create_default_group(self.value.device_type)
+            )
         return super().call_method(tx, name, args, kwargs)
 
 

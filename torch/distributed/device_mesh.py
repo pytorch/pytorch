@@ -41,7 +41,9 @@ else:
         _find_pg_by_ranks_and_tag,
         _get_default_group,
         _get_group_tag,
+        Backend,
         get_backend,
+        get_backend_config,
         get_process_group_ranks,
         get_rank,
         get_world_size,
@@ -444,34 +446,78 @@ else:
 
             # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
-            if device_type != "xla":
-                # always try to create default (world) pg, even if it is not initialized
-                # already. The world pg is used for device mesh identity (rank) on each
-                # process (we need to know if the current global rank is in the mesh or not).
-                if _init_backend:
-                    self._get_or_create_default_group()
-                    self._init_process_groups()
+            if device_type == "xla":
+                # TODO: I (kwen2501) don't know why xla also skips the
+                # coordinate calculation below. Just keep things as is for now.
+                return
 
-                if is_initialized() and get_backend() == "threaded":
-                    self._thread_id = threading.get_ident()
+            # We may opportunistically create default (world) pg, if it is not
+            # initialized already. (Take it as a convenience feature that may be
+            # revoke if we have to).
+            # The world pg is used for device mesh identity (rank) on each
+            # process (we need to know if the current global rank is in the mesh
+            # or not).
+            if _init_backend:
+                self._get_or_create_default_group(device_type)
+                # Create the subgroups for each dimension of the mesh.
+                self._init_process_groups()
 
-                # calculate the coordinates of the current global rank on the mesh
-                rank_coords = (self.mesh == get_rank()).nonzero()
-                assert rank_coords.size(0) in (0, 1)
-                self._coordinate_on_dim: Optional[List[int]] = (
-                    rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
+            # Must have been initialized by this point
+            if get_backend() == "threaded":
+                self._thread_id = threading.get_ident()
+
+            # calculate the coordinates of the current global rank on the mesh
+            rank_coords = (self.mesh == get_rank()).nonzero()
+            assert rank_coords.size(0) in (0, 1)
+            self._coordinate_on_dim: Optional[List[int]] = (
+                rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
+            )
+
+        def _get_or_create_default_group(self, device_type: str) -> ProcessGroup:
+            if is_initialized():
+                # User has already initialized the process group, let's check if
+                # the process group is compatible with the device type.
+                backend_config = get_backend_config()
+                if device_type not in backend_config.device_backend_map:
+                    raise ValueError(
+                        f"It seems you have initialized the default process group, "
+                        f"however, it does not support device type {device_type}. "
+                        f"Supported device types are {backend_config.device_backend_map.keys()}. "
+                        f"Please `init_process_group` with device type {device_type}, "
+                        f"or pass a supported device type to DeviceMesh."
+                    )
+                # Check world size.
+                world_size = get_world_size()
+                if self.mesh.numel() > world_size:
+                    raise RuntimeError(
+                        f"Mesh should not be bigger than default world size {world_size}, but found {self.mesh.numel()} ranks!"
+                    )
+                return _get_default_group()
+
+            # User has not initialized the process group, we can try to
+            # create one, but only when there is a known backend for the
+            # device type. Otherwise, we will raise an error.
+            logger.info(
+                "It seems you have not initialized the default process group, "
+                "DeviceMesh will try to create one for you (but cannot "
+                "guarantee it would be successful). "
+            )
+            backend = Backend.default_device_backend_map.get(device_type)
+            if backend is None:
+                raise ValueError(
+                    "Oops, we don't know what communication backend to use for "
+                    f"device type {device_type}. Please `init_process_group` "
+                    "with a supporting backend. "
                 )
-
-        def _get_or_create_default_group(self):
-            default_initialized = is_initialized()
-            if not default_initialized:
-                init_process_group()
-
-            world_size = get_world_size()
-            if self.mesh.numel() > world_size:
-                raise RuntimeError(
-                    f"Mesh should not be bigger than default world size {world_size}, but found {self.mesh.numel()} ranks!"
+            try:
+                init_process_group(f"{device_type}:{backend}")
+            except Exception as e:
+                logger.error(
+                    "DeviceMesh failed to initialize the default process group for you. "  # noqa: G004
+                    f"Config used: {device_type}:{backend}. "
+                    "Please call `init_process_group` with a correct config. "
                 )
+                raise e
 
             device_handle = _get_device_handle(self.device_type)
             # TODO: if user want to pass pg_options, offer a way to do it
@@ -500,70 +546,52 @@ else:
             # https://github.com/pytorch/pytorch/issues/93173#issuecomment-1907095208
             dim_group_infos: List[Tuple[str, List[int], str]] = []
 
-            if self.mesh.ndim == 1 and self.mesh.numel() == get_world_size():
-                # Append the default pg to the first dim groups only if the default pg is compatible with `self.device_type`.
-                # Otherwise, create new pg.
-                default_group = _get_default_group()
-                ranks = list(range(get_world_size()))
-                dim_group = (
-                    new_group(backend="cpu:gloo,cuda:nccl", ranks=ranks)
-                    if torch.cuda.is_available()
-                    and get_backend(default_group) == "gloo"
-                    else default_group
+            # create sub pgs base on the mesh argument specified
+            for dim in range(self.mesh.ndim):
+                # swap the current dim to the last dim
+                # then reshape to flatten out other dims
+                pg_ranks_by_dim = self.mesh.swapdims(-1, dim).reshape(
+                    -1, self.mesh.size(dim)
                 )
-                dim_group_infos.append(
-                    (
-                        _get_group_tag(dim_group),
-                        ranks,
-                        dim_group.group_name,
-                    )
-                )
-            else:
-                # create sub pgs base on the mesh argument specified
-                for dim in range(self.mesh.ndim):
-                    # swap the current dim to the last dim
-                    # then reshape to flatten out other dims
-                    pg_ranks_by_dim = self.mesh.swapdims(-1, dim).reshape(
-                        -1, self.mesh.size(dim)
-                    )
-                    # multi-dim mesh, create subgroups by looping over the pg_ranks
-                    # for each dim and append the groups
-                    for dim_mesh in pg_ranks_by_dim:
-                        subgroup_ranks = dim_mesh.tolist()
+                # multi-dim mesh, create subgroups by looping over the pg_ranks
+                # for each dim and append the groups
+                for dim_mesh in pg_ranks_by_dim:
+                    subgroup_ranks = dim_mesh.tolist()
 
-                        # Respect dim group options specified via _MeshEnv.set_dim_group_options().
-                        # Inherit from the parent group if no options are specified for the group.
-                        if dim in _mesh_resources.mesh_dim_group_options:
+                    # Respect dim group options specified via _MeshEnv.set_dim_group_options().
+                    # Inherit from the parent group if no options are specified for the group.
+                    if dim in _mesh_resources.mesh_dim_group_options:
+                        (
+                            backend,
+                            pg_options,
+                        ) = _mesh_resources.mesh_dim_group_options[dim]
+                    else:
+                        backend, pg_options = None, None
+
+                    # We temporarily revert the re-use subgroup, since it breaks two internal tests.
+                    # Temporarily reverting to resolve test timeout while root-causing.
+                    # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
+                    dim_group = new_group(
+                        ranks=subgroup_ranks,
+                        backend=backend,
+                        pg_options=pg_options,
+                    )
+
+                    # only add to dim_groups if the current rank in the subgroup
+                    if self.get_rank() in subgroup_ranks:
+                        if len(dim_group_infos) > dim:
+                            raise RuntimeError(
+                                f"Each device mesh dimension should get only one process group, but got {self.get_rank()} "
+                                f"in {subgroup_ranks}!"
+                            )
+                        dim_group_infos.append(
                             (
-                                backend,
-                                pg_options,
-                            ) = _mesh_resources.mesh_dim_group_options[dim]
-                        else:
-                            backend, pg_options = None, None
-
-                        # We temporarily revert the re-use subgroup, since it breaks two internal tests.
-                        # Temporarily reverting to resolve test timeout while root-causing.
-                        # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
-                        dim_group = new_group(
-                            ranks=subgroup_ranks,
-                            backend=backend,
-                            pg_options=pg_options,
+                                _get_group_tag(not_none(dim_group)),
+                                subgroup_ranks,
+                                dim_group.group_name,
+                            )
                         )
 
-                        # only add to dim_groups if the current rank in the subgroup
-                        if self.get_rank() in subgroup_ranks:
-                            if len(dim_group_infos) > dim:
-                                raise RuntimeError(
-                                    f"Each device mesh dimension should get only one process group, but got {self.get_rank()} "
-                                    f"in {subgroup_ranks}!"
-                                )
-                            dim_group_infos.append(
-                                (
-                                    _get_group_tag(not_none(dim_group)),
-                                    subgroup_ranks,
-                                    dim_group.group_name,
-                                )
-                            )
             self._dim_group_infos = dim_group_infos
 
         def __enter__(self) -> "DeviceMesh":
