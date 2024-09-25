@@ -71,6 +71,14 @@ class CustomOpTestCaseBase(TestCase):
             lib._destroy()
         del self.libraries
 
+    @classmethod
+    def setUpClass(cls):
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
+
+    @classmethod
+    def tearDownClass(cls):
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
+
     def ns(self):
         return getattr(torch.ops, self.test_ns)
 
