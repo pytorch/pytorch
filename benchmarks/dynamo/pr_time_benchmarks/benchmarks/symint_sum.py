@@ -6,7 +6,7 @@ import torch
 
 
 class Benchmark(BenchmarkBase):
-    N = 1000
+    N = 200
 
     def name(self):
         return "symint_sum"
