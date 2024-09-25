@@ -689,8 +689,8 @@ def _convert_block_mask_to_mask(
 def _create_sparse_block_from_block_mask(
     block_mask: Tuple[Tensor, Optional[Tensor]],
     mask_mod: Optional[Callable],
-    KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
     Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
+    KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
 ) -> BlockMask:
     partial_blocks, full_blocks = block_mask
 
@@ -705,7 +705,7 @@ def _create_sparse_block_from_block_mask(
         partial_bm[1],
         full_bm[0],
         full_bm[1],
-        BLOCK_SIZE=(KV_BLOCK_SIZE, Q_BLOCK_SIZE),
+        BLOCK_SIZE=(Q_BLOCK_SIZE, KV_BLOCK_SIZE),
         mask_mod=mask_mod,
     )
 
@@ -856,7 +856,7 @@ def create_block_mask(
             mask_mod, B, H, Q_LEN, KV_LEN, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE
         )
         block_mask = _create_sparse_block_from_block_mask(
-            (partial_block_mask, full_block_mask), mask_mod
+            (partial_block_mask, full_block_mask), mask_mod, Q_BLOCK_SIZE, KV_BLOCK_SIZE
         )
     return block_mask
 
