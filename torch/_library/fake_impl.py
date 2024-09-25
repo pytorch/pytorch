@@ -83,10 +83,10 @@ def construct_meta_kernel(qualname: str, fake_impl_holder: FakeImplHolder) -> Ca
             raise RuntimeError(
                 f"{qualname} ({source}): You're trying to run this operator "
                 f"with meta Tensors (as opposed to FakeTensors), but this "
-                f"operator may return a data-dependent output shape. Meta "
-                f"Tensors don't support operators with data-dependent output "
-                f"shape, but FakeTensors do. "
-                f"If your operator does not return a data-dependent output, "
+                f"operator may return an output Tensor with data-dependent shape. Meta "
+                f"Tensors don't support operators with outputs that have data-dependent shapes "
+                f"but FakeTensors do. "
+                f"If your operator does not return an output with data-dependent shape, "
                 f"make sure the FakeTensor and/or meta kernel does not call "
                 f"torch.library.get_ctx(). Otherwise, please use FakeTensors."
             )
