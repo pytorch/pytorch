@@ -41,14 +41,14 @@ if(NOT __AOTRITON_INCLUDED)
   else()
     file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/.ci/docker/aotriton_version.txt" __AOTRITON_CI_INFO)
     list(GET __AOTRITON_CI_INFO 0 __AOTRITON_VER)
-    list(GET __AOTRITON_CI_INFO 1 __AOTRITON_MANY)
+    list(GET __AOTRITON_CI_INFO 1 __AOTRITON_MANYLINUX)
     list(GET __AOTRITON_CI_INFO 2 __AOTRITON_ROCM)
     list(GET __AOTRITON_CI_INFO 3 __AOTRITON_COMMIT)
     list(GET __AOTRITON_CI_INFO 4 __AOTRITON_SHA256)
     list(GET __AOTRITON_CI_INFO 5 __AOTRITON_Z)
     set(__AOTRITON_URL "https://github.com/ROCm/aotriton/releases/download/\
     ${__AOTRITON_VER}/aotriton-\
-    ${__AOTRITON_VER}-${__AOTRITON_MANY}\
+    ${__AOTRITON_VER}-${__AOTRITON_MANYLINUX}\
     _${__AOTRITON_ARCH}-${__AOTRITON_ROCM}-shared.tar.${__AOTRITON_Z}")
     set(__AOTRITON_ARCH ${CMAKE_HOST_SYSTEM_PROCESSOR})
     ExternalProject_Add(aotriton_external
