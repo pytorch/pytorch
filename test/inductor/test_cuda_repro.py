@@ -433,7 +433,11 @@ class CudaReproTests(TestCase):
                 triton.Config({"XBLOCK": 2}),
             ],
             meta={
-                "signature": {0: "*fp32", 1: "*fp32", 2: "i32"},
+                "signature": {
+                    "in_out_ptr0": "*fp32",
+                    "in_ptr0": "*fp32",
+                    "xnumel": "i32",
+                },
                 "device": DeviceProperties.create(torch.device("cuda")),
                 "configs": [instance_descriptor(divisible_by_16=(0, 1), equal_to_1=())],
                 "constants": {},
