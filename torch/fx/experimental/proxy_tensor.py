@@ -2054,16 +2054,18 @@ class _MakefxTracer:
                     concrete_args=tuple(phs),
                 )
             except Exception:
-                partial_module = fx.GraphModule({}, self.fx_tracer.graph)
                 trace_structured(
                     "artifact",
                     metadata_fn=lambda: {
                         "name": "make_fx_fail_partial",
                         "encoding": "string",
                     },
-                    payload_fn=lambda: partial_module.print_readable(
-                        print_output=False, include_stride=True, include_device=True
-                    ),
+                    payload_fn=lambda: self.fx_tracer.graph.python_code(
+                        root_module="self",
+                        verbose=True,
+                        include_stride=True,
+                        include_device=True
+                    ).src,
                 )
                 raise
 

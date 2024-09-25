@@ -208,6 +208,7 @@ class FSDPParamGroup:
         if self.is_sharded and not self._reset_sharded_params:
             for fsdp_param in self.fsdp_params:
                 fsdp_param.reset_sharded_param()
+                fsdp_param._init_extensions()  # allow monkey patch after init
             self._reset_sharded_params = True
         self._validate_no_meta_params()
         self._validate_cpu_offload_params()
