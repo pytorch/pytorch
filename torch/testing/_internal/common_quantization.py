@@ -657,7 +657,8 @@ class QuantizationTestCase(TestCase):
         b = io.BytesIO()
         torch.save(model_dict, b)
         b.seek(0)
-        loaded_dict = torch.load(b)
+        # weights_only=False as we sometimes get a ScriptObect here (weird)
+        loaded_dict = torch.load(b, weights_only=False)
         loaded_model.load_state_dict(loaded_dict)
         ref_out = ref_model(*x)
         load_out = loaded_model(*x)
@@ -674,7 +675,8 @@ class QuantizationTestCase(TestCase):
         b = io.BytesIO()
         torch.save(ref_model, b)
         b.seek(0)
-        loaded = torch.load(b)
+        # weights_only=False as this is legacy code that saves the model
+        loaded = torch.load(b, weights_only=False)
         load_out = loaded(*x)
         check_outputs(ref_out, load_out)
 
@@ -1245,6 +1247,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         export_with_dynamic_shape=False,
         is_qat=False,
         is_debug_mode=False,
+        capture_pre_autograd_graph_node_occurrence=None,
     ):
         # resetting dynamo cache
         torch._dynamo.reset()
@@ -1303,6 +1306,10 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             for k, v in PT2EQuantizationTestCase._MAP_TO_FX_TRACED_OPS.items():
                 if k in expected_node_occurrence:
                     node_occurrence[ns.call_function(v)] = expected_node_occurrence[k]
+            if capture_pre_autograd_graph_node_occurrence is not None:
+                node_occurrence = {
+                    ns.call_function(k): v for k, v in capture_pre_autograd_graph_node_occurrence.items()
+                }
             self.checkGraphModuleNodes(m_fx, expected_node_occurrence=node_occurrence)
             fx_quant_output = m_fx(*example_inputs)
             self.assertEqual(fx_quant_output, pt2_quant_output)

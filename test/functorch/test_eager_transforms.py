@@ -2882,7 +2882,7 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_jvp, expected_jvp)
 
     @dtypes(torch.float)
-    def test_linearize_composition(self, device, dtype):
+    def test_linearize_composition_vmap(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
         x_t = make_tensor((3, 3, 1), device=device, dtype=dtype)
 
@@ -2896,6 +2896,25 @@ class TestLinearize(TestCase):
             return jvp(fn, (x_p,), (x_t,))[1]
 
         expected_batched_jvp = vmap(jvp_fn)(x_t)
+
+        self.assertEqual(actual_batched_jvp, expected_batched_jvp)
+
+    @dtypes(torch.float)
+    def test_linearize_composition_grad(self, device, dtype):
+        x_p = make_tensor((3,), device=device, dtype=dtype)
+        x_t = make_tensor((3,), device=device, dtype=dtype)
+
+        def fn(x):
+            z = torch.ones(3, device=device, dtype=dtype)
+            return grad(lambda x: z @ x)(x)
+
+        _, jvp_fn = linearize(fn, x_p)
+        actual_batched_jvp = jvp_fn(x_t)
+
+        def jvp_fn(x_t):
+            return jvp(fn, (x_p,), (x_t,))[1]
+
+        expected_batched_jvp = jvp_fn(x_t)
 
         self.assertEqual(actual_batched_jvp, expected_batched_jvp)
 
@@ -4970,7 +4989,14 @@ def forward(self, x_1):
 
 
 def construct_sum_pyop():
-    mysum = HigherOrderOperator("mysum")
+    class MySum(HigherOrderOperator):
+        def __init__(self):
+            super().__init__("mysum")
+
+        def __call__(self, *args, **kwargs):
+            return super().__call__(*args, **kwargs)
+
+    mysum = MySum()
 
     @mysum.py_impl(torch._C._functorch.TransformType.Vmap)
     def mysum_batch_rule(interpreter, x, dim):
@@ -5150,7 +5176,6 @@ class TestCompileTransforms(TestCase):
         self.assertEqual(actual, expected)
 
     # torch.compile is not supported on Windows
-    @expectedFailureIf(IS_WINDOWS)
     @torch._dynamo.config.patch(suppress_errors=False)
     def test_grad_deprecated_api(self, device):
         x = torch.randn((), device=device)

@@ -20,10 +20,10 @@ class TranslationMetadata(object):
     download_uri: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "downloadUri"}
     )
-    full_description: Optional[
-        _multiformat_message_string.MultiformatMessageString
-    ] = dataclasses.field(
-        default=None, metadata={"schema_property_name": "fullDescription"}
+    full_description: Optional[_multiformat_message_string.MultiformatMessageString] = (
+        dataclasses.field(
+            default=None, metadata={"schema_property_name": "fullDescription"}
+        )
     )
     full_name: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "fullName"}

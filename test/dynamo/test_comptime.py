@@ -3,6 +3,7 @@
 import collections
 import re
 import sys
+import time
 from io import StringIO
 
 import torch._dynamo.test_case
@@ -159,7 +160,7 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertExpectedInline(
             FILE.getvalue(),
             """\
-- TensorVariable()
+- FakeTensor(..., size=(2,))
 """,
         )
 
@@ -185,8 +186,8 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertExpectedInline(
             FILE.getvalue(),
             """\
-x = TensorVariable()
-y = TensorVariable()
+x = FakeTensor(..., size=(2,))
+y = FakeTensor(..., size=(2,))
 """,
         )
 
@@ -202,6 +203,29 @@ y = TensorVariable()
             return y + 3
 
         f(torch.randn(2), torch.randn(2))
+
+    def test_sleep(self):
+        sleep_time = 5
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.optimize(cnt)
+        def f(x, z, should_sleep):
+            if should_sleep:
+                comptime.sleep(sleep_time)
+            y = x * 2
+            return y + 3
+
+        start = time.time()
+        f(torch.randn(2), torch.randn(2), False)
+        total_no_sleep = time.time() - start
+
+        start = time.time()
+        f(torch.randn(2), torch.randn(2), True)
+        total_with_sleep = time.time() - start
+
+        self.assertTrue(total_with_sleep > sleep_time)
+        # Hopefully this won't be flaky
+        self.assertTrue(abs(total_with_sleep - sleep_time - total_no_sleep) < 3)
 
     # Just make sure it doesn't crash
     def test_get_local_closure_variable(self):

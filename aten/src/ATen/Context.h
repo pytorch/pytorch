@@ -52,7 +52,7 @@ class TORCH_API Context {
     } else if (device_type == at::kIPU) {
       return at::detail::getIPUHooks().getDefaultIPUGenerator(device.index());
     } else if (device_type == at::kPrivateUse1) {
-      return at::GetPrivateUse1HooksInterface()->getDefaultGenerator(
+      return at::detail::getPrivateUse1Hooks().getDefaultGenerator(
           device.index());
     } else {
       AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
@@ -91,7 +91,7 @@ class TORCH_API Context {
     } else if (device_type == at::kXPU) {
       return at::detail::getXPUHooks().getDeviceFromPtr(data);
     } else if (device_type == at::kPrivateUse1) {
-      return at::GetPrivateUse1HooksInterface()->getDeviceFromPtr(data);
+      return at::detail::getPrivateUse1Hooks().getDeviceFromPtr(data);
     } else {
       AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
     }
@@ -182,7 +182,7 @@ class TORCH_API Context {
   void lazyInitPrivateUse1() {
     c10::call_once(thp_init, [&] {
       if (isPrivateUse1HooksRegistered()) {
-        at::GetPrivateUse1HooksInterface()->initPrivateUse1();
+        at::detail::getPrivateUse1Hooks().initPrivateUse1();
       }
     });
   }
@@ -233,6 +233,9 @@ class TORCH_API Context {
 
   void setSDPUseCuDNN(bool);
   bool userEnabledCuDNNSDP() const;
+
+  void setAllowFP16BF16ReductionMathSDP(bool);
+  bool allowFP16BF16ReductionMathSDP() const;
 
   void setSDPUseOverrideable(bool);
   bool userEnabledOverrideableSDP() const;
@@ -390,6 +393,7 @@ class TORCH_API Context {
   bool enabled_mathSDP = true;
   bool enabled_cudnnSDP = true;
   bool enabled_overrideable = true;
+  bool allow_fp16_bf16_reduction_mathSDP = false;
 #ifdef USE_ROCM
   bool benchmark_cudnn = true;
 #else

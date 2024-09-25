@@ -203,7 +203,7 @@ class TritonTemplateKernel(TritonKernel):
         num_bytes = []
         for i, inp in enumerate(itertools.chain(self.input_nodes, (self.output_node,))):
             size = V.graph.sizevars.size_hints(inp.get_size())
-            numel = functools.reduce(operator.mul, size)
+            numel = functools.reduce(operator.mul, size, 1)
             dtype_size = get_dtype_size(inp.get_dtype())
             num_bytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
         return sum(num_bytes)
@@ -1283,7 +1283,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
             def precompile_with_captured_stdout(choice):
                 with restore_stdout_stderr(initial_stdout, initial_stderr):
-                    return choice.precompile()
+                    start_time = time.time()
+                    choice.precompile()
+                    return time.time() - start_time
 
             executor = ThreadPoolExecutor(max_workers=num_workers)
 
@@ -1304,6 +1306,12 @@ class AlgorithmSelectorCache(PersistentCache):
                     if e := future.exception():
                         log.error(
                             "Exception %s for benchmark choice %s", e, futures[future]
+                        )
+                    else:
+                        log.info(
+                            "Precompiling benchmark choice %s took %.02fs",
+                            futures[future],
+                            future.result(),
                         )
 
                 executor.shutdown(wait=True)

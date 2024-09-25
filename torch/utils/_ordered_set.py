@@ -23,7 +23,7 @@ __all__ = ["OrderedSet"]
 
 
 # Using Generic[T] bc py38 does not support type parameterized MutableSet
-class OrderedSet(Generic[T], MutableSet):
+class OrderedSet(MutableSet, Generic[T]):
     """
     Insertion ordered set, similar to OrderedDict.
     """
