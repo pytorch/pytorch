@@ -97,8 +97,8 @@ RUN sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/*.repo
 ENV LC_ALL en_US.UTF-8
 ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US.UTF-8
+RUN yum -y update
 RUN yum install -y \
-        aclocal \
         autoconf \
         automake \
         bison \
@@ -115,7 +115,6 @@ RUN yum install -y \
         wget \
         which \
         xz \
-        yasm
 RUN yum install -y \
     https://repo.ius.io/ius-release-el7.rpm \
     https://ossci-linux.s3.amazonaws.com/epel-release-7-14.noarch.rpm
