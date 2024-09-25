@@ -3579,7 +3579,8 @@ class TestCudaMallocAsync(TestCase):
         torch.cuda.memory.empty_cache()
         mb = 1024 * 1024
         _, all_memory = torch.cuda.memory.mem_get_info()
-        total_allowed = 120 * mb
+        pre_reserved = torch.cuda.memory_reserved()
+        total_allowed = 120 * mb + pre_reserved
         fraction_allowed = total_allowed / all_memory
         assert int(fraction_allowed * all_memory) == total_allowed
         torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
@@ -3609,7 +3610,8 @@ class TestCudaMallocAsync(TestCase):
         torch.cuda.memory.empty_cache()
         mb = 1024 * 1024
         _, all_memory = torch.cuda.memory.mem_get_info()
-        total_allowed = 120 * mb
+        pre_reserved = torch.cuda.memory_reserved()
+        total_allowed = 120 * mb + pre_reserved
         fraction_allowed = total_allowed / all_memory
         assert int(fraction_allowed * all_memory) == total_allowed
         torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
