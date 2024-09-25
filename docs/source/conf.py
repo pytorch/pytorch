@@ -404,6 +404,7 @@ coverage_ignore_functions = [
     # torch.cuda.memory
     "caching_allocator_alloc",
     "caching_allocator_delete",
+    "caching_allocator_enable",
     "change_current_allocator",
     "empty_cache",
     "get_allocator_backend",

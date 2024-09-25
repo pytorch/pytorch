@@ -117,6 +117,7 @@ Memory management
      reset_peak_memory_stats
      caching_allocator_alloc
      caching_allocator_delete
+     caching_allocator_enable
      get_allocator_backend
      CUDAPluggableAllocator
      change_current_allocator
