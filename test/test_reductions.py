@@ -3,6 +3,7 @@
 import contextlib
 import torch
 import numpy as np
+import unittest
 
 import math
 from typing import Dict, List, Sequence
@@ -3145,7 +3146,7 @@ class TestReductions(TestCase):
         self.assertEqual(hist_out, expected_hist)
         self.assertEqual(bin_edges_out, expected_bin_edges)
 
-    @expectedFailureMeta  # histogram returns different values from Numpy in some cases, on the order of 2e-5 relative
+    @unittest.expectedFailure  # histogram returns different values from Numpy in some cases, on the order of 2e-5 relative
     @onlyCPU
     @dtypes(torch.float32)
     def test_histogram(self, device, dtype):
