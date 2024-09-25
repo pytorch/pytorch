@@ -6,27 +6,7 @@ on:
     types: [opened, synchronize, reopened]
 
 jobs:
-  # NB: This doesn't work with forked PR https://github.com/parkerbxyz/suggest-changes/issues/33 :(
-  checkout-pytorch-grab-lintrunner:
-    permissions: read-all
-    runs-on: lf.linux.2xlarge
-    if: ${{ github.repository_owner == 'pytorch' }}
-    continue-on-error: true
-    outputs:
-      lintrunner-script: ${{ steps.store-lintrunner-script.outputs.lintrunner-script }}
-    steps:
-      - name: Checkout PyTorch
-    #   check out the PyTorch repo at main instead of the pr head
-        uses: actions/checkout@v4
-      - name: Store lintrunner script
-        shell: bash
-        id: store-lintrunner-script
-        run: |
-          set -ex
-          echo "lintrunner-script=$(cat .github/scripts/lintrunner.sh)" >> "$GITHUB_ENV"
-
   lintrunner-autoformat:
-    needs: checkout-pytorch-grab-lintrunner
     permissions:
       contents: read
       pull-requests: write
@@ -45,11 +25,10 @@ jobs:
           python-version: "3.10"
       - name: Run lintrunner (nonretryable)
         continue-on-error: true
+        # we can't run all files here because only changes around where the diff are shown in the PR UI
         run: |
           export ADDITIONAL_LINTRUNNER_ARGS="format"
-          echo "${{ needs.checkout-pytorch-grab-lintrunner.outputs.lintrunner-script }}" > lintrunner.sh
-          bash lintrunner.sh
-          rm lintrunner.sh
+          bash .github/scripts/lintrunner.sh
       - name: Check for changes
         id: git-check
         run: |
