@@ -229,7 +229,7 @@ def stage_backward_weight(
         # `hook` -> cell -> param_group -> intermediates -> `hook`
         # becuase we install the hook function onto each of the intermediate autograd nodes.
         # We need to keep intermediates alive up until backward_weight, but we can free it now.
-        # del param_group["intermediates"]
+        del param_group["intermediates"]
 
         assert all(len(g) == 1 for g in param_group["grads"])
         # [NEW!] Able to pass a GradientEdge to autograd.grad as output
