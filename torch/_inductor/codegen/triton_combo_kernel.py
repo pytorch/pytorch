@@ -90,7 +90,7 @@ def _default_custom_combo_kernel_horizontal_partition(
         # rnumel > 2048 usually has long execution time
         # BaseSchedulerNode.group[-1][-1] is rnumel for reduction nodes
         long_reduction = [
-            n for n in reduction if V.graph.sizevars.size_hint(n.group[-1][-1]) > 2048
+            n for n in reduction if V.graph.sizevars.size_hint(n.group[-1][-1]) > 2048  # type: ignore[arg-type]
         ]
         short_reduction = [n for n in reduction if n not in long_reduction]
         if long_reduction:
@@ -660,18 +660,19 @@ class ComboKernel(Kernel):
         heuristics: str,
         size_hints: List[int],
         selected_kernel: TritonKernel,
+        signature: List[Any],
+        argdefs: List[str],
         pointwise_with_reduce: bool = False,
-        signature: Optional[List[Any]] = None,
     ) -> str:
         can_use_32bit = all(k.index_dtype == "tl.int32" for k in self.sub_kernels)
         size_dtype = "tl.int32" if can_use_32bit else "tl.int64"
-        if signature is None:
-            _, _, signature, _ = self.args.python_argdefs()
         for i, sub in enumerate(self.sub_kernels):
             self.min_x_blocks_sub_kernel(sub, i)
         self.select_dispatch_strategy()
         triton_meta = {
-            "signature": signature_to_meta(signature, size_dtype=size_dtype),
+            "signature": signature_to_meta(
+                signature, size_dtype=size_dtype, argdefs=argdefs
+            ),
             "device": DeviceProperties.create(
                 V.graph.scheduler.get_current_device_or_throw()
             ),
@@ -850,6 +851,7 @@ class ComboKernel(Kernel):
                 selected_kernel,
                 pointwise_with_reduce=pointwise_with_reduction,
                 signature=signature,
+                argdefs=argdefs,
             )
         )
         code.writeline(
