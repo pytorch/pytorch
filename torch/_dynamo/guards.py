@@ -1141,7 +1141,7 @@ class GuardBuilder(GuardBuilderBase):
         # code_parts in a function object which is then passed on to the leaf
         # guard.
         make_guard_fn_args = ", ".join(closure_vars.keys())
-        _, pycode = build_guard_function(code_parts, make_guard_fn_args)
+        _guard_body, pycode = build_guard_function(code_parts, make_guard_fn_args)
         out: Dict[str, Any] = {}
         globals_for_guard_fn = {"G": self.scope["G"]}
         exec(pycode, globals_for_guard_fn, out)
@@ -2000,7 +2000,7 @@ class GuardBuilder(GuardBuilderBase):
             # this logic, be my guest!  -- ezyang 2024)
             #
             assert guard.source is not None
-            static, _ = tensor_always_has_static_shape(
+            static, _reason = tensor_always_has_static_shape(
                 value, is_tensor=True, tensor_source=guard.originating_source
             )
 

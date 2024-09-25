@@ -108,7 +108,7 @@ class Observer:
             agent_rref (RRef): an RRef referencing the agent object.
             n_steps (int): number of steps in this episode
         """
-        state, _ = self.env.reset(), 0
+        state, _ep_reward = self.env.reset(), 0
         for _ in range(n_steps):
             # send the state to the agent to get an action
             action = _remote_method(Agent.select_action, agent_rref, self.id, state)

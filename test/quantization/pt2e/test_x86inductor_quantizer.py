@@ -534,6 +534,29 @@ class TestHelperModules:
             weighted = torch.matmul(attention, v)
             return weighted
 
+    class Conv2dFlattenTranspose(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.projection = torch.nn.Conv2d(
+                3, 768, kernel_size=(16, 16), stride=(16, 16)
+            )
+            self.cls_token = torch.rand(1, 1, 768)
+
+        def forward(self, pixel_values):
+            embeddings = self.projection(pixel_values).flatten(2).transpose(1, 2)
+            embeddings = torch.cat((self.cls_token, embeddings), dim=1)
+            return embeddings
+
+    class Conv2dFlattenCatTranspose(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(3, 768, kernel_size=(16, 16), stride=(16, 16))
+
+        def forward(self, x):
+            y = self.conv(x).flatten(2)
+            y = torch.cat([y, y], dim=-1)
+            return y.transpose(1, 2)
+
 
 class X86InductorQuantTestCase(QuantizationTestCase):
     def _test_quantizer(
@@ -944,15 +967,97 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
     @skipIfNoX86
     def test_flatten_recipe(self):
         r"""
-        Test pattern: int8_in_int8_out_ops(flatten) - non_quantizable op(pow)
-        Since flatten is a int8_in_int8_out_op, there is obs between flatten and pow.
+        Test pattern: conv -> flatten -> cat -> transpose
         """
-        self._single_op_share_observer_recipe_test_helper(
-            TestHelperModules.Conv2dSingleOpPowModule(
-                lambda x: torch.flatten(x, 1)
-            ).eval(),
-            torch.rand(1, 2, 14, 14),
+        m = TestHelperModules.Conv2dFlattenCatTranspose().eval()
+        x = torch.randn(1, 3, 224, 224)
+        quantizer = X86InductorQuantizer().set_global(
+            xiq.get_default_x86_inductor_quantization_config()
+        )
+        example_inputs = (x,)
+        node_occurrence = {
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 4,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
+            # quantize_per_channel for weights are const propagated
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+        }
+        node_list = [
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.conv2d.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.aten.flatten.using_ints,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.cat.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        ]
+        _, prepare_model, _ = self._test_quantizer(
+            m,
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
+        )
+        # Check Flatten has share observer at input and output
+        for node in prepare_model.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target is torch.ops.aten.flatten.using_ints
+            ):
+                single_op_node = node
+                input_obs_of_single_op = getattr(
+                    prepare_model, single_op_node.args[0].target
+                )
+                output_obs_of_single_op = getattr(
+                    prepare_model, next(iter(single_op_node.users)).target
+                )
+            elif (
+                node.op == "call_function"
+                and node.target is torch.ops.aten.conv2d.default
+            ):
+                conv_node = node
+                input_obs_of_conv = getattr(prepare_model, conv_node.args[0].target)
+        self.assertTrue(isinstance(input_obs_of_single_op, ObserverBase))
+        self.assertTrue(isinstance(output_obs_of_single_op, ObserverBase))
+        self.assertTrue(isinstance(input_obs_of_conv, ObserverBase))
+        self.assertTrue(input_obs_of_single_op is output_obs_of_single_op)
+        self.assertTrue(input_obs_of_single_op is not input_obs_of_conv)
+
+    @skipIfNoX86
+    def test_flatten_recipe2(self):
+        r"""
+        Test pattern: conv -> flatten -> transpose
+        """
+        m = TestHelperModules.Conv2dFlattenTranspose().eval()
+        x = torch.randn(1, 3, 224, 224)
+        quantizer = X86InductorQuantizer().set_global(
+            xiq.get_default_x86_inductor_quantization_config()
+        )
+        example_inputs = (x,)
+        node_occurrence = {
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
+            # quantize_per_channel for weights are const propagated
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+        }
+        node_list = [
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.conv2d.default,
+            torch.ops.aten.flatten.using_ints,
+            torch.ops.aten.transpose.int,
+        ]
+        self._test_quantizer(
+            m,
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
         )
 
     @skipIfNoX86

@@ -230,7 +230,7 @@ class JitTestCase(JitCommonTestCase):
                 # and it's easier to just work with a fresh copy each time.
                 buffer_copy = buffer.getvalue()
 
-                code_files, _ = extract_files(buffer)
+                code_files, _debug_files = extract_files(buffer)
 
             except RuntimeError as e:
                 if not self._isHookExceptionOk(e):
@@ -247,7 +247,7 @@ class JitTestCase(JitCommonTestCase):
             torch.jit.save(imported, saved_module_buffer_2)
 
             saved_module_buffer_2.seek(0)
-            code_files_2, _ = extract_files(saved_module_buffer_2)
+            code_files_2, _debug_files_2 = extract_files(saved_module_buffer_2)
 
             for a, b in zip(code_files, code_files_2):
                 self.assertMultiLineEqual(a, b)

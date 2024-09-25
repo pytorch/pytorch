@@ -77,7 +77,6 @@ def assert_(val, msg=""):
     For documentation on usage, refer to the Python documentation.
 
     """
-
     __tracebackhide__ = True  # Hide traceback for py.test
     if not val:
         try:

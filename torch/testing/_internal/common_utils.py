@@ -4220,7 +4220,7 @@ class TestCase(expecttest.TestCase):
         # CI flag should be set in the parent process only.
         env.pop("CI", None)
         env.pop("TEST_SHOWLOCALS", None)
-        _, stderr = TestCase.run_process_no_exception(code, env=env)
+        _stdout, stderr = TestCase.run_process_no_exception(code, env=env)
         return stderr.decode('ascii')
 
 

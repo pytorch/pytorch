@@ -776,7 +776,7 @@ class MetaConverter:
             (
                 inner_sizes,
                 inner_strides,
-                _,
+                _inner_storage_offset,
             ) = sym_sizes_strides_storage_offset(inner_t, inner_src, symbolic_context)
             return torch.empty_strided(
                 inner_sizes,

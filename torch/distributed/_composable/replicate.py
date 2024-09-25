@@ -83,7 +83,6 @@ class _ReplicateState(_State):
 
         self.has_initialized = True
         self.module = module
-
         ignored_params = {p for m in ignored_modules for p in m.parameters()}
         for submodule in module.modules():
             if _is_fully_sharded(submodule):

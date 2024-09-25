@@ -164,7 +164,7 @@ def associative_scan(
         pytree.tree_unflatten(leaves, spec),
         pytree.tree_unflatten(leaves, spec),
     )
-    out_leaves, _ = pytree.tree_flatten(out)
+    out_leaves, _tree_out = pytree.tree_flatten(out)
     if len(leaves) != len(out_leaves):
         raise RuntimeError(
             "The number of leaves of the pytree of the output of the operator needs to match the length of the pytree of the input"

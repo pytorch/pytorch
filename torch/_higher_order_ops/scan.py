@@ -172,7 +172,7 @@ def scan(
             )
 
         # There are no pytree restrictions on the second output of the operator
-        _, tree_out = pytree.tree_flatten(out[1])
+        _out_leaves, tree_out = pytree.tree_flatten(out[1])
 
         combine_fn = functools.partial(
             wrap_combine_fn_flat,
