@@ -289,7 +289,7 @@ class TritonBlockPointerTest(InductorTestCase):
             ((4, 4), 1, 1),
             ((4, 4, 4), 1, 1),
             ((8, 8, 8), 1, 1),
-            ((15, 15), 0, 1),  # Non-power of 2
+            ((15, 15), None, 1),  # Non-power of 2
             ((3 * max_block, 2), 3, 2),  # Multiple of max block. Uses loops.
             (
                 (2, 3 * max_block),
@@ -497,6 +497,44 @@ class TritonBlockPointerTest(InductorTestCase):
                 else:
                     self.assertNotIn(tile_name, program)
 
+    @parametrize("reduction_op", [torch.sum, torch.argmax])
+    @parametrize(
+        "view_size,num_block_pointers,num_triton_kernels",
+        [
+            ((15, 15), 1, 1),  # Non-power of 2
+            ((129, 129), 3, 2),  # Test a large size, with loops.
+        ],
+    )
+    def test_nd_tiling_odd_shapes_reduce(
+        self,
+        view_size: Tuple[int],
+        num_block_pointers: int,
+        num_triton_kernels: int,
+        reduction_op: Callable,
+    ):
+        """
+        Tests a reduction kernel.
+        """
+
+        device = torch.device(GPU_TYPE)
+        full_size = tuple(2 * dim for dim in view_size)
+        full = torch.randn(full_size).to(device)
+        view = torch.as_strided(full, view_size, full.stride())
+
+        # Expect at least 1 block pointer for the input.
+        # Add 2 more if we generate 2 kernels.
+        result, (code,) = self.run_and_compare(
+            reduction_op,
+            view,
+            expected_num_block_pointers=num_block_pointers,
+            expected_num_triton_kernels=num_triton_kernels,
+            config_patches={"triton.prefer_nd_tiling": True},
+        )
+
+        # Check the code for multiple Rn_BLOCK's
+        expected_blocks = ["R0_BLOCK", "R1_BLOCK"]
+        for block in expected_blocks:
+            self.assertIn(block, code)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
