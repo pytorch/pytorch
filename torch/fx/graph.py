@@ -462,7 +462,10 @@ class CodeGen:
                 return s
             return f
 
+        yellow = make_wrapper_func("yellow")  # noqa: F841
+        cyan = make_wrapper_func("cyan")  # noqa: F841
         red = make_wrapper_func("red")
+        green = make_wrapper_func("green")  # noqa: F841
         dim_green = make_wrapper_func("dim_green")
         dim = make_wrapper_func("dim")
         dim_blue = make_wrapper_func("dim_blue")

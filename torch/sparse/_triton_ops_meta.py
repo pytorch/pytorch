@@ -550,7 +550,7 @@ def optimize_scatter_mm(
             return value
         return next_value
 
-    meta, speedup, timing, _ = minimize(
+    meta, speedup, timing, _sensitivity_message = minimize(
         bench, initial_meta, reference_meta, step_meta_parameter
     )
     if initial_meta is not reference_meta and initial_meta == meta and not force:

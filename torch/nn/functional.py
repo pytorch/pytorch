@@ -2681,7 +2681,17 @@ def embedding_bag(
             f"weight has to be a 2D Tensor, but got Tensor of dimension {weight.dim()}"
         )
 
-    if input.dim() == 2:
+    if not torch.jit.is_scripting() and input.dim() == 2 and input.is_nested:
+        include_last_offset = True
+        offsets = input.offsets()
+        input = input.values().reshape(-1)
+        if per_sample_weights is not None:
+            if not per_sample_weights.is_nested:
+                raise ValueError(
+                    "If input is nested, then per_sample_weights must be nested if specified"
+                )
+            per_sample_weights = per_sample_weights.values().reshape(-1)
+    elif input.dim() == 2:
         if offsets is not None:
             type_str = "<unknown>"
             # TODO: Remove this once script supports type() calls
@@ -6226,7 +6236,7 @@ def multi_head_attention_forward(
     #
 
     if need_weights:
-        _, _, E = q.shape
+        _B, _Nt, E = q.shape
         q_scaled = q * math.sqrt(1.0 / float(E))
 
         assert not (

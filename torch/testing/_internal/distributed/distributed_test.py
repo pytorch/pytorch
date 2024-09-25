@@ -984,7 +984,7 @@ class DistributedTest:
         @require_world_size(4)
         @skip_if_lt_x_gpu(4)
         def test_new_subgroups_by_enumeration(self):
-            _, _, rank = self._init_global_test()
+            _group, _group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
             device_id = rank_to_GPU[rank][0]
             cur_subgroup, subgroups = dist.new_subgroups_by_enumeration(
@@ -1010,12 +1010,12 @@ class DistributedTest:
         @require_world_size(4)
         @skip_if_lt_x_gpu(4)
         def test_new_subgroups_by_enumeration_input_rank_exceeds_world_size(self):
-            _, group_id, _ = self._init_global_test()
+            _group, group_id, _rank = self._init_global_test()
             init_multigpu_helper(dist.get_world_size(), BACKEND)
             world_size = get_world_size(group_id)
 
             with self.assertRaisesRegex(
-                RuntimeError,
+                ValueError,
                 "The new group's rank should be within the world_size set by init_process_group",
             ):
                 dist.new_subgroups_by_enumeration(
@@ -2785,7 +2785,7 @@ class DistributedTest:
                 dist.ReduceOp.BOR,
                 dist.ReduceOp.BXOR,
             ]
-            _, group_id, _ = self._init_global_test()
+            _group, group_id, _rank = self._init_global_test()
             for unsupported_op in unsupported_ops:
                 with self.assertRaisesRegex(
                     ValueError, "all_reduce does not support"
@@ -2951,12 +2951,12 @@ class DistributedTest:
 
         # SPARSE ALL REDUCE
         def _test_sparse_all_reduce_sum(self, fn):
-            _, group_id, rank = self._init_global_test()
+            _group, group_id, rank = self._init_global_test()
 
             tests = simple_sparse_reduce_tests(
                 rank, dist.get_world_size(), num_inputs=1
             )
-            for (inputs, outputs) in tests:
+            for inputs, outputs in tests:
                 tensors = [fn(input) for input in inputs]
                 dist.all_reduce(tensors[0], dist.ReduceOp.SUM, group_id)
                 self.assertEqual(tensors[0], outputs[0])
@@ -3019,7 +3019,7 @@ class DistributedTest:
             BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
         def test_all_reduce_coalesced_max_complex_unsupported(self):
-            _, group_id, _ = self._init_global_test()
+            _group, group_id, _rank = self._init_global_test()
             with self.assertRaisesRegex(ValueError, "all_reduce does not support"):
                 dist.all_reduce_coalesced(
                     [_build_tensor(1, dtype=torch.cfloat)], dist.ReduceOp.MAX, group_id
@@ -3235,7 +3235,7 @@ class DistributedTest:
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
         )
         def test_scatter_checks(self):
-            group, _, rank = self._init_global_test()
+            group, _group_id, rank = self._init_global_test()
             one = torch.ones([1])
 
             # Specify scatter_list argument only on source rank.
@@ -3354,7 +3354,7 @@ class DistributedTest:
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
         )
         def test_gather_checks(self):
-            group, _, rank = self._init_global_test()
+            group, _group_id, rank = self._init_global_test()
             one = torch.ones([1])
 
             # Specify gather_list argument only on destination rank.
@@ -4348,7 +4348,7 @@ class DistributedTest:
         def _test_DistributedDataParallelCPU(self, gradient_as_bucket_view=False):
             # Run a simple end to end DDP-CPU model, use result of single node
             # model as baseline
-            _, _, rank = self._init_global_test()
+            _group, _group_id, rank = self._init_global_test()
 
             # cpu training setup
             model_base = DDP_NET
@@ -5266,7 +5266,7 @@ class DistributedTest:
             to the ``ddp_model``. The hook fed into this function should not change
             the resulting gradients.
             """
-            _, group_id, rank = self._init_global_test()
+            _group, group_id, rank = self._init_global_test()
             world_size = get_world_size()
 
             # FIXME: Add testing for gloo/CUDA
@@ -5452,7 +5452,7 @@ class DistributedTest:
         )
         @skip_if_no_gpu
         def test_DistributedDataParallel(self):
-            _, _, rank = self._init_global_test()
+            _group, _group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
             gpus = list(rank_to_GPU[rank])
 
@@ -5842,7 +5842,7 @@ class DistributedTest:
         def _test_DistributedDataParallel_SyncBatchNorm_with_memory_format(
             self, memory_format
         ):
-            _, _, rank = self._init_global_test()
+            _group, _group_id, rank = self._init_global_test()
             num_processes = dist.get_world_size()
             local_bs = 2
             bs_offset = int(rank * 2)
@@ -5893,7 +5893,7 @@ class DistributedTest:
         )
         @skip_if_no_gpu
         def test_DistributedDataParallel_SyncBatchNorm(self):
-            _, _, rank = self._init_global_test()
+            _group, _group_id, rank = self._init_global_test()
             world_size = dist.get_world_size()
             # DDP does not support replicating BN layers within a process, hence
             # testing with one module replica per process
@@ -5938,7 +5938,7 @@ class DistributedTest:
         )
         @skip_if_no_gpu
         def test_DistributedDataParallel_SyncBatchNorm_No_Affine(self):
-            _, _, rank = self._init_global_test()
+            _group, _group_id, rank = self._init_global_test()
             world_size = dist.get_world_size()
             # DDP does not support replicating BN layers within a process, hence
             # testing with one module replica per process
@@ -5963,7 +5963,7 @@ class DistributedTest:
         )
         @skip_if_no_gpu
         def test_DistributedDataParallel_SyncBatchNorm_2D_Input(self):
-            _, _, rank = self._init_global_test()
+            _group, _group_id, rank = self._init_global_test()
             # DDP does not support replicating BN layers within a process, hence
             # testing with one module replica per process
             gpus = [rank]
@@ -6010,7 +6010,7 @@ class DistributedTest:
         @skip_if_no_gpu
         @require_world_size(2)
         def test_DistributedDataParallel_SyncBatchNorm_Single_Input_Per_Process(self):
-            _, _, rank = self._init_global_test()
+            _group, _group_id, rank = self._init_global_test()
             # DDP does not support replicating BN layers within a process, hence
             # testing with one module replica per process
             gpus = [rank]
@@ -6058,7 +6058,7 @@ class DistributedTest:
         def test_DistributedDataParallel_SyncBatchNorm_Diff_Input_Sizes_Running_Value(
             self,
         ):
-            _, _, rank = self._init_global_test()
+            _group, _group_id, rank = self._init_global_test()
             model = nn.parallel.DistributedDataParallel(
                 ONLY_SBN_NET.cuda(rank), device_ids=[rank]
             )
@@ -6099,7 +6099,7 @@ class DistributedTest:
         )
         @skip_if_no_gpu
         def test_DistributedDataParallel_SyncBatchNorm_Diff_Input_Sizes_gradient(self):
-            _, _, rank = self._init_global_test()
+            _group, _group_id, rank = self._init_global_test()
             # only do single GPU per process
             gpus = [rank]
 
@@ -6123,7 +6123,7 @@ class DistributedTest:
         )
         @skip_if_no_gpu
         def test_DistributedDataParallel_SyncBatchNorm_half(self):
-            _, _, rank = self._init_global_test()
+            _group, _group_id, rank = self._init_global_test()
 
             model = copy.deepcopy(BN_NET)
             model = model.half()
@@ -6361,7 +6361,7 @@ class DistributedTest:
         )
         @skip_if_no_gpu
         def test_ddp_logging_data_gpu(self):
-            _, _, rank = self._init_global_test()
+            _group, _group_id, rank = self._init_global_test()
             model_DDP = self._test_ddp_logging_data(is_gpu=True)
             ddp_logging_data = model_DDP._get_ddp_logging_data()
             self.assertEqual(ddp_logging_data.get("device_ids"), str(rank))
@@ -6419,7 +6419,7 @@ class DistributedTest:
             expected_err = "should be called before training loop starts"
             with self.assertRaisesRegex(RuntimeError, expected_err):
                 local_bs = 2
-                _, input, target, loss = self._prepare_dummy_data(local_bs)
+                _batch_size, input, target, loss = self._prepare_dummy_data(local_bs)
                 offset = dist.get_rank() * local_bs
 
                 # DDP training, DDP scatters subsets of input to nodes/GPUs
@@ -7956,7 +7956,7 @@ class DistributedTest:
 
         @require_backend_is_available({"gloo"})
         def test_grads_same_across_ranks_with_no_sync(self):
-            _, _, rank = self._init_global_test()
+            _group, _group_id, rank = self._init_global_test()
             world_size = dist.get_world_size()
             if world_size < 2:
                 self.skipTest("This test requires at least two ranks.")
@@ -8488,7 +8488,7 @@ class DistributedTest:
                 backend=dist.get_backend(), timeout=timedelta(seconds=10)
             )
             torch.cuda.set_device(self.rank)
-            ctx, _ = self._determine_expected_error_verify_model_across_rank(
+            ctx, _expected_err = self._determine_expected_error_verify_model_across_rank(
                 group_to_use
             )
             # Creates network with different sized embedding table on different
@@ -8514,7 +8514,7 @@ class DistributedTest:
                 backend=dist.get_backend(), timeout=timedelta(seconds=10)
             )
             torch.cuda.set_device(self.rank)
-            ctx, _ = self._determine_expected_error_verify_model_across_rank(
+            ctx, _expected_err = self._determine_expected_error_verify_model_across_rank(
                 group_to_use, diff_num_params=True
             )
 
@@ -9037,7 +9037,7 @@ class DistributedTest:
             if ignore_sparse:
                 for module_name, module in model.named_modules():
                     if module == model.sub_module.embedding_net.embedding:
-                        for parameter_name, _ in module.named_parameters(recurse=False):
+                        for parameter_name, _param in module.named_parameters(recurse=False):
                             fqn = f"{module_name}.{parameter_name}"
                             sparse_embedding_fqns.append(fqn)
 
@@ -9058,7 +9058,7 @@ class DistributedTest:
             fqn_to_param_index = {}
             index = 0
             for module_name, module in model.named_modules():
-                for parameter_name, _ in module.named_parameters(recurse=False):
+                for parameter_name, _param in module.named_parameters(recurse=False):
                     fqn = f"{module_name}.{parameter_name}"
                     fqn_to_param_index[fqn] = index
                     if fqn not in sparse_embedding_fqns:

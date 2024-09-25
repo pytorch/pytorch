@@ -664,7 +664,7 @@ class _ValgrindWrapper:
                 raise OSError(f"Failed to collect callgrind profile:\n{error_report}")
 
             def parse_output(fpath: str, inclusive: bool) -> FunctionCounts:
-                _, annotate_invocation_output = run([
+                _annotate_invocation, annotate_invocation_output = run([
                     "callgrind_annotate",
                     f"--inclusive={'yes' if inclusive else 'no'}",
                     "--threshold=100",

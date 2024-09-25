@@ -91,7 +91,7 @@ def get_size_of_node(fx_module: GraphModule, node: Node) -> size_bytes:
         submodule = submodule_dict[node.target]
         parameters = submodule.named_parameters()
         # Parameters are named tuples
-        for _, p in parameters:
+        for _name, p in parameters:
             total_num_of_elems += p.numel()
     # Don't forget the output size
     # node.shape is the shape of this node's output

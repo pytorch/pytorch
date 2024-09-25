@@ -69,7 +69,7 @@ GloballyUniqueId GloballyUniqueId::fromIValue(const at::IValue& ivalue) {
       ivalues[0].toInt() <= std::numeric_limits<worker_id_t>::max(),
       "GloballyUniqueId createdOn out of range, got ",
       ivalues[0].toInt());
-  worker_id_t createdOn = ivalues[0].toInt();
+  worker_id_t createdOn = static_cast<worker_id_t>(ivalues[0].toInt());
 
   TORCH_CHECK(
       ivalues[1].toInt() <= std::numeric_limits<local_id_t>::max(),

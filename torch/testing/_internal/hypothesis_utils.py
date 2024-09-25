@@ -36,7 +36,7 @@ _ENFORCED_ZERO_POINT = defaultdict(lambda: None, {
 })
 
 def _get_valid_min_max(qparams):
-    scale, zero_point, _ = qparams
+    scale, zero_point, _quantized_type = qparams
     adjustment = 1 + torch.finfo(torch.float).eps
     _long_type_info = torch.iinfo(torch.long)
     long_min, long_max = _long_type_info.min / adjustment, _long_type_info.max / adjustment

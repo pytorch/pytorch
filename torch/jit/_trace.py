@@ -135,7 +135,7 @@ class ONNXTracedModule(torch.nn.Module):
             else:
                 return tuple(out_vars)
 
-        graph, _ = torch._C._create_graph_by_tracing(
+        graph, _out = torch._C._create_graph_by_tracing(
             wrapper,
             in_vars + module_state,
             _create_interpreter_name_lookup_fn(),

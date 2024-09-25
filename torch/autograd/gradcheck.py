@@ -1227,8 +1227,10 @@ def _test_backward_mul_by_grad_output(outputs, inputs, masked) -> bool:
 def _test_undefined_forward_mode(func, outputs, inputs):
     fwAD = torch.autograd.forward_ad
 
-    _, inp_tensors = _get_inp_tensors(inputs)
-    _, all_u, _ = _make_vectors(inp_tensors, outputs, use_forward_ad=True)
+    _inp_tensors_idx, inp_tensors = _get_inp_tensors(inputs)
+    _all_v, all_u, _all_u_dense = _make_vectors(
+        inp_tensors, outputs, use_forward_ad=True
+    )
 
     with fwAD.dual_level():
         fw_grads = []
@@ -1270,8 +1272,8 @@ def _test_undefined_forward_mode(func, outputs, inputs):
             dual_inputs[idx] = dual_inp_obj
 
             for index_o, (d_o1, d_o2) in enumerate(zip(dual_outputs1, dual_outputs2)):
-                _, res1 = fwAD.unpack_dual(d_o1)
-                _, res2 = fwAD.unpack_dual(d_o2)
+                _val1, res1 = fwAD.unpack_dual(d_o1)
+                _val2, res2 = fwAD.unpack_dual(d_o2)
 
                 if not (res1 is None or res2 is None):
                     if not torch.allclose(res1, res2):

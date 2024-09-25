@@ -67,6 +67,7 @@ from torch._inductor.codegen.rocm.compile_command import (
 )
 from torch._utils_internal import log_cache_bypass
 
+from .remote_cache import create_cache
 from .utils import _align
 
 
@@ -436,7 +437,7 @@ def write(
     # hashes just because the content begins/ends with different number of
     # spaces.
     key: str = get_hash(content.strip(), extra, hash_type)
-    basename, _, path = get_path(key, extension, specified_dir)
+    basename, _subdir, path = get_path(key, extension, specified_dir)
     if not os.path.exists(path):
         write_atomic(path, content, make_dirs=True)
     return basename, path
@@ -1325,25 +1326,13 @@ class FxGraphCache:
         """
         Attempts to load the remote cache, returns None on error.
         """
-        remote_cache = None
         cache_id = "fx-graph-v1"
-        try:
-            if config.is_fbcode():
-                from torch._inductor.fb.remote_cache import FbRemoteFxGraphCache
-
-                remote_cache = FbRemoteFxGraphCache(cache_id)
-            else:
-                from torch._inductor.remote_cache import RemoteFxGraphCache
-
-                remote_cache = RemoteFxGraphCache(cache_id)
-        except ModuleNotFoundError as e:
-            # No need for a stack trace on this error
-            remote_cache = None
-            log.warning("Unable to create a remote cache: %s", e)
-        except Exception:
-            remote_cache = None
-            log.warning("Unable to create a remote cache", exc_info=True)
-        return remote_cache
+        return create_cache(
+            cache_id,
+            config.is_fbcode(),
+            "FbRemoteFxGraphCache",
+            "RemoteFxGraphCache",
+        )
 
     @staticmethod
     def load_with_key(
