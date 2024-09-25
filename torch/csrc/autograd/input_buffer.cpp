@@ -11,6 +11,7 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>
 #include <c10/core/StreamGuard.h>
+#include <c10/core/impl/COW.h>
 #include <optional>
 
 #include <cstddef>
@@ -79,6 +80,7 @@ bool can_accumulate_inplace(const Variable& v) {
 
       // and we hold the last reference
       at::caching::adjusted_use_count(v) == 1 && v.has_storage() &&
+      !c10::impl::cow::is_cowsim_data_ptr(v.storage().data_ptr()) &&
       v.storage().use_count() == 1);
 }
 } // anonymous namespace

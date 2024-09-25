@@ -1357,12 +1357,12 @@ def forward(self, crop_camera_1, mask_1):
     _lazy_clone_alias_1 = torch.ops.aten._lazy_clone_alias.default(view_1);  view_1 = None
     bmm = torch.ops.aten.bmm.default(_lazy_clone_alias, _lazy_clone_alias_1);  _lazy_clone_alias = _lazy_clone_alias_1 = None
     view_2 = torch.ops.aten.view.default(bmm, [sym_size_int, 3, 3]);  bmm = None
-    mul = sym_size_int * 3
-    view_3 = torch.ops.aten.view.default(view_2, [mul, 3]);  view_2 = mul = None
+    mul_4 = sym_size_int * 3
+    view_3 = torch.ops.aten.view.default(view_2, [mul_4, 3]);  view_2 = mul_4 = None
     _lazy_clone_alias_2 = torch.ops.aten._lazy_clone_alias.default(view_3);  view_3 = None
     mm = torch.ops.aten.mm.default(_lazy_clone_alias_2, eye);  _lazy_clone_alias_2 = eye = None
-    view_4 = torch.ops.aten.view.default(mm, [sym_size_int, 3, 3]);  mm = sym_size_int = None
-    index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_4);  crop_camera_1 = mask_1 = view_4 = None
+    _unsafe_view = torch.ops.aten._unsafe_view.default(mm, [sym_size_int, 3, 3]);  mm = sym_size_int = None
+    index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], _unsafe_view);  crop_camera_1 = mask_1 = _unsafe_view = index_put_ = None
     return None""")  # noqa: B950
 
     def test_unbacked_slice(self):
