@@ -7,12 +7,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
-
-namespace onnx {
-using namespace ::c10::onnx;
-}
+namespace torch::jit {
 
 // Meyer’s Singleton for C++ 14
 ConstantValueMap& ConstantValueMap::getInstance() {
@@ -290,7 +285,7 @@ void ConstantValueMap::ClearMaps() {
 
 // For debug only.
 void ConstantValueMap::PrintMaps() {
-  std::cout << "Rank/Shape Map:" << std::endl;
+  std::cout << "Rank/Shape Map:" << '\n';
   for (const auto& x : ConstantValueMap::getInstance().rankMap) {
     std::stringstream ss;
     if (ConstantValueMap::getInstance().shapeMap.find(x.first) !=
@@ -308,45 +303,45 @@ void ConstantValueMap::PrintMaps() {
       }
     }
     ss << " (rank = " << x.second << ")";
-    std::cout << "node " << x.first << ": " << ss.str() << std::endl;
+    std::cout << "node " << x.first << ": " << ss.str() << '\n';
   }
-  std::cout << std::endl;
-  std::cout << "Value Map:" << std::endl;
+  std::cout << '\n';
+  std::cout << "Value Map:" << '\n';
   for (const auto& x : ConstantValueMap::getInstance().tensorValueMap) {
-    std::cout << "node " << x.first << ": " << x.second << std::endl;
+    std::cout << "node " << x.first << ": " << x.second << '\n';
   }
-  std::cout << std::endl;
-  std::cout << "TypeReliable Map:" << std::endl;
+  std::cout << '\n';
+  std::cout << "TypeReliable Map:" << '\n';
   size_t count = 0;
   for (const auto& x : ConstantValueMap::getInstance().typeReliableMap) {
     std::cout << "(node " << x.first << ": " << x.second << "), ";
     count++;
     if (count % 10 == 0) {
-      std::cout << std::endl;
+      std::cout << '\n';
     }
   }
-  std::cout << std::endl;
-  std::cout << "UseInferredType Map:" << std::endl;
+  std::cout << '\n';
+  std::cout << "UseInferredType Map:" << '\n';
   count = 0;
   for (const auto& x : ConstantValueMap::getInstance().useInferredTypeMap) {
     std::cout << "(node " << x.first << ": " << x.second << "), ";
     count++;
     if (count % 10 == 0) {
-      std::cout << std::endl;
+      std::cout << '\n';
     }
   }
-  std::cout << std::endl;
-  std::cout << "ShapeValue Map:" << std::endl;
+  std::cout << '\n';
+  std::cout << "ShapeValue Map:" << '\n';
   count = 0;
   for (const auto& x : ConstantValueMap::getInstance().shapeValueMap) {
     std::cout << "(node " << x.first << ": " << x.second << "), ";
     count++;
     if (count % 10 == 0) {
-      std::cout << std::endl;
+      std::cout << '\n';
     }
   }
-  std::cout << std::endl;
-  std::cout << "InferredShape Map:" << std::endl;
+  std::cout << '\n';
+  std::cout << "InferredShape Map:" << '\n';
   count = 0;
   for (const auto& x : ConstantValueMap::getInstance().inferredShapeData) {
     std::cout << "(node " << x.first << ": ";
@@ -360,29 +355,28 @@ void ConstantValueMap::PrintMaps() {
     std::cout << "), ";
     count++;
     if (count % 10 == 0) {
-      std::cout << std::endl;
+      std::cout << '\n';
     }
   }
-  std::cout << std::endl;
-  std::cout << "SymbolDim Map:" << std::endl;
+  std::cout << '\n';
+  std::cout << "SymbolDim Map:" << '\n';
   count = 0;
   for (const auto& x : ConstantValueMap::getInstance().symbolDimMap) {
     std::cout << "(" << x.first << ": " << x.second << "), ";
     count++;
     if (count % 10 == 0) {
-      std::cout << std::endl;
+      std::cout << '\n';
     }
   }
-  std::cout << "DimSymbol Map:" << std::endl;
+  std::cout << "DimSymbol Map:" << '\n';
   count = 0;
   for (const auto& x : ConstantValueMap::getInstance().dimSymbolMap) {
     std::cout << "(" << x.first << ": " << x.second << "), ";
     count++;
     if (count % 10 == 0) {
-      std::cout << std::endl;
+      std::cout << '\n';
     }
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -44,6 +44,21 @@ from unittest import mock
 import sympy
 
 import torch
+
+
+GPU_TYPES = ["cuda", "xpu"]
+
+
+# defines here before import torch._dynamo is for avoiding circular import
+# when get_gpu_type is imported from dynamo
+@functools.lru_cache(None)
+def get_gpu_type():
+    avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
+    assert len(avail_gpus) <= 1
+    gpu_type = "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
+    return gpu_type
+
+
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
@@ -356,7 +371,7 @@ def gen_gm_and_inputs(target, args, kwargs):
         len(target._schema.returns) == 1
         and str(target._schema.returns[0].type) == "Tensor"
     ):
-        node = (node,)
+        node = (node,)  # type: ignore[assignment]
     g.output(node)
 
     gm = torch.fx.GraphModule({}, g)
@@ -449,13 +464,23 @@ class CachedMethod(Protocol, Generic[P, RV]):
 
 # See https://github.com/python/mypy/issues/13222#issuecomment-1193073470 to understand the type signature
 def cache_on_self(fn: Callable[Concatenate[Any, P], RV]) -> CachedMethod[P, RV]:
-    key = f"__{fn.__name__}_cache"
+    name = fn.__name__
+    key = f"__{name}_cache"
 
-    @functools.wraps(fn)
-    def wrapper(self):
-        if not hasattr(self, key):
-            setattr(self, key, fn(self))
-        return getattr(self, key)
+    # wrapper is likely on the hot path, compile a specialized version of it
+    ctx = {"fn": fn}
+    exec(
+        f"""\
+        def {name}_cache_on_self(self):
+            try:
+                return self.{key}
+            except AttributeError:
+                self.{key} = rv = fn(self)
+                return rv
+        """.lstrip(),
+        ctx,
+    )
+    wrapper = functools.wraps(fn)(ctx[f"{name}_cache_on_self"])
 
     def clear_cache(self):
         if hasattr(self, key):
@@ -1199,7 +1224,7 @@ def _use_template_for_cpu(layout):
     return use_max_autotune() and layout.device.type == "cpu"
 
 
-def use_cpp_packed_gemm_template(layout, mat1, mat2):
+def use_cpp_packed_gemm_template(layout, mat1, mat2, mat2_transposed=False):
     from . import ir
     from .codegen.cpp_micro_gemm import create_micro_gemm
     from .codegen.cpp_utils import get_gemm_template_output_and_compute_dtype
@@ -1214,8 +1239,12 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     int8_gemm = mat1.get_dtype() == torch.uint8
     layout_dtypes = [torch.float32, torch.bfloat16, torch.half, torch.uint8]
     m, n, k, layout, mat1, mat2 = mm_args(
-        mat1, mat2, out_dtype=layout.dtype if int8_gemm else None
+        mat1,
+        mat2,
+        out_dtype=layout.dtype if int8_gemm else None,
+        mat2_transposed=mat2_transposed,
     )
+
     # TODO(jgong5): support dynamic shapes for n or k
     if has_free_symbols((n, k)):
         return False
@@ -1233,10 +1262,15 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
         output_dtype=output_dtype,
         num_threads=parallel_num_threads(),
     )
+
+    def is_last_dim_stride1(x):
+        x.freeze_layout()
+        return x.get_stride()[-1] == 1
+
     return (
         layout.dtype in layout_dtypes
         and micro_gemm is not None
-        and mat1.get_stride()[-1] == 1  # TODO(jgong5): support transposed input
+        and is_last_dim_stride1(mat1)  # TODO(jgong5): support transposed input
         and isinstance(mat2, ir.StorageBox)
         and mat2.is_module_buffer()
     )
@@ -1341,6 +1375,25 @@ def run_and_get_triton_code(fn, *args, **kwargs):
         1 <= len(source_codes) <= 2
     ), f"expected one or two code outputs got {len(source_codes)}"
     return source_codes[0]
+
+
+def run_and_get_graph_lowering(fn, *args, **kwargs):
+    from torch._inductor.codecache import CompiledFxGraph
+    from torch._inductor.graph import GraphLowering
+
+    real_init = CompiledFxGraph.__init__
+    graph_lowerings = []
+
+    def fake_init(*args, **kwargs):
+        real_init(*args, **kwargs)
+        graph = args[2]
+        assert isinstance(graph, GraphLowering)
+        graph_lowerings.append(graph)
+
+    with mock.patch.object(CompiledFxGraph, "__init__", fake_init):
+        result = fn(*args, **kwargs)
+
+    return result, graph_lowerings
 
 
 @contextlib.contextmanager
@@ -1994,3 +2047,24 @@ def set_tracing_context_output_strides(example_inputs, compiled_graph):
                         for e in exprs
                     )
                 )
+
+
+def should_use_remote_fx_graph_cache():
+    if config.fx_graph_remote_cache is not None:
+        return config.fx_graph_remote_cache
+    if not config.is_fbcode():
+        return False
+
+    if torch._utils_internal.is_fb_unit_test():
+        return False
+
+    try:
+        from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
+    except ModuleNotFoundError:
+        return False
+
+    jk_name = "pytorch/remote_cache:fx_graph_memcache_version"
+    if torch.version.hip is not None:
+        jk_name = "pytorch/remote_cache:fx_graph_memcache_version_amd"
+
+    return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(jk_name)

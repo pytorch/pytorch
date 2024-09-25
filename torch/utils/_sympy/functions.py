@@ -3,6 +3,17 @@ import functools
 import math
 import operator
 import sys
+from typing import (
+    Any,
+    Callable,
+    Iterable,
+    List,
+    Optional,
+    SupportsFloat,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 import sympy
 from sympy import S
@@ -19,16 +30,56 @@ from sympy.utilities.iterables import sift
 from .numbers import int_oo
 
 
+_T = TypeVar("_T", bound=SupportsFloat)
+
+# Portions of this file are adapted from the Sympy codebase, which was
+# licensed as follows:
+#
+#   Copyright (c) 2006-2023 SymPy Development Team
+#
+#   All rights reserved.
+#
+#   Redistribution and use in source and binary forms, with or without
+#   modification, are permitted provided that the following conditions are met:
+#
+#     a. Redistributions of source code must retain the above copyright notice,
+#        this list of conditions and the following disclaimer.
+#     b. Redistributions in binary form must reproduce the above copyright
+#        notice, this list of conditions and the following disclaimer in the
+#        documentation and/or other materials provided with the distribution.
+#     c. Neither the name of SymPy nor the names of its contributors
+#        may be used to endorse or promote products derived from this software
+#        without specific prior written permission.
+#
+#   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+#   AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+#   IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+#   ARE DISCLAIMED. IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE FOR
+#   ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+#   DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+#   SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+#   CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+#   LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+#   OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+#   DAMAGE.
+
 __all__ = [
     "FloorDiv",
     "ModularIndexing",
+    "Where",
+    "PythonMod",
+    "Mod",
     "CleanDiv",
+    "CeilToInt",
+    "FloorToInt",
     "CeilDiv",
     "IntTrueDiv",
     "FloatTrueDiv",
     "LShift",
     "RShift",
     "IsNonOverlappingAndDenseIndicator",
+    "TruncToFloat",
+    "TruncToInt",
     "RoundToInt",
     "RoundDecimal",
     "ToFloat",
@@ -38,10 +89,10 @@ __all__ = [
 ]
 
 
-def _keep_float(f):
+def _keep_float(f: Callable[..., _T]) -> Callable[..., Union[_T, sympy.Float]]:
     @functools.wraps(f)
-    def inner(*args):
-        r = f(*args)
+    def inner(*args: Any) -> Union[_T, sympy.Float]:
+        r: Union[_T, sympy.Float] = f(*args)
         if any(isinstance(a, sympy.Float) for a in args) and not isinstance(
             r, sympy.Float
         ):
@@ -51,10 +102,54 @@ def _keep_float(f):
     return inner
 
 
-def fuzzy_eq(x, y):
+def fuzzy_eq(x: Optional[bool], y: Optional[bool]) -> Optional[bool]:
     if None in (x, y):
         return None
     return x == y
+
+
+def simple_floordiv_gcd(p: sympy.Basic, q: sympy.Basic) -> sympy.Basic:
+    """
+    Fast path for sympy.gcd, using a simple factoring strategy.
+
+    We try to rewrite p and q in the form n*e*p1 + n*e*p2 and n*e*q0,
+    where n is the greatest common integer factor and e is the largest
+    syntactic common factor (i.e., common sub-expression) in p and q.
+    Then the gcd returned is n*e, cancelling which we would be left with
+    p1 + p2 and q0.
+
+    Note that further factoring of p1 + p2 and q0 might be possible with
+    sympy.factor (which uses domain-specific theories). E.g., we are unable
+    to find that x*y + x + y + 1 is divisible by x + 1. More generally,
+    when q is of the form q1 + q2 (instead of being already factored) it
+    might be necessary to fall back on sympy.gcd.
+    """
+
+    def integer_coefficient(x: sympy.Basic) -> int:
+        integer_coefficients: List[int] = [
+            abs(int(arg))
+            for arg in sympy.Mul.make_args(x)
+            if isinstance(arg, (int, sympy.Integer))
+        ]
+        return math.prod(integer_coefficients)
+
+    def integer_factor(expr: sympy.Basic) -> int:
+        integer_factors: Iterable[int] = map(
+            integer_coefficient, sympy.Add.make_args(expr)
+        )
+        return functools.reduce(math.gcd, integer_factors)
+
+    gcd: int = math.gcd(integer_factor(p), integer_factor(q))
+    p, q = p / gcd, q / gcd  # type: ignore[operator, assignment]  # remove in py3.12
+
+    base_splits: List[Tuple[sympy.Basic, ...]] = list(
+        map(sympy.Mul.make_args, sympy.Add.make_args(p))
+    )
+    divisor_split: Tuple[sympy.Basic, ...] = sympy.Mul.make_args(q)
+    for x in divisor_split:
+        if all(x in base_split for base_split in base_splits):
+            gcd = gcd * x  # type: ignore[operator]  # remove in py3.12
+    return gcd  # type: ignore[return-value]  # remove in py3.12
 
 
 # It would be nice to have assertions on whether or not inputs is_integer
@@ -84,20 +179,19 @@ class FloorDiv(sympy.Function):
     NB: This is Python-style floor division, round to -Inf
     """
 
-    nargs = (2,)
-    precedence = 50  # precedence of mul  # noqa: F811
-
-    is_integer = True
+    nargs: Tuple[int, ...] = (2,)
+    precedence: int = 50  # precedence of mul  # noqa: F811
+    is_integer: bool = True
 
     @property
-    def base(self):
+    def base(self) -> sympy.Basic:
         return self.args[0]
 
     @property
-    def divisor(self):
+    def divisor(self) -> sympy.Basic:
         return self.args[1]
 
-    def _sympystr(self, printer):
+    def _sympystr(self, printer: sympy.printing.StrPrinter) -> str:
         base = printer.parenthesize(self.base, self.precedence)
         divisor = printer.parenthesize(self.divisor, self.precedence)
         return f"({base}//{divisor})"
@@ -105,7 +199,9 @@ class FloorDiv(sympy.Function):
     # Automatic evaluation.
     # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
     @classmethod
-    def eval(cls, base, divisor):
+    def eval(
+        cls, base: sympy.Integer, divisor: sympy.Integer
+    ) -> Union[sympy.Basic, None]:
         # python test/test_dynamic_shapes.py -k TestDimConstraints.test_dim_constraints_solve_full
         # Assert triggered by inequality solver
         # assert base.is_integer, base
@@ -164,7 +260,9 @@ class FloorDiv(sympy.Function):
                 return FloorDiv(base - term, divisor) + quotient
 
         try:
-            gcd = sympy.gcd(base, divisor)
+            gcd = simple_floordiv_gcd(base, divisor)
+            if equal_valued(gcd, 1) and isinstance(divisor, sympy.Add):
+                gcd = sympy.gcd(base, divisor)
             if not equal_valued(gcd, 1):
                 return FloorDiv(
                     sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
@@ -172,17 +270,21 @@ class FloorDiv(sympy.Function):
         except sympy.PolynomialError:
             pass  # https://github.com/pytorch/pytorch/issues/108276
 
+        return None
+
 
 class ModularIndexing(sympy.Function):
     """
     ModularIndexing(a, b, c) => (a // b) % c where % is the C modulus
     """
 
-    nargs = (3,)
-    is_integer = True
+    nargs: Tuple[int, ...] = (3,)
+    is_integer: bool = True
 
     @classmethod
-    def eval(cls, base, divisor, modulus):
+    def eval(
+        cls, base: sympy.Integer, divisor: sympy.Integer, modulus: sympy.Integer
+    ) -> Optional[sympy.Basic]:
         if base == 0 or modulus == 1:
             return sympy.Integer(0)
 
@@ -206,8 +308,8 @@ class ModularIndexing(sympy.Function):
             pass  # https://github.com/pytorch/pytorch/issues/108276
 
         if isinstance(base, sympy.Add):
-            new_terms = []
-            all_positive = True
+            new_terms: List[sympy.Integer] = []
+            all_positive: bool = True
             for term in base.args:
                 if sympy.gcd(term, modulus * divisor) != modulus * divisor:
                     if (isinstance(term, sympy.Integer) and term < 0) or (
@@ -230,11 +332,13 @@ class ModularIndexing(sympy.Function):
         if isinstance(base, FloorDiv):
             return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
 
-    def _eval_is_nonnegative(self):
+        return None
+
+    def _eval_is_nonnegative(self) -> Optional[bool]:
         p, q = self.args[:2]
         return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)  # type: ignore[attr-defined]
 
-    def _eval_is_positive(self):
+    def _eval_is_positive(self) -> Optional[bool]:
         p, q = self.args[:2]
         return fuzzy_eq(p.is_positive, q.is_positive)  # type: ignore[attr-defined]
 
@@ -244,37 +348,40 @@ class Where(sympy.Function):
     Good ol' ternary operator
     """
 
-    nargs = (3,)
+    nargs: Tuple[int, ...] = (3,)
 
-    def _eval_is_integer(self):
+    def _eval_is_integer(self) -> Optional[bool]:
         return True if self.args[1].is_integer and self.args[2].is_integer else None  # type: ignore[attr-defined]
 
-    def _eval_is_nonnegative(self):
+    def _eval_is_nonnegative(self) -> Optional[bool]:
         return (
             True
             if self.args[1].is_nonnegative and self.args[2].is_nonnegative  # type: ignore[attr-defined]
             else None
         )
 
-    def _eval_is_positive(self):
+    def _eval_is_positive(self) -> Optional[bool]:
         return True if self.args[1].is_positive and self.args[2].is_positive else None  # type: ignore[attr-defined]
 
     @classmethod
-    def eval(cls, c, p, q):
+    def eval(
+        cls, c: sympy.Basic, p: sympy.Basic, q: sympy.Basic
+    ) -> Optional[sympy.Basic]:
         if c == sympy.true:
             return p
         elif c == sympy.false:
             return q
+        return None
 
 
 # Python-style modulus: take sign from RHS
 class PythonMod(sympy.Function):
-    nargs = (2,)
+    nargs: Tuple[int, ...] = (2,)
 
-    is_integer = True
+    is_integer: bool = True
 
     @classmethod
-    def eval(cls, p, q):
+    def eval(cls, p: sympy.Expr, q: sympy.Expr) -> Optional[sympy.Expr]:
         # python test/dynamo/test_export.py -k ExportTests.test_trivial_constraint
         # Triggered by sympy.solvers.inequalities.reduce_inequalities
         # assert p.is_integer, p
@@ -316,11 +423,13 @@ class PythonMod(sympy.Function):
         if sympy.Mod(p, q) == 0:
             return S.Zero
 
+        return None
+
     # NB: args[1] for PythonMod
-    def _eval_is_nonnegative(self):
+    def _eval_is_nonnegative(self) -> Optional[bool]:
         return True if self.args[1].is_positive else None  # type: ignore[attr-defined]
 
-    def _eval_is_nonpositive(self):
+    def _eval_is_nonpositive(self) -> Optional[bool]:
         return True if self.args[1].is_negative else None  # type: ignore[attr-defined]
 
 
@@ -381,8 +490,6 @@ class CleanDiv(FloorDiv):
     Div where we can assume no rounding.
     This is to enable future optimizations.
     """
-
-    pass
 
 
 # Don't use sympy ceiling/floor as they will attempt simplifications involving
@@ -510,7 +617,7 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
         if not args:
             return args
         args = list(ordered(args))
-        if cls == Min:
+        if cls is Min:
             other = Max
         else:
             other = Min  # type: ignore[assignment]
@@ -538,7 +645,7 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
             # there may be more than one numeric arg present since
             # local zeros have not been handled yet, so look through
             # more than the first arg
-            if cls == Min:
+            if cls is Min:
                 for arg in args:
                     if not arg.is_number:
                         break
@@ -551,7 +658,7 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
                     if (arg > big) == True:  # noqa: E712
                         big = arg
             T = None
-            if cls == Min:
+            if cls is Min:
                 if small != Min.identity:
                     other = Max
                     T = small
@@ -745,13 +852,13 @@ class Max(MinMaxBase, Application):  # type: ignore[misc]
     zero = S.Infinity
     identity = S.NegativeInfinity
 
-    def _eval_is_positive(self):
+    def _eval_is_positive(self):  # type:ignore[override]
         return fuzzy_or(a.is_positive for a in self.args)  # type: ignore[attr-defined]
 
-    def _eval_is_nonnegative(self):
+    def _eval_is_nonnegative(self):  # type:ignore[override]
         return fuzzy_or(a.is_nonnegative for a in self.args)  # type: ignore[attr-defined]
 
-    def _eval_is_negative(self):
+    def _eval_is_negative(self):  # type:ignore[override]
         return fuzzy_and(a.is_negative for a in self.args)
 
 
@@ -763,13 +870,13 @@ class Min(MinMaxBase, Application):  # type: ignore[misc]
     zero = S.NegativeInfinity
     identity = S.Infinity
 
-    def _eval_is_positive(self):
+    def _eval_is_positive(self):  # type:ignore[override]
         return fuzzy_and(a.is_positive for a in self.args)  # type: ignore[attr-defined]
 
-    def _eval_is_nonnegative(self):
+    def _eval_is_nonnegative(self):  # type:ignore[override]
         return fuzzy_and(a.is_nonnegative for a in self.args)  # type: ignore[attr-defined]
 
-    def _eval_is_negative(self):
+    def _eval_is_negative(self):  # type:ignore[override]
         return fuzzy_or(a.is_negative for a in self.args)
 
 
@@ -1051,7 +1158,7 @@ class Identity(sympy.Function):
     Prevents expansion and other optimizations
     """
 
-    def __repr__(self):
+    def __repr__(self):  # type: ignore[override]
         return f"Identity({self.args[0]})"
 
     def _eval_is_real(self):

@@ -675,10 +675,11 @@ TORCH_IMPL_FUNC(gelu_out_mps)(const Tensor& self, c10::string_view approximate, 
   auto approximate_type = get_gelutype_enum(approximate);
   MPSStream* stream = getCurrentMPSStream();
 
-  bool executeGatherOp =
-      !(self.is_contiguous(MemoryFormat::Contiguous) || self.is_contiguous(MemoryFormat::ChannelsLast) ||
-        self.is_contiguous(MemoryFormat::ChannelsLast3d));
-  Tensor output_ = at::empty_like(self, executeGatherOp ? MemoryFormat::Contiguous : MemoryFormat::Preserve);
+  bool executeGatherOp = needsGather(output);
+  Tensor output_;
+  if (executeGatherOp) {
+    output_ = at::empty_like(output, MemoryFormat::Contiguous);
+  }
 
   @autoreleasepool {
     const auto key = "gelu_out_mps" + getTensorsStringKey({self}) + ":" + gelutype_to_string(approximate_type);
@@ -696,7 +697,7 @@ TORCH_IMPL_FUNC(gelu_out_mps)(const Tensor& self, c10::string_view approximate, 
       newCachedGraph->outputTensor_ = outputTensor;
     });
 
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self, nil, executeGatherOp);
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
     Placeholder outputPlaceholder =
         Placeholder(cachedGraph->outputTensor_, executeGatherOp ? output_ : output, nil, false);
 
@@ -719,7 +720,11 @@ TORCH_IMPL_FUNC(gelu_backward_out_mps)
     return;
   }
 
-  Tensor grad_input_ = at::empty_like(self, self.suggest_memory_format());
+  bool executeGatherOp = needsGather(grad_input);
+  Tensor grad_input_;
+  if (executeGatherOp) {
+    grad_input_ = at::empty_like(grad_input, MemoryFormat::Contiguous);
+  }
 
   auto approximate_type = get_gelutype_enum(approximate);
   MPSStream* stream = getCurrentMPSStream();
@@ -793,12 +798,16 @@ TORCH_IMPL_FUNC(gelu_backward_out_mps)
 
     Placeholder gradPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad);
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input_);
+    Placeholder outputPlaceholder =
+        Placeholder(cachedGraph->gradInputTensor_, executeGatherOp ? grad_input_ : grad_input);
 
     auto feeds = dictionaryFromPlaceholders(gradPlaceholder, selfPlaceholder);
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
-  grad_input.copy_(grad_input_);
+
+  if (executeGatherOp) {
+    grad_input.copy_(grad_input_);
+  }
 }
 
 static void elu_variants_out_mps(const Tensor& self,
