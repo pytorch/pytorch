@@ -10,18 +10,34 @@ on:
     branches: [gh/**/base]
 
 jobs:
-  lintrunner-autoformat:
+  # NB: This doesn't work with forked PR https://github.com/parkerbxyz/suggest-changes/issues/33 :(
+  checkout-pytorch-grab-lintrunner:
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: read
     runs-on: lf.linux.2xlarge
     if: ${{ github.repository_owner == 'pytorch' }}
+    outputs:
+      lintrunner-script: ${{ steps.store-lintrunner-script.outputs.lintrunner-script }}
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           submodules: true
           fetch-depth: 0
+      - name: Store lintrunner script
+        id: store-lintrunner-script
+        run: |
+          echo "lintrunner-script=$(cat .github/scripts/lintrunner.sh)" >> "$GITHUB_ENV"
+
+  lintrunner-autoformat:
+    needs: checkout-pytorch-grab-lintrunner
+    permissions:
+      contents: read
+      pull-requests: write
+    runs-on: lf.linux.2xlarge
+    if: ${{ github.repository_owner == 'pytorch' }}
+    steps:
       - name: Setup miniconda
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
@@ -30,7 +46,9 @@ jobs:
         continue-on-error: true
         run: |
           export ADDITIONAL_LINTRUNNER_ARGS="format"
-          .github/scripts/lintrunner.sh
+          echo "${{ needs.checkout-pytorch-grab-lintrunner.outputs.lintrunner-script }}" > lintrunner.sh
+          bash lintrunner.sh
+          rm lintrunner.sh
       - name: Check for changes
         id: git-check
         run: |
