@@ -7388,6 +7388,27 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             self.assertEqual(output.shape, (4, nt.shape[1], 48))
             self.assertFalse(output._is_view())
 
+    @dtypes(torch.float32)
+    def test_composite_op_with_custom_mode(self, device, dtype):
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        # simple passthrough TorchDispatchMode
+        class CustomDispatchMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=..., kwargs=None):
+                return func(*args, **kwargs)
+
+        nt = random_nt_from_dims(
+            [4, None, 2, 3],
+            device=device,
+            dtype=dtype,
+            layout=torch.jagged,
+            requires_grad=True,
+        )
+        with CustomDispatchMode():
+            res = nt.reshape(4, -1, 6)
+
+        self.assertEqual(res.shape, (4, nt.shape[1], 6))
+
 
 FORWARD_FAILURES = {
     # === BEGIN NotImplementedError SECTION ===
