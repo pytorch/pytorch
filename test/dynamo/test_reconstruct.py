@@ -7,6 +7,7 @@ from typing import List
 
 import torch
 import torch._dynamo.test_case
+from torch.testing._internal.common_utils import IS_FBCODE
 
 
 def _filter_instructions(instructions, opname):
@@ -223,6 +224,9 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             d_opt = opt_f(t)
             self.assertEqual(d, d_opt)
 
+    @unittest.skipIf(
+        IS_FBCODE, "capturing functional_call is not enabled by default in FB_CODE"
+    )
     def test_functional_call_reconstruct(self):
         """
         PyTorch shouldn't codegen any key/value when functional_call is used

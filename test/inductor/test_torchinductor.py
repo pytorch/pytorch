@@ -3376,7 +3376,7 @@ class CommonTemplate:
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn)(t)
 
-    def test_amp(self):
+    def test_compile_in_amp(self):
         class Repro(torch.nn.Module):
             def forward(self, a, b, c):
                 attn_output = torch._C._nn.scaled_dot_product_attention(
@@ -3387,7 +3387,7 @@ class CommonTemplate:
         mod = Repro().to(self.device)
 
         requires_grad = True
-        buf0 = torch.zeros(
+        buf0 = torch.randn(
             (5, 5, 5, 5),
             dtype=torch.float16,
             requires_grad=requires_grad,
@@ -4059,6 +4059,10 @@ class CommonTemplate:
             # Greatest relative difference: 0.06512477175897748 at index (0, 4, 11, 9) (up to 0.001 allowed)
             atol=6e-5,
             rtol=0.001,
+            # Make sure we compute also with fp16 in the reference. Otherwise,
+            # the reference will compute with fp32 and cast back to fp16, which
+            # causes numeric differences beyond tolerance.
+            reference_in_float=False if torch.version.hip else True,
         )
 
     def test_convolution2(self):
@@ -4089,6 +4093,10 @@ class CommonTemplate:
             (torch.randn([2, 5, 16, 16]),),
             atol=6e-5,
             rtol=0.001,
+            # Make sure we compute also with fp16 in the reference. Otherwise,
+            # the reference will compute with fp32 and cast back to fp16, which
+            # causes numeric differences beyond tolerance.
+            reference_in_float=False if torch.version.hip else True,
         )
 
     @skip_if_gpu_halide
@@ -9527,6 +9535,7 @@ class CommonTemplate:
         self.assertEqual(x[0], -1)
         self.assertEqual(cnts.frame_count, frame_count + 1)
 
+    @config.patch({"triton.autotune_at_compile_time": False})
     @config.patch(profiler_mark_wrapper_call=True)
     def test_profiler_mark_wrapper_call(self):
         from torch.profiler import profile
