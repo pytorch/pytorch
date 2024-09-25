@@ -1669,7 +1669,8 @@ def forward(self, x_1, output_1):
             self.assertEqual(out_e[1], out_c[1])
 
     @requires_gpu
-    def test_constexpr_dynamic_shapes(self):
+    @parametrize("wrapped", [False, True])
+    def test_constexpr_dynamic_shapes(self, wrapped):
         # https://github.com/pytorch/pytorch/issues/136504
         @triton.jit
         def triton_(x_ptr, y_ptr, NUMEL: tl.constexpr, BLOCK_SIZE: tl.constexpr):
@@ -1682,13 +1683,26 @@ def forward(self, x_1, output_1):
 
             tl.store(y_ptr + offsets, result, mask)
 
-        def fn(x):
+        def triton_kernel_impl(x: torch.Tensor) -> torch.Tensor:
             y = torch.empty_like(x)
             BLOCK_SIZE = 256
             numel = x.numel()
             grid = (triton.cdiv(numel, BLOCK_SIZE),)
-            triton_[grid](x, y, numel, BLOCK_SIZE)
+            if wrapped:
+                capture_triton(triton_)[grid](x, y, numel, BLOCK_SIZE)
+            else:
+                triton_[grid](x, y, numel, BLOCK_SIZE)
             return y
+
+        if wrapped:
+            triton_kernel = torch._library.triton_op(
+                "constexpr_test::square", triton_kernel_impl, mutates_args={}
+            )
+        else:
+            triton_kernel = triton_kernel_impl
+
+        def fn(x):
+            return triton_kernel(x)
 
         fn_c = torch.compile(fn, dynamic=True)
 
@@ -1701,7 +1715,8 @@ def forward(self, x_1, output_1):
         self.assertEqual(x2 * x2, res2)
 
     @requires_gpu
-    def test_constexpr_autotune_dynamic_shapes(self):
+    @parametrize("wrapped", [False, True])
+    def test_constexpr_autotune_dynamic_shapes(self, wrapped):
         # https://github.com/pytorch/pytorch/issues/136504
         @triton.autotune(
             [
@@ -1721,7 +1736,7 @@ def forward(self, x_1, output_1):
 
             tl.store(y_ptr + offsets, result, mask)
 
-        def fn(x):
+        def triton_kernel_impl(x: torch.Tensor) -> torch.Tensor:
             y = torch.empty_like(x)
             BLOCK_SIZE = 256
             numel = x.numel()
@@ -1729,8 +1744,21 @@ def forward(self, x_1, output_1):
             def grid(meta):
                 return (triton.cdiv(numel, meta["BLOCK_SIZE"]),)
 
-            triton_[grid](x, y, numel)
+            if wrapped:
+                capture_triton(triton_)[grid](x, y, numel)
+            else:
+                triton_[grid](x, y, numel)
             return y
+
+        if wrapped:
+            triton_kernel = torch._library.triton_op(
+                "constexpr_test::square", triton_kernel_impl, mutates_args={}
+            )
+        else:
+            triton_kernel = triton_kernel_impl
+
+        def fn(x):
+            return triton_kernel(x)
 
         fn_c = torch.compile(fn, dynamic=True)
 

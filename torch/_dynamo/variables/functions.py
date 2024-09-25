@@ -1147,3 +1147,12 @@ class TritonKernelVariable(VariableTracker):
 
         # Bail out to parent's implementation
         return super().call_method(tx, name, args, kwargs)
+
+    def try_specialize(self, arg: Any) -> Any:
+        from .constant import ConstantVariable
+        from .tensor import SymNodeVariable
+
+        # See [Note: Specialize tl.constexpr args in user-defined triton kernels]
+        if isinstance(arg, SymNodeVariable):
+            return ConstantVariable.create(arg.evaluate_expr())
+        return arg
