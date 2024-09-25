@@ -107,14 +107,6 @@ def graph_desc(fn):
 
 
 class TestAutograd(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
-
-    @classmethod
-    def tearDownClass(cls):
-        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
-
     def test_copy_slices_graph_task_updates(self):
         def f1(x, y):
             out = x.clone().view(-1)
