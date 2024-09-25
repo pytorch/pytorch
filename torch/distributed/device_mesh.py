@@ -473,22 +473,6 @@ else:
                     f"Mesh should not be bigger than default world size {world_size}, but found {self.mesh.numel()} ranks!"
                 )
 
-            device_handle = _get_device_handle(self.device_type)
-            # TODO: if user want to pass pg_options, offer a way to do it
-            if not default_initialized and device_handle:
-                # automatically set the current cuda/cuda-like device base on num of gpu devices available in each host
-                # NOTE: This device selection would only work for homogeneous hardware.
-                num_devices_per_host = device_handle.device_count()
-                if (
-                    world_size > num_devices_per_host
-                    and world_size % num_devices_per_host != 0
-                ):
-                    raise RuntimeError(
-                        f"DeviceMesh only support homogeneous hardware, but found "
-                        f"{world_size} ranks and {num_devices_per_host} {self.device_type} devices!"
-                    )
-                device_handle.set_device(get_rank() % num_devices_per_host)
-
             return _get_default_group()
 
         def _init_process_groups(self):
