@@ -7,7 +7,7 @@ set(CAFFE2_USE_EXCEPTION_PTR 1)
 # ---[ Check if we want to turn off deprecated warning due to glog.
 if(USE_GLOG)
   cmake_push_check_state(RESET)
-  set(CMAKE_REQUIRED_FLAGS "-std=c++14")
+  set(CMAKE_REQUIRED_FLAGS "-std=c++17")
   CHECK_CXX_SOURCE_COMPILES(
       "#include <glog/stl_logging.h>
       int main(int argc, char** argv) {
