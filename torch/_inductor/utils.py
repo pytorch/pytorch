@@ -2047,18 +2047,3 @@ def set_tracing_context_output_strides(example_inputs, compiled_graph):
                         for e in exprs
                     )
                 )
-
-
-def is_statically_one(shape_env, x):
-    if x == 1:
-        return True
-    equal_to_one_exprs = [
-        x.expr.lhs
-        for x in shape_env.guards
-        if isinstance(x.expr, sympy.core.relational.Equality)
-        and isinstance(x.expr.rhs, sympy.core.numbers.One)
-    ]
-    for e in equal_to_one_exprs:
-        if shape_env._maybe_evaluate_static(sympy.Eq(x, e)):
-            return True
-    return False
