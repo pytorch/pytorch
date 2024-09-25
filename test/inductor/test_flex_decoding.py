@@ -527,6 +527,57 @@ class TestFlexDecoding(InductorTestCase):
             compiled_lse,
         )
 
+    def run_test_with_call_paged_attention(
+        self,
+        score_mod: Optional[Callable],
+        mask_mod: Optional[Callable],
+        sdpa_mask: Tensor,
+        dtype: torch.dtype = torch.float16,
+        Q_B: int = B,
+        Q_H: int = Hq,
+        Q_S: int = 1,
+        Q_D: int = D,
+        KV_B: int = B,
+        KV_H: int = Hkv,
+        KV_S: int = S,
+        V_D: int = D,
+    ):
+        q = torch.randn(
+            (Q_B, KV_H, Q_S * (Q_H // KV_H), Q_D),
+            dtype=dtype,
+            device="cuda",
+            requires_grad=False,
+        )
+        k = torch.randn(
+            (KV_B, KV_H, KV_S, Q_D), dtype=dtype, device="cuda", requires_grad=False
+        )
+        v = torch.randn(
+            (KV_B, KV_H, KV_S, V_D), dtype=dtype, device="cuda", requires_grad=False
+        )
+        q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
+
+        golden_call = functools.partial(
+            torch.nn.functional.scaled_dot_product_attention, attn_mask=sdpa_mask
+        )
+        golden_out = golden_call(q_gold, k_gold, v_gold)
+        ref_out = golden_call(q_ref, k_ref, v_ref)
+
+        if mask_mod is not None:
+            block_mask = create_block_mask(mask_mod, Q_B, 1, 1, S)
+        else:
+            block_mask = create_block_mask(noop_mask, Q_B, 1, 1, S)
+
+        compiled_out, _ = self.run_paged_attention(
+            score_mod, q, k, v, dtype, block_mask
+        )
+
+        self._check_out(
+            golden_out,
+            ref_out,
+            compiled_out,
+        )
+
     @supported_platform
     @expectedFailure
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -556,11 +607,6 @@ class TestFlexDecoding(InductorTestCase):
         output = sdpa_hop(q, k, v, _identity, block_mask)
 
         output.backward(backward_grad)
-
-    @supported_platform
-    def test_flex_decoding_masks(self):
-        # TODO: Add test for different block masks
-        return
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
@@ -1220,7 +1266,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         loss.backward()
         self.assertEqual(query.grad[:, :, M:, :].sum(), 0)
 
-    # TODO: Add a similar test
     @supported_platform
     def test_windowed_no_mask_vs_sdpa(self):
         score_mod = _generate_windowed(1000)
@@ -1234,7 +1279,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test_with_call(attention, sdpa_attention, Q_H=16, KV_H=16, Q_S=8)
 
-    # TODO: Add a similar test
     @supported_platform
     def test_windowed_full_mask_vs_sdpa(self):
         def mask_mod(b, h, q, kv):
@@ -1254,7 +1298,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test_with_call(attention, sdpa_attention, Q_H=16, KV_H=16, Q_S=8)
 
-    # TODO: Add a similar test
     @supported_platform
     def test_windowed_partial_block_vs_sdpa(self):
         def mask_mod(b, h, q, kv):
@@ -1269,6 +1312,38 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
         self.run_test_with_call(attention, sdpa_attention, Q_H=16, KV_H=16, Q_S=8)
+
+    @supported_platform
+    def test_windowed_no_mask_vs_sdpa_paged_attention(self):
+        score_mod = _generate_windowed(1000)
+
+        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000)
+
+        self.run_test_with_call_paged_attention(
+            score_mod, None, sdpa_mask, Q_H=16, KV_H=16, Q_S=8
+        )
+
+    @supported_platform
+    def test_windowed_full_mask_vs_sdpa_paged_attention(self):
+        def mask_mod(b, h, q, kv):
+            return q + 1000 >= kv
+
+        score_mod = _generate_windowed(1000)
+        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000)
+        self.run_test_with_call_paged_attention(
+            score_mod, mask_mod, sdpa_mask, Q_H=16, KV_H=16, Q_S=8
+        )
+
+    @supported_platform
+    def test_windowed_partial_block_vs_sdpa_paged_attention(self):
+        def mask_mod(b, h, q, kv):
+            return q + 1000 >= kv
+
+        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000)
+
+        self.run_test_with_call_paged_attention(
+            None, mask_mod, sdpa_mask, Q_H=16, KV_H=16, Q_S=8
+        )
 
     # TODO: Add a similar test
     @supported_platform

@@ -1007,7 +1007,12 @@ class PagedAttention:
             new_mask_mod,
         )
 
-    def get_mask_mod(self, mask_mod: _mask_mod_signature) -> _mask_mod_signature:
+    def get_mask_mod(
+        self, mask_mod: Optional[_mask_mod_signature]
+    ) -> _mask_mod_signature:
+        if mask_mod is None:
+            mask_mod = noop_mask
+
         def new_mask_mod(b, h, q_idx, physical_kv_idx):
             physical_kv_block = physical_kv_idx // self.page_size
             physical_kv_offset = physical_kv_idx % self.page_size
@@ -1019,8 +1024,12 @@ class PagedAttention:
 
         return new_mask_mod
 
-    def get_score_mod(self, score_mod: _score_mod_signature) -> _score_mod_signature:
-        # TODO: discuss what's the correct handle of score_mod = None.
+    def get_score_mod(
+        self, score_mod: Optional[_score_mod_signature]
+    ) -> _score_mod_signature:
+        if score_mod is None:
+            score_mod = _identity
+
         def new_score_mod(score, b, h, q_idx, physical_kv_idx):
             physical_kv_block = physical_kv_idx // self.page_size
             physical_kv_offset = physical_kv_idx % self.page_size
