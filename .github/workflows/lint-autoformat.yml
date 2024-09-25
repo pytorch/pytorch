@@ -17,10 +17,11 @@ jobs:
     steps:
       - name: Checkout PyTorch
     #   check out the PyTorch repo at main instead of the pr head
-        uses: actions/checkout@v4 
+        uses: actions/checkout@v4
       - name: Store lintrunner script
         id: store-lintrunner-script
         run: |
+          set -ex
           echo "lintrunner-script=$(cat .github/scripts/lintrunner.sh)" >> "$GITHUB_ENV"
 
   lintrunner-autoformat:
