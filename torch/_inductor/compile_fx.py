@@ -57,7 +57,6 @@ from torch._inductor.utils import (
     InputType,
     is_gpu,
     should_assume_input_aligned,
-    should_use_remote_fx_graph_cache,
     tensor_is_aligned,
 )
 from torch._logging import trace_structured
@@ -421,6 +420,27 @@ def fake_tensor_prop(
                 )
 
     return fake_mode
+
+
+def should_use_remote_fx_graph_cache():
+    if config.fx_graph_remote_cache is not None:
+        return config.fx_graph_remote_cache
+    if not config.is_fbcode():
+        return False
+
+    if torch._utils_internal.is_fb_unit_test():
+        return False
+
+    try:
+        from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
+    except ModuleNotFoundError:
+        return False
+
+    jk_name = "pytorch/remote_cache:fx_graph_memcache_version"
+    if torch.version.hip is not None:
+        jk_name = "pytorch/remote_cache:fx_graph_memcache_version_amd"
+
+    return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(jk_name)
 
 
 # pass config dict back to user
@@ -1193,10 +1213,7 @@ def fw_compiler_freezing(
     unwrapped_args_offsets = [0]
     max_offset_idx = 0
     if tracing_context is not None:
-        assert tracing_context.params_flat_unwrap_subclasses is not None
-        params_flat_unwrap = [
-            r() for r in tracing_context.params_flat_unwrap_subclasses
-        ]
+        params_flat_unwrap = tracing_context.params_flat_unwrap_subclasses
         assert params_flat_unwrap is not None
         max_offset_idx = max(0, len(params_flat_unwrap) - 1)
         assert params_flat_unwrap is not None

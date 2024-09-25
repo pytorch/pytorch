@@ -8,7 +8,9 @@
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/utils/byte_order.h>
 
-namespace torch::distributed::rpc {
+namespace torch {
+namespace distributed {
+namespace rpc {
 
 // Parse error message and return RPCErrorType based on the message.
 TORCH_API RPCErrorType getRPCErrorType(const JitFuture& jitFuture);
@@ -83,4 +85,6 @@ TORCH_API void populateRemoteProfiledEvents(
     const std::vector<std::vector<torch::autograd::profiler::LegacyEvent>>&
         eventLists);
 
-} // namespace torch::distributed::rpc
+} // namespace rpc
+} // namespace distributed
+} // namespace torch

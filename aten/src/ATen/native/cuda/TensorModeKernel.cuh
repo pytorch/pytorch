@@ -5,7 +5,8 @@
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 // Used for a segmented reduction
 struct ModeUnsignedBoolPair {
@@ -430,4 +431,5 @@ __global__ void compute_mode(
   }
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

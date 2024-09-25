@@ -181,7 +181,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             return super().var_getattr(tx, name)
 
-        obj = inspect.getattr_static(self.value, name, None)
+        try:
+            obj = inspect.getattr_static(self.value, name)
+        except AttributeError:
+            obj = None
 
         if isinstance(obj, staticmethod):
             func = obj.__get__(self.value)
@@ -209,13 +212,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 sys.version_info >= (3, 12) and name == "__mro__"
             ):
                 return VariableBuilder(tx, source)(obj.__get__(self.value))
-
-        if inspect.ismemberdescriptor(obj) or inspect.isdatadescriptor(obj):
-            value = getattr(self.value, name)
-            if source is not None:
-                return VariableBuilder(tx, source)(value=value)
-            else:
-                return SourcelessBuilder.create(tx=tx, value=value)
 
         if ConstantVariable.is_literal(obj):
             return ConstantVariable.create(obj)
@@ -1008,7 +1004,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
             if isinstance(result, variables.DeletedVariable):
-                raise_observed_exception(AttributeError, tx)
+                raise_observed_exception(AttributeError, tx, self)
             return result
 
         if name == "__dict__":
@@ -1188,7 +1184,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return SourcelessBuilder.create(tx, subobj)
 
         # Earlier we were returning GetAttrVariable but its incorrect. In absence of attr, Python raises AttributeError.
-        raise_observed_exception(AttributeError, tx)
+        raise_observed_exception(AttributeError, tx, self)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if self._check_for_getattribute():

@@ -16,7 +16,8 @@
 #include <functional>
 #include <optional>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 namespace {
 
 // to enable operator+-*/ for Value
@@ -63,8 +64,9 @@ void copy_(torch::lazy::LazyTensorPtr& input, torch::lazy::LazyTensorPtr& src) {
     if (src_tensor.sizes() != input_shape.Get().sizes()) {
       src_tensor = src_tensor.expand(input_shape.Get().sizes().vec());
     }
-    input->UpdateFromTensor(src_tensor, /*sync=*/false);
+    input->UpdateFromTensor(std::move(src_tensor), /*sync=*/false);
   }
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

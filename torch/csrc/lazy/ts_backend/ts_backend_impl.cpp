@@ -20,7 +20,8 @@ extern TORCH_API void RegisterTorchScriptLazyNativeFunctions();
 extern TORCH_API void RegisterTorchScriptAutogradLazyNativeFunctions();
 } // namespace at
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 struct TSBackendDeviceType : public BackendDeviceType {
   TSBackendDeviceType() = delete;
@@ -279,4 +280,5 @@ void InitTorchScriptBackend() {
   LazyGraphExecutor::Register(executor);
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

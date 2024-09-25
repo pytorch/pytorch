@@ -315,7 +315,7 @@ class CycleIteratorVariable(IteratorVariable):
             self.saved_index = (self.saved_index + 1) % len(self.saved)
             return self.item
         else:
-            raise_observed_exception(StopIteration, tx)
+            raise_observed_exception(StopIteration, tx, self)
 
 
 class ZipVariable(IteratorVariable):
@@ -371,7 +371,7 @@ class ZipVariable(IteratorVariable):
         def get_item(it):
             if isinstance(it, list):
                 if old_index >= len(it):
-                    raise_observed_exception(StopIteration, tx)
+                    raise_observed_exception(StopIteration, tx, self)
                 return it[old_index]
             else:
                 return it.next_variable(tx)

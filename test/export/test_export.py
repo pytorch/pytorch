@@ -1134,38 +1134,6 @@ def forward(self, p_linear_weight, p_linear_bias, x):
         ]
         self.assertEqual(actual_torch_fns, exp_torch_fns)
 
-    def test_duplicate_modules_with_non_persistent_buffers(self):
-        class FooWithBuf(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.register_buffer("buf", torch.randn(4), persistent=False)
-
-            def forward(self, x):
-                return x + self.buf
-
-        class BarWithFoo(torch.nn.Module):
-            def __init__(self, foo):
-                super().__init__()
-                self.foo = foo
-
-            def forward(self, x):
-                return self.foo(x)
-
-        class ModWith2Bars(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                foo = FooWithBuf()
-                self.b1 = BarWithFoo(foo)
-                self.b2 = BarWithFoo(foo)
-
-            def forward(self, x):
-                return self.b1(x) + self.b2(x)
-
-        mod = ModWith2Bars()
-        inputs = (torch.randn(4),)
-        ep = export(mod, inputs)
-        self.assertTrue(torch.allclose(ep.module()(*inputs), mod(*inputs)))
-
     def test_derived_dim_basic(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -7254,6 +7222,8 @@ def forward(self, x, y):
             if node.op == "call_function":
                 self.assertTrue(False)
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T200904004
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_istft_op(self):
         class istft_class(torch.nn.Module):
             def forward(self, spec):
@@ -7271,41 +7241,6 @@ def forward(self, x, y):
         imaginary_part = torch.randn(1, 513, 282, dtype=torch.float32)
         spec = torch.complex(real_part, imaginary_part)
         export(model, (spec,))
-
-    def test_export_linear_preserve_dynamic_shape(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.lin = torch.nn.Linear(4, 4)
-
-            def forward(self, x):
-                return self.lin(x)
-
-        mod = M()
-        ep = export(
-            mod,
-            (torch.randn(8, 4),),
-            dynamic_shapes={
-                "x": {
-                    0: Dim("x"),
-                }
-            },
-        )
-
-        if IS_FBCODE:
-            ep = ep.run_decompositions(
-                {}, _preserve_ops=(torch.ops.aten.linear.default,)
-            )
-        else:
-            table = torch.export.core_aten_decompositions()
-            del table[torch.ops.aten.linear.default]
-            ep = ep.run_decompositions(table)
-
-        comp_mod = ep.module()
-        inp1 = torch.randn(3, 4)
-        inp2 = torch.randn(7, 4)
-        self.assertTrue(torch.allclose(comp_mod(inp1), mod(inp1)))
-        self.assertTrue(torch.allclose(comp_mod(inp2), mod(inp2)))
 
     def test_automatic_dynamic_shapes_simple_equality(self):
         # The next 3 test cases tests for automatic dynamic shapes specs, verifying that automatic dynamism

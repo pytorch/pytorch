@@ -36,6 +36,9 @@ runner_types:
     max_available: 1000
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
+    variants:
+      amz2023:
+        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
   lf.linux.10xlarge.avx2:
     disk_size: 200
     instance_type: m4.10xlarge
@@ -109,6 +112,9 @@ runner_types:
     max_available: 1000
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
+    variants:
+      amz2023:
+        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
   lf.linux.4xlarge.nvidia.gpu:
     disk_size: 150
     instance_type: g3.4xlarge
@@ -123,6 +129,9 @@ runner_types:
     max_available: 400
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
+    variants:
+      amz2023:
+        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
   lf.linux.g4dn.12xlarge.nvidia.gpu:
     disk_size: 150
     instance_type: g4dn.12xlarge
@@ -165,6 +174,9 @@ runner_types:
     max_available: 50
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
+    variants:
+      amz2023:
+        ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
   lf.linux.large:
     max_available: 1200
     disk_size: 15

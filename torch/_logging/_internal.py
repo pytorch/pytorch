@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
 import hashlib
-import importlib.util
 import itertools
 import json
 import logging
@@ -14,6 +13,7 @@ import tempfile
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
+from importlib import __import__
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from weakref import WeakSet
 
@@ -724,8 +724,11 @@ def _parse_log_settings(settings):
 
 
 def _is_valid_module(qname):
-    spec = importlib.util.find_spec(qname)
-    return spec is not None
+    try:
+        __import__(qname)
+        return True
+    except ImportError:
+        return False
 
 
 def _update_log_state_from_env():

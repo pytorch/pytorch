@@ -1,6 +1,7 @@
 #include <torch/csrc/lazy/backend/lowering_context.h>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 LoweringContext::LoweringContext(const std::string& name, BackendDevice device)
     : device_(std::move(device)) {}
@@ -16,4 +17,5 @@ const std::vector<BackendDataPtr>& LoweringContext::GetParametersData() const {
   return parameters_;
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

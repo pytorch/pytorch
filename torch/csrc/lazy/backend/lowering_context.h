@@ -2,6 +2,8 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <torch/csrc/lazy/backend/backend_data.h>
@@ -9,7 +11,8 @@
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/ir_util.h>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 class TORCH_API Computation {
  public:
@@ -107,4 +110,5 @@ class TORCH_API LoweringContext {
   Util::EmissionMap emit_status_;
 };
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

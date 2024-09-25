@@ -245,7 +245,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     # If you're creating a new HigherOrderOperator, please do not change the
     # default. Adding operators to the global torch.ops namespace is a bad
     # practice due to name collisions.
-    def __init__(self, name, *, cacheable=False):
+    def __init__(self, name):
         super().__init__()
         if type(self) is HigherOrderOperator:
             raise RuntimeError(
@@ -258,7 +258,6 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
         _higher_order_ops[name] = self
         self._ns = "higher_order"
         self.__module__ = "torch.ops.higher_order"
-        self._cacheable = cacheable
 
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
 
@@ -281,9 +280,6 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     @property
     def namespace(self):
         return self._ns
-
-    def cacheable(self):
-        return self._cacheable
 
     def fallthrough(self, dispatch_key):
         self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)

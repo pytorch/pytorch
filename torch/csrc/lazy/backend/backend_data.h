@@ -4,7 +4,8 @@
 #include <torch/csrc/lazy/core/shape.h>
 #include <cstring>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 class TORCH_API BackendData {
  public:
@@ -56,4 +57,5 @@ class TORCH_API BackendData {
 
 using BackendDataPtr = std::shared_ptr<BackendData>;
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

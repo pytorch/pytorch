@@ -219,19 +219,12 @@ class LocalElasticAgent(SimpleElasticAgent):
             else:
                 alive_callback = self._worker_watchdog.get_last_progress_time
 
-            try:
-                healthcheck_port_as_int = int(healthcheck_port)
-                self._health_check_server = create_healthcheck_server(
-                    alive_callback=alive_callback,
-                    port=healthcheck_port_as_int,
-                    timeout=60,
-                )
-                self._health_check_server.start()
-            except ValueError:
-                logger.info(
-                    "Invalid healthcheck port value: '%s', expecting integer. Not starting healthcheck server.",
-                    healthcheck_port,
-                )
+            self._health_check_server = create_healthcheck_server(
+                alive_callback=alive_callback,
+                port=int(healthcheck_port),
+                timeout=60,
+            )
+            self._health_check_server.start()
         else:
             logger.info(
                 "Environment variable '%s' not found. Do not start health check.",

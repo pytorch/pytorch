@@ -19,7 +19,6 @@ class JobConfig:
         )
         self.parser.add_argument(
             "trace_dir",
-            nargs="?",
             help="Directory containing one trace file per rank, named with <prefix>_<rank>.",
         )
         self.parser.add_argument(
@@ -34,10 +33,7 @@ class JobConfig:
             default=None,
             nargs="+",
             type=str,
-            help=(
-                "List of filter strings, it could be pg name or pg desc. "
-                "If specified, only show traces for the given pg."
-            ),
+            help="List of filter strings",
         )
         self.parser.add_argument("-o", "--output", default=None)
         self.parser.add_argument(

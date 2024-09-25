@@ -17,7 +17,7 @@ import torch.nn as nn
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
 from torch._inductor import config
-from torch._inductor.exc import CppWrapperCodegenError
+from torch._inductor.exc import CppWrapperCodeGenError
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_cpp_code
@@ -76,8 +76,8 @@ try:
         )
         from .test_torchinductor import copy_tests, requires_multigpu, TestFailure
     except ImportError:
-        from test_aot_inductor_utils import (  # @manual=fbcode//caffe2/test/inductor:aot_inductor_utils-library
-            AOTIRunnerUtil,
+        from test_aot_inductor_utils import (
+            AOTIRunnerUtil,  # @manual=fbcode//caffe2/test/inductor:aot_inductor_utils-library
         )
         from test_control_flow import (  # @manual=fbcode//caffe2/test/inductor:control_flow-library
             CondModels,
@@ -1750,7 +1750,7 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10).to(self.device),
         )
         with self.assertRaisesRegex(
-            CppWrapperCodegenError, "Unsupported input dtype torch.float32"
+            CppWrapperCodeGenError, "Unsupported input dtype torch.float32"
         ):
             torch._export.aot_compile(Model(), example_inputs)
 
@@ -3744,7 +3744,6 @@ if not IS_FBCODE:
             "test_aoti_debug_printer_codegen": fail_with_and_without_stack_allocation(
                 is_skip=True
             ),
-            "test_view_outputs": fail_minimal_arrayref_interface(is_skip=True),
         }
     ),
     # The following test passes internally but fails in OSS CI. To be investigated.

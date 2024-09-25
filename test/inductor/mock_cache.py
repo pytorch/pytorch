@@ -126,7 +126,7 @@ class MockBackend(RemoteCacheBackend[Any]):
         return wrapper
 
     @override
-    def _get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Optional[Any]:
         stat = global_stats.get_stat(self._name)
         if key in stat.cache:
             stat += Stats(num_get_hit=1)
@@ -136,7 +136,7 @@ class MockBackend(RemoteCacheBackend[Any]):
             return None
 
     @override
-    def _put(self, key: str, data: Any) -> None:
+    def put(self, key: str, data: Any) -> None:
         stat = global_stats.get_stat(self._name)
         stat += Stats(num_put=1)
         stat.cache[key] = data

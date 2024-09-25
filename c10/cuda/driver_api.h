@@ -29,7 +29,6 @@
   _(cuMemGetAllocationGranularity)  \
   _(cuMemExportToShareableHandle)   \
   _(cuMemImportFromShareableHandle) \
-  _(cuStreamWriteValue32)           \
   _(cuGetErrorString)
 
 #if defined(CUDA_VERSION) && (CUDA_VERSION >= 12030)

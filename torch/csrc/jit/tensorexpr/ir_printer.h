@@ -75,11 +75,7 @@ class TORCH_API IRPrinter : public IRVisitor {
   class PrinterStream : public std::ostream {
    public:
     PrinterStream(IRPrinter* printer, std::ostream& os)
-        : std::ostream(os.rdbuf()), printer_(printer) {
-      initialize_imbue();
-    }
-
-    void initialize_imbue();
+        : std::ostream(os.rdbuf()), printer_(printer) {}
 
     IRPrinter* printer() {
       return printer_;

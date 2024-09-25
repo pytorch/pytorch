@@ -7,7 +7,8 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 // Is this questionable namespace pollution?
 #if defined(USE_ROCM)
@@ -188,4 +189,5 @@ void run_launcher(
   }
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at
