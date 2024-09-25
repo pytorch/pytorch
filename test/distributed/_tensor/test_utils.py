@@ -8,7 +8,12 @@ from torch.distributed._tensor._utils import compute_local_shape_and_global_offs
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.distributed.tensor.placement_types import _StridedShard, Replicate, Shard
+from torch.distributed.tensor.placement_types import (
+    _FlatShard,
+    _StridedShard,
+    Replicate,
+    Shard,
+)
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -87,6 +92,31 @@ class UtilTest(DTensorTestBase):
                     dtensor.to_local(),
                     global_tensor[dim0_start:dim0_end, dim1_start:dim1_end],
                 )
+
+    @with_comms
+    def test_compute_local_shape_and_global_offset_flat_shard(self):
+        placements = (_FlatShard(0),)
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        for size in [
+            torch.Size([1, 2, 2]),
+            torch.Size([1, 5, 3]),
+            torch.Size([8, 3, 2]),
+        ]:
+            global_tensor = torch.arange(size.numel()).view(size)
+            global_shape = global_tensor.size()
+            dtensor = distribute_tensor(global_tensor, device_mesh, placements)
+            local_size, global_offset = compute_local_shape_and_global_offset(
+                global_shape, device_mesh, placements
+            )
+
+            # Check that the local tensor is the same as slicing the
+            # *flattened* global tensor with the local size and global offset
+            dim0_start = global_offset[0]
+            dim0_end = global_offset[0] + local_size[0]
+            self.assertEqual(
+                dtensor.to_local(),
+                global_tensor.view(-1)[dim0_start:dim0_end],
+            )
 
     @with_comms
     def test_fsdp_tp_meta_compute(self):

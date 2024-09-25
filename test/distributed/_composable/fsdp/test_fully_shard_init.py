@@ -1020,8 +1020,6 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
 
         for param, ref_param in zip(model.parameters(), ref_model.parameters()):
             full_param = param.full_tensor()
-            # NOTE: We must view back from 1D to ND.
-            full_param = full_param.view(param.shape)
             self.assertEqual(full_param, ref_param)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")

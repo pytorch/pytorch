@@ -541,6 +541,29 @@ class _FlatShard(Shard):
                 f"{self.__class__.__name__} only supports dim-0, not {self.dim}"
             )
 
+    def _shard_tensor(
+        self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
+    ) -> torch.Tensor:
+        return super()._shard_tensor(tensor.view(-1), mesh, mesh_dim)
+
+    def _to_replicate_tensor(
+        self,
+        local_tensor: torch.Tensor,
+        mesh: DeviceMesh,
+        mesh_dim: int,
+        current_logical_shape: List[int],
+    ) -> torch.Tensor:
+        if mesh.ndim > 1:
+            raise AssertionError(
+                f"Can only redistribute {self.__class__.__name__} to replicate "
+                f"for 1D mesh, not {mesh_dim=} on {mesh=}"
+            )
+        flat_replicate_tensor = super()._to_replicate_tensor(
+            local_tensor, mesh, mesh_dim, current_logical_shape
+        )
+        replicate_tensor = flat_replicate_tensor.view(current_logical_shape)
+        return replicate_tensor
+
 
 @dataclass(frozen=True)
 class Replicate(Placement):
