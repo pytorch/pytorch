@@ -495,7 +495,7 @@ class Module:
         super().__setattr__ for all other attributes.
         """
         super().__setattr__("training", True)
-        super().__setattr__('_is_replica', False)
+        super().__setattr__("_is_replica", False)
         super().__setattr__("_parameters", {})
         super().__setattr__("_buffers", {})
         super().__setattr__("_non_persistent_buffers_set", set())
