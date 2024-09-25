@@ -1,4 +1,5 @@
 import argparse
+import csv
 import itertools
 from collections import defaultdict
 from dataclasses import asdict, dataclass
@@ -14,6 +15,7 @@ import torch.nn.functional as F
 from torch.nn.attention.flex_attention import (
     _create_empty_block_mask,
     create_block_mask,
+    create_mask,
     flex_attention,
 )
 
@@ -23,14 +25,14 @@ torch._dynamo.config.automatic_dynamic_shapes = False
 torch._dynamo.config.cache_size_limit = 1000
 
 
-from triton.testing import do_bench
+from torch._inductor.runtime.benchmarking import benchmarker
 
 
 def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) -> float:
     # warmup
     for _ in range(5):
         func(*args, **kwargs)
-    return do_bench(lambda: func(*args, **kwargs)) * 1e3
+    return benchmarker.benchmark_gpu(lambda: func(*args, **kwargs)) * 1e3
 
 
 @dataclass(frozen=True)
@@ -105,9 +107,7 @@ def generate_inputs(
         torch.rand, kv_shape, device=device, dtype=dtype, requires_grad=requires_grad
     )
     query = (
-        make_q()
-        .view(batch_size, num_h_groups * q_sequence_length, kv_heads, head_dim)
-        .transpose(1, 2)
+        make_q().view(batch_size, q_sequence_length, q_heads, head_dim).transpose(1, 2)
     )
     key = (
         make_kv()
@@ -145,8 +145,9 @@ def run_single_experiment(
     if get_func_name(config.mask_mod) == "causal":
         kwargs["is_causal"] = True
 
-    def eager_sdpa(query, key, value, _):
-        return F.scaled_dot_product_attention(query, key, value, **kwargs)
+    def eager_sdpa(query, key, value, attn_mask):
+        out = F.scaled_dot_product_attention(query, key, value, attn_mask, **kwargs)
+        return out.reshape(batch_size, q_heads, q_seq_len, head_dim)
 
     if max_autotune:
         compiled_sdpa = torch.compile(
@@ -160,27 +161,62 @@ def run_single_experiment(
 
     if mask_mod:
         block_mask = create_block_mask(
-            mask_mod, 1, 1, q_seq_len * (q_heads // kv_heads), kv_seq_len, query.device
+            mask_mod, 1, 1, q_seq_len, kv_seq_len, query.device
         )
     else:
         block_mask = _create_empty_block_mask(query, key)
 
+    if mask_mod and get_func_name(mask_mod) != "causal":
+        attn_mask = create_mask(mask_mod, 1, 1, query.shape[-2], key.shape[-2])
+    else:
+        attn_mask = None
+
+    # Broadcast query/key for eager.
+    b_key = torch.repeat_interleave(key, q_heads // kv_heads, dim=1)
+    b_value = torch.repeat_interleave(value, q_heads // kv_heads, dim=1)
+
     forward_eager_time = benchmark_torch_function_in_microseconds(
-        eager_sdpa, query, key, value, score_mod
+        eager_sdpa, query, b_key, b_value, attn_mask
     )
     forward_compiled_time = benchmark_torch_function_in_microseconds(
-        compiled_sdpa, query, key, value, score_mod, block_mask
+        compiled_sdpa,
+        query,
+        key,
+        value,
+        score_mod=score_mod,
+        block_mask=block_mask,
+        enable_gqa=True,
     )
 
+    out_eager = eager_sdpa(query, b_key, b_value, attn_mask)
+    out_compile = compiled_sdpa(
+        query,
+        b_key,
+        b_value,
+        score_mod=score_mod,
+        block_mask=block_mask,
+        enable_gqa=True,
+    )
+
+    if score_mod is None:
+        torch.testing.assert_close(out_eager, out_compile, atol=1e-2, rtol=1e-2)
+
     if config.calculate_bwd_time:
-        out_eager = eager_sdpa(query, key, value, score_mod)
+        out_eager = eager_sdpa(query, b_key, b_value, attn_mask)
         dOut = torch.randn_like(out_eager)
         backward_eager_time = benchmark_torch_function_in_microseconds(
             out_eager.backward, dOut, retain_graph=True
         )
 
-        out_compile = compiled_sdpa(query, key, value, score_mod)
-        dOut = torch.randn_like(out_eager)
+        out_compile = compiled_sdpa(
+            query,
+            key,
+            value,
+            score_mod=score_mod,
+            block_mask=block_mask,
+            enable_gqa=True,
+        )
+        dOut = torch.randn_like(out_compile)
         backward_compile_time = benchmark_torch_function_in_microseconds(
             out_compile.backward, dOut, retain_graph=True
         )
@@ -249,8 +285,6 @@ def calculate_tflops(config: ExperimentConfig, results: ExperimentResults) -> fl
 def get_func_name(func):
     if func is None:
         return "None"
-    if "gqa" in func.__name__:
-        return func.__name__
     func_str = str(func)
     if "<locals>" in func_str:
         # For locally defined functions
@@ -296,7 +330,7 @@ def get_average_speedups(results: List[Experiment], type: str):
     return table_data
 
 
-def print_results(results: List[Experiment]):
+def print_results(results: List[Experiment], save_path: Optional[str] = None):
     table_data = defaultdict(list)
     for experiment in results:
         for key, value in experiment.asdict().items():
@@ -329,8 +363,8 @@ def print_results(results: List[Experiment]):
 
     table_data["score_mod"] = [get_func_name(func) for func in table_data["score_mod"]]
     table_data["mask_mod"] = [get_func_name(func) for func in table_data["mask_mod"]]
-    print(tabulate(table_data, headers="keys", tablefmt="github", floatfmt=".3f"))
 
+    print(tabulate(table_data, headers="keys", tablefmt="github", floatfmt=".3f"))
     print("\n")
     print("FWD Speedups".center(125, "="))
     print("\n")
@@ -343,6 +377,15 @@ def print_results(results: List[Experiment]):
         print("\n")
         average_data = get_average_speedups(results, type="bwd")
         print(tabulate(average_data, headers="keys", tablefmt="github", floatfmt=".3f"))
+
+    if save_path is not None:
+        with open(save_path, "w", newline="") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=table_data.keys())
+            writer.writeheader()
+            for i in range(len(next(iter(table_data.values())))):
+                row = {k: v[i] for k, v in table_data.items()}
+                writer.writerow(row)
+        print(f"\nResults saved to {save_path}")
 
 
 def generate_score_mods(score_mods: List[str]) -> List[Callable | None]:
@@ -359,8 +402,9 @@ def generate_score_mods(score_mods: List[str]) -> List[Callable | None]:
         return score + 2 * h
 
     function_dict = {
-        "noop": noop,
+        "noop": None,
         "causal": None,
+        "offset": None,
         "rel": relative_bias,
         "head_bias": head_bias,
     }
@@ -374,43 +418,91 @@ def generate_mask_mods(score_mods: List[str]) -> List[Callable | None]:
     def causal(b, h, m, n):
         return m >= n
 
+    def gen_offset(off):
+        def offset(b, h, m, n):
+            return m + off >= n
+
+        return offset
+
     mask_mod_dict = {
         "noop": None,
         "causal": causal,
+        "offset": gen_offset,
         "rel": None,
         "head_bias": None,
     }
     return [mask_mod_dict[name] for name in score_mods]
 
 
-def get_gqa_score_mod(score_mod, G, q_seq_len):
-    if score_mod is None:
-        return None
+def generate_flash_configs(
+    calculate_bwd: bool,
+    dtype: torch.dtype,
+    batch_sizes: List[int],
+    num_heads: List[Tuple[int, int]],
+    seq_lens: List[int],
+    head_dims: List[int],
+    score_mods_str: List[str],
+    decoding: bool,
+    kv_cache_size: List[int],
+    cal_bandwidth: bool,
+) -> List[ExperimentConfig]:
+    assert not (calculate_bwd and decoding), "Decoding does not support backward"
 
-    def score_mod_gqa(score, b, hkv, m, n):
-        g = m // q_seq_len
-        new_m = m % q_seq_len
-        hq = hkv * G + g
-        return score_mod(score, b, hq, new_m, n)
+    bs_seqlen_vals = [
+        (32, 512),
+        (16, 1024),
+        (8, 2048),
+        (4, 4096),
+        (2, 8192),
+        (1, 16384),
+    ]
+    causal_vals = [False, True]
+    headdim_vals = [64, 128]
+    dim = 2048
 
-    score_mod_name = get_func_name(score_mod)
-    set_func_name(score_mod_gqa, score_mod_name + "_gqa")
-    return score_mod_gqa
+    score_mods = generate_score_mods(score_mods_str)
+    mask_mods = generate_mask_mods(score_mods_str)
+    all_configs = []
 
+    for (
+        (batch_size, seq_len),
+        causal,
+        head_dim,
+        score_mod,
+        mask_mod,
+    ) in itertools.product(
+        bs_seqlen_vals,
+        causal_vals,
+        headdim_vals,
+        score_mods,
+        mask_mods,
+    ):
+        num_heads = dim // head_dim
 
-def get_gqa_mask_mod(mask_mod, G, q_seq_len):
-    if mask_mod is None:
-        return None
+        if decoding:
+            q_seq_len, kv_seq_len = 1, seq_len
+        else:
+            q_seq_len = kv_seq_len = seq_len
 
-    def mask_mod_gqa(b, h, m, n):
-        g = m // q_seq_len
-        new_m = m % q_seq_len
-        hq = h * G + g
-        return mask_mod(b, hq, new_m, n)
+        all_configs.append(
+            ExperimentConfig(
+                shape=(
+                    batch_size,
+                    num_heads,
+                    q_seq_len,
+                    num_heads,
+                    kv_seq_len,
+                    head_dim,
+                ),
+                score_mod=score_mod,
+                mask_mod=mask_mod,
+                dtype=dtype,
+                calculate_bwd_time=calculate_bwd,
+                cal_bandwidth=cal_bandwidth,
+            )
+        )
 
-    mask_mod_name = get_func_name(mask_mod)
-    set_func_name(mask_mod_gqa, mask_mod_name + "_gqa")
-    return mask_mod_gqa
+    return all_configs
 
 
 def generate_experiment_configs(
@@ -440,16 +532,14 @@ def generate_experiment_configs(
         (q_heads, kv_heads),
         (q_seq_len, kv_seq_len),
         head_dim,
-        score_mod,
-        mask_mod,
+        (score_mod, mask_mod),
         dtype,
     ) in itertools.product(
         kv_cache_size if kv_cache_size else batch_sizes,
         num_heads,
         q_kv_seq_lens,
         head_dims,
-        score_mods,
-        mask_mods,
+        zip(score_mods, mask_mods),
         dtypes,
     ):
         if kv_cache_size:
@@ -460,11 +550,10 @@ def generate_experiment_configs(
             if bsz <= 0:
                 continue
 
-        if q_heads != kv_heads:  # GQA work around before it's explicitly supported
-            assert q_heads % kv_heads == 0
-            G = q_heads // kv_heads
-            score_mod = get_gqa_score_mod(score_mod, G, q_seq_len)
-            mask_mod = get_gqa_mask_mod(mask_mod, G, q_seq_len)
+        assert q_heads % kv_heads == 0
+
+        if mask_mod and get_func_name(mask_mod) == "gen_offset":
+            mask_mod = mask_mod(kv_seq_len // 2)
 
         all_configs.append(
             ExperimentConfig(
@@ -496,7 +585,7 @@ def main(args):
             args.mods,
             args.decoding,
             args.kv_cache_size,
-            args.cal_bandwidth,
+            args.throughput,
         )
     ):
         results.append(
@@ -510,7 +599,7 @@ def main(args):
             )
         )
 
-    print_results(results)
+    print_results(results, args.save_path)
 
 
 def heads_input_type(s):
@@ -577,11 +666,16 @@ Ignores -b batch size and calculate batch size from kv_cache size instead when s
 """,
     )
     parser.add_argument(
-        "--cal-bandwidth",
+        "--throughput",
         action="store_true",
         help="Calculate kernel memory bandwidth & computational throughput. ",
     )
-
+    parser.add_argument(
+        "--save-path",
+        type=str,
+        help="Path to save the results JSON file (optional)",
+        default=None,
+    )
     # Parse arguments
     args = parser.parse_args()
     args.dtype = getattr(torch, args.dtype)

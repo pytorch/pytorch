@@ -57,20 +57,15 @@ class BenchmarkRunner:
         args = self.parser.parse_args()
         if args.use_heuristic:
             torch._inductor.config.autoheuristic_use = self.name
+            torch._inductor.config.autoheuristic_collect = ""
         else:
+            torch._inductor.config.autoheuristic_use = ""
             torch._inductor.config.autoheuristic_collect = self.name
         torch._inductor.config.autoheuristic_log_path = args.o
         if args.device is not None:
             torch.cuda.set_device(args.device)
         random.seed(time.time())
         self.main(args.num_samples, args.num_reps)
-
-    def get_random_between_pow2(self, min_power2: int, max_power2: int) -> int:
-        i = random.randint(min_power2, max_power2 - 1)
-        lower = 2**i + 1
-        upper = 2 ** (i + 1) - 1
-        assert lower <= upper, "lower must not be greater than upper"
-        return random.randint(lower, upper)
 
     @abstractmethod
     def run_benchmark(self, *args: Any) -> None:

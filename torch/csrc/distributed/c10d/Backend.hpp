@@ -358,12 +358,12 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   // Do not call this directly, use ProcessGroup::setGroupName instead.
-  void setGroupName(const std::string& name) {
-    pg_name_ = name;
+  void setGroupUid(const std::string& pg_uid) {
+    pg_uid_ = pg_uid;
   }
 
-  const std::string& getGroupName() const {
-    return pg_name_;
+  const std::string& getGroupUid() const {
+    return pg_uid_;
   }
 
   void setGroupDesc(const std::string& desc) {
@@ -405,7 +405,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.
   DebugLevel dist_debug_level_;
-  std::string pg_name_;
+  std::string pg_uid_;
   std::string pg_desc_;
 
   std::function<void(std::shared_ptr<WorkInfo>)> onCompletionHook_;

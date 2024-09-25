@@ -222,7 +222,7 @@ Tensor Reduce(
       dims,
       strides,
       reducer,
-      [&](ParameterList p [[maybe_unused]]) {
+      [&](ParameterList& p [[maybe_unused]]) {
         return ExprHandle(reducer.initializer());
       },
       body_func,

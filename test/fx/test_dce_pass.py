@@ -13,11 +13,9 @@ class TestDCE(TestCase):
     def _custom_is_impure_node(self, node: torch.fx.Node) -> bool:
         if node.is_impure():
             return True
-
-        if node.op == "call_function":
-            schema = getattr(node.target, "_schema", None)
-            schema_mutable = schema is not None and schema.is_mutable
-            return schema_mutable
+        # a custom function that defines add operators as impure.
+        if node.target == torch.ops.aten.add:
+            return True
         return False
 
     def _has_nodes_without_users(self, m: torch.fx.GraphModule, custom: bool = False):
@@ -206,7 +204,7 @@ class TestDCE(TestCase):
                 return a * 2
 
         # %add_ node should not be removed because it has side effects.
-        self._run_dce_and_test(TestModule(), expect_dce_changes=False, custom=True)
+        self._run_dce_and_test(TestModule(), expect_dce_changes=False)
 
     def test_impure_kwargs(self):
         """
@@ -217,6 +215,20 @@ class TestDCE(TestCase):
             def forward(self, a: torch.Tensor) -> torch.Tensor:
                 b = a + 1
                 torch._ops.ops.aten.add.out(b, b, out=a, alpha=2)
+                return a
+
+        # %add_out node should not be removed because it has side effects.
+        self._run_dce_and_test(TestModule(), expect_dce_changes=False)
+
+    def test_impure_custom(self):
+        """
+        Test that DCE doesn't remove nodes marked as impure by a custom function.
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, a: torch.Tensor) -> torch.Tensor:
+                b = a + 1
+                c = torch._ops.ops.aten.add(b, b)
                 return a
 
         # %add_out node should not be removed because it has side effects.

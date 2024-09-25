@@ -125,6 +125,12 @@ class ContextWrappingVariable(VariableTracker):
         if isinstance(args[0], UserFunctionVariable):
             return WrappedUserFunctionVariable(args[0], self)
 
+    def supports_graph_breaks(self):
+        return True
+
+    def exit_on_graph_break(self):
+        return True
+
 
 class GenericContextWrappingVariable(UserDefinedObjectVariable):
     # Some methods in ContextWrappingVariable assumes the arguments are
@@ -182,6 +188,12 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
 
         tx.generic_context_manager_depth -= 1
         return x
+
+    def supports_graph_breaks(self):
+        return False
+
+    def exit_on_graph_break(self):
+        return True
 
 
 class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
@@ -559,6 +571,56 @@ class InferenceModeVariable(ContextWrappingVariable):
         return "inference_mode"
 
 
+class CUDADeviceVariable(ContextWrappingVariable):
+    """represents torch.cuda.device"""
+
+    @staticmethod
+    def create(tx: "InstructionTranslator", device, **kwargs):
+        var = CUDADeviceVariable(
+            target_values=[torch.cuda._get_device_index(device, optional=True)],
+            initial_values=None,
+            **kwargs,
+        )
+        return var
+
+    def __init__(
+        self,
+        target_values,
+        initial_values=None,
+        **kwargs,
+    ) -> None:
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+        self.target_values = target_values
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        self.state.cleanup_assert()
+        tx.output.create_node(
+            "call_function",
+            torch.cuda._maybe_exchange_device,
+            (self.state.proxy,),
+            {},
+        )
+        return variables.ConstantVariable.create(False)
+
+    def enter(self, tx):
+        prev_idx = torch.cuda._exchange_device(*self.target_values)
+        self.set_cleanup_hook(tx, lambda: torch.cuda._maybe_exchange_device(prev_idx))
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch.cuda._exchange_device,
+            (*self.target_values,),
+            {},
+        )
+
+    def module_name(self):
+        return "torch.cuda"
+
+    def fn_name(self):
+        return "device"
+
+
 class TorchFunctionDisableVariable(ContextWrappingVariable):
     """represents whether torch function overrides are enabled or not"""
 
@@ -587,6 +649,8 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
 
     def _call_func(self, tx: "InstructionTranslator", values):
         assert len(values) == 1
+        tx.symbolic_torch_function_state.torch_function_subclass_enabled = values[0]
+        tx.symbolic_torch_function_state.torch_function_mode_enabled = values[0]
         tx.output.set_torch_function_state(values[0])
 
 
@@ -927,6 +991,80 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
         return "use_training_state"
 
 
+class SDPAKernelVariable(ContextWrappingVariable):
+    """represents torch.nn.attention.sdpa_kernel"""
+
+    @staticmethod
+    def create(tx: "InstructionTranslator", backends, **kwargs):
+        if isinstance(backends, torch.nn.attention.SDPBackend):
+            backends = [backends]
+        var = SDPAKernelVariable(
+            target_values=backends,
+            initial_values=None,
+            **kwargs,
+        )
+        return var
+
+    def __init__(
+        self,
+        target_values: List[torch.nn.attention.SDPBackend],
+        initial_values=None,
+        **kwargs,
+    ) -> None:
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+
+    @staticmethod
+    def _backends_to_nodes(tx, backends):
+        nodes = []
+        for backend in backends:
+            # convert to/from string in order to bake the backend into FX graph
+            nodes.append(
+                tx.output.create_node(
+                    "call_function",
+                    torch.nn.attention._backend_from_string,
+                    (backend.name,),
+                    {},
+                )
+            )
+        return nodes
+
+    def enter(self, tx):
+        self.prev_backends = torch.nn.attention._cur_sdpa_kernel_backends()
+        self.set_cleanup_hook(
+            tx, lambda: torch.nn.attention._sdpa_kernel(self.prev_backends)
+        )
+        torch.nn.attention._sdpa_kernel(self.target_values)
+        arg = self._backends_to_nodes(tx, self.target_values)
+        tx.output.create_node(
+            "call_function",
+            torch.nn.attention._sdpa_kernel,
+            (arg,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        self.state.cleanup_assert()
+        arg = self._backends_to_nodes(tx, self.prev_backends)
+        tx.output.create_node(
+            "call_function",
+            torch.nn.attention._sdpa_kernel,
+            (arg,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+    def module_name(self):
+        return "torch.nn.attention"
+
+    # use a private version of sdpa_kernel that accepts variadic arguments
+    # since dynamo reconstructs the contents of target_values one-by-one
+    def fn_name(self):
+        return "_sdpa_kernel_variadic"
+
+
 class StreamVariable(VariableTracker):
     def __init__(self, proxy, value, device, **kwargs) -> None:
         if proxy is not None and "example_value" in proxy.node.meta:
@@ -1036,6 +1174,15 @@ class EventVariable(VariableTracker):
 
     def as_proxy(self):
         return self.proxy
+
+    def reconstruct(self, codegen):
+        # If we got here, this event is fully subsumed by the graph - this means it is
+        # not an input or global
+        assert not self.source
+        # Similar to stream handling, we lift the event into a global and then codegen bytecode to load it from there.
+        prefix = "_event"
+        name = codegen.tx.output.install_global_by_id(prefix, self.value)
+        codegen.append_output(codegen.create_load_global(name, add=True))
 
 
 class WithExitFunctionVariable(VariableTracker):

@@ -18,7 +18,6 @@ class FileSetup:
     def shutdown(self):
         if os.path.exists(self.path):
             os.remove(self.path)
-            pass
 
 
 class EvalModeForLoadedModule(FileSetup):
