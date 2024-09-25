@@ -2162,6 +2162,40 @@ class TestBlockMask(InductorTestCase):
         self.assertTrue(block_mask[0].sparsity() > block_mask[1].sparsity())
 
     @supported_platform
+    def test_adjust(self):
+        def causal_mask(b, h, q, kv):
+            return q >= kv
+
+        block_mask_large = create_block_mask(causal_mask, 1, 1, 2048, 2048)
+        block_mask_small = create_block_mask(causal_mask, 1, 1, 1024, 1024)
+        block_mask_adjusted = block_mask_large.adjust(1024, 1024)
+        self.assertEqual(
+            block_mask_small.q_num_blocks, block_mask_adjusted.q_num_blocks
+        )
+        self.assertEqual(block_mask_small.q_indices, block_mask_adjusted.q_indices)
+        self.assertEqual(
+            block_mask_small.full_q_num_blocks, block_mask_adjusted.full_q_num_blocks
+        )
+        self.assertEqual(
+            block_mask_small.full_q_indices, block_mask_adjusted.full_q_indices
+        )
+        self.assertEqual(
+            block_mask_small.kv_num_blocks, block_mask_adjusted.kv_num_blocks
+        )
+        self.assertEqual(block_mask_small.kv_indices, block_mask_adjusted.kv_indices)
+        self.assertEqual(
+            block_mask_small.full_kv_num_blocks, block_mask_adjusted.full_kv_num_blocks
+        )
+        self.assertEqual(
+            block_mask_small.full_kv_indices, block_mask_adjusted.full_kv_indices
+        )
+        self.assertEqual(block_mask_small.BLOCK_SIZE, block_mask_adjusted.BLOCK_SIZE)
+
+        # block_mask can't be adjusted to a larger shape
+        with self.assertRaises(AssertionError):
+            block_mask_large.adjust(4096, 4096)
+
+    @supported_platform
     def test_getitem(self):
         offset = torch.zeros(8, device="cuda")
 

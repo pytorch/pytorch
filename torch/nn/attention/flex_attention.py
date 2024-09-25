@@ -384,6 +384,46 @@ class BlockMask:
             self.mask_mod,
         )
 
+    def adjust(
+        self,
+        new_q_len: int,
+        new_kv_len: int,
+    ):
+        if (
+            new_q_len > self.q_num_blocks.shape[-1] * self.BLOCK_SIZE[0]
+            or new_kv_len > self.kv_num_blocks.shape[-1] * self.BLOCK_SIZE[1]
+        ):
+            raise AssertionError(
+                "Can't adjust block_mask to a larger q_len or kv_len, please create a new one."
+            )
+        elif (
+            new_q_len == self.q_num_blocks.shape[-1] * self.BLOCK_SIZE[0]
+            and new_kv_len == self.kv_num_blocks.shape[-1] * self.BLOCK_SIZE[1]
+        ):
+            return self
+        else:
+            kv_mask_size = new_kv_len // self.BLOCK_SIZE[1]
+            new_kv_num_blocks = self.kv_num_blocks[:, :, :kv_mask_size]
+            new_kv_indices = self.kv_indices[:, :, :kv_mask_size, :kv_mask_size]
+            new_full_kv_num_blocks = (
+                self.full_kv_num_blocks[:, :, :kv_mask_size]
+                if self.full_kv_num_blocks is not None
+                else None
+            )
+            new_full_kv_indices = (
+                self.full_kv_indices[:, :, :kv_mask_size, :kv_mask_size]
+                if self.full_kv_indices is not None
+                else None
+            )
+            return self.from_kv_blocks(
+                new_kv_num_blocks,
+                new_kv_indices,
+                new_full_kv_num_blocks,
+                new_full_kv_indices,
+                self.BLOCK_SIZE,
+                self.mask_mod,
+            )
+
     def __str__(self):
         s = f"BlockMask(shape={self.shape}, sparsity={self.sparsity():.2f}%, \n"
         mask_str = self.to_string().strip()
