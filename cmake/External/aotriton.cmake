@@ -1,6 +1,7 @@
 if(NOT __AOTRITON_INCLUDED)
   set(__AOTRITON_INCLUDED TRUE)
 
+  set(__AOTRITON_STAMP_DIR "${CMAKE_CURRENT_BINARY_DIR}/aotriton/cmake-stamp")
   set(__AOTRITON_SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/aotriton/src")
   set(__AOTRITON_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/aotriton/build")
   set(__AOTRITON_INSTALL_DIR "${PROJECT_SOURCE_DIR}/torch")
@@ -19,6 +20,7 @@ if(NOT __AOTRITON_INCLUDED)
     ExternalProject_Add(aotriton_external
       GIT_REPOSITORY https://github.com/ROCm/aotriton.git
       GIT_TAG ${__AOTRITON_CI_COMMIT}
+      STAMP_DIR ${__AOTRITON_STAMP_DIR}
       SOURCE_DIR ${__AOTRITON_SOURCE_DIR}
       BINARY_DIR ${__AOTRITON_BUILD_DIR}
       PREFIX ${__AOTRITON_INSTALL_DIR}
