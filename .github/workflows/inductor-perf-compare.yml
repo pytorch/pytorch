@@ -33,10 +33,10 @@ jobs:
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
-          { config: "inductor_huggingface_perf_compare", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
-          { config: "inductor_timm_perf_compare", shard: 1, num_shards: 2, runner: "linux.gcp.a100" },
-          { config: "inductor_timm_perf_compare", shard: 2, num_shards: 2, runner: "linux.gcp.a100" },
-          { config: "inductor_torchbench_perf_compare", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
+          { config: "inductor_huggingface_perf_compare", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+          { config: "inductor_timm_perf_compare", shard: 1, num_shards: 2, runner: "linux.aws.a100" },
+          { config: "inductor_timm_perf_compare", shard: 2, num_shards: 2, runner: "linux.aws.a100" },
+          { config: "inductor_torchbench_perf_compare", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
         ]}
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
