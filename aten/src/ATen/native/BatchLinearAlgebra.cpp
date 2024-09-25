@@ -132,6 +132,7 @@ extern "C" void dgetrf_(int *m, int *n, double *a, int *lda, int *ipiv, int *inf
 extern "C" void sgetrf_(int *m, int *n, float *a, int *lda, int *ipiv, int *info);
 
 // potrs
+#if defined(_WIN32) && defined(_M_ARM64)
 #if AT_BUILD_WITH_APL()
 
 #define LAPACK_COL_MAJOR 102
@@ -158,7 +159,9 @@ static inline void spotrs_(char *uplo, int *n, int *nrhs, float *a, int *lda, fl
   *info = LAPACKE_spotrs(LAPACK_COL_MAJOR, *uplo, *n, *nrhs, a, *lda, b, *ldb);
 }
 
+#endif
 #else
+
 extern "C" void zpotrs_(char *uplo, int *n, int *nrhs, std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb, int *info);
 extern "C" void cpotrs_(char *uplo, int *n, int *nrhs, std::complex<float> *a, int *lda, std::complex<float> *b, int *ldb, int *info);
 extern "C" void dpotrs_(char *uplo, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, int *info);
