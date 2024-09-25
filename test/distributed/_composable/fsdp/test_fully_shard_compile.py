@@ -112,6 +112,7 @@ class TestFullyShardCompile(FSDPTest):
             None,  # mesh_info: FSDPMeshInfo,
             None,  # post_forward_mesh_info: Optional[FSDPMeshInfo],
             None,  # device: torch.device,
+            None,  # shard_placement_fn: Optional[Callable],
             None,  # mp_policy: MixedPrecisionPolicy,
             None,  # offload_policy: OffloadPolicy,
         )

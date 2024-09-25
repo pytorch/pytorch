@@ -3,7 +3,7 @@ import inspect
 import itertools
 from dataclasses import dataclass, field
 from enum import auto, Enum
-from typing import Any, cast, List, Optional, Sequence, Tuple
+from typing import Any, Callable, cast, List, Optional, Sequence, Tuple
 
 import torch
 import torch._dynamo.compiled_autograd as ca
@@ -13,7 +13,11 @@ from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.device_mesh import _mesh_resources
-from torch.distributed.tensor.placement_types import _StridedShard, Placement
+from torch.distributed.tensor.placement_types import (
+    _FlatShard,
+    _StridedShard,
+    Placement,
+)
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import (
@@ -221,6 +225,7 @@ class FSDPParam:
         mesh_info: FSDPMeshInfo,
         post_forward_mesh_info: Optional[FSDPMeshInfo],
         device: torch.device,
+        shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]],
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
     ):
@@ -234,7 +239,7 @@ class FSDPParam:
             self.offload_to_cpu and cast(CPUOffloadPolicy, offload_policy).pin_memory
         )
         self.grad_offload_event: Optional[torch.cuda.Event] = None
-        self._init_sharded_param(param, device)
+        self._init_sharded_param(param, device, shard_placement_fn)
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
         self._init_extensions()
@@ -250,11 +255,27 @@ class FSDPParam:
         )
 
     @torch.no_grad()
-    def _init_sharded_param(self, param: nn.Parameter, device: torch.device):
+    def _init_sharded_param(
+        self,
+        param: nn.Parameter,
+        device: torch.device,
+        shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]],
+    ):
         if param.device != device and param.device.type != "meta":
             raise AssertionError(
                 f"Expects the parameter to already be moved to device {device} but got {param.device}"
             )
+        if shard_placement_fn is not None:
+            fsdp_placement = shard_placement_fn(param)
+            if fsdp_placement is None:
+                fsdp_placement = Shard(0)
+        else:
+            fsdp_placement = Shard(0)
+        assert isinstance(fsdp_placement, Shard), f"{fsdp_placement}"
+        if fsdp_placement.dim != 0:
+            raise NotImplementedError
+        self.fsdp_placement = fsdp_placement
+        shard_dim = fsdp_placement.dim
         # TODO: Replace the sharded DTensor parameter construction logic with
         # `distribute_tensor` after https://github.com/pytorch/pytorch/issues/116101
         # TODO: Simplify the following sharded parameter padding logic after
@@ -282,16 +303,16 @@ class FSDPParam:
                 raise NotImplementedError(
                     f"FSDP only supports 1D TP, not {self._tp_spec.placements}"
                 )
-            split_factor = self._tp_spec.num_shards_map[0]
+            split_factor = self._tp_spec.num_shards_map[shard_dim]
             assert (
                 2 <= self._spmd_mesh.ndim <= 3
             ), f"_spmd_mesh.ndim can only be 2 or 3 but got {self._spmd_mesh.ndim}."
             self._spmd_placements: Tuple[Placement, ...]
             dp_shard_tp_placement = (
                 (
-                    _StridedShard(0, split_factor=split_factor)
+                    _StridedShard(shard_dim, split_factor=split_factor)
                     if split_factor > 1
-                    else Shard(0)
+                    else Shard(shard_dim)
                 ),
                 self._tp_spec.placements[0],
             )
@@ -321,9 +342,9 @@ class FSDPParam:
         else:
             self._spmd_mesh = self.mesh_info.mesh
             if isinstance(self.mesh_info, HSDPMeshInfo):
-                self._spmd_placements = (Replicate(), Shard(0))
+                self._spmd_placements = (Replicate(), fsdp_placement)
             else:
-                self._spmd_placements = (Shard(0),)
+                self._spmd_placements = (fsdp_placement,)
             self._sharding_spec = DTensorSpec(
                 self._spmd_mesh,
                 self._spmd_placements,
@@ -336,6 +357,8 @@ class FSDPParam:
             param_data = param
         self._orig_size = param_data.size()
         self._contiguous_orig_stride = make_contiguous_strides_for(self._orig_size)
+        if isinstance(fsdp_placement, _FlatShard):
+            param_data = param_data.view(-1)
         shard_rank = self.mesh_info.shard_mesh_rank
         shard_world_size = self.mesh_info.shard_mesh_size
         chunks = _chunk_with_empty(param_data, shard_world_size, dim=0)

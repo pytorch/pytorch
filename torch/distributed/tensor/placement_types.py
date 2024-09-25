@@ -525,6 +525,17 @@ class _StridedShard(Shard):
 
 
 @dataclass(frozen=True)
+class _FlatShard(Shard):
+    dim: int = 0
+
+    def __post_init__(self):
+        if self.dim != 0:
+            raise AssertionError(
+                f"{self.__class__.__name__} only supports dim-0, not {self.dim}"
+            )
+
+
+@dataclass(frozen=True)
 class Replicate(Placement):
     """
     The ``Replicate()`` placement describes the DTensor replicating on a corresponding

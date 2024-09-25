@@ -52,6 +52,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
     SequenceParallel,
 )
+from torch.distributed.tensor.placement_types import _FlatShard
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import (
@@ -1077,7 +1078,10 @@ def check_sharded_parity(
                 "so we cannot check for equality using it"
             )
         sharded_ref_param = distribute_tensor(replicated_param, mesh, placements)
-        cls.assertEqual(sharded_param.to_local(), sharded_ref_param.to_local())
+        sharded_ref_param_tensor = sharded_ref_param.to_local()
+        if any(isinstance(pl, _FlatShard) for pl in placements):
+            sharded_ref_param_tensor = sharded_ref_param_tensor.view(-1)
+        cls.assertEqual(sharded_param.to_local(), sharded_ref_param_tensor)
         if replicated_param.grad is None:
             cls.assertIsNone(sharded_param.grad)
             continue
@@ -1085,7 +1089,10 @@ def check_sharded_parity(
         sharded_ref_grad = distribute_tensor(replicated_param.grad, mesh, placements)
         cls.assertIsInstance(sharded_param.grad, DTensor)
         assert isinstance(sharded_param.grad, DTensor)  # mypy
-        cls.assertEqual(sharded_param.grad.to_local(), sharded_ref_grad.to_local())
+        sharded_ref_grad_tensor = sharded_ref_grad.to_local()
+        if any(isinstance(pl, _FlatShard) for pl in placements):
+            sharded_ref_grad_tensor = sharded_ref_grad_tensor.view(-1)
+        cls.assertEqual(sharded_param.grad.to_local(), sharded_ref_grad_tensor)
 
 
 class FSDPTestMultiThread(MultiThreadedTestCase):
