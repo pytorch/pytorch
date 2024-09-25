@@ -526,6 +526,13 @@ class _StridedShard(Shard):
 
 @dataclass(frozen=True)
 class _FlatShard(Shard):
+    """
+    The ``_FlatShard`` placement flattens the tensor to 1D and then shards it.
+    Compared to ``Shard(0)``, this can reduce the amount of padding when the
+    shard mesh dim is larger than the tensor's dim-0 size. However, this has
+    poor support for DTensor APIs, and the local shard loses the tensor shape.
+    """
+
     dim: int = 0
 
     def __post_init__(self):
