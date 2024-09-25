@@ -1,30 +1,22 @@
 name: Apply lint suggestions
 
 on:
-  pull_request_target:
-    types: [opened, synchronize, reopened]
-    branches: [main]
 
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [gh/**/base]
 
 jobs:
   # NB: This doesn't work with forked PR https://github.com/parkerbxyz/suggest-changes/issues/33 :(
   checkout-pytorch-grab-lintrunner:
-    permissions:
-      contents: read
-      pull-requests: read
+    permissions: read-all
     runs-on: lf.linux.2xlarge
     if: ${{ github.repository_owner == 'pytorch' }}
     outputs:
       lintrunner-script: ${{ steps.store-lintrunner-script.outputs.lintrunner-script }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-        with:
-          submodules: true
-          fetch-depth: 0
+    #   check out the PyTorch repo at main instead of the pr head
+        uses: actions/checkout@v4 
       - name: Store lintrunner script
         id: store-lintrunner-script
         run: |
@@ -38,6 +30,11 @@ jobs:
     runs-on: lf.linux.2xlarge
     if: ${{ github.repository_owner == 'pytorch' }}
     steps:
+      - name: Checkout pytorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: true
+          fetch-depth: 0
       - name: Setup miniconda
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
