@@ -289,7 +289,6 @@ def disable(fn=None, recursive=True):
         fn (optional): The function to disable
         recursive (optional): A boolean value indicating whether the disabling should be recursive.
             Defaults to ``True``.
-
     """
     import torch._dynamo
 
