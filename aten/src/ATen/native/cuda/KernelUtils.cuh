@@ -5,8 +5,7 @@
 #include <cuda_bf16.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at:: native {
 
 __device__ __forceinline__ size_t
 idx(const size_t nc,
@@ -145,5 +144,4 @@ __device__ __forceinline__ void fastAtomicAdd(
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

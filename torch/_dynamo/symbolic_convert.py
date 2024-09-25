@@ -650,7 +650,7 @@ def break_graph_if_unsupported(*, push):
                 assert b.with_context is not None
                 assert isinstance(b.with_context, (ContextWrappingVariable))
                 b.with_context.reconstruct_type(cg)
-                cg.extend_output(b.resume_fn().try_except(cg.code_options, cleanup))
+                cg.extend_output(b.resume_fn().try_finally(cg.code_options, cleanup))
             self.output.add_output_instructions(cg.get_instructions())
             del cg
 

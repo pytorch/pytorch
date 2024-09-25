@@ -15,9 +15,9 @@ import time
 import weakref
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import torch.distributed as dist
 from torch.distributed import Store
@@ -471,7 +471,7 @@ class _BackendRendezvousStateHolder(_RendezvousStateHolder):
     def _sanitize(self) -> None:
         state = self._state
 
-        expire_time = datetime.utcnow() - (
+        expire_time = datetime.now(timezone.utc) - (
             self._settings.keep_alive_interval * self._settings.keep_alive_max_attempt
         )
 
@@ -716,7 +716,7 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
         self._record(message=msg)
         logger.debug(msg)
 
-        self._state.last_heartbeats[self._node] = datetime.utcnow()
+        self._state.last_heartbeats[self._node] = datetime.now(timezone.utc)
 
     def _add_to_participants(self) -> None:
         msg = (
@@ -740,7 +740,9 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
         self._keep_alive()
 
         if len(state.participants) == self._settings.min_nodes:
-            state.deadline = datetime.utcnow() + self._settings.timeout.last_call
+            state.deadline = (
+                datetime.now(timezone.utc) + self._settings.timeout.last_call
+            )
 
         if len(state.participants) == self._settings.max_nodes:
             self._mark_rendezvous_complete()
@@ -848,7 +850,9 @@ def _should_keep_alive(ctx: _RendezvousContext) -> bool:
     except KeyError:
         return False
 
-    return last_heartbeat <= datetime.utcnow() - ctx.settings.keep_alive_interval
+    return (
+        last_heartbeat <= datetime.now(timezone.utc) - ctx.settings.keep_alive_interval
+    )
 
 
 class _RendezvousExitOp:
@@ -936,8 +940,9 @@ class _RendezvousJoinOp:
             if (
                 len(state.participants) >= ctx.settings.min_nodes
                 and len(state.participants) <= ctx.settings.max_nodes
+                and state.deadline is not None
             ):
-                if cast(datetime, state.deadline) < datetime.utcnow():
+                if state.deadline < datetime.now(timezone.utc):
                     msg = (
                         f"The node '{ctx.node}' marking the rendezvous complete, "
                         f"quorum established within deadline"
