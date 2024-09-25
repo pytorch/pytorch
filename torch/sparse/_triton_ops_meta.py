@@ -755,8 +755,6 @@ def optimize_bsr_dense_addmm(
     verbose=False,
     opname=None,
 ):
-    if out_dtype is None:
-        out_dtype = dtype
     torch.manual_seed(0)
     bsr = create_blocked_tensor(
         0, m, k, (bm, bk), sparsity, dtype, device
@@ -767,7 +765,7 @@ def optimize_bsr_dense_addmm(
     right_alpha = (
         make_tensor(n, dtype=dtype, device=device) if use_right_alpha else None
     )
-    if out_dtype is None:
+    if out_dtype is not None:
         out = dense.new_empty((m, n), dtype=out_dtype)
     else:
         out = None
