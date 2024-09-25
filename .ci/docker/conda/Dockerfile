@@ -5,7 +5,6 @@ FROM centos:7 as base
 ENV LC_ALL en_US.UTF-8
 ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US.UTF-8
-RUN echo "ulimit is $(ulimit -n)"
 
 ARG DEVTOOLSET_VERSION=9
 RUN sed -i s/mirror.centos.org/vault.centos.org/g /etc/yum.repos.d/*.repo
