@@ -96,7 +96,6 @@ if config.abi_compatible:
             f"{test_name}_dynamic_shapes"
         ] = test_torchinductor.TestFailure(("cpp_wrapper",), is_skip=False)
     skip_list = [
-        "test_multihead_attention_cpu",
         *[
             func
             for func in dir(test_cpu_select_algorithm.TestSelectAlgorithmCPU())
