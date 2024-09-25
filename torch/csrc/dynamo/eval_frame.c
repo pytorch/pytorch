@@ -8,7 +8,6 @@
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <opcode.h>
-#include <pthread.h>
 #include <stdbool.h>
 
 PyObject* guard_error_hook = NULL;
@@ -17,7 +16,6 @@ const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
 static int active_dynamo_threads = 0;
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
-static __thread bool eval_frame_callback_enabled = true;
 
 inline static PyObject* eval_frame_callback_get(void) {
   void* result = PyThread_tss_get(&eval_frame_callback_key);
@@ -508,7 +506,7 @@ static PyObject* _custom_eval_frame_shim(
   //  - Python callable(): enables TorchDynamo
   PyObject* callback = eval_frame_callback_get();
 
-  if (!eval_frame_callback_enabled || callback == Py_None) {
+  if (!eval_frame_callback_enabled_get() || callback == Py_None) {
     return eval_frame_default(tstate, frame, throw_flag);
   }
 
@@ -583,9 +581,9 @@ static PyObject* _custom_eval_frame(
   }
   if (extra == SKIP_CODE_RECURSIVE) {
     DEBUG_TRACE("skip recursive %s", get_frame_name(frame));
-    eval_frame_callback_enabled = false;
+    eval_frame_callback_enabled_set(false);
     PyObject* result = eval_frame_default(tstate, frame, throw_flag);
-    eval_frame_callback_enabled = true;
+    eval_frame_callback_enabled_set(true);
     return result;
   }
 
@@ -682,9 +680,9 @@ static PyObject* _custom_eval_frame(
     set_extra_state(F_CODE(frame), SKIP_CODE_RECURSIVE);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
-    eval_frame_callback_enabled = false;
+    eval_frame_callback_enabled_set(false);
     PyObject* r = eval_frame_default(tstate, frame, throw_flag);
-    eval_frame_callback_enabled = true;
+    eval_frame_callback_enabled_set(true);
     return r;
   } else if (result != Py_None) {
     DEBUG_TRACE("create cache %s", get_frame_name(frame));
@@ -797,11 +795,11 @@ static PyObject* set_eval_frame_py(PyObject* dummy, PyObject* callback) {
 }
 
 static PyObject* set_eval_frame_callback_enabled(PyObject* dummy, PyObject* enabled) {
-  bool prior = eval_frame_callback_enabled;
+  bool prior = eval_frame_callback_enabled_get();
   if (enabled == Py_True) {
-    eval_frame_callback_enabled = true;
+    eval_frame_callback_enabled_set(true);
   } else if (enabled == Py_False) {
-    eval_frame_callback_enabled = false;
+    eval_frame_callback_enabled_set(false);
   } else {
     DEBUG_TRACE0("arg error");
     PyErr_SetString(PyExc_TypeError, "expected bool");
@@ -811,7 +809,7 @@ static PyObject* set_eval_frame_callback_enabled(PyObject* dummy, PyObject* enab
 }
 
 static PyObject* is_eval_frame_callback_enabled(PyObject* dummy, PyObject* args) {
-  return PyBool_FromLong(eval_frame_callback_enabled);
+  return PyBool_FromLong(eval_frame_callback_enabled_get());
 }
 
 static PyObject* reset_code(PyObject* dummy, PyObject* code) {
