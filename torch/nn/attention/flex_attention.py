@@ -912,15 +912,17 @@ def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
             f"Got Ev={value.size(-1)} and E={query.size(-1)}."
         )
 
+
 def _validate_device(query: Tensor, key: Tensor, value: Tensor):
-    """ TODO: Remove once non cuda device support is added 
-        We only need to check query since we have already that q,k,v are on the same device
+    """TODO: Remove once non cuda device support is added
+    We only need to check query since we have already that q,k,v are on the same device
     """
     if query.device.type != "cuda":
         raise ValueError(
             "FlexAttention is only supported on CUDA devices. "
             f"Found input tensors on {query.device.type} device."
         )
+
 
 def flex_attention(
     query: Tensor,

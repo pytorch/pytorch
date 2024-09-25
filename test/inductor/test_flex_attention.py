@@ -1994,7 +1994,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(flex_q_grad, q.grad, atol=3e-3, rtol=2e-3)
         torch.testing.assert_close(flex_k_grad, k.grad, atol=3e-3, rtol=2e-3)
         torch.testing.assert_close(flex_v_grad, v.grad, atol=3e-3, rtol=2e-3)
-    
+
     def test_cpu_error_message(self):
         make_tensor = functools.partial(
             torch.randn,
@@ -2005,7 +2005,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         with self.assertRaisesRegex(
-            ValueError, "FlexAttention is only supported on CUDA devices. Found input tensors on cpu device."
+            ValueError,
+            "FlexAttention is only supported on CUDA devices. Found input tensors on cpu device.",
         ):
             flex_attention(query, key, value)
 
