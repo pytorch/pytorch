@@ -9,6 +9,7 @@ import inspect
 import itertools
 import random
 import sys
+import threading
 import types
 import warnings
 from typing import Dict, Generic, List, TYPE_CHECKING
@@ -82,11 +83,6 @@ def is_forbidden_context_manager(ctx):
         from _pytest.python_api import RaisesContext
         from _pytest.recwarn import WarningsChecker
 
-        # TODO mlazos: Temporary to get this stack to pass
-        # remove in subsequent PR
-        from torch.overrides import BaseTorchFunctionMode
-
-        f_ctxs.append(BaseTorchFunctionMode)
         f_ctxs.append(RaisesContext)
         f_ctxs.append(WarningsChecker)
     except ImportError:
@@ -185,10 +181,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             return super().var_getattr(tx, name)
 
-        try:
-            obj = inspect.getattr_static(self.value, name)
-        except AttributeError:
-            obj = None
+        obj = inspect.getattr_static(self.value, name, None)
 
         if isinstance(obj, staticmethod):
             func = obj.__get__(self.value)
@@ -197,6 +190,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             else:
                 return SourcelessBuilder.create(tx, func)
         elif isinstance(obj, classmethod):
+            if isinstance(obj.__func__, property):
+                return variables.UserFunctionVariable(obj.__func__.fget).call_function(
+                    tx, [self], {}
+                )
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif isinstance(obj, types.ClassMethodDescriptorType):
             # e.g.: inspect.getattr_static(dict, "fromkeys")
@@ -212,6 +209,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 sys.version_info >= (3, 12) and name == "__mro__"
             ):
                 return VariableBuilder(tx, source)(obj.__get__(self.value))
+
+        if inspect.ismemberdescriptor(obj) or inspect.isdatadescriptor(obj):
+            value = getattr(self.value, name)
+            if source is not None:
+                return VariableBuilder(tx, source)(value=value)
+            else:
+                return SourcelessBuilder.create(tx=tx, value=value)
 
         if ConstantVariable.is_literal(obj):
             return ConstantVariable.create(obj)
@@ -413,7 +417,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and self.source
             and not is_forbidden_context_manager(self.value)
         ):
-            # import here to avoid an unfortunate circular dependency.
             from .ctx_manager import GenericContextWrappingVariable
 
             cm_obj = tx.output.side_effects.track_object_new(
@@ -421,7 +424,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
             cm_obj.call_method(tx, "__init__", args, kwargs)
             return cm_obj
-
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
             # check if this a quasi-namedtuple or a real one
@@ -711,7 +713,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if method is object.__init__:
                 return ConstantVariable.create(None)
 
-            if is_standard_setattr(method):
+            if is_standard_setattr(method) or isinstance(self.value, threading.local):
                 return self.method_setattr_standard(tx, *args, **kwargs)
 
             # [NOTE] OrderedDict, dict subtypes must always have source
@@ -809,7 +811,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def needs_slow_setattr(self):
         return not is_standard_setattr(
             inspect.getattr_static(self.value, "__setattr__", None)
-        )
+        ) and not isinstance(self.value, threading.local)
 
     def unpack_var_sequence(self, tx):
         if (
@@ -994,7 +996,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
             if isinstance(result, variables.DeletedVariable):
-                raise_observed_exception(AttributeError, tx, self)
+                raise_observed_exception(AttributeError, tx)
             return result
 
         if name == "__dict__":
@@ -1174,7 +1176,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return SourcelessBuilder.create(tx, subobj)
 
         # Earlier we were returning GetAttrVariable but its incorrect. In absence of attr, Python raises AttributeError.
-        raise_observed_exception(AttributeError, tx, self)
+        raise_observed_exception(AttributeError, tx)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if self._check_for_getattribute():

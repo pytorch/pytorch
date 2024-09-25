@@ -81,7 +81,7 @@ def maybe_realize(args: List[Optional[IRNode]]):
 
 
 def get_float32_precision():
-    if torch.get_float32_matmul_precision() == "highest":
+    if torch.get_float32_matmul_precision() == "highest" or torch.version.hip:
         return "'ieee'"
     else:
         return "'tf32'"
