@@ -27,7 +27,12 @@ def patch(f):
 
 
 class TestSplitCatFxPasses(TestCase):
-    @patch
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "normalization_pass": {},
+        },
+        post_grad_fusion_options={},
+    )
     def test_split_normalization(self):
         def arg_only(x):
             return [torch.relu(s) for s in torch.split(x, 2, 1)]
@@ -76,27 +81,31 @@ class TestSplitCatFxPasses(TestCase):
         def cm_with_list(x):
             return [torch.relu(s) for s in x.split([16, 16], dim=-1)]
 
+        def normalize_reshape_with_dynamic_shape(x):
+            return x.reshape(4, 16)
+
         args = [
             torch.randn(2, 32),
         ]
-        for fn, expected_split_norm_count in [
-            (arg_only, 1),
-            (arg_only_dim0, 1),
-            (kwarg1, 1),
-            (kwarg2, 1),
-            (kwarg3, 1),
-            (list_replace, 0),
-            (multi_split, 17),
-            (unequal_split, 1),
-            (arg_only_cm, 1),
-            (kwarg1_cm, 1),
-            (kwarg2_cm, 1),
-            (multi_split_cm, 17),
-            (unequal_split_cm, 1),
-            (cm_with_list, 1),
+        for fn, dynamic, expected_split_norm_count in [
+            (arg_only, False, 1),
+            (arg_only_dim0, False, 1),
+            (kwarg1, False, 1),
+            (kwarg2, False, 1),
+            (kwarg3, False, 1),
+            (list_replace, False, 0),
+            (multi_split, False, 17),
+            (unequal_split, False, 1),
+            (arg_only_cm, False, 1),
+            (kwarg1_cm, False, 1),
+            (kwarg2_cm, False, 1),
+            (multi_split_cm, False, 17),
+            (unequal_split_cm, False, 1),
+            (cm_with_list, False, 1),
+            (normalize_reshape_with_dynamic_shape, True, 0),
         ]:
             expected = fn(*args)
-            actual = torch.compile(fn)(*args)
+            actual = torch.compile(fn, dynamic=dynamic)(*args)
 
             torch.testing.assert_close(actual, expected)
             self.assertEqual(

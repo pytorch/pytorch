@@ -1787,6 +1787,7 @@ class MkldnnRnnLayer(ExternKernelAlloc):
             None,
             op_overload=torch.ops.aten.mkldnn_rnn_layer.default,
         )
+        self.outputs: List[MultiOutput] = []
 
     @classmethod
     def create(
@@ -1856,11 +1857,14 @@ class MkldnnRnnLayer(ExternKernelAlloc):
             assert len(output_shape) == 3, "Expect output_shape to be 3D"
             return FlexibleLayout.contiguous_strides(output_shape)
 
-        output_sizes = [output_shape, hy_shape, cy_shape]
+        # C shim call requires all the outputs to be passed in, and thus the last
+        # dummy return value is added.
+        output_sizes = [output_shape, hy_shape, cy_shape, [1]]
         output_strides = [
             get_strides_of_lstm_output(output_shape, batch_first),
             FlexibleLayout.contiguous_strides(hy_shape),
             FlexibleLayout.contiguous_strides(cy_shape),
+            [1],
         ]
         output_ir = [
             MultiOutput(
@@ -1877,5 +1881,10 @@ class MkldnnRnnLayer(ExternKernelAlloc):
                 zip(output_sizes, output_strides)
             )
         ]
+        packed.outputs = output_ir
 
         return output_ir
+
+    def codegen(self, wrapper):
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        return super().codegen(wrapper)

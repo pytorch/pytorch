@@ -126,11 +126,13 @@ class TorchExportStrategy(CaptureStrategy):
             )
         except torch._dynamo.exc.UserError as exc:
             # Refine the dynamic shapes based on the suggested fixes.
-            new_shapes = (
-                torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes(
+            try:
+                new_shapes = torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes(
                     exc.msg, dynamic_shapes
                 )
-            )
+            except Exception:
+                # If the dynamic shapes cannot be refined, re-raise the exception.
+                raise exc from None
             return torch.export.export(
                 model, args, kwargs=kwargs, dynamic_shapes=new_shapes
             )
@@ -165,11 +167,13 @@ class TorchExportNonStrictStrategy(CaptureStrategy):
             )
         except torch._dynamo.exc.UserError as exc:
             # Refine the dynamic shapes based on the suggested fixes.
-            new_shapes = (
-                torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes(
+            try:
+                new_shapes = torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes(
                     exc.msg, dynamic_shapes
                 )
-            )
+            except Exception:
+                # If the dynamic shapes cannot be refined, re-raise the exception.
+                raise exc from None
             return torch.export.export(
                 model, args, kwargs=kwargs, dynamic_shapes=new_shapes, strict=False
             )
