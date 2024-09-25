@@ -13,7 +13,6 @@ std::string GetFirstUserFrameInPythonIfEnabled() {
 }
 } // namespace
 
-
 namespace torch::lazy {
 
 static hash_t OperandHashes(
@@ -102,4 +101,3 @@ TSOpVector TensorList::Lower(
 }
 
 } // namespace torch::lazy
-

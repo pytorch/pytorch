@@ -5,7 +5,6 @@
 
 #include <utility>
 
-
 namespace torch::lazy {
 
 TSLoweringContext::TSLoweringContext(
@@ -21,7 +20,11 @@ TSLoweringContext::TSLoweringContext(
     BackendDevice device,
     c10::ArrayRef<const Node*> post_order,
     Util::EmissionMap emit_status)
-    : torch::lazy::LoweringContext(name, std::move(device), post_order, std::move(emit_status)),
+    : torch::lazy::LoweringContext(
+          name,
+          std::move(device),
+          post_order,
+          std::move(emit_status)),
       graph_(std::make_shared<torch::jit::Graph>()),
       function_(
           std::make_shared<torch::jit::GraphFunction>(name, graph_, nullptr)) {
@@ -84,4 +87,3 @@ torch::jit::Value* TSLoweringContext::GetParameter(const BackendDataPtr& data) {
 }
 
 } // namespace torch::lazy
-

@@ -13,9 +13,6 @@
 #include <torch/csrc/lazy/ts_backend/ir_builder.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 
-#include <utility>
-
-
 namespace torch::lazy {
 
 static TSOpVector LowerBuiltin(
@@ -58,10 +55,10 @@ TSOpVector LowerTSBuiltin(
 
 static torch::jit::Value* GenerateClone(
     torch::jit::Value* val,
-    std::shared_ptr<torch::jit::GraphFunction> function) {
+    const std::shared_ptr<torch::jit::GraphFunction>& function) {
   std::vector<torch::jit::NamedValue> clone_arguments;
   clone_arguments.emplace_back(val);
-  TSOpVector cloned = LowerBuiltin(at::aten::clone, std::move(function), clone_arguments);
+  TSOpVector cloned = LowerBuiltin(at::aten::clone, function, clone_arguments);
   TORCH_CHECK_EQ(cloned.size(), 1);
   return cloned.front();
 }
@@ -70,13 +67,14 @@ static torch::jit::Value* GenerateClone(
 
 // Default node lowering
 TSOpVector TsNode::Lower(
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::shared_ptr<torch::jit::GraphFunction> function,
     TSLoweringContext* loctx) const {
   std::vector<torch::jit::NamedValue> arguments;
   for (const torch::lazy::Output& output : operands()) {
     arguments.emplace_back(loctx->GetOutputOp(output));
   }
-  return LowerBuiltin(this, std::move(function), arguments);
+  return LowerBuiltin(this, function, arguments);
 }
 
 // Non-native ops
@@ -131,4 +129,3 @@ torch::lazy::TSOpVector Scalar::Lower(
 }
 
 } // namespace torch::lazy
-

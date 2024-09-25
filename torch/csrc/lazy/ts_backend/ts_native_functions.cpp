@@ -24,7 +24,6 @@
 
 using at::Tensor;
 
-
 namespace torch::lazy {
 namespace {
 
@@ -520,8 +519,14 @@ at::Tensor LazyNativeFunctions::slice_backward_symint(
     c10::SymInt start,
     c10::SymInt end,
     c10::SymInt step) {
-  return at::functionalization::functionalize_aten_op_symint<ATEN_OP(
-      slice_backward)>::call(grad_output, input_sizes, dim, std::move(start), std::move(end), std::move(step));
+  return at::functionalization::
+      functionalize_aten_op_symint<ATEN_OP(slice_backward)>::call(
+          grad_output,
+          input_sizes,
+          dim,
+          std::move(start),
+          std::move(end),
+          std::move(step));
 }
 
 // re-use the composite kernel from core, that way we don't need to provide a
@@ -540,4 +545,3 @@ std::tuple<Tensor, Tensor, Tensor> LazyNativeFunctions::native_group_norm(
 }
 
 } // namespace torch::lazy
-

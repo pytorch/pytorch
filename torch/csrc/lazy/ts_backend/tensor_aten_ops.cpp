@@ -16,7 +16,6 @@
 #include <functional>
 #include <optional>
 
-
 namespace torch::lazy {
 namespace {
 
@@ -69,4 +68,3 @@ void copy_(torch::lazy::LazyTensorPtr& input, torch::lazy::LazyTensorPtr& src) {
 }
 
 } // namespace torch::lazy
-

@@ -3,7 +3,6 @@
 #include <torch/csrc/lazy/ts_backend/ts_autograd_functions.h>
 #include <torch/csrc/lazy/ts_backend/ts_eager_fallback.h>
 
-
 namespace torch::lazy {
 
 at::Tensor MaxPool3dAutogradFunctionTS::forward(
@@ -58,4 +57,3 @@ torch::autograd::variable_list MaxPool3dAutogradFunctionTS::backward(
 }
 
 } // namespace torch::lazy
-

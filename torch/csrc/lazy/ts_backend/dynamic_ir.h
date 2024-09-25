@@ -2,10 +2,8 @@
 
 #include <ATen/core/symbol.h>
 
-#include <functional>
 #include <memory>
 #include <string>
-#include <utility>
 
 #include <c10/core/ScalarType.h>
 #include <c10/util/Flags.h>
@@ -17,8 +15,7 @@
 
 C10_DECLARE_bool(ltc_enable_dynamic_shapes);
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 /**
  * The goal of "dynamic" Nodes is to patch a hole in our tracing.
@@ -77,5 +74,4 @@ class TORCH_API SizeDiv : public TsNode, public DimensionNode {
   std::string ToString() const override;
 };
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

@@ -12,7 +12,6 @@
 #include <sstream>
 #include <unordered_map>
 
-
 namespace torch::lazy {
 namespace {
 
@@ -214,7 +213,7 @@ void ts_eager_fallback(
   const auto arguments_begin = stack->size() - num_arguments;
 
   std::vector<at::Tensor> tensor_args;
-  std::vector<int> tensor_args_indices;
+  std::vector<size_t> tensor_args_indices;
 
   std::vector<c10::List<at::Tensor>> tensorlist_args;
   std::vector<c10::List<std::optional<at::Tensor>>> opt_tensorlist_args;
@@ -369,4 +368,3 @@ void ts_eager_fallback(
 }
 
 } // namespace torch::lazy
-

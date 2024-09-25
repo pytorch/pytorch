@@ -2,8 +2,7 @@
 
 #include <torch/csrc/autograd/custom_function.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 struct MaxPool3dAutogradFunctionTS
     : public torch::autograd::Function<MaxPool3dAutogradFunctionTS> {
@@ -20,5 +19,4 @@ struct MaxPool3dAutogradFunctionTS
       torch::autograd::variable_list grad_output);
 };
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

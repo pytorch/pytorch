@@ -6,7 +6,6 @@ static const torch::lazy::DimensionNode* DimCast(torch::lazy::Output output) {
   return dynamic_cast<const torch::lazy::DimensionNode*>(output.node);
 }
 
-
 namespace torch::lazy {
 
 TSOpVector SizeNode::Lower(
@@ -34,7 +33,7 @@ SizeNode::SizeNode(Value input, size_t dim)
       dim_(dim){};
 
 int64_t SizeNode::getStaticValue() const {
-  return dynamic_cast<const TsNode*>(operand(0).node)->shape(0).size(dim_);
+  return dynamic_cast<const TsNode*>(operand(0).node)->shape(0).size(static_cast<int64_t>(dim_));
 }
 bool SizeNode::isSymbolic() const {
   auto symbolic_vec =
@@ -113,4 +112,3 @@ std::string SizeDiv::ToString() const {
 }
 
 } // namespace torch::lazy
-
