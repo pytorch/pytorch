@@ -58,6 +58,7 @@ from torch._C import _onnx as _C_onnx
 from torch._C._onnx import OperatorExportTypes, TensorProtoDataType, TrainingMode
 
 from ._exporter_states import ExportTypes
+from ._internal.exporter._onnx_program import ONNXProgram
 from ._internal.onnxruntime import (
     is_onnxrt_backend_supported,
     OrtBackend as _OrtBackend,
@@ -103,7 +104,6 @@ from . import (  # usort: skip. Keep the order instead of sorting lexicographica
 from ._internal._exporter_legacy import (  # usort: skip. needs to be last to avoid circular import
     DiagnosticOptions,
     ExportOptions,
-    ONNXProgram,
     ONNXRuntimeOptions,
     OnnxRegistry,
     enable_fake_mode,
@@ -168,7 +168,7 @@ def export(
     export_modules_as_functions: bool | Collection[type[torch.nn.Module]] = False,
     autograd_inlining: bool = True,
     **_: Any,  # ignored options
-) -> Any | None:
+) -> ONNXProgram | None:
     r"""Exports a model into ONNX format.
 
     Args:
@@ -336,11 +336,11 @@ def export(
             Refer to https://github.com/pytorch/pytorch/pull/74765 for more details.
     """
     if dynamo is True or isinstance(model, torch.export.ExportedProgram):
-        from torch.onnx._internal import exporter
+        from torch.onnx._internal.exporter import _compat
 
         if isinstance(args, torch.Tensor):
             args = (args,)
-        return exporter.export_compat(
+        return _compat.export_compat(
             model,
             args,
             f,
@@ -398,7 +398,7 @@ def dynamo_export(
     *model_args,
     export_options: ExportOptions | None = None,
     **model_kwargs,
-) -> ONNXProgram | Any:
+) -> ONNXProgram:
     """Export a torch.nn.Module to an ONNX graph.
 
     Args:
@@ -446,11 +446,11 @@ def dynamo_export(
     import warnings
 
     from torch.onnx import _flags
-    from torch.onnx._internal import exporter
+    from torch.onnx._internal.exporter import _compat
     from torch.utils import _pytree
 
     if isinstance(model, torch.export.ExportedProgram):
-        return exporter.export_compat(
+        return _compat.export_compat(
             model,  # type: ignore[arg-type]
             model_args,
             f=None,
@@ -498,7 +498,7 @@ def dynamo_export(
         else:
             dynamic_shapes = None
 
-        return exporter.export_compat(
+        return _compat.export_compat(
             model,  # type: ignore[arg-type]
             model_args,
             f=None,
