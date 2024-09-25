@@ -946,7 +946,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "queue_callback":
-            if torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+            if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
                 assert (
                     tx.one_graph
                 ), "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
@@ -1002,6 +1002,13 @@ class GetAttrVariable(VariableTracker):
 
     def as_proxy(self):
         return GetAttrVariable.create_getattr_proxy(self.obj.as_proxy(), self.name)
+
+    def as_python_constant(self):
+        constant = self.obj.as_python_constant()
+        try:
+            return getattr(constant, self.name)
+        except AttributeError:
+            raise NotImplementedError(f"{self} is not a constant") from None
 
     def const_getattr(self, tx: "InstructionTranslator", name):
         if not isinstance(self.obj, variables.NNModuleVariable):
