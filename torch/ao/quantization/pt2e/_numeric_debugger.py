@@ -1,7 +1,7 @@
 import copy
 import logging
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import torch
 from torch.ao.ns.fx.utils import compute_sqnr
@@ -19,9 +19,18 @@ def generate_numeric_debug_handle(graph_module: GraphModule) -> None:
     """Attach numeric_debug_handle_id for all nodes in the model except for placeholder node
     The graph nodes of input model is modified inplace.
     """
-    unique_id = 0
+    unique_id = -1
+    # Find the max ID that exists in the graph first, in case part of the graph
+    # has already been annotated. This way we guarantee there are no duplicate
+    # handle IDs.
     for node in graph_module.graph.nodes:
-        if node.op in ["output", "placehodler"]:
+        unique_id = max(
+            unique_id, node.meta.get(CUSTOM_KEY, {}).get(NUMERIC_DEBUG_HANDLE_KEY, -1)
+        )
+    unique_id += 1
+
+    for node in graph_module.graph.nodes:
+        if node.op in ["output", "placeholder"]:
             continue
 
         if CUSTOM_KEY not in node.meta:
@@ -134,6 +143,17 @@ class QuantizationComparisonResult:
             self.actual.to(dtype=torch.float32), self.ref.to(dtype=torch.float32)
         )
 
+    def loss(
+        self, loss_function: Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
+    ) -> torch.Tensor:
+        if self.actual.shape != self.ref.shape:
+            raise ValueError(
+                f"Cannot compare tensors with different shapes: {self.actual.shape} vs {self.ref.shape}"
+            )
+        return loss_function(
+            self.actual.to(dtype=torch.float32), self.ref.to(dtype=torch.float32)
+        )
+
     def __repr__(self) -> str:
         # Don't include the tensors themselves as they are quite large to print
         # out.
@@ -149,6 +169,10 @@ class QuantizationComparisonResult:
 
         if not isinstance(self.ref, torch.Tensor):
             raise ValueError(f"`self.ref` value must be a Tensor, got: {self.ref}")
+        if self.actual.shape != self.ref.shape:
+            raise ValueError(
+                f"Cannot compare tensors with different shapes: ref={self.ref.shape} vs actual={self.actual.shape}"
+            )
 
 
 @dataclass(frozen=True)
@@ -197,8 +221,8 @@ def extract_results_from_loggers(
 
 
 def compare_results(
-    ref_results: Dict[int, Tuple[str, object, List[torch.Tensor]]],
-    actual_results: Dict[int, Tuple[str, object, List[torch.Tensor]]],
+    ref_results: Dict[int, Tuple[Optional[str], object, List[torch.Tensor]]],
+    actual_results: Dict[int, Tuple[Optional[str], object, List[torch.Tensor]]],
 ) -> Dict[int, NodeAccuracySummary]:
     """Given two dict mapping from `debug_handle_id` (int) to list of tensors
     return a map from `debug_handle_id` to `NodeAccuracySummary` that contains
@@ -220,16 +244,25 @@ def compare_results(
             )
             continue
         actual_name, actual_stack, actual_stats = actual_results[debug_handle]
-        comparisons[debug_handle] = NodeAccuracySummary(
-            handle=debug_handle,
-            actual_node_name=actual_name,
-            actual_module_stack=_module_stack_to_str(actual_stack),
-            ref_node_name=ref_name,
-            ref_module_stack=_module_stack_to_str(ref_stack),
-            results=[
+        try:
+            results = [
                 QuantizationComparisonResult(actual=a, ref=b)
                 for a, b in zip(actual_stats, ref_stats)
-            ],
+            ]
+        except Exception as e:
+            # Add extra information for an exception from QuantizationComparisonResult
+            # if the shapes didn't match, to include the handle and the node names.
+            raise ValueError(
+                f"For numeric_debug_handle={debug_handle} from ref node {ref_name} and actual node {actual_name}"
+            ) from e
+
+        comparisons[debug_handle] = NodeAccuracySummary(
+            handle=debug_handle,
+            actual_node_name=actual_name or "",
+            actual_module_stack=_module_stack_to_str(actual_stack),
+            ref_node_name=ref_name or "",
+            ref_module_stack=_module_stack_to_str(ref_stack),
+            results=results,
         )
 
     return comparisons

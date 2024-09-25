@@ -6,9 +6,9 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from .. import variables
 from ..current_scope_id import current_scope_id
-from ..exc import unimplemented
+from ..exc import unimplemented, Unsupported
 from ..source import AttrSource, Source
-from ..utils import istype
+from ..utils import is_function_or_wrapper, istype
 
 
 if TYPE_CHECKING:
@@ -236,18 +236,29 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         raise NotImplementedError
 
     def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
-        """getattr(self, name) returning a python constant"""
-        raise NotImplementedError
+        v = self.as_python_constant()
+        try:
+            return getattr(v, name)
+        except AttributeError:
+            raise NotImplementedError from None
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
-        value = self.const_getattr(tx, name)
-        if not variables.ConstantVariable.is_literal(value):
-            raise NotImplementedError
-        source = None
-        if self.source:
-            source = AttrSource(self.source, name)
-        return variables.ConstantVariable.create(value, source=source)
+
+        from .builder import SourcelessBuilder, VariableBuilder
+        from .misc import GetAttrVariable
+
+        source = self.source and AttrSource(self.source, name)
+        try:
+            value = self.const_getattr(tx, name)
+            if not is_function_or_wrapper(value):
+                if source:
+                    return VariableBuilder(tx, source)(value=value)
+                else:
+                    return SourcelessBuilder.create(tx=tx, value=value)
+        except (NotImplementedError, Unsupported):
+            pass
+        return GetAttrVariable(self, name, source=source)
 
     def is_proxy(self):
         try:
@@ -289,12 +300,25 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def unpack_var_sequence(self, tx) -> List["VariableTracker"]:
         raise NotImplementedError
 
+    def force_unpack_var_sequence(self, tx) -> List["VariableTracker"]:
+        # like unpack_var_sequence, but should only be used when it is
+        # safe to eagerly (vs. lazily) unpack this variable.
+        # e.g. map(f, x) is normally evaluated lazily but sometimes
+        # we want to force eager unpacking, e.g. when converting to a list.
+        # NOTE: this method is allowed to mutate the VariableTracker, so
+        # it should only be called once.
+        return self.unpack_var_sequence(tx)
+
     def has_unpack_var_sequence(self, tx) -> bool:
         try:
             self.unpack_var_sequence(tx)
             return True
         except NotImplementedError:
             return False
+
+    # NB: don't call force_unpack_var_sequence, especially if it mutates!
+    def has_force_unpack_var_sequence(self, tx) -> bool:
+        return self.has_unpack_var_sequence(tx)
 
     def inspect_parameter_names(self) -> List[str]:
         unimplemented(f"inspect_parameter_names: {self}")

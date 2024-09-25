@@ -22,6 +22,7 @@ from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 
 from ..._dynamo.utils import counters
 from .. import codecache, config, cpp_builder, cpu_vec_isa, ir, metrics
+from ..loop_body import LoopBody
 from ..scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
@@ -70,6 +71,7 @@ from .cpp_utils import (
     INDEX_TYPE,
     LocalBufferContext,
     promote_args,
+    template_fusion_with_epilogues_supported,
     unify_mask_base_type,
     value_to_cpp,
 )
@@ -1640,6 +1642,11 @@ class CppVecOverrides(CppOverrides):
                 "signbit",
             )
             octype = "bool" if output_mask else cdtype
+            octype = (
+                DTYPE_TO_CPP[args[-2]]
+                if (scalar_func.__name__ == "to_dtype_bitcast")
+                else octype
+            )
             with code.indent():
                 for argidx, arg in enumerate(args):
                     if isinstance(arg, CppCSEVariable):
@@ -1668,9 +1675,9 @@ class CppVecOverrides(CppOverrides):
                 else:
                     load_args = f"tmpbuf_out.data(), {cexpr_index(size)}"
                     if n_vec == 1:
-                        load_fn = f"at::vec::Vectorized<{cdtype}>::loadu"
+                        load_fn = f"at::vec::Vectorized<{octype}>::loadu"
                     else:
-                        load_fn = f" at::vec::VectorizedN<{cdtype}, {n_vec}>::loadu"
+                        load_fn = f" at::vec::VectorizedN<{octype}, {n_vec}>::loadu"
                 code.writeline(f"return {load_fn}({load_args});")
             code.writeline("()")
             return code
@@ -2140,9 +2147,7 @@ class CppKernel(Kernel):
 
     @property
     def assert_function(self) -> str:
-        if V.graph.aot_mode:
-            # TODO: Using AOTI_TORCH_CHECK is causing performance drop for some models
-            # compared with JIT Inductor which uses TORCH_CHECK
+        if config.abi_compatible:
             return "AOTI_TORCH_CHECK"
         else:
             return "TORCH_CHECK"
@@ -2524,7 +2529,7 @@ class CppVecKernel(CppKernel):
                 n_idx = self._get_num_vectors(torch.int64)
                 cdtype = DTYPE_TO_CPP[dtype]
                 index = ops.index_expr(index, torch.int64).value
-                assert index.is_vec
+                assert isinstance(index, CppCSEVariable) and index.is_vec
                 line = f"atomic_add_vec<{cdtype}, {n_idx}, {n_src}>({var}, {index}, {value});"
                 self.stores.writeline(DeferredLine(name, line))
         else:
@@ -3181,7 +3186,7 @@ class CppTile2DKernel(CppVecKernel):
         )
 
 
-def get_loop_body_lowp_fp(_body: ir.LoopBody) -> Tuple[Optional[torch.dtype], bool]:
+def get_loop_body_lowp_fp(_body: LoopBody) -> Tuple[Optional[torch.dtype], bool]:
     """
     Returns the low precision data type (torch.float16/torch.bfloat16) contained in the nodes
     and if all the nodes can codegen with this data type without converting to float.
@@ -3389,7 +3394,7 @@ class TilingSelect:
                             call_ranges[tiling_indice], fallback=0
                         )
                         if call_range < factor_lowp:
-                            V.graph.sizevars.guard_lt(call_range, factor_lowp)
+                            V.graph.sizevars.guard_lt(call_range, factor_lowp)  # type: ignore[arg-type]
                             tiling_factor = factor_lowp // 2
                             break
                     elif call_ranges[tiling_indice] < factor_lowp:
@@ -3466,7 +3471,7 @@ class CppKernelProxy(CppKernel):
 
     # Check if all the nodes of a given fx graph can support BF16/FP16
     def is_lowp_fp_scheduler(self, scheduler_node: SchedulerNode):
-        if not isinstance(scheduler_node._body, ir.LoopBody):
+        if not isinstance(scheduler_node._body, LoopBody):
             return True
         # Propagate the dtype to check if all the fx node is bf16/fp16
         DataTypePropagation.propagate_scheduler_node(scheduler_node)
@@ -3475,7 +3480,7 @@ class CppKernelProxy(CppKernel):
             and not get_loop_body_lowp_fp(scheduler_node._body)[1]
         )
 
-    def legalize_lowp_fp_dtype_loopbody(self, loop_body: ir.LoopBody):
+    def legalize_lowp_fp_dtype_loopbody(self, loop_body: LoopBody):
         def add_to_dtype(sub_graph: torch.fx.Graph):
             def is_lowp_fp_load(node: torch.fx.Node):
                 if node.target not in ["load"]:
@@ -3642,18 +3647,9 @@ class CppKernelProxy(CppKernel):
 
         for _node in nodes:
             assert isinstance(_node, SchedulerNode)
-            assert isinstance(_node._body, ir.LoopBody)
-            node: SchedulerNode = _node
-
-            def is_memory_copy_scheduler_node(node: SchedulerNode):
-                op_counts = node.read_writes.op_counts
-                return (
-                    len(op_counts) == 2 and "load" in op_counts and "store" in op_counts
-                )
-
-            should_legalize = not is_memory_copy_scheduler_node(node)
-            if should_legalize:
-                body: ir.LoopBody = node._body
+            assert isinstance(_node._body, LoopBody)
+            body: LoopBody = _node._body
+            if not body.is_memory_copy():
                 self.legalize_lowp_fp_dtype_loopbody(body)
 
     def codegen_functions(self, fn_list, var_sizes_list):
@@ -4153,7 +4149,10 @@ class CppScheduling(BaseScheduling):
             # TODO(jgong5): support pre-op fusion with template
             return False
         if node1.is_template():
-            return not node2.is_reduction()
+            template_fusion_supported, _ = template_fusion_with_epilogues_supported(
+                node1, [node2]
+            )
+            return not node2.is_reduction() and template_fusion_supported
         return (
             self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
         ) or self.can_fuse_vertical_outer_loop(node1, node2)
@@ -4164,9 +4163,9 @@ class CppScheduling(BaseScheduling):
         When one of the indexing_exprs contains a division, we eliminate the division by splitting the loop
         to avoid non-contiguous loads, subject to the following conditions:
             1. No reduction and no mudular index for all nodes.
-            2. Only one node's one indexing_exprs contains a division, according to this indexing_exprs,
-               we can get the dimension that needs to be split, and the split dimension is contiguous
-               in all other indexing_exprs.
+            2. The indexing_exprs of all nodes contain only one (or more, but all the same) division,
+               where the divisor is an integer, the dividend is one of the iter_vars, and this var,
+               i.e. the dimension that needs to be split, is contiguous in all other indexing_exprs.
 
         For example, if the node's var_ranges: {z0: 2, z1: 9216, z2: 960} and indexing_exprs:
         {'index0': 8847360*z0 + 960*z1 + z2, 'index1': 32*z0 + (z2//30), 'index2': z2},
@@ -4187,8 +4186,8 @@ class CppScheduling(BaseScheduling):
 
         split_var = None
         split_number = None
-        divide_index_name = None
         num_div = 0
+        div_expr_ = None
         match_div = False
         matched_node = None
 
@@ -4196,24 +4195,27 @@ class CppScheduling(BaseScheduling):
             assert isinstance(node.node, ir.ComputedBuffer)
             _, original_body, _ = node.node.get_default_sizes_body()
             for name, expr in original_body.indexing_exprs.items():
-                num_div += expr.count(FloorDiv)
-                if num_div > 1:
-                    return nodes
-                if expr.count(FloorDiv) == 1:
-                    div_expr = expr.find(FloorDiv).pop()
-                    split_var = div_expr.args[0]
-                    split_number = div_expr.args[1]
-                    divide_index_name = name
+                for div_expr in expr.find(FloorDiv):
                     if (
-                        isinstance(split_number, sympy.core.numbers.Integer)
-                        and isinstance(split_var, sympy.core.symbol.Symbol)
-                        and divide_index_name is not None
+                        any(div_expr.has(var) for var in original_body.iter_vars)
+                        and div_expr != div_expr_
+                    ):
+                        div_expr_ = div_expr
+                        num_div += 1
+                    if num_div > 1:
+                        return nodes
+                    if (
+                        isinstance(div_expr.args[1], sympy.core.numbers.Integer)
+                        and div_expr.args[0] in original_body.iter_vars
+                        and name is not None
                         and all(
-                            stride_at_vec_range(expr, split_var) == 1
-                            for name, expr in original_body.indexing_exprs.items()
-                            if name != divide_index_name
+                            stride_at_vec_range(expr_, div_expr.args[0]) in (0, 1)
+                            for name_, expr_ in original_body.indexing_exprs.items()
+                            if name_ != name
                         )
                     ):
+                        split_var = div_expr.args[0]
+                        split_number = div_expr.args[1]
                         match_div = True
                         matched_node = node
 
@@ -4339,9 +4341,9 @@ class CppScheduling(BaseScheduling):
                             ):
                                 contiguous_index_expr += stride * var
                                 stride *= range
-                            write_index_expr = scheduler_node._body.writes_name2expr[
+                            write_index_expr = scheduler_node._body.get_write_expr(
                                 scheduler_buffer.get_name()
-                            ]
+                            )
 
                             def is_contiguous_index(x):
                                 return x == contiguous_index_expr
@@ -4349,9 +4351,9 @@ class CppScheduling(BaseScheduling):
                             return is_contiguous_index(write_index_expr) and all(
                                 isinstance(user.node, SchedulerNode)
                                 and is_contiguous_index(
-                                    user.node._body.reads_name2expr[
+                                    user.node._body.get_read_expr(
                                         scheduler_buffer.get_name()
-                                    ],
+                                    ),
                                 )
                                 for user in scheduler_buffer.users
                             )
@@ -4506,6 +4508,9 @@ class CppScheduling(BaseScheduling):
         def template_buffer_has_other_users(
             template_buffer, outputs_by_name, epilogue_nodes
         ):
+            if not epilogue_nodes:
+                return False
+
             assert template_buffer.get_name() in outputs_by_name
             users = outputs_by_name[template_buffer.get_name()].users
             return not all(
@@ -4566,7 +4571,7 @@ class CppScheduling(BaseScheduling):
         compile_wrapper.splice(src_code, strip=True)
         if not V.graph.cpp_wrapper:
             compile_wrapper.writeline("''')")
-        wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), cuda=False)
+        wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), gpu=False)
         return kernel_name
 
     def flush(self):
@@ -4647,7 +4652,7 @@ class KernelGroup:
     def call_kernel(self, wrapper, kernel_name):
         _, call_args, arg_types = self.args.cpp_argdefs()
         wrapper.generate_kernel_call(
-            kernel_name, call_args, cuda=False, arg_types=arg_types
+            kernel_name, call_args, gpu=False, arg_types=arg_types
         )
 
 

@@ -10,7 +10,6 @@ import pathlib
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
-from torch._export import converter as _torchscript_converter
 from torch.utils import _pytree
 
 
@@ -126,11 +125,13 @@ class TorchExportStrategy(CaptureStrategy):
             )
         except torch._dynamo.exc.UserError as exc:
             # Refine the dynamic shapes based on the suggested fixes.
-            new_shapes = (
-                torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes(
+            try:
+                new_shapes = torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes(
                     exc.msg, dynamic_shapes
                 )
-            )
+            except Exception:
+                # If the dynamic shapes cannot be refined, re-raise the exception.
+                raise exc from None
             return torch.export.export(
                 model, args, kwargs=kwargs, dynamic_shapes=new_shapes
             )
@@ -165,11 +166,13 @@ class TorchExportNonStrictStrategy(CaptureStrategy):
             )
         except torch._dynamo.exc.UserError as exc:
             # Refine the dynamic shapes based on the suggested fixes.
-            new_shapes = (
-                torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes(
+            try:
+                new_shapes = torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes(
                     exc.msg, dynamic_shapes
                 )
-            )
+            except Exception:
+                # If the dynamic shapes cannot be refined, re-raise the exception.
+                raise exc from None
             return torch.export.export(
                 model, args, kwargs=kwargs, dynamic_shapes=new_shapes, strict=False
             )
@@ -198,6 +201,9 @@ class JitTraceConvertStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
+        # Avoid circular import
+        from torch._export import converter as _torchscript_converter
+
         del dynamic_shapes  # Unused
 
         flattened_args, spec = _pytree.tree_flatten((args, kwargs))

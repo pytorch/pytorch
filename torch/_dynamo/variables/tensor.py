@@ -225,7 +225,6 @@ class TensorVariable(VariableTracker):
         # (1) the tensor is a traceable tensor subclass
         # (2) We are getattr'ing an inner tensor from that subclass
         if not self.source and is_traceable_wrapper_subclass(fake_val):
-            fake_val = self.proxy.node.meta["example_value"]
             attrs, ctx = fake_val.__tensor_flatten__()
             proxy = getattr(self.as_proxy(), name)
             example_value = getattr(fake_val, name)
@@ -243,14 +242,19 @@ class TensorVariable(VariableTracker):
                 return SourcelessBuilder.create(tx, example_value)
 
         if not (self.source and self.source.subguards_allowed()):
-            raise NotImplementedError
+            return
+
+        from ..guards import CLOSURE_VARS, GuardBuilder
 
         # For local source, we associate the real value. We use this real value
         # for implementing getattr fallthrough on the variable tracker base class.
-
         # Note - this scope construction is mirrored in guards
         # A subsequent PR will introduce a util.
-        scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
+        scope = {
+            "L": tx.output.local_scope,
+            "G": tx.output.global_scope,
+            **CLOSURE_VARS,
+        }
         try:
             # We raise in case we get a typerror bug w/ SuperSource.
             # SuperSource has bugs in it atm, and can produce code like
@@ -259,25 +263,25 @@ class TensorVariable(VariableTracker):
             # Which is incorrect, and violates the invariant that all sources should be eval()-able against the scope.
             _input_associated_real_value = eval(self.source.name(), scope)
         except Exception as exc:
-            raise NotImplementedError from exc
-
-        if _input_associated_real_value is None:
-            raise NotImplementedError
-
-        if object_has_getattribute(_input_associated_real_value):
-            raise NotImplementedError
-
-        if get_custom_getattr(_input_associated_real_value):
-            raise NotImplementedError
+            msg = f"{exc!r} raised in eval('{self.source.name()}')"
+            raise NotImplementedError(msg) from exc
 
         real_value = getattr(_input_associated_real_value, name)
+        if _input_associated_real_value is None:
+            return
+
+        if object_has_getattribute(_input_associated_real_value):
+            return
+
+        if get_custom_getattr(_input_associated_real_value):
+            return
+
         if callable(real_value):
             # Callables have more nuanced handling, and we should let the existing system delegate here.
             # Raising was past behavior and so should always be sound to fall back.
             # Note - at a certain point we may want to handle
-            raise NotImplementedError
+            return
 
-        from ..guards import GuardBuilder
         from .builder import VariableBuilder
 
         attr_source = AttrSource(self.source, name)
@@ -859,29 +863,6 @@ class TensorVariable(VariableTracker):
             # unless we find that we need to make it work.
             unimplemented("Tensor.set_.source_Tensor_storage_offset")
 
-    # def method_add_(self, other, *, alpha=None):
-    #     if alpha is not None:
-    #         from ..symbolic_convert import InstructionTranslator
-
-    #         tx = InstructionTranslator.current_tx()
-    #         result = variables.TorchInGraphFunctionVariable(torch.mul).call_function(
-    #             tx, [other, alpha], {}
-    #         )
-    #         return self.call_method(tx, "add_", [result], {})
-
-    # def method_addcdiv_(self, tensor1, tensor2, *, value=None):
-    #     from ..symbolic_convert import InstructionTranslator
-
-    #     tx = InstructionTranslator.current_tx()
-    #     if value is not None:
-    #         result = variables.TorchInGraphFunctionVariable(torch.div).call_function(
-    #             tx, [tensor1, tensor2], {}
-    #         )
-    #         result = variables.TorchInGraphFunctionVariable(torch.mul).call_function(
-    #             tx, [result, value], {}
-    #         )
-    #         return self.call_method(tx, "add_", [result], {})
-
     def method___contains__(self, arg):
         from ..symbolic_convert import InstructionTranslator
 
@@ -1006,12 +987,15 @@ class TensorVariable(VariableTracker):
 
             from .builder import wrap_fx_proxy
 
+            self_proxy = self.as_proxy()
+            self_proxy.node.meta["has_backward_hook"] = True
+
             return wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
                     "call_function",
                     _register_hook_trampoline,
-                    (self.as_proxy(), bw_state_proxy),
+                    (self_proxy, bw_state_proxy),
                     {},
                 ),
             )
@@ -1166,8 +1150,6 @@ class NumpyNdarrayVariable(TensorVariable):
         from ..utils import numpy_attr_wrapper
         from .builder import wrap_fx_proxy
 
-        result = None
-
         example_value = self.as_proxy().node.meta["example_value"]
         example_ndarray = tnp.ndarray(example_value)
 
@@ -1186,7 +1168,7 @@ class NumpyNdarrayVariable(TensorVariable):
                 (self.as_proxy(), name),
                 {},
             )
-            result = NumpyNdarrayVariable.create(tx, proxy)
+            return NumpyNdarrayVariable.create(tx, proxy)
 
         # These are awkward to implement.  The standard playbook for torch._numpy
         # interop is to trace a call into the torch._numpy wrapper which works for
@@ -1215,9 +1197,8 @@ class NumpyNdarrayVariable(TensorVariable):
             unimplemented(f"TODO: add support for ndarray.{name}")
         elif name in ["__version__"]:
             unimplemented("delegate np.__version__ to NumPy")
-        if result is None:
-            raise NotImplementedError
-        return result
+        else:
+            return super().var_getattr(tx, name)
 
     @staticmethod
     def patch_args(name, args, kwargs):
