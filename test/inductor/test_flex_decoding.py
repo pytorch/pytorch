@@ -360,23 +360,21 @@ class TestFlexDecoding(InductorTestCase):
     # TODO: test if #batch size in block mask is different from page table, or the cache
     # TODO: add test for page_size as 64 and 256
 
-    def run_paged_attention(
+    def preprocess_paged_attention(
         self,
         score_mod: Optional[Callable],
         q: Tensor,
         k: Tensor,
         v: Tensor,
+        block_mask,
         dtype: torch.dtype = torch.float16,
-        block_mask: Optional[BlockMask] = None,
     ):
+        assert block_mask is not None, "Must provide block_mask"
         _, Q_H, _, _ = q.shape
         KV_B, KV_H, KV_S, QK_D = k.shape
         _, _, _, V_D = v.shape
 
         n_pages, page_size, max_batch_size = 64, 128, 5
-
-        if block_mask is None:
-            block_mask = create_block_mask(noop_mask, max_batch_size, 1, 1, S)
 
         # allocate cache
         MAX_CACHED_SEQ_LEN = n_pages * page_size
@@ -402,13 +400,13 @@ class TestFlexDecoding(InductorTestCase):
             n_pages, page_size, max_batch_size, MAX_CACHED_SEQ_LEN
         )
         paged_cache.allocate_until_length(
-            torch.tensor([KV_S//4, KV_S//2, KV_S//4, KV_S//3], device="cuda")
+            torch.tensor([KV_S // 4, KV_S // 2, KV_S // 4, KV_S // 3], device="cuda")
         )
         paged_cache.allocate_until_length(
-            torch.tensor([KV_S//4, KV_S//2, KV_S//2, KV_S//2], device="cuda")
+            torch.tensor([KV_S // 4, KV_S // 2, KV_S // 2, KV_S // 2], device="cuda")
         )
         paged_cache.allocate_until_length(
-            torch.tensor([KV_S//2, KV_S, KV_S//2, KV_S], device="cuda")
+            torch.tensor([KV_S // 2, KV_S, KV_S // 2, KV_S], device="cuda")
         )
         paged_cache.allocate_until_length(
             torch.tensor([KV_S, KV_S, KV_S, KV_S], device="cuda")
@@ -421,20 +419,45 @@ class TestFlexDecoding(InductorTestCase):
         paged_cache.update(batch_idx, input_pos, v, v_cache)
 
         # convert block mask and score mod
-        new_block_mask = paged_cache.convert_logical_block_mask(
+        converted_block_mask = paged_cache.convert_logical_block_mask(
             block_mask, MAX_CACHED_SEQ_LEN
         )
+        converted_score_mod = paged_cache.get_score_mod(score_mod)
+
+        return k_cache, v_cache, converted_block_mask, converted_score_mod
+
+    def run_paged_attention(
+        self,
+        score_mod: Optional[Callable],
+        q: Tensor,
+        k: Tensor,
+        v: Tensor,
+        dtype: torch.dtype = torch.float16,
+        block_mask: Optional[BlockMask] = None,
+    ):
+        Q_B, Q_H, KV_H = q.shape[0], q.shape[1], k.shape[1]
+
+        if block_mask is None:
+            block_mask = create_block_mask(noop_mask, Q_B, 1, 1, S)
+
+        (
+            k_cache,
+            v_cache,
+            converted_block_mask,
+            converted_score_mod,
+        ) = self.preprocess_paged_attention(score_mod, q, k, v, block_mask, dtype)
+
         compiled_sdpa = torch.compile(
             create_attention(
-                paged_cache.get_score_mod(score_mod),
-                block_mask,
+                converted_score_mod,
+                converted_block_mask,
                 enable_gqa=(not Q_H == KV_H),
             )
         )
 
         # compute
         compiled_out, compiled_lse = compiled_sdpa(
-            q, k_cache, v_cache, return_lse=True, block_mask=new_block_mask
+            q, k_cache, v_cache, return_lse=True, block_mask=converted_block_mask
         )
         return compiled_out, compiled_lse
 
@@ -480,7 +503,7 @@ class TestFlexDecoding(InductorTestCase):
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
 
-        if block_mask is None:  
+        if block_mask is None:
             block_mask = create_block_mask(noop_mask, Q_B, 1, 1, S)
 
         sdpa_partial = create_attention(
@@ -861,7 +884,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(score_mod_scale, dtype)
         self.run_test_with_paged_attention(score_mod_scale, dtype)
 
-    # TODO: Fix error
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_recompile_changed_score_mod(self, dtype):
@@ -892,7 +914,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test(score_mod_scale, dtype)
 
-    # TODO: Think about how to support this case
     @supported_platform
     def test_multiple_score_mod_calls(self):
         query = torch.randn((1, 8, 4, 64), dtype=torch.float32, device="cuda")
@@ -920,7 +941,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         tolerance = Tolerances(atol=2e-1, rtol=2e-1)
         torch.testing.assert_close(out, out2, atol=tolerance.atol, rtol=tolerance.rtol)
 
-    # TODO: Think about how to support this case
     @supported_platform
     def test_multiple_score_mod_calls2(self):
         query = torch.randn((1, 8, 4, 64), dtype=torch.float32, device="cuda")
@@ -949,6 +969,164 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out = f(query, *keys, *values)
         out2 = torch.compile(f)(query, *keys, *values)
         self.assertTrue((out - out2).abs().mean() < 1e-2)
+
+    @supported_platform
+    def test_multiple_score_mod_calls_paged_attention(self):
+        query = torch.randn((1, 8, 4, 64), dtype=torch.float32, device="cuda")
+        keys = [
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            for _ in range(2)
+        ]
+        values = [
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            for _ in range(2)
+        ]
+
+        def scoremod_1(qk, b, h, q, kv):
+            return qk + (q - kv)
+
+        def scoremod_2(qk, b, h, q, kv):
+            return torch.where(q >= kv, qk, -float("inf"))
+
+        block_mask = create_block_mask(noop_mask, 1, 1, 1, S)
+
+        def f(q, k1, k2, v1, v2):
+            q2 = flex_attention(q, k1, v1, score_mod=scoremod_1, block_mask=block_mask)
+            return flex_attention(
+                q2, k2, v2, score_mod=scoremod_2, block_mask=block_mask
+            )
+
+        eager_out = f(query, *keys, *values)
+
+        (
+            k_cache1,
+            v_cache1,
+            converted_block_mask1,
+            converted_score_mod1,
+        ) = self.preprocess_paged_attention(
+            scoremod_1, query, keys[0], values[0], block_mask, torch.float32
+        )
+        (
+            k_cache2,
+            v_cache2,
+            converted_block_mask2,
+            converted_score_mod2,
+        ) = self.preprocess_paged_attention(
+            scoremod_2, query, keys[1], values[1], block_mask, torch.float32
+        )
+
+        def paged_f(q, k1, k2, v1, v2):
+            q2 = flex_attention(
+                q,
+                k1,
+                v1,
+                score_mod=converted_score_mod1,
+                block_mask=converted_block_mask1,
+            )
+            return flex_attention(
+                q2,
+                k2,
+                v2,
+                score_mod=converted_score_mod2,
+                block_mask=converted_block_mask2,
+            )
+
+        compiled_out = torch.compile(paged_f)(
+            query, k_cache1, k_cache2, v_cache1, v_cache2
+        )
+        tolerance = Tolerances(atol=2e-1, rtol=2e-1)
+        torch.testing.assert_close(
+            eager_out, compiled_out, atol=tolerance.atol, rtol=tolerance.rtol
+        )
+
+    @supported_platform
+    def test_multiple_score_mod_calls_paged_attention2(self):
+        query = torch.randn((1, 8, 4, 64), dtype=torch.float32, device="cuda")
+        keys = [
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            for _ in range(3)
+        ]
+        values = [
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            for _ in range(3)
+        ]
+
+        def scoremod_1(qk, b, h, q, kv):
+            return qk + (q - kv)
+
+        def scoremod_2(qk, b, h, q, kv):
+            return torch.where(q >= kv, qk, -float("inf"))
+
+        block_mask = create_block_mask(noop_mask, 1, 1, 1, S)
+
+        attention1 = functools.partial(
+            flex_attention, score_mod=scoremod_1, block_mask=block_mask
+        )
+
+        def f(q, k1, k2, k3, v1, v2, v3):
+            q2 = attention1(q, k1, v1)
+            q3 = flex_attention(q2, k2, v2, score_mod=scoremod_2, block_mask=block_mask)
+            return flex_attention(
+                q3, k3, v3, score_mod=scoremod_1, block_mask=block_mask
+            )
+
+        eager_out = f(query, *keys, *values)
+
+        (
+            k_cache1,
+            v_cache1,
+            converted_block_mask1,
+            converted_score_mod1,
+        ) = self.preprocess_paged_attention(
+            scoremod_1, query, keys[0], values[0], block_mask, torch.float32
+        )
+        (
+            k_cache2,
+            v_cache2,
+            converted_block_mask2,
+            converted_score_mod2,
+        ) = self.preprocess_paged_attention(
+            scoremod_2, query, keys[1], values[1], block_mask, torch.float32
+        )
+        (
+            k_cache3,
+            v_cache3,
+            converted_block_mask3,
+            converted_score_mod3,
+        ) = self.preprocess_paged_attention(
+            scoremod_1, query, keys[2], values[2], block_mask, torch.float32
+        )
+
+        paged_attention1 = functools.partial(
+            flex_attention,
+            score_mod=converted_score_mod1,
+            block_mask=converted_block_mask1,
+        )
+
+        def paged_f(q, k1, k2, k3, v1, v2, v3):
+            q2 = paged_attention1(q, k1, v1)
+            q3 = flex_attention(
+                q2,
+                k2,
+                v2,
+                score_mod=converted_score_mod2,
+                block_mask=converted_block_mask2,
+            )
+            return flex_attention(
+                q3,
+                k3,
+                v3,
+                score_mod=converted_score_mod3,
+                block_mask=converted_block_mask3,
+            )
+
+        compiled_out = torch.compile(paged_f)(
+            query, k_cache1, k_cache2, k_cache3, v_cache1, v_cache2, v_cache3
+        )
+        tolerance = Tolerances(atol=2e-1, rtol=2e-1)
+        torch.testing.assert_close(
+            eager_out, compiled_out, atol=tolerance.atol, rtol=tolerance.rtol
+        )
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
@@ -1010,7 +1188,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(bias_mod)
         self.run_test_with_paged_attention(bias_mod)
 
-    # TODO: Add a similar test. We cannot use this one since paged attention does not support backward.
     @supported_platform
     def test_fully_masked_out_rows_0_check_gqa(self):
         # Ensure fully masked out rows won't cause NaNs.

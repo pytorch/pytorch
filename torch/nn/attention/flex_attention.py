@@ -1029,7 +1029,7 @@ class PagedAttention:
             return torch.where(
                 logical_block_idx >= 0,
                 score_mod(score, b, h, q_idx, logical_kv_idx),
-                False,
+                float("-inf"),
             )
 
         return new_score_mod
