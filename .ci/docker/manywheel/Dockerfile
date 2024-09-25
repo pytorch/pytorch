@@ -55,9 +55,9 @@ RUN cp $(which patchelf) /patchelf
 
 FROM patchelf as python
 # build python
-COPY manywheel/build_scripts /build_scripts
-ADD ./common/install_cpython.sh /build_scripts/install_cpython.sh
-RUN bash build_scripts/build.sh && rm -r build_scripts
+#COPY manywheel/build_scripts /build_scripts
+#ADD ./common/install_cpython.sh /build_scripts/install_cpython.sh
+#RUN bash build_scripts/build.sh && rm -r build_scripts
 
 FROM base as cuda
 ARG BASE_CUDA_VERSION=10.2
