@@ -2649,7 +2649,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         def fn(x, y):
             return x + y
 
-        cnt = CompileCounterWithBackend("aot_eager")
+        cnt = CompileCounterWithBackend("inductor")
         fn_opt = torch._dynamo.optimize(cnt)(fn)
 
         x = torch.arange(3)
