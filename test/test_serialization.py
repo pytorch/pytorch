@@ -4258,7 +4258,10 @@ class TestSerialization(TestCase, SerializationMixin):
         # Test that without materialize_fake_tensor, behavior for fake_tensors is not altered by ctx
         if not materialize_fake:
             ft = converter.from_real_tensor(mode, torch.randn(2, device=t_device))
-            with self.assertRaisesRegex(AttributeError, "Can't pickle local object 'WeakValueDictionary.__init__.<locals>.remove'"):
+            with self.assertRaisesRegex(
+                AttributeError,
+                "Can't (get|pickle) local object 'WeakValueDictionary.__init__.<locals>.remove'"
+            ):
                 with skip_data(), BytesIOContext() as f:
                     torch.save(ft, f)
 

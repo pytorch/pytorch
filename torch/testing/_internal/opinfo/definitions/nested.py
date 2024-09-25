@@ -76,32 +76,47 @@ def _sample_njts(device, dtype, requires_grad=False, dims=None):
 # This reference unbinds the input NJT and invokes the op on each of the components,
 # optionally wrapping the result in an NJT.
 def unbind_reference(op, sample, wrap_output_as_njt=True):
-    assert sample.input.is_nested
-    out_ref_components = []
-    for i, component in enumerate(sample.input.unbind(dim=0)):
+    # first NJT in the arglist determines expected ragged structure
+    nt_inp = (
+        sample.input
+        if sample.input.is_nested
+        # TODO: look in kwargs too?
+        else next(a for a in sample.args if a.is_nested)
+    )
 
-        def _slice_njts(t, i=i, inp=sample.input):
+    out_ref_components = []
+    for i in range(nt_inp.shape[0]):
+
+        def _slice_input(t, i=i, inp=nt_inp):
             # any NJT with the same ragged structure as the input should
-            # also be sliced to pass to the reference
+            # be sliced to pass to the reference
             if isinstance(t, torch.Tensor) and _raggedness_matches(t, inp):
                 return t[i]
+            # allow the SampleInput to tell us how to slice it for ref calculation
+            elif isinstance(t, torch.Tensor) and hasattr(t, "_batch_dim"):
+                bdim = t._batch_dim  # type: ignore[attr]
+                if t.shape[bdim] == 1:
+                    return t[0]
+                else:
+                    return t.select(bdim, i)
             else:
                 return t
 
-        args = tree_map(_slice_njts, sample.args)
-        kwargs = tree_map(_slice_njts, sample.kwargs)
+        inp = _slice_input(sample.input)
+        args = tree_map(_slice_input, sample.args)
+        kwargs = tree_map(_slice_input, sample.kwargs)
 
         from torch._prims_common import canonicalize_dims
 
         # Need to adjust dim to apply on NJT component
         if "dim" in kwargs:
-            kwargs["dim"] = canonicalize_dims(sample.input.dim(), kwargs["dim"]) - 1
+            kwargs["dim"] = canonicalize_dims(nt_inp.dim(), kwargs["dim"]) - 1
             assert kwargs["dim"] >= 0
 
         # TODO: handle this
         assert "dims" not in kwargs
 
-        out_ref_component = op.op(component, *args, **kwargs)
+        out_ref_component = op.op(inp, *args, **kwargs)
 
         # TODO: handle list / tuple / non-NJT outputs
         assert not isinstance(out_ref_component, (list, tuple))
@@ -157,9 +172,71 @@ def sample_inputs_elementwise_njt_binary(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
     ):
         # TODO: account for non-contiguous NJTs here
-        # TODO: provide sample inputs for broadcasting cases and mixed (NT, T), (T, NT) inputs
         njt2 = torch.randn_like(njt1)
         yield SampleInput(njt1, args=(njt2,), kwargs=dict(op_kwargs))
+
+        # broadcasting case: (B, j0, ...) with (B, 1, ...)
+        t = torch.randn(
+            (njt1.shape[0], 1, *njt1.shape[2:]),
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+        )
+        # used for slicing in unbind_reference()
+        t._batch_dim = 0
+        # (NT, T)
+        yield SampleInput(njt1, args=(t,), kwargs=dict(op_kwargs))
+        # (T, NT)
+        yield SampleInput(t, args=(njt1,), kwargs=dict(op_kwargs))
+
+        # broadcasting case: (B, j0, ...) with (1, 1...)
+        t = torch.randn(
+            [1 for _ in range(njt1.dim())],
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+        )
+        # used for slicing in unbind_reference()
+        t._batch_dim = 0
+        # (NT, T)
+        yield SampleInput(njt1, args=(t,), kwargs=dict(op_kwargs))
+        # (T, NT)
+        yield SampleInput(t, args=(njt1,), kwargs=dict(op_kwargs))
+
+        # broadcasting case: (B, j0, ...) with (...)
+        t = torch.randn(
+            njt1.shape[2:], device=device, dtype=dtype, requires_grad=requires_grad
+        )
+        # (NT, T)
+        yield SampleInput(njt1, args=(t,), kwargs=dict(op_kwargs))
+        # (T, NT)
+        yield SampleInput(t, args=(njt1,), kwargs=dict(op_kwargs))
+
+        # broadcasting case: (B, j0, ...) with scalar
+        t = torch.randn((), device=device, dtype=dtype, requires_grad=requires_grad)
+        # (NT, T)
+        yield SampleInput(njt1, args=(t,), kwargs=dict(op_kwargs))
+        # (T, NT)
+        yield SampleInput(t, args=(njt1,), kwargs=dict(op_kwargs))
+
+    # mixed broadcasting case: (B, j0, 1) with (B, 1, D)
+    B = 4
+    D = 16
+    njt = random_nt_from_dims(
+        (B, None, 1),
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
+        layout=torch.jagged,
+    )
+    t = torch.randn(B, 1, D, device=device, dtype=dtype, requires_grad=requires_grad)
+    # used for slicing in unbind_reference()
+    t._batch_dim = 0
+
+    # (NT, T)
+    yield SampleInput(njt, args=(t,), kwargs=dict(op_kwargs))
+    # (T, NT)
+    yield SampleInput(t, args=(njt,), kwargs=dict(op_kwargs))
 
 
 def sample_inputs_njt_reduction(
@@ -311,7 +388,7 @@ def sample_inputs_nn_functional_rms_norm(
     op_info, device, dtype, requires_grad, **kwargs
 ):
     for njt in _sample_njts(
-        device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[3, 4]
     ):
         # normalize over non-ragged dims
         for start_dim in range(2, njt.dim()):
