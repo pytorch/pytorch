@@ -1139,6 +1139,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.sym_min: lambda a, b: -1,
         torch.sym_not: lambda input: -1,
         torch.sym_ite: lambda a, b, c: -1,
+        torch.sym_sum: lambda args: -1,
         torch._sym_sqrt: lambda input: -1,
         torch._sym_cos: lambda input: -1,
         torch._sym_cosh: lambda input: -1,
