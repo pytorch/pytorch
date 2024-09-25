@@ -1843,6 +1843,16 @@
     CompositeExplicitAutograd: count_nonzero
   autogen: count_nonzero.out
 
+- func: count_nonzero.dtype_IntList_out(Tensor self, int[] dim, ScalarType dtype) -> Tensor
+  variants: function, method
+  dispatch:
+    CPU, CUDA: count_nonzero_dtype_intlist
+
+- func: count_nonzero.dtype_out(Tensor self, int dim, ScalarType dtype) -> Tensor
+  variants: function, method
+  dispatch:
+    CPU, CUDA: count_nonzero_dtype
+
 - func: cov(Tensor self, *, int correction=1, Tensor? fweights=None, Tensor? aweights=None) -> Tensor
   variants: function, method
 
