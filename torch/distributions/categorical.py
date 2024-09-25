@@ -1,8 +1,10 @@
+# mypy: allow-untyped-defs
 import torch
 from torch import nan
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import lazy_property, logits_to_probs, probs_to_logits
+
 
 __all__ = ["Categorical"]
 

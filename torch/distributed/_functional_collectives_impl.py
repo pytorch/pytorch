@@ -1,7 +1,9 @@
+# mypy: allow-untyped-defs
 from typing import List, Optional
 
 import torch
 import torch.distributed.distributed_c10d as c10d
+
 
 """
 This file contains the op impls for the legacy (c10d_functional) functional collectives.

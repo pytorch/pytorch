@@ -16,8 +16,7 @@ namespace ONNX_NAMESPACE {
 class ModelProto;
 }
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // This map is used to keep track of parameters that should be exported
 // externally. When `defer_weight_export` is true, the returned map contains
@@ -72,7 +71,7 @@ class TORCH_API ScriptModuleSerializer {
  public:
   explicit ScriptModuleSerializer(
       caffe2::serialize::PyTorchStreamWriter& export_writer)
-      : writer_(export_writer), current_source_range_tag_(0) {}
+      : writer_(export_writer) {}
 
   void writeFiles(const std::string& code_dir);
   void serialize(
@@ -138,7 +137,7 @@ class TORCH_API ScriptModuleSerializer {
   // just source information about where the node is, since bytecode inlines the
   // graph before saving it.
   SourceRangeTagMap source_range_tags_;
-  int64_t current_source_range_tag_;
+  int64_t current_source_range_tag_{0};
 };
 
 // For testing purposes
@@ -277,5 +276,4 @@ TORCH_API void save_jit_module_to_write_func(
     bool save_mobile_debug_info,
     const std::function<size_t(const void*, size_t)>& writer_func);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

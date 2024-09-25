@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 from typing import Tuple, Union
 
@@ -8,6 +9,7 @@ from torch._C._functorch import (
     unwrap_if_dead,
 )
 from torch.utils._exposed_in import exposed_in
+
 
 __all__ = [
     "exposed_in",

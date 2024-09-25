@@ -1,7 +1,9 @@
+# mypy: allow-untyped-defs
 import threading
 from contextlib import contextmanager
 
 import torch
+
 
 doc = """
 This is used when dynamo traces torch.nn.Parameter, which normally would not trace properly

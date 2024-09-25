@@ -1,7 +1,10 @@
+# mypy: allow-untyped-defs
 import abc
 import copy
+import logging
 import operator
 from collections import defaultdict
+from contextlib import contextmanager
 from copy import deepcopy
 from enum import Enum
 from typing import Any, cast, Dict, List, Optional, Set, Tuple, Union
@@ -20,7 +23,16 @@ from torch.export.exported_program import (
     TensorArgument,
 )
 from torch.fx._symbolic_trace import is_fx_tracing
+from torch.fx.graph_module import _print_readable
+from torch.fx.passes.tools_common import legalize_graph, NodeList
+from torch.fx.passes.utils.fuser_utils import erase_nodes, fuse_as_graphmodule
 from torch.utils._pytree import GetAttrKey, SequenceKey
+
+from ._remove_effect_tokens_pass import _remove_effect_tokens
+
+
+log = logging.getLogger(__name__)
+
 
 __all__ = ["InterpreterModule", "UnflattenedModule", "unflatten", "FlatArgsAdapter"]
 
@@ -29,12 +41,27 @@ class _AttrKind(Enum):
     PARAMETER = "parameter"
     BUFFER = "buffer"
     CONSTANT = "constant"
+    MODULE = "module"
+
+
+RUN_WITH_INTERPRETER = True
+
+
+@contextmanager
+def _disable_interpreter():
+    global RUN_WITH_INTERPRETER
+    old_flag = RUN_WITH_INTERPRETER
+    RUN_WITH_INTERPRETER = False
+    try:
+        yield
+    finally:
+        RUN_WITH_INTERPRETER = old_flag
 
 
 # Assign attribute 'from_obj' to the qualified name 'target' on 'to_module
 # This installs empty Modules where none exist yet if they are subpaths of target
 def _assign_attr(
-    from_obj: Union[torch.Tensor, torch.ScriptObject],
+    from_obj: Union[torch.Tensor, torch.ScriptObject, torch.nn.Module],
     to_module: torch.nn.Module,
     target: str,
     attr_kind: _AttrKind,
@@ -67,6 +94,9 @@ def _assign_attr(
             ),
         )
         setattr(to_module, field, from_obj)
+    elif attr_kind == _AttrKind.MODULE:
+        assert isinstance(from_obj, torch.nn.Module)
+        setattr(to_module, field, from_obj)
 
 
 class InterpreterModule(torch.nn.Module):
@@ -82,13 +112,18 @@ class InterpreterModule(torch.nn.Module):
         super().__init__()
         self.graph = graph
         self.graph.owning_module = self
+        self._run_with_interpeter = RUN_WITH_INTERPRETER
 
     def forward(self, *args, **kwargs):
         assert self.graph_module is not None, "Didn't finalize this InterpreterModule"
-        if torch.compiler.is_dynamo_compiling():
+        if not is_fx_tracing() and (
+            torch.compiler.is_dynamo_compiling() or not self._run_with_interpeter
+        ):
             # Dynamo cannot trace through torch.fx.Interpreter, so fall back to
             # GraphModule codegen in this instance.
-            return self.graph_module(*args, **kwargs)
+            # Patch the codegened forward to run with this InterpreterModule,
+            # so attribute accesses, etc. are on this module instead.
+            return type(self.graph_module).forward(self, *args, **kwargs)
         else:
             if kwargs:
                 # Handle **kwargs. FX only natively supports positional
@@ -129,6 +164,22 @@ class InterpreterModule(torch.nn.Module):
             if node.op == "placeholder":
                 self.arg_names.append(node.target)
 
+    def print_readable(
+        self,
+        print_output=True,
+        include_stride=False,
+        include_device=False,
+        colored=False,
+    ):
+        return _print_readable(
+            self,
+            "InterpreterModule",
+            print_output,
+            include_stride,
+            include_device,
+            colored,
+        )
+
 
 class FlatArgsAdapter(abc.ABC):
     """
@@ -161,10 +212,12 @@ class UnflattenedModule(torch.nn.Module):
         export_graph = deepcopy(export_module.graph)
         self.graph_signature = deepcopy(export_module.graph_signature)
         self.graph = torch.fx.Graph()
+        self.graph.owning_module = self
         self.module_call_graph = deepcopy(export_module.module_call_graph)
         self.flat_args_adapter = flat_args_adapter
         # Flag to indicate whether args have been adapted.
         self.adapted = False
+        self._run_with_interpeter = RUN_WITH_INTERPRETER
 
         _inplace_buffer_mutations(export_graph, self.graph_signature)
         _outline_submodules(export_graph, self)
@@ -188,7 +241,9 @@ class UnflattenedModule(torch.nn.Module):
         for name in self.graph_signature.parameters:  # this loop adds used params
             param = state_dict[name]
             if id(param) not in id_to_param:
-                id_to_param[id(param)] = torch.nn.Parameter(param.clone())
+                id_to_param[id(param)] = torch.nn.Parameter(
+                    param.clone(), requires_grad=param.requires_grad
+                )
 
             _assign_attr(
                 id_to_param[id(param)],
@@ -384,6 +439,7 @@ class UnflattenedModule(torch.nn.Module):
         assert [fqn for fqn, _ in self.named_modules(remove_duplicate=False)] == list(
             fqn_order.keys()
         )
+        self.graph.lint()
 
     def _print_graph(self):
         for fqn, mod in self.named_modules():
@@ -456,10 +512,29 @@ class UnflattenedModule(torch.nn.Module):
             _check_input_constraints_for_graph(
                 self.input_placeholders, new_flat_args_with_path, self.range_constraints
             )
-        tree_out = torch.fx.Interpreter(self, graph=self.graph).run(
-            *flat_args, enable_io_processing=False
-        )
+        if torch.compiler.is_dynamo_compiling() and not self._run_with_interpreter:
+            tree_out = torch.fx.GraphModule(self, self.graph)(*flat_args)
+        else:
+            tree_out = torch.fx.Interpreter(self, graph=self.graph).run(
+                *flat_args, enable_io_processing=False
+            )
         return pytree.tree_unflatten(tree_out, signature.out_spec)
+
+    def print_readable(
+        self,
+        print_output=True,
+        include_stride=False,
+        include_device=False,
+        colored=False,
+    ):
+        return _print_readable(
+            self,
+            "UnflattenedModule",
+            print_output,
+            include_stride,
+            include_device,
+            colored,
+        )
 
 
 def unflatten(
@@ -484,6 +559,9 @@ def unflatten(
         An instance of :class:`UnflattenedModule`, which has the same module
         hierarchy as the original eager module pre-export.
     """
+    if module.verifier.dialect == "TRAINING":
+        raise RuntimeError("Unflattener doesn't support non-functional training IR yet")
+    module = _remove_effect_tokens(module)
     return UnflattenedModule(module, flat_args_adapter)
 
 
@@ -556,9 +634,13 @@ def _compute_accessor(parent_fqn: str, child_fqn: str) -> str:
     parent_split = parent_fqn.split(".")
     child_split = child_fqn.split(".")
 
-    assert (
-        child_split[: len(parent_split)] == parent_split
-    ), f"Child module '{child_fqn}' is not a descendant of parent module '{parent_fqn}'"
+    # TODO: support skip connection by inlining the child module.
+    if child_split[: len(parent_split)] != parent_split:
+        raise RuntimeError(
+            f"Child module '{child_fqn}' is not a descendant of parent mldule '{parent_fqn}'."
+            "This is currently unsupported."
+            "Please try to make child module attach to parent module direclty."
+        )
     return ".".join(child_split[len(parent_split) :])
 
 
@@ -645,12 +727,12 @@ def _add_submodule(mod: torch.nn.Module, target: str, module_to_add: torch.nn.Mo
 class _ModuleFrame:
     def __init__(
         self,
-        flat_graph,
-        nodes,
+        flat_graph: torch.fx.Graph,
+        nodes: Tuple[torch.fx.Node, ...],
         seen_nodes,
         seen_modules,
         parent,
-        module_stack,
+        module_stack: List[str],
         module_id,
         module_call_graph: Dict[str, ModuleCallSignature],
         module: Optional[torch.nn.Module] = None,
@@ -730,13 +812,19 @@ class _ModuleFrame:
                     )
                     if isinstance(arg, ConstantArgument):
                         continue
-                    flat_arg_node.meta = copy.copy(self.seen_nodes[arg.name].meta)
-                    self.node_to_placeholder[self.seen_nodes[arg.name]] = flat_arg_node
+
+                    if arg.name in self.seen_nodes:
+                        flat_arg_node.meta = copy.copy(self.seen_nodes[arg.name].meta)
+                        self.node_to_placeholder[
+                            self.seen_nodes[arg.name]
+                        ] = flat_arg_node
 
             with self.parent.graph.inserting_before(self.parent_call_module):
                 input_nodes: List[Optional[torch.fx.Node]] = []
                 for input in signature.inputs:
                     if isinstance(input, ConstantArgument) and input.value is None:
+                        input_nodes.append(None)
+                    elif input.name not in self.seen_nodes:
                         input_nodes.append(None)
                     else:
                         assert isinstance(input, (TensorArgument, SymIntArgument))
@@ -781,17 +869,59 @@ class _ModuleFrame:
         placeholder_node.meta = copy.copy(x.meta)
         self.node_to_placeholder[x] = placeholder_node
 
+    def copy_sym_call_function(self, x):
+        # This only exists because we deduplicate sym_size nodes in the flat export graph,
+        # and if preserve_module_call_signature is set, we may not be able to pass sym_size
+        # nodes, or their downstream users, as inputs to submodule calls.
+        # To avoid this we copy these call_function nodes with sym_type results.
+        # This should however only be done for sym_type nodes - call_function nodes on tensors
+        # should not be deduplicated in the first place.
+        args = pytree.tree_map_only(torch.fx.Node, self.remap_input, x.args)
+        kwargs = pytree.tree_map_only(torch.fx.Node, self.remap_input, x.kwargs)
+        node = self.graph.call_function(x.target, args, kwargs)
+        node.meta = copy.copy(x.meta)
+        self.node_map[x] = node
+        return node
+
     def remap_input(self, x):
         assert x.graph is self.flat_graph
         if x in self.node_map:
             return self.node_map[x]
-        if x not in self.node_to_placeholder:
+        self.print(f"remap_input({x})")
+        if x in self.node_to_placeholder:
+            return self.node_to_placeholder[x]
+        elif (
+            x.op == "placeholder"
+            or self.module_call_graph.get(self.fqn) is None
+            # allow placeholder creation if we are not preserving module call signature
+        ):
             self.add_placeholder(x)
             if self.parent_call_module is not None:
                 # Important to *prepend* the output to match how we are
                 # inserting placeholder nodes.
-                self.parent_call_module.insert_arg(0, self.parent.remap_input(x))
-        return self.node_to_placeholder[x]
+                with self.parent.graph.inserting_before(self.parent_call_module):
+                    self.parent_call_module.insert_arg(0, self.parent.remap_input(x))
+            return self.node_to_placeholder[x]
+        elif x.op == "call_function" and (
+            x.target
+            in (
+                torch.ops.aten.sym_size.int,
+                torch.ops.aten.item.default,
+                torch.ops.aten.unbind.int,
+                torch.ops.aten.sum.dim_IntList,
+                torch.ops.aten.view.default,
+                torch.ops.aten.diff.default,
+            )
+            or (hasattr(x.target, "__module__") and x.target.__module__ == "_operator")
+        ):
+            # export deduplicates sym_size nodes, and may need to re-copy them
+            # if module call signature needs to be preserved
+            self.copy_sym_call_function(x)
+            return self.node_map[x]
+        else:
+            raise RuntimeError(
+                f"Could not run remap_input() on op type: {x.op} for node {x}"
+            )
 
     def finalize_outputs(self):
         orig_outputs = []
@@ -800,18 +930,32 @@ class _ModuleFrame:
         if signature is not None and self.parent is not None:
             for output in signature.outputs:
                 if isinstance(output, (TensorArgument, SymIntArgument)):
-                    orig_outputs.append(self.seen_nodes[output.name])
+                    if output.name in self.seen_nodes:
+                        orig_outputs.append(self.seen_nodes[output.name])
+                    else:
+                        orig_outputs.append(None)
                 else:
                     raise RuntimeError(
                         f"Unsupported data type for output node: {output}"
                     )
 
+            def get_actual_output_node(output):
+                if output is None:
+                    return None
+
+                seen_node = self.seen_nodes[output.name]
+                if seen_node in self.node_map:
+                    return self.node_map[seen_node]
+                elif seen_node in self.node_to_placeholder:
+                    return self.node_to_placeholder[seen_node]
+                else:
+                    raise RuntimeError(
+                        f"Could not find output node {output}. Graph: {self.graph}"
+                    )
+
             tree_out_node = _generate_unflatten(
                 self.module,
-                tuple(
-                    self.node_map[self.seen_nodes[output.name]]
-                    for output in orig_outputs
-                ),
+                tuple(get_actual_output_node(output) for output in orig_outputs),
                 signature.out_spec,
             )
             parent_out: Optional[torch.fx.Node] = _generate_flatten(
@@ -851,6 +995,8 @@ class _ModuleFrame:
             self.parent.node_map[orig_outputs[0]] = parent_out
         else:
             for i, orig_output in enumerate(orig_outputs):
+                if orig_output is None:
+                    continue
                 # Use Proxy to record getitem access.
                 proxy_out = torch.fx.Proxy(parent_out)[i].node  # type: ignore[index]
                 proxy_out.meta["val"] = orig_output.meta.get("val")
@@ -1123,3 +1269,178 @@ def _recursive_getattr(obj, attr_path):
         obj = getattr(obj, attr)
 
     return obj
+
+
+def _construct_inputs(
+    gm: torch.fx.GraphModule,
+    signature: ModuleCallSignature,
+    node_name_map: Dict[str, torch.fx.Node],
+) -> Tuple[List[torch.fx.Node], Dict[str, torch.fx.Node]]:
+    tree_unflatten_args: List[Optional[torch.fx.Node]] = []
+    for input_ in signature.inputs:
+        if isinstance(input_, ConstantArgument) and input_.value is None:
+            # Constants should be directly embedded into the graph and not used
+            # as inputs
+            tree_unflatten_args.append(None)
+        elif input_.name not in node_name_map:
+            # For unused inputs
+            tree_unflatten_args.append(None)
+        else:
+            tree_unflatten_args.append(node_name_map[input_.name])
+
+    # Insert unflatten call
+    unflatten_node = _generate_unflatten(gm, tree_unflatten_args, signature.in_spec)
+
+    assert signature.in_spec.num_children == 2
+
+    args_spec = signature.in_spec.children_specs[0]
+    assert args_spec.context is None
+    args_node = gm.graph.call_function(operator.getitem, (unflatten_node, 0))
+    args_nodes = [
+        gm.graph.call_function(operator.getitem, (args_node, i))
+        for i in range(args_spec.num_children)
+    ]
+
+    kwargs_spec = signature.in_spec.children_specs[1]
+    assert kwargs_spec.context is not None
+    kwargs_node = gm.graph.call_function(operator.getitem, (unflatten_node, 1))
+    kwargs_nodes = {
+        k: gm.graph.call_function(operator.getitem, (kwargs_node, k))
+        for k in kwargs_spec.context
+    }
+    return args_nodes, kwargs_nodes
+
+
+def _insert_call_module(
+    gm: torch.fx.GraphModule,
+    args_nodes: List[torch.fx.Node],
+    kwargs_nodes: Dict[str, torch.fx.Node],
+    module_to_swap: torch.nn.Module,
+    name: str,
+) -> torch.fx.Node:
+    _assign_attr(module_to_swap, gm, name, _AttrKind.MODULE)
+    module_node = gm.graph.call_module(name, tuple(args_nodes), kwargs_nodes)  # type: ignore[arg-type]
+    return module_node
+
+
+def _deconstruct_outputs(
+    gm: torch.fx.GraphModule,
+    signature: ModuleCallSignature,
+    module_node: torch.fx.Node,
+    node_name_map: Dict[str, torch.fx.Node],
+    orig_outputs: Tuple[torch.fx.Node, ...],
+) -> None:
+    flatten_node = _generate_flatten(gm, module_node, signature.out_spec)
+
+    for i, orig_output in enumerate(orig_outputs):
+        # Use Proxy to record getitem access.
+        proxy_out = torch.fx.Proxy(flatten_node)[i].node  # type: ignore[index]
+        orig_output.replace_all_uses_with(proxy_out, propagate_meta=True)
+
+        node_name_map[orig_output.name] = proxy_out
+
+
+def _swap_module_helper(
+    gm: torch.fx.GraphModule,
+    modules_to_swap: Dict[str, torch.nn.Module],
+    module_call_graph: Dict[str, ModuleCallSignature],
+) -> torch.fx.GraphModule:
+    log.debug("Starting graph:")
+    log.debug(gm.graph)
+
+    legalize_graph(gm)
+
+    partitions: Dict[str, NodeList] = defaultdict(list)
+
+    node_name_map: Dict[str, torch.fx.Node] = {
+        node.name: node for node in gm.graph.nodes
+    }
+
+    # TODO: Handle the duplicate module case
+    for node in gm.graph.nodes:
+        if nn_module_stack := node.meta.get("nn_module_stack"):
+            for path, _ in nn_module_stack.values():
+                if path in modules_to_swap:
+                    partitions[path].append(node)
+                    break
+
+    for name, nodes in partitions.items():
+        """
+        Given a graph like the following, and we want to swap out the submodule "foo":
+        graph():
+            %x : [num_users=1] = placeholder[target=x]
+            %y : [num_users=2] = placeholder[target=y]
+            %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%y, %x), kwargs = {}), nn_module_stack = {"foo": ("foo", torch.nn.Module)}
+            %sub : [num_users=1] = call_function[target=torch.ops.aten.sub.Tensor](args = (%y, %add), kwargs = {}), nn_module_stack = {"bar": ("bar", torch.nn.Module)}
+            return (sub,)
+
+        We will first partition out foo's subgraph:
+        graph():
+            %x : [num_users=1] = placeholder[target=x]
+            %y : [num_users=2] = placeholder[target=y]
+            %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%y, %x), kwargs = {})
+            return add
+
+        And then insert an unflatten + call_module + flatten to replace the subgraph:
+        graph():
+            %x : [num_users=1] = placeholder[target=x]
+            %y : [num_users=1] = placeholder[target=y]
+
+            %_spec_0 : [num_users=1] = get_attr[target=_spec_0]
+            %tree_unflatten : [num_users=2] = call_function[target=torch.utils._pytree.tree_unflatten](args = ([%x, %y], %_spec_0), kwargs = {})
+            %getitem : [num_users=2] = call_function[target=operator.getitem](args = (%tree_unflatten, 0), kwargs = {})
+            %getitem_1 : [num_users=1] = call_function[target=operator.getitem](args = (%getitem, 0), kwargs = {})
+            %getitem_2 : [num_users=1] = call_function[target=operator.getitem](args = (%getitem, 1), kwargs = {})
+            %getitem_3 : [num_users=0] = call_function[target=operator.getitem](args = (%tree_unflatten, 1), kwargs = {})
+            %foo : [num_users=0] = call_module[target=foo](args = (%getitem_1, %getitem_2), kwargs = {})
+            %_spec_1 : [num_users=1] = get_attr[target=_spec_1]
+            %tree_flatten_spec : [num_users=1] = call_function[target=torch.fx._pytree.tree_flatten_spec](args = (None, %_spec_1), kwargs = {})
+            %getitem_4 : [num_users=1] = call_function[target=operator.getitem](args = (%tree_flatten_spec, 0), kwargs = {})
+
+            %sub : [num_users=1] = call_function[target=torch.ops.aten.sub.Tensor](args = (%y, %getitem_4), kwargs = {})
+            return (%sub,)
+
+        The `tree_unflatten` call will construct tensor inputs into the input
+        format needed by the swapped eager module.
+        The `call_module` node should now reference the swapped torch.nn.Module.
+        The `tree_flatten_spec` call will deconstruct the eager outputs of the
+        swapped module into tensors.
+        """  # noqa: B950
+
+        submod_name = name.replace(".", "_")
+        sub_gm, orig_inputs, orig_outputs = fuse_as_graphmodule(
+            gm, nodes, f"fused_{submod_name}"
+        )
+
+        log.debug("Fused subgraph nodes:")
+        log.debug(sub_gm.graph)
+
+        signature: ModuleCallSignature = module_call_graph[name]
+
+        args_nodes, kwargs_nodes = _construct_inputs(gm, signature, node_name_map)
+        module_node = _insert_call_module(
+            gm, args_nodes, kwargs_nodes, modules_to_swap[name], name
+        )
+        _deconstruct_outputs(gm, signature, module_node, node_name_map, orig_outputs)
+
+        erase_nodes(gm, nodes)
+
+        log.debug("Swapped graph:")
+        log.debug(gm.graph)
+
+    legalize_graph(gm)
+
+    gm.recompile()
+
+    return gm
+
+
+def _swap_modules(
+    ep: ExportedProgram, modules_to_swap: Dict[str, torch.nn.Module]
+) -> torch.fx.GraphModule:
+    module_call_graph = {
+        entry.fqn: entry.signature for entry in ep.module_call_graph if entry.signature
+    }
+    gm = ep.module()
+    assert isinstance(gm, torch.fx.GraphModule)
+    return _swap_module_helper(gm, modules_to_swap, module_call_graph)

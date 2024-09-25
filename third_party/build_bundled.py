@@ -41,7 +41,7 @@ def create_bundled(d, outstream, include_files=False):
     """Write the information to an open outstream"""
     collected = collect_license(d)
     sorted_keys = sorted(collected.keys())
-    outstream.write('The Pytorch repository and source distributions bundle '
+    outstream.write('The PyTorch repository and source distributions bundle '
                     'several libraries that are \n')
     outstream.write('compatibly licensed.  We list these here.')
     files_to_include = []
@@ -107,16 +107,16 @@ def identify_license(f, exception=''):
             return 'Apache-2.0'
         elif 'libhungarian' in txt:
             # Used in opentelemetry-cpp/tools/vcpkg/ports/hungarian
-            return 'Apache-2.0'
+            return 'Permissive (free to use)'
         elif 'PDCurses' in txt:
             # Used in opentelemetry-cpp/tools/vcpkg/ports/pdcurses
-            return 'Apache-2.0'
+            return 'Public Domain for core'
         elif 'Copyright1999UniversityofNorthCarolina' in txt:
             # Used in opentelemetry-cpp/tools/vcpkg/ports/pqp
             return 'Apache-2.0'
         elif 'sigslot' in txt:
             # Used in opentelemetry-cpp/tools/vcpkg/ports/sigslot
-            return 'Apache-2.0'
+            return 'Public Domain'
         elif squeeze("Clarified Artistic License") in txt:
             return 'Clarified Artistic License'
         elif all([squeeze(m) in txt.lower() for m in bsd3_txt]):

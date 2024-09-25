@@ -1,26 +1,25 @@
 import operator
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-toq = torch.ops.quantized
-
-import torch.ao.nn.quantized as nnq
-import torch.ao.nn.quantized.dynamic as nnqd
+import torch.ao.nn.intrinsic as nni
+import torch.ao.nn.intrinsic.qat as nniqat
 import torch.ao.nn.intrinsic.quantized as nniq
 import torch.ao.nn.intrinsic.quantized.dynamic as nniqd
-import torch.ao.nn.intrinsic.qat as nniqat
-import torch.ao.nn.intrinsic as nni
 import torch.ao.nn.qat as nnqat
 import torch.ao.nn.qat.dynamic as nnqatd
-from torch.ao.quantization.backend_config import get_native_backend_config
-import torch.ao.quantization.fx._lower_to_native_backend as \
-    _lower_to_native_backend
+import torch.ao.nn.quantized as nnq
+import torch.ao.nn.quantized.dynamic as nnqd
+import torch.ao.quantization.fx._lower_to_native_backend as _lower_to_native_backend
 import torch.ao.quantization.quantization_mappings as quantization_mappings
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.ao.quantization.backend_config import get_native_backend_config
 
 from .ns_types import NSNodeTargetType
 
-from typing import Callable, Dict, List, Optional, Set, Tuple
+
+toq = torch.ops.quantized
 
 
 def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
@@ -102,8 +101,8 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         {
             F.relu,
             nn.ReLU,
-            'relu',
-            'relu_',
+            "relu",
+            "relu_",
             torch.relu,
         },
         # maxpool
@@ -122,8 +121,8 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         # sigmoid
         {
             torch.sigmoid,
-            'sigmoid',
-            'sigmoid_',
+            "sigmoid",
+            "sigmoid_",
             nn.Sigmoid,
             F.sigmoid,
         },
@@ -236,13 +235,13 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nn.Tanh,
             F.tanh,
             torch.tanh,
-            'tanh_',
-            'tanh',
+            "tanh_",
+            "tanh",
         },
         # F.hardsigmoid
         {
-            'hardsigmoid_',
-            'hardsigmoid',
+            "hardsigmoid_",
+            "hardsigmoid",
             F.hardsigmoid,
             nn.Hardsigmoid,
         },
@@ -364,7 +363,6 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
     ]
 
     for pattern, config in backend_config._pattern_complex_format_to_config.items():
-
         # pattern format: (c, (b, a))
         first_element = pattern
         # look from the end, because pattern is in reverse order
@@ -412,8 +410,10 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
     # Add function swaps from default lowering path
     #
 
-    for source, (target1, target2) in \
-            _lower_to_native_backend.STATIC_LOWER_FUNCTIONAL_MAP.items():
+    for source, (  # type:ignore[assignment]
+        target1,
+        target2,
+    ) in _lower_to_native_backend.STATIC_LOWER_FUNCTIONAL_MAP.items():
         new_connections.append((source, target1))
         new_connections.append((source, target2))
 
@@ -422,7 +422,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         _lower_to_native_backend.QBIN_RELU_OP_MAPPING,
         quantization_mappings.DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS,
     ):
-        for source, target in source_to_target.items():
+        for source, target in source_to_target.items():  # type:ignore[assignment]
             new_connections.append((source, target))
 
     #
@@ -432,9 +432,8 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
     for source_to_target in (
         quantization_mappings.DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS,
     ):
-        for source, target in source_to_target.items():
+        for source, target in source_to_target.items():  # type:ignore[assignment]
             new_connections.append((source, target))
-
 
     # add the new connections from backend_config
     for item1, item2 in new_connections:
@@ -696,30 +695,29 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
     }
 
     METHS_IO_TYPE_FP32_OR_INT8: Set[NSNodeTargetType] = {
-        'sigmoid_',
-        'sigmoid',
-        'tanh_',
-        'tanh',
-        'hardsigmoid_',
-        'hardsigmoid',
-        'relu_',
-        'relu',
+        "sigmoid_",
+        "sigmoid",
+        "tanh_",
+        "tanh",
+        "hardsigmoid_",
+        "hardsigmoid",
+        "relu_",
+        "relu",
     }
 
     return {
-        'funs_io_type_fp32': FUNS_IO_TYPE_FP32,
-        'funs_io_type_fp16': FUNS_IO_TYPE_FP16,
-        'funs_io_type_int8': FUNS_IO_TYPE_INT8,
-        'funs_io_type_fp32_or_int8': FUNS_IO_TYPE_FP32_OR_INT8,
-        'mods_io_type_fp32': MODS_IO_TYPE_FP32,
-        'mods_io_type_int8': MODS_IO_TYPE_INT8,
-        'mods_io_type_fp32_or_int8': MODS_IO_TYPE_FP32_OR_INT8,
-        'meths_io_type_fp32_or_int8': METHS_IO_TYPE_FP32_OR_INT8,
+        "funs_io_type_fp32": FUNS_IO_TYPE_FP32,
+        "funs_io_type_fp16": FUNS_IO_TYPE_FP16,
+        "funs_io_type_int8": FUNS_IO_TYPE_INT8,
+        "funs_io_type_fp32_or_int8": FUNS_IO_TYPE_FP32_OR_INT8,
+        "mods_io_type_fp32": MODS_IO_TYPE_FP32,
+        "mods_io_type_int8": MODS_IO_TYPE_INT8,
+        "mods_io_type_fp32_or_int8": MODS_IO_TYPE_FP32_OR_INT8,
+        "meths_io_type_fp32_or_int8": METHS_IO_TYPE_FP32_OR_INT8,
     }
 
 
 def get_unmatchable_types_map() -> Dict[str, Set[NSNodeTargetType]]:
-
     FUNS_UNMATCHABLE: Set[NSNodeTargetType] = {
         torch.quantize_per_tensor,
         operator.getitem,
@@ -730,32 +728,32 @@ def get_unmatchable_types_map() -> Dict[str, Set[NSNodeTargetType]]:
     }
 
     METHS_UNMATCHABLE: Set[NSNodeTargetType] = {
-        'to',
-        'dequantize',
-        'reshape',
-        'view',
-        'unsqueeze_',
-        'unsqueeze',
-        'transpose',
-        'squeeze_',
-        'squeeze',
-        'size',
-        'shape',
-        'resize_',
-        'repeat_interleave',
-        'repeat',
-        'permute',
-        'numel',
-        'mean',
-        'detach_',
-        'detach',
-        'contiguous',
-        'clamp',
-        'chunk',
+        "to",
+        "dequantize",
+        "reshape",
+        "view",
+        "unsqueeze_",
+        "unsqueeze",
+        "transpose",
+        "squeeze_",
+        "squeeze",
+        "size",
+        "shape",
+        "resize_",
+        "repeat_interleave",
+        "repeat",
+        "permute",
+        "numel",
+        "mean",
+        "detach_",
+        "detach",
+        "contiguous",
+        "clamp",
+        "chunk",
     }
 
     return {
-        'funs_unmatchable': FUNS_UNMATCHABLE,
-        'mods_unmatchable': MODS_UNMATCHABLE,
-        'meths_unmatchable': METHS_UNMATCHABLE,
+        "funs_unmatchable": FUNS_UNMATCHABLE,
+        "mods_unmatchable": MODS_UNMATCHABLE,
+        "meths_unmatchable": METHS_UNMATCHABLE,
     }

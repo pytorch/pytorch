@@ -3,7 +3,7 @@ from collections import defaultdict
 from typing import Dict
 
 import torch
-from torch.distributed._tensor.experimental.tp_transform import (
+from torch.distributed._tensor.experimental._tp_transform import (
     tensor_parallel_transformation,
 )
 from torch.distributed.tensor.parallel.style import (
@@ -43,7 +43,7 @@ class MLPListModule(torch.nn.Module):
 
 
 class DummyModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fc = torch.nn.Linear(3, 5)
         self.bn = torch.nn.BatchNorm1d(5)

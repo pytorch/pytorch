@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import functools
 import logging
@@ -26,7 +27,6 @@ import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed._state_dict_utils import _gather_state_dict
-from torch.distributed._tensor import DTensor, Replicate
 from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
@@ -52,7 +52,9 @@ from torch.distributed.fsdp.api import (
     StateDictSettings,
     StateDictType,
 )
+from torch.distributed.tensor import DTensor, Replicate
 from torch.utils._pytree import tree_map_only
+
 
 if TYPE_CHECKING:
     from torch.distributed._shard.sharded_tensor import ShardedTensor
@@ -340,14 +342,14 @@ def _broadcast_processed_state(
     group: Optional[dist.ProcessGroup],
 ) -> Dict[str, Any]:
     objects: List[Any] = [None]
-    if fsdp_state.rank == 0:
+    if dist.get_rank(group) == 0:
         objects[0] = tree_map_only(
             torch.Tensor,
             lambda v: v.cpu() if v.dim() == 0 else _PosDimTensorInfo(v.shape, v.dtype),  # type: ignore[union-attr]
             optim_state,
         )
     dist.broadcast_object_list(objects, src=0, group=group)
-    if fsdp_state.rank == 0:
+    if dist.get_rank(group) == 0:
         return optim_state
     else:
         return objects[0]
@@ -356,7 +358,7 @@ def _broadcast_processed_state(
 def _broadcast_state(
     fsdp_state: _FSDPState, state: Any, group: Optional[dist.ProcessGroup]
 ) -> Any:
-    if fsdp_state.rank == 0:
+    if dist.get_rank(group) == 0:
         if not isinstance(state, torch.Tensor) or state.dim() == 0:
             return state
         tensor = state.to(fsdp_state.compute_device)

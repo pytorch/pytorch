@@ -5,24 +5,24 @@ import dataclasses
 import functools
 import inspect
 import sys
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 from torch._subclasses.fake_tensor import is_fake
 
-from .. import polyfill, variables
-from ..bytecode_transformation import (
-    create_call_function,
-    create_call_method,
-    create_instruction,
-    create_load_method,
-)
+from .. import polyfills, variables
+from ..bytecode_transformation import create_call_function, create_instruction
 from ..eval_frame import skip_code
-from ..exc import unimplemented
+from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, GetItemSource
+from ..source import AttrSource, GetItemSource, is_from_local_source
 from ..utils import dict_keys, dict_values, istype, specialize_symnode
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
 
 # [Adding a new supported class within the keys of ConstDictVarialble]
 # - Add its tracker type to is_hashable
@@ -72,7 +72,7 @@ class ConstDictVariable(VariableTracker):
         Note that it's also fine to put VTs into dictionaries and sets, but doing so does not take into account aliasing
         """
 
-        def __init__(self, vt):
+        def __init__(self, vt) -> None:
             # We specialize SymNodes
             vt = specialize_symnode(vt)
             # TODO Temorarily remove to figure out what keys are we breaking on
@@ -128,8 +128,18 @@ class ConstDictVariable(VariableTracker):
             return Hashable._eq_impl(self.underlying_value, other)
 
     def __init__(
-        self, items: Dict[VariableTracker, VariableTracker], user_cls=dict, **kwargs
-    ):
+        self,
+        items: Dict[VariableTracker, VariableTracker],
+        user_cls=dict,
+        **kwargs,
+    ) -> None:
+        # .clone() pass these arguments in kwargs but they're recreated a few
+        # lines below
+        if "original_items" in kwargs:
+            kwargs.pop("original_items")
+        if "should_reconstruct_all" in kwargs:
+            kwargs.pop("should_reconstruct_all")
+
         super().__init__(**kwargs)
 
         Hashable = ConstDictVariable._HashableTracker
@@ -145,6 +155,10 @@ class ConstDictVariable(VariableTracker):
             return key if isinstance(key, Hashable) else Hashable(key)
 
         self.items = {make_hashable(x): v for x, v in items.items()}
+        # need to reconstruct everything if the dictionary is an intermediate value
+        # or if a pop/delitem was executed
+        self.should_reconstruct_all = not is_from_local_source(self.source)
+        self.original_items = items.copy()
         self.user_cls = user_cls
 
     def as_proxy(self):
@@ -171,7 +185,7 @@ class ConstDictVariable(VariableTracker):
     def python_type(self):
         return self.user_cls
 
-    def __contains__(self, vt):
+    def __contains__(self, vt) -> bool:
         assert isinstance(vt, VariableTracker)
         Hashable = ConstDictVariable._HashableTracker
         return (
@@ -180,35 +194,72 @@ class ConstDictVariable(VariableTracker):
             and not isinstance(self.items[Hashable(vt)], variables.DeletedVariable)
         )
 
+    def len(self):
+        return len(
+            [
+                x
+                for x in self.items.values()
+                if not isinstance(x, variables.DeletedVariable)
+            ]
+        )
+
+    def _maybe_realize(self, item):
+        return item.realize() if item else item
+
     def reconstruct(self, codegen):
         # instructions to load collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
-            codegen.extend_output(
-                [
-                    codegen.create_load_python_module(collections, True),
-                    codegen.create_load_attr("OrderedDict"),
-                ]
+            codegen.add_push_null(
+                lambda: codegen.extend_output(
+                    [
+                        codegen.create_load_python_module(collections),
+                        codegen.create_load_attr("OrderedDict"),
+                    ]
+                )
             )
         # instructions to build the dict keys and values
+        num_args = 0
         for key, value in self.items.items():
-            codegen(key.vt)
-            codegen(value)
+            # We can safely call realize() here as it won't introduce any new guards
+            is_new_item = (
+                self._maybe_realize(self.original_items.get(key.vt)) != value.realize()
+            )
+
+            if is_new_item or self.should_reconstruct_all:
+                codegen(key.vt)
+                codegen(value)
+                num_args += 1
+
         # BUILD_MAP and calling collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
             codegen.extend_output(
                 [
-                    create_instruction("BUILD_MAP", arg=len(self.items)),
+                    create_instruction("BUILD_MAP", arg=num_args),
                     *create_call_function(1, False),
                 ]
             )
         # BUILD_MAP only if user_cls is dict
         else:
-            codegen.append_output(create_instruction("BUILD_MAP", arg=len(self.items)))
+            codegen.append_output(create_instruction("BUILD_MAP", arg=num_args))
 
-    def getitem_const(self, arg: VariableTracker):
+    def getitem_const_raise_exception_if_absent(
+        self, tx: "InstructionTranslator", arg: VariableTracker
+    ):
+        key = ConstDictVariable._HashableTracker(arg)
+        if key not in self.items:
+            raise_observed_exception(KeyError, tx)
+        return self.items[key]
+
+    def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         key = ConstDictVariable._HashableTracker(arg)
         if key not in self.items:
             unimplemented(f"dict KeyError: {arg.value}")
+        return self.items[key]
+
+    def maybe_getitem_const(self, arg: VariableTracker):
+        key = ConstDictVariable._HashableTracker(arg)
+        if key not in self.items:
+            return None
         return self.items[key]
 
     def call_method(
@@ -224,6 +275,7 @@ class ConstDictVariable(VariableTracker):
             ListIteratorVariable,
             ListVariable,
             TupleVariable,
+            UserDefinedObjectVariable,
         )
 
         Hashable = ConstDictVariable._HashableTracker
@@ -232,7 +284,7 @@ class ConstDictVariable(VariableTracker):
 
         if name == "__getitem__":
             assert len(args) == 1
-            return self.getitem_const(args[0])
+            return self.getitem_const_raise_exception_if_absent(tx, args[0])
         elif name == "items":
             assert not (args or kwargs)
             if self.source:
@@ -262,6 +314,7 @@ class ConstDictVariable(VariableTracker):
             self.items[Hashable(args[0])] = args[1]
             return ConstantVariable.create(None)
         elif name == "__delitem__" and arg_hashable and self.mutable_local:
+            self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             self.items.__delitem__(Hashable(args[0]))
             return ConstantVariable.create(None)
@@ -272,51 +325,81 @@ class ConstDictVariable(VariableTracker):
             else:
                 return args[1]
         elif name == "pop" and arg_hashable and self.mutable_local:
+            self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             return self.items.pop(Hashable(args[0]))
         elif name == "clear":
+            self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             self.items.clear()
             return ConstantVariable.create(None)
-        elif (
-            name == "update"
-            and len(args) == 1
-            and isinstance(
+        elif name == "update" and self.mutable_local:
+            is_args_supported = len(args) == 1 and isinstance(
                 args[0],
                 (
                     ConstDictVariable,
                     ListVariable,
                     TupleVariable,
                     ListIteratorVariable,
+                    variables.IteratorVariable,
+                    UserDefinedObjectVariable,
                 ),
             )
-            and self.mutable_local
-        ):
-            tx.output.side_effects.mutation(self)
-            if isinstance(args[0], ConstDictVariable):
-                dict_vt = args[0]
+
+            is_kwargs_supported = len(kwargs) > 0 and len(args) == 0
+
+            if is_args_supported or is_kwargs_supported:
+                tx.output.side_effects.mutation(self)
+                if len(args) == 1:
+                    if isinstance(args[0], ConstDictVariable):
+                        dict_vt = args[0]
+                    else:
+                        dict_vt = BuiltinVariable.call_custom_dict(tx, dict, args[0])
+                    self.items.update(dict_vt.items)
+                # Wrap strings
+                kwargs = {
+                    Hashable(ConstantVariable.create(k)): v for k, v in kwargs.items()
+                }
+                self.items.update(kwargs)
+                return ConstantVariable.create(None)
             else:
-                dict_vt = BuiltinVariable.call_custom_dict(tx, dict, args[0])
-            self.items.update(dict_vt.items)
-            # Wrap strings
-            kwargs = {
-                Hashable(ConstantVariable.create(k)): v for k, v in kwargs.items()
-            }
-            self.items.update(kwargs)
-            return ConstantVariable.create(None)
+                return super().call_method(tx, name, args, kwargs)
         elif name in ("get", "__getattr__") and args[0] in self:
-            return self.getitem_const(args[0])
+            return self.getitem_const(tx, args[0])
         elif name == "__contains__" and len(args) == 1:
             return ConstantVariable.create(args[0] in self)
+        elif name == "setdefault" and arg_hashable and self.mutable_local:
+            assert not kwargs
+            assert len(args) <= 2
+            value = self.maybe_getitem_const(args[0])
+            if value is not None:
+                return value
+            else:
+                if len(args) == 1:
+                    x = ConstantVariable.create(None)
+                else:
+                    x = args[1]
+                tx.output.side_effects.mutation(self)
+                self.items[Hashable(args[0])] = x
+                return x
         else:
             return super().call_method(tx, name, args, kwargs)
 
     def unpack_var_sequence(self, tx):
         return [x.vt for x in self.items.keys()]
 
+    def call_hasattr(self, tx, name):
+        # dict not allow setting arbitrary attributes. To check for hasattr, we can just check the __dict__ of the dict.
+        # OrderedDict though requires side effects tracking because it supports arbitrary setattr.
+        if self.user_cls is dict:
+            if name in self.user_cls.__dict__:
+                return ConstantVariable.create(True)
+            return ConstantVariable.create(False)
+        unimplemented(f"hasattr on {self.user_cls} is not supported")
+
 
 class DefaultDictVariable(ConstDictVariable):
-    def __init__(self, items, user_cls, default_factory=None, **kwargs):
+    def __init__(self, items, user_cls, default_factory=None, **kwargs) -> None:
         super().__init__(items, user_cls, **kwargs)
         assert user_cls is collections.defaultdict
         self.default_factory = default_factory
@@ -336,7 +419,7 @@ class DefaultDictVariable(ConstDictVariable):
     @staticmethod
     def is_supported_arg(arg):
         if isinstance(arg, variables.BuiltinVariable):
-            return arg.fn in [list, tuple, dict]
+            return arg.fn in (list, tuple, dict, set)
         else:
             return isinstance(arg, variables.functions.BaseUserFunctionVariable)
 
@@ -351,7 +434,7 @@ class DefaultDictVariable(ConstDictVariable):
             assert len(args) == 1
 
             if args[0] in self:
-                return self.getitem_const(args[0])
+                return self.getitem_const(tx, args[0])
             else:
                 if self.default_factory is None:
                     raise KeyError(f"{args[0]}")
@@ -365,6 +448,9 @@ class DefaultDictVariable(ConstDictVariable):
             return super().call_method(tx, name, args, kwargs)
 
 
+# TODO: Implementing this via inheritance rather than composition is a
+# footgun, because self method calls in dict will route back to the set
+# implementation, which is almost assuredly wrong
 class SetVariable(ConstDictVariable):
     """We model a sets as dictonary with None values"""
 
@@ -372,7 +458,7 @@ class SetVariable(ConstDictVariable):
         self,
         items: List[VariableTracker],
         **kwargs,
-    ):
+    ) -> None:
         items = dict.fromkeys(items, SetVariable._default_value())
         super().__init__(items, **kwargs)
 
@@ -430,7 +516,25 @@ class SetVariable(ConstDictVariable):
             assert not kwargs
             assert len(args) == 1
             return variables.UserFunctionVariable(
-                polyfill.set_isdisjoint
+                polyfills.set_isdisjoint
+            ).call_function(tx, [self, args[0]], {})
+        elif name == "intersection":
+            assert not kwargs
+            assert len(args) == 1
+            return variables.UserFunctionVariable(
+                polyfills.set_intersection
+            ).call_function(tx, [self, args[0]], {})
+        elif name == "union":
+            assert not kwargs
+            assert len(args) == 1
+            return variables.UserFunctionVariable(polyfills.set_union).call_function(
+                tx, [self, args[0]], {}
+            )
+        elif name == "difference":
+            assert not kwargs
+            assert len(args) == 1
+            return variables.UserFunctionVariable(
+                polyfills.set_difference
             ).call_function(tx, [self, args[0]], {})
         elif (
             name == "update"
@@ -450,10 +554,70 @@ class SetVariable(ConstDictVariable):
             else:
                 arg = args[0]
             return super().call_method(tx, "update", (arg,), kwargs)
+        elif name == "remove":
+            assert not kwargs
+            assert len(args) == 1
+            if args[0] not in self:
+                unimplemented("key does not exist")
+            return super().call_method(tx, "pop", args, kwargs)
+        elif name == "discard":
+            assert not kwargs
+            assert len(args) == 1
+            if args[0] in self:
+                return super().call_method(tx, "pop", args, kwargs)
+            else:
+                return ConstantVariable.create(value=None)
         return super().call_method(tx, name, args, kwargs)
 
-    def getitem_const(self, arg: VariableTracker):
+    def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         raise RuntimeError("Illegal to getitem on a set")
+
+
+class FrozensetVariable(SetVariable):
+    def __init__(
+        self,
+        items: List[VariableTracker],
+        **kwargs,
+    ) -> None:
+        super().__init__(items, **kwargs)
+
+    def debug_repr(self):
+        if not self.items:
+            return "frozenset()"
+        else:
+            return "{" + ",".join(k.vt.debug_repr() for k in self.items.keys()) + "}"
+
+    @property
+    def set_items(self):
+        return self.items.keys()
+
+    def python_type(self):
+        return frozenset
+
+    def as_python_constant(self):
+        return {k.vt.as_python_constant() for k in self.set_items}
+
+    def reconstruct(self, codegen):
+        codegen.foreach([x.vt for x in self.set_items])
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_global("frozenset"),
+                ]
+            )
+        )
+        codegen.extend_output(create_call_function(0, False))
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
+    ) -> "VariableTracker":
+        if name in ["add", "pop", "update", "remove", "discard", "clear"]:
+            raise RuntimeError(f"Illegal call_method {name} on a frozenset")
+        return super().call_method(tx, name, args, kwargs)
 
 
 class DictView(VariableTracker):
@@ -465,7 +629,7 @@ class DictView(VariableTracker):
 
     kv: Optional[str] = None
 
-    def __init__(self, dv_dict: ConstDictVariable, **kwargs):
+    def __init__(self, dv_dict: ConstDictVariable, **kwargs) -> None:
         super().__init__(**kwargs)
         assert self.kv in ("keys", "values")
         assert isinstance(dv_dict, ConstDictVariable)
@@ -489,12 +653,8 @@ class DictView(VariableTracker):
 
     def reconstruct(self, codegen):
         codegen(self.dv_dict)
-        codegen.extend_output(
-            [
-                create_load_method(self.kv),
-                *create_call_method(0),
-            ]
-        )
+        codegen.load_method(self.kv)
+        codegen.call_method(0)
 
     def call_method(
         self,
@@ -549,6 +709,8 @@ class DictValues(DictView):
 
 def _is_matching_transformers_cls(cls) -> bool:
     mod = sys.modules.get("transformers.file_utils")
+    if mod is None:
+        mod = sys.modules.get("transformers.utils.generic")
     return mod is not None and issubclass(cls, mod.ModelOutput)
 
 
@@ -557,14 +719,24 @@ def _is_matching_diffusers_cls(cls) -> bool:
     return mod is not None and issubclass(cls, mod.BaseOutput)
 
 
-def _call_hasattr_customobj(self, tx, name: str) -> "VariableTracker":
+def _call_hasattr_customobj(
+    self, tx: "InstructionTranslator", name: str
+) -> "VariableTracker":
     """Shared method between DataClassVariable and CustomizedDictVariable where items are attrs"""
+    if tx.output.side_effects.is_attribute_mutation(self):
+        try:
+            result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
+            return variables.ConstantVariable.create(
+                not isinstance(result, variables.DeletedVariable)
+            )
+        except KeyError:
+            pass
     if name in self.items or hasattr(self.user_cls, name):
         return ConstantVariable(True)
     elif istype(self.mutable_local, MutableLocal) and self.source is None:
         # Something created locally can't have any extra fields on it
         return ConstantVariable(False)
-    elif self.mutable_local is None and self.source:
+    elif self.source:
         # Maybe add a guard
         try:
             example = tx.output.root_tx.get_example_value(self.source)
@@ -579,154 +751,17 @@ def _call_hasattr_customobj(self, tx, name: str) -> "VariableTracker":
     )
 
 
-class DataClassVariable(ConstDictVariable):
-    """
-    This is a bit of a hack to deal with
-    transformers.file_utils.ModelOutput() from huggingface.
-
-    ModelOutput causes trouble because it a a mix of a dataclass and a
-    OrderedDict and it calls super() methods implemented in C.
-    """
-
-    # ModelOutput() excludes None, though generic datclasses don't
-    include_none = False
-
+class CustomizedDictVariable(ConstDictVariable):
     @staticmethod
-    @functools.lru_cache(None)
-    def _patch_once():
-        try:
-            from transformers.file_utils import ModelOutput
-
-            for obj in ModelOutput.__dict__.values():
-                if callable(obj):
-                    skip_code(obj.__code__)
-        except ImportError:
-            pass
-
-        try:
-            from diffusers.utils import BaseOutput
-
-            for obj in BaseOutput.__dict__.values():
-                if callable(obj):
-                    skip_code(obj.__code__)
-        except ImportError:
-            pass
-
-    @staticmethod
-    def is_matching_cls(cls):
+    def is_matching_cls_hf(cls):
         return _is_matching_transformers_cls(cls) or _is_matching_diffusers_cls(cls)
 
-    @classmethod
-    def is_matching_object(cls, obj):
-        return cls.is_matching_cls(type(obj))
-
-    @classmethod
-    def create(cls, user_cls, args, kwargs, options):
-        DataClassVariable._patch_once()
-
-        skip_code(user_cls.__init__.__code__)
-        keys = [f.name for f in dataclasses.fields(user_cls)]
-        bound = inspect.signature(user_cls).bind(*args, **kwargs)
-        bound.apply_defaults()
-        assert set(bound.arguments.keys()) == set(keys)
-        items = {}
-        for key in keys:
-            val = bound.arguments[key]
-            key = ConstantVariable.create(key)
-            if isinstance(val, VariableTracker):
-                items[key] = val
-            else:
-                if cls.include_none:
-                    assert variables.ConstantVariable.is_literal(val)
-                    items[key] = variables.ConstantVariable.create(val)
-                else:
-                    assert val is None, f"unexpected {val}"
-
-        if len(items) == 1 and not isinstance(items[keys[0]], variables.TensorVariable):
-            unimplemented("DataClassVariable iterator constructor")
-            # TODO(jansel): implement unpacking logic in ModelOutput.__post_init__
-
-        return cls(items, user_cls, **options)
-
-    @classmethod
-    def wrap(cls, builder, obj):
-        user_cls = type(obj)
-        keys = [f.name for f in dataclasses.fields(user_cls)]
-
-        excluded = []
-        items = {}
-        for key in keys:
-            # __init__ function of a dataclass might not have yet defined the key
-            if hasattr(obj, key):
-                val = getattr(obj, key)
-                var = builder.__class__(
-                    tx=builder.tx, source=AttrSource(builder.source, key)
-                )(val)
-                if val is not None or cls.include_none:
-                    key = ConstantVariable.create(key)
-                    items[key] = var
-                else:
-                    excluded.append(var)
-        return cls(items, user_cls)
-
-    def __init__(self, items, user_cls, **options):
-        super().__init__(items, user_cls, **options)
-        assert self.is_matching_cls(user_cls)
-
-    def as_proxy(self):
-        raise NotImplementedError
-
-    def reconstruct(self, codegen):
-        codegen.extend_output([codegen._create_load_const(self.user_cls)])
-        # All the keys are just wrapped strings
-        d = self.keys_as_python_constant()
-        codegen.foreach(d.values())
-        keys = tuple(d.keys())
-        codegen.extend_output(codegen.create_call_function_kw(len(keys), keys, True))
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        if name == "__getitem__":
-            assert not kwargs and len(args) == 1
-            val = args[0]
-            if val.python_type() == str:
-                return self.getitem_const(val)
-            else:
-                return self.call_method(tx, "to_tuple", [], {}).call_method(
-                    tx, "__getitem__", args, kwargs
-                )
-        elif name == "to_tuple":
-            assert not (args or kwargs)
-            return variables.TupleVariable(list(self.items.values()))
-        elif name == "__setattr__":
-            name = "__setitem__"
-        return super().call_method(tx, name, args, kwargs)
-
-    def var_getattr(self, tx, name: str) -> "VariableTracker":
-        name_vt = ConstantVariable.create(name)
-        if name_vt in self:
-            return self.call_method(tx, "__getitem__", [name_vt], {})
-        elif not self.include_none:
-            defaults = {f.name: f.default for f in dataclasses.fields(self.user_cls)}
-            if name in defaults:
-                assert variables.ConstantVariable.is_literal(defaults[name])
-                return variables.ConstantVariable.create(defaults[name])
-        super().var_getattr(tx, name)
-
-    call_hasattr = _call_hasattr_customobj
-
-
-class CustomizedDictVariable(ConstDictVariable):
     @staticmethod
     def is_matching_cls(cls):
         # True if using default OrderedDict.__init__ and did not implement __post_init__
         if (
             issubclass(cls, collections.OrderedDict)
+            and cls is not collections.OrderedDict
             and cls.__init__ is collections.OrderedDict.__init__
             and not hasattr(cls, "__post_init__")
         ):
@@ -734,7 +769,7 @@ class CustomizedDictVariable(ConstDictVariable):
         # hack for HF usecase:
         #   assume dataclass annotation for ModelOutput subclass
         #   assume self.create is AA to ModelOutput.__post_init__
-        return _is_matching_transformers_cls(cls) or _is_matching_diffusers_cls(cls)
+        return CustomizedDictVariable.is_matching_cls_hf(cls)
 
     @classmethod
     def is_matching_object(cls, obj):
@@ -768,9 +803,7 @@ class CustomizedDictVariable(ConstDictVariable):
                     )
 
             bound_args = {}
-            if _is_matching_transformers_cls(user_cls) or _is_matching_diffusers_cls(
-                user_cls
-            ):
+            if cls.is_matching_cls_hf(user_cls):
                 # Skip none
                 for k, v in bound.arguments.items():
                     if isinstance(v, ConstantVariable) and v.value is None or v is None:
@@ -796,9 +829,29 @@ class CustomizedDictVariable(ConstDictVariable):
     # called from builder.py
     @classmethod
     def wrap(cls, builder, obj):
-        raise NotImplementedError
+        user_cls = type(obj)
 
-    def __init__(self, items, user_cls, **options):
+        if not cls.is_matching_cls_hf(user_cls):
+            unimplemented("custom non-hf dict subclass wrap unimplemented")
+
+        items = builder.__class__(tx=builder.tx, source=builder.source)(
+            collections.OrderedDict(obj)
+        ).items
+
+        keys = [f.name for f in dataclasses.fields(user_cls)]
+        for key in keys:
+            # __init__ function of a dataclass might not have yet defined the key
+            if hasattr(obj, key):
+                val = getattr(obj, key)
+                var = builder.__class__(
+                    tx=builder.tx, source=AttrSource(builder.source, key)
+                )(val)
+                if val is not None:
+                    key = ConstantVariable.create(key)
+                    items[key] = var
+        return cls(items, user_cls)
+
+    def __init__(self, items, user_cls, **options) -> None:
         super().__init__(items, user_cls, **options)
         assert self.is_matching_cls(user_cls)
 
@@ -808,33 +861,38 @@ class CustomizedDictVariable(ConstDictVariable):
     # 'RETURN_VALUE triggered compile'
     # called from torch/_dynamo/codegen.py
     def reconstruct(self, codegen):
-        is_hf_model_output = _is_matching_transformers_cls(
-            self.user_cls
-        ) or _is_matching_diffusers_cls(self.user_cls)
+        is_hf_model_output = self.is_matching_cls_hf(self.user_cls)
 
-        # If the user class is a ModelOutput, then wrap the instance creation in
-        # torch._dynamo.disable(). Even though we mark the __post_init__ as skip
-        # in `create` function, this is not enough. TorchDynamo can still get
-        # triggered on the child functions of __post_init__. This upsets export.
-        # Since, we know that ModelOutput __post_init__ is not worth optimizing,
-        # we just wrap the instance creation in torch._dynamo.disable(),
-        # regardless whether its export or not.
-        if is_hf_model_output:
-            # load torch._dynamo.disable
-            codegen.append_output(codegen.create_load_global("torch", True, add=True))
-            codegen.append_output(codegen.create_load_attr("_dynamo"))
-            codegen.append_output(codegen.create_load_attr("disable"))
-        codegen.extend_output([codegen._create_load_const(self.user_cls)])
+        def gen_fn1():
+            # If the user class is a ModelOutput, then wrap the instance creation in
+            # torch._dynamo.disable(). Even though we mark the __post_init__ as skip
+            # in `create` function, this is not enough. TorchDynamo can still get
+            # triggered on the child functions of __post_init__. This upsets export.
+            # Since, we know that ModelOutput __post_init__ is not worth optimizing,
+            # we just wrap the instance creation in torch._dynamo.disable(),
+            # regardless whether its export or not.
+            if is_hf_model_output:
+                # load torch._dynamo.disable
+                def gen_fn2():
+                    codegen.append_output(codegen.create_load_global("torch", add=True))
+                    codegen.append_output(codegen.create_load_attr("_dynamo"))
+                    codegen.append_output(codegen.create_load_attr("disable"))
 
-        if is_hf_model_output:
-            # Wrap user_cls with disable
-            codegen.extend_output(create_call_function(1, False))
+                codegen.add_push_null(gen_fn2)
+
+            codegen.extend_output([codegen._create_load_const(self.user_cls)])
+
+            if is_hf_model_output:
+                # Wrap user_cls with disable
+                codegen.extend_output(create_call_function(1, False))
+
+        codegen.add_push_null(gen_fn1)
 
         # All the keys are just wrapped strings
         d = self.keys_as_python_constant()
         codegen.foreach(d.values())
         keys = tuple(d.keys())
-        codegen.extend_output(codegen.create_call_function_kw(len(keys), keys, True))
+        codegen.extend_output(codegen.create_call_function_kw(len(keys), keys, False))
 
     def call_method(
         self,
@@ -852,21 +910,34 @@ class CustomizedDictVariable(ConstDictVariable):
         ):
             # for python dict method without overridden
             return super().call_method(tx, name, args, kwargs)
-        elif name in ("__getitem__", "to_tuple", "__setitem__", "__setattr__"):
+        elif name in (
+            "__getitem__",
+            "to_tuple",
+            "__setitem__",
+            "__setattr__",
+            "__post_init__",
+        ):
             # for user overridden method
             return tx.inline_user_function_return(
                 variables.UserFunctionVariable(fn, source=source),
                 [self] + list(args),
                 kwargs,
             )
+        elif fn is getattr(collections.OrderedDict, name, None):
+            return super().call_method(tx, name, args, kwargs)
 
-        unimplemented("custom dict: call_method unimplemented name=%s", name)
+        unimplemented(f"custom dict: call_method unimplemented name={name}")
 
-    def var_getattr(self, tx, name: str) -> "VariableTracker":
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         name_vt = ConstantVariable.create(name)
         if name_vt in self:
             return self.call_method(tx, "__getitem__", [name_vt], {})
-        super().var_getattr(tx, name)
+        if dataclasses.is_dataclass(self.user_cls):
+            defaults = {f.name: f.default for f in dataclasses.fields(self.user_cls)}
+            if name in defaults:
+                assert variables.ConstantVariable.is_literal(defaults[name])
+                return variables.ConstantVariable.create(defaults[name])
+        return super().var_getattr(tx, name)
 
     call_hasattr = _call_hasattr_customobj
 
@@ -907,17 +978,23 @@ class HFPretrainedConfigVariable(VariableTracker):
     def is_matching_object(cls, obj):
         return cls.is_matching_cls(type(obj))
 
-    def __init__(self, obj, **kwargs):
+    def __init__(self, obj, **kwargs) -> None:
         super().__init__(**kwargs)
         self.obj = obj
         assert self.is_matching_cls(type(obj))
 
-    def var_getattr(self, tx, name: str) -> "VariableTracker":
-        from . import ConstantVariable
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+        from .builder import VariableBuilder
 
-        return ConstantVariable.create(getattr(self.obj, name))
+        try:
+            attr_value = getattr(self.obj, name)
+            attr_source = AttrSource(self.source, name)
+            return VariableBuilder(tx, attr_source)(attr_value)
 
-    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        except AttributeError:
+            unimplemented(f"getattr({self.value}, {name})")
+
+    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         return variables.ConstantVariable.create(hasattr(self.obj, name))
 
 
@@ -932,15 +1009,21 @@ class PythonSysModulesVariable(VariableTracker):
         return dict
 
     def reconstruct(self, codegen):
-        codegen.extend_output(
-            [
-                codegen.create_load_python_module(sys, True),
-                codegen.create_load_attr("modules"),
-            ]
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_python_module(sys),
+                    codegen.create_load_attr("modules"),
+                ]
+            )
         )
 
     def call_method(
-        self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+        self,
+        tx: "InstructionTranslator",
+        name,
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
     ):
         if name == "__getitem__":
             return self.call_getitem(tx, *args, **kwargs)
@@ -950,7 +1033,7 @@ class PythonSysModulesVariable(VariableTracker):
             return self.call_contains(tx, *args, **kwargs)
         unimplemented(f"sys.modules.{name}(*{args}, **{kwargs})")
 
-    def _contains_helper(self, tx, key: VariableTracker):
+    def _contains_helper(self, tx: "InstructionTranslator", key: VariableTracker):
         k = key.as_python_constant()
         has_key = k in sys.modules
         install_guard(
@@ -960,12 +1043,15 @@ class PythonSysModulesVariable(VariableTracker):
         )
         return k, has_key
 
-    def call_contains(self, tx, key: VariableTracker):
+    def call_contains(self, tx: "InstructionTranslator", key: VariableTracker):
         k, has_key = self._contains_helper(tx, key)
         return ConstantVariable.create(value=has_key)
 
     def call_get(
-        self, tx, key: VariableTracker, default: Optional[VariableTracker] = None
+        self,
+        tx: "InstructionTranslator",
+        key: VariableTracker,
+        default: Optional[VariableTracker] = None,
     ):
         from .builder import VariableBuilder
 
@@ -982,7 +1068,7 @@ class PythonSysModulesVariable(VariableTracker):
 
         return ConstantVariable.create(value=None)
 
-    def call_getitem(self, tx, key: VariableTracker):
+    def call_getitem(self, tx: "InstructionTranslator", key: VariableTracker):
         from .builder import VariableBuilder
 
         k, has_key = self._contains_helper(tx, key)

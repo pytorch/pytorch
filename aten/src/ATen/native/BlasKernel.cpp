@@ -4,6 +4,7 @@
 #include <ATen/OpMathType.h>
 #include <ATen/Parallel.h>
 #include <c10/core/ScalarType.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Unroll.h>
 #include <c10/util/complex.h>
@@ -16,6 +17,7 @@
 #include <arm_neon.h>
 #endif
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-function")
 namespace {
 
 /// Wrapper for const_cast<T*> with type-inference.
@@ -967,3 +969,4 @@ INSTANTIATE_VDOT_IMPL(c10::complex<double>);
 #undef INSTANTIATE_DOT_IMPL
 
 } // namespace at::native
+C10_DIAGNOSTIC_POP()

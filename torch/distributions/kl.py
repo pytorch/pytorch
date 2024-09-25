@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import math
 import warnings
 from functools import total_ordering
@@ -35,6 +36,7 @@ from .poisson import Poisson
 from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
 from .utils import _sum_rightmost, euler_constant as _euler_gamma
+
 
 _KL_REGISTRY: Dict[
     Tuple[Type, Type], Callable

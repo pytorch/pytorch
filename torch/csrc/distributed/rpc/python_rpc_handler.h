@@ -5,9 +5,7 @@
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/utils/pybind.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 // Singleton class provides interface to execute python UDF remote call
 // and deserialize the returned results by running python function
@@ -128,6 +126,4 @@ class PYBIND11_EXPORT PythonRpcHandler {
   std::mutex init_lock_;
 };
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

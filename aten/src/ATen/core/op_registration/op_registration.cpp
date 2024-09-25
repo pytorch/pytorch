@@ -71,7 +71,7 @@ c10::FunctionSchema RegisterOperators::inferSchemaFromKernels_(
       opName,
       " because there is no kernel specified.");
 
-  std::optional<FunctionSchema> inferred_schema = c10::nullopt;
+  std::optional<FunctionSchema> inferred_schema = std::nullopt;
   for (const auto& kernel : options.kernels) {
     if (nullptr != kernel.inferred_function_schema.get()) {
       if (!inferred_schema.has_value()) {

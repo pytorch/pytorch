@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import dataclasses
@@ -5,7 +6,6 @@ import itertools
 import logging
 import math
 import operator
-import sys
 from typing import (
     Callable,
     Dict,
@@ -23,8 +23,9 @@ import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
-
+from torch._logging import LazyString
 from torch._prims_common import dtype_to_type
+
 from .functions import (
     _keep_float,
     FloatTrueDiv,
@@ -42,6 +43,8 @@ from .functions import (
     TruncToInt,
 )
 from .interp import sympy_interp
+from .numbers import int_oo, IntInfinity, NegativeIntInfinity
+
 
 log = logging.getLogger(__name__)
 
@@ -84,10 +87,15 @@ def simple_sympify(e):
 def sympy_generic_le(lower, upper):
     if isinstance(lower, sympy.Expr):
         assert isinstance(upper, sympy.Expr)
-        return lower <= upper
+        # instead of lower <= upper, we do upper >= lower since upper is mostly int_oo
+        # and we have better code paths there.
+        return upper >= lower
     else:
         # only negative condition is True > False
-        assert isinstance(lower, SympyBoolean) and isinstance(upper, SympyBoolean)
+        assert isinstance(lower, SympyBoolean) and isinstance(upper, SympyBoolean), (
+            lower,
+            upper,
+        )
         return not (lower and not upper)
 
 
@@ -131,11 +139,19 @@ class ValueRanges(Generic[_T]):
         return f"VR[{self.lower}, {self.upper}]"
 
     @overload
-    def __init__(self: ValueRanges[sympy.Expr], lower: ExprIn, upper: ExprIn) -> None:
+    def __init__(
+        self: ValueRanges[sympy.Expr],
+        lower: ExprIn,
+        upper: ExprIn,
+    ) -> None:
         ...
 
     @overload
-    def __init__(self: ValueRanges[SympyBoolean], lower: BoolIn, upper: BoolIn) -> None:
+    def __init__(  # type: ignore[misc]
+        self: ValueRanges[SympyBoolean],
+        lower: BoolIn,
+        upper: BoolIn,
+    ) -> None:
         ...
 
     def __init__(self, lower: AllIn, upper: AllIn) -> None:
@@ -148,13 +164,10 @@ class ValueRanges(Generic[_T]):
                 raise ValueRangeError(f"Invalid ranges [{lower}:{upper}]")
         except TypeError as e:
             raise TypeError(f"Could not compare {lower} <= {upper}") from e
-        # Because this is a frozen class
-        object.__setattr__(self, "lower", lower)
-        object.__setattr__(self, "upper", upper)
-        # Unlike bool/int in Python, we don't report bools are ints
-        object.__setattr__(self, "is_bool", isinstance(lower, SympyBoolean))
-        if self.is_bool:
-            assert isinstance(upper, SympyBoolean), (lower, upper)
+
+        is_bool_lower = isinstance(lower, SympyBoolean)
+        is_bool_upper = isinstance(upper, SympyBoolean)
+        assert is_bool_lower == is_bool_upper, (lower, upper)
 
         # Warning: is_int/is_float is best effort.  We do pretty well in
         # Dynamo, but in Inductor these attributes are often wrong because we
@@ -162,12 +175,26 @@ class ValueRanges(Generic[_T]):
         # the flexible analysis for is_int: sometimes a sympy.oo pops in for
         # an integer bound. I would /like/ for us not to do this, but it's
         # too hard to push the invariant through right now.
+        if isinstance(lower, sympy.Integer) and upper == sympy.oo:
+            upper = int_oo
+        if isinstance(upper, sympy.Integer) and lower == -sympy.oo:
+            lower = -int_oo
+        # NB: [-int_oo, -int_oo] and [int_oo, int_oo] are allowed
+        integer_types = (sympy.Integer, NegativeIntInfinity, IntInfinity)
+        is_int_lower = isinstance(lower, integer_types)
+        is_int_upper = isinstance(upper, integer_types)
 
+        # Because this is a frozen class
+        object.__setattr__(self, "lower", lower)
+        object.__setattr__(self, "upper", upper)
+        # Unlike bool/int in Python, we don't report bools are ints
+        #
+        # NB: is_bool_lower == is_bool_upper, so we only need to check one
+        object.__setattr__(self, "is_bool", is_bool_lower)
         object.__setattr__(
             self,
             "is_int",
-            not self.is_bool
-            and (isinstance(lower, sympy.Integer) or isinstance(upper, sympy.Integer)),
+            not self.is_bool and is_int_lower and is_int_upper,
         )
         """
         # This assert is just impossible right now, too many sympy bugs
@@ -208,13 +235,15 @@ class ValueRanges(Generic[_T]):
     # Intersection
     @overload
     def __and__(
-        self: ValueRanges[sympy.Expr], other: ValueRanges[sympy.Expr]
+        self: ValueRanges[sympy.Expr],
+        other: ValueRanges[sympy.Expr],
     ) -> ValueRanges[sympy.Expr]:
         ...
 
     @overload
-    def __and__(
-        self: ValueRanges[SympyBoolean], other: ValueRanges[SympyBoolean]
+    def __and__(  # type: ignore[misc]
+        self: ValueRanges[SympyBoolean],
+        other: ValueRanges[SympyBoolean],
     ) -> ValueRanges[SympyBoolean]:
         ...
 
@@ -238,13 +267,15 @@ class ValueRanges(Generic[_T]):
     # Union
     @overload
     def __or__(
-        self: ValueRanges[sympy.Expr], other: ValueRanges[sympy.Expr]
+        self: ValueRanges[sympy.Expr],
+        other: ValueRanges[sympy.Expr],
     ) -> ValueRanges[sympy.Expr]:
         ...
 
     @overload
-    def __or__(
-        self: ValueRanges[SympyBoolean], other: ValueRanges[SympyBoolean]
+    def __or__(  # type: ignore[misc]
+        self: ValueRanges[SympyBoolean],
+        other: ValueRanges[SympyBoolean],
     ) -> ValueRanges[SympyBoolean]:
         ...
 
@@ -252,6 +283,8 @@ class ValueRanges(Generic[_T]):
         if ValueRanges.unknown() in (self, other):
             return ValueRanges.unknown()
         assert self.is_bool == other.is_bool, (self, other)
+        assert self.is_int == other.is_int, (self, other)
+        assert self.is_float == other.is_float, (self, other)
         if self.is_bool:
             return ValueRanges(
                 sympy.And(self.lower, other.lower), sympy.Or(self.upper, other.upper)
@@ -264,10 +297,13 @@ class ValueRanges(Generic[_T]):
     def is_singleton(self) -> bool:
         return self.lower == self.upper
 
-    # TODO: this doesn't work with bools but arguably it should
     @staticmethod
     def unknown() -> ValueRanges[sympy.Expr]:
         return ValueRanges(-sympy.oo, sympy.oo)
+
+    @staticmethod
+    def unknown_int() -> ValueRanges[sympy.Expr]:
+        return ValueRanges(-int_oo, int_oo)
 
     @staticmethod
     def unknown_bool() -> ValueRanges[SympyBoolean]:
@@ -281,7 +317,7 @@ class ValueRanges(Generic[_T]):
 
     @overload
     @staticmethod
-    def wrap(arg: Union[BoolIn, BoolVR]) -> BoolVR:
+    def wrap(arg: Union[BoolIn, BoolVR]) -> BoolVR:  # type: ignore[misc]
         ...
 
     @staticmethod
@@ -306,7 +342,7 @@ class ValueRanges(Generic[_T]):
 
     @overload
     @staticmethod
-    def decreasing_map(x: Union[BoolIn, BoolVR], fn: BoolFn) -> BoolVR:
+    def decreasing_map(x: Union[BoolIn, BoolVR], fn: BoolFn) -> BoolVR:  # type: ignore[misc]
         ...
 
     @staticmethod
@@ -329,27 +365,36 @@ class ValueRanges(Generic[_T]):
         """Fn is convex and has a minimum at 0."""
         x = ValueRanges.wrap(x)
         if 0 in x:
-            return ValueRanges(0, max(fn(x.lower), fn(x.upper)))
-        else:
-            return ValueRanges.monotone_map(x, fn)
+            upper = max(fn(x.lower), fn(x.upper))
+            upper = simple_sympify(upper)
+            if isinstance(upper, sympy.Float) or upper == sympy.oo:
+                return ValueRanges(0.0, upper)
+            return ValueRanges(0, upper)
+        return ValueRanges.monotone_map(x, fn)
 
     @overload
     @staticmethod
     def coordinatewise_increasing_map(
-        x: Union[ExprIn, ExprVR], y: Union[ExprIn, ExprVR], fn: ExprFn2
+        x: Union[ExprIn, ExprVR],
+        y: Union[ExprIn, ExprVR],
+        fn: ExprFn2,
     ) -> ExprVR:
         ...
 
     @overload
     @staticmethod
-    def coordinatewise_increasing_map(
-        x: Union[BoolIn, BoolVR], y: Union[BoolIn, BoolVR], fn: BoolFn2
+    def coordinatewise_increasing_map(  # type: ignore[misc]
+        x: Union[BoolIn, BoolVR],
+        y: Union[BoolIn, BoolVR],
+        fn: BoolFn2,
     ) -> BoolVR:
         ...
 
     @staticmethod
     def coordinatewise_increasing_map(
-        x: Union[AllIn, AllVR], y: Union[AllIn, AllVR], fn: AllFn2
+        x: Union[AllIn, AllVR],
+        y: Union[AllIn, AllVR],
+        fn: AllFn2,
     ) -> AllVR:
         """
         It's increasing on each coordinate.
@@ -400,7 +445,7 @@ class SymPyValueRangeAnalysis:
             elif dtype.is_floating_point:
                 return ValueRanges.unknown()
             else:
-                return ValueRanges(-sys.maxsize - 1, sys.maxsize)
+                return ValueRanges(-int_oo, int_oo)
 
         if is_python:
             type_ = dtype_to_type(dtype)
@@ -423,6 +468,10 @@ class SymPyValueRangeAnalysis:
     def to_dtype(a, dtype, src_dtype=None):
         if dtype == torch.float64:
             return ValueRanges.increasing_map(a, ToFloat)
+        elif dtype == torch.bool:
+            return ValueRanges.unknown_bool()
+        elif not dtype.is_floating_point:
+            return ValueRanges.unknown_int()
         return ValueRanges.unknown()
 
     @staticmethod
@@ -457,6 +506,10 @@ class SymPyValueRangeAnalysis:
     @classmethod
     def ne(cls, a, b):
         return cls.not_(cls.eq(a, b))
+
+    @classmethod
+    def identity(cls, a):
+        return ValueRanges.wrap(a)
 
     @classmethod
     def lt(cls, a, b):
@@ -500,10 +553,10 @@ class SymPyValueRangeAnalysis:
             return cls.and_(a, b)
 
         def safe_mul(a, b):
-            # Make unknown() * wrap(0) == wrap(0)
-            if a == 0:
+            # Make unknown() * wrap(0.0) == wrap(0.0)
+            if a == 0.0 or a == 0:
                 return a
-            elif b == 0:
+            elif b == 0.0 or b == 0:
                 return b
             else:
                 return a * b
@@ -514,9 +567,7 @@ class SymPyValueRangeAnalysis:
     def int_truediv(a, b):
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
-        if 0 in b or (
-            (-sympy.oo in a or sympy.oo in a) and (-sympy.oo in b or sympy.oo in b)
-        ):
+        if 0 in b or ((-int_oo in a or int_oo in a) and (-int_oo in b or int_oo in b)):
             return ValueRanges.unknown()
         else:
             return ValueRanges.coordinatewise_monotone_map(
@@ -540,14 +591,17 @@ class SymPyValueRangeAnalysis:
     def floordiv(a, b):
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
-        if 0 in b or (
-            # TODO: make this more precise
-            (-sympy.oo in a or sympy.oo in a)
-            or (-sympy.oo in b or sympy.oo in b)
-        ):
-            return ValueRanges.unknown()
-        else:
-            return ValueRanges.coordinatewise_monotone_map(a, b, FloorDiv)
+        if 0 in b:
+            return ValueRanges.unknown_int()
+        products = []
+        for x, y in itertools.product([a.lower, a.upper], [b.lower, b.upper]):
+            r = FloorDiv(x, y)
+            if r is sympy.nan:
+                products.append((sympy.sign(x) * sympy.sign(y)) * int_oo)
+            else:
+                products.append(r)
+
+        return ValueRanges(min(products), max(products))
 
     @classmethod
     def mod(cls, x, y):
@@ -563,10 +617,10 @@ class SymPyValueRangeAnalysis:
 
         def c_div(a, b):
             x = a / b
-            return sympy.Integer(x) if x.is_finite else x
+            return sympy.Integer(x) if x.is_finite and x not in (int_oo, -int_oo) else x
 
         if 0 in y:
-            return ValueRanges.unknown()
+            return ValueRanges.unknown_int()
         elif y.is_singleton():
             y_val = abs(y.lower)
             # If it wraps, we need to take the whole interval
@@ -596,7 +650,7 @@ class SymPyValueRangeAnalysis:
 
     @classmethod
     def is_non_overlapping_and_dense_indicator(cls, *args):
-        return ValueRanges.unknown()  # TODO: type here is wrong
+        return ValueRanges.unknown_int()
 
     @classmethod
     def pow_by_natural(cls, a, b):
@@ -610,7 +664,7 @@ class SymPyValueRangeAnalysis:
             # to replacements, so don't assert it, but DO clamp it to prevent
             # degenerate problems
             return ValueRanges.coordinatewise_increasing_map(
-                a, b & ValueRanges(0, sys.maxsize - 1), PowByNatural
+                a, b & ValueRanges(0, int_oo), PowByNatural
             )
         elif b.is_singleton():
             if b.lower % 2 == 0:
@@ -683,7 +737,7 @@ class SymPyValueRangeAnalysis:
         if 0 in x:
             return ValueRanges.unknown()
         else:
-            return ValueRanges.decreasing_map(x, lambda y: FloatTrueDiv(1.0, y))
+            return ValueRanges.decreasing_map(x, lambda y: FloatTrueDiv(1.0, y))  # type: ignore[operator]
 
     @staticmethod
     def abs(x):
@@ -885,7 +939,7 @@ class SymPyValueRangeAnalysis:
 
 
 class ValueRangeAnalysis(SymPyValueRangeAnalysis):
-    def __init__(self):
+    def __init__(self) -> None:
         self.name = "ValueRangeAnalysis"
         boolean_operators = (
             "xor",
@@ -928,6 +982,8 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
         if dtype == torch.bool:
             if x.is_singleton():
                 return ValueRanges.wrap(x.lower != 0)
+            elif x.is_bool:
+                return x
             elif 0 not in x:
                 return ValueRanges.wrap(sympy.true)
             else:
@@ -938,6 +994,8 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
             if dtype.is_floating_point:
                 return sympy.Float(x)
             else:
+                if x in (int_oo, -int_oo):
+                    return x
                 try:
                     return sympy.Integer(x)
                 except TypeError:
@@ -985,7 +1043,18 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
 def bound_sympy(
     expr: sympy.Expr, ranges: Optional[Dict[sympy.Symbol, ValueRanges]] = None
 ) -> ValueRanges:
-    log.debug("bound_sympy(%s, %s)", expr, ranges)
+    log.debug(
+        "bound_sympy(%s)%s",
+        expr,
+        LazyString(
+            lambda: "\n"
+            + "\n".join(
+                f"  {k}: {r}" for k, r in ranges.items() if k in expr.free_symbols
+            )
+            if ranges
+            else ""
+        ),
+    )
     if isinstance(expr, sympy.Number):
         return ValueRanges.wrap(expr)
 
@@ -1000,20 +1069,20 @@ def bound_sympy(
     if unbounded_vars:
         # Give some bounds to the free variables via their SymPy assumptions
         # TODO A better way of doing this would be to assign them a range upon creation, as
-        #      size variables can come with a lower bound of 2, as we specialise on 0 and 1
+        #      size variables can come with a lower bound of 2, as we specialize on 0 and 1
         unbounded_ranges: Dict[sympy.Symbol, ValueRanges] = {}
         for s in unbounded_vars:
             if s.is_integer:  # type: ignore[attr-defined]
                 if s.is_positive:  # type: ignore[attr-defined]
-                    lower = 1
+                    vr = ValueRanges(1, int_oo)
                 elif s.is_nonnegative:  # type: ignore[attr-defined]
-                    lower = 0
+                    vr = ValueRanges(0, int_oo)
                 else:
-                    lower = -math.inf  # type: ignore[assignment]
+                    vr = ValueRanges.unknown_int()
             else:
                 # Don't bother trying very hard here
-                lower = -math.inf  # type: ignore[assignment]
-            unbounded_ranges[s] = ValueRanges(lower, math.inf)  # type: ignore[index]
+                vr = ValueRanges.unknown()
+            unbounded_ranges[s] = vr  # type: ignore[index]
         ranges = {**ranges, **unbounded_ranges}
 
     return sympy_interp(SymPyValueRangeAnalysis, ranges, expr)

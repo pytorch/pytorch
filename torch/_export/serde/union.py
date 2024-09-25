@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 from dataclasses import fields
 from typing import Hashable, Set

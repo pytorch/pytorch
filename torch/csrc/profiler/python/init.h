@@ -5,8 +5,7 @@
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/python/pybind.h>
 
-namespace pybind11 {
-namespace detail {
+namespace pybind11::detail {
 using torch::profiler::impl::TensorID;
 
 #define STRONG_POINTER_TYPE_CASTER(T) \
@@ -23,13 +22,10 @@ STRONG_POINTER_TYPE_CASTER(torch::profiler::impl::PyOptimizerSelf);
 
 template <>
 struct type_caster<TensorID> : public strong_uint_type_caster<TensorID> {};
-} // namespace detail
-} // namespace pybind11
+} // namespace pybind11::detail
 
-namespace torch {
-namespace profiler {
+namespace torch::profiler {
 
 void initPythonBindings(PyObject* module);
 
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler

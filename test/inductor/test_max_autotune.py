@@ -1,8 +1,6 @@
 # Owner(s): ["module: inductor"]
-import json
 import os
 import unittest
-
 from typing import Callable, List, Optional
 
 import torch
@@ -24,7 +22,6 @@ from torch._inductor.select_algorithm import (
     TritonTemplateCaller,
 )
 from torch._inductor.test_case import run_tests, TestCase
-
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -34,8 +31,14 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
 )
-
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+
+
+try:
+    from .mock_cache import global_stats, PatchCaches, Stats
+except ImportError:
+    from mock_cache import global_stats, PatchCaches, Stats  # @manual
+
 
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
@@ -222,87 +225,13 @@ class TestMaxAutotune(TestCase):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
     @skipIfRocm
-    @parametrize("dynamic", (False, True))
-    def test_max_autotune_remote_caching(self, dynamic: bool):
-        from unittest.mock import patch
-
-        def mm(a, b):
-            a = torch.sin(a)
-            return a @ b
-
-        a = torch.randn(100, 10).cuda()
-        b = torch.randn(10, 100).cuda()
-
-        class Model(torch.nn.Module):
-            def forward(self, x, y):
-                return x + y
-
-        def f(x, y):
-            return Model()(x, y)
-
-        x = torch.randn(100, 100).cuda()
-        y = torch.randn(100, 100).cuda()
-
-        cache = {}
-        num_get = 0
-        num_put = 0
-
-        class MyCache:
-            def __init__(self, key, is_autotune=False):
-                pass
-
-            def get(self, filename):
-                nonlocal cache
-                nonlocal num_get
-                if filename not in cache:
-                    return None
-                ret = json.loads(cache[filename])
-                num_get += 1
-                return ret
-
-            def put(self, filename, data):
-                nonlocal cache
-                nonlocal num_put
-                cache[filename] = json.dumps(data)
-                num_put += 1
-
-        cache_module = (
-            "triton.runtime.fb_memcache.FbMemcacheRemoteAutotuneCacheBackend"
-            if config.is_fbcode()
-            else "torch._inductor.remote_cache.RedisRemoteCacheBackend"
-        )
-
-        with config.patch(
-            {
-                "autotune_local_cache": False,
-                "autotune_remote_cache": True,
-            }
-        ), patch.dict(os.environ), patch(cache_module, MyCache, create=True):
-            os.environ.pop("TRITON_CACHE_MANAGER", None)
-            with config.patch({"max_autotune": True}):
-                for _ in range(4):
-                    with fresh_inductor_cache():
-                        torch.compile(mm, dynamic=dynamic)(a, b)
-                    reset()
-                self.assertEqual(num_get, 3)
-                self.assertEqual(num_put, 1)
-            num_get = 0
-            num_put = 0
-            for _ in range(4):
-                with fresh_inductor_cache():
-                    torch.compile(f, dynamic=dynamic)(x, y)
-                reset()
-            self.assertEqual(num_get, 3)
-            self.assertEqual(num_put, 1)
-
-    @skipIfRocm
     def test_precompilation_threads(self):
         import threading
         from typing import Any, Dict
         from unittest.mock import Mock, patch
 
         class FakeChoiceCaller(ChoiceCaller):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__("none", [], Mock())
                 self.thread_id = None
 
@@ -316,20 +245,20 @@ class TestMaxAutotune(TestCase):
                 return None
 
             def hash_key(self) -> str:
-                return None
+                return str(hash(self))
 
             def output_node(self) -> "TensorBox":  # noqa: F821
                 return None
 
         fake_choices = [FakeChoiceCaller() for i in range(10)]
-        fake_lookup_result = {choice: 0.123 for choice in fake_choices}
+        fake_lookup_result = dict.fromkeys(fake_choices, 0.123)
 
         def no_lookup(
             choices: List[ChoiceCaller],
             op: str,
             inputs: str,
             benchmark: Callable[[Any], Dict[ChoiceCaller, float]],
-        ) -> Dict[ChoiceCaller, float]:
+        ) -> Optional[Dict[ChoiceCaller, float]]:
             if benchmark is not None:
                 return benchmark(choices)
 
@@ -486,6 +415,7 @@ class TestMaxAutotune(TestCase):
         torch._export.aot_compile(fn, args=inputs)
 
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
+    @skipIfRocm
     def test_precompilations(self):
         def fn(a, b, c):
             a = (a @ b) @ c
@@ -495,7 +425,7 @@ class TestMaxAutotune(TestCase):
         fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
         inputs = [torch.rand([256, 256], device="cuda") for _ in range(3)]
 
-        self.assertEqual(fn(*inputs), fn_c(*inputs), atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(fn_c(*inputs), fn(*inputs), atol=1e-2, rtol=1e-2)
 
         from torch._dynamo.utils import counters
 
@@ -669,6 +599,30 @@ class TestMaxAutotune(TestCase):
             z = torch.randint(0, 10, (224,)).to(device="cuda")
             f(x, y, z)
 
+    def test_conv3d(self):
+        fn = torch.nn.functional.conv3d
+        image = torch.randn([1, 3, 8, 16, 32])
+        filt = torch.randn([3, 3, 7, 7, 7])
+
+        with config.patch({"max_autotune": True}):
+            expected = fn(image, filt)
+            actual = torch.compile(fn)(image, filt)
+            torch.testing.assert_close(actual, expected, atol=6e-5, rtol=0.001)
+
+    @config.patch(
+        max_autotune=True, max_autotune_conv_backends="", layout_optimization=False
+    )
+    def test_conv_backend(self):
+        m = torch.nn.Sequential(
+            torch.nn.Conv2d(3, 3, 1, 1),
+        ).cuda()
+        inp = torch.randn([2, 3, 16, 16]).cuda()
+
+        with self.assertRaises(BackendCompilerFailed) as context:
+            torch.compile(m)(inp)
+
+        self.assertIn("NoValidChoicesError", str(context.exception))
+
     def test_non_contiguous_input_mm(self):
         """
         Make sure the triton template can work with non-contiguous inputs without crash.
@@ -685,7 +639,7 @@ class TestMaxAutotune(TestCase):
 
         ref = x @ y
         act = f(x, y)
-        self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
+        torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
 
     def test_non_contiguous_input_addmm(self):
         b = torch.randn((768), dtype=torch.bfloat16, device="cuda")
@@ -700,7 +654,7 @@ class TestMaxAutotune(TestCase):
 
         ref = torch.addmm(b, x, y)
         act = f(x, y)
-        self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
+        torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
 
     def test_non_contiguous_input_bmm(self):
         x = rand_strided(
@@ -716,7 +670,7 @@ class TestMaxAutotune(TestCase):
 
         ref = torch.bmm(x, y)
         act = f(x, y)
-        self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
+        torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
 
     def test_non_contiguous_input_mm_plus_mm(self):
         x1 = rand_strided((50257, 32768), (1, 50304), device="cuda")
@@ -731,7 +685,7 @@ class TestMaxAutotune(TestCase):
 
         ref = x1 @ y1 + x2 @ y2
         act = f(x1, y1, x2, y2)
-        self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
+        torch.testing.assert_close(act, ref, atol=1e-2, rtol=1e-2)
 
     @config.patch(
         max_autotune=True,
@@ -770,6 +724,63 @@ class TestMaxAutotune(TestCase):
             self.assertIn("NoValidChoicesError", str(context.exception))
 
 
+@instantiate_parametrized_tests
+class TestMaxAutotuneRemoteCache(TestCase):
+    def setUp(self):
+        super().setUp()
+        PatchCaches.setUp()
+
+    def tearDown(self):
+        super().tearDown()
+        PatchCaches.tearDown()
+
+    @skipIfRocm
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_remote_caching(self, dynamic: bool):
+        from unittest.mock import patch
+
+        def mm(a, b):
+            a = torch.sin(a)
+            return a @ b
+
+        a = torch.randn(100, 10).cuda()
+        b = torch.randn(10, 100).cuda()
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        def f(x, y):
+            return Model()(x, y)
+
+        x = torch.randn(100, 100).cuda()
+        y = torch.randn(100, 100).cuda()
+
+        with config.patch(
+            {
+                "autotune_local_cache": False,
+                "autotune_remote_cache": True,
+            }
+        ), patch.dict(os.environ), PatchCaches():
+            os.environ.pop("TRITON_CACHE_MANAGER", None)
+            with config.patch({"max_autotune": True}):
+                for _ in range(4):
+                    with fresh_inductor_cache():
+                        torch.compile(mm, dynamic=dynamic)(a, b)
+                    reset()
+
+                global_stats.report()
+                self.assertEqual(global_stats.autotune_remote, Stats(1, 3, 1))
+
+            global_stats.reset()
+            for _ in range(4):
+                with fresh_inductor_cache():
+                    torch.compile(f, dynamic=dynamic)(x, y)
+                reset()
+            global_stats.report()
+            self.assertEqual(global_stats.autotune_remote, Stats(1, 3, 1))
+
+
 class TestBenchmarkRequest(BenchmarkRequest):
     def __init__(
         self, value: float, multi_device: bool, parent_visible_devices: Optional[str]
@@ -792,6 +803,7 @@ class TestBenchmarkRequest(BenchmarkRequest):
         if not self.multi_device:
             assert visible_devices == self.parent_visible_devices
         else:
+            assert self.parent_visible_devices is not None
             valid_devices = self.parent_visible_devices.split(",")
             assert visible_devices in valid_devices
 

@@ -6,15 +6,12 @@
 
 #include <memory>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 TORCH_API void UnpackQuantizedWeights(
     std::shared_ptr<Graph>& graph,
-    std::map<std::string, IValue>& paramsDict,
-    bool caffe2);
+    std::map<std::string, IValue>& paramsDict);
 TORCH_API void insertPermutes(
     std::shared_ptr<Graph>& graph,
     std::map<std::string, IValue>& paramsDict);
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

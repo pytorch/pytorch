@@ -15,7 +15,7 @@ except ImportError:
     create_bundled = None
 
 license_file = "third_party/LICENSES_BUNDLED.txt"
-starting_txt = "The Pytorch repository and source distributions bundle"
+starting_txt = "The PyTorch repository and source distributions bundle"
 site_packages = os.path.dirname(os.path.dirname(torch.__file__))
 distinfo = glob.glob(os.path.join(site_packages, "torch-*dist-info"))
 

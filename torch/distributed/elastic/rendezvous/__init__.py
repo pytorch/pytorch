@@ -128,8 +128,8 @@ of the following implementations that come with PyTorch:
      )
 """
 
-
 from .api import (
+    rendezvous_handler_registry,
     RendezvousClosedError,
     RendezvousConnectionError,
     RendezvousError,
@@ -142,13 +142,12 @@ from .api import (
     RendezvousStateError,
     RendezvousStoreInfo,
     RendezvousTimeoutError,
-    rendezvous_handler_registry,
 )
-
-from .registry import _register_default_handlers
+from .registry import _register_default_handlers, _register_out_of_tree_handlers
 
 
 _register_default_handlers()
+_register_out_of_tree_handlers()
 
 
 __all__ = [

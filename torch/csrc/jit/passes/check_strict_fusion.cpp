@@ -7,10 +7,8 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
-#include <unordered_map>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -77,7 +75,7 @@ static void checkForUnfusedOps(Node* enter_node) {
     for (Node* n : guarding_ifs) {
       ss << *n << "\n";
     }
-    throw ErrorReport(enter_node->input()->node()->sourceRange()) << ss.str();
+    throw(ErrorReport(enter_node->input()->node()->sourceRange()) << ss.str());
   }
 
   // autodiff/nnc both insert a number of guards, see
@@ -110,8 +108,7 @@ static void checkForUnfusedOps(Node* enter_node) {
       }
       ss << "\n";
     }
-    auto range = enter_node->input()->node()->sourceRange();
-    throw ErrorReport(enter_node->input()->node()->sourceRange()) << ss.str();
+    throw(ErrorReport(enter_node->input()->node()->sourceRange()) << ss.str());
   }
 }
 
@@ -128,5 +125,4 @@ void CheckStrictFusion(std::shared_ptr<Graph>& graph) {
   // TODO: improve control flow not taken, right now always errors
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

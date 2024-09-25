@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import inspect
 import itertools
@@ -12,6 +13,7 @@ import torch._functorch as _functorch
 import torch.utils.hooks as hooks
 from torch._C import _functions
 from torch._functorch.autograd_function import custom_function_call
+
 
 __all__ = [
     "FunctionCtx",

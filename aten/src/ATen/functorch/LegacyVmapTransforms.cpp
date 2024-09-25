@@ -96,7 +96,7 @@ static std::tuple<int64_t, int64_t> computeFrontBatchDimsFromLevels(std::bitset<
   return std::make_tuple(dim, level);
 }
 
-static Tensor moveDimToFrontAndExpand(Tensor tensor, optional<int64_t> dim, c10::SymInt size) {
+static Tensor moveDimToFrontAndExpand(Tensor tensor, std::optional<int64_t> dim, c10::SymInt size) {
   if (dim) {
     tensor = tensor.movedim(*dim, 0);
   } else {
@@ -156,7 +156,7 @@ MultiBatchVmapTransform::logicalToPhysical(ITensorListRef logical_tensors) {
   return result;
 }
 
-static Tensor moveDimToFrontAndUnsqueeze(Tensor tensor, optional<int64_t> dim, int64_t example_ndim) {
+static Tensor moveDimToFrontAndUnsqueeze(Tensor tensor, std::optional<int64_t> dim, int64_t example_ndim) {
   if (dim) {
     tensor = tensor.movedim(*dim, 0);
   } else {

@@ -59,13 +59,11 @@ def swap_tensor(
         else:
             del module._buffers[name]
     else:
-        try:
+        if hasattr(module, name):
             orig_tensor = getattr(module, name)
-        except AttributeError as ex:
+        else:
             if not allow_missing:
-                raise AttributeError(
-                    f"{module._get_name()} has no attribute `{name}`"
-                ) from ex
+                raise AttributeError(f"{module._get_name()} has no attribute `{name}`")
             orig_tensor = _MISSING
         if (
             orig_tensor is not _MISSING
@@ -132,9 +130,9 @@ class NamedMemberAccessor:
         if not name:
             return self.module
 
-        try:
+        if name in self.memo:
             return self.memo[name]
-        except KeyError:
+        else:
             prefix, dot, attr = name.rpartition(".")
             if dot:
                 module = self.get_submodule(prefix)

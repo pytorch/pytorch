@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import math
 import numbers
@@ -16,6 +17,7 @@ from torch.distributions.utils import (
     vec_to_tril_matrix,
 )
 from torch.nn.functional import pad, softplus
+
 
 __all__ = [
     "AbsTransform",

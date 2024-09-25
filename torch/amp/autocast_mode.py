@@ -1,17 +1,19 @@
+# mypy: allow-untyped-defs
 import collections
 import functools
 import warnings
-
 from typing import Any, Optional
 
 import torch
 from torch.types import _dtype
+
 
 try:
     import numpy as np
 
     HAS_NUMPY = True
 except ModuleNotFoundError:
+    HAS_NUMPY = False
     np = None  # type: ignore[assignment]
 
 __all__ = [
@@ -79,7 +81,7 @@ class autocast:
             loss.backward()
             optimizer.step()
 
-    See the :ref:`CUDA Automatic Mixed Precision examples<amp-examples>` for usage (along with gradient scaling)
+    See the :ref:`Automatic Mixed Precision examples<amp-examples>` for usage (along with gradient scaling)
     in more complex scenarios (e.g., gradient penalty, multiple models/losses, custom autograd functions).
 
     :class:`autocast` can also be used as a decorator, e.g., on the ``forward`` method of your model::
@@ -320,6 +322,15 @@ class autocast:
                 raise RuntimeError(
                     "Current CUDA Device does not support bfloat16. Please switch dtype to float16."
                 )
+        elif self.device == "mps":
+            supported_dtype = [torch.float16]
+            if self.fast_dtype not in supported_dtype:
+                error_message = "In MPS autocast, but the target dtype is not supported. Disabling autocast.\n"
+                error_message += (
+                    "MPS Autocast only supports dtype of torch.bfloat16 currently."
+                )
+                warnings.warn(error_message)
+                enabled = False
         elif self.device == "xla":
             supported_dtype = [torch.float16, torch.bfloat16]
             if self.fast_dtype not in supported_dtype:

@@ -1,6 +1,8 @@
+# mypy: allow-untyped-defs
 import copy
 import io
 import math
+import weakref
 from typing import (
     Any,
     Callable,
@@ -21,10 +23,12 @@ import torch.distributed as dist
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
+
 if dist.is_available() or TYPE_CHECKING:
     from torch.distributed import distributed_c10d
     from torch.distributed._shard.sharded_tensor import ShardedTensor
-    from torch.distributed._tensor import distribute_tensor, DTensor, Replicate
+    from torch.distributed.tensor import distribute_tensor, DTensor, Replicate
+    from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
 
 
 def _identity_func(
@@ -88,7 +92,7 @@ def _iterate_state_dict(
     device: Optional[torch.device] = None,
     cpu_offload: bool = False,
     companion_obj: Any = None,
-    ranks_only: Tuple[int, ...] = tuple(),
+    ranks_only: Tuple[int, ...] = (),
     type_check: bool = True,
     non_blocking: bool = True,
 ) -> Dict[str, Any]:
@@ -205,7 +209,7 @@ def _gather_state_dict(
     pg: Optional[dist.ProcessGroup] = None,
     device: Optional[torch.device] = None,
     cpu_offload: bool = False,
-    ranks_only: Tuple[int, ...] = tuple(),
+    ranks_only: Tuple[int, ...] = (),
     type_check: bool = True,
 ) -> Dict[str, Any]:
     """
@@ -290,7 +294,7 @@ def _gather_state_dict(
 def _offload_state_dict_to_cpu(
     state_dict: Dict[str, Any],
     *,
-    ranks_only: Tuple[int, ...] = tuple(),
+    ranks_only: Tuple[int, ...] = (),
     type_check: bool = True,
 ) -> Dict[str, Any]:
     """
@@ -369,7 +373,7 @@ def _copy_state_dict(
         pg=None,
         device=None,
         cpu_offload=False,
-        ranks_only=tuple(),
+        ranks_only=(),
         companion_obj=copy_state_dict,
         type_check=type_check,
         non_blocking=non_blocking,
@@ -404,12 +408,23 @@ def _create_cpu_state_dict(
             return torch.tensor(0, dtype=obj.dtype)
 
         if share_memory:
-            t = torch.empty(*tuple(obj.size()), dtype=obj.dtype).share_memory_()
+            t = torch.empty(*tuple(obj.size()), dtype=obj.dtype)
+            t = t.share_memory_()
             if pin_memory:
-                succ = torch.cuda.cudart().cudaHostRegister(
-                    t.data_ptr(),
-                    t.numel() * t.element_size(),
-                    1,  # lines up with 'cudaHostRegisterPortable'
+
+                def unpin_memory(t):
+                    succ = int(torch.cuda.cudart().cudaHostUnregister(t.data_ptr()))
+                    assert (
+                        succ == 0
+                    ), f"Unpinning shared memory failed with error-code: {succ}"
+
+                weakref.finalize(t, unpin_memory, t)
+                succ = int(
+                    torch.cuda.cudart().cudaHostRegister(
+                        t.data_ptr(),
+                        t.numel() * t.element_size(),
+                        1,  # lines up with 'cudaHostRegisterPortable'
+                    )
                 )
                 assert (
                     succ == 0
@@ -428,7 +443,7 @@ def _create_cpu_state_dict(
         pg=None,
         device=None,
         cpu_offload=False,
-        ranks_only=tuple(),
+        ranks_only=(),
         type_check=False,
     )
     return ret
@@ -466,7 +481,7 @@ def _check_state_dict_similarity(
             pg=None,
             device=None,
             cpu_offload=False,
-            ranks_only=tuple(),
+            ranks_only=(),
             companion_obj=compared_state_dict,
             type_check=False,
         )
@@ -519,6 +534,17 @@ def _broadcast_tensors(
     else:
         dist.broadcast(tensors[0], src=0, group=pg)
 
+    _distribute_tensors(local_state_dict, keys, device, pg)
+
+
+def _distribute_tensors(
+    local_state_dict: Dict[str, Any],
+    keys: List[str],
+    device: torch.device,
+    pg: Optional[dist.ProcessGroup] = None,
+) -> None:
+    if pg is None:
+        pg = dist.distributed_c10d._get_default_group()
     for key in keys:
         _local_state = local_state_dict.get(key, None)
         if _local_state is None or torch.is_tensor(_local_state):
@@ -526,8 +552,23 @@ def _broadcast_tensors(
 
         local_state = _local_state[0]
         full_tensor = _local_state[1]
-        local_state_dict[key] = distribute_tensor(
-            full_tensor, local_state.device_mesh, local_state.placements
+
+        shape, offset = compute_local_shape_and_global_offset(
+            full_tensor.shape, local_state.device_mesh, local_state.placements
+        )
+        slices = [
+            slice(cur_offset, cur_offset + cur_shape)
+            for cur_shape, cur_offset in zip(shape, offset)
+        ]
+        local_tensor = full_tensor[slices]
+        # TODO: currently, we cannot handle strided sharding if the dp dimension is not even. For example,
+        # one of the case that is not yet supported is when placements = (Shard(0), _StridedShard(0, sf=2)).
+        local_state_dict[key] = DTensor.from_local(
+            local_tensor,
+            local_state.device_mesh,
+            local_state.placements,
+            shape=local_state.shape,
+            stride=local_state.stride(),
         )
 
 
@@ -582,6 +623,37 @@ def _broadcast_state_dict(
 
     if keys:
         _broadcast_tensors(ret, local_state_dict, keys, device, pg)
+
+
+def _distribute_state_dict(
+    full_state_dict: Dict[str, Any],
+    local_state_dict: Dict[str, Any],
+    device: torch.device,
+    pg: Optional[dist.ProcessGroup] = None,
+) -> None:
+    # Full_state_dict = True, broadcast_from_rank0 = False here. Each rank has
+    # full_state_dict. Skip the broadcast in ``_broadcast_state_dict`` and
+    # distribute tensors in each rank
+    for key, value in full_state_dict.items():
+        if key not in full_state_dict:
+            continue
+        if not torch.is_tensor(value):
+            local_state_dict[key] = value
+        elif value.dim() == 0:
+            local_state_dict[key] = value.cpu()
+        else:
+            assert isinstance(value, torch.Tensor)
+            local_state = local_state_dict.get(key, None)
+            if local_state is None:
+                continue
+            elif isinstance(local_state, DTensor):
+                local_state_dict[key] = distribute_tensor(
+                    value.detach().to(device),
+                    local_state.device_mesh,
+                    local_state.placements,
+                )
+            else:
+                local_state_dict[key] = value.detach().to(device)
 
 
 # These APIs are from torch.distributed.checkpoint.

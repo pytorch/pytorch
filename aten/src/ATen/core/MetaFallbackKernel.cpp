@@ -17,7 +17,7 @@ static void metaFallback(
       "while using an operator with PT2 compilation APIs (torch.compile/torch.export); "
       "in order to use this operator with those APIs you'll need to add a fake impl. "
       "Please see the following for next steps:  "
-      "https://pytorch.org/docs/main/notes/custom_operators.html");
+      "https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html");
 }
 
 TORCH_LIBRARY_IMPL(_, Meta, m) {

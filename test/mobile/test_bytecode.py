@@ -20,6 +20,7 @@ from torch.jit.mobile import (
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
 
+
 pytorch_test_dir = Path(__file__).resolve().parents[1]
 
 # script_module_v4.ptl and script_module_v5.ptl source code

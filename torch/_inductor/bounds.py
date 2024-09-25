@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 import operator
 from functools import partial
@@ -7,7 +8,8 @@ from sympy import Expr
 
 import torch
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
-from .ir import InterpreterShim, LoopBody, LoopBodyBlock
+
+from .loop_body import InterpreterShim, LoopBody, LoopBodyBlock
 from .utils import cache_on_self, dominated_nodes
 from .virtualized import V
 
@@ -43,6 +45,15 @@ class BoundVars:
         )
         # To access this variable call `get_bounds()`
         self._bounds: Dict[torch.fx.Node, ValueRanges[Expr]] = {}
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}("
+            f"loop_body={self.loop_body},\n "
+            f"replacement_vals={self.replacement_vals}, \n"
+            f"unbounded_vars={self.unbounded_vars}, \n"
+            f"_bounds={self._bounds})"
+        )
 
     @cache_on_self
     def get_bounds(self) -> Dict[torch.fx.Node, ValueRanges[Expr]]:
@@ -117,7 +128,7 @@ class BoundVars:
         self.replacement_vals[old] = new
         return new
 
-    def get_index(self, name: Expr) -> ValueRanges[Expr]:
+    def get_index(self, name: str) -> ValueRanges[Expr]:
         expr = self.loop_body.indexing_exprs[name]
         bound = self.replacement_vals.get(expr)
         if bound is None:

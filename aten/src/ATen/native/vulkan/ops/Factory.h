@@ -13,7 +13,7 @@ Tensor _empty_affine_quantized(
     const std::optional<bool> pin_memory,
     const double scale,
     const int64_t zero_point,
-    const optional<MemoryFormat> memory_format);
+    const std::optional<MemoryFormat> memory_format);
 
 } // namespace ops
 } // namespace vulkan

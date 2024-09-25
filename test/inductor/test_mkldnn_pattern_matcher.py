@@ -6,21 +6,15 @@ import unittest
 
 import torch
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
-
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
-from torch._export import capture_pre_autograd_graph
 from torch._inductor import config, metrics
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.ao.quantization.quantize_pt2e import (
-    convert_pt2e,
-    prepare_pt2e,
-    prepare_qat_pt2e,
-)
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.nn import functional as F
 from torch.testing._internal.common_quantization import (
+    _generate_qdq_quantized_model,
     skipIfNoDynamoSupport,
     skipIfNoONEDNN,
     skipIfNoONEDNNBF16,
@@ -37,7 +31,8 @@ unary_list = {
     torch.nn.Tanh(): 2,
     torch.nn.Hardswish(): 6,
     torch.nn.LeakyReLU(0.1, inplace=False): 4,
-    torch.nn.Hardtanh(min_val=-0.5, max_val=4, inplace=False): 3,
+    # Use floats for min/max, otherwise they can get converted to symints
+    torch.nn.Hardtanh(min_val=-0.5, max_val=4.0, inplace=False): 3,
     torch.nn.Hardtanh(min_val=-0.5, max_val=float("inf"), inplace=False): 3,
     torch.nn.GELU(approximate="none"): 6,
     torch.nn.GELU(approximate="tanh"): 10,
@@ -129,28 +124,6 @@ class TestPatternMatcherBase(TestCase):
 
         return tuple(clone(x) for x in inputs)
 
-    def _generate_qdq_quantized_model(
-        self, mod, inputs, is_qat=False, is_dynamic=False, quantizer=None
-    ):
-        maybe_no_grad = contextlib.nullcontext() if is_qat else torch.no_grad()
-        with maybe_no_grad:
-            export_model = capture_pre_autograd_graph(
-                mod,
-                inputs,
-            )
-            quantizer = (
-                quantizer if quantizer else get_default_quantizer(is_qat, is_dynamic)
-            )
-            prepare_model = (
-                prepare_qat_pt2e(export_model, quantizer)
-                if is_qat
-                else prepare_pt2e(export_model, quantizer)
-            )
-            prepare_model(*inputs)
-            convert_model = convert_pt2e(prepare_model)
-            torch.ao.quantization.move_exported_model_to_eval(convert_model)
-            return convert_model
-
     def _test_common(
         self,
         mod,
@@ -189,7 +162,7 @@ class TestPatternMatcherBase(TestCase):
             maybe_autocast = contextlib.nullcontext()
 
         if check_quantization:
-            convert_model = self._generate_qdq_quantized_model(
+            convert_model = _generate_qdq_quantized_model(
                 mod, inputs, is_qat, is_dynamic, quantizer
             )
             with torch.no_grad(), maybe_autocast:
@@ -233,11 +206,12 @@ class TestPatternMatcherBase(TestCase):
         rtol=1.3e-6,
         check_quantization=False,
         check_dynamic=None,
+        num_include_ops=None,
     ):
         with torch.no_grad():
             clone_inputs = self._clone_inputs(inputs)
             if check_quantization:
-                mod = self._generate_qdq_quantized_model(mod, inputs)
+                mod = _generate_qdq_quantized_model(mod, inputs)
             expected = mod(*inputs)
             actual, (source_code,) = run_and_get_code(
                 torch.compile(mod, fullgraph=True, dynamic=check_dynamic),
@@ -245,6 +219,12 @@ class TestPatternMatcherBase(TestCase):
             )
             for op in include_ops:
                 self.assertIn(op, source_code)
+            if num_include_ops is not None:
+                assert len(include_ops) == len(num_include_ops)
+                for i in range(len(include_ops)):
+                    self.assertEqual(
+                        source_code.count(include_ops[i]), num_include_ops[i]
+                    )
             for op in exclude_ops:
                 self.assertNotIn(op, source_code)
             if check_dynamic is not None:
@@ -398,15 +378,21 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     def test_linear_add_bias(self):
         class M(torch.nn.Module):
-            def __init__(self, dtype, unary_fn):
+            def __init__(self, dtype, unary_fn, cast_bias):
                 super().__init__()
-                self.linear = torch.nn.Linear(10, 64, bias=False)
-                self.bias = torch.randn(64).to(dtype=dtype)
+                self.linear1 = torch.nn.Linear(10, 64, bias=False)
+                self.bias1 = torch.randn(64)
+                self.linear2 = torch.nn.Linear(10, 64, bias=False)
+                self.bias2 = torch.randn(64)
+                if cast_bias:
+                    self.bias1 = self.bias1.to(dtype=dtype)
+                    self.bias2 = self.bias2.to(dtype=dtype)
                 self.unary_fn = unary_fn
 
             def forward(self, x):
-                x = self.linear(x) + self.bias
-                return self.unary_fn(x)
+                a = self.linear1(x) + self.bias1
+                b = self.linear2(x) + self.bias2
+                return self.unary_fn(a), self.unary_fn(b)
 
         dtypes = []
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
@@ -416,23 +402,34 @@ class TestPatternMatcher(TestPatternMatcherBase):
         options = itertools.product(unary_list, dtypes)
         for unary_fn, dtype in options:
             metrics.reset()
-            mod = M(dtype, unary_fn).eval()
+            fold_mod = M(dtype, unary_fn, cast_bias=True).eval()
             v = torch.randn(2, 10)
             matcher_count = 3
-            # Add 1 for weight packing pass, add 2 for bias folding pass.
+            # Add 1 for weight packing pass, add 2 for bias folding pass per linear.
             matcher_nodes = unary_list[unary_fn] + 3
             if self._check_unary_is_decomposed(unary_fn):
                 # Has extra dtype conversion nodes for autocast.
                 matcher_nodes += 2
+            # we have 2 linears, so we double the matcher_count/nodes
             self._test_common(
-                mod, (v,), matcher_count, matcher_nodes, check_autocast=dtype
+                fold_mod,
+                (v,),
+                matcher_count * 2,
+                matcher_nodes * 2,
+                check_autocast=dtype,
             )
             self.assertEqual(metrics.generated_kernel_count, 1)
+            # we won't fold the bias if bias is not same dtype with weight
+            # https://github.com/pytorch/pytorch/pull/129138
+            metrics.reset()
+            mod = M(dtype, unary_fn, cast_bias=False).eval()
+            self._test_common(mod, (v,), 2, 2, check_autocast=dtype)
+            # 1 kernel for "to_lowp", 2 kernels for unary ops
+            self.assertEqual(metrics.generated_kernel_count, 3)
 
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNN
-    @skipIfRocm
-    def test_conv_transpose2d_unary(self):
+    def _test_conv_transpose_unary_base(self, dim=4):
+        assert dim == 4 or dim == 5
+
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -440,13 +437,18 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 **kwargs,
             ):
                 super().__init__()
-                self.conv_transpose2d = torch.nn.ConvTranspose2d(
-                    3, 16, 3, stride=2, padding=1
-                )
+                if dim == 4:
+                    self.conv_transpose = torch.nn.ConvTranspose2d(
+                        3, 16, 3, stride=2, padding=1
+                    )
+                else:
+                    self.conv_transpose = torch.nn.ConvTranspose3d(
+                        3, 16, 3, stride=2, padding=1
+                    )
                 self.unary_fn = unary_fn
 
             def forward(self, x):
-                x = self.conv_transpose2d(x)
+                x = self.conv_transpose(x)
                 return self.unary_fn(x)
 
         dtypes = [
@@ -457,15 +459,19 @@ class TestPatternMatcher(TestPatternMatcherBase):
         if torch.ops.mkldnn._is_mkldnn_fp16_supported():
             dtypes.append(torch.float16)
 
+        cl_format = torch.channels_last if dim == 4 else torch.channels_last_3d
         options = itertools.product(
             unary_list,
-            [torch.contiguous_format, torch.channels_last],
+            [torch.contiguous_format, cl_format],
             dtypes,
         )
 
         for unary_fn, memory_format, dtype in options:
             metrics.reset()
-            x_shape = (1, 3, 28, 28)
+            if dim == 4:
+                x_shape = (1, 3, 28, 28)
+            else:
+                x_shape = (1, 3, 17, 28, 28)
             mod = M(unary_fn).eval()
 
             v = torch.randn(x_shape, dtype=torch.float32).to(
@@ -482,6 +488,18 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self._test_common(mod, (v,), 2, match_nodes, check_autocast=dtype)
             generated_kernel_count = cal_conv_generated_kernel_number(mod, v, dtype)
             self.assertEqual(metrics.generated_kernel_count, generated_kernel_count)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_conv_transpose2d_unary_cpu(self):
+        self._test_conv_transpose_unary_base(dim=4)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_conv_transpose3d_unary_cpu(self):
+        self._test_conv_transpose_unary_base(dim=5)
 
     def _test_conv_binary_base(self, dim=4):
         assert dim == 4 or dim == 5
@@ -589,6 +607,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             binary_list, [[2, 3, 10], [2, 10]], [True, False], dtypes
         )
         out_feature = 30
+
         for binary_fn, input_shape, bias, dtype in options:
             metrics.reset()
             # addmm(mm) + (linear+add)
@@ -694,7 +713,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_int8_mixed_bf16(self):
         r"""
         This testcase will quantize a single Conv2d module with int8_mixed_bf16 quantization.
@@ -715,7 +733,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 128, kernel_size=3, stride=1)
                 self.unary_fn = copy.deepcopy(unary_op)
-                self.conv2 = torch.nn.Conv2d(128, 128, kernel_size=3, stride=1)
+                self.conv2 = torch.nn.Conv2d(
+                    128, 128, kernel_size=3, stride=1, bias=False
+                )
                 self.unary_fn2 = copy.deepcopy(unary_op)
 
             def forward(self, x):
@@ -748,7 +768,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_relu_cpu(self):
         r"""
         This testcase will quantize Conv2d->ReLU pattern.
@@ -758,7 +777,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_relu_int8_mixed_bf16(self):
         r"""
         This testcase will quantize Conv2d->ReLU pattern with int8_mixed_bf16 quantization.
@@ -767,7 +785,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_relu6_cpu(self):
         r"""
         This testcase will quantize Conv2d->ReLU6 pattern.
@@ -776,7 +793,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_hardtanh_cpu(self):
         r"""
         This testcase will quantize Conv2d->Hardtanh pattern.
@@ -786,7 +802,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_hardtanh_int8_mixed_bf16_cpu(self):
         r"""
         This testcase will quantize Conv2d->Hardtanh pattern.
@@ -802,7 +817,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_hardswish_cpu(self):
         r"""
         This testcase will quantize Conv2d->Hardswish pattern.
@@ -812,7 +826,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_hardswish_int8_mixed_bf16_cpu(self):
         r"""
         This testcase will quantize Conv2d->Hardswish pattern.
@@ -829,7 +842,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_silu_cpu(self):
         r"""
         This testcase will quantize Conv2d->SiLU pattern.
@@ -839,7 +851,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_silu_int8_mixed_bf16_cpu(self):
         r"""
         This testcase will quantize Conv2d->SiLU pattern.
@@ -880,8 +891,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.conv2 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
                 self.add_fn = add_fn
                 self.relu = torch.nn.ReLU()
-                self.conv3 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
-                self.conv4 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.conv3 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1, bias=False)
+                self.conv4 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1, bias=False)
                 self.add_fn2 = add_fn
                 self.relu2 = torch.nn.ReLU()
                 self.use_relu = use_relu
@@ -925,33 +936,28 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_add_cpu(self):
         self._qconv2d_add_cpu_test_helper()
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_add_int8_mixed_bf16(self):
         self._qconv2d_add_cpu_test_helper(int8_mixed_bf16=True)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_add_relu_cpu(self):
         self._qconv2d_add_cpu_test_helper(use_relu=True)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_add_relu_int8_mixed_bf16(self):
         self._qconv2d_add_cpu_test_helper(use_relu=True, int8_mixed_bf16=True)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_add_broadcast_shapes_cpu(self):
         r"""
         This testcase will quantize Conv2d->add pattern using broadcast shape inputs.
@@ -991,7 +997,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_add_2(self):
         r"""
         This testcase prevents this pattern be matched as a conv_binary fusion by mistake.
@@ -1037,7 +1042,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_add_3(self):
         r"""
         This testcase will test below model:
@@ -1199,7 +1203,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qat_qconv2d_relu(self):
         r"""
         This testcase will quantize Conv2d->ReLU pattern with qat flow.
@@ -1209,7 +1212,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qat_qconv2d_relu6(self):
         r"""
         This testcase will quantize Conv2d->ReLU6 pattern with qat flow.
@@ -1218,7 +1220,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qat_qconv2d_hardtanh(self):
         r"""
         This testcase will quantize Conv2d->Hardtanh pattern with qat flow.
@@ -1227,7 +1228,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qat_qconv2d_silu(self):
         r"""
         This testcase will quantize Conv2d->SiLU pattern with qat flow.
@@ -1236,7 +1236,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qat_qconv2d_hardswish(self):
         r"""
         This testcase will quantize Conv2d->Hardswish pattern with qat flow.
@@ -1461,7 +1460,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_cpu(self):
         r"""
         This testcase will quantize a single Linear Moduel.
@@ -1471,7 +1469,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_dynamic_qlinear_cpu(self):
         r"""
         This testcase will quantize a single Linear Moduel.
@@ -1483,7 +1480,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_dynamic_qlinear_qat_cpu(self):
         r"""
         This testcase will quantize a single Linear Moduel.
@@ -1495,7 +1491,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_dynamic_qlinear_input_dim_exceeds_2(self):
         r"""
         This testcase will quantize a single Linear Moduel.
@@ -1508,7 +1503,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_int8_mixed_bf16(self):
         r"""
         This testcase will quantize a single Linear Moduel with int8_mixed_bf16 quantization.
@@ -1520,7 +1514,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_input_dim_exceeds_2(self):
         r"""
         This testcase will quantize a single Linear Moduel.
@@ -1531,7 +1524,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_int8_mixed_bf16_input_dim_exceeds_2(self):
         r"""
         This testcase will quantize a single Linear Moduel with int8_mixed_bf16 quantization.
@@ -1543,7 +1535,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_input_dim_exceeds_2_and_not_contiguous(self):
         r"""
         This testcase will quantize a single Linear Module.
@@ -1571,7 +1562,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_int8_mixed_bf16_input_dim_exceeds_2_and_not_contiguous(self):
         r"""
         This testcase will quantize a single Linear Module for int8_bf16.
@@ -1634,7 +1624,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_relu_cpu(self):
         r"""
         This testcase will quantize a Linear->ReLU pattern.
@@ -1644,7 +1633,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_relu_int8_mixed_bf16(self):
         r"""
         This testcase will quantize a Linear->ReLU pattern with int8_mixed_bf16 quantization.
@@ -1655,7 +1643,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_relu_input_dim_exceeds_2(self):
         r"""
         This testcase will quantize a Linear->ReLU pattern.
@@ -1665,7 +1652,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_relu_int8_mixed_bf16_input_dim_exceeds_2(self):
         r"""
         This testcase will quantize a Linear->ReLU pattern with int8_mixed_bf16 quantization.
@@ -1676,7 +1662,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_gelu_cpu(self):
         r"""
         This testcase will quantize a Linear->GELU pattern.
@@ -1687,7 +1672,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_gelu_int8_mixed_bf16(self):
         r"""
         This testcase will quantize a Linear->GELU pattern with int8_mixed_bf16 quantization.
@@ -1796,10 +1780,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 to_bf16_after_binary = 2 * (add_fn == add_fn_list[2] and fq_x2)
                 self.assertEqual(
                     counters["inductor"]["qlinear_binary_matcher_nodes"],
-                    5 + 2 * use_relu + to_bf16_after_binary,
+                    (4 if is_dynamic else 5) + 2 * use_relu + to_bf16_after_binary,
                 )
 
-            for is_qat in [False, True]:
+            is_qat_list = [False, True]
+            is_dynamic_list = [False, True]
+            cases = itertools.product(is_qat_list, is_dynamic_list)
+            for is_qat, is_dynamic in cases:
                 self._test_common(
                     mod,
                     (v,),
@@ -1807,31 +1794,59 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
                     matcher_check_fn=matcher_check_fn,
                     is_qat=is_qat,
+                    is_dynamic=is_dynamic,
                 )
+                if torch._inductor.config.cpp_wrapper:
+                    # For CPP wrapper
+                    self._test_code_common(
+                        mod,
+                        (v,),
+                        [
+                            "torch.ops.onednn.qlinear_pointwise.tensor",
+                            "torch.ops.onednn.qlinear_pointwise.binary",
+                        ]
+                        if config.abi_compatible
+                        else [
+                            "op_onednn_qlinear_pointwise_tensor.call",
+                            "op_onednn_qlinear_pointwise_binary_tensor.call",
+                        ],
+                        [],
+                        check_quantization=True,
+                        num_include_ops=[4, 4] if config.abi_compatible else [2, 2],
+                    )
+                else:
+                    # For python wrapper
+                    self._test_code_common(
+                        mod,
+                        (v,),
+                        [
+                            "torch.ops.onednn.qlinear_pointwise.tensor",
+                            "torch.ops.onednn.qlinear_pointwise.binary",
+                        ],
+                        [],
+                        check_quantization=True,
+                        num_include_ops=[2, 2],
+                    )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_add_cpu(self):
         self._qlinear_add_cpu_test_helper()
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_add_int8_mixed_bf16(self):
         self._qlinear_add_cpu_test_helper(int8_mixed_bf16=True)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_add_relu_cpu(self):
         self._qlinear_add_cpu_test_helper(use_relu=True)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_add_relu_int8_mixed_bf16(self):
         self._qlinear_add_cpu_test_helper(use_relu=True, int8_mixed_bf16=True)
 
@@ -1882,7 +1897,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_dequant_promotion_cpu(self):
         r"""
         This testcase test if dequant node before linear is promoted correctly:
@@ -1901,7 +1915,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_dequant_promotion_int8_mixed_bf16(self):
         r"""
         Test with int8_mixed_bf16 quantization.
@@ -1922,7 +1935,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_dequant_promotion_cpu_input_dim_exceeds_2(self):
         r"""
         This testcase test if dequant node before linear is promoted correctly:
@@ -1941,7 +1953,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_dequant_promotion_int8_mixed_bf16_input_dim_exceeds_2(self):
         r"""
         Test with int8_mixed_bf16 quantization.
@@ -1962,7 +1973,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_dequant_promotion_dynamic_cpu(self):
         r"""
         This testcase test if dequant node before linear is promoted correctly:
@@ -1993,7 +2003,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_mul_cpu(self):
         r"""
         This testcase will quantize a Linear->Mul pattern.
@@ -2026,7 +2035,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
 
     @skipIfNoDynamoSupport
-    @skipIfRocm
     def test_qmaxpool2d(self):
         r"""
         This testcase will quantize Conv2d->ReLU->MaxPool2d pattern.
@@ -2074,10 +2082,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
 
     @skipIfNoDynamoSupport
-    @skipIfRocm
     def test_qflatten(self):
         r"""
-        This testcase will quantize Conv2d->AdaptiveAvgPool2d->flatten pattern.
+        This testcase will quantize Conv2d->AdaptiveAvgPool2d->flatten->cat pattern.
         """
 
         class M(torch.nn.Module):
@@ -2092,8 +2099,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
 
             def forward(self, x):
-                return torch.flatten(
-                    self.adaptive_avg_pool2d(self.relu(self.conv(x))), 1
+                return torch.cat(
+                    [
+                        torch.flatten(
+                            self.adaptive_avg_pool2d(self.relu(self.conv(x))), 1
+                        )
+                    ]
                 )
 
         mod = M().eval()
@@ -2110,7 +2121,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
         )
 
     @skipIfNoDynamoSupport
-    @skipIfRocm
     def test_qcat(self):
         r"""
         This testcase will quantize cat based pattern:
@@ -2162,7 +2172,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     # https://github.com/pytorch/pytorch/issues/99841.
     def test_hardtanh_pattern_fallback(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv_transpose = torch.nn.ConvTranspose2d(
                     in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
@@ -2184,7 +2194,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     def test_leaky_relu_pattern_fallback(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
@@ -2204,7 +2214,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     # https://github.com/pytorch/pytorch/issues/99838.
     def test_conv2d_add_scalar(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
@@ -2224,7 +2234,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         self, include_ops=None, exclude_ops=None
     ):
         class Model_v1(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
@@ -2235,7 +2245,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 return torch.add(conv_out, other.relu())
 
         class Model_v2(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
@@ -2276,7 +2286,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     ):
         # Written buffer is graph input, we can't fuse inplace.
         class Model_v1(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
@@ -2288,7 +2298,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         # Written buffer is an alias tensor, we can't fuse inplace.
         class Model_v2(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
@@ -2299,7 +2309,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 return torch.add(conv_out, other[1:2, :, :, :]), other
 
         class Model_v3(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
@@ -2318,7 +2328,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         # Written buffer is an ReinterpretView, we can't fuse inplace.
         class Model_v4(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 32, 3, padding=1, bias=True)
                 self.linear = torch.nn.Linear(32 * 28, 32 * 28)
@@ -2327,12 +2337,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
             def forward(self, x, y):
                 x = self.conv(self.relu(x))
                 y = self.linear(y)
-                y = torch.cat((y, y), 1)
+                y = torch.cat((y, y + 1), 1)
                 y = torch.ops.aten.permute.default(y, [0, 2, 1]).reshape(1, 32, 28, 28)
                 return x + y
 
         class Model_v5(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.relu = torch.nn.ReLU()
@@ -2366,7 +2376,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     def test_conv2d_binary_fusion_failed(self):
         # we don't support alpha !=1 case or other has different size with conv's output.
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
@@ -2379,7 +2389,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         # https://github.com/pytorch/pytorch/issues/100802.
         # we can't do the fusion when add's inputs are same tensor.
         class Model2(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1
@@ -2393,7 +2403,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         # https://github.com/pytorch/pytorch/issues/101374.
         # we can't do the fusion when add's inputs are mixed dtype.
         class Model3(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1
@@ -2429,7 +2439,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     def test_reproduce_99842_issue(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1)
 
@@ -2538,6 +2548,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             om(*example_inputs)
             om(*example_inputs)
 
+    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_reproduce_121253_issue(self):
         class Mod(torch.nn.Module):
             def __init__(self, weight, bias, beta, alpha):
@@ -2562,8 +2573,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 else "mkldnn._linear_pointwise"
             )
             for beta, alpha in zip([1.0, 0.1, 0.0], [1.0, 0.1, 1.0]):
-                weight = torch.randn(64, 64, dtype=dtype)
-                bias = torch.randn(64, dtype=dtype)
+                weight = torch.nn.Parameter(torch.randn(64, 64, dtype=dtype))
+                bias = torch.nn.Parameter(torch.randn(64, dtype=dtype))
                 mod = Mod(weight, bias, beta, alpha).to(dtype).eval()
                 with torch.no_grad():
                     x = torch.randn(1, 64, dtype=dtype)
@@ -2576,22 +2587,38 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     self._test_code_common(mod, (x,), include_ops, exclude_ops)
 
     @skipIfNoDynamoSupport
-    @skipIfRocm
     def test_woq_int8(self):
         class M(torch.nn.Module):
-            def forward(self, x, weight, scales):
-                return torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
+            def __init__(self, is_permute):
+                super().__init__()
+                self.is_permute = is_permute
 
-        mod = M().eval()
+            def forward(self, x, weight, scales):
+                if self.is_permute:
+                    weight = weight.t()
+                    m = torch.mm(
+                        x.reshape(-1, x.shape[-1]),
+                        weight.to(x.dtype),
+                    )
+                    y = m * scales.to(m.dtype)
+                    y = y.reshape(*x.shape[:-1], y.shape[-1])
+                    return y
+                else:
+                    return (
+                        torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
+                    )
+
         x_shape = (1, 1, 256)
-        w_shape = (12, 256)
         s_shape = 12
         x_strides = [
             (256, 256, 1),  # linear dispatching to mm
             (256, 32, 1),  # linear dispatching to bmm
         ]
-        for x_stride in x_strides:
+        is_permutes = [False, True]
+        for x_stride, is_permute in itertools.product(x_strides, is_permutes):
+            mod = M(is_permute=is_permute).eval()
             x = torch.randn(x_shape, dtype=torch.bfloat16).as_strided(x_shape, x_stride)
+            w_shape = (12, 256)
             w = torch.randint(-128, 127, w_shape, dtype=torch.int8)
             s = torch.randn(s_shape, dtype=torch.bfloat16)
 
@@ -2621,7 +2648,7 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
     def test_conv_transpose2d_dynamic_shapes(self):
         # We don't support conv_transpose2d for now.
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv_transpose2d = torch.nn.ConvTranspose2d(
                     3, 16, 3, stride=2, padding=1
@@ -2713,7 +2740,6 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qat_bn_conv2d(self):
         r"""
         This testcase will quantize a single BN Conv2d module with qat flow.
@@ -2750,7 +2776,6 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_q_attention_block(self):
         class SelfAttnLikeModule(torch.nn.Module):
             def __init__(

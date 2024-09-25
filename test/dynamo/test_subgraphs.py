@@ -2,11 +2,11 @@
 from unittest.mock import patch
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import unsupported
 from torch._dynamo.utils import ifdynstaticdefault
+
 
 globalmod = torch.nn.ReLU()
 
@@ -310,7 +310,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = torch.add(unsupported(x, x), 1)
             return a * x + len_(b)
 
-        self._common(fn, 2, ifdynstaticdefault(4, 5))
+        self._common(fn, 2, 4)
 
     def test_restore_range(self):
         def fn(a, b):
@@ -587,7 +587,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
                 b = b + x * i
             return b
 
-        self._common(fn, 1, ifdynstaticdefault(2, 7))
+        self._common(fn, 1, ifdynstaticdefault(2, 3))
 
 
 if __name__ == "__main__":

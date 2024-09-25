@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
 )
 
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -40,7 +41,7 @@ class TestInput(FSDPTest):
         """Test FSDP with input being a list or a dict, only single GPU."""
 
         class Model(Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer = Linear(4, 4)
 

@@ -1,5 +1,6 @@
 import pytest  # noqa: F401
 
+
 default_rnns = [
     "cudnn",
     "aten",

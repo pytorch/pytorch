@@ -613,7 +613,7 @@ void addInputs(Node* n, const char* name, int64_t value) {
   }
 }
 
-void addInputs(Node* n, const char* name, c10::SymInt value) {
+void addInputs(Node* n, const char* name, const c10::SymInt& value) {
   addInputs(n, name, value.guard_int(__FILE__, __LINE__));
 }
 
@@ -743,7 +743,7 @@ void addInputs(
 void addInputs(
     Node* n,
     const char* name,
-    std::vector<at::Tensor> value,
+    const std::vector<at::Tensor>& value,
     bool allow_undefined) {
   addInputs(n, name, at::ITensorListRef(value), allow_undefined);
 }
@@ -818,8 +818,8 @@ void addInputs(Node* n, const char* name, std::optional<c10::SymInt> value) {
       n,
       name,
       value.has_value()
-          ? c10::make_optional(value->guard_int(__FILE__, __LINE__))
-          : c10::nullopt);
+          ? std::make_optional(value->guard_int(__FILE__, __LINE__))
+          : std::nullopt);
 }
 
 void addInputs(

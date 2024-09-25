@@ -440,15 +440,6 @@ TORCH_IMPL_FUNC(log_softmax_backward_cpu_out) (
   }
 }
 
-static Tensor softmax(const Tensor& input_, const int64_t dim_) {
-  auto result = [&]() {
-    NoNamesGuard guard;
-    return at::_softmax(input_, dim_, false);
-  }();
-  namedinference::propagate_names(result, input_);
-  return result;
-}
-
 Tensor softmax(const Tensor& input_, const int64_t dim_, std::optional<ScalarType> dtype) {
   auto result = [&]() {
     NoNamesGuard guard;
@@ -503,15 +494,6 @@ Tensor& softmax_out(
 // special_softmax, alias for softmax
 Tensor special_softmax(const Tensor& input_, const int64_t dim_, std::optional<ScalarType> dtype) {
   return at::softmax(input_, dim_, dtype);
-}
-
-static Tensor log_softmax(const Tensor& input_, const int64_t dim_) {
-  auto result = [&]() {
-    NoNamesGuard guard;
-    return at::_log_softmax(input_, dim_, false);
-  }();
-  namedinference::propagate_names(result, input_);
-  return result;
 }
 
 Tensor log_softmax(const Tensor& input_, const int64_t dim_, std::optional<ScalarType> dtype) {
@@ -579,11 +561,11 @@ DEFINE_DISPATCH(log_softmax_kernel);
 DEFINE_DISPATCH(softmax_backward_kernel);
 DEFINE_DISPATCH(log_softmax_backward_kernel);
 
-Tensor softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
+Tensor softmax(const Tensor& self, Dimname dim, std::optional<ScalarType> dtype) {
   return at::softmax(self, dimname_to_position(self, dim), dtype);
 }
 
-Tensor log_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
+Tensor log_softmax(const Tensor& self, Dimname dim, std::optional<ScalarType> dtype) {
   return at::log_softmax(self, dimname_to_position(self, dim), dtype);
 }
 

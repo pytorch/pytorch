@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import array
 import enum
 import functools

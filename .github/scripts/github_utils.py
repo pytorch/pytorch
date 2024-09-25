@@ -3,7 +3,6 @@
 import json
 import os
 import warnings
-
 from dataclasses import dataclass
 from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Union
 from urllib.error import HTTPError
@@ -47,16 +46,24 @@ def gh_fetch_url_and_headers(
         with urlopen(Request(url, headers=headers, data=data_, method=method)) as conn:
             return conn.headers, reader(conn)
     except HTTPError as err:
-        if err.code == 403 and all(
-            key in err.headers for key in ["X-RateLimit-Limit", "X-RateLimit-Used"]
+        if (
+            err.code == 403
+            and all(
+                key in err.headers
+                for key in ["X-RateLimit-Limit", "X-RateLimit-Remaining"]
+            )
+            and int(err.headers["X-RateLimit-Remaining"]) == 0
         ):
             print(
-                f"""Rate limit exceeded:
+                f"""{url}
+                Rate limit exceeded:
                 Used: {err.headers['X-RateLimit-Used']}
                 Limit: {err.headers['X-RateLimit-Limit']}
                 Remaining: {err.headers['X-RateLimit-Remaining']}
                 Resets at: {err.headers['x-RateLimit-Reset']}"""
             )
+        else:
+            print(f"Error fetching {url} {err}")
         raise
 
 
@@ -161,6 +168,14 @@ def gh_post_commit_comment(
     )
 
 
+def gh_close_pr(org: str, repo: str, pr_num: int, dry_run: bool = False) -> None:
+    url = f"{GITHUB_API_URL}/repos/{org}/{repo}/pulls/{pr_num}"
+    if dry_run:
+        print(f"Dry run closing PR {pr_num}")
+    else:
+        gh_fetch_url(url, method="PATCH", data={"state": "closed"})
+
+
 def gh_delete_comment(org: str, repo: str, comment_id: int) -> None:
     url = f"{GITHUB_API_URL}/repos/{org}/{repo}/issues/comments/{comment_id}"
     gh_fetch_url(url, method="DELETE")
@@ -202,3 +217,12 @@ def gh_update_pr_state(org: str, repo: str, pr_num: int, state: str = "open") ->
             )
         else:
             raise
+
+
+def gh_query_issues_by_labels(
+    org: str, repo: str, labels: List[str], state: str = "open"
+) -> List[Dict[str, Any]]:
+    url = f"{GITHUB_API_URL}/repos/{org}/{repo}/issues"
+    return gh_fetch_json(
+        url, method="GET", params={"labels": ",".join(labels), "state": state}
+    )

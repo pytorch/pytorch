@@ -20,7 +20,7 @@ std::optional<Method> Object::find_method(const std::string& basename) const {
       return Method(_ivalue(), fn);
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 void Object::define(const std::string& src, const ResolverPtr& resolver) {

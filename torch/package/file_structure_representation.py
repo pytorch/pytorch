@@ -1,6 +1,8 @@
+# mypy: allow-untyped-defs
 from typing import Dict, List
 
 from .glob_group import GlobGroup, GlobPattern
+
 
 __all__ = ["Directory"]
 

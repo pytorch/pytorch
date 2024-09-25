@@ -8,8 +8,7 @@
 #include <cstddef>
 #include <limits>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -81,7 +80,6 @@ struct FunctionalGraphSlicer {
         graph_->createWithSubgraph(prim::FunctionalGraph)
             ->insertBefore(block->return_node());
     auto reverse_iter = block->nodes().reverse();
-    std::vector<Value*> graph_outputs;
     for (auto it = reverse_iter.begin(); it != reverse_iter.end();) {
       Node* n = *it++;
 
@@ -223,5 +221,4 @@ void InlineFunctionalGraphs(const std::shared_ptr<Graph>& graph) {
   InlineFunctionalGraphs(graph->block());
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

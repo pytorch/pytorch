@@ -18,7 +18,7 @@ template <typename acc_t, typename scalar_t, typename F>
 Vectorized<acc_t> load_reduce_vec(const scalar_t* data, F reduce, acc_t ident) {
   using vec_t = Vectorized<scalar_t>;
   using vacc_t = Vectorized<acc_t>;
-  static_assert(vacc_t::size() <= vec_t::size(), "");
+  static_assert(vacc_t::size() <= vec_t::size());
   const auto val = vec_t::loadu(data);
   alignas(64) std::array<scalar_t, vec_t::size()> values;
   val.store(values.data());
@@ -142,7 +142,7 @@ struct OuterSumCastLoadPolicy <vec_t, vacc_t,
   }
 
   static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
-    static_assert(vacc_t::size() <= vec_t::size(), "");
+    static_assert(vacc_t::size() <= vec_t::size());
     const auto val = vec_t::loadu(data + stride * index, vacc_t::size());
     alignas(64) scalar_t values[vec_t::size()];
     val.store(values);
@@ -303,7 +303,7 @@ template <typename StorePolicy, typename scalar_t>
 static void store(char * C10_RESTRICT data, int64_t stride, int64_t index,
                   const Vectorized<scalar_t> &values) {
   using vec_t = Vectorized<scalar_t>;
-  alignas(64) std::array<scalar_t, vec_t::size()> array_values;
+  alignas(64) std::array<scalar_t, vec_t::size()> array_values{};
   values.store(array_values.data());
   store<StorePolicy>(data, stride, index, array_values);
 }

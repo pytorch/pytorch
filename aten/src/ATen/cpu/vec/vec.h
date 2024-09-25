@@ -15,7 +15,7 @@ inline Vectorized<bool> convert_to_bool(Vectorized<int8_t> x) {
   x.ne(Vectorized<int8_t>(0)).store(buffer);
 
   Vectorized<bool> ret;
-  static_assert(x.size() == ret.size(), "");
+  static_assert(x.size() == ret.size());
   std::memcpy(ret, buffer, ret.size() * sizeof(bool));
   return ret;
 }

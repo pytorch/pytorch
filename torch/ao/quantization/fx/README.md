@@ -1,5 +1,5 @@
 # FX Graph Mode Quantization Design Doc
-High Level FX Graph Mode Quantization Flow
+<!---
 ```
 float_model            QConfigMapping           BackendConfig
     \                          |                        /
@@ -21,8 +21,29 @@ float_model            QConfigMapping           BackendConfig
 —--------------------------------------------------------
                               |
                        Quantized Model
-
 ```
+-->
+
+```mermaid
+---
+title: High Level FX Graph Mode Quantization Flow
+---
+flowchart TD
+    classDef nofs fill:none,stroke:none
+    classDef sub fill:#D6EAF8,stroke:none
+    float_model:::nofs --> prepare_fx:::sub
+    QConfigMapping:::nofs --> prepare_fx
+    BackendConfig:::nofs --> prepare_fx
+    subgraph prepare_fx["`_(prepare_fx/prepare_qat_fx)_`"]
+    Fuse:::nofs --> swap[QAT Module Swap]:::nofs --> obs[Insert Observers]:::nofs
+    end
+    prepare_fx --> Calibrate/Train:::nofs --> convert_fx:::sub
+    subgraph convert_fx["`_(convert_fx)_`"]
+    Convert:::nofs --> Lowering:::nofs
+    end
+    convert_fx --> qm[Quantized Model]:::nofs
+```
+
 Please refer to [TODO: link] for definitions of terminologies.
 
 ## Overview
@@ -49,7 +70,7 @@ In the following, I’ll first have a detailed description for each step, and th
 
 ```
 class LinearReLUModule(torch.nn.Module):
-   def __init__(self):
+   def __init__(self) -> None:
        super().__init__()
        self.linear = torch.nn.Linear(5, 10).float()
        self.relu = torch.nn.ReLU()
