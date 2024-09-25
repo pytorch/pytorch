@@ -1216,7 +1216,7 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and params["device"] == torch.device("cpu")
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
     def test_pointwise_associative_scan_simple(self, reverse, combine_mode, device):
@@ -1262,7 +1262,7 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and params["device"] == torch.device("cpu")
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
     def test_pointwise_associative_scan_dim(self, reverse, combine_mode, device):
@@ -1304,7 +1304,7 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and params["device"] == torch.device("cpu")
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
     def test_pointwise_associative_scan_compile(
@@ -1364,7 +1364,7 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and params["device"] == torch.device("cpu")
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
     def test_pointwise_associative_scan_binary_operator(
@@ -1416,7 +1416,7 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and params["device"] == torch.device("cpu")
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
     def test_pointwise_associative_scan_tuple(self, reverse, combine_mode, device):
@@ -1444,7 +1444,7 @@ def forward(self, pred_1, x_1):
         unittest.skip,
         lambda params: (
             params["combine_mode"] == "pointwise"
-            and params["device"] == torch.device("cpu")
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
     def test_pointwise_associative_scan_complex_pytree(
