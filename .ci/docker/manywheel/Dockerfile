@@ -10,12 +10,13 @@ ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US.UTF-8
 
 ARG DEVTOOLSET_VERSION=9
+RUN echo "ulimit is $(ulimit -n)"
+
 # Note: This is required patch since CentOS have reached EOL
 # otherwise any yum install setp will fail
 RUN sed -i s/mirror.centos.org/vault.centos.org/g /etc/yum.repos.d/*.repo
 RUN sed -i s/^#.*baseurl=http/baseurl=http/g /etc/yum.repos.d/*.repo
 RUN sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/*.repo
-RUN yum update -y
 RUN yum install -y wget curl perl util-linux xz bzip2 git patch which perl zlib-devel
 # Just add everything as a safe.directory for git since these will be used in multiple places with git
 RUN git config --global --add safe.directory '*'
@@ -33,12 +34,10 @@ ENV LD_LIBRARY_PATH=/opt/rh/devtoolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt
 RUN yum --enablerepo=extras install -y epel-release
 
 # cmake-3.18.4 from pip
-RUN yum update -y
 RUN yum install -y python3-pip && \
     python3 -mpip install cmake==3.18.4 && \
     ln -s /usr/local/bin/cmake /usr/bin/cmake
 
-RUN yum update -y
 RUN yum install -y autoconf aclocal automake make sudo
 
 FROM base as openssl
@@ -97,8 +96,8 @@ RUN sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/*.repo
 ENV LC_ALL en_US.UTF-8
 ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US.UTF-8
-RUN yum -y update
 RUN yum install -y \
+        aclocal \
         autoconf \
         automake \
         bison \
@@ -115,6 +114,7 @@ RUN yum install -y \
         wget \
         which \
         xz \
+        yasm
 RUN yum install -y \
     https://repo.ius.io/ius-release-el7.rpm \
     https://ossci-linux.s3.amazonaws.com/epel-release-7-14.noarch.rpm
