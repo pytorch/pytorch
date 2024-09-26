@@ -884,7 +884,11 @@ class TritonHOPifier:
         )
 
     def call_triton_kernel(self, variable, args, kwargs, tx):
+        from triton import JITFunction
         from triton.runtime.autotuner import autotune, Autotuner, Config
+
+        from torch._dynamo.variables.constant import ConstantVariable
+        from torch._dynamo.variables.tensor import SymNodeVariable
 
         if "num_ctas" in kwargs:
             self.raise_unsupported(
@@ -959,6 +963,27 @@ class TritonHOPifier:
                 return int(x)
             else:
                 return x
+
+        if isinstance(variable.kernel, JITFunction):
+            constexprs = variable.kernel.constexprs
+        else:
+            assert isinstance(variable.kernel, Autotuner)
+            constexprs = variable.kernel.fn.constexprs
+
+        for idx, arg_name in enumerate(variable.kernel.arg_names):
+            if idx in constexprs:
+                if arg_name in combined_args_raw and isinstance(
+                    combined_args_raw[arg_name], SymNodeVariable
+                ):
+                    # This arg is marked as tl.constexpr. That means that triton will recompile every time
+                    # this value changes.
+                    # https://github.com/pytorch/pytorch/issues/136504
+                    # One option is to correctly pass the symints in so that the symbolic expressions are defined
+                    # when the triton code is being executed.
+                    # But since triton will have to recompile either way, we instead just specialize on the value.
+                    combined_args_raw[arg_name] = ConstantVariable.create(
+                        combined_args_raw[arg_name].evaluate_expr()
+                    )
 
         if len(set(pytree.tree_map(intify, grids))) == 1:
             # If there's only one unique grid, lets simplify

@@ -389,7 +389,10 @@ class TritonPrinter(PythonPrinter):
     def _print_Float(self, expr):
         # Use a tensor here to get float64. Otherwise the constant is
         # truncated to float32.
-        ret = f"tl.full([1], {expr}, tl.float64)"
+        if config.is_fbcode() and torch.version.hip:
+            ret = f"{expr}"
+        else:
+            ret = f"tl.full([1], {expr}, tl.float64)"
         return ret
 
     def _print_ToFloat(self, expr):
@@ -1870,8 +1873,8 @@ class TritonKernel(SIMDKernel):
         # Triton performance for bucketize_binary_search is much better when the number
         # of threads equals the number of elements.
         # If we're trying to use a bucketize kernel, we should make sure that an
-        # autotuning config with num_elements_per_warp=32 exists.
-        self.autotune_hints.add(AutotuneHint.ELEMENTS_PER_WARP_32)
+        # autotuning config with num_elements_per_warp=(warp_size) exists.
+        self.autotune_hints.add(AutotuneHint.ONE_ELEMENT_PER_THREAD)
 
         offsets_ptr = self.args.input(offsets_name)
         block_size = self.dense_size_str()
