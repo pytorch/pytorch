@@ -171,6 +171,10 @@ torchbench_setup_macos() {
 
 test_torchbench_perf() {
   echo $(pwd)
+  ls -a
+  cd ..
+  ls -a
+  cd pytorch
   print_cmake_info
 
   echo "Launching torchbench setup"
