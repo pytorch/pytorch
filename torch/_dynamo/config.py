@@ -51,10 +51,10 @@ accumulated_cache_size_limit = 256
 # [@compile_ignored: runtime_behaviour] skip tracing recursively if cache limit is hit
 skip_code_recursive_on_cache_limit_hit = True
 
-# [@compile_ignored: runtime_behaviour] raise a hard error if cache limit is
-# hit.  If you are on a model where you know you've sized the cache correctly,
-# this can help detect problems when you regress guards/specialization.  This
-# works best when cache_size_limit = 1.
+# raise a hard error if cache limit is hit.  If you are on a model where you
+# know you've sized the cache correctly, this can help detect problems when
+# you regress guards/specialization.  This works best when cache_size_limit = 1.
+# [@compile_ignored: runtime_behaviour]
 fail_on_cache_limit_hit = False
 
 # whether or not to specialize on int inputs.  This only has an effect with
