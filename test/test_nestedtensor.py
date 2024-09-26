@@ -6296,7 +6296,10 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         # Compute tolerances
         output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
-        grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(grads_ref[0], grads_lp_ref[0])
+        # fudge factor of 1.7 for smaller GPUs e.g., A2, A16
+        grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(
+            grads_ref[0], grads_lp_ref[0], 1.7
+        )
         grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(grads_ref[1], grads_lp_ref[1])
         grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(grads_ref[2], grads_lp_ref[2])
         grad_atols = [grad_q_ref_atol, grad_k_ref_atol, grad_v_ref_atol]
@@ -7371,6 +7374,59 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         output = g(nt)
         output.backward(torch.ones_like(output))
         self.assertEqual(output._metadata_cache, cache)
+
+    # See https://github.com/pytorch/pytorch/issues/128649
+    @xfailIfTorchDynamo
+    @dtypes(torch.float32)
+    def test_composite_op_in_inference_mode(self, device, dtype):
+        # expect view
+        nt = random_nt_from_dims(
+            [4, None, 48],
+            device=device,
+            dtype=dtype,
+            layout=torch.jagged,
+            requires_grad=True,
+        )
+
+        with torch.inference_mode():
+            output = nt.reshape([4, -1, 3, 16])
+            self.assertEqual(output.shape, (4, nt.shape[1], 3, 16))
+            self.assertTrue(output._is_view())
+
+        # expect copy
+        nt = random_nt_from_dims(
+            [4, None, 3, 16],
+            device=device,
+            dtype=dtype,
+            layout=torch.jagged,
+            requires_grad=True,
+        ).transpose(-1, -2)
+
+        with torch.inference_mode():
+            output = nt.reshape([4, -1, 48])
+            self.assertEqual(output.shape, (4, nt.shape[1], 48))
+            self.assertFalse(output._is_view())
+
+    @dtypes(torch.float32)
+    def test_composite_op_with_custom_mode(self, device, dtype):
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        # simple passthrough TorchDispatchMode
+        class CustomDispatchMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=..., kwargs=None):
+                return func(*args, **kwargs)
+
+        nt = random_nt_from_dims(
+            [4, None, 2, 3],
+            device=device,
+            dtype=dtype,
+            layout=torch.jagged,
+            requires_grad=True,
+        )
+        with CustomDispatchMode():
+            res = nt.reshape(4, -1, 6)
+
+        self.assertEqual(res.shape, (4, nt.shape[1], 6))
 
 
 FORWARD_FAILURES = {
