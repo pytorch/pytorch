@@ -1207,11 +1207,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         return shim_fn
 
     def generate_c_shim_extern_kernel_call(self, kernel, args):
-        # In the abi_compatible mode, we call fallback aten ops through a C shim layer
-        # Setting self.allow_stack_allocation to False because the exchange between
-        # ArrayRefTensor and at::Tensor is still fragile.
-        self.allow_stack_allocation = False
-
         wrapped_args = []
         debug_printer_manager = V.graph.wrapper_code.debug_printer
 
@@ -1325,9 +1320,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         reduce,
         kwargs,
     ):
-        # No stack allocation when there is a fallback op
-        self.allow_stack_allocation = False
-
         if config.abi_compatible:
             # call the ABI shim function instead of the ATen one
             cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name)
@@ -1357,9 +1349,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.writeline(line)
 
     def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
-        # No stack allocation when there is a fallback op
-        self.allow_stack_allocation = False
-
         # TODO: update aoti_torch_index_put_out in ir.py to use autogen out version
         if config.abi_compatible:
             # See the comment in codegen_reinterpret_view about why having something like
@@ -1443,26 +1432,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
         self.unbacked_symbol_decls.add(str(node.sym))
 
-    def can_stack_allocate_buffer(self, buffer):
-        return (
-            self.allow_stack_allocation
-            and buffer.get_device().type == "cpu"
-            and self.can_prove_buffer_has_static_shape(buffer)
-            and ir.is_contiguous_strides_for_shape(
-                buffer.get_stride(), buffer.get_size()
-            )
-        )
-
     def make_buffer_free(self, buffer):
         return (
             ""
             if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
-            or (V.graph.aot_mode and buffer.get_name() in self.stack_allocated_buffers)
-            or (
-                config.use_minimal_arrayref_interface
-                and V.graph.aot_mode
-                and buffer.get_name() in V.graph.graph_inputs
-            )
             else f"{buffer.get_name()}.reset();"
         )
 
@@ -1559,12 +1532,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             buffer.get_dtype(),
             buffer.get_size(),
             buffer.get_stride(),
-            buffer if self.can_stack_allocate_buffer(buffer) else None,
         )
 
-    def make_allocation(
-        self, name, device, dtype, shape, stride, buffer_if_can_stack_allocate=None
-    ):
+    def make_allocation(self, name, device, dtype, shape, stride):
         orig_stride = stride
         device_str = self.codegen_device(device)
         dtype_code = self.codegen_dtype(dtype)
@@ -1585,20 +1555,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
             device_type, device_id = device_str.split(",")
             device_idx = "this->device_idx_" if V.graph.aot_mode else device_id
-            if buffer_if_can_stack_allocate is not None:
-                self.stack_allocated_buffers[name] = buffer_if_can_stack_allocate
-                cpp_type = DTYPE_TO_CPP[dtype]
-                numel = buffer_if_can_stack_allocate.get_numel()
-                # Note: we don't zero storage because empty_strided doesn't zero either.
-                self.wrapper_call.writeline(f"{cpp_type} {name}_storage[{numel}];")
-                args = [
-                    f"{name}_storage",
-                    size_array_var,
-                    stride_array_var,
-                    device_type,
-                    device_idx,
-                ]
-                return f"ArrayRefTensor<{cpp_type}> {name}({', '.join(args)});"
 
             args = [
                 str(len(shape)),
@@ -1774,14 +1730,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         writer.writelines(call_strs)
 
         if config.abi_compatible:
-            if (
-                self.can_stack_allocate_buffer(data)
-                and self.is_statically_known_list_of_ints(size_list)
-                and self.is_statically_known_list_of_ints(stride_list)
-                and ir.is_contiguous_strides_for_shape(stride_list, size_list)
-            ):
-                return final_tmp_name
-
             # NB, the return handle here represents a temporary tensor, which will be automatically
             # released.
             # Here's a sample usage in the cpp wrapper code:
@@ -1820,10 +1768,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def codegen_device_copy(self, src, dst):
         if config.abi_compatible:
-            # aoti_torch_tensor_copy_ takes AtenTensorHandle as input,
-            # while stack-allocation results in ArrayRefTensor
-            # so disable stack allocation here
-            self.allow_stack_allocation = False
             self.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_tensor_copy_(expensive_copy_to_tensor_if_needed({src}), {dst}));"
             )
@@ -2123,9 +2067,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         raw_args=None,
         outputs=None,
     ):
-        # No stack allocation when there is a fallback op
-        self.allow_stack_allocation = False
-
         def extract_output_name(out):
             if out is None:
                 return None
