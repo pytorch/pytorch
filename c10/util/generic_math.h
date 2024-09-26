@@ -93,15 +93,18 @@ calc_erfinv(T y) {
       T(-1.970840454), T(-1.624906493), T(3.429567803), T(1.641345311)};
   std::array<T, 2> d = {T(3.543889200), T(1.637067800)};
   T y_abs = std::abs(y);
-  if (y_abs > 1.0)
+  if (y_abs > 1.0) {
     return std::numeric_limits<T>::quiet_NaN();
+  }
 #ifdef _WIN32
   // error C2039: '_copysign': is not a member of 'std'
-  if (y_abs == 1.0)
+  if (y_abs == 1.0) {
     return copysign(std::numeric_limits<T>::infinity(), y);
+  }
 #else
-  if (y_abs == 1.0)
+  if (y_abs == 1.0) {
     return std::copysign(std::numeric_limits<T>::infinity(), y);
+  }
 #endif
   if (y_abs <= static_cast<T>(CENTRAL_RANGE)) {
     z = y * y;
