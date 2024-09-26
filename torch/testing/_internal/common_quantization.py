@@ -1247,6 +1247,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         export_with_dynamic_shape=False,
         is_qat=False,
         is_debug_mode=False,
+        capture_pre_autograd_graph_node_occurrence=None,
     ):
         # resetting dynamo cache
         torch._dynamo.reset()
@@ -1305,6 +1306,10 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             for k, v in PT2EQuantizationTestCase._MAP_TO_FX_TRACED_OPS.items():
                 if k in expected_node_occurrence:
                     node_occurrence[ns.call_function(v)] = expected_node_occurrence[k]
+            if capture_pre_autograd_graph_node_occurrence is not None:
+                node_occurrence = {
+                    ns.call_function(k): v for k, v in capture_pre_autograd_graph_node_occurrence.items()
+                }
             self.checkGraphModuleNodes(m_fx, expected_node_occurrence=node_occurrence)
             fx_quant_output = m_fx(*example_inputs)
             self.assertEqual(fx_quant_output, pt2_quant_output)

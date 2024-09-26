@@ -41,9 +41,9 @@ from torch.utils._triton import has_triton
 
 
 try:
-    from .mock_cache import patch_fbcode, PatchCaches
+    from .mock_cache import global_stats, PatchCaches, Stats
 except ImportError:
-    from mock_cache import PatchCaches  # @manual
+    from mock_cache import global_stats, PatchCaches, Stats  # @manual
 
 
 HAS_TRITON = has_triton()
@@ -160,6 +160,7 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
     @requires_triton()
+    @config.patch({"fx_graph_remote_cache": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))
@@ -179,7 +180,6 @@ class TestFxGraphCache(TestCase):
 
         with config.patch(
             {
-                "fx_graph_cache": False,
                 "fx_graph_remote_cache": True,
             }
         ), patch.dict(os.environ), PatchCaches():
@@ -190,10 +190,12 @@ class TestFxGraphCache(TestCase):
                     self.assertEqual(fn(a, b), compiled_fn(a, b))
                 reset()
 
-        PatchCaches.report()
-        self.assertEqual(PatchCaches.num_get_hit, 3)
-        self.assertEqual(PatchCaches.num_get_miss, 1)
-        self.assertEqual(PatchCaches.num_put, 1)
+        self.assertEqual(global_stats.fx_graph, Stats(1, 3, 1))
+
+        if config.is_fbcode():
+            # Check that the cache entries seem reasonable
+            for k in global_stats.fx_graph.cache.keys():
+                self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c10")
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
@@ -361,12 +363,65 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
     @requires_gpu()
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_flex_attention_caching(self):
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        block_mask = create_block_mask(
+            lambda b, h, q, kv: q >= kv, None, None, 2048, 2048
+        )
+
+        def score_mod(score, b, h, q, kv):
+            return score + (q - kv)
+
+        def fn(q, k, v):
+            return flex_attention(q, k, v, score_mod=score_mod, block_mask=block_mask)
+
+        def score_mod2(score, b, h, q, kv):
+            return score
+
+        def fn2(q, k, v):
+            return flex_attention(q, k, v, score_mod=score_mod2, block_mask=block_mask)
+
+        a, b, c = (torch.randn(1, 4, 512, 64).cuda() for _ in range(3))
+        compiled_fn = torch.compile(fn)
+        compiled_fn2 = torch.compile(fn2)
+
+        atol, rtol = 1e-4, 1e-4
+
+        # A first call should miss in the cache.
+        self.assertEqual(fn(a, b, c), compiled_fn(a, b, c), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
+
+        # A second call should hit. (First reset so in-memory guards
+        # don't prevent compilation).
+        for m in torch._inductor.codecache.PyCodeCache.cache.values():
+            os.remove(m.__file__)
+        self.reset()
+        self.assertEqual(fn(a, b, c), compiled_fn(a, b, c), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
+
+        # A third call with different score_mod should have a cache miss
+        for m in torch._inductor.codecache.PyCodeCache.cache.values():
+            os.remove(m.__file__)
+        self.reset()
+        self.assertEqual(fn2(a, b, c), compiled_fn2(a, b, c), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
+
+    @requires_gpu()
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
-    def test_higher_order_op_bypass(self):
+    def test_triton_higher_order_op_bypass(self):
         """
-        Verify that we bypass the cache when we have higher order ops.
+        Verify that we bypass the cache when we have a triton higher order ops.
         """
 
         def fn(x, y):
@@ -793,16 +848,14 @@ class TestAutotuneCache(TestCase):
         torch._dynamo.reset()
         clear_inductor_caches()
 
+    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @unittest.skipIf(not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"autotune_local_cache": False})
     @config.patch({"autotune_remote_cache": True})
     @config.patch({"max_autotune": True})
-    @parametrize("fbcode", (False,) + (True,) * config.is_fbcode())
-    def test_autotune_cache(self, fbcode: bool):
-        if not fbcode:
-            self.skipTest("Redis for autotune is currently broken")
-
+    def test_autotune_cache(self):
         class Model(torch.nn.Module):
             def forward(self, x, y, a, b):
                 return x + y, a + b
@@ -816,21 +869,22 @@ class TestAutotuneCache(TestCase):
         b = torch.randn(1000, 100).cuda()
         f_compiled = torch.compile(f, fullgraph=True)
 
-        with PatchCaches(), patch_fbcode(fbcode):
+        with PatchCaches():
             f_compiled(x, y, a, b)
 
-            PatchCaches.update()
-            self.assertEqual(PatchCaches.num_get_hit, 0)
-            self.assertEqual(PatchCaches.num_get_miss, 2)
-            self.assertEqual(PatchCaches.num_put, 2)
+            self.assertEqual(global_stats.autotune_remote, Stats(2, 0, 2))
 
             self.reset()
             f_compiled(x, y, a, b)
 
-        PatchCaches.report()
-        self.assertEqual(PatchCaches.num_get_hit, 2)
-        self.assertEqual(PatchCaches.num_get_miss, 2)
-        self.assertEqual(PatchCaches.num_put, 2)
+        self.assertEqual(global_stats.autotune_remote, Stats(2, 2, 2))
+
+        if config.is_fbcode():
+            # Check that the cache entries seem reasonable
+            for k in global_stats.autotune_remote.cache.keys():
+                self.assertRegex(k, r"[0-9a-z]{52}\.py")
+            for k in global_stats.triton.cache.keys():
+                self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c10")
 
 
 class TestUtils(TestCase):
