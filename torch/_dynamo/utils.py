@@ -21,7 +21,6 @@ import operator
 import os
 import re
 import sys
-import textwrap
 import threading
 import time
 import types
@@ -30,6 +29,7 @@ import uuid
 import warnings
 import weakref
 from contextlib import contextmanager
+from dataclasses import is_dataclass
 from functools import lru_cache
 from types import MethodWrapperType
 from typing import (
@@ -63,7 +63,7 @@ import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._C import (
-    _get_function_stack_at,
+    _instruction_counter,
     _len_torch_function_stack,
     _pop_torch_function_stack,
     _push_on_torch_function_stack,
@@ -219,6 +219,21 @@ def _add_time_spent(key: str, phase_name: str, time_spent: float) -> None:
     frame_phase_timing[key][phase_name] += time_spent
 
 
+# Use frame_phase_timing to record remote_cache_time_saved
+# This follows the same principles of key as the other frame phase timings,
+# but is incremented by FxGraphCache (and later AOTAutogradCache) directly
+def add_remote_cache_time_saved(time_saved_ns: int, is_backward: bool = False) -> None:
+    key = None
+    if is_backward:
+        # Use compile id as the frame key for backwards compilation
+        key = str(torch._guards.CompileContext.current_compile_id())
+    else:
+        key = str(curr_frame)
+    # Convert to seconds (as a float)
+    time_saved = time_saved_ns / 1e9
+    _add_time_spent(key, "remote_cache_time_saved", time_saved)
+
+
 def get_cache_stats() -> Dict[str, Any]:
     """Get a bunch of metadata about cache hits and misses to use in chromium events"""
     cache_stats = {
@@ -331,15 +346,24 @@ def dynamo_timed(
                                 code_gen_time = frame_phase_timing[compile_id].get(
                                     "code_gen", None
                                 )
+                                remote_cache_time_saved = frame_phase_timing[
+                                    compile_id
+                                ].get("remote_cache_time_saved", None)
                             else:
                                 inductor_compile_time = None
                                 code_gen_time = None
+                                remote_cache_time_saved = None
+                            structured_logging_overhead_s = (
+                                torch._logging.get_structured_logging_overhead()
+                            )
                             metrics = BwdCompilationMetrics(
                                 compile_id,
                                 inductor_compile_time,
                                 code_gen_time,
                                 fail_type,
                                 fail_reason,
+                                remote_cache_time_saved,
+                                structured_logging_overhead_s,
                             )
                             record_compilation_metrics(metrics)
 
@@ -778,6 +802,9 @@ class CompilationMetrics:
     # a compiled frame
     has_guarded_code: bool
     possibly_missed_reinplacing_opportunities: Optional[int]
+    remote_cache_time_saved_s: Optional[float]
+    structured_logging_overhead_s: Optional[float]
+    config_suppress_errors: Optional[bool]
 
 
 @dataclasses.dataclass
@@ -787,6 +814,8 @@ class BwdCompilationMetrics:
     code_gen_time_s: Optional[float]
     fail_type: Optional[str]
     fail_reason: Optional[str]
+    remote_cache_time_saved_s: Optional[float]
+    structured_logging_overhead_s: Optional[float]
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -812,6 +841,11 @@ def record_compilation_metrics(
             k: list(v) if isinstance(v, set) else v
             for k, v in dataclasses.asdict(compilation_metrics).items()
         },
+        # NB: Because compilation metrics *includes* the logging overhead time,
+        # we can't both *measure* the logging overhead of compilation metrics
+        # without making it inconsistent with compilation metrics itself, so
+        # we ignore the (hopefully small) time spent logging compilation metrics
+        record_logging_overhead=False,
     )
     if config.log_compilation_metrics:
         log_compilation_event(compilation_metrics)
@@ -1607,8 +1641,12 @@ def same(
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
         fp64_ref = ref
-    if isinstance(ref, (list, tuple, torch.nn.ParameterList, torch.Size)):
-        assert isinstance(res, (list, tuple)), f"type mismatch {type(ref)} {type(res)}"
+    if isinstance(
+        ref, (list, tuple, collections.deque, torch.nn.ParameterList, torch.Size)
+    ):
+        assert isinstance(
+            res, (list, tuple, collections.deque)
+        ), f"type mismatch {type(ref)} {type(res)}"
         if len(ref) != len(res):
             log_error("Length mismatch")
             return False
@@ -1727,6 +1765,26 @@ def same(
 
             # Check error from fp64 version
             if fp64_ref.dtype == torch.float64:
+                # Fix a corner case that res and fp64_ref does not contains NaN and match (with loose tolerance)
+                # while the ref contains NaN. In this case, RMSE should not match any ways.
+                # But res is 'BETTER' than ref so we count it pass.
+                #
+                # This happens for Super_SloMo when loop ordering after fusion is enabled:
+                # https://gist.github.com/shunting314/11f235c70f7db0d52718d26f4a701cab
+                loose_tol = 1e-2 * 4
+                if (
+                    not fp64_ref.isnan().any()
+                    and not res.isnan().any()
+                    and ref.isnan().any()
+                    and torch.allclose(
+                        fp64_ref.to(dtype=res.dtype),
+                        res,
+                        atol=loose_tol,
+                        rtol=loose_tol,
+                        equal_nan=equal_nan,
+                    )
+                ):
+                    return True
                 ref_error = rmse(fp64_ref, ref).item()
                 # ref unable to produce this with stable numerics in this precision, ignore
                 if math.isnan(ref_error):
@@ -1741,7 +1799,9 @@ def same(
                 # accuracy when comparing AMP with FP32 is within a difference of less than 0.1%.
                 # Thus, it's possible that the correctness check failures for these models are
                 # false alarms. We use multiplier of 3 instead of 2 to avoid these false alarms.
-                multiplier = 3.0 if res.dtype == torch.bfloat16 else 2.0
+                multiplier = (
+                    3.0 if res.dtype in (torch.float16, torch.bfloat16) else 2.0
+                )
 
                 if use_larger_multiplier_for_smaller_tensor and (
                     fp64_ref.numel() <= 10 and tol >= 4 * 1e-2
@@ -1887,104 +1947,6 @@ graph_break_reasons: List[torch._dynamo.output_graph.GraphCompileReason] = []
 # keep record of compiled code, if we are in "error if recompile"
 # to track code that dynamo has compiled previously
 seen_code_map = ExactWeakKeyDictionary()
-
-
-class CompileProfiler:
-    """Utility for profiling how and what dynamo would compile.
-
-    Can be used for
-     * diagnosing recompilation issues
-     * determining an appropriate compile cache limit
-     * (TODO)confirming which functions got compiled/skipped
-    """
-
-    def __init__(self):
-        self.frame_count = 0
-        self.op_count = 0
-        self.backend_ctx_ctor = disable_cache_limit
-
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
-        self.frame_count += 1
-        for node in gm.graph.nodes:
-            if "call" in node.op:
-                self.op_count += 1
-        return gm.forward
-
-    # no-op __enter__ and __exit__ to preserve BC
-    def __enter__(self):
-        return self
-
-    def __exit__(self, typ, val, traceback):
-        pass
-
-    def get_metrics(self):
-        return {"guard_failures": guard_failures}
-
-    def report(self):
-        metrics = self.get_metrics()
-        gf = metrics["guard_failures"]
-
-        def num_recompiles(code):
-            return len(gf[code])
-
-        def recompile_reasons(code):
-            return "\n".join([str(x) for x in gf[code]])
-
-        summarized_gf = [
-            [format_func_info(code), num_recompiles(code), recompile_reasons(code)]
-            for code in gf
-        ]
-
-        def graph_break_report():
-            if "graph_break" in counters:
-                graph_breaks = counters["graph_break"]
-                return tabulate(
-                    [[msg, graph_breaks[msg]] for msg in graph_breaks],
-                    headers=["Graph Break Reason", "Count"],
-                )
-
-        def recompilation_report():
-            if len(gf):
-                max_recompiles = max(num_recompiles(code) for code in gf)
-                recomp_table = tabulate(
-                    summarized_gf,
-                    headers=["Function", "Recompiles", "Recompile Reasons"],
-                )
-                return recomp_table + textwrap.dedent(
-                    f"""
-
-                    Set torch._dynamo.config.cache_size_limit to {max_recompiles} to avoid being cache limited.
-                """
-                )
-
-        report = textwrap.dedent(
-            """
-            Torchdynamo Profiler Report
-            ===========================
-
-            Graph Breaks
-            ------------
-            Graph breaks happen when torchdynamo encounters code it can't safely trace.
-            If you want to find out why breaks are happening, check below for each break reason
-            You may gain additional insight by passing `fullgraph=True` to torch.compile,
-            to stop at the first break.
-
-        """
-        )
-        report += graph_break_report() or "No graph breaks detected."
-        report += textwrap.dedent(
-            """
-
-            Recompilation
-            -------------
-            These subgraphs were recompiled more than once due to guard failures
-            Guard failures indicate some condition assumed to be static by the tracer changed,
-            making it unsafe to reuse the compiled program.
-
-        """
-        )
-        report += recompilation_report() or "No recompilation detected.\n"
-        return report
 
 
 # return same dir unless user changes config between calls
@@ -2142,10 +2104,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         ):
             raise UserError(  # noqa: B904
                 UserErrorType.CONSTRAINT_VIOLATION,
-                "Tried to use data-dependent value in the subsequent computation. "
-                "This can happen when we encounter unbounded dynamic value that is unknown during tracing time.  "
-                "You will need to explicitly give hint to the compiler. Please take a look at "
-                f"torch._check OR torch._check_is_size APIs.  {cause}",
+                str(cause),
                 case_name="constrain_as_size_example",
             )
         elif isinstance(cause, ValueRangeError):
@@ -2312,9 +2271,13 @@ def import_submodule(mod: types.ModuleType):
 
 
 def object_has_getattribute(value: Any):
+    return class_has_getattribute(type(value))
+
+
+def class_has_getattribute(cls: type):
     try:
         if isinstance(
-            inspect.getattr_static(type(value), "__getattribute__"),
+            inspect.getattr_static(cls, "__getattribute__"),
             types.FunctionType,
         ):
             return True
@@ -2370,9 +2333,7 @@ def tensor_always_has_static_shape(
 
     if (
         tensor_source.guard_source().is_specialized_nn_module()
-        # Marking the tensor attributes of nn modules static to keep the behavior same as before
-        # inline_inbuilt_nn_module flag was introduced.
-        or tensor_source.guard_source().is_unspecialized_nn_module()
+        or tensor_source.guard_source().is_unspecialized_builtin_nn_module()
     ) and config.force_nn_module_property_static_shapes:
         return True, TensorStaticReason.NN_MODULE_PROPERTY
 
@@ -2960,6 +2921,18 @@ def to_fake_tensor(t, fake_mode):
     )
 
 
+# NB: this works for both classes and instances
+def is_frozen_dataclass(value):
+    return (
+        not object_has_getattribute(value)
+        and not class_has_getattribute(value)
+        and is_dataclass(value)
+        and hasattr(value, "__dataclass_params__")
+        and hasattr(value.__dataclass_params__, "frozen")
+        and value.__dataclass_params__.frozen
+    )
+
+
 def get_first_attr(obj, *attrs):
     """
     Return the first available attribute or throw an exception if none is present.
@@ -3124,14 +3097,10 @@ def is_parameter_freezing():
     return torch._inductor.config.freezing and not torch.is_grad_enabled()
 
 
-def get_torch_function_mode_stack(filter_ignored=True):
-    from .variables.torch_function import IGNORED_MODES
-
-    stack = [_get_function_stack_at(i) for i in range(_len_torch_function_stack())]
-    if filter_ignored:
-        stack = [mode for mode in stack if type(mode) not in IGNORED_MODES]
-
-    return stack
+def get_torch_function_mode_stack():
+    return [
+        get_torch_function_mode_stack_at(i) for i in range(_len_torch_function_stack())
+    ]
 
 
 def get_torch_function_mode_stack_at(ind):
@@ -3145,6 +3114,11 @@ def set_torch_function_mode_stack(stack):
 
     for mode in stack:
         _push_on_torch_function_stack(mode)
+
+
+def clear_torch_function_mode_stack():
+    for i in range(_len_torch_function_stack()):
+        _pop_torch_function_stack()
 
 
 def verify_guard_fn_signature(value):
@@ -3203,3 +3177,41 @@ def get_user_object_from_id(obj_id):
 def store_user_object_weakref(obj):
     obj_id = id(obj)
     user_obj_id_to_weakref[obj_id] = weakref.ref(obj)
+
+
+class CompileTimeInstructionCounter:
+    _counter: int = 0
+    _id: int = -1
+    _depth = 0
+
+    @classmethod
+    def start(cls) -> None:
+        cls._depth = cls._depth + 1
+        if cls._depth == 1:
+            cls._id = _instruction_counter.start()
+
+    @classmethod
+    def end(cls) -> None:
+        cls._depth = cls._depth - 1
+        if cls._depth == 0:
+            cls._counter += _instruction_counter.end(cls._id)
+            cls._id = -1
+
+    @classmethod
+    def clear(cls) -> None:
+        cls._counter = 0
+
+    @classmethod
+    def value(cls) -> int:
+        return cls._counter
+
+    @classmethod
+    @contextmanager
+    def record(cls):
+        try:
+            if config.record_compile_time_instruction_count:
+                cls.start()
+            yield
+        finally:
+            if config.record_compile_time_instruction_count:
+                cls.end()

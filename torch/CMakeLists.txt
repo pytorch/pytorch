@@ -337,11 +337,17 @@ endif()
 
 # in case of the split build we need to add compile definitions
 if(BUILD_LIBTORCHLESS)
+
+  if(USE_UCC)
+    target_link_libraries(torch_python PRIVATE __caffe2_ucc)
+    target_compile_definitions(torch_python PRIVATE USE_UCC)
+  endif()
+
   if(USE_UCC AND USE_C10D_UCC)
     target_compile_definitions(torch_python PRIVATE USE_C10D_UCC)
   endif()
 
-  if(USE_UCC AND USE_C10D_NCCL)
+  if(USE_NCCL AND USE_C10D_NCCL)
     target_compile_definitions(torch_python PRIVATE USE_C10D_NCCL)
   endif()
 

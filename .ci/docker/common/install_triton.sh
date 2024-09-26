@@ -12,10 +12,7 @@ conda_reinstall() {
   as_jenkins conda install -q -n py_$ANACONDA_PYTHON_VERSION -y --force-reinstall $*
 }
 
-if [ -n "${ROCM_VERSION}" ]; then
-  TRITON_REPO="https://github.com/openai/triton"
-  TRITON_TEXT_FILE="triton-rocm"
-elif [ -n "${XPU_VERSION}" ]; then
+if [ -n "${XPU_VERSION}" ]; then
   TRITON_REPO="https://github.com/intel/intel-xpu-backend-for-triton"
   TRITON_TEXT_FILE="triton-xpu"
 else
