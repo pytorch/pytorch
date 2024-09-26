@@ -305,7 +305,6 @@ if(NOT DEFINED USE_VULKAN)
   cmake_dependent_option(USE_VULKAN "Use Vulkan GPU backend" ON "ANDROID" OFF)
 endif()
 
-option(USE_SLEEF_FOR_ARM_VEC256 "Use sleef for arm" OFF)
 option(USE_SOURCE_DEBUG_ON_MOBILE "Enable" ON)
 option(USE_LITE_INTERPRETER_PROFILER "Enable" ON)
 cmake_dependent_option(
@@ -369,7 +368,7 @@ cmake_dependent_option(
     USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI" OFF)
 cmake_dependent_option(
     USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
-    "USE_DISTRIBUTED" OFF)
+    "USE_DISTRIBUTED AND NOT WIN32" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 option(BUILD_LIBTORCH_CPU_WITH_DEBUG
@@ -489,10 +488,6 @@ if(USE_SYSTEM_LIBS)
     set(USE_SYSTEM_NCCL ON)
   endif()
 endif()
-
-# Used when building Caffe2 through setup.py
-option(BUILDING_WITH_TORCH_LIBS
-       "Tell cmake if Caffe2 is being built alongside torch libs" ON)
 
 # /Z7 override option When generating debug symbols, CMake default to use the
 # flag /Zi. However, it is not compatible with sccache. So we rewrite it off.
@@ -887,6 +882,16 @@ cmake_dependent_option(
   Will be disabled if not supported by the platform" ON
   "USE_CUDA OR USE_ROCM" OFF)
 
+#
+# Cannot be put into Dependencies.cmake due circular dependency:
+# USE_FLASH_ATTENTION -> USE_ROCM -> Dependencies.cmake -> aotriton.cmake
+#
+if(USE_ROCM)
+  if(USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION)
+    include(cmake/External/aotriton.cmake)
+  endif()
+endif()
+
 if(DEBUG_CUDA)
   string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -lineinfo")
   string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -lineinfo")
@@ -906,17 +911,20 @@ if(USE_PYTORCH_QNNPACK)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_PYTORCH_QNNPACK")
 endif()
 
-if(USE_SLEEF_FOR_ARM_VEC256)
-  string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
-  add_definitions(-DAT_BUILD_ARM_VEC256_WITH_SLEEF)
-endif()
-
 # Enable sleef on macOS with Apple silicon by default
 if((${CMAKE_SYSTEM_NAME} STREQUAL "Darwin") AND ("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "arm64"))
   message(STATUS "Running on macOS with Apple silicon")
   string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
   add_definitions(-DAT_BUILD_ARM_VEC256_WITH_SLEEF)
 endif()
+
+# Enable sleef on Arm(R) architecture by default (except Android)
+if((NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Android")
+  AND("${CMAKE_SYSTEM_PROCESSOR}" MATCHES "aarch64"))
+  string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
+  add_definitions(-DAT_BUILD_ARM_VEC256_WITH_SLEEF)
+endif()
+
 
 if(USE_XNNPACK)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_XNNPACK")

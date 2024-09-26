@@ -487,10 +487,14 @@ class TestReductions(TestCase):
             self.assertEqual(y, y2)
 
     @skipIfNoSciPy
-    def test_logsumexp(self, device):
+    @dtypes(torch.float32, torch.double, torch.complex64, torch.complex128)
+    def test_logsumexp(self, device, dtype):
         from scipy.special import logsumexp
-        a = torch.randn(5, 4, device=device)
-        a[0, 0] = inf
+        a = torch.randn(5, 4, device=device, dtype=dtype)
+        # torch.exp(complex(inf, 0)) yields inf+nan*j instead of inf+0*j on CPU which disagrees with CUDA, C++ std::exp,
+        # numpy and scipy. Skip inf testing on CPU. Related to https://github.com/pytorch/pytorch/issues/95740
+        if torch.device(device) != torch.device('cpu'):
+            a[0, 0] = inf
         a[1, :] = -inf
         actual = a.logsumexp(1)
         expected = logsumexp(a.cpu().numpy(), 1)
@@ -498,11 +502,14 @@ class TestReductions(TestCase):
         self.assertEqual(expected, actual)
 
         # check that out is actually inplace
-        b = torch.zeros(5, 2, device=device)
+        b = torch.zeros(5, 2, device=device, dtype=dtype)
         c = b[:, 0]
         torch.logsumexp(a, 1, out=c)
         self.assertEqual(expected, b[:, 0])
 
+    @skipIfNoSciPy
+    def test_logsumexp_integral_promotion(self, device):
+        from scipy.special import logsumexp
         # check integral inputs is promoted to floating point
         e = torch.randint(-100, 100, [5, 4], device=device)
         actual = e.logsumexp(1).to(torch.float64)
@@ -876,6 +883,18 @@ class TestReductions(TestCase):
         # is internally cast.
         a_float = a.to(torch.float32)
         self.assertEqual(a_float.mean(), a.mean(dtype=torch.float32))
+
+    @onlyCPU
+    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
+    def test_mean_out_is_alias_of_return(self, dtype, device):
+        a = torch.tensor([[[1.0, 1.0, 1.0, 1.0]], [[2.0, 2.0, 2.0, 2.0]], [[3.0, 3.0, 3.0, 3.0]]],
+                         dtype=dtype, device=device)
+        out = torch.empty((1, 1, 4), dtype=dtype, device=device)
+
+        return_out = torch.mean(a, dim=0, keepdim=True, out=out)
+        target = torch.tensor([[[2.0, 2.0, 2.0, 2.0]]], dtype=dtype, device=device)
+        self.assertTrue(torch._C._is_alias_of(out, return_out))
+        self.assertTrue(torch.allclose(out, target))
 
     # TODO: update this and tests that use it to handle device properly
     def _test_reduce_integer_upcast(self, fn, has_out=True, test_complex=True):
@@ -1498,7 +1517,13 @@ class TestReductions(TestCase):
         self.assertEqual(res1, res2.to(dtype=dtype))
 
     def test_prod_bool(self, device):
-        vals = [[True, True], [True, False], [False, False], []]
+        vals = [
+            [True, True],
+            [True, False],
+            [False, False],
+            [],
+            [False] * 256,  # https://github.com/pytorch/pytorch/issues/127866
+        ]
         for val in vals:
             result = torch.prod(torch.tensor(val, device=device), dtype=torch.bool).item()
             expect = np.prod(np.array(val), dtype=bool)

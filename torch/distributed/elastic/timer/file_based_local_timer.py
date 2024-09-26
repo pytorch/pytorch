@@ -193,10 +193,11 @@ class FileTimerServer:
 
     def start(self) -> None:
         logger.info(
-            "Starting %s..." " max_interval=%s," " daemon=%s",
+            "Starting %s... max_interval=%s, daemon=%s, file_path=%s",
             type(self).__name__,
             self._max_interval,
             self._daemon,
+            self._file_path,
         )
         self._watchdog_thread = threading.Thread(
             target=self._watchdog_loop, daemon=self._daemon
@@ -268,7 +269,7 @@ class FileTimerServer:
         log_debug_info_for_expired_timers(
             self._run_id,
             {
-                pid: self._get_scopes(expired_timers)
+                pid: [expired_timer.to_json() for expired_timer in expired_timers]
                 for pid, expired_timers in all_expired_timers.items()
             },
         )

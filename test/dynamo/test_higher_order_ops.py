@@ -3810,10 +3810,10 @@ class GraphModule(torch.nn.Module):
         if torch._dynamo.config.inline_inbuilt_nn_modules:
             expected = """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_params_l1_weight_: "f32[1, 1]", L_params_l1_bias_: "f32[1]", L_buffers_buffer_: "f32[1]", L_inputs_: "f32[1, 1]"):
+    def forward(self, L_params_l1_weight_: "f32[1, 1]", L_buffers_buffer_: "f32[1]", L_params_l1_bias_: "f32[1]", L_inputs_: "f32[1, 1]"):
         l_params_l1_weight_ = L_params_l1_weight_
-        l_params_l1_bias_ = L_params_l1_bias_
         l_buffers_buffer_ = L_buffers_buffer_
+        l_params_l1_bias_ = L_params_l1_bias_
         l_inputs_ = L_inputs_
 
         linear: "f32[1, 1]" = torch._C._nn.linear(l_inputs_, l_params_l1_weight_, l_params_l1_bias_);  l_inputs_ = l_params_l1_weight_ = l_params_l1_bias_ = None
@@ -6130,7 +6130,7 @@ class GraphModule(torch.nn.Module):
             return torch.func.vmap(f)(x, y)
 
         actual = wrapper_fn(x, y)
-        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x, y)
+        expected = torch.compile(wrapper_fn, backend="aot_eager")(x, y)
         self.assertEqual(len(counters["graph_break"]), 0)
         self.assertEqual(actual, expected)
         self.assertEqual(some_list, [1, 1])
@@ -6440,6 +6440,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         class _FallthroughTestOnly(torch._ops.HigherOrderOperator):
             def __init__(self):
                 super().__init__("_fallthrough_test_only")
+
+            def __call__(self, *args, **kwargs):
+                return super().__call__(*args, **kwargs)
 
         test_op = _FallthroughTestOnly()
         default_keys = torch._ops._HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS

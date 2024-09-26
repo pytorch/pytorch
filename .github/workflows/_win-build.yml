@@ -11,6 +11,16 @@ on:
         required: true
         type: string
         description: What CUDA version to build with, "cpu" for none.
+      use-xpu:
+        required: false
+        type: boolean
+        default: false
+        description: If set, build with XPU support.
+      vc-year:
+        required: false
+        type: string
+        default: "2019"
+        description: The Visual Studio year to use for building.
       build-with-debug:
         required: false
         type: boolean
@@ -141,7 +151,7 @@ jobs:
           SCCACHE_REGION: us-east-1
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
-          VC_YEAR: "2019"
+          VC_YEAR: "${{ inputs.vc-year }}"
           ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
           AWS_DEFAULT_REGION: us-east-1
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -149,6 +159,7 @@ jobs:
           DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
           TORCH_CUDA_ARCH_LIST: "8.6"
           USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
+          USE_XPU: ${{ inputs.use-xpu == true && '1' || '0' }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
           .ci/pytorch/win-build.sh

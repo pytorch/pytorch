@@ -9,8 +9,7 @@
 #include <algorithm>
 #include <optional>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace onnx {
 using namespace ::c10::onnx;
@@ -707,5 +706,4 @@ void ConstantFoldONNX(
   GRAPH_DUMP("After ConstantFoldONNX:", g);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

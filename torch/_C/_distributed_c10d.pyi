@@ -296,15 +296,6 @@ class Backend:
     def _set_default_timeout(self, timeout: timedelta) -> None: ...
 
 class ProcessGroup:
-    class Options:
-        def __init__(self, backend: str, timeout: timedelta = ...) -> None: ...
-        @property
-        def backend(self) -> str: ...
-        @property
-        def _timeout(self) -> timedelta: ...
-        @_timeout.setter
-        def _timeout(self, val: timedelta) -> None: ...
-
     class BackendType(Enum):
         UNDEFINED = ...
         GLOO = ...
@@ -318,7 +309,6 @@ class ProcessGroup:
         store: Store,
         rank: int,
         size: int,
-        options: Options,
     ) -> None: ...
     def rank(self) -> int: ...
     def size(self) -> int: ...
@@ -508,6 +498,7 @@ class ProcessGroup:
     @property
     def _device_types(self) -> list[torch.device]: ...
     def _get_backend(self, device: torch.device) -> Backend: ...
+    def _set_default_backend(self, backend_type: BackendType) -> None: ...
     def _register_backend(
         self,
         device: torch.device,
@@ -532,7 +523,7 @@ class ProcessGroup:
 class ProcessGroupGloo(Backend):
     class Device: ...
 
-    class Options(ProcessGroup.Options):
+    class Options(Backend.Options):
         devices: list[ProcessGroupGloo.Device]
         threads: int
 
@@ -562,7 +553,7 @@ class ProcessGroupNCCL(Backend):
         min_ctas: int
         max_ctas: int
 
-    class Options(ProcessGroup.Options):
+    class Options(Backend.Options):
         config: ProcessGroupNCCL.NCCLConfig
         is_high_priority_stream: bool
         split_from: ProcessGroupNCCL
