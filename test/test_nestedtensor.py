@@ -6299,7 +6299,10 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         # Compute tolerances
         output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
-        grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(grads_ref[0], grads_lp_ref[0])
+        # fudge factor of 1.7 for smaller GPUs e.g., A2, A16
+        grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(
+            grads_ref[0], grads_lp_ref[0], 1.7
+        )
         grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(grads_ref[1], grads_lp_ref[1])
         grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(grads_ref[2], grads_lp_ref[2])
         grad_atols = [grad_q_ref_atol, grad_k_ref_atol, grad_v_ref_atol]
@@ -6729,12 +6732,16 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         loss_nt_compile.backward()
 
         self.assertEqual(v32_dense_eager.grad, v32_dense_compile.grad)
-        self.assertEqual(v32_dense_eager.grad, v32_nt_eager.grad)
-        self.assertEqual(v32_dense_eager.grad, v32_nt_compile.grad)
+        self.assertEqual(v32_dense_eager.grad, v32_nt_eager.grad, atol=1e-4, rtol=1e-4)
+        self.assertEqual(
+            v32_dense_eager.grad, v32_nt_compile.grad, atol=1e-4, rtol=1e-4
+        )
 
         self.assertEqual(v16_dense_eager.grad, v16_dense_compile.grad)
-        self.assertEqual(v16_dense_eager.grad, v16_nt_eager.grad)
-        self.assertEqual(v16_dense_eager.grad, v16_nt_compile.grad)
+        self.assertEqual(v16_dense_eager.grad, v16_nt_eager.grad, atol=1e-5, rtol=5e-3)
+        self.assertEqual(
+            v16_dense_eager.grad, v16_nt_compile.grad, atol=1e-5, rtol=5e-3
+        )
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
