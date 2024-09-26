@@ -2526,12 +2526,13 @@ class TritonKernel(SIMDKernel):
             loop_trees = [tree for tree in self.range_trees if tree.is_loop]
             for level, tree in enumerate(loop_trees):
                 # Write the loop header.
-                prefix = tree.prefix
-                self.body.writeline(
-                    f"for {prefix}offset in range(0, {prefix}numel, {prefix.upper()}BLOCK):"
-                )
+                with self.body.indent(offset=level):
+                    prefix = tree.prefix
+                    self.body.writeline(
+                        f"for {prefix}offset in range(0, {prefix}numel, {prefix.upper()}BLOCK):"
+                    )
 
-                # Indent and write the loop body.
+                # Write the loop body.
                 with self.body.indent(offset=level + 1):
                     self.iteration_ranges_codegen_header(tree, self.body)
                     if tree == innermost_tree:
