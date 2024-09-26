@@ -1,8 +1,8 @@
 # flake8: noqa: G004
 
-# Note: updates to this script should be copied over to _runner-determinator.yml.
-# You can do it easily by running the following command:
-#   python .github/scripts/update_runner_determinator.py
+# Note: Copies of this script in runner_determinator.py and _runner-determinator.yml
+#       must be kept in sync. You can do it easily by running the following command:
+#           python .github/scripts/update_runner_determinator.py
 
 """
 This runner determinator is used to determine which set of runners to run a
