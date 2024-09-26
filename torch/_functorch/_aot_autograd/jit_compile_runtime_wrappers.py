@@ -599,7 +599,7 @@ def aot_dispatch_autograd(
     # let go of fx_g and use fw_module and bw_module. The question is - does
     # joint graph partitioners need to keep the invariant of original fx_g
     # signature?
-    fx_g = partition_invoke_subgraphs(fx_g, joint_inputs, aot_config)
+    # fx_g = partition_invoke_subgraphs(fx_g, joint_inputs, aot_config)
 
     # Copied from aot_dispatch_autograd_graph.
     disable_amp = torch._C._is_any_autocast_enabled()

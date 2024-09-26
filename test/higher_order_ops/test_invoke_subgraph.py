@@ -110,8 +110,8 @@ class TestInvokeSubgraph(TestCase):
         # opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
 
-        x = torch.randn(8, 8, requires_grad=False, device="cuda")
-        y = torch.randn(8, 8, requires_grad=False, device="cuda")
+        x = torch.randn(8, 8, requires_grad=True, device="cuda")
+        y = torch.randn(8, 8, requires_grad=True, device="cuda")
         out = opt_fn(x, y)
 
 

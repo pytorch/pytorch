@@ -530,12 +530,21 @@ class PythonWrapperCodegen(CodeGen):
         self.add_import_once = add_import_once
         self._metas: Dict[str, str] = {}
         self._meta_vars: Set[str] = set()
+
         self.multi_kernel_state = MultiKernelState()
 
         # intermediate tensor value printing utility
         self.debug_printer = DebugPrinterManager(
             debug_printer_level=config.aot_inductor.debug_intermediate_value_printer
         )
+
+        self.already_codegened_subgraphs: Dict[str, str] = {}
+
+    @staticmethod
+    def create(is_subgraph, subgraph_name, parent_wrapper):
+        if is_subgraph:
+            return SubgraphPythonWrapperCodegen(subgraph_name, parent_wrapper)
+        return PythonWrapperCodegen()
 
     def write_constant(self, name: str, hashed: str) -> None:
         self.header.writeline(f"{name} = None  # {hashed}")
@@ -1269,6 +1278,9 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_defs.splice(body)
 
+    def define_subgraph_call(self, name: str, kernel: str):
+        self.header.splice(kernel)
+
     def define_user_defined_triton_kernel(self, kernel, configs, kwargs):
         from torch.utils._triton import patch_triton_dtype_repr
 
@@ -1945,8 +1957,6 @@ class PythonWrapperCodegen(CodeGen):
         assert buffer_reuse_key(input_buffer) == buffer_reuse_key(output_buffer)
         self.codegen_allocation(input_buffer)
         self.freed.add(input_buffer.get_name())
-        self.allocated.remove(input_buffer.get_name())
-        self.allocated.add(output_buffer.get_name())
         self.reuses[output_buffer.get_name()] = input_buffer.get_name()
         self.writeline(ReuseLine(self, input_buffer, output_buffer))
 
@@ -1976,11 +1986,28 @@ class PythonWrapperCodegen(CodeGen):
             self.push_codegened_graph(subgraph.graph)
             self.writeline(f"{self.comment} subgraph: {subgraph.name}")
             self.codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
-            parent_graph = V.graph
-            with V.set_graph_handler(subgraph.graph):
-                subgraph.graph.codegen_subgraph(
-                    parent_graph=parent_graph,
-                )
+
+            if subgraph.graph.name not in self.already_codegened_subgraphs:
+                # If its codegened, the parent wrapper already has subgraph fn by name subgraph.graph.name
+                with V.set_graph_handler(subgraph.graph):
+                    result = subgraph.graph.codegen()
+                    subgraph_code = result[0]
+                    self.already_codegened_subgraphs[subgraph.graph.name] = None
+                    self.define_subgraph_call(subgraph.graph.name, subgraph_code)
+
+            inner_inputs = ", ".join(subgraph.graph.graph_input_names)
+            if len(subgraph.graph.graph_input_names) == 1:
+                inner_inputs += ","
+
+            output_names = subgraph.graph.get_output_names()
+            inner_outputs = ", ".join(output_names)
+            if len(output_names) == 1:
+                inner_outputs += ","
+
+            self.writeline(
+                f"({inner_outputs}) = {subgraph.graph.name}([{inner_inputs}])"
+            )
+
             self.codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
         finally:
             self.pop_codegened_graph()
@@ -2097,3 +2124,54 @@ class PythonWrapperCodegen(CodeGen):
     @staticmethod
     def can_prove_buffer_has_static_shape(buffer):
         return PythonWrapperCodegen.static_shape_for_buffer_or_none(buffer) is not None
+
+
+# TODO(anijain2305) - We will need this for all types of wrapper codegen classes
+class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
+    def __init__(self, subgraph_name, parent_wrapper):
+        self.parent_wrapper = parent_wrapper
+        self.subgraph_name = subgraph_name
+        super().__init__()
+
+    def write_prefix(self) -> None:
+        assert self.subgraph_name is not None
+        self.prefix.splice(
+            f"""
+
+            def {self.subgraph_name}(args):
+            """
+        )
+        with self.prefix.indent():
+            if config.triton.debug_sync_graph:
+                self.prefix.writeline(V.graph.device_ops.synchronize())
+            if V.graph.graph_inputs:
+                lhs = ", ".join(V.graph.graph_input_names)
+                if len(V.graph.graph_input_names) == 1:
+                    lhs += ","
+                self.prefix.writeline(f"{lhs} = args")
+                self.prefix.writeline("args.clear()")
+
+            self.codegen_inputs(self.prefix, V.graph.graph_inputs)
+            # if config.size_asserts:
+            #     self.codegen_input_size_asserts()
+            # if config.nan_asserts:
+            #     self.codegen_input_nan_asserts()
+
+    def write_header(self) -> None:
+        pass
+
+    def write_triton_header_once(self) -> None:
+        self.parent_wrapper.write_triton_header_once()
+
+    def add_benchmark_harness(self, output):
+        pass
+
+    def benchmark_compiled_module(self, output):
+        pass
+
+    def write_get_raw_stream_header_once(self):
+        self.parent_wrapper.write_get_raw_stream_header_once()
+
+    # TODO(anijain2305) - Figure out this stream thing
+    # def write_get_raw_stream(self, device_idx: int, graph=None) -> str:
+    #     pass

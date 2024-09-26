@@ -641,7 +641,7 @@ class GraphLowering(torch.fx.Interpreter):
         gm: torch.fx.GraphModule,
         example_inputs: List[torch.Tensor],
         subgraph_name: str,
-    ) -> "GraphLowering":
+    ) -> "SubgraphLowering":
         """
         Make a subgraph of the current graph with all inherited
         parts, except the graph module (`gm`) and `example_inputs`.
@@ -650,7 +650,8 @@ class GraphLowering(torch.fx.Interpreter):
         for maintaining the same `shape_env` and other properties.
         The subgraph name is qualified by the parent graph's name.
         """
-        return GraphLowering(
+        return SubgraphLowering(
+            parent=self,
             gm=gm,
             example_inputs=example_inputs,
             shape_env=self._shape_env,
@@ -924,18 +925,21 @@ class GraphLowering(torch.fx.Interpreter):
         self, target: str, args: Tuple[object], kwargs: Dict[str, object]  # type: ignore[override]
     ) -> Union[Expr, TensorBox, None]:
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
-        self.graph_input_names.append(target)
         if isinstance(example, SymTypes):
+            self.graph_input_names.append(target)
             expr = example.node.expr
             self.graph_inputs[target] = expr
             return expr
         elif isinstance(example, (int, bool, float)):
+            self.graph_input_names.append(target)
             expr = sympy.sympify(example)
             self.graph_inputs[target] = expr
             return expr
         elif example is None:
+            self.graph_input_names.append(target)
             return None
         if isinstance(example, BackwardState):
+            self.graph_input_names.append(target)
             # Ignored arg, must be unused
             # Alternately we could filter this out in AotAutograd
             return None
@@ -957,6 +961,7 @@ class GraphLowering(torch.fx.Interpreter):
                 FixedLayout(example.device, example.dtype, sizes, strides),
             )
         )
+        self.graph_input_names.append(target)
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
         if self.current_node.users:  # cudagraphs should work with an unused CPU input
@@ -1685,7 +1690,9 @@ class GraphLowering(torch.fx.Interpreter):
             if not supported_dtype_of_cpp_wrapper(dtype, self.device_type):
                 raise CppWrapperCodegenError(f"Unsupported input dtype {dtype}")
 
-    def init_wrapper_code(self) -> None:
+    def init_wrapper_code(
+        self, is_subgraph=False, subgraph_name=None, parent_wrapper_code=None
+    ) -> None:
         device_types = self.device_types.copy()
         device_types.discard("cpu")
         device_types.discard("meta")
@@ -1706,7 +1713,9 @@ class GraphLowering(torch.fx.Interpreter):
         assert (
             wrapper_code_gen_cls is not None
         ), f"Device {self.device_type} not supported"
-        self.wrapper_code = wrapper_code_gen_cls()
+        self.wrapper_code = wrapper_code_gen_cls.create(
+            is_subgraph, subgraph_name, parent_wrapper_code
+        )
 
         if self.const_module:
             # If we have const module, we could reuse the kernels
@@ -1834,24 +1843,37 @@ class GraphLowering(torch.fx.Interpreter):
         self.wrapper_code.pop_codegened_graph()
         return result
 
-    def codegen_subgraph(self, parent_graph: "GraphLowering") -> None:
-        """
-        This is a more compact version of the `codegen()` above
-        where we codegen this graph as a subgraph of some parent
-        graph. The parent graph is passed as an argument: the
-        intention is to inline codegening of the subgraph in
-        the parent graph's wrapper code (including the generated
-        kerenls). The wrapper code is not finalized (via `.generate()`
-        call), as this will be done in the parent graph's `codegen()`.
-        """
-        from .scheduler import Scheduler
+    # def codegen_subgraph(self, parent_graph: "GraphLowering") -> None:
+    #     """
+    #     This is a more compact version of the `codegen()` above
+    #     where we codegen this graph as a subgraph of some parent
+    #     graph. The parent graph is passed as an argument: the
+    #     intention is to inline codegening of the subgraph in
+    #     the parent graph's wrapper code (including the generated
+    #     kerenls). The wrapper code is not finalized (via `.generate()`
+    #     call), as this will be done in the parent graph's `codegen()`.
+    #     """
+    #     from .scheduler import Scheduler
 
-        self.wrapper_code = parent_graph.wrapper_code
-        self.device_ops = parent_graph.device_ops
-        self.cpp_wrapper = parent_graph.cpp_wrapper
+    #     self.init_wrapper_code(is_subgraph=True)
 
-        self.scheduler = Scheduler(self.operations)
-        self.scheduler.codegen()
+    #     self.scheduler = Scheduler(self.operations)
+    #     V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
+
+    #     self.wrapper_code.push_codegened_graph(self)
+    #     self.scheduler.codegen()
+
+    #     result = self.wrapper_code.generate(self.is_inference)
+    #     parent_graph.wrapper_code.define_subgraph_call("animesh", result[0])
+    #     print(result[0])
+    # breakpoint()
+
+    # self.wrapper_code = parent_graph.wrapper_code
+    # self.device_ops = parent_graph.device_ops
+    # self.cpp_wrapper = parent_graph.cpp_wrapper
+
+    # self.scheduler = Scheduler(self.operations)
+    # self.scheduler.codegen()
 
     def count_bytes(
         self,
@@ -1970,3 +1992,16 @@ class GraphLowering(torch.fx.Interpreter):
             and self.graph_inputs[name].get_numel() == 1
             and self.graph_inputs[name].get_device().type == "cpu"
         ) or name in self.zero_dim_cpu_tensor_list
+
+
+class SubgraphLowering(GraphLowering):
+    def __init__(self, parent, *args, **kwargs):
+        self.parent = parent
+        super().__init__(*args, **kwargs)
+
+    def init_wrapper_code(self):
+        super().init_wrapper_code(
+            is_subgraph=True,
+            subgraph_name=self.name,
+            parent_wrapper_code=self.parent.wrapper_code,
+        )
