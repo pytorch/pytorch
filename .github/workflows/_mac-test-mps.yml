@@ -159,13 +159,6 @@ jobs:
         run: |
           cat test/**/*_toprint.log || true
 
-      - name: Get workflow job id
-        id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id
-        if: always()
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
         if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
