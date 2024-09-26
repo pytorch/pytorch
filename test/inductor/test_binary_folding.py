@@ -15,8 +15,14 @@ from torch.testing._internal.common_cuda import TEST_CUDNN
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
-from inductor.test_inductor_freezing import TestCase
-from inductor.test_torchinductor import check_model, check_model_gpu, copy_tests
+from inductor.test_inductor_freezing import (  # @manual=fbcode//caffe2/test/inductor:inductor_freezing-library
+    TestCase,
+)
+from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+    check_model,
+    check_model_gpu,
+    copy_tests,
+)
 from torch.testing._internal.common_utils import TEST_WITH_ASAN
 from torch.testing._internal.inductor_utils import skipCUDAIf
 

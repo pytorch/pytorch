@@ -26,6 +26,7 @@
 #endif
 
 #include <sstream>
+#include <tuple>
 #include <utility>
 
 // For TupleIteratorGetItemAccessor, we need a fast way to retrieve the
@@ -2461,6 +2462,26 @@ std::unique_ptr<GuardManager> make_guard_manager(
     std::string source,
     py::handle example_value,
     py::handle guard_manager_enum) {
+#if IS_PYBIND_2_13_PLUS
+  using fourobjects =
+      std::tuple<py::object, py::object, py::object, py::object>;
+  PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<fourobjects>
+      storage;
+
+  auto& [guard_manager_enum_class, base_guard_manager_enum, dict_guard_manager_enum, dict_subclass_guard_manager_enum] =
+      storage
+          .call_once_and_store_result([]() -> fourobjects {
+            py::object guard_manager_enum_class =
+                py::module_::import("torch._dynamo.guards")
+                    .attr("GuardManagerType");
+            return {
+                guard_manager_enum_class,
+                guard_manager_enum_class.attr("GUARD_MANAGER"),
+                guard_manager_enum_class.attr("DICT_GUARD_MANAGER"),
+                guard_manager_enum_class.attr("DICT_SUBCLASS_GUARD_MANAGER")};
+          })
+          .get_stored();
+#else
   static py::object guard_manager_enum_class =
       py::module_::import("torch._dynamo.guards").attr("GuardManagerType");
   static py::object base_guard_manager_enum =
@@ -2469,6 +2490,7 @@ std::unique_ptr<GuardManager> make_guard_manager(
       guard_manager_enum_class.attr("DICT_GUARD_MANAGER");
   static py::object dict_subclass_guard_manager_enum =
       guard_manager_enum_class.attr("DICT_SUBCLASS_GUARD_MANAGER");
+#endif
   if (py::isinstance<py::dict>(example_value)) {
     // The purpose of having both DictGuardManager and DictSubclassGuardManager
     // is to handle the variability in how dictionaries and their subclasses
@@ -2523,7 +2545,8 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
     Py_ssize_t len = PyList_Size(initial_stack.ptr());
     for (Py_ssize_t idx = 0; idx < len; idx++) {
       PyObject* mode = PyList_GetItem(initial_stack.ptr(), idx); // borrowed ref
-      this->_ref_stack.push_back(Py_TYPE(mode));
+      auto type = Py_TYPE(mode);
+      this->_ref_stack.push_back(type);
     }
 
     len = PyList_Size(ignored_types.ptr());
@@ -2543,29 +2566,56 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
   bool check_nopybind(PyObject* value) override {
     // Ignore value arg, only used to satisfy the interface
     size_t ref_ind = 0;
-    int64_t len = at::impl::PythonTorchFunctionTLS::stack_len();
+    const int64_t len = at::impl::PythonTorchFunctionTLS::stack_len();
     const size_t ref_stack_size = this->_ref_stack.size();
 
-    for (int64_t idx = 0; idx < len; idx++) {
+    int64_t idx = 0;
+    while ((idx < len) && (ref_ind < ref_stack_size)) {
       std::shared_ptr<c10::SafePyObject> mode =
           at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
 
       PyTypeObject* mode_type = Py_TYPE(mode->ptr(getPyInterpreter()));
+      bool act_ignored = this->_ignored_types.count(mode_type) > 0;
+      bool ref_ignored =
+          this->_ignored_types.count(this->_ref_stack.at(ref_ind)) > 0;
       // skip ignored types
-      if (this->_ignored_types.count(mode_type) > 0) {
+      if (act_ignored && ref_ignored) {
+        idx++;
+        ref_ind++;
+        continue;
+      } else if (ref_ignored) {
+        ref_ind++;
+        continue;
+      } else if (act_ignored) {
+        idx++;
         continue;
       }
       // if we already have more non-ignored modes than the ref stack
       // or if the mode doesn't match at the current index, return false
-      else if (
-          (ref_stack_size == 0) || (ref_ind > ref_stack_size - 1) ||
-          mode_type != _ref_stack[ref_ind]) {
+      else if (mode_type != _ref_stack.at(ref_ind)) {
         return false;
       }
       ref_ind++;
+      idx++;
     }
 
-    return ref_ind == this->_ref_stack.size();
+    for (; ref_ind < ref_stack_size; ref_ind++) {
+      if (!(this->_ignored_types.count(this->_ref_stack.at(ref_ind)) > 0)) {
+        return false;
+      }
+    }
+
+    for (; idx < len; idx++) {
+      std::shared_ptr<c10::SafePyObject> mode =
+          at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
+
+      PyTypeObject* mode_type = Py_TYPE(mode->ptr(getPyInterpreter()));
+      if (!(this->_ignored_types.count(mode_type) > 0)) {
+        return false;
+      }
+    }
+
+    return ref_ind == ref_stack_size && idx == len;
   }
 
  private:
@@ -3439,6 +3489,69 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
 };
 
 /**
+ * Implements function call no args - e.g, torch.cuda.current_device()
+ */
+class CallFunctionNoArgsGuardAccessor : public GuardAccessor {
+ public:
+  CallFunctionNoArgsGuardAccessor(
+      RootGuardManager* root,
+      py::str name,
+      std::string source,
+      py::handle example_value,
+      py::handle guard_manager_enum)
+      : GuardAccessor(
+            root,
+            std::move(name),
+            std::move(source),
+            example_value,
+            guard_manager_enum) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
+    if (!PyCallable_Check(obj)) {
+      return false;
+    }
+
+    PyObject* x = PyObject_CallNoArgs(obj);
+    if (x == nullptr) {
+      // Call failed, clear the exception and return false.
+      PyErr_Clear();
+      return false;
+    }
+
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    if (!PyCallable_Check(obj)) {
+      return GuardDebugInfo(
+          false, std::string("Not a callable obj ") + get_source(), 0);
+    }
+
+    PyObject* x = PyObject_CallNoArgs(obj);
+    if (x == nullptr) {
+      // Call failed, clear the exception and return debug info.
+      std::string exc_message = get_exception_message();
+      PyErr_Clear();
+      return GuardDebugInfo(false, exc_message, 0);
+    }
+
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+  std::string repr() const override {
+    return "CallFunctionNoArgsGuardAccessor()";
+  }
+};
+
+/**
  * Similar to PythonLambdaLeafGuard, this class is a way to allow developers to
  * supply accessor as a python function. This is useful for from_numpy source.
  */
@@ -3783,6 +3896,12 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "WeakRefCallGuardAccessor");
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
+      CallFunctionNoArgsGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<CallFunctionNoArgsGuardAccessor>>(
+      py_m, "CallFunctionNoArgsGuardAccessor");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<
       TupleIteratorGetItemAccessor,
       GuardAccessor,
       std::unique_ptr<TupleIteratorGetItemAccessor>>(
@@ -4090,6 +4209,26 @@ PyObject* torch_c_dynamo_guards_init() {
             // A unique key is used to save as the accessor key.
             py::str unique_key("__weakref_call_accessor__");
             return self.get_child_manager<WeakRefCallGuardAccessor>(
+                std::move(unique_key),
+                std::move(source),
+                example_value,
+                guard_manager_enum);
+          },
+          py::arg("source"),
+          py::arg("example_value"),
+          py::arg("guard_manager_enum"),
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "call_function_no_args_manager",
+          [](GuardManager& self,
+             std::string source,
+             py::handle example_value,
+             py::handle guard_manager_enum) -> GuardManager* {
+            // A unique key is used to save as the accessor key.
+            py::str unique_key("__call_function_no_args_accessor__");
+            return self.get_child_manager<CallFunctionNoArgsGuardAccessor>(
                 std::move(unique_key),
                 std::move(source),
                 example_value,

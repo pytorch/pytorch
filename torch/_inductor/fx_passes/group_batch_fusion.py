@@ -396,10 +396,14 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
         input, other = node.args
         return (
             input.meta["val"].shape == other.meta["val"].shape  # type: ignore[union-attr]
+            # input and other can be scalars, where they have no attribute 'meta'
             if hasattr(input, "meta")
             and hasattr(other, "meta")
-            and "val" in input.meta  # type: ignore[union-attr]
-            and "val" in other.meta  # type: ignore[union-attr]
+            and is_node_meta_valid(input)  # type: ignore[arg-type, union-attr]
+            and is_node_meta_valid(other)  # type: ignore[arg-type, union-attr]
+            # torch.SymInt or torch.SymFloat object has no attribute 'shape'
+            and isinstance(input.meta["val"], torch.Tensor)  # type: ignore[union-attr]
+            and isinstance(other.meta["val"], torch.Tensor)  # type: ignore[union-attr]
             else False
         )
 
@@ -707,15 +711,24 @@ class PreGradBatchLinearFusion(BatchFusion):
                     torch.baddbmm,
                     args=(unsqueeze_biases, stack_inputs, transpose_weight),
                 )
-                bmm.meta["example_value"] = torch.baddbmm(
-                    unsqueeze_biases.meta["example_value"],
-                    stack_inputs.meta["example_value"],
-                    transpose_weight.meta["example_value"],
-                )
-                bmm_meta = bmm.meta["example_value"]
+                try:
+                    # it will have runtime error to broadcast when it has dynamic shape included
+                    # in the meta data, so we need to skip the update meta data
+                    bmm.meta["example_value"] = torch.baddbmm(
+                        unsqueeze_biases.meta["example_value"],
+                        stack_inputs.meta["example_value"],
+                        transpose_weight.meta["example_value"],
+                    )
+                    bmm_meta = bmm.meta["example_value"]
+                except Exception as e:
+                    log.debug(
+                        f" exception when update bmm meta data with stack error tracekey {e}"  # noqa: G004
+                    )
+                    bmm_meta = None
 
             bmm = graph.call_function(torch.unbind, args=(bmm,), kwargs={"dim": 0})
-            bmm.meta["example_value"] = torch.unbind(bmm_meta, dim=0)
+            if bmm_meta is not None:
+                bmm.meta["example_value"] = torch.unbind(bmm_meta, dim=0)
             for i, linear in enumerate(batch_nodes):
                 with graph.inserting_after(bmm):
                     getitem = graph.call_function(operator.getitem, args=(bmm, i))
