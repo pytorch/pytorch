@@ -301,7 +301,7 @@ class TestSerialize(TestCase):
             self.assertEqual(node.inputs[1].name, "dim")
 
     def test_serialize_sym_float(self) -> None:
-        class DynamicFloatSimpleModel(nn.Module):
+        class DynamicFloatSimpleModel(torch.nn.Module):
             def __init__(self, multiplier: torch.SymFloat):
                 super().__init__()
                 self.multiplier = multiplier

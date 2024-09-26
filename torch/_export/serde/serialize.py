@@ -120,7 +120,7 @@ def _reverse_map(d: Dict[Any, Enum]):
 
 
 MetaType = Union[
-    FakeTensor, int, torch.SymInt, float, torch.SymFloat,  bool, torch.SymBool, ep.CustomObjArgument
+    FakeTensor, int, torch.SymInt, float, torch.SymFloat, bool, torch.SymBool, ep.CustomObjArgument
 ]
 
 
