@@ -17,17 +17,11 @@ from warnings import warn
 # worry about it.
 EMIT_METRICS = False
 try:
-    import boto3  # type: ignore[import]
+    from tools.stats.upload_stats_lib import upload_to_s3
 
     EMIT_METRICS = True
 except ImportError as e:
     print(f"Unable to import boto3. Will not be emitting metrics.... Reason: {e}")
-
-# Sometimes our runner machines are located in one AWS account while the metrics table may be in
-# another, so we need to specify the table's ARN explicitly.
-TORCHCI_METRICS_TABLE_ARN = (
-    "arn:aws:dynamodb:us-east-1:308535385114:table/torchci-metrics"
-)
 
 
 class EnvVarMetric:
@@ -163,12 +157,10 @@ def emit_metric(
 
     if EMIT_METRICS:
         try:
-            session = boto3.Session(region_name="us-east-1")
-            session.resource("dynamodb").Table(TORCHCI_METRICS_TABLE_ARN).put_item(
-                Item={
-                    **reserved_metrics,
-                    **metrics,
-                }
+            upload_to_s3(
+                bucket_name="ossci-metrics",
+                key=f"metrics/{reserved_metrics['dynamo_key']}",
+                docs={**reserved_metrics, "info": metrics},
             )
         except Exception as e:
             # We don't want to fail the job if we can't upload the metric.
