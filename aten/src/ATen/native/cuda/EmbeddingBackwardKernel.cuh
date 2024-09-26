@@ -4,7 +4,8 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/TensorUtils.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 Tensor embedding_backward_cuda_kernel(
     const Tensor &grad,
@@ -18,4 +19,4 @@ Tensor embedding_backward_cuda_kernel(
     const Tensor &bag_size = Tensor(),
     const Tensor &per_sample_weights = Tensor());
 
-} // namespace at::native
+}}
