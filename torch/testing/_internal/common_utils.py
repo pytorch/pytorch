@@ -5335,5 +5335,7 @@ def scoped_load_inline(*args, **kwargs):
     temp_dir = tempfile.TemporaryDirectory()
     if kwargs.get("verbose", False):
         print(f'Using temporary extension directory {temp_dir.name}...', file=sys.stderr)
+    if "build_directory" not in kwargs:
+        kwargs["build_directory"] = temp_dir.name
     module = cpp_extension.load_inline(*args, **kwargs)
     return module, temp_dir
