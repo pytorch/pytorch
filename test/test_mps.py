@@ -2165,6 +2165,19 @@ class TestMPS(TestCaseMPS):
     def test_linear3D_no_bias_backward(self):
         self._linear_helper(in_features=2, out_features=3, shape=((4, 5, 2)), bias=True, backward_pass=True)
 
+    @xfailIf(product_version < 14.0)
+    def test_linear_large(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/122045
+        x_cpu = torch.randn(9, 1024, 1, device='cpu')
+        w_cpu = torch.randn(50304, 1, device='cpu')
+        x_mps = x_cpu.detach().clone().to('mps')
+        w_mps = w_cpu.detach().clone().to('mps')
+
+        out_cpu = F.linear(x_cpu, w_cpu, None)
+        out_mps = F.linear(x_mps, w_mps, None)
+
+        self.assertEqual(out_cpu, out_mps)
+
     def test_uniform(self):
         low = torch.zeros(5, 5, requires_grad=True)
         high = (torch.ones(5, 5) * 3).requires_grad_()
