@@ -2074,16 +2074,41 @@ class TritonKernel(SIMDKernel):
         root_op: str
 
 
-        def final_reduction(value):
-            #TODO refactor to the same signature as final_argreduce, so we can move collapse_dims
-            # into this function with the benefit of CSE
+        def _final_reduction(buffer, value: str, result_type: Optional[str]) -> str:
+            """
+            Helper to generate a reduction call, e.g. tl.sum.
+            """
             use_helper = reduction_type in {"any", "max", "min", "prod"}
             module = "triton_helpers" if use_helper else "tl"
+
+            value = self.reduction_collapse_dims(buffer, value)
             if reduction_type in {"max", "min"}:
-                return self.reduction_resize(
+                value = self.reduction_resize(
                     f"{module}.{reduction_type}2({value}, {dim})"
                 )
-            return self.reduction_resize(f"{module}.{reduction_type}({value}, {dim})")
+            else:
+                value = self.reduction_resize(f"{module}.{reduction_type}({value}, {dim})")
+
+            if result_type is not None:
+                value = f"{value}.to({result_type})"
+
+            return value
+
+        def final_reduction_new_var(buffer, value: str, result_type: Optional[str]) -> CSEVariable:
+            """
+            Generate a reduction and assign it to a new variable.
+            """
+            value = _final_reduction(buffer, value, result_type)
+            return self.cse.generate(buffer, value)
+
+        def final_reduction_define(buffer, result_var: CSEVariable, value: str, result_type: Optional[str]) -> None:
+            """
+            Generate a reduction and assign it to an existing variable.
+            """
+            value = _final_reduction(buffer, value, result_type)
+            buffer.splice(
+                f"{result_var} = {value}"
+            )
 
         def final_argreduce(buffer, result_var, value, index):
             value = self.reduction_collapse_dims(buffer, value)
@@ -2120,9 +2145,6 @@ class TritonKernel(SIMDKernel):
             else:
                 masked_value = _mask_value(value, default)
 
-            # Reshape before the final reduction
-            masked_value = self.reduction_collapse_dims(self.compute, masked_value)
-
             if reduction_type in {"argmax", "argmin"}:
                 accumulator_index = str(
                     self.cse.generate(
@@ -2150,9 +2172,7 @@ class TritonKernel(SIMDKernel):
                     for var_name in (mean, m2, weight)
                 )
             else:
-                result_var = self.cse.generate(
-                    self.compute, final_reduction(masked_value)
-                )
+                result_var = final_reduction_new_var(self.compute, masked_value, None)
         else:
             accumulator = f"_{result_var}"
             default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
@@ -2252,13 +2272,9 @@ class TritonKernel(SIMDKernel):
                     # which is needed because tl.reduce doesn't support tl.int1
                     accumulator = f"{accumulator}.to(tl.int8)"
                     result_type = triton_compute_type(dtype)
-                    self.suffix.writeline(
-                        f"{result_var} = {final_reduction(accumulator)}.to({result_type})"
-                    )
+                    final_reduction_define(self.suffix, result_var, accumulator, result_type)
                 else:
-                    self.suffix.writeline(
-                        f"{result_var} = {final_reduction(accumulator)}"
-                    )
+                    final_reduction_define(self.suffix, result_var, accumulator, None)
 
         self.cse.reduction_cache[cache_key] = result_var
 
