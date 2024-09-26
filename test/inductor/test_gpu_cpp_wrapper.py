@@ -80,7 +80,6 @@ test_failures_gpu_wrapper = {
     "test_scaled_dot_product_efficient_attention_xpu_dynamic_shapes": test_torchinductor.TestFailure(
         ("gpu_wrapper",), is_skip=False
     ),
-
 }
 
 
