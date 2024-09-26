@@ -103,7 +103,7 @@ jobs:
       - uses: nick-fields/retry@v3.0.0
         name: Push to https://https://ghcr.io/
         id: push-to-ghcr-io
-        if: ${{ github.event_name == 'push' }}
+        if: ${{ 0 && github.event_name == 'push' }}
         env:
           ECR_DOCKER_IMAGE: ${{ steps.build-docker-image.outputs.docker-image }}
           GHCR_PAT: ${{ secrets.GHCR_PAT }}
