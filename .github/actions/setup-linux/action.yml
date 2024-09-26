@@ -28,6 +28,10 @@ runs:
         echo "instance-type: $(get_ec2_metadata instance-type)"
         echo "system info $(uname -a)"
 
+    - name: Just ls /
+      shell: bash
+      run: ls /
+
     - name: Check if in a ARC runner
       shell: bash
       id: check_arc_runner
