@@ -93,6 +93,8 @@ def _inline_module(gm: torch.fx.GraphModule, inline_mod_name: str):
     # Now actually do the swap. Note that we have to keep track of new nodes that are
     # copied into `gm` -- we do this via replacement_mapping.
     call_mod_args = call_mod_node_to_replace.args
+    call_mod_kwargs = call_mod_node_to_replace.kwargs
+
     replacement_mapping: Dict[torch.fx.Node, torch.fx.Node] = {}
     ph_count = 0
 
@@ -103,7 +105,12 @@ def _inline_module(gm: torch.fx.GraphModule, inline_mod_name: str):
 
     for inline_node in inline_mod.graph.nodes:
         if inline_node.op == "placeholder":
-            replacement_mapping[inline_node] = call_mod_args[ph_count]
+            replacement_mapping[inline_node] = (
+                call_mod_kwargs[inline_node.name]
+                if inline_node.name in call_mod_kwargs
+                else call_mod_args[ph_count]
+            )
+
             ph_count += 1
             continue
 
