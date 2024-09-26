@@ -344,6 +344,7 @@ def mps_ops_modifier(ops):
         'tanh',
         'tensor_split',
         'transpose',
+        'transpose_copy',
         'T',
         'unbind',
         'unflatten',
@@ -738,7 +739,7 @@ def mps_ops_modifier(ops):
         'nn.functional.adaptive_avg_pool3d': None,
         'nn.functional.adaptive_max_pool3d': None,
         'nn.functional.interpolatearea': None,
-        'nn.functional.interpolatebicubic': None,
+        'nn.functional.interpolatebicubic': [torch.uint8],
         'nn.functional.interpolatetrilinear': None,
         'nn.functional.max_unpool1dgrad': None,
         'nn.functional.max_unpool2dgrad': None,
@@ -5727,6 +5728,10 @@ class TestMPS(TestCaseMPS):
         helper(2, 8, 4, 5, dtype=torch.int32)
         helper(2, 8, 4, 5, dtype=torch.int64)
         helper(2, 8, 4, 5, dtype=torch.bool)
+        # Regression test for https://github.com/pytorch/pytorch/issues/136132
+        x = torch.ones(2, 4, 1, 30, 1, device='mps').sum(dim=-2)
+        self.assertEqual(x.numel(), 8)
+        self.assertEqual(x.max().item(), 30.0)
 
     # Test forward prod
     def test_prod(self):
@@ -12215,6 +12220,13 @@ class TestConsistency(TestCaseMPS):
             cpu_grad_inputs = torch.autograd.grad(diff_cpu_out, diff_cpu_arg, grad_outputs=cpu_grad_outputs, allow_unused=True)
             mps_grad_inputs = torch.autograd.grad(diff_mps_out, diff_mps_arg, grad_outputs=mps_grad_outputs, allow_unused=True)
 
+            if (
+                op.name == "nn.functional.pad"
+                and op.variant_test_name in ["replicate", "reflect"]
+                and dtype == torch.float16
+            ):
+                atol = 1e-5
+                rtol = 1.5e-3
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
 

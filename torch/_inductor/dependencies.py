@@ -576,24 +576,24 @@ def extract_read_writes(
         if fn.indirect_vars:
             # mimic the `tmpX` naming tracing gives us
             repl = {v: sympy.Symbol(f"tmp{i}") for i, v in enumerate(fn.indirect_vars)}
-            name_to_index = {k: sympy_subs(v, repl) for k, v in name_to_index.items()}
+            name_to_index = {k: sympy_subs(v, repl) for k, v in name_to_index.items()}  # type: ignore[arg-type]
         for entry in fn.memory_usage[MemoryUsageType.LOAD]:
-            inner.load(entry.buffer_name, name_to_index[entry.index_name])
+            inner.load(entry.buffer_name, name_to_index[entry.index_name])  # type: ignore[arg-type]
         for entry in fn.memory_usage[MemoryUsageType.LOAD_SEED]:
-            inner.load_seed(entry.buffer_name, int(name_to_index[entry.index_name]))
+            inner.load_seed(entry.buffer_name, int(name_to_index[entry.index_name]))  # type: ignore[arg-type]
         for entry in fn.memory_usage[MemoryUsageType.STORE]:
             inner.store(
-                entry.buffer_name, name_to_index[entry.index_name], None, entry.mode
+                entry.buffer_name, name_to_index[entry.index_name], None, entry.mode  # type: ignore[arg-type]
             )
         for entry in fn.memory_usage[MemoryUsageType.STORE_REDUCTION]:
             inner.store_reduction(
-                entry.buffer_name, name_to_index[entry.index_name], None
+                entry.buffer_name, name_to_index[entry.index_name], None  # type: ignore[arg-type]
             )
         for entry in fn.memory_usage[MemoryUsageType.INDEX_EXPR]:
             inner.index_expr(name_to_index[entry.index_name], None)
         for entry in fn.memory_usage[MemoryUsageType.BUCKETIZE]:
             inner.bucketize(
-                None, entry.buffer_name, name_to_index[entry.index_name], None, None
+                None, entry.buffer_name, name_to_index[entry.index_name], None, None  # type: ignore[arg-type]
             )
         # fn.memory_usage[MemoryUsageType.CHECK_BOUNDS] intentionally skipped
     else:
