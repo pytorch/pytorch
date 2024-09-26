@@ -1062,7 +1062,6 @@ def _compile(
                 possibly_missed_reinplacing_opportunities,
                 remote_cache_time_saved,
                 structured_logging_overhead_s,
-                config.suppress_errors,
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()

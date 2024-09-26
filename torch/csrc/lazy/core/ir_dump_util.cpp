@@ -10,7 +10,8 @@
 #include <sstream>
 #include <unordered_map>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 namespace {
 
 using NodeIdMap = std::unordered_map<const Node*, size_t>;
@@ -254,4 +255,5 @@ std::string DumpUtil::ToBackend(
   return getBackend()->GetComputationBackendText(computation);
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

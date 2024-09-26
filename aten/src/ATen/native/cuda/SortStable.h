@@ -2,7 +2,8 @@
 #include <ATen/core/TensorBase.h>
 #include <cstdint>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 // Stable-sort self into values, and set indices to the
 // inverse-permutation from values back to self.
@@ -14,4 +15,5 @@ void launch_stable_sort_kernel(
     const TensorBase& values,
     const TensorBase& indices);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

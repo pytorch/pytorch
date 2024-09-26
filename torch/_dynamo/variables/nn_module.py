@@ -1133,7 +1133,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         if out is None:
             out = self.getattr_helper(tx, "_buffers", name_vt)
         if out is None:
-            raise_observed_exception(AttributeError, tx)
+            raise_observed_exception(AttributeError, tx, self)
         return out
 
 

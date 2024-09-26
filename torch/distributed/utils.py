@@ -18,6 +18,8 @@ from typing import (
 import torch
 import torch.distributed as dist
 from torch import nn
+from torch.nn.parallel._functions import _get_stream
+from torch.nn.parallel.scatter_gather import _is_namedtuple
 from torch.nn.utils.rnn import PackedSequence
 
 
@@ -121,9 +123,6 @@ def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
                 device_mod = getattr(torch, device.type, None)
                 if device.type == "cpu" or device_mod is None:
                     return (obj.to(target_device),)
-
-                from torch.nn.parallel._functions import _get_stream
-
                 # Perform CPU -> target_device copies in a background stream. This code is
                 # motivated from similar logic in torch/nn/parallel/_functions.py
                 stream = _get_stream(target_device)
@@ -142,9 +141,6 @@ def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
                         assert isinstance(output, torch.Tensor)
                         output.record_stream(current_stream)  # type: ignore[arg-type]
                 return (output,)
-
-        from torch.nn.parallel.scatter_gather import _is_namedtuple
-
         if _is_namedtuple(obj):
             return [type(obj)(*args) for args in zip(*map(to_map, obj))]
         if isinstance(obj, tuple) and len(obj) > 0:
@@ -232,8 +228,6 @@ def _apply_to_tensors(fn, container):
     """Recursively apply to all tensor in different kinds of container types."""
 
     def apply(x):
-        from torch.nn.parallel.scatter_gather import _is_namedtuple
-
         if isinstance(x, torch.Tensor):
             return fn(x)
         elif hasattr(x, "__dataclass_fields__"):

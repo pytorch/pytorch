@@ -10,7 +10,8 @@
 #include <functional>
 #include <set>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 // Helper class to allow tracking zero or more things, which should be forcibly
 // be one only thing.
@@ -51,4 +52,5 @@ class Unique {
   std::optional<T> value_;
 };
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

@@ -121,7 +121,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                 return py::make_tuple(workerInfo.name_, workerInfo.id_);
               },
               /* __setstate__ */
-              [](const py::tuple& t) {
+              [](py::tuple t) {
                 TORCH_CHECK(t.size() == 2, "Invalid WorkerInfo state.");
 
                 WorkerInfo info(
@@ -764,8 +764,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
   module.def(
       "get_rpc_timeout",
       []() {
-        return static_cast<float>(
-                   RpcAgent::getCurrentRpcAgent()->getRpcTimeout().count()) /
+        return RpcAgent::getCurrentRpcAgent()->getRpcTimeout().count() /
             kSecToMsConversion;
       },
       R"(

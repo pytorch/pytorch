@@ -2,7 +2,8 @@
 
 #include <c10/util/Logging.h>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 std::vector<const Node*> Util::ComputePostOrder(
     const Node* node,
@@ -67,4 +68,5 @@ size_t Util::GetGraphSize(c10::ArrayRef<const Node*> nodes) {
   return ComputePostOrder(nodes).size();
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

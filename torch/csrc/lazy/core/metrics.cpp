@@ -12,7 +12,8 @@
 #include <cmath>
 #include <sstream>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 namespace {
 
 const std::vector<double>* ReadEnvPercentiles() {
@@ -41,9 +42,9 @@ void EmitMetricInfo(
   double accumulator = 0.0;
   size_t total_samples = 0;
   std::vector<Sample> samples = data->Samples(&accumulator, &total_samples);
-  (*ss) << "Metric: " << name << '\n';
-  (*ss) << "  TotalSamples: " << total_samples << '\n';
-  (*ss) << "  Accumulator: " << data->Repr(accumulator) << '\n';
+  (*ss) << "Metric: " << name << std::endl;
+  (*ss) << "  TotalSamples: " << total_samples << std::endl;
+  (*ss) << "  Accumulator: " << data->Repr(accumulator) << std::endl;
   if (!samples.empty()) {
     double total = 0.0;
     for (auto& sample : samples) {
@@ -53,10 +54,11 @@ void EmitMetricInfo(
         samples.back().timestamp_ns - samples.front().timestamp_ns;
     if (delta_time > 0) {
       double value_sec = 1e6 * (total / (delta_time / 1000.0));
-      (*ss) << "  ValueRate: " << data->Repr(value_sec) << " / second" << '\n';
+      (*ss) << "  ValueRate: " << data->Repr(value_sec) << " / second"
+            << std::endl;
       double count_sec =
           1e6 * (static_cast<double>(samples.size()) / (delta_time / 1000.0));
-      (*ss) << "  Rate: " << count_sec << " / second" << '\n';
+      (*ss) << "  Rate: " << count_sec << " / second" << std::endl;
     }
   }
 
@@ -74,15 +76,15 @@ void EmitMetricInfo(
     (*ss) << (metrics_percentiles[i] * 100.0)
           << "%=" << data->Repr(samples[index].value);
   }
-  (*ss) << '\n';
+  (*ss) << std::endl;
 }
 
 void EmitCounterInfo(
     const std::string& name,
     CounterData* data,
     std::stringstream* ss) {
-  (*ss) << "Counter: " << name << '\n';
-  (*ss) << "  Value: " << data->Value() << '\n';
+  (*ss) << "Counter: " << name << std::endl;
+  (*ss) << "  Value: " << data->Value() << std::endl;
 }
 
 template <typename T, typename G>
@@ -432,4 +434,5 @@ int64_t NowNs() {
       .count();
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

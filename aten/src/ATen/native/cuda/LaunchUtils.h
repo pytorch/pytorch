@@ -1,7 +1,8 @@
 #pragma once
-#include <algorithm>
+#include<algorithm>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 // returns 2**floor(log2(n))
 static int lastPow2(unsigned int n) {
@@ -13,4 +14,5 @@ static int lastPow2(unsigned int n) {
   return std::max<int>(1, n - (n >> 1));
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

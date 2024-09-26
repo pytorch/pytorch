@@ -73,7 +73,7 @@ class InvalidCxxCompiler(RuntimeError):
         )
 
 
-class CppWrapperCodegenError(RuntimeError):
+class CppWrapperCodeGenError(RuntimeError):
     def __init__(self, msg: str) -> None:
         super().__init__(f"C++ wrapper codegen error: {msg}")
 

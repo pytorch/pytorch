@@ -2,6 +2,7 @@
 #include <ATen/core/TensorBase.h>
 #include <optional>
 
+
 namespace at::cuda::detail {
 TORCH_API void f8f8bf16_rowwise(
     at::Tensor XQ, // FP8
@@ -11,4 +12,4 @@ TORCH_API void f8f8bf16_rowwise(
     std::optional<at::Tensor> bias, // BF16
     bool use_fast_accum,
     at::Tensor& out);
-} // namespace at::cuda::detail
+}  // at::cuda::detail

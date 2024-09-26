@@ -16,7 +16,8 @@
 #include <numeric>
 #include <thread>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 std::vector<int64_t> ComputeArrayStrides(c10::ArrayRef<int64_t> sizes) {
   std::vector<int64_t> strides(sizes.size(), 1);
@@ -68,4 +69,5 @@ bool IsSpecialScalar(const at::Scalar& value) {
   return false;
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch
