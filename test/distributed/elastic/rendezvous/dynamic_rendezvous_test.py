@@ -14,7 +14,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from base64 import b64encode
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Callable, cast, Optional, Tuple
 from unittest import TestCase
 from unittest.mock import call, MagicMock, Mock, patch, PropertyMock
@@ -134,7 +134,7 @@ class RendezvousStateTest(TestCase):
         state = _RendezvousState()
         state.round = 1
         state.complete = True
-        state.deadline = datetime.utcnow()
+        state.deadline = datetime.now(timezone.utc)
         state.closed = True
 
         # fmt: off
@@ -160,8 +160,8 @@ class RendezvousStateTest(TestCase):
 
                     state.wait_list.add(node_waiting)
 
-                    state.last_heartbeats[node_running] = datetime.utcnow()
-                    state.last_heartbeats[node_waiting] = datetime.utcnow()
+                    state.last_heartbeats[node_running] = datetime.now(timezone.utc)
+                    state.last_heartbeats[node_waiting] = datetime.now(timezone.utc)
 
                 bits = pickle.dumps(state)
 
@@ -1405,7 +1405,9 @@ class DynamicRendezvousHandlerTest(TestCase):
         self.assertEqual(self._state.last_heartbeats[self._node], now)
 
     def _assert_keep_alive_swallows_rendezvous_errors(self) -> None:
-        last_heartbeat_time = datetime.utcnow() - (self._keep_alive_interval * 2)
+        last_heartbeat_time = datetime.now(timezone.utc) - (
+            self._keep_alive_interval * 2
+        )
 
         self._state.last_heartbeats[self._node] = last_heartbeat_time
 
@@ -1597,6 +1599,23 @@ class CreateHandlerTest(TestCase):
                 create_handler(self._store, self._backend, self._params)
                 record_mock.assert_called_once()
 
+    def test_create_handler_rdzv_local_addr(self) -> None:
+        params = RendezvousParameters(
+            backend=self._backend.name,
+            endpoint="dummy_endpoint",
+            run_id="dummy_run_id",
+            min_nodes=1,
+            max_nodes=1,
+            join_timeout="50",
+            last_call_timeout="60",
+            close_timeout="70",
+            local_addr="127.0.0.2",
+        )
+        store = HashStore()
+        handler = create_handler(store, self._backend, params)
+        rdzv_info = handler.next_rendezvous()
+        self.assertEqual(rdzv_info.bootstrap_store_info.master_addr, "127.0.0.2")
+
 
 def _ignore_exception(exception_type: Exception, fn: Callable):
     try:
@@ -1656,7 +1675,7 @@ class IntegrationTest(TestCase):
             "min_nodes": 2,
             "max_nodes": 2,
             "join_timeout": "5",
-            "local_addr": f"address_{len(self._handlers)}",
+            "local_addr": f"127.0.0.{len(self._handlers)}",
         }
         params.update(**kwargs)
 
@@ -1714,7 +1733,7 @@ class IntegrationTest(TestCase):
         state_and_token = self._backend.get_state()
         state = pickle.loads(state_and_token[0])
         addresses = [node.addr for node in state.redundancy_list]
-        self.assertListEqual(addresses, ["address_2"])
+        self.assertListEqual(addresses, ["127.0.0.2"])
 
     def test_redundancy_transition_to_wait_list_then_join_rendezvous(self) -> None:
         handler1 = self._create_handler(

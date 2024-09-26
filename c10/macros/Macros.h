@@ -345,6 +345,7 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #if defined(__ANDROID__) || defined(__APPLE__) || defined(__FreeBSD__)
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
+#define CUDA_KERNEL_ASSERT_MSG(cond, msg)
 #define SYCL_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
 #if defined(NDEBUG)
@@ -365,6 +366,16 @@ __host__ __device__
 }
 #endif // NDEBUG
 #define CUDA_KERNEL_ASSERT(cond)                 \
+  if (C10_UNLIKELY(!(cond))) {                   \
+    (void)(_wassert(                             \
+               _CRT_WIDE(#cond),                 \
+               _CRT_WIDE(__FILE__),              \
+               static_cast<unsigned>(__LINE__)), \
+           0);                                   \
+  }
+// TODO: This doesn't assert the message because I (chilli) couldn't figure out
+// a nice way to convert a char* to a wchar_t*
+#define CUDA_KERNEL_ASSERT_MSG(cond, msg)        \
   if (C10_UNLIKELY(!(cond))) {                   \
     (void)(_wassert(                             \
                _CRT_WIDE(#cond),                 \
@@ -413,12 +424,18 @@ __host__ __device__
 // ROCm disable kernel assert by default
 #if !defined(C10_USE_ROCM_KERNEL_ASSERT) and defined(USE_ROCM)
 #define CUDA_KERNEL_ASSERT(cond)
+#define CUDA_KERNEL_ASSERT_MSG(cond, msg)
 #define SYCL_KERNEL_ASSERT(cond)
 #else
 #define CUDA_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
     __assert_fail(                                                       \
         #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
+  }
+#define CUDA_KERNEL_ASSERT_MSG(cond, msg)                              \
+  if (C10_UNLIKELY(!(cond))) {                                         \
+    __assert_fail(                                                     \
+        msg, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
 #define SYCL_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \

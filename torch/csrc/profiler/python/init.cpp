@@ -441,7 +441,7 @@ void initPythonBindings(PyObject* module) {
             return py::reinterpret_borrow<py::object>(
                 torch::autograd::utils::wrap(metadata.dtype_));
           })
-      .def_readonly("dim", &TensorMetadata::dim_)
+      .def_readonly("dim", &TensorMetadata::size_dim_)
       .def_readonly("sizes", &TensorMetadata::sizes_)
       .def_readonly("strides", &TensorMetadata::strides_);
 
