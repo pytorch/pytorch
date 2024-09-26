@@ -30,6 +30,7 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
 #include <c10/util/copysign.h>
+#include <c10/util/generic_math.h>
 #include <ATen/native/cpu/zmath.h>
 #include <c10/util/TypeCast.h>
 #include <c10/macros/Macros.h>
@@ -430,7 +431,7 @@ public:
     return map(std::erfc);
   }
   Vectorized<T> erfinv() const {
-    return map(calc_erfinv);
+    return map(c10::calc_erfinv);
   }
   Vectorized<T> exp() const {
     return map(std::exp);

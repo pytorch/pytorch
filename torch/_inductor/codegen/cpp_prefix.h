@@ -26,6 +26,7 @@
 #include <c10/util/generic_math.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON) || defined(CPU_CAPABILITY_VSX)
 #define INDUCTOR_USE_VECTOR_TYPES() 1
@@ -36,9 +37,6 @@
 #if INDUCTOR_USE_VECTOR_TYPES()
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
-#else
-// For calc_erfinv
-#include <ATen/native/Math.h>
 #endif
 
 typedef at::Half half;
