@@ -2982,6 +2982,11 @@ class Scheduler:
                 return False
 
             template = node2.get_template_node_or_throw()
+
+            if not isinstance(template, ir.TritonTemplateBuffer):
+                why("prologue fusion only supported for TritonTemplates")
+                return False
+
             allowed_prologue_inps = template.allowed_prologue_inps
 
             unsupported_prologue_args = (

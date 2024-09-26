@@ -3985,7 +3985,9 @@ class TritonTemplateBuffer(TemplateBuffer):
                 MutationOutput(NoneLayout(device), buf, self) for buf in mutated_inputs
             ]
 
-        self.allowed_prologue_inps = allowed_prologue_inps
+        self.allowed_prologue_inps = (
+            allowed_prologue_inps if allowed_prologue_inps else OrderedSet()
+        )
 
     def get_outputs(self) -> List[Buffer]:
         return self.outputs

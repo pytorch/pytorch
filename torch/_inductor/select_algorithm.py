@@ -15,7 +15,7 @@ import textwrap
 import time
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import sympy
@@ -62,6 +62,10 @@ log = logging.getLogger(__name__)
 VERIFY: Dict[str, Any] = {}
 PRINT_AUTOTUNE = True
 DEBUG = False
+
+if TYPE_CHECKING:
+    from torch._inductor.codegen.common import CSEVariable
+    from torch._inductor.ops_handler import StoreMode
 
 
 class KernelNamespace:
@@ -117,7 +121,7 @@ class SubgraphInfo:
     indexing_code: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
     loads: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
     stores: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
-    ops_handler: Optional[V.WrapperHandler] = None
+    ops_handler: Optional[V.WrapperHandler] = None  # type: ignore[name-defined]
 
     def to_dict(self):
         return {
@@ -172,7 +176,7 @@ class TritonTemplateKernel(TritonKernel):
 
         self.subgraph_bodies: Dict[str, SubgraphInfo] = {}
 
-        self.prologue_replaced_args = []
+        self.prologue_replaced_args: List[str] = []
         self._inputs_with_prologue_fusion: OrderedSet[str] = OrderedSet()
 
         # The following attributes are all used for triton kernel codegen.
@@ -186,7 +190,7 @@ class TritonTemplateKernel(TritonKernel):
         self.stores: IndentedBuffer = FakeIndentedBuffer()
         self.template_mask: Optional[str] = None
         self.template_out: Optional[str] = None
-        self.ops_handler: Optional[V.WrapperHandler] = None
+        self.ops_handler: Optional[V.WrapperHandler] = None  # type: ignore[name-defined]
 
     @contextlib.contextmanager
     def set_subgraph_body(self, body_name: str):
@@ -207,7 +211,7 @@ class TritonTemplateKernel(TritonKernel):
             if not self.ops_handler
             else lambda: V.set_ops_handler(self.ops_handler(V.get_ops_handler()))
         )
-        with context():
+        with context():  # type: ignore[operator]
             yield
         self.subgraph_bodies[body_name] = SubgraphInfo(
             **{
@@ -455,7 +459,7 @@ class TritonTemplateKernel(TritonKernel):
             self.body.writeline(f"{output_name} = {out.value}")
 
             body_val = self.body.getvalue()
-            self.cse.invalidate(set())  # type: ignore[arg-type]
+            self.cse.invalidate(set())
             return body_val
 
     def load_input(
@@ -570,7 +574,7 @@ class TritonTemplateKernel(TritonKernel):
             with self.set_subgraph_body(hook_key):
                 self.cse.invalidate(set())
                 self.codegen_body()
-                self.cse.invalidate(set())  # type: ignore[arg-type]
+                self.cse.invalidate(set())
                 if not prologue_called:
                     self.body.writeline(load_code)
 
@@ -1587,7 +1591,9 @@ class AlgorithmSelectorCache(PersistentCache):
                     layout,
                     input_nodes,
                     get_timings,
-                    allowed_prologue_inps,
+                    allowed_prologue_inps
+                    if allowed_prologue_inps is not None
+                    else OrderedSet(),
                 )
             )
 
