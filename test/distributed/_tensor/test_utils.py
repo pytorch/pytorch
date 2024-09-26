@@ -108,8 +108,6 @@ class UtilTest(DTensorTestBase):
             local_size, global_offset = compute_local_shape_and_global_offset(
                 global_shape, device_mesh, placements
             )
-            if self.rank == 2:
-                print(f"{dtensor=} {dtensor.shape=} {local_size=} {global_offset=}")
 
             # Check that the local tensor is the same as slicing the
             # *flattened* global tensor with the local size and global offset
