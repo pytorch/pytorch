@@ -114,22 +114,22 @@ jobs:
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
-      - name: Check if in a ARC runner
+      - name: Check if in a container runner
         shell: bash
         id: check_arc_runner
-        run: echo "IN_ARC_RUNNER=$([ -f /.inarc ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        run: echo "IN_CONTAINER_RUNNER=$([ -f /.inarc ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         id: install-nvidia-driver
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
-        if: ${{ contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu') && steps.check_arc_runner.outputs.IN_ARC_RUNNER == 'false' }}
+        if: ${{ contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu') && steps.check_arc_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
 
       - name: Lock NVIDIA A100 40GB Frequency
         run: |
           sudo nvidia-smi -pm 1
           sudo nvidia-smi -ac 1215,1410
           nvidia-smi
-        if: contains(matrix.runner, 'a100')
+        if: ${{ contains(matrix.runner, 'a100') && steps.check_arc_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
 
       - name: Start monitoring script
         id: monitor-script

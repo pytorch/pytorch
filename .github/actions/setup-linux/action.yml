@@ -32,14 +32,14 @@ runs:
       shell: bash
       run: ls /
 
-    - name: Check if in a ARC runner
+    - name: Check if in a container runner
       shell: bash
       id: check_arc_runner
-      run: echo "IN_ARC_RUNNER=$([ -f /.inarc ] && echo true || echo false)"  >> $GITHUB_OUTPUT
+      run: echo "IN_CONTAINER_RUNNER=$([ -f /.inarc ] && echo true || echo false)"  >> $GITHUB_OUTPUT
 
     - name: Start docker if docker deamon is not running
       shell: bash
-      if: ${{ steps.check_arc_runner.outputs.IN_ARC_RUNNER == 'false' }}
+      if: ${{ steps.check_arc_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
       run: |
         if systemctl is-active --quiet docker; then
             echo "Docker daemon is running...";
@@ -77,7 +77,7 @@ runs:
         env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
 
     - name: Kill any existing containers, clean up images
-      if: ${{ steps.check_arc_runner.outputs.IN_ARC_RUNNER == 'false' }}
+      if: ${{ steps.check_arc_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
       shell: bash
       run: |
         # ignore expansion of "docker ps -q" since it could be empty
@@ -120,7 +120,7 @@ runs:
     - name: Check that the docker daemon is running
       shell: bash
       continue-on-error: true
-      if: ${{ steps.check_arc_runner.outputs.IN_ARC_RUNNER == 'true' }}
+      if: ${{ steps.check_arc_runner.outputs.IN_CONTAINER_RUNNER == 'true' }}
       run: |
         set +x
 
