@@ -103,7 +103,7 @@ SerializedPyObj SerializedPyObj::fromIValues(std::vector<at::IValue> values) {
   std::vector<at::Tensor> tensors;
   tensors.reserve(values.size());
   for (auto& value : values) {
-    tensors.emplace_back(value.toTensor());
+    tensors.emplace_back(std::move(value).toTensor());
   }
   return SerializedPyObj(std::move(payload), std::move(tensors));
 }
