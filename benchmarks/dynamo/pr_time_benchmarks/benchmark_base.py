@@ -1,14 +1,11 @@
 import csv
 import gc
-import json
-import os
 from abc import ABC, abstractmethod
 
 from fbscribelogger import make_scribe_logger
 
 import torch._C._instruction_counter as i_counter
 import torch._dynamo.config as config
-import torch._logging.scribe as scribe
 from torch._dynamo.utils import CompileTimeInstructionCounter
 
 
@@ -55,10 +52,6 @@ struct TorchBenchmarkCompileTimeLogEntry {
 """,  # noqa: B950
 )
 
-# This is enabled only for OSS runs, we always run on the same machine, when running locally
-# expected values are different so by default this is not enabled.
-compare_results_with_expected = os.environ.get("PR_TIME_BENCHMARKS_TEST", "0") == "1"
-
 
 class BenchmarkBase(ABC):
     # Measure total number of instruction spent in _work.
@@ -84,19 +77,12 @@ class BenchmarkBase(ABC):
         self._num_iterations = value
         return self
 
-    def enable_instruction_count(self, expected=None, noise_margin=None):
+    def enable_instruction_count(self):
         self._enable_instruction_count = True
-        if expected is not None:
-            assert noise_margin is not None
-            self._expected_instruction_count_result = (expected, noise_margin)
-
         return self
 
-    def enable_compile_time_instruction_count(self, expected=None, noise_margin=None):
+    def enable_compile_time_instruction_count(self):
         self._enable_compile_time_instruction_count = True
-        if expected is not None:
-            assert noise_margin is not None
-            self._expected_instruction_count_result = (expected, noise_margin)
         return self
 
     def name(self):
@@ -115,43 +101,6 @@ class BenchmarkBase(ABC):
 
     def _prepare_once(self):  # noqa: B027
         pass
-
-    def _verify_instruction_count(self, result):
-        if not compare_results_with_expected:
-            return
-
-        def log(event_name):
-            scribe.open_source_signpost(
-                subsystem="pr_time_benchmarks",
-                name=event_name,
-                parameters=json.dumps(self.name()),
-            )
-
-        if self._expected_instruction_count_result is None:
-            log("instruction_count_disabled")
-            return
-
-        (expected, noise_margin) = self._expected_instruction_count_result
-        low = expected - expected * noise_margin
-        high = expected + expected * noise_margin
-
-        if result > high:
-            print(
-                f"**REGRESSION** benchmark {self.name()} failed, \
-actual instruction count {result} is higher than expected {expected} with noise margin {noise_margin} \
-if this is an expected regression, please update the expected instruction count in the benchmark",
-            )
-
-            log("instruction_count_test_fail_regression")
-
-        if result < low:
-            print(
-                f"**WIN** benchmark {self.name()} failed, \
-actual instruction count {result} is lower than expected {expected} with noise margin {noise_margin} \
-please update the expected instruction count in the benchmark",
-            )
-            # if the test is by passed
-            log("instruction_count_test_fail_win")
 
     def _count_instructions(self):
         print(f"collecting instruction count for {self.name()}")
@@ -224,7 +173,6 @@ please update the expected instruction count in the benchmark",
                 name=self.name(),
                 instruction_count=r,
             )
-            self._verify_instruction_count(r)
 
         if self._enable_compile_time_instruction_count:
             r = self._count_compile_time_instructions()
@@ -241,5 +189,4 @@ please update the expected instruction count in the benchmark",
                 name=self.name(),
                 instruction_count=r,
             )
-            self._verify_instruction_count(r)
         return self
