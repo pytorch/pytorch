@@ -420,7 +420,7 @@ TorchTune
 TorchChat
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
--  Jack Khuu (Jack-Khuu)
+-  Jack Khuu (`Jack-Khuu <https://github.com/Jack-Khuu>`__)
 -  Jesse White (`byjlw <https://github.com/byjlw>`__)
 -  (emeritus) Michael Gschwind (`mikekgfb <https://github.com/mikekgfb>`__)
 
