@@ -923,6 +923,15 @@ graph():
         with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
             ep = export(model, inputs, strict=False)
 
+    def test_is_nonzero(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return torch.is_nonzero(x)
+
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = export(Foo(), (torch.tensor([64]),), strict=False)
+        breakpoint()
+
     def test_export_script_module(self):
         class Foo(torch.nn.Module):
             def forward(self, rv: torch.Tensor, t: torch.Tensor):
