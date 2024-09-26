@@ -343,7 +343,7 @@ class NCCLComm {
   static std::shared_ptr<NCCLComm> create_scalable(
       int numRanks,
       int rank,
-      std::vector<ncclUniqueId> &commIds,
+      std::vector<ncclUniqueId>& commIds,
       ncclConfig_t& config) {
     auto comm = std::make_shared<NCCLComm>();
     bool isInitialized = false;
@@ -353,12 +353,22 @@ class NCCLComm {
                 << ": creating NCCL communicator in nonblocking mode";
       C10D_NCCL_CHECK_NONBLOCKING(
           ncclCommInitRankScalable(
-              &(comm->ncclComm_), numRanks, rank, commIds.size(), commIds.data(), &config),
+              &(comm->ncclComm_),
+              numRanks,
+              rank,
+              commIds.size(),
+              commIds.data(),
+              &config),
           std::nullopt);
     } else {
       C10D_NCCL_CHECK(
           ncclCommInitRankScalable(
-              &(comm->ncclComm_), numRanks, rank, commIds.size(), commIds.data(), &config),
+              &(comm->ncclComm_),
+              numRanks,
+              rank,
+              commIds.size(),
+              commIds.data(),
+              &config),
           std::nullopt);
       // under blocking mode, comm is initialized after NCCL CHECK
       isInitialized = true;

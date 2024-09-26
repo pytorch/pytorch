@@ -725,9 +725,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Helper that allgathers nccl unique IDs to all ranks through the store
   void allgatherUniqueNCCLID(
-    int root,
-    ncclUniqueId* ncclID,
-    std::vector<ncclUniqueId> &ncclIDs);
+      int root,
+      ncclUniqueId* ncclID,
+      std::vector<ncclUniqueId>& ncclIDs);
 
   // Helper that either looks up the cached NCCL communicators or creates
   // a new set of NCCL communicators as a cache entry

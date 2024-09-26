@@ -2108,21 +2108,21 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
 void ProcessGroupNCCL::allgatherUniqueNCCLID(
     int root,
     ncclUniqueId* ncclID,
-    std::vector<ncclUniqueId> &ncclIDs) {
+    std::vector<ncclUniqueId>& ncclIDs) {
   std::vector<std::string> storeKeys;
-  for(int r=0; r<getSize(); r++) {
+  for (int r = 0; r < getSize(); r++) {
     storeKeys.emplace_back("UniqueNCCLID:" + std::to_string(r));
   }
-  if(rank_ == root) {
+  if (rank_ == root) {
     auto vec = std::vector<uint8_t>(
-      reinterpret_cast<uint8_t*>(ncclID),
-      reinterpret_cast<uint8_t*>(ncclID) + NCCL_UNIQUE_ID_BYTES);
+        reinterpret_cast<uint8_t*>(ncclID),
+        reinterpret_cast<uint8_t*>(ncclID) + NCCL_UNIQUE_ID_BYTES);
     store_->set(storeKeys[root], vec);
     std::memcpy(&ncclIDs[root], vec.data(), vec.size());
   }
   store_->wait(storeKeys);
-  for(int r=0; r<getSize(); r++) {
-    if(r != root) {
+  for (int r = 0; r < getSize(); r++) {
+    if (r != root) {
       try {
         auto vec = store_->get(storeKeys[r]);
         TORCH_CHECK_WITH(
@@ -2132,29 +2132,29 @@ void ProcessGroupNCCL::allgatherUniqueNCCLID(
         std::memcpy(&ncclIDs[r], vec.data(), vec.size());
       } catch (const std::exception& e) {
         std::string exceptionMsg = c10::str(
-          "[",
-          rank_,
-          "] is setting up NCCL communicator and "
-          "retrieving ncclUniqueId from [0] via c10d key-value store by key '",
-          storeKeys[r],
-          "', but store->get('",
-          storeKeys[r],
-          "') got error: ");
+            "[",
+            rank_,
+            "] is setting up NCCL communicator and "
+            "retrieving ncclUniqueId from [0] via c10d key-value store by key '",
+            storeKeys[r],
+            "', but store->get('",
+            storeKeys[r],
+            "') got error: ");
         C10_THROW_ERROR(
-          DistBackendError,
-          exceptionMsg + e.what() +
-              ". This may indicate a possible application crash on rank 0 or a network set up issue.");
+            DistBackendError,
+            exceptionMsg + e.what() +
+                ". This may indicate a possible application crash on rank 0 or a network set up issue.");
       } catch (...) {
         C10_THROW_ERROR(
-          DistBackendError,
-          c10::str(
-              "Unknown exception while [",
-              rank_,
-              "] is setting up NCCL communicator and "
-              "retrieving ncclUniqueId from [0] via c10d key-value store by key '",
-              storeKeys[r],
-              "'",
-              ". This may indicate a possible application crash on rank 0 or a network set up issue."));
+            DistBackendError,
+            c10::str(
+                "Unknown exception while [",
+                rank_,
+                "] is setting up NCCL communicator and "
+                "retrieving ncclUniqueId from [0] via c10d key-value store by key '",
+                storeKeys[r],
+                "'",
+                ". This may indicate a possible application crash on rank 0 or a network set up issue."));
       }
     }
   }
@@ -2319,7 +2319,8 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     LOG(INFO) << logPrefix()
               << "ProcessGroupNCCL broadcast unique ID through store took "
               << timerDeltaMs << " ms";
-    ncclComm = NCCLComm::create_scalable(numRanks, rank, ncclIDs, options_->config);
+    ncclComm =
+        NCCLComm::create_scalable(numRanks, rank, ncclIDs, options_->config);
   }
 #else
   // To simplify conditional nesting, just create the ncclComms[i]
