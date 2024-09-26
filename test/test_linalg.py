@@ -3067,6 +3067,28 @@ class TestLinalg(TestCase):
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3})
     def test_solve(self, device, dtype):
+        def np_linalg_solve(A, b):
+            # Adapt torch.linalg.solve to np.linalg.solve. torch.linalg.solve
+            # is numerically equivalent to np.linalg.solve in NumPy 1 but not in
+            # NumPy 2. "b" can no longer have the batch dimensions if it is a
+            # vector (i.e. rhs == ()). Please refer to the difference in the
+            # following documentation for more details.
+            # https://numpy.org/doc/1.26/reference/generated/numpy.linalg.solve.html
+            # https://numpy.org/doc/2.0/reference/generated/numpy.linalg.solve.html
+
+            batches = A.shape[:-2]
+            squeezed_batches = math.prod(batches)
+
+            # Squeeze the batch dimensions.
+            squeezed_A = A.reshape(squeezed_batches, *A.shape[len(batches):])
+            squeezed_b = b.reshape(squeezed_batches, *b.shape[len(batches):])
+
+            # Apply np.linalg.solve to each batch element.
+            result = np.array([np.linalg.solve(a, b) for a, b in zip(squeezed_A, squeezed_b)]).astype(b.dtype)
+
+            # Expand the batch dimensions.
+            return result.reshape(batches + b.shape[len(batches):])
+
         def run_test(n, batch, rhs):
             A_dims = (*batch, n, n)
             b_dims = (*batch, n, *rhs)
@@ -3082,7 +3104,7 @@ class TestLinalg(TestCase):
             self.assertEqual(b.expand_as(Ax), Ax)
 
             # Check against NumPy
-            expected = np.linalg.solve(A.cpu().numpy(), b.expand_as(x).cpu().numpy())
+            expected = np_linalg_solve(A.cpu().numpy(), b.cpu().numpy())
             self.assertEqual(x, expected)
 
         batches = [(), (0, ), (3, ), (2, 3)]
