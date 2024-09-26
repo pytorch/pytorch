@@ -419,6 +419,8 @@ def get_rollout_state_from_issue(github_token: str, repo: str, issue_num: int) -
 def main() -> None:
     args = parse_args()
 
+    runner_label_prefix = DEFAULT_LABEL_PREFIX
+
     try:
         rollout_state = get_rollout_state_from_issue(
             args.github_token, args.github_issue_repo, args.github_issue
@@ -437,7 +439,7 @@ def main() -> None:
         runner_label_prefix = get_runner_prefix(
             rollout_state,
             (args.github_issue_owner, username),
-            args.github_branc,
+            args.github_branch,
             is_canary,
         )
 
