@@ -19,8 +19,7 @@ void check_single_result(
 }
 } // namespace
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 CppFunctionTensorPreHook::CppFunctionTensorPreHook(
     std::shared_ptr<hooks_list> hooks,
@@ -65,5 +64,4 @@ variable_list CppFunctionSingleTensorPreHook::operator()(
   return results;
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

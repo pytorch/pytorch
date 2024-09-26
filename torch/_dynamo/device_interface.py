@@ -1,5 +1,7 @@
 # mypy: allow-untyped-defs
 import inspect
+import time
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Type, Union
 
 import torch
@@ -104,7 +106,7 @@ class DeviceInterface(metaclass=DeviceInterfaceMeta):
         raise NotImplementedError
 
     @staticmethod
-    def get_raw_stream():
+    def get_raw_stream(device_idx: int) -> int:
         raise NotImplementedError
 
     @staticmethod
@@ -117,6 +119,14 @@ class DeviceInterface(metaclass=DeviceInterfaceMeta):
 
     @staticmethod
     def get_compute_capability(device: _device_t = None):
+        raise NotImplementedError
+
+    @staticmethod
+    def is_bf16_supported(including_emulation: bool = False):
+        raise NotImplementedError
+
+    @staticmethod
+    def memory_allocated(device: _device_t = None) -> int:
         raise NotImplementedError
 
 
@@ -195,9 +205,11 @@ class CudaInterface(DeviceInterface):
     _set_stream_by_id = staticmethod(torch.cuda._set_stream_by_id)  # type: ignore[assignment]
     synchronize = staticmethod(torch.cuda.synchronize)
     get_device_properties = staticmethod(torch.cuda.get_device_properties)  # type: ignore[assignment]
-    get_raw_stream = staticmethod(get_cuda_stream)  # type: ignore[arg-type]
+    get_raw_stream = staticmethod(get_cuda_stream)  # type: ignore[assignment, arg-type]
     exchange_device = staticmethod(torch.cuda._exchange_device)  # type: ignore[arg-type]
     maybe_exchange_device = staticmethod(torch.cuda._maybe_exchange_device)  # type: ignore[arg-type]
+    memory_allocated = staticmethod(torch.cuda.memory_allocated)
+    is_bf16_supported = staticmethod(torch.cuda.is_bf16_supported)  # type: ignore[arg-type]
 
     # Can be mock patched by @patch decorator.
     @staticmethod
@@ -265,9 +277,10 @@ class XpuInterface(DeviceInterface):
     _set_stream_by_id = staticmethod(torch.xpu._set_stream_by_id)  # type: ignore[assignment]
     synchronize = staticmethod(torch.xpu.synchronize)
     get_device_properties = staticmethod(torch.xpu.get_device_properties)  # type: ignore[assignment]
-    get_raw_stream = staticmethod(get_xpu_stream)  # type: ignore[arg-type]
+    get_raw_stream = staticmethod(get_xpu_stream)  # type: ignore[assignment, arg-type]
     exchange_device = staticmethod(torch.xpu._exchange_device)  # type: ignore[arg-type]
     maybe_exchange_device = staticmethod(torch.xpu._maybe_exchange_device)  # type: ignore[arg-type]
+    memory_allocated = staticmethod(torch.xpu.memory_allocated)
 
     # Can be mock patched by @patch decorator.
     @staticmethod
@@ -278,6 +291,55 @@ class XpuInterface(DeviceInterface):
     def get_compute_capability(device: _device_t = None):
         cc = torch.xpu.get_device_capability(device)
         return cc
+
+    @staticmethod
+    def is_bf16_supported(including_emulation: bool = False) -> bool:
+        return torch.xpu.is_bf16_supported()
+
+
+@dataclass
+class CpuDeviceProperties:
+    multi_processor_count: int
+
+
+class CpuInterface(DeviceInterface):
+    class Event(_EventBase):
+        def __init__(self, enable_timing=True):
+            self.time = 0.0
+
+        def elapsed_time(self, end_event) -> float:
+            return (end_event.time - self.time) * 1000
+
+        def record(self):
+            self.time = time.perf_counter()
+
+    @staticmethod
+    def is_available() -> bool:
+        return True
+
+    @staticmethod
+    def get_compute_capability(device: _device_t = None) -> str:
+        return ""
+
+    @staticmethod
+    def get_raw_stream(device_idx) -> int:
+        return 0
+
+    @staticmethod
+    def current_device():
+        return 0
+
+    @staticmethod
+    def synchronize(device: _device_t = None):
+        pass
+
+    class Worker:
+        @staticmethod
+        def get_device_properties(device: _device_t = None):
+            import multiprocessing
+
+            cpu_count = multiprocessing.cpu_count()
+            return CpuDeviceProperties(cpu_count)
 
 
 device_interfaces: Dict[str, Type[DeviceInterface]] = {}
@@ -317,5 +379,7 @@ def init_device_reg():
     register_interface_for_device("xpu", XpuInterface)
     for i in range(torch.xpu.device_count()):
         register_interface_for_device(f"xpu:{i}", XpuInterface)
+
+    register_interface_for_device("cpu", CpuInterface)
 
     _device_initialized = True

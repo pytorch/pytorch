@@ -114,19 +114,16 @@ class JitBackendTestCase(JitTestCase):
         """
         Stub for correctness tests.
         """
-        pass
 
     def test_save_load(self):
         """
         Stub for serialization tests.
         """
-        pass
 
     def test_errors(self):
         """
         Stub for testing error checking.
         """
-        pass
 
 
 class BasicModuleTest(JitBackendTestCase):
@@ -559,13 +556,11 @@ class JitBackendTestCaseWithCompiler(JitTestCase):
         """
         Stub for correctness tests.
         """
-        pass
 
     def test_errors(self):
         """
         Stub for testing error checking.
         """
-        pass
 
 
 class BasicModuleTestWithCompiler(JitBackendTestCaseWithCompiler):

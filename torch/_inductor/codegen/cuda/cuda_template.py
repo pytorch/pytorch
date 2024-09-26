@@ -230,11 +230,17 @@ class CUTLASSTemplate(CUDATemplate):
         torch.float32: "float",
         torch.float64: "double",
         torch.float16: "cutlass::half_t",
-        torch.int32: "int",
+        torch.int32: "int32_t",
+        torch.int16: "int16_t",
         torch.int8: "int8_t",
         torch.uint8: "uint8_t",
         torch.bool: "bool",
         torch.bfloat16: "cutlass::bfloat16_t",
+    }
+
+    _DTYPE_TO_CUTLASS_SPARSE_META = {
+        torch.int32: "uint32_t",
+        torch.int16: "uint16_t",
     }
 
     def cutlass_type_cast(self, node: IRNode, ptr: str) -> str:
@@ -242,3 +248,11 @@ class CUTLASSTemplate(CUDATemplate):
             return ptr
         else:
             return f"({self._DTYPE_TO_CUTLASS.get(node.get_dtype())}*)({ptr})"
+
+    def cutlass_sparse_meta_type_cast(self, node: IRNode, ptr: str) -> str:
+        if node is None:
+            return ptr
+        else:
+            return (
+                f"({self._DTYPE_TO_CUTLASS_SPARSE_META.get(node.get_dtype())}*)({ptr})"
+            )

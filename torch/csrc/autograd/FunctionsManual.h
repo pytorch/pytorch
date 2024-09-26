@@ -229,10 +229,15 @@ at::Tensor logsumexp_jvp(
     const at::Tensor& self_t,
     IntArrayRef dim,
     bool keepdim);
+at::Tensor safe_logsumexp_jvp(
+    const at::Tensor& self_p,
+    const at::Tensor& self_t,
+    IntArrayRef dim,
+    bool keepdim);
 at::Tensor logcumsumexp_backward(
     at::Tensor grad,
     const at::Tensor& self,
-    at::Tensor result,
+    const at::Tensor& result,
     int64_t dim);
 at::Tensor logcumsumexp_jvp(
     const at::Tensor& self_p,

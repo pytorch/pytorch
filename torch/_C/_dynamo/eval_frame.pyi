@@ -8,6 +8,11 @@ from torch._dynamo.types import DynamoCallback, DynamoGuardHook
 # exposes the same interface.
 _PyInterpreterFrame = NewType("_PyInterpreterFrame", types.FrameType)
 
+# For typechecking
+SkipCodeRecursiveFlag = NewType("SkipCodeRecursiveFlag", object)
+# Flag returned by Dynamo tracer to indicate to Dynamo eval frame that we should skip frames recursively.
+skip_code_recursive_flag: SkipCodeRecursiveFlag
+
 def set_eval_frame(callback: DynamoCallback) -> DynamoCallback: ...
 def reset_code(code: types.CodeType) -> None: ...
 def unsupported(obj1: object, obj2: object) -> object: ...
