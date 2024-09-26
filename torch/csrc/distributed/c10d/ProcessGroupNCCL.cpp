@@ -2352,6 +2352,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
 #else
     ncclComm = NCCLComm::create(numRanks, rank, ncclID);
 #endif
+#endif // NCCL_HAS_INIT_RANK_SCALABLE
   }
 
   // Creates the NCCL streams
