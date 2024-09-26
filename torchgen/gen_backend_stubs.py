@@ -165,7 +165,10 @@ Only the following keys are supported: {", ".join(valid_keys)}'
             use_out_as_primary=use_out_as_primary,
             use_device_guard=use_device_guard,
         )
-        assert backend_key not in backend_indices
+        assert (
+            backend_key not in backend_indices
+            or len(backend_indices[backend_key].index) == 0
+        )
         backend_indices[backend_key] = backend_idx
 
     autograd_key: DispatchKey | None = None

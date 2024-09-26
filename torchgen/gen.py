@@ -2201,7 +2201,6 @@ def gen_source_files(
 #include <ATen/hip/ATenHIPGeneral.h>
 #include <ATen/hip/HIPDevice.h>
 #include <ATen/hip/HIPContext.h>"""
-
     for dispatch_key in dispatch_keys:
         fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
 
@@ -2355,7 +2354,16 @@ def gen_source_files(
                     structured_func_group_dict[func.structured_delegate] = func_group
                     break
 
-        if dispatch_key in (DispatchKey.CPU, DispatchKey.CUDA):
+        aoti_c_shim_backends = [DispatchKey.CPU, DispatchKey.CUDA]
+        # generate aoti c shim for external backends
+        ext_backend_yamls = {
+            DispatchKey.XPU: "third_party/torch-xpu-ops/yaml/xpu_functions.yaml"
+        }
+        for key, yaml_path in ext_backend_yamls.items():
+            if os.path.exists(yaml_path):
+                aoti_c_shim_backends.append(key)
+
+        if dispatch_key in aoti_c_shim_backends:
             fallbacks = {}
             for func in native_functions:
                 op_name = get_fallback_op_name(func)
@@ -2364,6 +2372,20 @@ def gen_source_files(
             fallback_native_functions = tuple(
                 value for _, value in sorted(fallbacks.items())
             )
+            if dispatch_key in ext_backend_yamls:
+                from torchgen.gen_backend_stubs import parse_backend_yaml
+
+                # `parse_backend_yaml` will update `backend_indice`.
+                # Copy here to not modify the original backend_indices thus not affecting the rest of the codegen
+                cshim_backend_indices = backend_indices.copy()
+                parsed_backend_yaml = parse_backend_yaml(
+                    ext_backend_yamls[dispatch_key],
+                    grouped_native_functions,
+                    cshim_backend_indices,
+                )
+                cshim_backend_indices = parsed_backend_yaml.backend_indices
+            else:
+                cshim_backend_indices = backend_indices
 
             # header files were checked in for ABI-compatiblilty checking
             header_file_name = f"c_shim_{dispatch_key.lower()}.h"
@@ -2371,7 +2393,7 @@ def gen_source_files(
                 fallback_native_functions,
                 structured_func_group_dict,
                 dispatch_key,
-                backend_indices,
+                cshim_backend_indices,
                 header=True,
                 includes="",
             )
@@ -2431,7 +2453,7 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
                     fallback_native_functions,
                     structured_func_group_dict,
                     dispatch_key,
-                    backend_indices,
+                    cshim_backend_indices,
                     header=False,
                     includes=headers_for_aoti() + "\n" + extra_headers,
                 ),
