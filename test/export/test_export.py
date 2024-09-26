@@ -928,9 +928,30 @@ graph():
             def forward(self, x):
                 return torch.is_nonzero(x)
 
-        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
-            ep = export(Foo(), (torch.tensor([64]),), strict=False)
-        breakpoint()
+        def _long_tensor(nz):
+            return torch.full((), int(nz))
+
+        def _float_tensor(nz):
+            return torch.full((), int(nz), dtype=torch.float32)
+
+        def _bool_tensor(nz):
+            return torch.full((), int(nz)).bool()
+
+        def _complex_tensor(nz):
+            return torch.complex(torch.zeros(()), torch.full((), float(nz)))
+
+        mod = Foo()
+        for _tensor in [
+            _long_tensor,
+            _float_tensor,
+            _bool_tensor,
+            _complex_tensor,
+        ]:
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                for nz in [True, False]:
+                    sample_input = _tensor(nz=nz)
+                    ep = export(mod, (sample_input,), strict=False)
+                    self.assertEqual(ep.module()(sample_input), nz)
 
     def test_export_script_module(self):
         class Foo(torch.nn.Module):
