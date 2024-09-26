@@ -1344,7 +1344,7 @@ class GraphModuleSerializer(metaclass=Final):
                 as_sym_int=self.serialize_sym_int_output(name, meta_val)
             )
         elif isinstance(meta_val, (int, torch.SymFloat)):
-            # e.g "-> SymInt"
+            # e.g "-> SymFloat"
             return Argument.create(
                 as_sym_float=self.serialize_sym_float_output(name, meta_val)
             )
