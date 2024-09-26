@@ -4,7 +4,8 @@
 #include <algorithm>
 #include <numeric>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 std::vector<int64_t> InversePermutation(
     c10::ArrayRef<int64_t> input_permutation) {
@@ -23,4 +24,5 @@ bool IsPermutation(c10::ArrayRef<int64_t> permutation) {
       permutation.begin(), permutation.end(), trivial_permutation.begin());
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

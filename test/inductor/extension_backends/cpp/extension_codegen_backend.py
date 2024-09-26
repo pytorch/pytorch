@@ -3,7 +3,7 @@ from torch._inductor.scheduler import BaseScheduling
 from torch._inductor.virtualized import V
 
 
-class ExtensionWrapperCodegen(wrapper.PythonWrapperCodegen):
+class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 

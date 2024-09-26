@@ -3,7 +3,7 @@ from torch._inductor.codegen.common import DeviceOpOverrides
 from torch._inductor.scheduler import BaseScheduling
 
 
-class ExtensionWrapperCodegen(wrapper.PythonWrapperCodegen):
+class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 

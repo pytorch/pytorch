@@ -19,7 +19,7 @@ namespace at::native {
 template <typename T>
 static int minimum_grid_for_occupancy(T kernel, int max_block_size) {
   int minGridSize = 0;
-  int blockSize = 0;
+  int blockSize;
   C10_CUDA_CHECK(cudaOccupancyMaxPotentialBlockSize(
       &minGridSize,
       &blockSize,
@@ -361,7 +361,7 @@ void sortCommon(Sorter sorter, const TensorBase &key, const TensorBase &value,
 void sortKeyValueInplace(
     const TensorBase& key,
     const TensorBase& value,
-    int64_t dim,
+    int dim,
     bool descending,
     bool stable) {
   const auto sort_size = key.size(dim);

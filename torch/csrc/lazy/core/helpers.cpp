@@ -6,7 +6,8 @@
 
 #include <limits>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 std::vector<int64_t> DropDimensions(
     c10::ArrayRef<int64_t> sizes,
@@ -138,4 +139,5 @@ std::vector<std::string> StrSplit(c10::string_view text, char delim) {
   return tokens;
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

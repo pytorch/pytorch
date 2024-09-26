@@ -94,7 +94,7 @@ def sdpa_kernel(backends: Union[List[SDPBackend], SDPBackend]):
     .. warning:: This function is beta and subject to change.
 
     Args:
-        backends (Union[List[SDPBackend], SDPBackend]): A backend or list of backends for scaled dot product attention.
+        backend (Union[List[SDPBackend], SDPBackend]): A backend or list of backends for scaled dot product attention.
 
     Example:
 

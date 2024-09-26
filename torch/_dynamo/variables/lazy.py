@@ -1,7 +1,7 @@
+# mypy: allow-untyped-defs
 import collections
 import functools
-from typing import Any, Callable, Dict, Optional, Tuple, Union
-from typing_extensions import Self
+from typing import Optional
 
 from .base import VariableTracker
 from .tensor import SymNodeVariable
@@ -10,14 +10,14 @@ from .tensor import SymNodeVariable
 class LazyCache:
     """Container to cache the real VariableTracker"""
 
-    def __init__(self, value: Any, source: Any) -> None:
+    def __init__(self, value, source) -> None:
         if not isinstance(value, LazySymNodeFormatString):
             assert source
         self.value = value
         self.source = source
         self.vt: Optional[VariableTracker] = None
 
-    def realize(self) -> None:
+    def realize(self):
         assert self.vt is None
         from ..symbolic_convert import InstructionTranslator
         from .builder import SourcelessBuilder, VariableBuilder
@@ -49,10 +49,10 @@ class LazyVariableTracker(VariableTracker):
     _nonvar_fields = {"_cache", *VariableTracker._nonvar_fields}
 
     @staticmethod
-    def create(value: Any, source: Any, **options: Any) -> "LazyVariableTracker":
+    def create(value, source, **options):
         return LazyVariableTracker(LazyCache(value, source), source=source, **options)
 
-    def __init__(self, _cache: LazyCache, **kwargs: Any) -> None:
+    def __init__(self, _cache, **kwargs) -> None:
         assert isinstance(_cache, LazyCache)
         super().__init__(**kwargs)
         self._cache = _cache
@@ -64,17 +64,16 @@ class LazyVariableTracker(VariableTracker):
             assert self._cache.vt is not None
         return self._cache.vt
 
-    def unwrap(self) -> Union[VariableTracker, Self]:
+    def unwrap(self):
         """Return the real VariableTracker if it already exists"""
         if self.is_realized():
-            assert self._cache.vt is not None
             return self._cache.vt
         return self
 
-    def is_realized(self) -> bool:
+    def is_realized(self):
         return self._cache.vt is not None
 
-    def clone(self, **kwargs: Any) -> VariableTracker:
+    def clone(self, **kwargs):
         assert kwargs.get("_cache", self._cache) is self._cache
         if kwargs.get("source", self.source) is not self.source:
             self.realize()
@@ -85,7 +84,7 @@ class LazyVariableTracker(VariableTracker):
             return self.unwrap().__str__()
         return VariableTracker.__str__(self.unwrap())
 
-    def __getattr__(self, item: str) -> Any:
+    def __getattr__(self, item):
         return getattr(self.realize(), item)
 
     # most methods are auto-generated below, these are the ones we want to exclude
@@ -95,9 +94,9 @@ class LazyVariableTracker(VariableTracker):
     @classmethod
     def realize_all(
         cls,
-        value: Any,
-        cache: Optional[Dict[int, Tuple[Any, Any]]] = None,
-    ) -> Any:
+        value,
+        cache=None,
+    ):
         """
         Walk an object and realize all LazyVariableTrackers inside it.
         """
@@ -151,19 +150,15 @@ class LazySymNodeFormatString:
         )
 
 
-def _create_realize_and_forward(
-    name: str,
-) -> Callable[[LazyVariableTracker, Any, Any], Any]:
+def _create_realize_and_forward(name):
     @functools.wraps(getattr(VariableTracker, name))
-    def realize_and_forward(
-        self: LazyVariableTracker, *args: Any, **kwargs: Any
-    ) -> Any:
+    def realize_and_forward(self, *args, **kwargs):
         return getattr(self.realize(), name)(*args, **kwargs)
 
     return realize_and_forward
 
 
-def _populate() -> None:
+def _populate():
     for name, value in VariableTracker.__dict__.items():
         if name not in LazyVariableTracker.__dict__:
             if callable(value):

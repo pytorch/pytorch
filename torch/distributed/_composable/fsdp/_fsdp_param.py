@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import inspect
 import itertools
 from dataclasses import dataclass, field
 from enum import auto, Enum
@@ -228,7 +227,6 @@ class FSDPParam:
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
-        self.mp_policy = mp_policy
         self.offload_to_cpu: bool = isinstance(offload_policy, CPUOffloadPolicy)
         self.pin_memory = (
             self.offload_to_cpu and cast(CPUOffloadPolicy, offload_policy).pin_memory
@@ -649,33 +647,10 @@ class FSDPParam:
                     sharded_local_tensor = sharded_local_tensor.to(
                         self.device, non_blocking=True
                     )
-                pre_all_gather_signature = inspect.signature(
-                    sharded_local_tensor.fsdp_pre_all_gather
-                )
-                num_fn_params = len(pre_all_gather_signature.parameters)
-                # Old signature only passes mesh; keep for BC for now
-                assert num_fn_params in (
-                    1,
-                    3,
-                ), (
-                    f"Invalid fsdp_pre_all_gather: {pre_all_gather_signature}\n"
-                    "Expects fsdp_pre_all_gather(self, mesh: DeviceMesh, "
-                    "module: nn.Module, mp_policy: MixedPrecisionPolicy)"
-                )
-                if num_fn_params == 1:
-                    (
-                        all_gather_inputs,
-                        self._extensions_data.all_gather_metadata,
-                    ) = sharded_local_tensor.fsdp_pre_all_gather(self.mesh_info.mesh)
-                else:
-                    (
-                        all_gather_inputs,
-                        self._extensions_data.all_gather_metadata,
-                    ) = sharded_local_tensor.fsdp_pre_all_gather(
-                        self.mesh_info.mesh,
-                        self._module_info.module,
-                        self.mp_policy,
-                    )
+                (
+                    all_gather_inputs,
+                    self._extensions_data.all_gather_metadata,
+                ) = sharded_local_tensor.fsdp_pre_all_gather(self.mesh_info.mesh)
                 self._extensions_data.all_gather_input_sizes = [
                     t.size() for t in all_gather_inputs
                 ]
@@ -755,21 +730,16 @@ class FSDPParam:
         local_tensor = new_param._local_tensor
         if local_tensor.is_meta:
             return
-        updated_local_tensor = False
         padded_sharded_size = self.padded_sharded_param_size
         if local_tensor.size() != padded_sharded_size:
             padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
             padded_local_tensor[: local_tensor.size(0)].copy_(local_tensor)
             local_tensor = padded_local_tensor
-            updated_local_tensor = True
         if self.pin_memory and not local_tensor.is_pinned():
             local_tensor = local_tensor.cpu().pin_memory()
-            updated_local_tensor = True
         self._sharded_param_data = local_tensor.view(-1)
         assert isinstance(self.sharded_param, DTensor)  # mypy
-        if updated_local_tensor:
-            # Only change the local tensor object if needed
-            self.sharded_param._local_tensor = local_tensor[: self.sharded_size[0]]
+        self.sharded_param._local_tensor = local_tensor[: self.sharded_size[0]]
 
     def __repr__(self):
         return f"FSDPParam(fqn={self._param_fqn}, orig_size={self._orig_size})"

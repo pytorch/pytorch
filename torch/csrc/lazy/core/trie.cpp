@@ -7,7 +7,8 @@
 #include <fstream>
 #include <sstream>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 namespace {
 
 void TraverseTrie(TrieNode* node, std::stringstream& ss) {
@@ -82,4 +83,5 @@ void TrieCache::DumpToDotFile(const std::string& file_name) {
   graph_file << ss.str();
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch
