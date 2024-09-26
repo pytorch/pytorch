@@ -820,7 +820,7 @@ bool CUDASymmetricMemoryAllocator::has_multicast_support(int device_idx) {
   // Use 0 to prevent unexpected cuda context initialization.
   // We generally expect multicast support to be uniform across all devices,
   // but we'll still perform a check during rendezvous.
-  return device_has_multicast_support(0);
+  return device_has_multicast_support(device_idx);
 }
 
 c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block(void* ptr) {
