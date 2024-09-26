@@ -1120,6 +1120,8 @@ class MKLPackedLinear(ExternKernelAlloc):
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
+            op_overload=self.op_overload,
+            raw_args=[*self.inputs, *self.constant_args],
         )
 
     @classmethod
@@ -1178,6 +1180,8 @@ class LinearUnary(ExternKernelAlloc):
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
+            op_overload=self.op_overload,
+            raw_args=[*self.inputs, *self.constant_args],
         )
 
     @classmethod
@@ -1243,6 +1247,8 @@ class LinearBinary(ExternKernelAlloc):
             self.cpp_op_schema,
             self.cpp_kernel_key,
             self.cpp_kernel_overload_name,
+            op_overload=self.op_overload,
+            raw_args=[*self.inputs, *self.constant_args],
         )
 
     @classmethod
