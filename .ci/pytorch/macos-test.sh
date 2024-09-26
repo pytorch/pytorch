@@ -149,14 +149,31 @@ test_jit_hooks() {
   assert_git_not_dirty
 }
 
+torchbench_setup_macos() {
+  cd ..
+  git clone --recursive https://github.com/pytorch/vision torchvision
+  git clone --recursive https://github.com/pytorch/audio torchaudio
+
+  cd torchvision
+  git fetch
+  git checkout "$$(cat ../pytorch/.github/ci_commit_pins/vision.txt)"
+  git submodule update --init --recursive
+
+  cd ../torchaudio
+  git fetch
+  git checkout "$$(cat ../pytorch/.github/ci_commit_pins/audio.txt)"
+  git submodule update --init --recursive
+
+  cd ../pytorch
+  checkout_install_torchbench
+}
+
 
 test_torchbench_perf() {
   print_cmake_info
 
   echo "Launching torchbench setup"
-  make -C $(pwd)/benchmarks/dynamo clone-deps
-  make -C $(pwd)/benchmarks/dynamo pull-deps
-  make -C $(pwd)/benchmarks/dynamo build-deps
+  torchbench_setup_macos
 
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir $TEST_REPORTS_DIR
