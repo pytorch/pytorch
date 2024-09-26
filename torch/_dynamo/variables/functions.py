@@ -1148,7 +1148,7 @@ class TritonKernelVariable(VariableTracker):
         # Bail out to parent's implementation
         return super().call_method(tx, name, args, kwargs)
 
-    def try_specialize(self, arg: Any) -> Any:
+    def specialize_symbolic(self, arg: Any) -> Any:
         from .constant import ConstantVariable
         from .tensor import SymNodeVariable
 

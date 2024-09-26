@@ -968,7 +968,6 @@ class TritonHOPifier:
             assert isinstance(variable.kernel, Autotuner)
             constexprs = variable.kernel.fn.constexprs
 
-        # breakpoint()
         for idx, arg_name in enumerate(variable.kernel.arg_names):
             if idx in constexprs:
                 if arg_name in combined_args_raw:
@@ -982,7 +981,7 @@ class TritonHOPifier:
                     #
                     # Depending on the type of `variable` we might expect different types for the symbolic args:
                     # either SymNodeVariables (for TritonKernelVariables) or SymInts (TracingTritonKernelWrapper)
-                    combined_args_raw[arg_name] = variable.try_specialize(
+                    combined_args_raw[arg_name] = variable.specialize_symbolic(
                         combined_args_raw[arg_name]
                     )
 
@@ -1073,7 +1072,7 @@ class TraceableTritonKernelWrapper:
             assert self.kernel is not None
             return self.kernel[self.grid](*args, **kwargs)
 
-    def try_specialize(self, arg: Any) -> Any:
+    def specialize_symbolic(self, arg: Any) -> Any:
         # See [Note: Specialize tl.constexpr args in user-defined triton kernels]
         if isinstance(arg, (torch.SymInt, torch.SymBool, torch.SymFloat)):
             return guard_scalar(arg)
