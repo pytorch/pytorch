@@ -145,6 +145,7 @@ class TestTritonHeuristics(TestCase):
         with self.assertRaisesRegex(AssertionError, "pre_hook"):
             autotuner = CachingAutotuner(**args)
 
+    @skipIfXpu
     def test_autotune_hints_to_configs(self):
         device_props = DeviceProperties.create(torch.device("cuda"))
         device_props = device_props._replace(warp_size=8)
