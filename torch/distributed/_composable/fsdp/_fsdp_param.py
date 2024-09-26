@@ -276,12 +276,15 @@ class FSDPParam:
             raise NotImplementedError
         self.fsdp_placement = fsdp_placement
         shard_dim = fsdp_placement.dim
+        is_flat_shard = isinstance(fsdp_placement, _FlatShard)
         # TODO: Replace the sharded DTensor parameter construction logic with
         # `distribute_tensor` after https://github.com/pytorch/pytorch/issues/116101
         # TODO: Simplify the following sharded parameter padding logic after
         # https://github.com/pytorch/pytorch/issues/113045
         self.is_dtensor = isinstance(param, DTensor)
         if self.is_dtensor:
+            if is_flat_shard:
+                raise NotImplementedError
             self._tp_spec = cast(DTensor, param)._spec
             dp_mesh, tp_mesh = (self.mesh_info.mesh, self._tp_spec.mesh)
             dp_global_mesh = _mesh_resources.get_root_mesh(dp_mesh)
@@ -345,19 +348,21 @@ class FSDPParam:
                 self._spmd_placements = (Replicate(), fsdp_placement)
             else:
                 self._spmd_placements = (fsdp_placement,)
+            param_for_meta = param if not is_flat_shard else param.view(-1)
             self._sharding_spec = DTensorSpec(
                 self._spmd_mesh,
                 self._spmd_placements,
                 tensor_meta=TensorMeta(
-                    param.size(),
-                    param.stride(),
-                    param.dtype,
+                    param_for_meta.size(),
+                    param_for_meta.stride(),
+                    param_for_meta.dtype,
                 ),
             )
+            del param_for_meta
             param_data = param
         self._orig_size = param_data.size()
         self._contiguous_orig_stride = make_contiguous_strides_for(self._orig_size)
-        if isinstance(fsdp_placement, _FlatShard):
+        if is_flat_shard:
             param_data = param_data.view(-1)
         shard_rank = self.mesh_info.shard_mesh_rank
         shard_world_size = self.mesh_info.shard_mesh_size

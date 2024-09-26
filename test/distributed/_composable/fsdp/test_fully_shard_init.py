@@ -1019,38 +1019,15 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
         fully_shard(model, shard_placement_fn=shard_placement_fn)
 
         for param, ref_param in zip(model.parameters(), ref_model.parameters()):
-            full_param = param.full_tensor()
+            # NOTE: Flat sharding flattens the global shape, so we must view
+            # back to the unflattened shape manually.
+            self.assertEqual(param.shape, ref_param.view(-1).shape)
+            full_param = param.full_tensor().view(ref_param.shape)
             self.assertEqual(full_param, ref_param)
-
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
-    def test_init_2d_transformer_flat_shard(self):
-        model, ref_model = self._init_models()
-
-        dp_size, tp_size = self.world_size // 2, 2
-        global_mesh = init_device_mesh(
-            "cuda", (dp_size, tp_size), mesh_dim_names=("dp", "tp")
-        )
-        model = Transformer.parallelize(model, global_mesh["tp"], use_seq_parallel=True)
-
-        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
-            return _FlatShard(0)
-
-        for layer in model.layers:
-            fully_shard(
-                layer, mesh=global_mesh["dp"], shard_placement_fn=shard_placement_fn
+            ref_dtensor = distribute_tensor(
+                ref_param, param.device_mesh, param.placements
             )
-        fully_shard(
-            model, mesh=global_mesh["dp"], shard_placement_fn=shard_placement_fn
-        )
-
-        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
-            # NOTE: We must redistribute first to (R, S(i)) and view back from
-            # 1D to ND before calling `full_tensor` to all-gather along TP.
-            tp_param = param.redistribute(
-                placements=(Replicate(), param.placements[1])
-            ).view(param.shape)
-            full_param = tp_param.full_tensor()
-            self.assertEqual(full_param, ref_param)
+            self.assertEqual(ref_dtensor, param)
 
 
 if __name__ == "__main__":

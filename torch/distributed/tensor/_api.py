@@ -26,6 +26,7 @@ from torch.distributed.tensor._utils import (
     normalize_to_torch_size,
 )
 from torch.distributed.tensor.placement_types import (
+    _FlatShard,
     Partial,
     Placement,
     Replicate,
@@ -719,6 +720,11 @@ def distribute_tensor(
                 f"`redistribute` instead?"
             )
         return tensor
+
+    if any(isinstance(pl, _FlatShard) for pl in placements):
+        if len(placements) > 1:
+            raise NotImplementedError
+        tensor = tensor.view(-1)
 
     local_tensor = tensor.detach()
 
