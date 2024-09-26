@@ -16,6 +16,9 @@ class ExportTracepoint(HigherOrderOperator):
     def __init__(self):
         super().__init__("_export_tracepoint")
 
+    def __call__(self, *args, **kwargs):
+        return super().__call__(*args, **kwargs)
+
 
 _export_tracepoint = ExportTracepoint()
 

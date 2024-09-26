@@ -34,10 +34,7 @@ def mark_mixed_dtype_conv(conv):
 
         conv_user = next(iter(conv_user.users.keys()))
 
-    if not (
-        conv_user.target == prims.convert_element_type.default
-        and conv_user.args[1] == conv_dtype
-    ):
+    if conv_user.target != prims.convert_element_type.default:
         return
 
     conv.meta["_allow_conv_mixed_dtype_folding"] = conv_dtype

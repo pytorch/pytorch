@@ -23,6 +23,7 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_utils import outputs_alias_inputs
 from torch.testing import make_tensor
 from torch.testing._internal import composite_compliance, opinfo
+from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     instantiate_device_type_tests,
@@ -626,6 +627,7 @@ class TestCommon(TestCase):
     # TODO: get working with Windows by addressing failing operators
     # TODO: get working with ASAN by addressing failing operators
     @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
+    @with_tf32_off
     @onlyNativeDeviceTypesAnd(["hpu"])
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
@@ -2476,9 +2478,16 @@ class TestFakeTensor(TestCase):
                         # if you see a shape exception here, you may need to add
                         # a `dynamic_output_shape` tag to an operator
 
-                        # prims/decomps must correctly model strides,
-                        # see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
-                        prims.utils.compare_tensor_meta(fake_out, real_out, True)
+                        if op.op not in [
+                            torch.ops.aten._efficient_attention_forward,
+                            torch.ops.aten._flash_attention_forward,
+                        ]:
+                            # prims/decomps must correctly model strides,
+                            # see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
+
+                            # note: the excluded ops have intentionally incorrect device;
+                            # see "Note [Seed and Offset]" (_meta_registrations.py)
+                            prims.utils.compare_tensor_meta(fake_out, real_out, True)
 
                         if name not in aliasing_failures:
                             fake_aliasing = outputs_alias_inputs(
