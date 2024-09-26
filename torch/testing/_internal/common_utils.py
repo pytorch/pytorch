@@ -97,6 +97,7 @@ from torch.testing._comparison import not_close_error_metas
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
+from torch.utils import cpp_extension
 try:
     import pytest
     has_pytest = True
@@ -5321,7 +5322,7 @@ def remove_cpp_extensions_build_root():
     """
     Removes the default root folder under which extensions are built.
     """
-    default_build_root = torch.utils.cpp_extension.get_default_build_root()
+    default_build_root = cpp_extension.get_default_build_root()
     if os.path.exists(default_build_root):
         if IS_WINDOWS:
             # rmtree returns permission error: [WinError 5] Access is denied
@@ -5330,15 +5331,9 @@ def remove_cpp_extensions_build_root():
         else:
             shutil.rmtree(default_build_root, ignore_errors=True)
 
-def scoped_load_inline(name, cpp_sources, functions, verbose):
+def scoped_load_inline(*args, **kwargs):
     temp_dir = tempfile.TemporaryDirectory()
-    if verbose:
+    if kwargs.get("verbose", False):
         print(f'Using temporary extension directory {temp_dir.name}...', file=sys.stderr)
-    module = torch.utils.cpp_extension.load_inline(
-        name=name,
-        cpp_sources=cpp_sources,
-        functions=functions,
-        verbose=verbose,
-        build_directory=temp_dir.name,
-    )
+    module = cpp_extension.load_inline(*args, **kwargs)
     return module, temp_dir
