@@ -4256,7 +4256,7 @@ class TestMPS(TestCaseMPS):
         for dtype in MPS_DTYPES:
             if dtype == torch.bool:
                 continue
-            data = torch.arange(48, dtype=dtype).reshape(1, 2, 4, 6)
+            data = torch.arange(48).to(dtype=dtype).reshape(1, 2, 4, 6)
             data = data.to(memory_format=torch.channels_last)
             mps_data = data.to("mps")
             self.assertEqual(data, mps_data)
@@ -9308,6 +9308,9 @@ class TestLinalgMPS(TestCaseMPS):
             rconds = [float(torch.rand(1)), ]
             # Test different types of rcond tensor
             for rcond_type in MPS_DTYPES:
+                # TODO: Figure out why it's not supported for complex
+                if rcond_dtype.is_complex:
+                    continue
                 rconds.append(torch.rand(A.shape[:-2], dtype=torch.float32, device=device).to(rcond_type))
             # Test broadcasting of rcond
             if A.ndim > 2:
@@ -11998,9 +12001,7 @@ class TestNoRegression(TestCase):
             self.assertEqual(x2.device.type, "mps")
 
 
-MPS_DTYPES = get_all_dtypes()
-for t in [torch.double, torch.cdouble, torch.cfloat, torch.bfloat16]:
-    del MPS_DTYPES[MPS_DTYPES.index(t)]
+MPS_DTYPES = [t for t in get_all_dtypes() if t not in [torch.double, torch.cdouble, torch.bfloat16]]
 
 MPS_GRAD_DTYPES = [torch.float32, torch.float16]
 
@@ -12107,7 +12108,7 @@ class TestConsistency(TestCaseMPS):
     NEW_ALLOW_LIST = defaultdict(list)
     NEW_ALLOW_LIST_GRAD = defaultdict(list)
 
-    @ops(mps_ops_modifier(test_consistency_op_db), allowed_dtypes=MPS_DTYPES + [torch.complex64])
+    @ops(mps_ops_modifier(test_consistency_op_db), allowed_dtypes=MPS_DTYPES)
     def test_output_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
 
@@ -12331,7 +12332,7 @@ class TestCommon(TestCase):
     def test_tensor_creation(self, device, dtype):
         def ones(device):
             return torch.ones((2, 2), dtype=dtype, device=device)
-        if dtype not in MPS_DTYPES + ([torch.bfloat16, torch.complex64] if product_version > 14.0 else [torch.complex64]):
+        if dtype not in MPS_DTYPES + ([torch.bfloat16] if product_version > 14.0 else []):
             with self.assertRaises(TypeError):
                 ones(device)
         else:
