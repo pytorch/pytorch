@@ -23,7 +23,12 @@ from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from .. import config, ir, pattern_matcher
 from ..codegen.common import BackendFeature, has_backend_feature
 from ..comms import remove_fsdp2_unsharded_param_graph_input_usage
-from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
+from ..fx_utils import (
+    FakeTensorUpdater,
+    get_fake_args_kwargs,
+    get_node_storage,
+    UserVisibleOutputStrideFixUpper,
+)
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
     _return_true,
@@ -70,7 +75,11 @@ pass_patterns = [
 ]
 
 
-def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
+def post_grad_passes(
+    gm: torch.fx.GraphModule,
+    user_visible_output_idxs: Optional[List[int]],
+    is_inference: bool,
+):
     """
     Passes that run on after grad.  This is called once on the forwards
     graph and once on the backwards graph.
@@ -87,6 +96,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     if is_inference and config.reorder_for_locality:
         reorder_for_locality(gm.graph)
 
+    output_stride_fix_upper = UserVisibleOutputStrideFixUpper(
+        gm.graph,
+        user_visible_output_idxs,
+    )
     fake_tensor_updater = FakeTensorUpdater(gm.graph)
 
     if config.post_grad_custom_pre_pass is not None:
@@ -138,6 +151,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     move_constructors_to_gpu(gm.graph)
 
+    output_stride_fix_upper.fixup()
     fake_tensor_updater.incremental_update()
 
     # Keep these last, since they introduces mutation. Look at

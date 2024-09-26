@@ -285,11 +285,13 @@ def _recursive_joint_graph_passes(gm):
     joint_graph_passes(gm)
 
 
-def _recursive_post_grad_passes(gm, is_inference: bool = False):
+def _recursive_post_grad_passes(
+    gm, user_visible_output_idxs, is_inference: bool = False
+):
     for subgraph_name in _get_subgraph_names(gm):
         subgraph = getattr(gm, subgraph_name)
-        _recursive_post_grad_passes(subgraph, is_inference)
-    post_grad_passes(gm, is_inference)
+        _recursive_post_grad_passes(subgraph, user_visible_output_idxs, is_inference)
+    post_grad_passes(gm, user_visible_output_idxs, is_inference)
 
 
 def split_const_gm(
@@ -769,7 +771,9 @@ def fx_codegen_and_compile(
 
         with V.set_fake_mode(fake_mode):
             # has some issues with memory in training
-            _recursive_post_grad_passes(gm, is_inference=is_inference)
+            _recursive_post_grad_passes(
+                gm, user_visible_output_idxs, is_inference=is_inference
+            )
             V.debug.fx_graph_transformed(gm, example_inputs)
             post_grad_graphs_log.debug(
                 "%s",
