@@ -272,11 +272,16 @@ def out_wrapper(
                     out_attr = getattr(out, k)
                     if k not in kwargs:
                         kwargs[k] = out_attr
-            if isinstance(out, TensorLike):
-                check_copy_devices(copy_from=args[0], copy_to=out)
-            elif isinstance(out, (tuple, list)):
+
+            def maybe_check_copy_devices(out):
+                if isinstance(out, TensorLike) and isinstance(args[0], TensorLike):
+                    check_copy_devices(copy_from=args[0], copy_to=out)
+
+            if isinstance(out, (tuple, list)):
                 for o in out:
-                    check_copy_devices(copy_from=args[0], copy_to=o)
+                    maybe_check_copy_devices(o)
+            else:
+                maybe_check_copy_devices(out)
 
             if pass_is_out:
                 result = fn(*args, is_out=(out is not None), **kwargs)  # type: ignore[arg-type]

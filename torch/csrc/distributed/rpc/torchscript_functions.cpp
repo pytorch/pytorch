@@ -47,7 +47,7 @@ c10::intrusive_ptr<JitFuture> rpcTorchscript(
       rpcTimeoutSeconds);
 
   // Get function return type to construct JitFuture.
-  auto returns = functionSchema.returns();
+  auto const& returns = functionSchema.returns();
   // Script call only allows single IValue returned.
   TORCH_INTERNAL_ASSERT(
       returns.size() == 1,
@@ -90,7 +90,7 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
   auto& ctx = RRefContext::getInstance();
 
   // Get function return type to construct UserRRef.
-  auto returns = functionSchema.returns();
+  auto const& returns = functionSchema.returns();
   // Script call only allows single IValue returned.
   TORCH_INTERNAL_ASSERT(
       returns.size() == 1,

@@ -72,7 +72,10 @@ MIOPEN_CMAKE_COMMON_FLAGS="
 -DMIOPEN_BUILD_DRIVER=OFF
 "
 # Pull MIOpen repo and set DMIOPEN_EMBED_DB based on ROCm version
-if [[ $ROCM_INT -ge 60200 ]] && [[ $ROCM_INT -lt 60300 ]]; then
+if [[ $ROCM_INT -ge 60300 ]]; then
+    echo "ROCm 6.3+ MIOpen does not need any patches, do not build from source"
+    exit 0
+elif [[ $ROCM_INT -ge 60200 ]] && [[ $ROCM_INT -lt 60300 ]]; then
     MIOPEN_BRANCH="release/rocm-rel-6.2-staging"
 elif [[ $ROCM_INT -ge 60100 ]] && [[ $ROCM_INT -lt 60200 ]]; then
     echo "ROCm 6.1 MIOpen does not need any patches, do not build from source"
