@@ -2893,7 +2893,10 @@ class Scheduler:
                 node2.get_name(),
             )
 
-        return self.score_fusion_memory(node1, node2) > 0
+        return (
+            self.score_fusion_memory(node1, node2)
+            >= config.score_fusion_memory_threshold
+        )
 
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
         """
@@ -2952,7 +2955,10 @@ class Scheduler:
             return False
         del device2
 
-        no_shared_data = self.score_fusion_memory(node1, node2) == 0
+        no_shared_data = (
+            self.score_fusion_memory(node1, node2)
+            < config.score_fusion_memory_threshold
+        )
         if no_shared_data:
             no_shared_data = not self.has_shared_data_after_reordering_loop(
                 node1, node2
