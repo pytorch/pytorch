@@ -858,8 +858,9 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
   MTLCompileOptions* options = compile_options;
   if (!options) {
     options = [[MTLCompileOptions new] autorelease];
+    // Need 3.0 for atomic oprations, 3.1 introduces bfloat support
     [options setLanguageVersion:is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? MTLLanguageVersion3_1
-                                                                                        : MTLLanguageVersion2_3];
+                                                                                        : MTLLanguageVersion3_0];
     [options setFastMathEnabled:(!fast_math || std::stoi(fast_math) == 0) ? NO : YES];
   }
 
