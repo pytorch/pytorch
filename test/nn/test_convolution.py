@@ -74,6 +74,8 @@ if TEST_SCIPY:
 if IS_MACOS:
     import platform
     product_version = float(".".join(platform.mac_ver()[0].split(".")[:2]) or -1)
+else:
+    product_version = 0.0.0
 
 
 class TestConvolutionNN(NNTestCase):
