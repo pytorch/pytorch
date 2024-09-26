@@ -63,7 +63,6 @@ import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._C import (
-    _get_function_stack_at,
     _instruction_counter,
     _len_torch_function_stack,
     _pop_torch_function_stack,
@@ -354,6 +353,9 @@ def dynamo_timed(
                                 inductor_compile_time = None
                                 code_gen_time = None
                                 remote_cache_time_saved = None
+                            structured_logging_overhead_s = (
+                                torch._logging.get_structured_logging_overhead()
+                            )
                             metrics = BwdCompilationMetrics(
                                 compile_id,
                                 inductor_compile_time,
@@ -361,6 +363,7 @@ def dynamo_timed(
                                 fail_type,
                                 fail_reason,
                                 remote_cache_time_saved,
+                                structured_logging_overhead_s,
                             )
                             record_compilation_metrics(metrics)
 
@@ -800,6 +803,8 @@ class CompilationMetrics:
     has_guarded_code: bool
     possibly_missed_reinplacing_opportunities: Optional[int]
     remote_cache_time_saved_s: Optional[float]
+    structured_logging_overhead_s: Optional[float]
+    config_suppress_errors: Optional[bool]
 
 
 @dataclasses.dataclass
@@ -810,6 +815,7 @@ class BwdCompilationMetrics:
     fail_type: Optional[str]
     fail_reason: Optional[str]
     remote_cache_time_saved_s: Optional[float]
+    structured_logging_overhead_s: Optional[float]
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -835,6 +841,11 @@ def record_compilation_metrics(
             k: list(v) if isinstance(v, set) else v
             for k, v in dataclasses.asdict(compilation_metrics).items()
         },
+        # NB: Because compilation metrics *includes* the logging overhead time,
+        # we can't both *measure* the logging overhead of compilation metrics
+        # without making it inconsistent with compilation metrics itself, so
+        # we ignore the (hopefully small) time spent logging compilation metrics
+        record_logging_overhead=False,
     )
     if config.log_compilation_metrics:
         log_compilation_event(compilation_metrics)
@@ -1788,7 +1799,9 @@ def same(
                 # accuracy when comparing AMP with FP32 is within a difference of less than 0.1%.
                 # Thus, it's possible that the correctness check failures for these models are
                 # false alarms. We use multiplier of 3 instead of 2 to avoid these false alarms.
-                multiplier = 3.0 if res.dtype == torch.bfloat16 else 2.0
+                multiplier = (
+                    3.0 if res.dtype in (torch.float16, torch.bfloat16) else 2.0
+                )
 
                 if use_larger_multiplier_for_smaller_tensor and (
                     fp64_ref.numel() <= 10 and tol >= 4 * 1e-2
@@ -2320,9 +2333,7 @@ def tensor_always_has_static_shape(
 
     if (
         tensor_source.guard_source().is_specialized_nn_module()
-        # Marking the tensor attributes of nn modules static to keep the behavior same as before
-        # inline_inbuilt_nn_module flag was introduced.
-        or tensor_source.guard_source().is_unspecialized_nn_module()
+        or tensor_source.guard_source().is_unspecialized_builtin_nn_module()
     ) and config.force_nn_module_property_static_shapes:
         return True, TensorStaticReason.NN_MODULE_PROPERTY
 
@@ -2916,6 +2927,8 @@ def is_frozen_dataclass(value):
         not object_has_getattribute(value)
         and not class_has_getattribute(value)
         and is_dataclass(value)
+        and hasattr(value, "__dataclass_params__")
+        and hasattr(value.__dataclass_params__, "frozen")
         and value.__dataclass_params__.frozen
     )
 
@@ -3087,7 +3100,9 @@ def is_parameter_freezing():
 def get_torch_function_mode_stack(filter_ignored=True):
     from .variables.torch_function import IGNORED_MODES
 
-    stack = [_get_function_stack_at(i) for i in range(_len_torch_function_stack())]
+    stack = [
+        get_torch_function_mode_stack_at(i) for i in range(_len_torch_function_stack())
+    ]
     if filter_ignored:
         stack = [mode for mode in stack if type(mode) not in IGNORED_MODES]
 
@@ -3105,6 +3120,11 @@ def set_torch_function_mode_stack(stack):
 
     for mode in stack:
         _push_on_torch_function_stack(mode)
+
+
+def clear_torch_function_mode_stack():
+    for i in range(_len_torch_function_stack()):
+        _pop_torch_function_stack()
 
 
 def verify_guard_fn_signature(value):

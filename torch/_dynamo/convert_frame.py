@@ -605,6 +605,10 @@ def _compile(
     output: Optional[OutputGraph] = None
     tracer: Optional[InstructionTranslator] = None
 
+    tf_mode_stack: List[
+        torch.overrides.TorchFunctionMode
+    ] = torch.overrides._get_current_function_mode_stack()
+
     @preserve_global_state
     def transform(
         instructions: List[Instruction], code_options: Dict[str, object]
@@ -618,6 +622,7 @@ def _compile(
             locals,
             globals,
             builtins,
+            tf_mode_stack,
             code_options,
             compiler_fn,
             one_graph,
@@ -1019,6 +1024,10 @@ def _compile(
                 possibly_missed_reinplacing_opportunities = None
                 remote_cache_time_saved = None
 
+            structured_logging_overhead_s = (
+                torch._logging.get_structured_logging_overhead()
+            )
+
             metrics = CompilationMetrics(
                 str(compile_id),
                 frame_key,
@@ -1048,6 +1057,8 @@ def _compile(
                 guarded_code is not None,
                 possibly_missed_reinplacing_opportunities,
                 remote_cache_time_saved,
+                structured_logging_overhead_s,
+                config.suppress_errors,
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()

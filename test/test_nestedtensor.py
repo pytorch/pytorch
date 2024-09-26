@@ -6,6 +6,7 @@ import itertools
 import math
 import sys
 import unittest
+from contextlib import nullcontext
 from functools import partial
 from typing import Optional, Tuple
 
@@ -4337,12 +4338,14 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             out_expected = torch.cat(
                 [func(t, dim=(reduce_dim[0] - 1)).unsqueeze(0) for t in nt.unbind()]
             )
+            if keepdim:
+                out_expected = out_expected.unsqueeze(reduce_dim[0])
 
             self.assertFalse(
                 out_actual.is_nested,
                 f"{op_name}(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
             )  # output is a dense tensor
-            self.assertTrue(torch.allclose(out_actual, out_expected))
+            self.assertEqual(out_actual, out_expected)
 
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
@@ -4602,12 +4605,14 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                         for t in nt_transposed.unbind()
                     ]
                 )
+                if keepdim:
+                    out_expected = out_expected.unsqueeze(reduce_dim[0])
 
                 self.assertFalse(
                     out_actual.is_nested,
                     f"{op_name}(): the result of reducing a nested tensor along the ragged dimension is a dense tensor",
                 )  # output is a dense tensor
-                self.assertTrue(torch.allclose(out_actual, out_expected, rtol=1e-4))
+                self.assertEqual(out_actual, out_expected)
 
     @dtypes(torch.float32)
     @parametrize(
@@ -5070,11 +5075,12 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     ):
         """
         Mean on NestedTensor fails when trying to reduce across multiple dimensions
+        only if the batch or ragged dims are included
         """
         tensor_lists = self._get_example_tensor_lists(
             include_list_of_lists=False, include_requires_grad=components_require_grad
         )
-        reduce_dims = ((0, 1), (2, 3), (2, 3, 4))
+        reduce_dims = ((0, 1), (2, 3), (2, 3, 4), (0, 3), (1, 2))
 
         for tensor_list, reduce_dim in itertools.product(tensor_lists, reduce_dims):
             nt = torch.nested.nested_tensor(
@@ -5086,10 +5092,20 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             )
 
             if nt.dim() > reduce_dim[-1]:
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "not supported across multiple dimensions for NestedTensor",
-                ):
+                ragged_or_batch_included = (
+                    nt._ragged_idx in reduce_dim or 0 in reduce_dim
+                )
+
+                context = (
+                    self.assertRaisesRegex(
+                        RuntimeError,
+                        "not supported across multiple dimensions for NestedTensor",
+                    )
+                    if ragged_or_batch_included
+                    else nullcontext()
+                )
+
+                with context:
                     out = torch.mean(nt, dim=reduce_dim, keepdim=keepdim)
 
     @dtypes(torch.float32)
@@ -6280,7 +6296,10 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         # Compute tolerances
         output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
-        grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(grads_ref[0], grads_lp_ref[0])
+        # fudge factor of 1.7 for smaller GPUs e.g., A2, A16
+        grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(
+            grads_ref[0], grads_lp_ref[0], 1.7
+        )
         grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(grads_ref[1], grads_lp_ref[1])
         grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(grads_ref[2], grads_lp_ref[2])
         grad_atols = [grad_q_ref_atol, grad_k_ref_atol, grad_v_ref_atol]
@@ -6710,12 +6729,16 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         loss_nt_compile.backward()
 
         self.assertEqual(v32_dense_eager.grad, v32_dense_compile.grad)
-        self.assertEqual(v32_dense_eager.grad, v32_nt_eager.grad)
-        self.assertEqual(v32_dense_eager.grad, v32_nt_compile.grad)
+        self.assertEqual(v32_dense_eager.grad, v32_nt_eager.grad, atol=1e-4, rtol=1e-4)
+        self.assertEqual(
+            v32_dense_eager.grad, v32_nt_compile.grad, atol=1e-4, rtol=1e-4
+        )
 
         self.assertEqual(v16_dense_eager.grad, v16_dense_compile.grad)
-        self.assertEqual(v16_dense_eager.grad, v16_nt_eager.grad)
-        self.assertEqual(v16_dense_eager.grad, v16_nt_compile.grad)
+        self.assertEqual(v16_dense_eager.grad, v16_nt_eager.grad, atol=1e-5, rtol=5e-3)
+        self.assertEqual(
+            v16_dense_eager.grad, v16_nt_compile.grad, atol=1e-5, rtol=5e-3
+        )
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
@@ -7165,10 +7188,14 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         check(nt)
 
-    @dtypes(torch.float32, torch.double, torch.half)
+    @dtypes(torch.float32, torch.double, torch.half, torch.bool)
     @parametrize("nt_dim", [2, 3, 4])
     @parametrize("requires_grad", [False, True])
     def test_to_padded_tensor(self, device, dtype, nt_dim, requires_grad):
+        if dtype is torch.bool and requires_grad:
+            # grads not supported for bool
+            return
+
         if nt_dim == 2:
             post_seq_len_shape = ()
         elif nt_dim == 3:
@@ -7178,7 +7205,9 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         nt = torch.nested.nested_tensor(
             [
-                torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                torch.randint(2, (n, *post_seq_len_shape), device=device, dtype=dtype)
+                if dtype is torch.bool
+                else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
                 for n in range(2, 9)
             ],
             layout=torch.jagged,
@@ -7199,7 +7228,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         nt2 = nested_from_padded(padded, nt.offsets())
         self.assertEqual(nt, nt2)
 
-        if requires_grad:
+        if requires_grad and dtype is not torch.bool:
             # ensure gradients flow through conversions
             nt2.backward(torch.ones_like(nt2))
             self.assertEqual(nt.grad, torch.ones_like(nt))
@@ -7214,6 +7243,10 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @parametrize("nt_dim", [2, 3, 4])
     @parametrize("requires_grad", [False, True])
     def test_to_padded_tensor_compile(self, device, dtype, nt_dim, requires_grad):
+        if dtype is torch.bool and requires_grad:
+            # grads not supported for bool
+            return
+
         if nt_dim == 2:
             post_seq_len_shape = ()
         elif nt_dim == 3:
@@ -7223,7 +7256,9 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         nt = torch.nested.nested_tensor(
             [
-                torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                torch.randint(2, (n, *post_seq_len_shape), device=device, dtype=dtype)
+                if dtype is torch.bool
+                else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
                 for n in range(2, 9)
             ],
             layout=torch.jagged,
@@ -7340,6 +7375,59 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         output.backward(torch.ones_like(output))
         self.assertEqual(output._metadata_cache, cache)
 
+    # See https://github.com/pytorch/pytorch/issues/128649
+    @xfailIfTorchDynamo
+    @dtypes(torch.float32)
+    def test_composite_op_in_inference_mode(self, device, dtype):
+        # expect view
+        nt = random_nt_from_dims(
+            [4, None, 48],
+            device=device,
+            dtype=dtype,
+            layout=torch.jagged,
+            requires_grad=True,
+        )
+
+        with torch.inference_mode():
+            output = nt.reshape([4, -1, 3, 16])
+            self.assertEqual(output.shape, (4, nt.shape[1], 3, 16))
+            self.assertTrue(output._is_view())
+
+        # expect copy
+        nt = random_nt_from_dims(
+            [4, None, 3, 16],
+            device=device,
+            dtype=dtype,
+            layout=torch.jagged,
+            requires_grad=True,
+        ).transpose(-1, -2)
+
+        with torch.inference_mode():
+            output = nt.reshape([4, -1, 48])
+            self.assertEqual(output.shape, (4, nt.shape[1], 48))
+            self.assertFalse(output._is_view())
+
+    @dtypes(torch.float32)
+    def test_composite_op_with_custom_mode(self, device, dtype):
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        # simple passthrough TorchDispatchMode
+        class CustomDispatchMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=..., kwargs=None):
+                return func(*args, **kwargs)
+
+        nt = random_nt_from_dims(
+            [4, None, 2, 3],
+            device=device,
+            dtype=dtype,
+            layout=torch.jagged,
+            requires_grad=True,
+        )
+        with CustomDispatchMode():
+            res = nt.reshape(4, -1, 6)
+
+        self.assertEqual(res.shape, (4, nt.shape[1], 6))
+
 
 FORWARD_FAILURES = {
     # === BEGIN NotImplementedError SECTION ===
@@ -7407,8 +7495,6 @@ FORWARD_FAILURES = {
     "jiterator_binary",
     "jiterator_binary_return_by_ref",
     "jiterator_unary",
-    # Bug found: sum() with keepdim=True returns invalid shape
-    "sum",
     # RuntimeError: prod(): keepdim=True must be set for NestedTensor
     "prod",
     # RuntimeError: "jagged_to_padded_dense" not implemented for 'Bool'
@@ -7442,6 +7528,8 @@ BACKWARD_FAILURES = {
     "clone",
     # Calling into torch.ops.aten.size directly
     "masked_select",
+    # NotImplementedError: aten._nested_sum_backward.default. Need to fix the backward pass.
+    "sum",
 }
 
 COMPILE_FORWARD_FAILURES = {

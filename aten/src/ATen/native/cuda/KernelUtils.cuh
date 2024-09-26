@@ -77,8 +77,7 @@ __device__ inline __half2 preview_unsafeAtomicAdd(__half2* address, __half2 valu
 #define NATIVE_BFLOAT162 __nv_bfloat162
 #endif
 
-namespace at {
-namespace native {
+namespace at:: native {
 
 __device__ __forceinline__ size_t
 idx(const size_t nc,
@@ -112,7 +111,7 @@ idx_cl(
 template <
     typename scalar_t,
     typename index_t,
-    typename std::enable_if<std::is_same<c10::Half, scalar_t>::value>::type* =
+    typename std::enable_if_t<std::is_same_v<c10::Half, scalar_t>>* =
         nullptr>
 __device__ __forceinline__ void fastSpecializedAtomicAdd(
     scalar_t* tensor,
@@ -158,7 +157,7 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
 template <
     typename scalar_t,
     typename index_t,
-    typename std::enable_if<std::is_same<c10::BFloat16, scalar_t>::value>::type* =
+    typename std::enable_if_t<std::is_same_v<c10::BFloat16, scalar_t>>* =
         nullptr>
 __device__ __forceinline__ void fastSpecializedAtomicAdd(
     scalar_t* tensor,
@@ -205,7 +204,7 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
 template <
     typename scalar_t,
     typename index_t,
-    typename std::enable_if<!std::is_same<c10::Half, scalar_t>::value && !std::is_same<c10::BFloat16, scalar_t>::value >::type* =
+    typename std::enable_if_t<!std::is_same_v<c10::Half, scalar_t> && !std::is_same_v<c10::BFloat16, scalar_t>>* =
         nullptr>
 __device__ __forceinline__ void fastSpecializedAtomicAdd(
     scalar_t* tensor,
@@ -234,5 +233,4 @@ __device__ __forceinline__ void fastAtomicAdd(
 #undef NATIVE_BFLOAT16
 #undef NATIVE_BFLOAT162
 
-} // namespace native
-} // namespace at
+} // namespace at::native
