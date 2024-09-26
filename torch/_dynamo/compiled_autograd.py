@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from typing import Any, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.external_utils import (
@@ -87,6 +87,7 @@ class AutogradCompilerInstance:
         inputs: List[torch.Tensor],
         sizes: List[int],
         scalars: List[Union[int, float]],
+        origins: List[List[Tuple[int, str]]],
     ):
         counters["compiled_autograd"]["captures"] += 1
         self.aot_graph_cls_name: Optional[str] = None
@@ -99,12 +100,14 @@ class AutogradCompilerInstance:
             for name in self.graph_placeholders
         )
 
+        self.stack.enter_context(preserve_node_meta())
+        inputs_origins, sizes_origins, scalars_origins = origins
         # tensor inputs to fake tensors
         inputs = [
             self.wrap_fake(x, self.source("inputs", idx))
             for idx, x in enumerate(inputs)
         ]
-        self.bind_tensors_to_proxies(inputs, args_proxy)
+        self.bind_tensors_to_proxies(inputs, args_proxy, inputs_origins)
 
         # size inputs to symints
         sizes = [
@@ -115,7 +118,7 @@ class AutogradCompilerInstance:
             )
             for idx, val in enumerate(sizes)
         ]
-        self.bind_tensors_to_proxies(sizes, sizes_proxy)
+        self.bind_tensors_to_proxies(sizes, sizes_proxy, sizes_origins)
 
         for idx, val in enumerate(scalars):
             source = self.source("scalars", idx)
@@ -137,14 +140,13 @@ class AutogradCompilerInstance:
                 )
             else:
                 raise AssertionError("Unexpected scalar type: ", type(val))
-        self.bind_tensors_to_proxies(scalars, scalars_proxy)
+        self.bind_tensors_to_proxies(scalars, scalars_proxy, scalars_origins)
 
         # TODO(jansel): are all these modes needed?
         self.stack.enter_context(decompose({}))
         self.stack.enter_context(self.fake_tensor_mode)
         self.stack.enter_context(self.proxy_mode)
         self.stack.enter_context(disable_autocast_cache())
-        self.stack.enter_context(preserve_node_meta())
         return inputs, sizes, scalars
 
     def proxy_call_backward(
@@ -448,9 +450,21 @@ class AutogradCompilerInstance:
         assert isinstance(proxy_tensor, torch.fx.experimental.proxy_tensor._ProxyTensor)
         return proxy_tensor.proxy
 
-    def bind_tensors_to_proxies(self, tensors, proxies):
+    def bind_tensors_to_proxies(
+        self, tensors, proxies, origins: Optional[List[Tuple[int, str]]] = None
+    ):
         if isinstance(proxies, torch.fx.Proxy):
-            proxies = [proxies[i] for i in range(len(tensors))]  # type: ignore[index]
+            if origins:
+                assert len(origins) == len(tensors)
+                bound_proxies = []
+                for i in range(len(tensors)):
+                    nodecall_index, node_name = origins[i]
+                    self.set_node_origin(node_name, nodecall_index, None)
+                    bound_proxies.append(proxies[i])  # type: ignore[index]
+                proxies = bound_proxies
+            else:
+                proxies = [proxies[i] for i in range(len(tensors))]  # type: ignore[index]
+
         assert len(tensors) == len(proxies)
         track_tensor_tree(tensors, proxies, constant=None, tracer=self.fx_tracer)
 
