@@ -231,8 +231,13 @@ class PackageExporter:
         if isinstance(f, (Path, str)):
             f = str(f)
             self.buffer: Optional[BinaryIO] = None
-        else:  # is a byte buffer
+        elif isinstance(f, BinaryIO):  # is a byte buffer
             self.buffer = f
+        else:
+            raise AttributeError(
+                "expected 'f' to be string, path, or a binary I/O object "
+                f"but got {type(f)}"
+            )
 
         self.zip_file = torch._C.PyTorchFileWriter(f)
         self.zip_file.set_min_version(6)
