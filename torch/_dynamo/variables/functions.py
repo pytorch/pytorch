@@ -398,15 +398,15 @@ class ContextlibContextManagerFunctionVariable(BaseUserFunctionVariable):
 
         tracer = self.inline_tracer
 
+        # TODO: in case of a graph break, we need to run the finally (if exist) block
+
         try:
             # inline_call_ has a try/except block that does the same thing
             # TODO: figure it out why it is not working for this usecase
             # TODO: Do we actually need the increment below?
-            tx.generic_context_manager_depth += 1
             return tracer.inline_call_().next_variable(tx)
         except exc.ObservedUserStopIteration as e:
             tx.exn_vt_stack.extend(tracer.exn_vt_stack)
-            tx.generic_context_manager_depth -= 1
             raise
 
 
