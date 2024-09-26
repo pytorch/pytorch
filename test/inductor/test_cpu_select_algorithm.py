@@ -290,7 +290,11 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             )
             and epilogue != "mul"
             and epilogue != "div"
-            or (dtype == torch.half and epilogue == "add" and not bias)
+            or (
+                dtype in (torch.float16, torch.bfloat16)
+                and epilogue == "add"
+                and not bias
+            )
             or (
                 dtype == torch.float32
                 and epilogue == "add"
@@ -304,7 +308,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             #    not fused via scheduler. This will also be true for float16 when
             #    hardware has the float16 instruction. The exception is mul or
             #    div fusion which is not supported for oneDNN linear.
-            # 2. For float16, since oneDNN linear is not applied, linear w/o bias
+            # 2. For bfloat16/float16, when oneDNN linear is not applied, linear w/o bias
             #    plus epilogue add is treated as linear w/ bias.
             # 3. For float32, when dynamic shapes is enabled, mkl linear is not applied.
             #    and linear w/o bias plus epilogue add is treated as addmm.
@@ -1513,7 +1517,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @set_num_threads(1)
-    @parametrize("batch_size", (1024,))
+    @parametrize("batch_size", (512,))
     @parametrize("in_features", (1024,))
     @parametrize("out_features", (1024,))
     @parametrize("bias", (True, False))
