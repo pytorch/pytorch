@@ -1088,9 +1088,9 @@ class PipelineScheduleMulti(_PipelineSchedule):
             stage.has_backward = self._has_backward
         self._stages_initialized = False
 
-        self._should_compute_loss = (
-            lambda stage: stage.is_last and self._loss_fn is not None
-        )
+        # avoid putting a reference to 'self' inside the lambda, it creates a ref cycle
+        has_loss: bool = self._loss_fn is not None
+        self._should_compute_loss = lambda stage: stage.is_last and has_loss
 
         # This will be set during init of derived schedules
         self.pipeline_order: Dict[int, List[Optional[_Action]]] = {}
