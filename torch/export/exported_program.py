@@ -69,6 +69,7 @@ from .graph_signature import (  # noqa: F401
     OutputKind,
     OutputSpec,
     SymIntArgument,
+    SymFloatArgument,
     TensorArgument,
     TokenArgument,
 )
@@ -437,6 +438,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
             return TensorArgument(name=new_ph.name)
         elif isinstance(old_arg, SymIntArgument):
             return SymIntArgument(name=new_ph.name)
+        elif isinstance(old_arg, SymFloatArgument):
+            return SymFloatArgument(name=new_ph.name)
         raise RuntimeError(f"Type of old_arg not supported: {type(old_arg)}")
 
     new_placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
