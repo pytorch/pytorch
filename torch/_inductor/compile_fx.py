@@ -474,7 +474,7 @@ def _compile_fx_inner(
     aot_mode: bool = False,
     is_inference: bool = False,
     boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
-    user_visible_outputs: Optional[Dict[str, None]] = None,
+    user_visible_output_idxs: Optional[List[int]] = None,
     layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
 ) -> Union[CompiledFxGraph, str]:
@@ -513,7 +513,7 @@ def _compile_fx_inner(
             aot_mode=aot_mode,
             is_inference=is_inference,
             boxed_forward_device_index=boxed_forward_device_index,
-            user_visible_outputs=user_visible_outputs,
+            user_visible_output_idxs=user_visible_output_idxs,
             layout_opt=layout_opt,
         )
 
@@ -531,7 +531,7 @@ def _compile_fx_inner(
         "cpp_wrapper": cpp_wrapper,
         "aot_mode": aot_mode,
         "is_inference": is_inference,
-        "user_visible_outputs": user_visible_outputs,
+        "user_visible_output_idxs": user_visible_output_idxs,
         "layout_opt": layout_opt,
         "extern_node_serializer": extern_node_serializer,
     }
@@ -688,9 +688,7 @@ def fx_codegen_and_compile(
     cpp_wrapper: bool = False,
     aot_mode: bool = False,
     is_inference: bool = False,
-    # Use a dict with None value rather than a set for deterministic
-    # iteration order just in case.
-    user_visible_outputs: Optional[Dict[str, None]] = None,
+    user_visible_output_idxs: Optional[List[int]] = None,
     layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
 ) -> Union[CompiledFxGraph, str]:
@@ -811,7 +809,7 @@ def fx_codegen_and_compile(
                     graph_id=graph_id,
                     cpp_wrapper=cpp_wrapper,
                     aot_mode=aot_mode,
-                    user_visible_outputs=user_visible_outputs,
+                    user_visible_output_idxs=user_visible_output_idxs,
                     extern_node_serializer=extern_node_serializer,
                     is_inference=is_inference,
                     is_const_graph=True,
@@ -832,7 +830,7 @@ def fx_codegen_and_compile(
                 graph_id=graph_id,
                 cpp_wrapper=cpp_wrapper,
                 aot_mode=aot_mode,
-                user_visible_outputs=user_visible_outputs,
+                user_visible_output_idxs=user_visible_output_idxs,
                 extern_node_serializer=extern_node_serializer,
                 is_inference=is_inference,
                 const_output_index=const_output_index,
@@ -1182,9 +1180,9 @@ def fw_compiler_freezing(
     # for freezing, all graph outputs should be user visible
     *_, model_outputs_node = opt_model.graph.nodes
     model_outputs = model_outputs_node.args[0]
-    user_visible_outputs = dict.fromkeys(
-        n.name for n in model_outputs if isinstance(n, torch.fx.Node)
-    )
+    user_visible_output_idxs = [
+        idx for idx, n in enumerate(model_outputs) if isinstance(n, torch.fx.Node)
+    ]
 
     static_input_idxs = list(range(num_fixed))
     wrapper_new_args_unwrapped_indices: List[int] = []
@@ -1235,7 +1233,7 @@ def fw_compiler_freezing(
             is_inference=True,
             boxed_forward_device_index=forward_device,
             layout_opt=layout_opt,
-            user_visible_outputs=user_visible_outputs,
+            user_visible_output_idxs=user_visible_output_idxs,
         )
 
     # aot_inductor codegens a call that takes in just the inputs, so we don't return a wrapper
@@ -1383,7 +1381,7 @@ def compile_fx(
                 num_example_inputs, len(example_inputs)
             )
 
-            user_visible_outputs = {}
+            user_visible_output_idxs = []
 
             if config.keep_output_stride:
                 model_outputs_node = output_node(model)
@@ -1431,13 +1429,11 @@ def compile_fx(
                 # of "graph" outputs. Make sure we're within bounds.
                 assert orig_output_end_idx <= num_model_outputs
 
-                user_visible_outputs = dict.fromkeys(
-                    n.name
-                    for n in model_outputs[
-                        original_output_start_index:orig_output_end_idx
-                    ]
-                    if isinstance(n, torch.fx.Node)
-                )
+                user_visible_output_idxs = [
+                    idx
+                    for idx in range(original_output_start_index, orig_output_end_idx)
+                    if isinstance(model_outputs[idx], torch.fx.Node)
+                ]
 
             return inner_compile(
                 model,
@@ -1447,7 +1443,7 @@ def compile_fx(
                 graph_id=graph_id,
                 is_inference=is_inference,
                 boxed_forward_device_index=forward_device,
-                user_visible_outputs=user_visible_outputs,
+                user_visible_output_idxs=user_visible_output_idxs,
             )
 
         fw_compiler = functools.partial(fw_compiler_base, is_inference=False)
@@ -1475,14 +1471,16 @@ def compile_fx(
             model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
         ):
             with dynamo_utils.dynamo_timed("compile_fx.<locals>.bw_compiler"):
-                user_visible_outputs = {}
+                user_visible_output_idxs = []
 
                 if config.bw_outputs_user_visible:
                     model_outputs_node = output_node(model)
                     model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
-                    user_visible_outputs = dict.fromkeys(
-                        n.name for n in model_outputs if isinstance(n, torch.fx.Node)
-                    )
+                    user_visible_output_idxs = [
+                        idx
+                        for idx, n in enumerate(model_outputs)
+                        if isinstance(n, torch.fx.Node)
+                    ]
                 fixed = count_tangents(model)
                 with config.patch(
                     get_cpp_wrapper_config()
@@ -1495,7 +1493,7 @@ def compile_fx(
                         is_backward=True,
                         graph_id=graph_id,
                         boxed_forward_device_index=forward_device,
-                        user_visible_outputs=user_visible_outputs,
+                        user_visible_output_idxs=user_visible_output_idxs,
                     )
 
         # TODO: can add logging before/after the call to create_aot_dispatcher_function

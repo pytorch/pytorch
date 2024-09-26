@@ -186,8 +186,25 @@ def getattr_recursive(
     return attr_itr
 
 
+def get_user_visible_output_names(
+    graph: Graph, user_visible_output_idxs: Optional[List[int]]
+) -> OrderedSet[str]:
+    if user_visible_output_idxs is None:
+        return OrderedSet()
+
+    output_node = next(iter(reversed(graph.nodes)))
+    assert output_node.op == "output"
+    outputs = output_node.args[0]
+
+    return OrderedSet(
+        outputs[idx].name
+        for idx in user_visible_output_idxs
+        if isinstance(outputs[idx], torch.fx.Node)
+    )
+
+
 def mark_nodes_dislike_padding(
-    g: Graph, user_visible_outputs: Optional[Dict[str, None]]
+    g: Graph, user_visible_output_names: OrderedSet[str]
 ) -> None:
     """
     Nodes like convolution/convolution_backward want its input to be dense.
@@ -247,11 +264,7 @@ def mark_nodes_dislike_padding(
                 if prior_op not in ops_like_padding:
                     prior.meta["dislike_padding"] = True
         # We only want to mark output nodes. So, move it after the above prior nodes process.
-        if (
-            not config.pad_outputs
-            and user_visible_outputs
-            and cur.name in user_visible_outputs
-        ):
+        if not config.pad_outputs and cur.name in user_visible_output_names:
             cur.meta["dislike_padding"] = True
 
 
@@ -313,7 +326,7 @@ class GraphLowering(torch.fx.Interpreter):
         graph_id: Optional[int] = None,
         cpp_wrapper: bool = False,
         aot_mode: bool = False,
-        user_visible_outputs: Optional[Dict[str, None]] = None,
+        user_visible_output_idxs: Optional[List[int]] = None,
         layout_opt: Optional[bool] = None,
         extern_node_serializer: Optional[
             Callable[[List[ir.ExternKernelNode]], Any]
@@ -425,10 +438,11 @@ class GraphLowering(torch.fx.Interpreter):
             self.find_nodes_prefer_channels_last() if self.layout_opt else OrderedSet()
         )
         self._warned_fallback = {"aten.convolution_backward"}
-        self.user_visible_outputs = (
-            user_visible_outputs if user_visible_outputs is not None else {}
+        self.user_visible_output_names = get_user_visible_output_names(
+            gm.graph,
+            user_visible_output_idxs,
         )
-        mark_nodes_dislike_padding(gm.graph, user_visible_outputs)
+        mark_nodes_dislike_padding(gm.graph, self.user_visible_output_names)
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
         self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
         self.cache_linemap: List[
@@ -1402,7 +1416,8 @@ class GraphLowering(torch.fx.Interpreter):
                 strides = n.meta["val"].stride()
                 if len(strides):
                     allow_padding = (
-                        config.pad_outputs or n.name not in self.user_visible_outputs
+                        config.pad_outputs
+                        or n.name not in self.user_visible_output_names
                     ) and not is_input_for_as_strided
                     dense = torch._prims_common.is_non_overlapping_and_dense(
                         n.meta["val"]
@@ -1415,7 +1430,7 @@ class GraphLowering(torch.fx.Interpreter):
                         and dense
                         and len(result.get_size()) == 4
                         and n in self.nodes_prefer_channels_last
-                        and n.name not in self.user_visible_outputs
+                        and n.name not in self.user_visible_output_names
                         and not is_input_for_as_strided
                     ):
                         strides = ir.FlexibleLayout.stride_ordered_for_memory_format(
