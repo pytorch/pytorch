@@ -19,6 +19,7 @@ from torch._higher_order_ops.flex_attention import (
 )
 from torch._higher_order_ops.utils import _set_compilation_env
 from torch.fx.experimental.proxy_tensor import (
+    _temp_remove_metadata_torch_function_mode,
     _temp_remove_pre_dispatch_torch_function_mode,
 )
 from torch.nn.attention._utils import _supported_head_dim, _validate_sdpa_input
@@ -805,9 +806,8 @@ def create_block_mask(
         Q_LEN (int): Sequence length of query.
         KV_LEN (int): Sequence length of key/value.
         device (str): Device to run the mask creation on.
-        KV_BLOCK_SIZE (int): Block size of block mask for each query.
-        Q_BLOCK_SIZE (int): Block size of block mask for each key/value.
-        _compile (bool): Whether to compile the mask creation.
+        BLOCK_SIZE (int or Tuple[int, int]): Block size for the block mask. If a single int is provided it is used for both query and key/value.
+        _compile (bool): Whether to compile the mask_mod function. Default is False.
 
     Returns:
         BlockMask:  A BlockMask object that contains the block mask information.
@@ -913,6 +913,17 @@ def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
         )
 
 
+def _validate_device(query: Tensor, key: Tensor, value: Tensor):
+    """TODO: Remove once non cuda device support is added
+    We only need to check query since we have already that q,k,v are on the same device
+    """
+    if query.device.type != "cuda":
+        raise ValueError(
+            "FlexAttention is only supported on CUDA devices. "
+            f"Found input tensors on {query.device.type} device."
+        )
+
+
 def flex_attention(
     query: Tensor,
     key: Tensor,
@@ -979,6 +990,7 @@ def flex_attention(
     # Some basic input validation
     _validate_sdpa_input(query, key, value)
     _validate_embed_dim(query, key, value)
+    _validate_device(query, key, value)
     if query.dim() != 4 or key.dim() != 4 or value.dim() != 4:
         raise NotImplementedError("NYI: query, key, and value must be 4D tensors")
     if (not enable_gqa) and query.size(-3) != key.size(-3):
@@ -1002,6 +1014,12 @@ def flex_attention(
         block_mask = _create_empty_block_mask(query, key)
     if scale is None:
         scale = 1.0 / math.sqrt(query.size(-1))
+
+    if query.device != block_mask.kv_num_blocks.device:
+        raise RuntimeError(
+            f"Expect q/k/v and block_mask to be on the same device "
+            f"but got {query.device} and {block_mask.kv_num_blocks.device}."
+        )
 
     kernel_options = _apply_kernel_options(
         query,
@@ -1027,6 +1045,10 @@ def flex_attention(
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("flex_attention requires dynamo support")
 
+    from torch._dynamo.backends.debugging import (
+        make_eager_backend_with_torch_function_mode,
+    )
+
     # Dynamo is expecting a callable with "__code__" attribute.
     # We cannot directly pass hop to it. So we wrap it in a dummy function.
     def _flex_attention_hop_wrapper(*args, **kwargs):
@@ -1035,18 +1057,25 @@ def flex_attention(
     with _set_compilation_env():
         with torch._dynamo.utils.disable_cache_limit():
             with _temp_remove_pre_dispatch_torch_function_mode():
-                out, lse = torch.compile(
-                    _flex_attention_hop_wrapper, backend="eager", fullgraph=True
-                )(
-                    query,
-                    key,
-                    value,
-                    score_mod,
-                    block_mask.as_tuple(),
-                    scale,
-                    kernel_options,
-                )
-                if return_lse:
-                    return out, lse * math.log(2)
-                else:
-                    return out
+                with _temp_remove_metadata_torch_function_mode() as metadata_mode:
+                    if metadata_mode:
+                        backend = make_eager_backend_with_torch_function_mode(
+                            metadata_mode
+                        )
+                    else:
+                        backend = "eager"
+                    out, lse = torch.compile(
+                        _flex_attention_hop_wrapper, backend=backend, fullgraph=True
+                    )(
+                        query,
+                        key,
+                        value,
+                        score_mod,
+                        block_mask.as_tuple(),
+                        scale,
+                        kernel_options,
+                    )
+                    if return_lse:
+                        return out, lse * math.log(2)
+                    else:
+                        return out
