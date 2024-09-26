@@ -70,6 +70,7 @@ from .exc import (
     augment_exc_message,
     BackendCompilerFailed,
     CacheLimitExceeded,
+    FailOnCacheLimitHit,
     format_error_msg,
     InternalTorchDynamoError,
     SkipCodeRecursiveException,
@@ -862,7 +863,11 @@ def _compile(
                 format_guard_failures(),
                 troubleshooting_url,
             )
-            if config.skip_code_recursive_on_cache_limit_hit and justknobs_check(
+            if config.fail_on_cache_limit_hit:
+                raise FailOnCacheLimitHit(
+                    f"{limit_type} reached, because fail_on_cache_limit_hit = True this is a HARD failure"
+                )
+            elif config.skip_code_recursive_on_cache_limit_hit and justknobs_check(
                 "pytorch/compiler:skip_code_recursive_on_cache_limit_hit"
             ):
                 raise CacheLimitExceeded(f"{limit_type} reached")
