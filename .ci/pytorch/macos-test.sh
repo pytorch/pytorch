@@ -170,6 +170,7 @@ torchbench_setup_macos() {
 
 
 test_torchbench_perf() {
+  echo $(pwd)
   print_cmake_info
 
   echo "Launching torchbench setup"
