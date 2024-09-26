@@ -18,7 +18,11 @@ import torch._dynamo as torchdynamo
 import torch.nn.functional as F
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
-from torch._decomp import get_decompositions
+from torch._decomp import (
+    _decomp_table_to_post_autograd_aten,
+    core_aten_decompositions,
+    get_decompositions,
+)
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import normalize_gm
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
@@ -84,7 +88,7 @@ except ImportError:
 try:
     from . import testing
 except ImportError:
-    import testing
+    import testing  # @manual=fbcode//caffe2/test:test_export-library
 # The following import pattern matters as `test_export.export` is patched
 # in other files (like test_export_nonstrict.py). `torch.export.export`
 # will invalidate the patch.
@@ -509,11 +513,9 @@ graph():
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(exported_program.module()(*args), m(*args))
 
-        from torch._export import capture_pre_autograd_graph
-
-        gm: torch.fx.GraphModule = capture_pre_autograd_graph(
+        gm: torch.fx.GraphModule = torch.export.export_for_training(
             m, args=example_args, dynamic_shapes=dynamic_shapes
-        )
+        ).module()
 
         args = (torch.randn(17, 3, 256, 256), torch.ones(17, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
@@ -892,6 +894,25 @@ graph():
             torch.allclose(ep.module()(torch.zeros(2, 3)), torch.ones(2, 3) * 21)
         )
 
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # TODO(pianpwk): user_output signature
+    def test_real_tensor_for_max_op(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                x = x[x > 0]
+                y = y[y > 0]
+                return max(x.shape[0], y.shape[0])
+
+        model = Foo()
+        inputs = (torch.randn(64), torch.randn(64))
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = export(model, inputs)
+
+        self.assertEqual(ep.module()(*inputs), model(*inputs))
+        x = torch.zeros(64)
+        y = torch.ones(64)
+        self.assertEqual(ep.module()(x, x), model(x, x))
+        self.assertEqual(ep.module()(x, y), model(x, y))
+
     def test_export_script_module(self):
         class Foo(torch.nn.Module):
             def forward(self, rv: torch.Tensor, t: torch.Tensor):
@@ -1051,14 +1072,17 @@ graph():
                 x = self.linear(x)
                 return torch.ops.aten.chunk.default(x, 3, 0)
 
-        gm = (
-            torch.export.export(
-                Foo(),
-                (torch.randn(3, 3),),
+        ep = torch.export.export(Foo(), (torch.randn(3, 3),))
+        if IS_FBCODE:
+            ep = ep.run_decompositions(
+                {}, _preserve_ops=(torch.ops.aten.linear.default,)
             )
-            .run_decompositions({}, _preserve_ops=(torch.ops.aten.linear.default,))
-            .graph_module
-        )
+        else:
+            decomp_table = _decomp_table_to_post_autograd_aten()
+            del decomp_table[torch.ops.aten.linear.default]
+            ep = ep.run_decompositions(decomp_table)
+
+        gm = ep.graph_module
         # linear is CompositeImplicitAutograd functional op so we should preserve it
         # chunk is CompositeImplicitAutograd non-functional op we decompose.
         self.assertExpectedInline(
@@ -1109,6 +1133,38 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             ("sin_1", "method_descriptor.sin"),
         ]
         self.assertEqual(actual_torch_fns, exp_torch_fns)
+
+    def test_duplicate_modules_with_non_persistent_buffers(self):
+        class FooWithBuf(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.randn(4), persistent=False)
+
+            def forward(self, x):
+                return x + self.buf
+
+        class BarWithFoo(torch.nn.Module):
+            def __init__(self, foo):
+                super().__init__()
+                self.foo = foo
+
+            def forward(self, x):
+                return self.foo(x)
+
+        class ModWith2Bars(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                foo = FooWithBuf()
+                self.b1 = BarWithFoo(foo)
+                self.b2 = BarWithFoo(foo)
+
+            def forward(self, x):
+                return self.b1(x) + self.b2(x)
+
+        mod = ModWith2Bars()
+        inputs = (torch.randn(4),)
+        ep = export(mod, inputs)
+        self.assertTrue(torch.allclose(ep.module()(*inputs), mod(*inputs)))
 
     def test_derived_dim_basic(self):
         class Foo(torch.nn.Module):
@@ -1419,6 +1475,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
                 "dy - 6 = 6" not in exc.args[0]
             )  # don't suggest fix for non-root dim
 
+    @unittest.skip("See https://github.com/pytorch/pytorch/issues/135759")
     def test_keep_composite_ops_invalid(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
@@ -1429,32 +1486,29 @@ def forward(self, p_linear_weight, p_linear_bias, x):
                 x = self.linear(x)
                 return torch.ops.aten.chunk.default(x, 3, 0)
 
-        with self.assertRaisesRegex(
-            RuntimeError, "aten.chunk.default is a mutating/aliasing op"
-        ):
-            _ = torch.export.export(
-                Foo(),
-                (torch.randn(3, 3),),
-            ).run_decompositions({}, _preserve_ops=(torch.ops.aten.chunk.default,))
+        def _(*args, **kwargs):
+            return NotImplemented
 
-        with self.assertRaisesRegex(
-            RuntimeError, "aten.sym_size.default is a metadata query function"
-        ):
+        with self.assertWarnsRegex(UserWarning, "The op aten.chunk.default"):
             _ = torch.export.export(
                 Foo(),
                 (torch.randn(3, 3),),
-            ).run_decompositions({}, _preserve_ops=(torch.ops.aten.sym_size.default,))
+            ).run_decompositions({torch.ops.aten.chunk.default: _})
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "We can't detect aten.native_batch_norm.default as a functional op statically",
+        with self.assertWarnsRegex(UserWarning, "The op aten.sym_size.default"):
+            _ = torch.export.export(
+                Foo(),
+                (torch.randn(3, 3),),
+            ).run_decompositions({torch.ops.aten.sym_size.default: _})
+
+        with self.assertWarnsRegex(
+            UserWarning,
+            "The op aten.native_batch_norm.default",
         ):
             _ = torch.export.export(
                 Foo(),
                 (torch.randn(3, 3),),
-            ).run_decompositions(
-                {}, _preserve_ops=(torch.ops.aten.native_batch_norm.default,)
-            )
+            ).run_decompositions({torch.ops.aten.native_batch_norm.default: _})
 
     def test_keep_composite_ops_linear_convd(self):
         class MyLinear(torch.nn.Module):
@@ -1482,10 +1536,14 @@ def forward(self, p_linear_weight, p_linear_bias, x):
         ep = torch.export.export(
             Foo(), (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50))
         )
-        ep_has_linear_convd = ep.run_decompositions(
-            decomp_table={},
-            _preserve_ops=testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY,
-        )
+        if IS_FBCODE:
+            ep_has_linear_convd = ep.run_decompositions(
+                {},
+                _preserve_ops=testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY,
+            )
+        else:
+            ep_has_linear_convd = ep.run_decompositions({})
+
         self.assertExpectedInline(
             str(ep_has_linear_convd.graph_module.code).strip(),
             """\
@@ -1499,13 +1557,19 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     return (add,)""",
         )
 
-        ep_has_convd = ep.run_decompositions(
-            decomp_table=None,
-            _preserve_ops=[
-                torch.ops.aten.conv2d.default,
-                torch.ops.aten.conv1d.default,
-            ],
-        )
+        if IS_FBCODE:
+            ep_has_convd = ep.run_decompositions(
+                _preserve_ops=(
+                    torch.ops.aten.conv2d.default,
+                    torch.ops.aten.conv1d.default,
+                )
+            )
+        else:
+            decomp_table = core_aten_decompositions()
+            del decomp_table[torch.ops.aten.conv2d.default]
+            del decomp_table[torch.ops.aten.conv1d.default]
+
+            ep_has_convd = ep.run_decompositions(decomp_table=decomp_table)
         self.assertExpectedInline(
             str(ep_has_convd.graph_module.code).strip(),
             """\
@@ -1521,10 +1585,15 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
     return (add,)""",
         )
+        if IS_FBCODE:
+            ep_has_convd = ep_has_convd.run_decompositions(
+                _preserve_ops=(torch.ops.aten.conv2d.default,)
+            )
+        else:
+            decomp_table = core_aten_decompositions()
+            del decomp_table[torch.ops.aten.conv2d.default]
 
-        ep_has_convd = ep_has_convd.run_decompositions(
-            decomp_table=None, _preserve_ops=[torch.ops.aten.conv2d.default]
-        )
+            ep_has_convd = ep_has_convd.run_decompositions(decomp_table=decomp_table)
         self.assertExpectedInline(
             str(ep_has_convd.graph_module.code).strip(),
             """\
@@ -1567,10 +1636,16 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         ep = torch.export.export_for_training(
             Foo(), (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50))
         )
-        ep_has_linear_convd = ep.run_decompositions(
-            decomp_table={},
-            _preserve_ops=testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY,
-        )
+
+        if IS_FBCODE:
+            ep_has_linear_convd = ep.run_decompositions(
+                {},
+                _preserve_ops=testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY,
+            )
+        else:
+            ep_has_linear_convd = ep.run_decompositions(
+                decomp_table={},
+            )
 
         self.assertExpectedInline(
             str(ep_has_linear_convd.graph_module.code).strip(),
@@ -1585,13 +1660,19 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
     return (add,)""",
         )
 
-        ep_has_convd = ep.run_decompositions(
-            decomp_table=None,
-            _preserve_ops=[
-                torch.ops.aten.conv2d.default,
-                torch.ops.aten.conv1d.default,
-            ],
-        )
+        if IS_FBCODE:
+            ep_has_convd = ep.run_decompositions(
+                _preserve_ops=(
+                    torch.ops.aten.conv2d.default,
+                    torch.ops.aten.conv1d.default,
+                )
+            )
+        else:
+            decomp_table = core_aten_decompositions()
+            del decomp_table[torch.ops.aten.conv2d.default]
+            del decomp_table[torch.ops.aten.conv1d.default]
+
+            ep_has_convd = ep.run_decompositions(decomp_table=decomp_table)
 
         self.assertExpectedInline(
             str(ep_has_convd.graph_module.code).strip(),
@@ -1609,9 +1690,14 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
     return (add,)""",
         )
 
-        ep_has_convd = ep_has_convd.run_decompositions(
-            decomp_table=None, _preserve_ops=[torch.ops.aten.conv2d.default]
-        )
+        if IS_FBCODE:
+            ep_has_convd = ep_has_convd.run_decompositions(
+                _preserve_ops=(torch.ops.aten.conv2d.default,)
+            )
+        else:
+            decomp_table = core_aten_decompositions()
+            del decomp_table[torch.ops.aten.conv2d.default]
+            ep_has_convd = ep_has_convd.run_decompositions(decomp_table=decomp_table)
 
         self.assertExpectedInline(
             str(ep_has_convd.graph_module.code).strip(),
@@ -1626,6 +1712,57 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
     cos = torch.ops.aten.cos.default(view_1);  view_1 = None
     sum_1 = torch.ops.aten.sum.dim_IntList(convolution, []);  convolution = None
     add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add,)""",
+        )
+
+    @unittest.skip("See https://github.com/pytorch/pytorch/issues/135759")
+    def test_error_when_passing_mutating_primitive_op(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        ep = export(Foo(), (torch.ones(3, 3),))
+        with self.assertWarnsRegex(
+            UserWarning,
+            "The op aten.index_put_.default",
+        ):
+            ep.run_decompositions({torch.ops.aten.index_put_.default: None})
+
+    def test_if_post_autograd_op_preserved(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x.sin() + x.sum()
+
+        ep = export(Foo(), (torch.ones(3, 3),))
+        if IS_FBCODE:
+            ep_preserve_sum = ep.run_decompositions(
+                _preserve_ops=(torch.ops.aten.sum.default,)
+            )
+        else:
+            decomp_table = core_aten_decompositions()
+            del decomp_table[torch.ops.aten.sum.default]
+            ep_preserve_sum = ep.run_decompositions(decomp_table)
+
+        # Even though we are decomposing to core aten which should make
+        # sum into sum.dim_IntList, we explicitly marked it to not do that.
+        self.assertExpectedInline(
+            str(ep_preserve_sum.graph_module.code).strip(),
+            """\
+def forward(self, x):
+    sin = torch.ops.aten.sin.default(x)
+    sum_1 = torch.ops.aten.sum.default(x);  x = None
+    add = torch.ops.aten.add.Tensor(sin, sum_1);  sin = sum_1 = None
+    return (add,)""",
+        )
+
+        ep_no_preserve_sum = ep.run_decompositions()
+        self.assertExpectedInline(
+            str(ep_no_preserve_sum.graph_module.code).strip(),
+            """\
+def forward(self, x):
+    sin = torch.ops.aten.sin.default(x)
+    sum_1 = torch.ops.aten.sum.dim_IntList(x, []);  x = None
+    add = torch.ops.aten.add.Tensor(sin, sum_1);  sin = sum_1 = None
     return (add,)""",
         )
 
@@ -2621,37 +2758,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             em.module()(x)
 
-    def test_mark_and_auto_dynamic(self):
-        # for this use case, mark_dynamic() and AUTO should have same effect.
-        # check that same symbol gets allocated to both dims without raising constraint violation.
-        AUTO, STATIC = Dim.AUTO, Dim.STATIC
-
-        class Foo(torch.nn.Module):
-            def forward(self, x, y):
-                torch._check(x.shape[0] == y.shape[0])
-                torch._check(x.shape[0] <= 64)
-                return x + 2, y + 2
-
-        inputs = (torch.randn(4, 4), torch.randn(4, 4))
-        ep_auto = torch.export.export(
-            Foo(), inputs, dynamic_shapes={"x": (AUTO, None), "y": (AUTO, None)}
-        )
-        torch._dynamo.mark_dynamic(inputs[0], 0)
-        torch._dynamo.mark_dynamic(inputs[1], 0)
-        ep_dynamic = torch.export.export(Foo(), inputs)
-
-        # test both programs have same effect
-        for ep in [ep_auto, ep_dynamic]:
-            gm = ep.module()
-            gm(torch.randn(32, 4), torch.randn(32, 4))
-            gm(torch.randn(1, 4), torch.randn(1, 4))
-            with self.assertRaises(RuntimeError):
-                gm(torch.randn(33, 4), torch.randn(32, 4))
-                gm(torch.randn(128, 4), torch.randn(128, 4))
-
     def test_dont_duck_size_for_auto_dynamic(self):
-        # for this use case, mark_dynamic() and AUTO should have same effect.
-        # check that same symbol gets allocated to both dims without raising constraint violation.
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
         class Foo(torch.nn.Module):
@@ -4687,6 +4794,134 @@ def forward(self, b_a_buffer, x):
         self.assertTrue(torch.allclose(core_aten_ep.module()(*inp), m(*inp)))
         self.assertEqual(id(state_dict), id(ep.state_dict))
 
+    @unittest.skipIf(IS_FBCODE, "We can't customize decomp in fbcode")
+    def test_export_for_inference_e2e(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin = torch.nn.Linear(10, 1)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        inp = (torch.randn(5, 10),)
+        m = M()
+
+        decomp_table = torch.export.core_aten_decompositions()
+
+        def _custom_decomp_for_linear(x, weight, bias):
+            return x + bias.sum()
+
+        decomp_table[torch.ops.aten.linear.default] = _custom_decomp_for_linear
+        del decomp_table[torch.ops.aten.sum.default]
+        ep = torch.export.export_for_inference(
+            m, inp, decomp_table=decomp_table, dynamic_shapes={"x": {0: Dim("batch")}}
+        )
+
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, p_lin_weight, p_lin_bias, x):
+    sum_1 = torch.ops.aten.sum.default(p_lin_bias);  p_lin_bias = None
+    add = torch.ops.aten.add.Tensor(x, sum_1);  x = sum_1 = None
+    return (add,)""",
+        )
+
+        ep_core = ep.run_decompositions()
+
+        self.assertExpectedInline(
+            str(ep_core.graph_module.code).strip(),
+            """\
+def forward(self, p_lin_weight, p_lin_bias, x):
+    sum_1 = torch.ops.aten.sum.dim_IntList(p_lin_bias, []);  p_lin_bias = None
+    add = torch.ops.aten.add.Tensor(x, sum_1);  x = sum_1 = None
+    return (add,)""",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "Expected input"):
+            ep.module()(torch.randn(4, 12))
+
+        with self.assertRaisesRegex(RuntimeError, "Expected input"):
+            ep_core.module()(torch.randn(4, 12))
+
+    @unittest.skipIf(IS_FBCODE, "We can't customize decomp in fbcode")
+    def test_export_decomp_torture_case_1(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin = torch.nn.Linear(10, 1)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        inp = (torch.randn(5, 10),)
+        m = M()
+        ep = export(m, inp)
+
+        def custom_decomp_callable(x, weight, bias):
+            return x + bias
+
+        decomp_table = core_aten_decompositions()
+        decomp_table[torch.ops.aten.linear.default] = custom_decomp_callable
+        core_aten_ep = ep.run_decompositions(decomp_table)
+        self.assertExpectedInline(
+            str(core_aten_ep.graph_module.code).strip(),
+            """\
+def forward(self, p_lin_weight, p_lin_bias, x):
+    add = torch.ops.aten.add.Tensor(x, p_lin_bias);  x = p_lin_bias = None
+    return (add,)""",
+        )
+
+    @unittest.skipIf(IS_FBCODE, "We can't customize decomp in fbcode")
+    def test_export_decomp_torture_case_2(self):
+        class MyLinear(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.weight = torch.randn(20, 98)
+                self.bias = torch.randn(20)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.weight, self.bias)
+
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(16, 33, 3)
+                self.conv1d = torch.nn.Conv1d(16, 33, 3)
+                self.linear = MyLinear()
+
+            def forward(self, x, y):
+                x_conv = self.conv(x)
+                y_conv_1d = self.conv1d(y)
+                x_linear = self.linear(x_conv)
+                return x_linear.cos() + y_conv_1d.sum()
+
+        ep = export(Foo(), (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50)))
+        ep_has_linear_convd = ep.run_decompositions(decomp_table={})
+
+        def _decompose_linear_custom(x, weight, bias):
+            return torch.matmul(x, weight.T) + 2 * bias
+
+        ep_decompose_linear = ep_has_linear_convd.run_decompositions(
+            decomp_table={torch.ops.aten.linear.default: _decompose_linear_custom}
+        )
+
+        self.assertExpectedInline(
+            str(ep_decompose_linear.graph_module.code).strip(),
+            """\
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
+    conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
+    permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
+    matmul = torch.ops.aten.matmul.default(conv2d, permute);  conv2d = permute = None
+    mul = torch.ops.aten.mul.Tensor(c_linear_bias, 2);  c_linear_bias = None
+    add = torch.ops.aten.add.Tensor(matmul, mul);  matmul = mul = None
+    cos = torch.ops.aten.cos.default(add);  add = None
+    sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
+    add_1 = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add_1,)""",
+        )
+
     def test_export_decomps_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -5257,7 +5492,7 @@ graph():
                 eps,
             ),
         )
-        ep.run_decompositions(decomp_table=torch._decomp.decomposition_table)
+        ep.run_decompositions()
         self.assertEqual(
             ep.module()(
                 input, weight, bias, running_mean, running_var, training, momentum, eps
@@ -5487,7 +5722,7 @@ graph():
         output = model(t, dim, index, src)
 
         ep = torch.export.export(model, args=(t, dim, index, src))
-        ep.run_decompositions(decomp_table=torch._decomp.decomposition_table)
+        ep = ep.run_decompositions()
         self.assertEqual(ep.module()(t, dim, index, src), output)
 
     def test_fqn(self):
@@ -7019,8 +7254,6 @@ def forward(self, x, y):
             if node.op == "call_function":
                 self.assertTrue(False)
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T200904004
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_istft_op(self):
         class istft_class(torch.nn.Module):
             def forward(self, spec):
@@ -7038,6 +7271,41 @@ def forward(self, x, y):
         imaginary_part = torch.randn(1, 513, 282, dtype=torch.float32)
         spec = torch.complex(real_part, imaginary_part)
         export(model, (spec,))
+
+    def test_export_linear_preserve_dynamic_shape(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        mod = M()
+        ep = export(
+            mod,
+            (torch.randn(8, 4),),
+            dynamic_shapes={
+                "x": {
+                    0: Dim("x"),
+                }
+            },
+        )
+
+        if IS_FBCODE:
+            ep = ep.run_decompositions(
+                {}, _preserve_ops=(torch.ops.aten.linear.default,)
+            )
+        else:
+            table = torch.export.core_aten_decompositions()
+            del table[torch.ops.aten.linear.default]
+            ep = ep.run_decompositions(table)
+
+        comp_mod = ep.module()
+        inp1 = torch.randn(3, 4)
+        inp2 = torch.randn(7, 4)
+        self.assertTrue(torch.allclose(comp_mod(inp1), mod(inp1)))
+        self.assertTrue(torch.allclose(comp_mod(inp2), mod(inp2)))
 
     def test_automatic_dynamic_shapes_simple_equality(self):
         # The next 3 test cases tests for automatic dynamic shapes specs, verifying that automatic dynamism
@@ -8054,10 +8322,15 @@ class TestExportCustomClass(TorchTestCase):
             ep.graph_module.code
         )
 
-        ep = ep.run_decompositions(
-            decomp_table=get_decompositions([torch.ops.aten.elu.default]),
-            _preserve_ops=[torch.ops.aten.elu.default],
-        )
+        if IS_FBCODE:
+            ep = ep.run_decompositions(_preserve_ops=(torch.ops.aten.elu.default,))
+        else:
+            decomp_table = core_aten_decompositions()
+            del decomp_table[torch.ops.aten.elu.default]
+
+            ep = ep.run_decompositions(
+                decomp_table=decomp_table,
+            )
         FileCheck().check_count("torch.ops.aten.elu.default", 1, exactly=True).run(
             ep.graph_module.code
         )
@@ -8079,12 +8352,17 @@ class TestExportCustomClass(TorchTestCase):
             "torch.ops.aten.upsample_bilinear2d.vec", 1, exactly=True
         ).run(ep.graph_module.code)
 
-        decomp_table = get_decompositions([torch.ops.aten.upsample_bilinear2d.vec])
-        ep = ep.run_decompositions(
-            decomp_table=decomp_table,
-            _preserve_ops=[torch.ops.aten.upsample_bilinear2d.vec],
-        )
-        assert torch.ops.aten.upsample_bilinear2d.vec in decomp_table
+        if IS_FBCODE:
+            ep = ep.run_decompositions(
+                _preserve_ops=(torch.ops.aten.upsample_bilinear2d.vec,)
+            )
+        else:
+            decomp_table = core_aten_decompositions()
+            del decomp_table[torch.ops.aten.upsample_bilinear2d.vec]
+            ep = ep.run_decompositions(
+                decomp_table=decomp_table,
+            )
+
         FileCheck().check_count(
             "torch.ops.aten.upsample_bilinear2d.vec", 1, exactly=True
         ).run(ep.graph_module.code)

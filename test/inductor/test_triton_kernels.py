@@ -36,12 +36,12 @@ if HAS_GPU:
 
     if not TEST_WITH_ROCM:
         if HAS_CUDA:
-            from triton.language.extra.cuda.libdevice import (
+            from triton.language.extra.cuda.libdevice import (  # @manual
                 fast_dividef,
                 fast_dividef as my_fast_dividef,
             )
         elif HAS_XPU:
-            from triton.language.extra.intel.libdevice import (
+            from triton.language.extra.intel.libdevice import (  # @manual
                 fast_dividef,
                 fast_dividef as my_fast_dividef,
             )
@@ -1015,6 +1015,66 @@ def forward(self, x_1, output_1):
         compiled_out = torch.compile(f)(inp)
         self.assertEqual(compiled_out, eager_out)
 
+    @torch._inductor.config.patch(
+        triton_kernel_default_layout_constraint="needs_fixed_stride_order"
+    )
+    @requires_gpu
+    def test_layout_constraint_needs_fixed_stride_order(self):
+        # Construct a custom op whose output strides are (1, 2)
+        @torch.library.custom_op("mylib::weird_op_with_lowering", mutates_args={})
+        def weird_op_with_lowering(x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_strided((2, 2), (1, 2), dtype=x.dtype, device=x.device)
+
+        @weird_op_with_lowering.register_fake
+        def _(x):
+            return torch.empty_strided((2, 2), (1, 2), dtype=x.dtype, device=x.device)
+
+        # The lowering for the custom op produces output strides (2, 1).
+        from torch._inductor.lowering import empty_strided, register_lowering
+
+        @register_lowering(torch.ops.mylib.weird_op_with_lowering)
+        def _(x):
+            return empty_strided(
+                x.shape, (2, 1), dtype=x.dtype, device=torch.device(GPU_TYPE, 0)
+            )
+
+        # Triton kernel that has different behavior depending on the input strides.
+        @triton.jit
+        def kernel(
+            in_ptr0,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            output = offsets
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def arange_out(x, out):
+            n_elements = x.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            kernel[grid](x, out, n_elements, BLOCK_SIZE=4)
+
+        def f(x):
+            y = weird_op_with_lowering(x)
+            # Inductor lowering will decide that y is better having strides (2, 1).
+            # This is different from the strides at tracing time (1, 2).
+            # Under the "needs_fixed_stride_order" config, inductor will coerce
+            # y to have strides (1, 2) before passing it to arange_out.
+            # If it doesn't, then the result will be different from eager mode.
+            arange_out(x, y)
+            return x + y
+
+        x = torch.randn(2, 2, device=GPU_TYPE)
+        eager_out = f(x)
+
+        compiled_inductor_f = torch.compile(f, backend="inductor", fullgraph=True)
+        compiled_inductor_out = compiled_inductor_f(x)
+        self.assertEqual(compiled_inductor_out, eager_out)
+
     @requires_gpu
     def test_triton_kernel_strided_input_nonzero_offset(self):
         def f(inp):
@@ -1556,11 +1616,132 @@ def forward(self, x_1, output_1):
         def f(x):
             return x * (0.12 * x.shape[0])
 
-        x = torch.ones(200, device=GPU_TYPE, dtype=torch.float64)
+        x = torch.ones(200, device=GPU_TYPE, dtype=dtype)
 
         eager_out = f(x)
         compiled_out = torch.compile(f, dynamic=True)(x)
         self.assertEqual(compiled_out, eager_out)
+
+    # TODO enable this test case on XPU.
+    @requires_cuda
+    @parametrize("cfg", ["normal", "cpp_wrapper", "cpp_abi"])
+    def test_triton_kernel_dtype_view(self, cfg):
+        # https://github.com/pytorch/pytorch/issues/136159
+        if cfg == "normal":
+            config_kwargs = {"cpp_wrapper": False, "abi_compatible": False}
+        elif cfg == "cpp_wrapper":
+            config_kwargs = {"cpp_wrapper": True, "abi_compatible": False}
+        elif cfg == "cpp_abi":
+            config_kwargs = {"cpp_wrapper": True, "abi_compatible": True}
+
+        with torch._inductor.config.patch(**config_kwargs):
+
+            @triton.jit
+            def _triton_kernel(out_ptr, numel, BLOCK_SIZE: tl.constexpr):
+                pid = tl.program_id(0)
+                offsets = BLOCK_SIZE * pid + tl.arange(0, BLOCK_SIZE)
+                mask = offsets < numel
+                ones = tl.full((BLOCK_SIZE,), 1, tl.float16)
+                tl.store(out_ptr + offsets, ones, mask)
+
+            def fn(x):
+                buf = torch.empty(x.shape, device=x.device, dtype=torch.float16)
+                # the buf.view() should be a view sharing the same storage as buf.
+                bfloat_buf = buf.view(dtype=torch.bfloat16)
+                BLOCK_SIZE = 256
+                numel = buf.numel()
+                grid = (triton.cdiv(numel, BLOCK_SIZE),)
+                _triton_kernel[grid](bfloat_buf, numel, BLOCK_SIZE)
+                return buf, bfloat_buf
+
+            fn_c = torch.compile(fn)
+
+            x = torch.randn(8, device=GPU_TYPE)
+            out_c = fn_c(x)
+            out_e = fn(x)
+
+            # expect view() to be an actual view, sharing the same data as the original buffer
+            # verify first that this is true in the eager output
+            self.assertEqual(out_e[0].data_ptr(), out_e[1].data_ptr())
+            # .. and also in the compiled output
+            self.assertEqual(out_c[0].data_ptr(), out_c[1].data_ptr())
+
+            self.assertEqual(out_e[0], out_c[0])
+            self.assertEqual(out_e[1], out_c[1])
+
+    @requires_gpu
+    def test_constexpr_dynamic_shapes(self):
+        # https://github.com/pytorch/pytorch/issues/136504
+        @triton.jit
+        def triton_(x_ptr, y_ptr, NUMEL: tl.constexpr, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offsets = BLOCK_SIZE * pid + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < NUMEL
+
+            data = tl.load(x_ptr + offsets, mask)
+            result = data * data
+
+            tl.store(y_ptr + offsets, result, mask)
+
+        def fn(x):
+            y = torch.empty_like(x)
+            BLOCK_SIZE = 256
+            numel = x.numel()
+            grid = (triton.cdiv(numel, BLOCK_SIZE),)
+            triton_[grid](x, y, numel, BLOCK_SIZE)
+            return y
+
+        fn_c = torch.compile(fn, dynamic=True)
+
+        x = torch.randn(512 + 5, device=GPU_TYPE)
+        res = fn_c(x)
+        self.assertEqual(x * x, res)
+
+        x2 = torch.randn(1024 + 5, device=GPU_TYPE)
+        res2 = fn_c(x2)
+        self.assertEqual(x2 * x2, res2)
+
+    @requires_gpu
+    def test_constexpr_autotune_dynamic_shapes(self):
+        # https://github.com/pytorch/pytorch/issues/136504
+        @triton.autotune(
+            [
+                triton.Config(kwargs={"BLOCK_SIZE": 128}),
+                triton.Config(kwargs={"BLOCK_SIZE": 256}),
+            ],
+            key=[],
+        )
+        @triton.jit
+        def triton_(x_ptr, y_ptr, NUMEL: tl.constexpr, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offsets = BLOCK_SIZE * pid + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < NUMEL
+
+            data = tl.load(x_ptr + offsets, mask)
+            result = data * data
+
+            tl.store(y_ptr + offsets, result, mask)
+
+        def fn(x):
+            y = torch.empty_like(x)
+            BLOCK_SIZE = 256
+            numel = x.numel()
+
+            def grid(meta):
+                return (triton.cdiv(numel, meta["BLOCK_SIZE"]),)
+
+            triton_[grid](x, y, numel)
+            return y
+
+        fn_c = torch.compile(fn, dynamic=True)
+
+        x = torch.randn(512 + 5, device=GPU_TYPE)
+        res = fn_c(x)
+        self.assertEqual(x * x, res)
+
+        x2 = torch.randn(1024 + 5, device=GPU_TYPE)
+        res2 = fn_c(x2)
+        self.assertEqual(x2 * x2, res2)
 
 
 def make_mutation_test(fn):
@@ -2483,8 +2664,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
     @requires_gpu
     def test_capture_triton_disabled_in_triton_op(self):
-        import triton
-        import triton.language as tl
+        import triton  # @manual
+        import triton.language as tl  # @manual
 
         @triton.jit
         def add_kernel(
