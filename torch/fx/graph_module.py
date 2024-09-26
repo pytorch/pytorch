@@ -99,6 +99,7 @@ def _method_from_src(
     globals_copy = globals.copy()
     _exec_with_source(src, globals_copy, co_fields)
     fn = globals_copy[method_name]
+    breakpoint()
     del globals_copy[method_name]
     return fn
 

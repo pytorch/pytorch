@@ -1329,6 +1329,7 @@ def _strict_export_lower_to_aten_ir(
         for name in non_persistent_buffers
         if name in reverse_name_lookup
     }
+
     with dynamo_fake_mode:
         aten_export_artifact = lower_to_aten_callback(
             gm_torch_level,

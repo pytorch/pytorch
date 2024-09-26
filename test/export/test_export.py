@@ -913,6 +913,22 @@ graph():
         self.assertEqual(ep.module()(x, x), model(x, x))
         self.assertEqual(ep.module()(x, y), model(x, y))
 
+    def test_pre_forward_hook(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 2
+
+        def _refine(model, inputs):
+            x = inputs[0]
+            torch._check(x.shape[0] <= 32)
+
+        mod = Foo()
+        mod.register_forward_pre_hook(_refine)
+
+        inputs = (torch.randn(32, 64),)
+        ep = export(mod, inputs, strict=True)
+        print(ep)
+
     def test_export_script_module(self):
         class Foo(torch.nn.Module):
             def forward(self, rv: torch.Tensor, t: torch.Tensor):
