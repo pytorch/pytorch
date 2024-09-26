@@ -725,59 +725,6 @@ def forward(self, primals_1):
     return (add,)""",
         )
 
-    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix the test case")
-    @unittest.skipIf(IS_MACOS, "TODO: need to fix the test case")
-    def test_input_mutation_fsdp_set__into_same_input(self):
-        import torch.distributed._composable.fsdp._fsdp_param
-
-        def f(a):
-            b = torch.arange(9, dtype=a.dtype).view(3, 3)
-            c = torch.arange(9, dtype=a.dtype).view(3, 3)
-            d = torch.arange(9, dtype=a.dtype).view(3, 3)
-            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(a):
-                torch.ops.fsdp.set_.default(a, b)
-            x = a * a
-            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(a):
-                torch.ops.fsdp.set_.default(a, c)
-            y = a * a
-            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(a):
-                torch.ops.fsdp.set_.default(a, c)
-            z = a * a
-            return x + y + z
-
-        inp = [torch.ones(3, 3, requires_grad=True)]
-        fw_graph = self.verify_aot_autograd(
-            f, inp, test_mutation=True, keep_inp_mutations=True
-        )
-        inp = [torch.ones(3, 3, requires_grad=False)]
-        self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
-        """
-        Expected behavior:
-        (1) When there are multiple set_() calls on the same graph input primal_X,
-        we want those set_() calls to all show up with primal_X as the first arg in the graph.
-        (2) Behavior (1) is not the case today with normal aten.set_ (blocked on #129892),
-        but using a custom fsdp.set_ op with no returns is a simple workaround to achieve that behavior.
-        """
-        self.assertExpectedInline(
-            fw_graph.code.strip(),
-            """\
-def forward(self, primals_1):
-    arange = torch.ops.aten.arange.default(9, dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    view = torch.ops.aten.view.default(arange, [3, 3]);  arange = None
-    arange_1 = torch.ops.aten.arange.default(9, dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    view_1 = torch.ops.aten.view.default(arange_1, [3, 3]);  arange_1 = None
-    set_ = torch.ops.fsdp.set_.default(primals_1, view);  view = set_ = None
-    mul = torch.ops.aten.mul.Tensor(primals_1, primals_1)
-    set__1 = torch.ops.fsdp.set_.default(primals_1, view_1);  set__1 = None
-    mul_1 = torch.ops.aten.mul.Tensor(primals_1, primals_1)
-    set__2 = torch.ops.fsdp.set_.default(primals_1, view_1);  view_1 = set__2 = None
-    mul_2 = torch.ops.aten.mul.Tensor(primals_1, primals_1)
-    add = torch.ops.aten.add.Tensor(mul, mul_1);  mul = mul_1 = None
-    add_1 = torch.ops.aten.add.Tensor(add, mul_2);  add = mul_2 = None
-    return (add_1, primals_1)""",
-        )
-        self.assertEqual(torch.compile(f, backend="inductor")(*inp), f(*inp))
-
     def test_input_mutation_simple_with_none_and_nontensor(self):
         # Tensor, None, int
         def f(a, b, c):
@@ -6237,90 +6184,37 @@ class TestAOTModuleSimplified(AOTTestCase):
         out_buffer = out.values()
         ga, gb, gc = torch.autograd.grad(out_buffer.sum(), (a, b, c))
 
-    def test_benchmark_grads_no_force_contiguous_nested_subclass(self):
-        num_iters = 200
-        warmup_iters = 20
-
+    @torch._inductor.config.patch({"freezing": True})
+    def test_inductor_freezing_with_subclasses(self):
         class M(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self):
                 super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.w = TwoTensor(torch.randn(3, 4), torch.randn(3, 4))
 
             def forward(self, x):
-                r = self.conv(x)
-                return r
+                return (
+                    x.index_select(
+                        dim=0, index=torch.tensor([0, 2, 1], dtype=torch.int64)
+                    )
+                    + self.w
+                )
 
         m = M()
-        m.to(memory_format=torch.channels_last)
-        m.train()
+        inp = torch.randn(3, 4)
+        with torch.no_grad():
+            torch.compile(m, fullgraph=True)(inp)
 
-        def inps_fn(x):
-            return (
-                TwoTensor(
-                    TwoTensor(x.clone(), x.clone()), TwoTensor(x.clone(), x.clone())
-                ),
-            )
+    def test_rrelu(self):
+        def fn(x):
+            return torch.rrelu(x, training=True)
 
-        benchmark_inps = [
-            inps_fn(
-                torch.randn(2, 3, 5, 5, requires_grad=True).to(
-                    memory_format=torch.channels_last
-                )
-            )
-            for _ in range(num_iters)
-        ]
+        def fn_(x):
+            torch.rrelu_(x, training=True)
+            return x
 
-        for i, inps in enumerate(benchmark_inps):
-            if i == warmup_iters:
-                torch._functorch._aot_autograd.profile.reset()
-
-            outs = torch.compile(m, backend="aot_eager", fullgraph=True)(*inps)
-            outs[0].sum().backward()
-
-        events = torch._functorch._aot_autograd.profile.get_events()
-
-        bwd_total_duration = sum(e.duration_sec for e in events)
-        avg_bwd_duration = bwd_total_duration / len(benchmark_inps)
-
-        print(f"Benchmark SUBCLASS avg_bwd_duration:{avg_bwd_duration*1000} ms")
-
-        class M2(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
-
-            def forward(self, x0, x1, x2, x3):
-                return self.conv(x0), self.conv(x1), self.conv(x2), self.conv(x3)
-
-        m2 = M2()
-        m2.to(memory_format=torch.channels_last)
-        m2.train()
-
-        def inps_fn2(x):
-            return (x.clone(), x.clone(), x.clone(), x.clone())
-
-        benchmark_inps2 = [
-            inps_fn2(
-                torch.randn(2, 3, 5, 5, requires_grad=True).to(
-                    memory_format=torch.channels_last
-                )
-            )
-            for _ in range(num_iters)
-        ]
-
-        for i, inps in enumerate(benchmark_inps2):
-            if i == warmup_iters:
-                torch._functorch._aot_autograd.profile.reset()
-
-            outs = torch.compile(m2, backend="aot_eager", fullgraph=True)(*inps)
-            outs[0].sum().backward()
-
-        events = torch._functorch._aot_autograd.profile.get_events()
-
-        bwd_total_duration = sum(e.duration_sec for e in events)
-        avg_bwd_duration = bwd_total_duration / len(benchmark_inps)
-
-        print(f"Benchmark NO_SUBCLASS avg_bwd_duration:{avg_bwd_duration * 1000} ms")
+        x = torch.randn(4, 4)
+        torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        torch.compile(fn_, backend="inductor", fullgraph=True)(x)
 
 
 # entries in here don't work and need to be fixed.
@@ -6474,6 +6368,7 @@ def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
                 self.assertEqual,
                 check_gradients=True,
                 try_check_data_specialization=try_check_data_specialization,
+                skip_correctness_check=op.skip_correctness_check_compile_vs_eager,
             )
         except DynamicOutputShapeException:
             self.skipTest("Dynamic output shape operation in trace")
@@ -6722,14 +6617,14 @@ class MockFXGraphCache:
             gm._fx_graph_cache_key = key
             return gm
 
-    def _lookup_graph(self, key, inputs, local, remote_cache):
+    def load_with_key(self, key, debug_lines, inputs, local, remote_cache, is_backward):
         gm = self.cache.get(key)
         if gm is not None:
             gm = make_boxed_func(gm)
-        return gm
+        return gm, {}
 
     def post_compile(self, gm, inputs, cudagraphs):
-        pass
+        return gm
 
 
 # The following tests fail in strict caching mode (i.e. they bypass or
@@ -6800,8 +6695,8 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
         self.inductor_cache = MockFXGraphCache()
         AOTAutogradCache.clear()
         with patch(
-            "torch._inductor.codecache.FxGraphCache._lookup_graph",
-            new=self.inductor_cache._lookup_graph,
+            "torch._inductor.codecache.FxGraphCache.load_with_key",
+            new=self.inductor_cache.load_with_key,
         ), patch(
             "torch._inductor.codecache.FxGraphCache.post_compile",
             new=self.inductor_cache.post_compile,
