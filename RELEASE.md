@@ -245,7 +245,7 @@ Please also make sure to add milestone target to the PR/issue, especially if it 
 You can now use `pytorchbot` to cherry pick a PyTorch PR that has been committed
 to the main branch using `@pytorchbot cherry-pick` command as follows (make sure 
 that the cherry-pick tracker issue for the target release labelled as "release tracker" - 
-this will allow the bot put find it and post comments).
+this will allow the bot to find it and post comments).
 
 ```
 usage: @pytorchbot cherry-pick --onto ONTO [--fixes FIXES] -c
