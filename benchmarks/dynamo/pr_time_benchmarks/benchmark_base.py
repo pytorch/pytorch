@@ -62,14 +62,6 @@ class BenchmarkBase(ABC):
     # Garbage collection is disabled during _work() to avoid noise.
     _enable_compile_time_instruction_count = False
 
-    # A pair of (expected, noise_margin) to compare with the actual instruction count.
-    # Margin is a percentage that represent acceptable noise margin.
-    # For example(100, 0.1(10%)) means that the actual instruction count should be between 90 and 110.
-
-    # The same variable is used for both instruction_count and compile_time_instruction_count
-    # because we do not allow both of them to be enabled at the same time now since they both log to the same scuba field.
-    _expected_instruction_count_result = None
-
     # number of iterations used to run when collecting instruction_count or compile_time_instruction_count.
     _num_iterations = 5
 
@@ -110,7 +102,6 @@ class BenchmarkBase(ABC):
             id = i_counter.start()
             self._work()
             count = i_counter.end(id)
-
             print(f"instruction count for iteration {i} is {count}")
             results.append(count)
         return min(results)
@@ -173,7 +164,6 @@ class BenchmarkBase(ABC):
                 name=self.name(),
                 instruction_count=r,
             )
-
         if self._enable_compile_time_instruction_count:
             r = self._count_compile_time_instructions()
 
