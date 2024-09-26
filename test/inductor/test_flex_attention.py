@@ -2896,7 +2896,6 @@ class TestPagedAttention(InductorTestCase):
         # Equivalent to: causal_mask(1, 0, 64, 14)
         self.assertEqual(converted_causal_mask(1, 0, 64, 270), True)
 
-
     @supported_platform
     def test_update(self):
         dtype = torch.float32
@@ -2984,7 +2983,6 @@ class TestPagedAttention(InductorTestCase):
     def test_paged_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
         n_pages, page_size, max_batch_size, max_seq_len = 32, 128, 4, 512
         n_heads, head_dim = 4, 16
-
 
         def causal_mask(b, h, q, kv):
             return q >= kv

@@ -333,8 +333,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
         _,  # q_indices
         _,  # full_q_num_blocks,
         _,  # full_q_indices,
-        SPARSE_KV_BLOCK_SIZE,
         _,  # SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE,
         _,
     ) = block_mask
 
