@@ -772,7 +772,7 @@ class GraphModuleSerializer(metaclass=Final):
                 )
             elif self.is_sym_float_arg(arg):
                 return Argument.create(
-                    as_sym_float=SymIntArgument.create(as_name=arg.name)
+                    as_sym_float=SymFloatArgument.create(as_name=arg.name)
                 )
             elif self.is_sym_bool_arg(arg):
                 return Argument.create(
