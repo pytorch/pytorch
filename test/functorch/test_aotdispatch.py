@@ -5975,6 +5975,7 @@ class TestAOTModuleSimplified(AOTTestCase):
             def __init__(self):
                 super().__init__()
                 self.w = TwoTensor(torch.randn(3, 4), torch.randn(3, 4))
+                self.wt = torch.randn(3, 4)
 
             def forward(self, x):
                 return (
@@ -5982,6 +5983,7 @@ class TestAOTModuleSimplified(AOTTestCase):
                         dim=0, index=torch.tensor([0, 2, 1], dtype=torch.int64)
                     )
                     + self.w
+                    + self.wt
                 )
 
         m = M()
