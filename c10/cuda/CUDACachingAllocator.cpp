@@ -2065,25 +2065,22 @@ class DeviceCachingAllocator {
     // mempool. When the count reaches 0, we tell free_cached_blocks it may now
     // cudaFree blocks from this graph's pool when it discovers they're unused
     // (unsplit).
-    auto uc = dec_pool_use_count(mempool_id);
-    TORCH_INTERNAL_ASSERT(uc >= 0);
-    maybe_mark_pool_freeable(mempool_id, uc, it->second.get());
+    auto it = get_private_pool(mempool_id);
+    TORCH_INTERNAL_ASSERT(it->second->use_count >= 1);
+    dec_use_count_and_maybe_mark_pool_freeable(mempool_id, it->second.get());
   }
 
   int getPoolUseCount(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    auto it = graph_pools.find(mempool_id);
-    if (it != graph_pools.end()) {
-      return it->second->use_count;
-    }
-    return 0;
+    auto it = get_private_pool(mempool_id);
+    return it->second->use_count;
   }
 
   void decPoolUseCountAndMarkPoolFree(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    auto uc = dec_pool_use_count(mempool_id);
-    TORCH_INTERNAL_ASSERT(uc == 0);
-    maybe_mark_pool_freeable(mempool_id, uc, it->second.get());
+    auto it = get_private_pool(mempool_id);
+    TORCH_INTERNAL_ASSERT(it->second->use_count == 1);
+    dec_use_count_and_maybe_mark_pool_freeable(mempool_id, it->second.get());
   }
 
   void addPeerAccess(c10::DeviceIndex dev_to_access) {
@@ -2174,16 +2171,14 @@ class DeviceCachingAllocator {
     }
   }
 
-  int dec_pool_use_count(MempoolId_t mempool_id) {
+  auto get_private_pool(MempoolId_t mempool_id) {
     auto it = graph_pools.find(mempool_id);
     TORCH_INTERNAL_ASSERT(it != graph_pools.end());
-    return --(it->second->use_count);
+    return it;
   }
 
-  void maybe_mark_pool_freeable(
-      MempoolId_t mempool_id,
-      int uc,
-      PrivatePool* pool) {
+  void dec_use_count_and_maybe_mark_pool_freeable(MempoolId_t mempool_id, PrivatePool* pool) {
+    auto uc = --(pool->use_count);
     if (uc == 0) {
       // Allows free_cached_blocks to begin cudaFreeing this pool's memory,
       // and makes sure this pool wasn't somehow made freeable already.
