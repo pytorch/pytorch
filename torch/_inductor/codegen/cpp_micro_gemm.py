@@ -526,7 +526,9 @@ class CppMicroGemmAMX(CppMicroGemm):
                     A + m * lda,
                     B + n,
                     C + m * ldc + n,
+{%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
                     m,
+{%- endif %}
                     K,
                     lda,
                     ldb,
@@ -543,7 +545,9 @@ class CppMicroGemmAMX(CppMicroGemm):
                     A + m_tail * lda,
                     B + n,
                     C + m_tail * ldc + n,
+{%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
                     m,
+{%- endif %}
                     K,
                     lda,
                     ldb,
@@ -563,7 +567,9 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
     const {{input_t}}* {{restrict_keyword}} A,
     const {{input2_t}}* {{restrict_keyword}} B,
     {{output_t}}* {{restrict_keyword}} C,
+{%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
     int64_t m,
+{%- endif %}
     int64_t K,
     int64_t lda,
     int64_t ldb,
@@ -643,6 +649,9 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         {%- if tile_row == 0 %}
             {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
         if C10_UNLIKELY(m == 0) {
+          // Load weights & cache them in L1D.
+          // We are assuming that the cache blocking size for N dimension for the micro-kernel is equal to Nr.
+          // If that were to change, we'd have to make changes here accordingly.
           load_B_in_buf(const_cast<{{input2_t}}*>(B) + k * ldb + {{tile_col * 16 * vnni_size}}, (k/16 + {{tile_col}}) * 512);
         }
         // We duplicate (k/16 + {{tile_col}}) * 512 because a variable holding it would have been declared twice
