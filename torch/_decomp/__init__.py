@@ -210,6 +210,7 @@ def register_decomposition(
 def get_decompositions(
     aten_ops: Sequence[Union[torch._ops.OperatorBase, OpOverloadPacket]],
     type: str = "post_autograd",
+    ignore_cia: bool = False,
 ) -> Dict[torch._ops.OperatorBase, Callable]:
     """
     Retrieve a dictionary of decompositions corresponding to the list of
@@ -233,9 +234,15 @@ def get_decompositions(
     for op in aten_ops:
         if isinstance(op, OpOverloadPacket) and op in packets_to_overloads:
             for op_overload in packets_to_overloads[op]:
-                decompositions[op_overload] = registry[op_overload]
+                if ignore_cia and _is_cia_op(op_overload):
+                    continue
+                else:
+                    decompositions[op_overload] = registry[op_overload]
         elif isinstance(op, (torch._ops.OperatorBase)) and op in registry:
-            decompositions[op] = registry[op]
+            if ignore_cia and _is_cia_op(op):
+                continue
+            else:
+                decompositions[op] = registry[op]
     return decompositions
 
 
@@ -290,7 +297,7 @@ def _check_valid_to_preserve(op_overload):
     return True
 
 
-def _is_cia_op(op: "OpOverload") -> bool:
+def _is_cia_op(op: "OperatorBase") -> bool:
     return (
         torch._C._dispatch_has_kernel_for_dispatch_key(
             op.name(), torch._C.DispatchKey.CompositeImplicitAutograd
@@ -379,69 +386,9 @@ def _get_decomp_for_cia(op):
 # excluding decompositions that results in prim ops
 # Resulting opset of decomposition is core aten ops
 def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
-    decomp_table = _core_aten_decompositions_post_autograd()
-
-    # If it is fbcode change, we return the old decomposition list
-    from torch._inductor import config
-
-    if config.is_fbcode():
-        return decomp_table
-
     aten = torch.ops.aten
 
-    # We are deleting custom decomp in core_aten_decomp
-    # for CIA ops but it should be fine technically
-    # because this table is only meant to be used in export context
-    # in which we really carefully control the decomp behaviour
-    # In any case, C++ decomps should be preferred
-    cia_ops_that_should_be_removed = [
-        aten.all.dimname,
-        aten.index_add.dimname,
-        aten.index_copy.dimname,
-        aten.index_fill.Dimname_Scalar,
-        aten.index_fill.Dimname_Tensor,
-        aten.norm.names_ScalarOpt_dim_dtype,
-        aten.norm.names_ScalarOpt_dim,
-        aten.silu_backward.default,
-        aten.std.default,
-        aten.std.dim,
-        aten.std.names_dim,
-        aten.std.correction_names,
-        aten.std_mean.default,
-        aten.std_mean.dim,
-        aten.std_mean.names_dim,
-        aten.std_mean.correction_names,
-        aten.upsample_bilinear2d.vec,
-        aten.upsample_trilinear3d.vec,
-    ]
-
-    for k in list(decomp_table.keys()):
-        if k in cia_ops_that_should_be_removed:
-            del decomp_table[k]
-
-    for op in _collect_all_valid_cia_ops():
-        decomp_table[op] = _get_decomp_for_cia(op)
-    return decomp_table
-
-
-# This table is a stop-gap table which replicates
-# the old behaviour of post-dispatch IR.
-# This table contains all functional CIA ops mapping
-# to their default decomp. In old export, this will
-# be decomposed implicitly.
-def _decomp_table_to_post_autograd_aten():
-    decomp_table = {}
-    for k in _collect_all_valid_cia_ops():
-        decomp_table[k] = _get_decomp_for_cia(k)
-    return decomp_table
-
-
-def _core_aten_decompositions_post_autograd() -> (
-    Dict[torch._ops.OperatorBase, Callable]
-):
-    aten = torch.ops.aten
-    # TODO Delete all mutating or CIA ops from this list
-    return get_decompositions(
+    decomp_table = get_decompositions(
         [
             aten.addcdiv,
             aten.addcdiv_,
@@ -667,5 +614,22 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.zeros_like,
             aten._chunk_cat,
             aten._weight_norm_interface,
-        ]
+        ],
+        ignore_cia=True,
     )
+
+    for op in _collect_all_valid_cia_ops():
+        decomp_table[op] = _get_decomp_for_cia(op)
+    return decomp_table
+
+
+# This table is a stop-gap table which replicates
+# the old behaviour of post-dispatch IR.
+# This table contains all functional CIA ops mapping
+# to their default decomp. In old export, this will
+# be decomposed implicitly.
+def _decomp_table_to_post_autograd_aten():
+    decomp_table = {}
+    for k in _collect_all_valid_cia_ops():
+        decomp_table[k] = _get_decomp_for_cia(k)
+    return decomp_table
