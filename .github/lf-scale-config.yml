@@ -124,7 +124,7 @@ runner_types:
     os: linux
     ami: al2023-ami-2023.5.20240701.0-kernel-6.1-x86_64
   lf.linux.g4dn.12xlarge.nvidia.gpu:
-    disk_size: 150
+    disk_size:  150
     instance_type: g4dn.12xlarge
     is_ephemeral: false
     max_available: 250
