@@ -33,7 +33,6 @@ from torch._dynamo.utils import (
     lazy_format_graph_code,
 )
 from torch._functorch import config as functorch_config
-from torch._functorch._aot_autograd.subclass_utils import unwrap_tensor_subclasses
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import (
     _StrideExprStr,
@@ -1194,12 +1193,8 @@ def fw_compiler_freezing(
     max_offset_idx = 0
     if tracing_context is not None:
         assert tracing_context.params_flat_unwrap_subclasses is not None
-        params_flat_unwrap = [
-            r() for r in tracing_context.params_flat_unwrap_subclasses
-        ]
-        assert params_flat_unwrap is not None
+        params_flat_unwrap = tracing_context.params_flat_unwrap_subclasses
         max_offset_idx = max(0, len(params_flat_unwrap) - 1)
-        assert params_flat_unwrap is not None
         preserved_indices_params_flat = set()
         unwrapped_idxs = tracing_context.params_unwrapped_to_flat_index
         assert unwrapped_idxs is not None
@@ -1244,12 +1239,10 @@ def fw_compiler_freezing(
         return optimized_function
 
     def wrapper(args):
-        args_unwrapped = unwrap_tensor_subclasses(args, is_joint_structure=False)
         args_new = [
-            args_unwrapped[i - unwrapped_args_offsets[min(i, max_offset_idx)]]
+            args[i - unwrapped_args_offsets[min(i, max_offset_idx)]]
             for i in preserved_arg_indices
         ]
-        args_unwrapped.clear()
         args.clear()
         return optimized_function(args_new)
 
