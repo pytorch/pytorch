@@ -3782,7 +3782,7 @@ def l1_loss(
 
     See :class:`~torch.nn.L1Loss` for details.
     """
-   
+
     args = (input, target, weight) if weight is not None else (input, target)
 
     if has_torch_function_variadic(input, target):
@@ -3885,7 +3885,7 @@ def mse_loss(
         if weight.size() != input.size():
             raise ValueError("Weights and input must have the same size.")
 
-        # Perform weighted MSE loss manually      
+        # Perform weighted MSE loss manually
         squared_errors = torch.pow(expanded_input - expanded_target, 2)
         weighted_squared_errors = squared_errors * weight
 
@@ -3899,7 +3899,7 @@ def mse_loss(
             raise ValueError(
                 f"Invalid reduction mode: {reduction}. Expected one of 'none', 'mean', 'sum'."
             )
-    else:    
+    else:
         return torch._C._nn.mse_loss(
             expanded_input, expanded_target, _Reduction.get_enum(reduction)
         )
