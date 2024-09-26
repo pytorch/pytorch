@@ -2472,7 +2472,41 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         with ctx():
             self.check_output_and_recompiles(fn)
 
-        self.assertTrue("CompiledFunctionBackward0" in logs.getvalue())
+        expected_logs = [
+            "code: CompiledFunctionBackward (NodeCall 2)",
+            "aot0_primals_3",
+            "aot0_relu",
+            "aot0_le",
+            "aot0_permute_2",
+            "code: CompiledFunctionBackward0 (NodeCall 2)",
+            "aot0_tangents_1",
+            "aot0_full_default",
+            "aot0_where",
+            "aot0_mm",
+            "aot0_permute_3",
+            "aot0_mm_1",
+            "aot0_permute_4",
+            "aot0_sum_1",
+            "aot0_view",
+            "aot0_permute_5",
+            "aot0_le_1",
+            "aot0_where_1",
+            "aot0_permute_6",
+            "aot0_mm_2",
+            "aot0_permute_7",
+            "aot0_sum_2",
+            "aot0_view_1",
+            "aot0_permute_8",
+        ]
+
+        found = 0
+        for line in logs.getvalue().split("\n"):
+            if found == len(expected_logs):
+                break
+            if expected_logs[found] in line:
+                found += 1
+
+        self.assertEqual(found, len(expected_logs))
 
     @mock.patch(
         "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count

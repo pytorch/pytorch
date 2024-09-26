@@ -354,19 +354,31 @@ class AutogradCompilerInstance:
         if self.aot_graph_cls_name is None:
             return
 
-        def is_similar(a: torch.fx.node.Node, b: torch.fx.node.Node):
-            target_match = a.target == b.target
+        def is_similar(ca: torch.fx.node.Node, aot: torch.fx.node.Node):
+            # 1. comparing using target (for aten ops)
+            target_match = ca.target == aot.target
             if not target_match:
+                # 2. comparing using name (for HOPs)
                 target_match = (
-                    hasattr(a.target, "__name__")
-                    and hasattr(b.target, "__name__")
-                    and a.target.__name__ == b.target.__name__
+                    hasattr(ca.target, "__name__")
+                    and hasattr(aot.target, "__name__")
+                    and ca.target.__name__ == aot.target.__name__
                 )
+            if (
+                not target_match
+                and hasattr(ca.target, "name")
+                and hasattr(aot.target, "name")
+                and aot.target.name() == "aten::reshape"
+                and hasattr(aot.meta.get("original_aten"), "name")
+            ):
+                # 3. undo view_to_reshape post grad pass
+                target_match = ca.target.name() == aot.meta["original_aten"].name()
+
             return (
                 target_match
-                and a.op == b.op
-                and a.type == b.type
-                and len(a.all_input_nodes) == len(b.all_input_nodes)
+                and ca.op == aot.op
+                and ca.type == aot.type
+                and len(ca.all_input_nodes) == len(aot.all_input_nodes)
             )
 
         for nodecall_index, info in self.aot_graph_infos.items():
@@ -404,7 +416,7 @@ class AutogradCompilerInstance:
                         ca_node = next(ca_it)
                         continue
 
-                    if not is_similar(aot_node, ca_node):
+                    if not is_similar(ca_node, aot_node):
                         # There should be no lazily inserted ops in the middle of a match
                         # So any deviation is an error
                         raise StopIteration
