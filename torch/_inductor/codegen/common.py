@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import contextlib
 import dataclasses
 import functools
@@ -16,12 +18,16 @@ from typing import (
     Dict,
     List,
     NamedTuple,
-    Never,
     Optional,
     Set,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
+
+
+if TYPE_CHECKING:
+    from typing import Never
 
 import sympy
 from sympy.printing.printer import Printer
@@ -2202,7 +2208,7 @@ class KernelTemplate:
         except NotImplementedError as e:
             pass
 
-    def generate(self, **kwargs) -> "torch._inductor.ir.ChoiceCaller":
+    def generate(self, **kwargs) -> torch._inductor.ir.ChoiceCaller:
         """
         Generates a ChoiceCaller instance from the given arguments.
         """
