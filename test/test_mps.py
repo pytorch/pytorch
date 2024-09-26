@@ -7734,6 +7734,11 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(np.arange(7, 1, -1), torch.arange(7, 1, -1, device='mps'))
         self.assertEqual(np.arange(1, 2, .3, dtype=np.float32), torch.arange(1, 2, .3, device='mps'))
         self.assertEqual(np.arange(6.3, dtype=np.float32), torch.arange(6.3, device='mps'))
+        # To be removed
+        if product_version >= 14.0:
+            def do_arange(start=1.2, end=10.3, dtype=torch.bfloat16, device='cpu'):
+                return torch.arange(start, end, device=device, dtype=dtype)
+            self.assertEqual(do_arange(device='mps'), do_arange(device='cpu'))
 
     def test_arange_empty(self):
         out_mps = torch.tensor([], device="mps")
