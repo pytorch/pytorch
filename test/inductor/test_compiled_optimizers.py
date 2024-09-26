@@ -359,6 +359,7 @@ def make_test(
     device="cuda",
     **kwargs,
 ):
+    @config.patch("score_fusion_memory_threshold", 1)
     def test_fn(self):
         stack = ExitStack()
         try:
