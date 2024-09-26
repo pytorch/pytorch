@@ -888,7 +888,7 @@ class GraphModuleSerializer(metaclass=Final):
                         values.append(SymIntArgument.create(as_int=a))
                 return Argument.create(as_sym_ints=values)
             elif all(self.is_sym_float_arg(a) for a in arg):
-                # list of sym_ints
+                # list of sym_float
                 values = []
                 for a in arg:
                     if isinstance(a, torch.fx.Node):
