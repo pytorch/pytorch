@@ -227,7 +227,7 @@ class TestCuda(TestCase):
         oom_regex = (
             "would exceed allowed memory"
             if TEST_CUDAMALLOCASYNC
-            else "Tried to allocate 800000000.00 GiB"
+            else f"Tried to allocate 800000000.00 GiB. GPU {tensor.device.index} has a total capacity of"
         )
         with self.assertRaisesRegex(RuntimeError, oom_regex):
             torch.empty(1024 * 1024 * 1024 * 800000000, dtype=torch.int8, device="cuda")
@@ -3579,7 +3579,8 @@ class TestCudaMallocAsync(TestCase):
         torch.cuda.memory.empty_cache()
         mb = 1024 * 1024
         _, all_memory = torch.cuda.memory.mem_get_info()
-        total_allowed = 120 * mb
+        pre_reserved = torch.cuda.memory_reserved()
+        total_allowed = 120 * mb + pre_reserved
         fraction_allowed = total_allowed / all_memory
         assert int(fraction_allowed * all_memory) == total_allowed
         torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
@@ -3609,7 +3610,8 @@ class TestCudaMallocAsync(TestCase):
         torch.cuda.memory.empty_cache()
         mb = 1024 * 1024
         _, all_memory = torch.cuda.memory.mem_get_info()
-        total_allowed = 120 * mb
+        pre_reserved = torch.cuda.memory_reserved()
+        total_allowed = 120 * mb + pre_reserved
         fraction_allowed = total_allowed / all_memory
         assert int(fraction_allowed * all_memory) == total_allowed
         torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
