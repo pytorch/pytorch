@@ -134,7 +134,9 @@ struct TORCH_API TensorPipeRpcBackendOptions : public RpcBackendOptions {
   }
 
   int numWorkerThreads;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::optional<std::vector<std::string>> transports;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::optional<std::vector<std::string>> channels;
   std::unordered_map<std::string, DeviceMap> deviceMaps;
   std::vector<c10::Device> devices;
@@ -224,6 +226,7 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   size_t numPendingResponses();
   size_t messageIdToTimeoutMapSize();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const bool isStaticGroup_;
 
  protected:
@@ -232,7 +235,7 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   // is a protected method since it is overwritten by FaultyTensorPipeAgent
   virtual void pipeWrite(
       const std::shared_ptr<tensorpipe::Pipe>&,
-      c10::intrusive_ptr<Message> message,
+      const c10::intrusive_ptr<Message>& message,
       std::vector<c10::Device>&& devices,
       std::vector<c10::Stream> streams,
       std::function<void(const tensorpipe::Error&)>) noexcept;

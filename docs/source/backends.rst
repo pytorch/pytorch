@@ -85,6 +85,10 @@ torch.backends.cuda
 
 .. autofunction:: torch.backends.cuda.enable_math_sdp
 
+.. autofunction:: torch.backends.cuda.fp16_bf16_reduction_math_sdp_allowed
+
+.. autofunction:: torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp
+
 .. autofunction:: torch.backends.cuda.cudnn_sdp_enabled
 
 .. autofunction:: torch.backends.cuda.enable_cudnn_sdp
