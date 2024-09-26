@@ -192,8 +192,7 @@ def get_user_visible_output_names(
     if user_visible_output_idxs is None:
         return OrderedSet()
 
-    output_node = next(iter(reversed(graph.nodes)))
-    assert output_node.op == "output"
+    output_node = graph.find_nodes(op="output")[0]
     outputs = output_node.args[0]
 
     return OrderedSet(
