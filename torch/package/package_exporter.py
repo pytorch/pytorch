@@ -229,7 +229,7 @@ class PackageExporter:
         torch._C._log_api_usage_once("torch.package.PackageExporter")
         self.debug = debug
         if isinstance(f, (Path, str)):
-            f = str(f)
+            f = os.fspath(f)
             self.buffer: Optional[BinaryIO] = None
         elif isinstance(f, BinaryIO):  # is a byte buffer
             self.buffer = f
