@@ -24,6 +24,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     dtypesIfMPS,
     expectedFailureMPS,
+    expectedFailureMPSPre15,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyCPU,
@@ -73,6 +74,7 @@ if TEST_SCIPY:
 
 if IS_MACOS:
     import platform
+
     product_version = float(".".join(platform.mac_ver()[0].split(".")[:2]) or -1)
 else:
     product_version = 0.0
@@ -2050,7 +2052,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @dtypesIfMPS(
         *([torch.float] if product_version < 14.0 else [torch.float, torch.cfloat])
     )  # Complex not supported on MacOS13
-    @expectedFailureMPS  # Fails on MPS - https://github.com/pytorch/pytorch/issues/136031
+    @expectedFailureMPSPre15  # Fails on MPS - https://github.com/pytorch/pytorch/issues/136031
     @parametrize_test("mode", ("valid", "same"))
     def test_conv3d_vs_scipy(self, device, dtype, mode):
         t = make_tensor((1, 5, 5, 10), device=device, dtype=dtype)

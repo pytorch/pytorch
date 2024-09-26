@@ -12,7 +12,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfMPS,
     expectedFailureMPS,
-    expectedFailureMPSIfVersionLessThan,
+    expectedFailureMPSPre15,
     expectedFailureXLA,
     instantiate_device_type_tests,
 )
@@ -173,7 +173,7 @@ class TestDropoutNNDeviceType(NNTestCase):
                     else:
                         self.assertNotEqual(permuted_inp, out)
 
-    @expectedFailureMPSIfVersionLessThan(15.0)
+    @expectedFailureMPSPre15
     def test_Dropout(self, device):
         input = torch.empty(1000)
         self._test_dropout(nn.Dropout, device, input)

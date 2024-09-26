@@ -1658,23 +1658,26 @@ def expectedFailureMPS(fn):
     return expectedFailure("mps")(fn)
 
 
-def expectedFailureMPSIfVersionLessThan(versions: float = None):
-    def dec_fn(fn):
-        @wraps(fn)
-        def wrap_fn(self, *args, **kwargs):
-            import platform
+def expectedFailureMPSPre15(fn):
+    import platform
 
-            version = float(".".join(platform.mac_ver()[0].split(".")[:2]) or -1)
-            if not version or version < 1.0:  # cpu or other unsupported device
-                return fn(self, *args, **kwargs)
-            if version < versions:
-                reason = f"test skipped for MPS versions < {version}"
-                raise unittest.expectedFailure(reason)
-            return fn(self, *args, **kwargs)
+    version = float(".".join(platform.mac_ver()[0].split(".")[:2]) or -1)
+    if not version or version < 1.0:  # cpu or other unsupported device
+        return fn
+    if version < 15.0:
+        return expectedFailure("mps")(fn)
+    return fn
 
-        return wrap_fn
 
-    return dec_fn
+def expectedFailureMPSPre14(fn):
+    import platform
+
+    version = float(".".join(platform.mac_ver()[0].split(".")[:2]) or -1)
+    if not version or version < 1.0:  # cpu or other unsupported device
+        return fn
+    if version < 14.0:
+        return expectedFailure("mps")(fn)
+    return fn
 
 
 # Skips a test on CPU if LAPACK is not available.
