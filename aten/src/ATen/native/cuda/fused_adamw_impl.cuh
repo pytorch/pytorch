@@ -1,7 +1,8 @@
 #pragma once
 #include <ATen/core/Tensor.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 void _fused_adamw_cuda_impl_(
     at::TensorList params,
@@ -33,4 +34,5 @@ void _fused_adamw_cuda_impl_(
     const std::optional<at::Tensor>& grad_scale,
     const std::optional<at::Tensor>& found_inf);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

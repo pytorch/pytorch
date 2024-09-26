@@ -6,7 +6,8 @@
 #include <ATen/native/cuda/fused_adam_utils.cuh>
 #include <vector>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 void _fused_adamw_cuda_impl_(
     at::TensorList params,
@@ -99,4 +100,5 @@ void _fused_adamw_cuda_impl_(
       });
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

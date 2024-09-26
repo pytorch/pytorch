@@ -9,7 +9,8 @@
 #include <math.h>
 #include <optional>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 namespace upsample {
 // TODO: Remove duplicate declaration.
@@ -365,4 +366,5 @@ __device__ __forceinline__ accscalar_t interpolate_aa_single_dim(
 
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at
