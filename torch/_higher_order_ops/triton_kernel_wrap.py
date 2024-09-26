@@ -523,7 +523,7 @@ def identify_mutated_tensors(kernel, kwargs):
 # Used for wrapping a Triton Kernel
 class TritonKernelWrapperMutation(HigherOrderOperator):
     def __init__(self) -> None:
-        super().__init__("triton_kernel_wrapper_mutation")
+        super().__init__("triton_kernel_wrapper_mutation", cacheable=False)
 
     def __call__(self, kernel_idx, constant_args_idx, grid, kwargs):
         return super().__call__(
@@ -540,7 +540,7 @@ triton_kernel_wrapper_mutation = TritonKernelWrapperMutation()
 # Used for wrapping a Triton Kernel in a functional manner
 class TritonKernelWrapperFunctional(HigherOrderOperator):
     def __init__(self) -> None:
-        super().__init__("triton_kernel_wrapper_functional")
+        super().__init__("triton_kernel_wrapper_functional", cacheable=False)
 
     def __call__(self, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone):
         return super().__call__(
@@ -624,19 +624,23 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
     return None
 
 
+def get_mutated_tensors(kernel_idx, constant_args_idx, kwargs):
+    kernel = kernel_side_table.get_kernel(kernel_idx)
+    constant_args = kernel_side_table.get_constant_args(constant_args_idx)
+    return identify_mutated_tensors(kernel, {**kwargs, **constant_args})
+
+
 @triton_kernel_wrapper_mutation.py_functionalize_impl
 def triton_kernel_wrapper_mutation_functionalize(
     ctx, kernel_idx, constant_args_idx, grid, kwargs
 ):
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
-    kernel = kernel_side_table.get_kernel(kernel_idx)
-    constant_args = kernel_side_table.get_constant_args(constant_args_idx)
     # TODO(oulgen): Preexisting bug, if two kernel inputs are views of each
     # other, and one gets mutated in kernel, and later another gets mutated,
     # they are no longer equal. Fix this by graph breaking on this condition
     # earlier in dynamo.
-    tensors_to_clone = identify_mutated_tensors(
-        kernel, {**unwrapped_kwargs, **constant_args}
+    tensors_to_clone = get_mutated_tensors(
+        kernel_idx, constant_args_idx, unwrapped_kwargs
     )
     with ctx.redispatch_to_next():
         unwrapped_outputs = triton_kernel_wrapper_functional(
@@ -880,7 +884,11 @@ class TritonHOPifier:
         )
 
     def call_triton_kernel(self, variable, args, kwargs, tx):
+        from triton import JITFunction
         from triton.runtime.autotuner import autotune, Autotuner, Config
+
+        from torch._dynamo.variables.constant import ConstantVariable
+        from torch._dynamo.variables.tensor import SymNodeVariable
 
         if "num_ctas" in kwargs:
             self.raise_unsupported(
@@ -955,6 +963,27 @@ class TritonHOPifier:
                 return int(x)
             else:
                 return x
+
+        if isinstance(variable.kernel, JITFunction):
+            constexprs = variable.kernel.constexprs
+        else:
+            assert isinstance(variable.kernel, Autotuner)
+            constexprs = variable.kernel.fn.constexprs
+
+        for idx, arg_name in enumerate(variable.kernel.arg_names):
+            if idx in constexprs:
+                if arg_name in combined_args_raw and isinstance(
+                    combined_args_raw[arg_name], SymNodeVariable
+                ):
+                    # This arg is marked as tl.constexpr. That means that triton will recompile every time
+                    # this value changes.
+                    # https://github.com/pytorch/pytorch/issues/136504
+                    # One option is to correctly pass the symints in so that the symbolic expressions are defined
+                    # when the triton code is being executed.
+                    # But since triton will have to recompile either way, we instead just specialize on the value.
+                    combined_args_raw[arg_name] = ConstantVariable.create(
+                        combined_args_raw[arg_name].evaluate_expr()
+                    )
 
         if len(set(pytree.tree_map(intify, grids))) == 1:
             # If there's only one unique grid, lets simplify

@@ -45,6 +45,20 @@ __all__ = [
 ]
 
 
+class _ArglessActivation(Module):
+    r"""Base class for activation functions that don't require constructor arguments.
+
+    This class standardizes the initialization process for simple activation functions.
+    It provides a parameterless constructor that calls the base Module's __init__
+    method, ensuring a consistent initialization across all subclasses.
+
+    Subclasses of _ArglessActivation should not define their own __init__ method.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+
+
 class Threshold(Module):
     r"""Thresholds each element of the input Tensor.
 
@@ -303,7 +317,7 @@ class ReLU6(Hardtanh):
         return inplace_str
 
 
-class Sigmoid(Module):
+class Sigmoid(_ArglessActivation):
     r"""Applies the Sigmoid function element-wise.
 
     .. math::
@@ -367,7 +381,7 @@ class Hardsigmoid(Module):
         return F.hardsigmoid(input, self.inplace)
 
 
-class Tanh(Module):
+class Tanh(_ArglessActivation):
     r"""Applies the Hyperbolic Tangent (Tanh) function element-wise.
 
     Tanh is defined as:
@@ -979,11 +993,11 @@ class MultiheadAttention(Module):
     Multi-Head Attention is defined as:
 
     .. math::
-        \text{MultiHead}(Q, K, V) = \text{Concat}(head_1,\dots,head_h)W^O
+        \text{MultiHead}(Q, K, V) = \text{Concat}(\text{head}_1,\dots,\text{head}_h)W^O
 
-    where :math:`head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)`.
+    where :math:`\text{head}_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)`.
 
-    ``nn.MultiHeadAttention`` will use the optimized implementations of
+    ``nn.MultiheadAttention`` will use the optimized implementations of
     ``scaled_dot_product_attention()`` when possible.
 
     In addition to support for the new ``scaled_dot_product_attention()``
@@ -1515,7 +1529,7 @@ class PReLU(Module):
         return f"num_parameters={self.num_parameters}"
 
 
-class Softsign(Module):
+class Softsign(_ArglessActivation):
     r"""Applies the element-wise Softsign function.
 
     .. math::
@@ -1538,7 +1552,7 @@ class Softsign(Module):
         return F.softsign(input)
 
 
-class Tanhshrink(Module):
+class Tanhshrink(_ArglessActivation):
     r"""Applies the element-wise Tanhshrink function.
 
     .. math::
@@ -1670,7 +1684,7 @@ class Softmax(Module):
         return f"dim={self.dim}"
 
 
-class Softmax2d(Module):
+class Softmax2d(_ArglessActivation):
     r"""Applies SoftMax over features to each spatial location.
 
     When given an image of ``Channels x Height x Width``, it will

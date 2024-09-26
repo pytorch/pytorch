@@ -38,15 +38,15 @@ from torch.testing._internal.inductor_utils import skipCUDAIf
 
 try:
     try:
-        import triton
-        from triton import language as tl
+        import triton  # @manual
+        from triton import language as tl  # @manual
     except ImportError:
         raise unittest.SkipTest("requires triton")  # noqa: B904
 
     try:
         from . import test_torchinductor
     except ImportError:
-        import test_torchinductor
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -433,7 +433,11 @@ class CudaReproTests(TestCase):
                 triton.Config({"XBLOCK": 2}),
             ],
             meta={
-                "signature": {0: "*fp32", 1: "*fp32", 2: "i32"},
+                "signature": {
+                    "in_out_ptr0": "*fp32",
+                    "in_ptr0": "*fp32",
+                    "xnumel": "i32",
+                },
                 "device": DeviceProperties.create(torch.device("cuda")),
                 "configs": [instance_descriptor(divisible_by_16=(0, 1), equal_to_1=())],
                 "constants": {},
@@ -1320,7 +1324,7 @@ class CudaReproTests(TestCase):
             kernel_code,
             """\
 @triton.jit
-def triton_(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK : tl.constexpr):
+def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK : tl.constexpr):
     xnumel = 4000
     xoffset = tl.program_id(0) * XBLOCK
     xindex = xoffset + tl.arange(0, XBLOCK)[:]

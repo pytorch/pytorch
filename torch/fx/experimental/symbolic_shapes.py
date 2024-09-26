@@ -386,6 +386,40 @@ def canonicalize_bool_expr(expr: SympyBoolean) -> SympyBoolean:
         expr = sympy.logic.boolalg.to_cnf(expr)
     return _canonicalize_bool_expr_impl(expr)
 
+
+def _sympy_from_args(
+        cls: type,
+        args: List[sympy.Expr],
+        sort: bool = True,
+        is_commutative: Optional[bool] = None,
+) -> sympy.Expr:
+    if not args:
+        return cls.identity
+    # These args are already in canonical form, so we avoid calling
+    # Add(*args) to avoid expensive Add.flatten operation
+    if sort:
+        if cls is sympy.Add:
+            sort_fn = sympy.core.add._addsort
+        elif cls is sympy.Mul:
+            sort_fn = sympy.core.mul._mulsort
+        else:
+            raise ValueError(f"Unknown cls: {cls}")
+
+        # we don't support non commutative with sort
+        assert is_commutative is True
+        if args[0].is_Number:
+            rest = args[1:]
+            sort_fn(rest)
+            return cls._from_args([args[0]] + rest, is_commutative=is_commutative)
+        else:
+            args = args.copy()
+            sort_fn(args)
+            return cls._from_args(args, is_commutative=is_commutative)
+    else:
+        # if the args are already sorted, we create directly
+        return cls._from_args(args, is_commutative=is_commutative)
+
+
 def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
     """
     After canonicalization, we are guaranteed to have eliminated Ge/Gt relations
@@ -404,7 +438,7 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
         t = type(expr)
 
     def is_neg(t):
-        return t.is_negative or (isinstance(t, sympy.Mul) and t.args[0].is_negative)
+        return (t.is_Number and t.is_negative) or (isinstance(t, sympy.Mul) and t.args[0].is_Number and t.args[0].is_negative)
 
     lhs = 0
     rhs = _reduce_to_lowest_terms(rhs)
@@ -416,12 +450,16 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
                 neg.append(-term)
             else:
                 pos.append(term)
-        lhs = sympy.Add(*neg)
-        rhs = sympy.Add(*pos)
+        # these are already sorted
+        rhs = _sympy_from_args(sympy.Add, pos, sort=False, is_commutative=True)
+        # the terms were changed, so needs a sorting
+        lhs = _sympy_from_args(sympy.Add, neg, sort=True, is_commutative=True)
     elif is_neg(rhs):
         # lhs == 0
         lhs, rhs = -rhs, 0
-    return t(lhs, rhs)
+    # We don't have to evaluate here because lhs, rhs came from a Boolean
+    # and it was already simplified
+    return t(lhs, rhs, evaluate=False)
 
 
 def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
@@ -432,20 +470,39 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
     Useful when an expression is == or != to 0.
     """
     def integer_coefficient(x):
-        if isinstance(x, sympy.Integer):
+        if x.is_Integer:
             return abs(int(x))
-        elif isinstance(x, sympy.Mul):
-            return math.prod([abs(int(arg)) for arg in x.args if isinstance(arg, sympy.Integer)])
+        elif x.is_Mul:
+            # If one of the args of a Mul is an Integer, it is the
+            # first arg. eg: args(2*x*3*y) == (6, x, y)
+            return abs(int(x.args[0])) if x.args[0].is_Integer else 1
         else:
             return 1
 
-    if isinstance(expr, sympy.Add):
+    def div_by_factor(x, factor):
+        if x.is_Integer:
+            return x / factor
+        elif x.is_Mul:
+            if x.args[0] != factor:
+                args = [x.args[0] / factor, *x.args[1:]]
+            else:
+                # Mul._from_args require a canonical list of args
+                # so we remove the first arg (x.args[0] / factor) if it was 1
+                args = list(x.args[1:])
+            return _sympy_from_args(sympy.Mul, args, is_commutative=x.is_commutative)
+
+    if expr.is_Add:
         atoms = expr.args
         factor = functools.reduce(math.gcd, map(integer_coefficient, atoms))
-        atoms = [x / factor for x in atoms]
-        return sympy.Add(*atoms)
-    else:
-        return expr / integer_coefficient(expr)
+        if factor == 1:
+            return expr
+        atoms = [div_by_factor(x, factor) for x in atoms]
+        return _sympy_from_args(sympy.Add, atoms, sort=True, is_commutative=expr.is_commutative)
+    elif expr.is_Integer:
+        return sympy.One
+    elif expr.is_Mul:
+        return div_by_factor(expr, integer_coefficient(expr))
+    return expr
 
 
 def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
@@ -1393,16 +1450,165 @@ def is_symbolic(val: Union[int, SymInt, float, SymFloat, bool, SymBool]) -> bool
 
 IndicatorTypes = (IsNonOverlappingAndDenseIndicator,)
 
+
+def _expandsums(args: List[sympy.Expr]) -> Tuple[sympy.Expr, bool]:
+    adds, other = [], []
+    for arg in args:
+        if arg.is_Add:
+            adds.append(arg)
+        else:
+            other.append(arg)
+
+    result = [sympy.Mul(*other)]
+    for add in adds:
+        result = [a * b for a, b in itertools.product(result, add.args)]
+
+    result = sympy.Add(*result)
+    return result, len(adds) > 1 or (len(adds) > 0 and len(other) > 0)
+
+
+def _fast_expand(expr: sympy.Expr) -> sympy.Expr:
+    # The expand algorithm in sympy is slow due to all the features is supports
+    # For eg: e^(-x)*(x-1)/(x+1) is expanded to (x-1)/(e^x + e^x*x) if x is
+    # positive and (e^(-x)*x-e^(-x))/(x+1) if x is negative. We do not implement
+    # such features here to avoid expensive checks. We also make sure that we
+    # only re-create the objects if any of the args changed to avoid expensive
+    # checks when re-creating objects.
+    new_args = [_fast_expand(arg) for arg in expr.args]
+    if any(arg is not new_arg for arg, new_arg in zip(expr.args, new_args)):
+        return _fast_expand(expr.func(*new_args))
+
+    if expr.is_Pow:
+        base, exp = expr.args
+        if exp.is_Integer and base.is_Add:
+            if exp > 1:
+                return sympy.expand_multinomial(expr, deep=False)
+            elif exp < 0:
+                return 1 / sympy.expand_multinomial(1 / expr, deep=False)
+    elif expr.is_Mul:
+        num, den = [], []
+        for arg in expr.args:
+            if arg.is_Pow and arg.args[1] == -1:
+                den.append(1 / arg)
+            else:
+                num.append(arg)
+
+        num, num_changed = _expandsums(num)
+        den, den_changed = _expandsums(den)
+        if num_changed or den_changed:
+            return num / den
+
+    return expr
+
+
 @lru_cache(256)
 def safe_expand(r):
     if hasattr(r, 'expand'):
         try:
-            return sympy.expand(r)
+            return _fast_expand(r)
         except RecursionError:
-            log.warning("RecursionError in sympy.expand(%s)", r)
+            log.warning("RecursionError in _fast_expand(%s)", r)
             return r
     else:
         return r
+
+
+@lru_cache(None)
+def _maybe_evaluate_static_worker(
+    expr: sympy.Expr,
+    symbol_info: Tuple[Tuple[sympy.Symbol, ValueRanges, sympy.Integer, bool], ...],
+    unbacked_only: bool,
+    size_oblivious: bool
+):
+    """
+    This variant of ShapeEnv._maybe_evaluate_static has no dependence on
+    ShapeEnv and thus can be cached indefinitely.  It does the "heavy" lifting
+    for static evaluation, including nontrivial reliance on Sympy simplification
+    that occurs when we reallocate the symbols
+    """
+
+    # Simplify making use of value range lower bound
+    new_shape_env = {}
+    new_range_env = {}
+    for idx, sinfo in enumerate(symbol_info):
+        k, vr, val, is_size_like = sinfo
+        if isinstance(val, SingletonInt):
+            # Skip var_ranges logic for SingletonInt which is only used
+            # for jagged layout NestedTensors today
+            continue
+        if size_oblivious and is_size_like:
+            lower = max(2, vr.lower)
+            # Clamping size-oblivious to some quantity below sys.maxsize
+            # helps us determine that f(u0) != sys.maxsize, which is a
+            # test that is looking for sys.maxsize as a sentinel, but you
+            # don't really want to worry about it for unbacked SymInts.
+            # This is similar to the flavor where size oblivious omits
+            # 0/1, it changes semantics but in a benign way.
+            upper = min(2 ** 48, vr.upper)
+            # This is a bit dodgy: what this means is that there was a
+            # size-like unbacked symbol whose upper bound < 2.  This
+            # causes... problems.
+            if lower <= upper:
+                vr = ValueRanges(lower, upper)
+        else:
+            lower = vr.lower
+        # Don't do anything if we don't have a nontrivial lower bound
+        # Also don't do anything if we asked only to simplify unbacked
+        # SymInt
+        if (
+            lower is -int_oo or
+            (unbacked_only and val is not None) or
+            not vr.is_int
+        ):
+            new_range_env[k] = vr
+            continue
+        # The goal is to take our symbols which have various lower bounds
+        # and reallocate them into new symbols which are exactly positive;
+        # e.g., if we have s0 in [2, inf], we want to turn it into ess0 in
+        # [1, inf], where s0 = ess0 + 1.  This gives the most information
+        # to sympy for subsequent simplifications.
+        #
+        # Positive means >= 1
+        # Positive - 1 means >= 0
+        # Positive + lower - 1 means >= lower
+        # The new symbol 's' is "too low", so when we substitute it in
+        # we have to increase it by offset (and conversely, the new
+        # variables have to have their value range bounds adjusted as
+        # well)
+        s = sympy.Symbol(f"evaluate_static_shape_{idx}", positive=True, integer=True)
+
+        # Note:
+        #   Offset might be a fraction(e.g. aten.split.Tensor), but shapes are always integers.
+        #   Sympy might give unexepected results when comparing an integer with a non-integer
+        #   Therefore, we cast offset to int here.
+        #   For example:
+        #       shape_0 = sympy.Symbol("shape_0", positive=True, integer=True)
+        #       expr = sympy.Eq(shape_0 - 1/3, 4)
+        #       expr.xreplace({}) # False
+        offset = int(lower - 1)
+        new_shape_env[k] = s + offset
+        new_range_env[s] = SymPyValueRangeAnalysis.add(vr, -offset)
+
+    try:
+        new_expr = expr.xreplace(new_shape_env)
+    except RecursionError:
+        log.warning("RecursionError in sympy.xreplace(%s, %s)", expr, new_shape_env)
+        return None
+
+    # We need to canonicalize, as after expand we may have something like `a + b = a` and
+    # sympy will not simplify the a. The two appeareances of the a will then make value ranges
+    # analysis give lose bounds
+    new_expr = canonicalize_bool_expr(safe_expand(new_expr))
+    if new_expr.is_number:
+        return new_expr
+
+    # Check if the range can solve it statically
+    out = bound_sympy(new_expr, new_range_env)
+    if out.is_singleton():
+        return out.lower
+
+    return new_expr if unbacked_only else None
+
 
 def error():
     raise AssertionError("shouldn't be hit")
@@ -2711,6 +2917,7 @@ class ShapeEnv:
     def set_unbacked_var_to_val(self, k: sympy.Symbol, v: int) -> None:
         """Used only when propagate_real_tensors; registers a value for an
         unbacked symbol, which can be used last resort to resolve hints."""
+        log.info("set_unbacked_var_to_val %s = %s", k, v)
         self.unbacked_var_to_val[k] = sympy.sympify(v)
 
     # Unlike set_replacement, this records a shapeenv event
@@ -4443,11 +4650,6 @@ class ShapeEnv:
         # axioms with compute hint NYE
         assert not compute_hint or not axioms
 
-        if var_to_range is None:
-            var_ranges = self.var_to_range
-        else:
-            var_ranges = dict(var_to_range)
-
         expr = self.simplify(expr)
 
         if compute_hint:
@@ -4462,115 +4664,44 @@ class ShapeEnv:
         subst = {}
         for e in axioms:
             if e.free_symbols.issubset(expr.free_symbols):
-                subst.update(dict(self.get_implications(e)))
+                subst.update(dict(self.get_implications(self.simplify(e))))
 
         expr = expr.xreplace(subst)
 
-        symbols = tuple(expr.free_symbols)
+        fs = expr.free_symbols
 
-        # Simplify making use of value range lower bound
-        new_shape_env = {}
-        new_range_env = {}
-        for idx, k in enumerate(symbols):
-            if isinstance(self.var_to_val.get(k, None), SingletonInt):
-                # Skip var_ranges logic for SingletonInt which is only used
-                # for jagged layout NestedTensors today
-                continue
-            vr = var_ranges[k]
-            if size_oblivious and k in self.size_like:
-                lower = max(2, vr.lower)
-                # Clamping size-oblivious to some quantity below sys.maxsize
-                # helps us determine that f(u0) != sys.maxsize, which is a
-                # test that is looking for sys.maxsize as a sentinel, but you
-                # don't really want to worry about it for unbacked SymInts.
-                # This is similar to the flavor where size oblivious omits
-                # 0/1, it changes semantics but in a benign way.
-                upper = min(2 ** 48, vr.upper)
-                # This is a bit dodgy: what this means is that there was a
-                # size-like unbacked symbol whose upper bound < 2.  This
-                # causes... problems.
-                if lower <= upper:
-                    vr = ValueRanges(lower, upper)
-            else:
-                lower = vr.lower
-            # Don't do anything if we don't have a nontrivial lower bound
-            # Also don't do anything if we asked only to simplify unbacked
-            # SymInt
-            if (
-                lower is -int_oo or
-                (unbacked_only and k in self.var_to_val) or
-                not vr.is_int
-            ):
-                new_range_env[k] = vr
-                continue
-            # The goal is to take our symbols which have various lower bounds
-            # and reallocate them into new symbols which are exactly positive;
-            # e.g., if we have s0 in [2, inf], we want to turn it into ess0 in
-            # [1, inf], where s0 = ess0 + 1.  This gives the most information
-            # to sympy for subsequent simplifications.
-            #
-            # Positive means >= 1
-            # Positive - 1 means >= 0
-            # Positive + lower - 1 means >= lower
-            # The new symbol 's' is "too low", so when we substitute it in
-            # we have to increase it by offset (and conversely, the new
-            # variables have to have their value range bounds adjusted as
-            # well)
-            s = sympy.Symbol(f"evaluate_static_shape_{idx}", positive=True, integer=True)
+        if not fs and (expr.is_number or expr.is_Boolean):
+            return expr
 
-            # Note:
-            #   Offset might be a fraction(e.g. aten.split.Tensor), but shapes are always integers.
-            #   Sympy might give unexepected results when comparing an integer with a non-integer
-            #   Therefore, we cast offset to int here.
-            #   For example:
-            #       shape_0 = sympy.Symbol("shape_0", positive=True, integer=True)
-            #       expr = sympy.Eq(shape_0 - 1/3, 4)
-            #       expr.xreplace({}) # False
-            offset = int(lower - 1)
-            new_shape_env[k] = s + offset
-            new_range_env[s] = SymPyValueRangeAnalysis.add(vr, -offset)
+        if var_to_range is None:
+            var_ranges = self.var_to_range
+        else:
+            var_ranges = dict(var_to_range)
 
-        try:
-            new_expr = expr.xreplace(new_shape_env)
-        except RecursionError:
-            log.warning("RecursionError in sympy.xreplace(%s, %s)", expr, new_shape_env)
-            self.counter["sympy_recursion_error"] += 1
-            return None
+        symbol_info = tuple(
+            (s, var_ranges.get(s), self.var_to_val.get(s), s in self.size_like)
+            for s in sorted(fs, key=lambda s: str(s))  # TODO: speed up sort?
+        )
 
-        # We need to canonicalize, as after expand we may have something like `a + b = a` and
-        # sympy will not simplify the a. The two appeareances of the a will then make value ranges
-        # analysis give lose bounds
-        new_expr = canonicalize_bool_expr(safe_expand(new_expr))
-        if new_expr.is_number:
-            return new_expr
-
-        # This is bad to do, the replacement with division leaves us with
-        # rationals when atom.args[0] is addition, e.g., sympy will happily
-        # turn (s0 + s1) // 2 into s0 / 2 + s1 / 2.  Needless complication!
-        """
-        floor_div_replace = {}
-        for atom in new_expr.atoms(FloorDiv):
-            floor_div_replace[atom] = sympy.floor(atom.args[0] / atom.args[1])
-        new_expr = safe_expand(new_expr.xreplace(floor_div_replace))
-        # TODO: when unbacked_only, can sometimes early return even when there
-        # are still free symbols
-        if new_expr.is_number:
-            return new_expr
-        """
-
-        # Check if the range can solve it statically
-        out = bound_sympy(new_expr, new_range_env)
-        if out.is_singleton():
-            return out.lower
-
-        return new_expr if unbacked_only else None
+        r = _maybe_evaluate_static_worker(expr, symbol_info, unbacked_only, size_oblivious)
+        return r
 
     @_lru_cache
     def replace(self, expr: "sympy.Expr") -> "sympy.Expr":
         """Apply symbol replacements to any symbols in the given expression
         """
-        replacements = {s: self._find(cast(sympy.Symbol, s)) for s in expr.free_symbols}
-        return safe_expand(expr.xreplace(replacements))
+        replacements = {}
+        for s in expr.free_symbols:
+            r = self._find(cast(sympy.Symbol, s))
+            # Micro-optimization: only do replacements if r and s are different
+            # Otherwise, xreplace is not a no-op and will trigger expensive
+            # assumption queries if expr has a relational node.
+            if not r.is_Symbol or r != s:
+                replacements[s] = r
+        if replacements:
+            return safe_expand(expr.xreplace(replacements))
+        else:
+            return expr
 
     @_lru_cache
     def _update_divisible(self):
@@ -4604,8 +4735,9 @@ class ShapeEnv:
                     if self.replace(Mod(base, divisor)) in self.divisible and \
                             base == base1 and self.replace(Mod(base1, divisor1)) in self.divisible:
                         div_replacements[atom] = divisor1
-            expr = expr.xreplace(div_replacements)
-            expr = safe_expand(expr)
+            if div_replacements:
+                expr = expr.xreplace(div_replacements)
+                expr = safe_expand(expr)
         if expr.has(FloorDiv):
             div_replacements = {}
             pows = expr.atoms(sympy.Pow)
@@ -4614,13 +4746,14 @@ class ShapeEnv:
                 base, divisor = fd.args
                 if self.replace(Mod(base, divisor)) in self.divisible:
                     div_replacements[fd] = CleanDiv(base, divisor)
-            new_expr = expr.xreplace(div_replacements)
-            new_expr = safe_expand(new_expr)
-            new_pows = new_expr.atoms(sympy.Pow)
-            new_rationals = new_expr.atoms(sympy.Rational).difference(new_expr.atoms(sympy.Integer))
-            # divisions simplified away
-            if new_pows.issubset(pows) and new_rationals.issubset(rationals):
-                expr = new_expr
+            if div_replacements:
+                new_expr = expr.xreplace(div_replacements)
+                new_expr = safe_expand(new_expr)
+                new_pows = new_expr.atoms(sympy.Pow)
+                new_rationals = new_expr.atoms(sympy.Rational).difference(new_expr.atoms(sympy.Integer))
+                # divisions simplified away
+                if new_pows.issubset(pows) and new_rationals.issubset(rationals):
+                    expr = new_expr
         return expr
 
     @lru_cache(256)
@@ -4860,7 +4993,7 @@ class ShapeEnv:
 
         # When specializing 'a == tgt', the equality should be also conveyed to
         # Z3, in case an expression uses 'a'.
-        self._add_target_expr(sympy.Eq(a, tgt))
+        self._add_target_expr(sympy.Eq(a, tgt, evaluate=False))
 
     def _add_divisible(self, expr: "sympy.Expr"):
         self.divisible.add(expr)
