@@ -22,10 +22,9 @@ from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_cpp_code
 from torch.export import Dim
-from torch.utils._triton import has_triton
 
 
-@unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+@unittest.skipIf(not HAS_CUDA, "Inductor+gpu needs triton and CUDA")
 @config.patch(memory_planning=True)
 class TestMemoryPlanning(TestCase):
     def _generate(self, *, device):
