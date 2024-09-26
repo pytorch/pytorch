@@ -580,7 +580,7 @@ def break_graph_if_unsupported(*, push):
                     # We don't support graph break under GenericContextWrappingVariable,
                     # If there is, we roll back to the checkpoint and fall back.
                     excp.remove_from_stats()
-                    unimplemented("Graph break under context manager")
+                    unimplemented("Graph break under GenericContextWrappingVariable")
 
                 if isinstance(excp, exc.UncapturedHigherOrderOpError):
                     raise
