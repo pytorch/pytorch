@@ -9309,7 +9309,7 @@ class TestLinalgMPS(TestCaseMPS):
             # Test different types of rcond tensor
             for rcond_type in MPS_DTYPES:
                 # TODO: Figure out why it's not supported for complex
-                if rcond_dtype.is_complex:
+                if rcond_type.is_complex:
                     continue
                 rconds.append(torch.rand(A.shape[:-2], dtype=torch.float32, device=device).to(rcond_type))
             # Test broadcasting of rcond
