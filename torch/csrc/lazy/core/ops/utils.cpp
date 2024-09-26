@@ -5,8 +5,7 @@
 #include <torch/csrc/lazy/core/tensor_util.h>
 #include <torch/csrc/lazy/core/util.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 bool StrideIsSupported(c10::ArrayRef<int64_t> stride) {
   std::vector<int64_t> sorted_stride(stride.begin(), stride.end());
@@ -99,5 +98,4 @@ std::vector<int64_t> BuildUnsqueezedDimensions(
   return output_dimensions;
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy
