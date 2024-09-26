@@ -3,6 +3,7 @@ import collections
 import importlib.machinery
 import io
 import linecache
+import os
 import pickletools
 import platform
 import types
@@ -229,7 +230,6 @@ class PackageExporter:
         torch._C._log_api_usage_once("torch.package.PackageExporter")
         self.debug = debug
         if isinstance(f, (Path, str)):
-            import os
             f = os.fspath(f)
             self.buffer: Optional[BinaryIO] = None
         elif isinstance(f, BinaryIO):  # is a byte buffer
