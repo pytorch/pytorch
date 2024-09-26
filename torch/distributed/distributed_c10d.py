@@ -747,8 +747,11 @@ STORE_BASED_BARRIER_PREFIX = "store_based_barrier_key"
 
 def _get_object_coll_device(group: Optional[ProcessGroup] = None) -> str:
     """
-    Return the device type to use with ``group`` for control flow usage (object
-    collectives, barrier).
+    .. note:: This is an internal helper and does not have backward
+        compatibility, please use with caution.
+
+    Return the device type to use with ``group`` for object collectives or
+    barrier.
 
     There are selection rules:
         1. If user specifies exactly one backend in ``init_process_group`` call:
@@ -766,6 +769,21 @@ def _get_object_coll_device(group: Optional[ProcessGroup] = None) -> str:
 
     """
     group = group or _get_default_group()
+
+    if not isinstance(group, ProcessGroup):
+        warnings.warn(
+            f"You are using a Backend {type(group)} as a ProcessGroup. "
+            "This usage is deprecated since PyTorch 2.0. Please use a public API "
+            "of PyTorch Distributed instead.",
+        )
+        # Provide backward compatibility to cases where `group` passed in is
+        # actually a Backend (like `ProcessGroupGloo`) rather than a
+        # `ProcessGroup` in PT 2.0 sense
+        if isinstance(group, ProcessGroupGloo):
+            # RPC uses Gloo for object collectives
+            return "cpu"
+        else:
+            raise ValueError(f"Expecting a ProcessGroup, but got a {type(group)}.")
 
     """
     ``group._device_types`` is a property pybind that returns the devices
@@ -794,13 +812,13 @@ def _get_object_coll_device(group: Optional[ProcessGroup] = None) -> str:
 
 def _get_pg_default_device(group: Optional[ProcessGroup] = None) -> torch.device:
     """
-    .. note:: This method may be deprecated, it only stays for
+    .. note:: This method will be deprecated, it only stays for
         backward-compatiblity reason. Alternatives:
 
-        - If you need to find a device for object collecitves, please use
+        - If you need to find a device for object collectives, please use
         `_get_object_coll_device(group)`.
 
-        - If you need to query the devices supported by group, please use
+        - If you need to query the device types supported by group, please use
         `_device_capability(group)`.
 
     Return the device type registered with ``group``.
@@ -821,8 +839,9 @@ def _get_pg_default_device(group: Optional[ProcessGroup] = None) -> torch.device
     warnings.warn(
         "`_get_pg_default_device` will be deprecated, it only stays for "
         "backward-compatiblity reason. If you need to find a device for object "
-        "collecitves, please use `_get_object_coll_device`. If you need to query "
-        "the devices supported by group, please use `_device_capability(group)`. "
+        "collectives, please use `_get_object_coll_device`. If you need to query "
+        "the device types supported by group, please use "
+        "`_device_capability(group)`. "
     )
     group = group or _get_default_group()
 
