@@ -264,5 +264,6 @@ hop_db = [
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
         ),
+        decorators=[onlyCUDA],
     )
 ]
