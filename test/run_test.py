@@ -1819,6 +1819,7 @@ def main():
     print_to_stderr(f"Running parallel tests on {NUM_PROCS} processes")
     print_to_stderr(test_batch)
     print_to_stderr(test_batch_exclude)
+    emit_metric("test_this_works", {"hello": "world"})
 
     if options.dry_run:
         return
