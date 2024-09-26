@@ -16,7 +16,7 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
         return f"torch.xpu._DeviceGuard({device_idx})"
 
     def cpp_device_guard(self):
-        return "at::xpu::XPUGuard"
+        return "at::DeviceGuard"
 
     def cpp_aoti_device_guard(self):
         return "AOTIXpuGuard"
@@ -32,7 +32,7 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
 
     def kernel_header(self):
         source_codes = """
-        #include <c10/xpu/XPUGuard.h>
+        #include <c10/core/DeviceGuard.h>
         #include <c10/xpu/XPUStream.h>
         #include <ATen/xpu/EmptyTensor.h>
         #include <torch/csrc/inductor/aoti_runtime/sycl_runtime_wrappers.h>
