@@ -337,12 +337,11 @@ def compute_native_function_declaration(
     metadata_list = kernel_index.get_kernels(g).values()
     if metadata_list is None:
         return []
-    prefix = "TORCH_API"
 
     # for kernels in lean mode, we declare two versions, one with context and one without.
     # In the end we will cleanup the unused one.
     def gen_decl(metadata: BackendMetadata, include_context: bool) -> str:
-        return f"{prefix} {sig.decl(name=metadata.kernel, include_context=include_context)};"
+        return f"{sig.decl(name=metadata.kernel, include_context=include_context)};"
 
     return [
         gen_decl(metadata, include_context)
@@ -499,11 +498,11 @@ def gen_headers(
     headers = {
         "headers": [
             "#include <executorch/runtime/core/exec_aten/exec_aten.h> // at::Tensor etc.",
-            "#include <executorch/codegen/macros.h> // TORCH_API",
             "#include <executorch/runtime/kernel/kernel_runtime_context.h>",
         ],
     }
     if use_aten_lib:
+        headers["headers"].append("#include <executorch/codegen/macros.h> // TORCH_API")
         cpu_fm.write(
             "NativeFunctions.h",
             lambda: dict(

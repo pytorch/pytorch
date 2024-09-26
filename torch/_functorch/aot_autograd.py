@@ -22,6 +22,7 @@ from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils.weak import TensorWeakRef
 
 
 static_inputs_log = torch._logging.getArtifactLogger(
@@ -99,6 +100,7 @@ from ._aot_autograd.subclass_utils import (  # noqa: F401
     create_metadata_for_subclass,
     requires_subclass_dispatch,
     unwrap_tensor_subclasses,
+    unwrap_tensor_subclasses_with_indices_to_original,
     wrap_tensor_subclasses,
     wrap_tensor_subclasses_maybe_joint,
 )
@@ -978,6 +980,13 @@ def aot_module_simplified(
 
     if tracing_context := torch._guards.TracingContext.try_get():
         tracing_context.params_flat = params_flat
+        (
+            params_flat_unwrap_subclasses,
+            tracing_context.params_unwrapped_to_flat_index,
+        ) = unwrap_tensor_subclasses_with_indices_to_original(params_flat)
+        tracing_context.params_flat_unwrap_subclasses = [
+            TensorWeakRef(p) for p in params_flat_unwrap_subclasses
+        ]
 
     aot_autograd_arg_pos_to_source = None
     # Then, the params 1:1 mapped sources, if relevant.
@@ -1063,7 +1072,7 @@ def aot_module_simplified(
         return compiled_fn
 
     # Autograd cache stuff
-    if config.enable_autograd_cache:
+    if config.enable_autograd_cache and not torch._inductor.config.force_disable_caches:
         compiled_fn = AOTAutogradCache.load(
             dispatch_and_compile, mod, fake_flat_args, aot_config, cudagraphs
         )

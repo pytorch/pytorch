@@ -88,6 +88,9 @@ class VectorizedN {
   template <int L = N, typename std::enable_if_t<L == 1, int> = 0>
   VectorizedN(const Vectorized<T>& val) : values({val}) {}
 
+  template <int L = N, typename std::enable_if_t<L == 2, int> = 0>
+  VectorizedN(const Vectorized<T>& val_0, const Vectorized<T>& val_1) : values({val_0, val_1}) {}
+
   template <int L = N, typename std::enable_if_t<L == 1, int> = 0>
   inline operator Vectorized<T>() const {
     return values[0];
