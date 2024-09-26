@@ -797,6 +797,12 @@ class GraphSignature:
 
 
 @dataclass
+class AOTAutogradCacheInfo:
+    cache_key: str
+    start_time_ns: int
+
+
+@dataclass
 class AOTConfig:
     """
     Configuration for AOTDispatcher
@@ -818,9 +824,8 @@ class AOTConfig:
     enable_log: bool = True
     # this is always false outside of export.
     pre_dispatch: bool = False
-
     # Key to use for AOTAutogradCache
-    cache_key: Optional[str] = None
+    cache_info: Optional[AOTAutogradCacheInfo] = None
 
     def __post_init__(self):
         if self.pre_dispatch:

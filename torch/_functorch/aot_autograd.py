@@ -1054,7 +1054,7 @@ def aot_module_simplified(
         static_input_indices=static_input_indices,
         is_export=False,
         no_tangents=False,
-        cache_key=None,
+        cache_info=None,
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     fake_flat_args = process_inputs(full_args, aot_config, fake_mode, shape_env)
