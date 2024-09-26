@@ -117,7 +117,9 @@ class ProcessContext:
             time_to_wait = max(0, end - time.monotonic())
             process.join(time_to_wait)
 
-    def join(self, timeout: float | None = None, grace_period: float | None = None):
+    def join(
+        self, timeout: Optional[float] = None, grace_period: Optional[float] = None
+    ):
         r"""Join one or more processes within spawn context.
 
         Attempt to join one or more processes in this spawn context.
@@ -129,9 +131,9 @@ class ProcessContext:
         ``False`` if there are more processes that need to be joined.
 
         Args:
-            timeout: Wait this long before giving up on waiting.
-            grace_period: When some processes fail, wait this long for others
-                to shutdown gracefully before killing them.
+            timeout (float): Wait this long (in seconds) before giving up on waiting.
+            grace_period (float): When any processes fail, wait this long (in seconds)
+                for others to shutdown gracefully before killing them.
         """
         # Ensure this function can be called even when we're done.
         if len(self.sentinels) == 0:
@@ -156,7 +158,7 @@ class ProcessContext:
         if error_index is None:
             # Return whether or not all processes have been joined.
             return len(self.sentinels) == 0
-
+        # An error occurred. Clean-up all processes before returning.
         # First, allow a grace period for processes to shutdown themselves.
         if grace_period is not None:
             self._join_procs_with_timeout(grace_period)
@@ -171,9 +173,7 @@ class ProcessContext:
         # to main thread and if that is in c/c++ land and stuck it won't
         # to handle it. We have seen processes getting stuck not handling
         # SIGTERM for the above reason.
-        self._join_procs_with_timeout(
-            30 if grace_period is None else grace_period
-        )
+        self._join_procs_with_timeout(30 if grace_period is None else grace_period)
         for process in self.processes:
             if process.is_alive():
                 log.warning(
