@@ -346,7 +346,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         tensor_alpha_mode = 1;
         TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
             &handle, &matmul, CUSPARSELT_MATMUL_ALPHA_VECTOR_SCALING, &tensor_alpha_mode, sizeof(tensor_alpha_mode)));
-        alpha_ptr = (float*)alpha_tensor.data_ptr();
+        alpha_ptr = static_cast<float*>(alpha_tensor.data_ptr());
     }
   }
 
