@@ -5,6 +5,8 @@
 #include <ATen/Dispatch.h>
 #include <c10/util/irange.h>
 
+#include <limits>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -31,6 +33,9 @@ Tensor _bincount_cpu_template(
   }
   if (self.dim() != 1 || *self.min().data_ptr<input_t>() < 0) {
     AT_ERROR("bincount only supports 1-d non-negative integral inputs.");
+  }
+  if (*self.max().data_ptr<input_t>() >= std::numeric_limits<input_t>::max()) {
+    AT_ERROR("input overflowed, it should be < ", std::numeric_limits<input_t>::max());
   }
 
   bool has_weights = weights.defined();
