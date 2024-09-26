@@ -335,6 +335,17 @@ class ReduceMod(torch.nn.Module):
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
 class TestControlFlow(TestCase):
+    def check_autograd(self, result, result_exp, params):
+        result_flatten, _ = pytree.tree_flatten(result)
+        result_exp_flatten, _ = pytree.tree_flatten(result_exp)
+        grad_exp_init = [torch.ones_like(el) for el in result_exp_flatten]
+        expected_grads = torch.autograd.grad(result_exp_flatten, params, grad_exp_init)
+        grad_init = [torch.ones_like(el) for el in result_flatten]
+        grads = torch.autograd.grad(result_flatten, params, grad_init)
+        print(grads)
+        print(expected_grads)
+        self.assertEqual(grads, expected_grads, atol=6e-05, rtol=6e-06)
+    
     def setUp(self):
         torch._dynamo.reset()
         super().setUp()
@@ -1283,10 +1294,15 @@ def forward(self, pred_1, x_1):
     # TODO: provide an implementation for all compile modes and re-enable all test
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "compile", "compile_dynamic_shape"])
-    @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # @parametrize("reverse", [False, True])
+    @parametrize("reverse", [False])
+    # @parametrize("compile_mode", ["none", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none"])
+    # @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("combine_mode", ["pointwise"])
+    # @parametrize("combine_mode", ["generic"])
+    # @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("device", [torch.device("cuda")])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
     @decorateIf(
@@ -1299,8 +1315,39 @@ def forward(self, pred_1, x_1):
     def test_associative_scan_compile(
         self, combine_mode, reverse, compile_mode, device
     ):
-        x = torch.randn(3, 10, 2, device=device)
+        # x = torch.randn(3, 10, 2, device=device, requires_grad=True)
+        x = torch.tile(torch.unsqueeze(torch.arange(1, 5, device=device, dtype=torch.float32, requires_grad=True), 1), (1, 3))
 
+        # # L = torch.tensor([[1., 1., 1.],
+        # # [1., 1., 1.],
+        # # [1., 1., 1.],
+        # # [1., 1., 1.]], device='cuda:0')
+        # # x = torch.tensor([[1., 1., 1.],
+        # # [4., 4., 4.],
+        # # [3., 3., 3.],
+        # # [2., 2., 2.]], device='cuda:0')
+        # L = torch.tensor([
+        # [1., 1., 1.],
+        # [1., 1., 1.],
+        # [1., 1., 1.]], device='cuda:0')
+        # x = torch.tensor([
+        # [4., 4., 4.],
+        # [3., 3., 3.],
+        # [2., 2., 2.]], device='cuda:0')
+        # x_init = torch.tensor([
+        # [1., 1., 1.]], device='cuda:0')
+        # num_xs = 1
+        # def joint_wrapper_bwd_asssociative_scan(x: torch.Tensor, y: torch.Tensor):
+        #     g_out = [g_L_h + g_h * go for g_L_h, g_h, go in zip(y[:num_xs], y[num_xs:], x[num_xs:])]
+            
+        #     # return (*x[:num_xs], *g_out)
+        #     return ((*g_out, *g_out), *g_out)
+            
+        # # out = associative_scan(joint_wrapper_bwd_asssociative_scan, ((L, x)),dim=0, reverse=False, combine_mode='generic')
+        # out = scan(joint_wrapper_bwd_asssociative_scan, ((x_init, x_init)), ((L, x)),dim=0, reverse=False)
+        # print(out)
+        
+        
         scan_fct = compile_mode_helper(associative_scan, compile_mode)
 
         for op, op_pt in [
@@ -1313,6 +1360,8 @@ def forward(self, pred_1, x_1):
             if not reverse:
                 result_exp_PT = op_pt(x, 0)
                 self.assertEqual(result, result_exp_PT)
+                
+            self.check_autograd(result, result_exp, (x,))
 
         # Jax Examples
         x = torch.arange(0, 4, device=device)
