@@ -2177,7 +2177,9 @@ class DeviceCachingAllocator {
     return it;
   }
 
-  void dec_use_count_and_maybe_mark_pool_freeable(MempoolId_t mempool_id, PrivatePool* pool) {
+  void dec_use_count_and_maybe_mark_pool_freeable(
+      MempoolId_t mempool_id,
+      PrivatePool* pool) {
     auto uc = --(pool->use_count);
     if (uc == 0) {
       // Allows free_cached_blocks to begin cudaFreeing this pool's memory,
