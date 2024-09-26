@@ -1048,7 +1048,10 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
             self.skipTest('cuSPARSELt not enabled')
 
     @parametrize("dense_input_shape", [(256, 128)])
-    def test_sparse_fp8_mm(self, dense_input_shape, device):
+    def test_sparse_fp8fp8_mm(self, dense_input_shape, device):
+        if torch.backends.cusparselt.version() < 602:
+            self.skipTest("fp8 matmul requires cuSPARSELt v0.6.2+") 
+
         A = rand_sparse_semi_structured_mask(256, 128, dtype=torch.float16)
         B = torch.rand(dense_input_shape, device=device).to(torch.float16).t()
 
