@@ -2105,6 +2105,61 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
   }
 }
 
+void ProcessGroupNCCL::allgatherUniqueNCCLID(
+    int root,
+    ncclUniqueId* ncclID,
+    std::vector<ncclUniqueId> &ncclIDs) {
+  std::vector<std::string> storeKeys;
+  for(int r=0; r<getSize(); r++) {
+    storeKeys.emplace_back("UniqueNCCLID:" + std::to_string(r));
+  }
+  if(rank_ == root) {
+    auto vec = std::vector<uint8_t>(
+      reinterpret_cast<uint8_t*>(ncclID),
+      reinterpret_cast<uint8_t*>(ncclID) + NCCL_UNIQUE_ID_BYTES);
+    store_->set(storeKeys[root], vec);
+    std::memcpy(&ncclIDs[root], vec.data(), vec.size());
+  }
+  store_->wait(storeKeys);
+  for(int r=0; r<getSize(); r++) {
+    if(r != root) {
+      try {
+        auto vec = store_->get(storeKeys[r]);
+        TORCH_CHECK_WITH(
+            DistBackendError,
+            vec.size() == NCCL_UNIQUE_ID_BYTES,
+            "Invalid size for ncclUniqueId");
+        std::memcpy(&ncclIDs[r], vec.data(), vec.size());
+      } catch (const std::exception& e) {
+        std::string exceptionMsg = c10::str(
+          "[",
+          rank_,
+          "] is setting up NCCL communicator and "
+          "retrieving ncclUniqueId from [0] via c10d key-value store by key '",
+          storeKeys[r],
+          "', but store->get('",
+          storeKeys[r],
+          "') got error: ");
+        C10_THROW_ERROR(
+          DistBackendError,
+          exceptionMsg + e.what() +
+              ". This may indicate a possible application crash on rank 0 or a network set up issue.");
+      } catch (...) {
+        C10_THROW_ERROR(
+          DistBackendError,
+          c10::str(
+              "Unknown exception while [",
+              rank_,
+              "] is setting up NCCL communicator and "
+              "retrieving ncclUniqueId from [0] via c10d key-value store by key '",
+              storeKeys[r],
+              "'",
+              ". This may indicate a possible application crash on rank 0 or a network set up issue."));
+      }
+    }
+  }
+}
+
 void ProcessGroupNCCL::destroyNCCLComms(const std::string& devNCCLCommMapKey) {
   std::lock_guard<std::mutex> lock(mutex_);
   if (devNCCLCommMap_.find(devNCCLCommMapKey) == devNCCLCommMap_.end()) {
@@ -2245,6 +2300,28 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   }
 #endif
 
+#ifdef NCCL_HAS_INIT_RANK_SCALABLE
+  // Assuming number of roots is the same as the number of ranks
+  int root = rank;
+  std::vector<ncclUniqueId> ncclIDs(getSize());
+
+  if (!ncclComm) {
+    ncclUniqueId ncclID;
+    C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID), std::nullopt);
+    // Broadcast so that each process can have a unique NCCL ID
+    auto timeStarted = std::chrono::steady_clock::now();
+    allgatherUniqueNCCLID(root, &ncclID, ncclIDs);
+    auto timerDeltaMs =
+        std::chrono::duration_cast<std::chrono::duration<double>>(
+            std::chrono::steady_clock::now() - timeStarted)
+            .count() *
+        1000;
+    LOG(INFO) << logPrefix()
+              << "ProcessGroupNCCL broadcast unique ID through store took "
+              << timerDeltaMs << " ms";
+    ncclComm = NCCLComm::create_scalable(numRanks, rank, ncclIDs, options_->config);
+  }
+#else
   // To simplify conditional nesting, just create the ncclComms[i]
   // entry if it hasn't been yet rather than untangling the
   // conditions that might have resulted in a split above.
