@@ -2089,22 +2089,22 @@ class DeviceCachingAllocator {
     // mempool. When the count reaches 0, we tell free_cached_blocks it may now
     // cudaFree blocks from this graph's pool when it discovers they're unused
     // (unsplit).
-    auto it = get_private_pool(mempool_id);
-    TORCH_INTERNAL_ASSERT(it->second->use_count >= 1);
-    dec_use_count_and_maybe_mark_pool_freeable(mempool_id, it->second.get());
+    auto pp = get_private_pool(mempool_id);
+    TORCH_INTERNAL_ASSERT(pp->use_count >= 1);
+    dec_use_count_and_maybe_mark_pool_freeable(mempool_id, pp);
   }
 
   int getPoolUseCount(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    auto it = get_private_pool(mempool_id);
-    return it->second->use_count;
+    auto pp = get_private_pool(mempool_id);
+    return pp->use_count;
   }
 
   void decPoolUseCountAndMarkPoolFree(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    auto it = get_private_pool(mempool_id);
-    TORCH_INTERNAL_ASSERT(it->second->use_count == 1);
-    dec_use_count_and_maybe_mark_pool_freeable(mempool_id, it->second.get());
+    auto pp = get_private_pool(mempool_id);
+    TORCH_INTERNAL_ASSERT(pp->use_count == 1);
+    dec_use_count_and_maybe_mark_pool_freeable(mempool_id, pp);
   }
 
   void addPeerAccess(c10::DeviceIndex dev_to_access) {
@@ -2195,10 +2195,10 @@ class DeviceCachingAllocator {
     }
   }
 
-  auto get_private_pool(MempoolId_t mempool_id) {
+  PrivatePool* get_private_pool(MempoolId_t mempool_id) {
     auto it = graph_pools.find(mempool_id);
     TORCH_INTERNAL_ASSERT(it != graph_pools.end());
-    return it;
+    return it->second.get();
   }
 
   void dec_use_count_and_maybe_mark_pool_freeable(
