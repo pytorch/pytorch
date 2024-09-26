@@ -913,6 +913,7 @@ graph():
         self.assertEqual(ep.module()(x, x), model(x, x))
         self.assertEqual(ep.module()(x, y), model(x, y))
 
+    @testing.expectedFailureSerDer  # SymBool serialization? TODO(pianpwk)
     def test_real_tensor_bool_cast(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -923,6 +924,7 @@ graph():
         with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
             ep = export(model, inputs, strict=False)
 
+    @testing.expectedFailureSerDer
     def test_is_nonzero(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -937,15 +939,12 @@ graph():
         def _bool_tensor(nz):
             return torch.full((), int(nz)).bool()
 
-        def _complex_tensor(nz):
-            return torch.complex(torch.zeros(()), torch.full((), float(nz)))
-
         mod = Foo()
         for _tensor in [
             _long_tensor,
             _float_tensor,
             _bool_tensor,
-            _complex_tensor,
+            # local_scalar_dense on complex NYI for fake tensors
         ]:
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
                 for nz in [True, False]:

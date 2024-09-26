@@ -372,6 +372,8 @@ class FunctionalTensorMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
+        print("dispatch", func, args)
+
         if self.export:
             # We need to make sure that we don't decompose to() as usual in export mode,
             # because it can get optimized away. Instead we always replace it with _to_copy().
