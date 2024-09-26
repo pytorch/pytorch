@@ -59,6 +59,10 @@ jobs:
           cat <<EOF > runner_determinator.py
           # flake8: noqa: G004
 
+          # Note: updates to this script should be copied over to _runner-determinator.yml.
+          # You can do it easily by running the following command:
+          #   python .github/scripts/update_runner_determinator.py
+
           """
           This runner determinator is used to determine which set of runners to run a
           GitHub job on. It uses the first comment of a GitHub issue (by default
