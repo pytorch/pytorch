@@ -242,11 +242,6 @@ def get_device_capability(device: Optional[_device_t] = None) -> Dict[str, Any]:
         for prop in dir(props)
         if not prop.startswith(("__", "_pybind11_"))
     }
-    # Remove `<bound method PyCapsule._pybind11_conduit_v1_ of _XpuDeviceProperties..>`
-    # to fix Triton tests.
-    # This field appears after updating pybind to 2.13.6.
-    props_dict.pop("_pybind11_conduit_v1_", None)
-    return props_dict
 
 
 def get_device_properties(device: Optional[_device_t] = None) -> _XpuDeviceProperties:
