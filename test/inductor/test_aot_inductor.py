@@ -3744,6 +3744,7 @@ if not IS_FBCODE:
             "test_aoti_debug_printer_codegen": fail_with_and_without_stack_allocation(
                 is_skip=True
             ),
+            "test_view_outputs": fail_minimal_arrayref_interface(is_skip=True),
         }
     ),
     # The following test passes internally but fails in OSS CI. To be investigated.
