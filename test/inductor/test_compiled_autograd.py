@@ -24,7 +24,7 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import skipIfWindows
+from torch.testing._internal.common_utils import scoped_load_inline, skipIfWindows
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
 
@@ -1590,7 +1590,7 @@ TORCH_LIBRARY(test_non_traceable_autograd_cpp_node, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        module, _ = scoped_load_inline(
             name="test_non_traceable_autograd_cpp_node",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1611,7 +1611,6 @@ TORCH_LIBRARY(test_non_traceable_autograd_cpp_node, m) {
         ), compiled_autograd.enable(compiler_fn):
             fn()
 
-    @unittest.skip("Flaky, cache from test ordering affects test. #135369")
     def test_autograd_cpp_node(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -1639,7 +1638,7 @@ TORCH_LIBRARY(test_autograd_cpp_node, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        module, _ = scoped_load_inline(
             name="test_autograd_cpp_node",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1707,7 +1706,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_id, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        module, _ = scoped_load_inline(
             name="test_autograd_cpp_node_id",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1804,7 +1803,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        module, _ = scoped_load_inline(
             name="test_autograd_cpp_node_saved",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1861,7 +1860,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        module, _ = scoped_load_inline(
             name="test_autograd_cpp_node_saved_dynamic",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1920,7 +1919,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_int, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        module, _ = scoped_load_inline(
             name="test_autograd_cpp_node_saved_int",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1978,7 +1977,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_float, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        module, _ = scoped_load_inline(
             name="test_autograd_cpp_node_saved_float",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -2069,7 +2068,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        module, _ = scoped_load_inline(
             name="test_autograd_cpp_node_data_dependent",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -2348,7 +2347,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        module, _ = scoped_load_inline(
             name="test_cudagraphs_cpu_scalar_used_in_cpp_custom_op",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",

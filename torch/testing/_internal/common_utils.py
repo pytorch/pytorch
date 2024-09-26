@@ -5329,3 +5329,16 @@ def remove_cpp_extensions_build_root():
             subprocess.run(["rm", "-rf", default_build_root], stdout=subprocess.PIPE)
         else:
             shutil.rmtree(default_build_root, ignore_errors=True)
+
+def scoped_load_inline(name, cpp_sources, functions, verbose):
+    temp_dir = tempfile.TemporaryDirectory()
+    if verbose:
+        print(f'Using temporary extension directory {temp_dir.name}...', file=sys.stderr)
+    module = torch.utils.cpp_extension.load_inline(
+        name=name,
+        cpp_sources=cpp_sources,
+        functions=functions,
+        verbose=verbose,
+        build_directory=temp_dir.name,
+    )
+    return module, temp_dir

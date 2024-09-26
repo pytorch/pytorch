@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    scoped_load_inline,
     skipIfTorchDynamo,
     subtest,
     TestCase,
@@ -2072,13 +2073,13 @@ torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x) {
   return CustomOpAutogradFunction::apply(x);
 }
 
-TORCH_LIBRARY(mylib, m) {
+TORCH_LIBRARY(test_autograd_function_backed_op, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
-            name="mylib",
+        module = scoped_load_inline(
+            name="test_autograd_function_backed_op",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
@@ -2086,7 +2087,11 @@ TORCH_LIBRARY(mylib, m) {
 
         x = torch.ones(2, 2, requires_grad=True)
         temp = x.clone().detach()
-        out = torch.ops.mylib.custom_op_backed_by_autograd_fn(x)
+        out = (
+            torch.ops.test_autograd_function_backed_op.custom_op_backed_by_autograd_fn(
+                x
+            )
+        )
         loss = out.sum()
         loss.backward()
         self.assertEqual(x.grad, temp)
