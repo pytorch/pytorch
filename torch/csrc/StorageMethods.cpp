@@ -49,6 +49,9 @@ static PyObject* THPStorage_nbytes(PyObject* self, PyObject* noargs) {
 
 static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  // PyLong_FromVoidPtr should not need to mutate the pointer in order
+  // to extract a new long object from it.
+
   auto self_ = THPStorage_Unpack(self);
   // See Note [Invalid Python Storages]
   auto invalid = self_.data() == nullptr &&

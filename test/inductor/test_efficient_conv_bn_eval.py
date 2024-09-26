@@ -23,8 +23,8 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from inductor.test_torchinductor import (
-    copy_tests,  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+    copy_tests,
 )
 
 
