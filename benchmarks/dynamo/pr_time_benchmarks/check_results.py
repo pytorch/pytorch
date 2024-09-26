@@ -91,6 +91,7 @@ def main():
             )
 
         if result > high:
+            fail = True
             ratio = (float)(result - entry.expected_value) * 100 / entry.expected_value
             print(
                 f"REGRESSION: benchmark {key} failed, actual result {result} "
@@ -99,9 +100,9 @@ def main():
             )
 
             log("fail_regression")
-            fail = True
 
         if result < low:
+            fail = True
             ratio = (float)(entry.expected_value - result) * 100 / entry.expected_value
 
             print(
