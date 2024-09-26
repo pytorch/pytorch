@@ -2169,6 +2169,7 @@ class TestMPS(TestCaseMPS):
 
     @xfailIf(product_version < 14.0)
     def test_linear_large(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/122045
         x_cpu = torch.randn(9, 1024, 1, device='cpu')
         w_cpu = torch.randn(50304, 1, device='cpu')
         x_mps = x_cpu.detach().clone().to('mps')
