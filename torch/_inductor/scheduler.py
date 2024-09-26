@@ -2521,7 +2521,6 @@ class Scheduler:
             non_template_nodes = node_list_2 if epilogue_fusion else node_list_1
 
             ms2, path2 = self.benchmark_fused_nodes(non_template_nodes)
-            # breakpoint()
 
             min_ms_fused = float("inf")
             ms_fused_choice = None
@@ -2982,7 +2981,6 @@ class Scheduler:
                 return False
 
             template = node2.get_template_node_or_throw()
-
             if not isinstance(template, ir.TritonTemplateBuffer):
                 why("prologue fusion only supported for TritonTemplates")
                 return False

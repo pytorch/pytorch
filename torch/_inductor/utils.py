@@ -1001,7 +1001,6 @@ class FakeIndentedBuffer(IndentedBuffer):
     def __getattribute__(self, name):
         if name == "__class__":  # Allow access to the class attribute
             return object.__getattribute__(self, name)
-        breakpoint()
         raise RuntimeError(
             f"Tried to call self.{name} on FakeIndentedBuffer. This buffer"
             "is currently used on TritonTemplateKernel to prevent actual"

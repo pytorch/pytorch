@@ -649,7 +649,6 @@ class TritonTemplateKernel(TritonKernel):
                 self.epilogue_fn(*epilogue_args),
             )
             self.codegen_body()
-            self.cse.invalidate(set())
 
         def hook():
             # more stuff might have been added since the codegen_body above

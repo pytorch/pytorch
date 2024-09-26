@@ -946,9 +946,16 @@ class TestPrologueFusion(TestCase):
 
         out, code = run_and_get_code(torch.compile(foo), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
-
+        
+        # one triton kernel
         FileCheck().check("def call").check_count(".run", 1, exactly=True).run(code[0])
 
+        f = FileCheck().check("def call")
+        # single allocation, two deallocations
+        f.check_count("empty_strided", 1, exactly=True).check_count(
+            "del", count=2, exactly=True
+        )
+        f.run(code[0])
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu

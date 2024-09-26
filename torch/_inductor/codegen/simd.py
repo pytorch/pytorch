@@ -1477,7 +1477,7 @@ class SIMDScheduling(BaseScheduling):
                     node.codegen(index_vars)
 
     def codegen_template(
-        self, template_node, epilogue_nodes, prologue_nodes, *, only_gen_src_code=False
+        self, template_node: BaseSchedulerNode, epilogue_nodes: List[BaseSchedulerNode], prologue_nodes: List[BaseSchedulerNode], *, only_gen_src_code=False
     ) -> Optional[str]:
         """
         Codegen a triton template
@@ -1488,9 +1488,8 @@ class SIMDScheduling(BaseScheduling):
         assert rnumel == 1
         kernel, render = template_node.node.make_kernel_render(template_node.node)
 
-        buf_name_to_prologue_node = {}
+        buf_name_to_prologue_node: Dict[str, BaseSchedulerNode] = {}
         for prologue in prologue_nodes:
-            # assert False
             names = prologue.get_buffer_names()
             assert len(names) == 1
             if not only_gen_src_code:
@@ -1527,7 +1526,6 @@ class SIMDScheduling(BaseScheduling):
                                 kernel.split_and_set_ranges(prologue_node.get_ranges())
                             )
                             kernel.cse.invalidate(set())
-                            # breakpoint()
 
         if not isinstance(partial_code, str):
             partial_code.finalize_hook("<DEF_KERNEL>")
