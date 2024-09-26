@@ -82,8 +82,8 @@ from .variables.ctx_manager import (
 from .variables.dicts import ConstDictVariable, SetVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
-    NestedUserFunctionVariable,
     ContextlibContextManagerFunctionVariable,
+    NestedUserFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,

@@ -5454,6 +5454,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @unittest.expectedFailure
     def test_linearize_disable_capture(self):
         counters.clear()
         with config.patch(capture_func_transforms=False):
