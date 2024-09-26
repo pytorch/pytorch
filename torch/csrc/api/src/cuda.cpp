@@ -9,7 +9,7 @@
 namespace torch::cuda {
 
 size_t device_count() {
-  return at::detail::getCUDAHooks().getNumGPUs();
+  return at::detail::getCUDAHooks().deviceCount();
 }
 
 bool is_available() {

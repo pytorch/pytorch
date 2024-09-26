@@ -436,7 +436,14 @@ void CUDAHooks::cuFFTClearPlanCache(DeviceIndex device_index) const {
   at::native::detail::cufft_clear_plan_cache_impl(device_index);
 }
 
+/**
+ * DEPRECATED: use deviceCount() instead
+ */
 int CUDAHooks::getNumGPUs() const {
+  return at::cuda::device_count();
+}
+
+DeviceIndex CUDAHooks::deviceCount() const {
   return at::cuda::device_count();
 }
 
