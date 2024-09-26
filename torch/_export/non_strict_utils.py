@@ -26,7 +26,6 @@ from torch.export.dynamic_shapes import (
     _combine_args,
     _DimHint,
     _process_dynamic_shapes,
-    _transform_shapes_for_default_dynamic,
     _tree_map_with_path,
 )
 from torch.export.graph_signature import CustomObjArgument
@@ -94,8 +93,14 @@ def fakify(
     if not isinstance(t, torch.Tensor):
         raise ValueError(f"Unsupported input type {type(t)}")
     n_dims = len(t.shape)
+    dynamic_sizes = [
+        DimDynamic.DYNAMIC
+        if i in getattr(t, "_dynamo_weak_dynamic_indices", {})
+        else DimDynamic.STATIC
+        for i in range(n_dims)
+    ]
     symbolic_context = StatelessSymbolicContext(
-        dynamic_sizes=[DimDynamic.DYNAMIC] * n_dims,
+        dynamic_sizes=dynamic_sizes,
         constraint_sizes=[None] * n_dims,
     )
     t_id = id(t)
@@ -136,10 +141,7 @@ def make_fake_inputs(
 
     combined_args = _combine_args(nn_module, args, kwargs)
     _check_dynamic_shapes(combined_args, dynamic_shapes)
-    transformed_dynamic_shapes = _transform_shapes_for_default_dynamic(
-        combined_args, dynamic_shapes
-    )
-    constraints = _process_dynamic_shapes(combined_args, transformed_dynamic_shapes)
+    constraints = _process_dynamic_shapes(combined_args, dynamic_shapes)
     t_constraints: Dict[int, Dict[int, Constraint]] = defaultdict(dict)
     for constraint in constraints:
         t_constraints[constraint.t_id][constraint.dim] = constraint
@@ -222,7 +224,7 @@ def make_fake_inputs(
             fake_kwargs,
             equalities_inputs,
             original_signature,
-            transformed_dynamic_shapes,
+            dynamic_shapes,
         )
 
 
