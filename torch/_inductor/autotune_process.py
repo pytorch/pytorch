@@ -825,14 +825,14 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
         # Prepopulate CppCodeCache
         # may happen in separate Threadpool
         log.debug("Precompiling %s", self)
-        CppCodeCache.load(self.source_code, cuda=False)
+        CppCodeCache.load(self.source_code, device_type="cpu")
         log.debug("Done precompiling %s", self)
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
     ) -> Callable[[], None]:
         # TODO(jgong5): use CppPythonBindingsCodeCache for better binding perf
-        self.DLL = CppCodeCache.load(self.source_code, cuda=False)
+        self.DLL = CppCodeCache.load(self.source_code, device_type="cpu")
         args = [tensor.data_ptr() for tensor in list(input_tensors) + [output_tensor]]
         log.debug(
             "make_run_fn: self.kernel_name=%s, self.DLL=%s, args=%s, self.extra_args=%s",
