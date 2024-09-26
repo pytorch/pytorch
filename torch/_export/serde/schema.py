@@ -111,11 +111,11 @@ class SymIntArgument(_Union):
     as_int: int
 
 # In most cases we will use the "as_name" field to store arguments which are
-# SymInts.
-# The "as_int" field is used in the case where we have a list containing a mix
-# of SymInt and float (ex. [1.0, s0, ...]). We will serialize this type of list to
-# be List[SymIntArgument] and map the SymInts to the "as_name" field, and ints
-# to the "as_int" field.
+# SymFloats.
+# The "as_float" field is used in the case where we have a list containing a mix
+# of SymFloat and float (ex. [1.0, s0, ...]). We will serialize this type of list to
+# be List[SymFloatArgument] and map the SymFloats to the "as_name" field, and ints
+# to the "as_float" field.
 @dataclass(repr=False)
 class SymFloatArgument(_Union):
     as_name: str
