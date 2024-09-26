@@ -57,13 +57,29 @@ ARGS = (torch.ones(1000, 1000, requires_grad=True),)
 
 
 class StructuredTraceTestingFilter(logging.Filter):
+    def __init__(self, match_name=None):
+        self.match_name = match_name
+
     def filter(self, record):
-        return "str" not in record.metadata
+        if "str" in record.metadata:
+            return False
+        if self.match_name is not None:
+            if "artifact" in record.metadata:
+                if self.match_name != record.metadata["artifact"]["name"]:
+                    return False
+            elif self.match_name not in record.metadata:
+                return False
+        return True
 
 
 class ChromiumEventFilter(logging.Filter):
     def filter(self, record):
         return "chromium_event" not in record.metadata
+
+
+class StructuredTracePayloadFormatter(logging.Formatter):
+    def format(self, record):
+        return record.payload.strip()
 
 
 class StructuredTraceTestingFormatter(logging.Formatter):
@@ -659,6 +675,41 @@ def forward(self, x, y):
 """,  # noqa: B950
         )
         self.assertParses()
+
+    @requires_tlparse
+    def test_make_fx_fail_partial(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        payload_buffer = io.StringIO()
+        payload_handler = logging.StreamHandler(payload_buffer)
+        payload_handler.setFormatter(StructuredTracePayloadFormatter())
+        payload_handler.addFilter(StructuredTraceTestingFilter("make_fx_fail_partial"))
+        trace_log.addHandler(payload_handler)
+
+        def f(x):
+            y = x + 1
+            raise RuntimeError("boo")
+
+        try:
+            make_fx(f)(torch.randn(2))
+        except RuntimeError:
+            pass
+
+        self.assertExpectedInline(
+            self.buffer.getvalue(),
+            """\
+{"artifact": {"name": "make_fx_fail_partial", "encoding": "string"}, "stack": "STACK", "has_payload": "HASH"}
+""",
+        )
+
+        self.assertExpectedInline(
+            payload_buffer.getvalue(),
+            """\
+def forward(self, x_1: "f32[2][1]cpu"):
+    # No stacktrace found for following nodes
+    add: "f32[2][1]cpu" = torch.ops.aten.add.Tensor(x_1, 1);  x_1 = add = None
+""",
+        )
 
     @requires_tlparse
     @torch._inductor.config.patch("fx_graph_cache", True)

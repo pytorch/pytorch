@@ -275,12 +275,14 @@ def transform_args(
         if convert_input_to_bool:
             dtype = torch.bool
         else:
-            # FIXME that's a crude approximation for promoting args
+            # FIXME this is a crude approximation for promoting args
             promoting_args = [
                 a
-                for a in itertools.chain(args, kwargs.values())
+                for a in args
                 if isinstance(a, (Number, sympy.Basic)) or hasattr(a, "dtype")
             ]
+            # only consider tensor kwargs for promotion, for now
+            promoting_args.extend(a for a in kwargs.values() if hasattr(a, "dtype"))
             dtype = get_promoted_dtype(
                 *promoting_args, type_promotion_kind=type_promotion_kind  # type: ignore[arg-type]
             )
@@ -353,7 +355,11 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
 
 
 def _register_lowering(
-    aten_fn, decomp_fn, broadcast, type_promotion_kind, convert_input_to_bool
+    aten_fn,
+    decomp_fn,
+    broadcast,
+    type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
+    convert_input_to_bool,
 ):
     """
     Add a lowering to lowerings dict
@@ -405,7 +411,9 @@ def _register_lowering(
 def register_lowering(
     aten_fn,
     broadcast=False,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    type_promotion_kind: Optional[
+        ELEMENTWISE_TYPE_PROMOTION_KIND
+    ] = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     convert_input_to_bool=False,
 ):
     """
@@ -5849,12 +5857,8 @@ def reduce_min(x, dim=None, keepdim=False):
 
 
 register_lowering(prims.xor_sum)(make_reduction("xor_sum"))
-reduce_amax = register_lowering(aten.amax, type_promotion_kind=None)(
-    make_reduction("max")
-)
-reduce_amin = register_lowering(aten.amin, type_promotion_kind=None)(
-    make_reduction("min")
-)
+reduce_amax = register_lowering(aten.amax)(make_reduction("max"))
+reduce_amin = register_lowering(aten.amin)(make_reduction("min"))
 reduce_argmax = register_lowering(aten.argmax)(
     make_reduction("argmax", override_return_dtype=torch.int64)
 )
