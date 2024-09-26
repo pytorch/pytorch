@@ -480,8 +480,8 @@ public:
     _mm512_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
     _mm512_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
     for (int64_t i = 0; i < size() / 2; i++) {
-      tmp1[i] = calc_erfinv(tmp1[i]);
-      tmp2[i] = calc_erfinv(tmp2[i]);
+      tmp1[i] = c10::calc_erfinv(tmp1[i]);
+      tmp2[i] = c10::calc_erfinv(tmp2[i]);
     }
     auto o1 = _mm512_loadu_ps(tmp1);
     auto o2 = _mm512_loadu_ps(tmp2);

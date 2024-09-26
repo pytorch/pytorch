@@ -203,7 +203,7 @@ public:
     return Vectorized<float>(Sleef_erfcf8_u15(values));
   }
   Vectorized<float> erfinv() const {
-    return map(calc_erfinv);
+    return map(c10::calc_erfinv);
   }
   Vectorized<float> exp() const {
     return Vectorized<float>(Sleef_expf8_u10(values));

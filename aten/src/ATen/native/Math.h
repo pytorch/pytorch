@@ -5,7 +5,7 @@
 #include <ATen/jiterator_macros.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
-#include <c10/util/MathConstants.h>
+#include <c10/util/generic_math.h>
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
@@ -143,58 +143,6 @@ jiterator_also_stringify_as(jiterator_code(
   }),
   i0e_string); // i0e_string
 }
-
-#define CENTRAL_RANGE 0.7
-
-template <typename T>
-inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
-calc_erfinv(T y) {
-/* Function to calculate inverse error function.  Rational approximation
-is used to generate an initial approximation, which is then improved to
-full accuracy by two steps of Newton's method.  Code is a direct
-translation of the erfinv m file in matlab version 2.0.
-Author:  Gary L. Pavlis, Indiana University
-Date:  February 1996
-*/
-  T x, z, num, dem; /*working variables */
-  /* coefficients in rational expansion */
-  T a[4] = {  T(0.886226899), T(-1.645349621),  T(0.914624893), T(-0.140543331) };
-  T b[4] = { T(-2.118377725),  T(1.442710462), T(-0.329097515),  T(0.012229801) };
-  T c[4] = { T(-1.970840454), T(-1.624906493),  T(3.429567803),  T(1.641345311) };
-  T d[2] = {  T(3.543889200),  T(1.637067800) };
-  T y_abs = std::abs(y);
-  if(y_abs > 1.0) return std::numeric_limits<T>::quiet_NaN();
-#ifdef _WIN32
-  // error C2039: '_copysign': is not a member of 'std'
-  if(y_abs == 1.0) return copysign(std::numeric_limits<T>::infinity(), y);
-#else
-  if(y_abs == 1.0) return std::copysign(std::numeric_limits<T>::infinity(), y);
-#endif
-  if(y_abs <= static_cast<T>(CENTRAL_RANGE)) {
-    z = y * y;
-    num = (((a[3]*z + a[2])*z + a[1])*z + a[0]);
-    dem = ((((b[3]*z + b[2])*z + b[1])*z +b[0]) * z + static_cast<T>(1.0));
-    x = y * num / dem;
-  }
-  else{
-    z = std::sqrt(-std::log((static_cast<T>(1.0)-y_abs)/static_cast<T>(2.0)));
-    num = ((c[3]*z + c[2])*z + c[1]) * z + c[0];
-    dem = (d[1]*z + d[0])*z + static_cast<T>(1.0);
-#ifdef _WIN32
-    // error C2039: '_copysign': is not a member of 'std'
-    x = copysign(num, y) / dem;
-#else
-    x = std::copysign(num, y) / dem;
-#endif
-  }
-  /* Two steps of Newton-Raphson correction */
-  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)/static_cast<T>(std::sqrt(c10::pi<double>)))*std::exp(-x*x));
-  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)/static_cast<T>(std::sqrt(c10::pi<double>)))*std::exp(-x*x));
-
-  return(x);
-}
-
-#undef CENTRAL_RANGE
 
 /*
  * Note [3-Clause BSD License for the Cephes Math Library]
@@ -1221,8 +1169,6 @@ template <>
 C10_UNUSED inline c10::Half calc_igammac<c10::Half>(c10::Half a, c10::Half x) {
   return calc_igammac<float>(float(a), float(x));
 }
-
-inline c10::BFloat16 calc_erfinv(c10::BFloat16 a) { return calc_erfinv(float(a)); }
 
 template <typename T>
 inline T abs_impl(T v) {

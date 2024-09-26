@@ -524,7 +524,7 @@ namespace {
         using vec = TypeParam;
         test_unary<vec>(
             NAME_INFO(erfinv),
-            RESOLVE_OVERLOAD(calc_erfinv),
+            RESOLVE_OVERLOAD(c10::calc_erfinv),
             [](const vec& v) { return v.erfinv(); },
             createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
