@@ -639,7 +639,7 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def erfinv(x):
-        return f"calc_erfinv({x})"
+        return f"c10::calc_erfinv({x})"
 
     @staticmethod
     def sqrt(x):

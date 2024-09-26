@@ -431,7 +431,7 @@ public:
     return map(std::erfc);
   }
   Vectorized<T> erfinv() const {
-    return map(calc_erfinv);
+    return map(c10::calc_erfinv);
   }
   Vectorized<T> exp() const {
     return map(std::exp);

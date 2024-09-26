@@ -166,7 +166,7 @@ public:
     return Vectorized<double>(Sleef_erfcd4_u15(values));
   }
   Vectorized<double> erfinv() const {
-    return map(calc_erfinv);
+    return map(c10::calc_erfinv);
   }
   Vectorized<double> exp() const {
     return Vectorized<double>(Sleef_expd4_u10(values));

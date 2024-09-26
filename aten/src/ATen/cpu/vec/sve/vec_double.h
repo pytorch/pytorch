@@ -188,7 +188,7 @@ public:
     return USE_SLEEF(Vectorized<double>(Sleef_erfcdx_u15sve(values)),map(std::erfc));
   }
   Vectorized<double> erfinv() const {
-    return map(calc_erfinv);
+    return map(c10::calc_erfinv);
   }
   Vectorized<double> exp() const {
     return USE_SLEEF(Vectorized<double>(Sleef_expdx_u10sve(values)),map(std::exp));

@@ -3,6 +3,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/MathConstants.h>
 #include <c10/util/TypeSafeSignMath.h>
+#include <array>
 #include <cmath>
 
 #if defined(__CUDA_ARCH__)
@@ -84,10 +85,13 @@ calc_erfinv(T y) {
   */
   T x, z, num, dem; /*working variables */
   /* coefficients in rational expansion */
-  T a[4] = {T(0.886226899), T(-1.645349621), T(0.914624893), T(-0.140543331)};
-  T b[4] = {T(-2.118377725), T(1.442710462), T(-0.329097515), T(0.012229801)};
-  T c[4] = {T(-1.970840454), T(-1.624906493), T(3.429567803), T(1.641345311)};
-  T d[2] = {T(3.543889200), T(1.637067800)};
+  std::array<T, 4> a = {
+      T(0.886226899), T(-1.645349621), T(0.914624893), T(-0.140543331)};
+  std::array<T, 4> b = {
+      T(-2.118377725), T(1.442710462), T(-0.329097515), T(0.012229801)};
+  std::array<T, 4> c = {
+      T(-1.970840454), T(-1.624906493), T(3.429567803), T(1.641345311)};
+  std::array<T, 2> d = {T(3.543889200), T(1.637067800)};
   T y_abs = std::abs(y);
   if (y_abs > 1.0)
     return std::numeric_limits<T>::quiet_NaN();
@@ -131,5 +135,9 @@ calc_erfinv(T y) {
 }
 
 #undef CENTRAL_RANGE
+
+inline c10::BFloat16 calc_erfinv(c10::BFloat16 a) {
+  return calc_erfinv(float(a));
+}
 
 } // namespace c10

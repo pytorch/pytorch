@@ -1170,8 +1170,6 @@ C10_UNUSED inline c10::Half calc_igammac<c10::Half>(c10::Half a, c10::Half x) {
   return calc_igammac<float>(float(a), float(x));
 }
 
-inline c10::BFloat16 calc_erfinv(c10::BFloat16 a) { return calc_erfinv(float(a)); }
-
 template <typename T>
 inline T abs_impl(T v) {
   return std::abs(v);
