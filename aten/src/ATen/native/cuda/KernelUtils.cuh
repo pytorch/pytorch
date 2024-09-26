@@ -146,7 +146,7 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
         reinterpret_cast<at::Half*>(tensor) + index,
         static_cast<at::Half>(value));
 #else
-    atomicAddNoReturn(
+    atomicAdd(
         reinterpret_cast<__half*>(tensor) + index,
         static_cast<__half>(value));
 #endif
