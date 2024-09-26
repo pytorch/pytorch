@@ -1,10 +1,11 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import builtins
 import copy
 import functools
 import hashlib
 import inspect
-import json
 import logging
 import math
 import operator
@@ -14,10 +15,11 @@ import re
 import sys
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import torch
 
+from .autotune_cache import AutotuneCache
 from .benchmarking import benchmarker
 from .coordinate_descent_tuner import CoordescTuner
 from .hints import (
@@ -40,11 +42,9 @@ from .runtime_utils import (
     get_num_bytes,
     next_power_of_2,
     triton_config_to_hashable,
+    validate_triton_config,
 )
 
-
-if TYPE_CHECKING:
-    from ..remote_cache import RemoteCacheBackend
 
 try:
     import triton
@@ -85,7 +85,10 @@ log = logging.getLogger(__name__)
 
 
 def autotune_hints_to_configs(
-    hints: Set[AutotuneHint], size_hints, block_size: int
+    hints: Set[AutotuneHint],
+    size_hints,
+    block_size: int,
+    device_props: DeviceProperties,
 ) -> List[Config]:
     """
     AutotuneHints can be attached to the metadata of triton kernels for providing
@@ -100,7 +103,7 @@ def autotune_hints_to_configs(
     configs = []
 
     for hint in hints:
-        if hint == AutotuneHint.ELEMENTS_PER_WARP_32:
+        if hint == AutotuneHint.ONE_ELEMENT_PER_THREAD:
             if len(size_hints) == 1:
                 xyz_options = ((block_size // 4, None, None),)
             elif len(size_hints) == 2:
@@ -116,7 +119,7 @@ def autotune_hints_to_configs(
                     triton_config(
                         size_hints,
                         *xyz,
-                        num_elements_per_warp=32,
+                        num_elements_per_warp=device_props.warp_size,
                     )
                 )
 
@@ -172,7 +175,7 @@ class CachingAutotuner(KernelInterface):
         triton_meta,  # passed directly to triton
         configs,
         save_cache_hook,
-        mutated_arg_names,
+        mutated_arg_names: List[str],  # see [Note: clone mutated buffers]
         heuristic_type,
         size_hints=None,
         inductor_meta=None,  # metadata not relevant to triton
@@ -182,6 +185,10 @@ class CachingAutotuner(KernelInterface):
         super().__init__()
 
         assert len(configs) > 0, "Non-empty TritonConfig list required for compiling"
+        # makes sure there are no pre-hooks on any of the triton configs
+        for cfg in configs:
+            validate_triton_config(cfg)
+
         self.fn = fn
         self.device_props: DeviceProperties = triton_meta["device"]
         self.triton_meta = {
@@ -261,10 +268,11 @@ class CachingAutotuner(KernelInterface):
                 self.inductor_meta.get("dynamic_scale_rblock", True)
                 and self.heuristic_type == HeuristicType.REDUCTION
                 and self.size_hints is not None
-                # Disable for AMDGPU/Intel as Triton is not ready to return n_regs for a compiled_binary.
-                and device_prop.type == "cuda"
+                # Disable for Intel as Triton is not ready to return n_regs for a compiled_binary.
+                and device_prop.type in ["cuda", "hip"]
                 and device_prop.major
-                and device_prop.major >= 8
+                and (device_prop.major >= 8 or torch.version.hip)
+                and device_prop.regs_per_multiprocessor is not None
             ):
                 assert device_prop.regs_per_multiprocessor
                 assert device_prop.max_threads_per_multi_processor
@@ -301,7 +309,7 @@ class CachingAutotuner(KernelInterface):
                     ):
                         continue
 
-                    nreg_per_warp = nreg * 32
+                    nreg_per_warp = nreg * device_prop.warp_size
                     nreg_per_block = nreg_per_warp * triton_config.num_warps
 
                     # Previously we set max_blocks_per_sm to 'max_threads_per_multi_processo / (32 * num_warps)'
@@ -355,7 +363,7 @@ class CachingAutotuner(KernelInterface):
                 if k == "waves_per_eu":
                     compile_meta["waves_per_eu"] = v
                     continue
-            compile_meta["constants"][self.fn.arg_names.index(k)] = v
+            compile_meta["constants"][k] = v
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
         compile_meta["debug"] = self.inductor_meta.get(
@@ -404,7 +412,7 @@ class CachingAutotuner(KernelInterface):
                 "num_stages": compile_meta["num_stages"],
                 "debug": compile_meta["debug"],
             }
-            if self.device_props.type != "hip":
+            if self.device_props.type == "hip":
                 if "waves_per_eu" in compile_meta:
                     options["waves_per_eu"] = compile_meta["waves_per_eu"]
                 if "matrix_instr_nonkdim" in compile_meta:
@@ -655,11 +663,6 @@ class CachingAutotuner(KernelInterface):
         stream = device_interface.get_raw_stream(device_interface.current_device())
 
         def kernel_call():
-            if launcher.config.pre_hook is not None:
-                launcher.config.pre_hook(
-                    {**dict(zip(self.arg_names, args)), **launcher.config.kwargs}
-                )
-
             cloned_args, cloned_kwargs = self.clone_args(*args, **kwargs)
             launcher(
                 *cloned_args,
@@ -673,11 +676,12 @@ class CachingAutotuner(KernelInterface):
 
             return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
 
-        return benchmarker.benchmark_gpu(kernel_call, rep=40, fast_flush=True)
+        return benchmarker.benchmark_gpu(kernel_call, rep=40)
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
         from ..compile_fx import clone_preserve_strides
 
+        # [Note: clone mutated buffers]
         # clone inplace buffers to avoid autotune contaminating them if
         # the kernel does in-place stores. avoid cloning other buffers because
         # it leads to increase memory use
@@ -753,6 +757,7 @@ class CachingAutotuner(KernelInterface):
             "x_block": launcher.config.kwargs.get("XBLOCK", 1),
             "y_block": launcher.config.kwargs.get("YBLOCK", None),
             "z_block": launcher.config.kwargs.get("ZBLOCK", None),
+            "r_block": launcher.config.kwargs.get("RBLOCK", None),
             "num_warps": launcher.bin.num_warps
             if hasattr(launcher.bin, "num_warps")
             else launcher.bin.metadata.num_warps,
@@ -826,7 +831,7 @@ class CachingAutotuner(KernelInterface):
             )
         return config2launcher.get(best_config)
 
-    def run(self, *args, grid, stream, **kwargs):
+    def run(self, *args, grid, stream, **kwargs):  # type:ignore[override]
         if len(self.launchers) != 1:
             if len(self.launchers) == 0:
                 start_time = time.time_ns()
@@ -847,11 +852,6 @@ class CachingAutotuner(KernelInterface):
         (launcher,) = self.launchers
         if launcher.store_cubin:
             self.save_gpu_kernel(grid, stream, launcher)
-
-        if launcher.config.pre_hook is not None:
-            launcher.config.pre_hook(
-                {**dict(zip(self.arg_names, args)), **launcher.config.kwargs, **kwargs}
-            )
 
         if os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_PARAMS", 0) == "1":
             _dump_launch_params(args, kwargs, launcher, self.fn.__name__)
@@ -962,7 +962,7 @@ class DebugAutotuner(CachingAutotuner):
         super().__init__(*args, **kwargs)
         self.cached = None
 
-    def run(self, *args, grid, stream):
+    def run(self, *args, grid, stream):  # type: ignore[override]
         possible_names = _find_names(self)
         kernel_name = f"{max(possible_names, key=len)}"
         if not re.match(self.regex_filter, kernel_name):
@@ -1006,74 +1006,6 @@ def hash_configs(configs: List[Config]):
     return hasher.hexdigest()
 
 
-def load_cached_autotuning(
-    best_config,
-    configs_hash: str,
-    configs: List[Config],
-    inductor_meta: Dict[str, Any],
-):
-    if best_config is None:
-        return None
-    if best_config.pop("configs_hash", None) != configs_hash:
-        return None
-
-    # Remove time taken for comparison
-    best_config.pop("time_taken_ms", None)
-
-    if inductor_meta.get("coordinate_descent_tuning") and best_config.pop(
-        "found_by_coordesc", False
-    ):
-        num_warps = best_config.pop("num_warps")
-        num_stages = best_config.pop("num_stages")
-        triton_config = Config(best_config, num_warps=num_warps, num_stages=num_stages)
-        triton_config.found_by_coordesc = True
-        return triton_config
-
-    matching_configs = [
-        cfg
-        for cfg in configs
-        if all(val == best_config.get(key) for key, val in cfg.kwargs.items())
-        and cfg.num_warps == best_config.get("num_warps")
-        and cfg.num_stages == best_config.get("num_stages")
-    ]
-    if len(matching_configs) != 1:
-        return None
-
-    return matching_configs[0]
-
-
-def should_use_remote_autotune_cache(inductor_meta):
-    if inductor_meta.get("autotune_remote_cache") is not None:
-        return inductor_meta.get("autotune_remote_cache")
-    if not inductor_meta.get("is_fbcode"):
-        return False
-    if torch._utils_internal.is_fb_unit_test():
-        return False
-    if inductor_meta.get("is_hip"):
-        return False
-
-    try:
-        from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
-    except ModuleNotFoundError:
-        return False
-
-    return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
-        "pytorch/remote_cache:autotune_memcache_version"
-    )
-
-
-class LocalAutotuneCache:
-    def get(self, filename):
-        if os.path.exists(filename):
-            with open(filename) as fd:
-                return json.loads(fd.read())
-        return None
-
-    def put(self, filename, data):
-        with open(filename, "w") as fd:
-            fd.write(json.dumps(data))
-
-
 def cached_autotune(
     size_hints: Optional[List[int]],
     configs: List[Config],
@@ -1089,92 +1021,27 @@ def cached_autotune(
     """
     configs = unique_configs(configs)
     assert len(configs) == 1 or filename
-    save_cache_hook: Optional[Callable[[Any, Any, Any], Any]]
     inductor_meta = {} if inductor_meta is None else inductor_meta
 
+    disabled = inductor_meta.get("force_disable_caches", False)
+
     # on disk caching logic and/or remote caching
-    if filename is not None and (
-        len(configs) > 1 or inductor_meta.get("coordinate_descent_tuning")
+    autotune_cache = None
+    if (
+        not disabled
+        and filename is not None
+        and (len(configs) > 1 or inductor_meta.get("coordinate_descent_tuning"))
     ):
         configs_hash = hash_configs(configs)
 
-        local_cache = None
-        cache_filename = None
-        remote_cache: Optional[RemoteCacheBackend] = None
-        remote_cache_key = None
-        best_config = None
-        if not inductor_meta.get("force_disable_caches", False):
-            if inductor_meta.get("autotune_local_cache", True):
-                local_cache = LocalAutotuneCache()
-                cache_filename = os.path.splitext(filename)[0] + ".best_config"
-            if should_use_remote_autotune_cache(inductor_meta):
-                backend_hash = inductor_meta.get("backend_hash", None)
-                if backend_hash is not None:
-                    key = backend_hash + configs_hash + "autotune-best-config-v2"
-                    key = hashlib.sha256(key.encode("utf-8")).hexdigest()
-
-                    try:
-                        if inductor_meta.get("is_fbcode"):
-                            from torch._inductor.fb.remote_cache import (
-                                FbRemoteAutotuneCacheBackend,
-                            )
-
-                            remote_cache = FbRemoteAutotuneCacheBackend(key)
-                        else:
-                            from torch._inductor.remote_cache import (
-                                RedisRemoteCacheBackend,
-                            )
-
-                            remote_cache = RedisRemoteCacheBackend(key)
-                    except Exception:
-                        remote_cache = None
-                        log.warning("Unable to create a remote cache", exc_info=True)
-                    # we already sha256 hash the source contents
-                    remote_cache_key = os.path.basename(filename)
-                else:
-                    log.debug(
-                        "backend_hash is not passed on the inductor_meta, unable to use autotune remote cache"
-                    )
-
-            best_config = None
-            if local_cache is not None and cache_filename is not None:
-                best_config = local_cache.get(cache_filename)
-            if (
-                remote_cache is not None
-                and remote_cache_key is not None
-                and best_config is None
-            ):
-                best_config = remote_cache.get(remote_cache_key)
-
-            best_config = load_cached_autotuning(
-                best_config, configs_hash, configs, inductor_meta
-            )
-            if best_config:
+        autotune_cache = AutotuneCache.create(inductor_meta, filename, configs_hash)
+        if autotune_cache:
+            if best_config := autotune_cache.read_best(inductor_meta, configs):
                 configs = [best_config]
 
-        else:
-            log.debug("autotune caching is disabled by config.force_disable_caches")
-
-        def save_cache_hook(cfg, time_taken_ns, found_by_coordesc=False):
-            data = {
-                **cfg.kwargs,
-                "num_warps": cfg.num_warps,
-                "num_stages": cfg.num_stages,
-                "configs_hash": configs_hash,
-                "found_by_coordesc": found_by_coordesc,
-                "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
-            }
-            if local_cache is not None and cache_filename is not None:
-                local_cache.put(cache_filename, data)
-            if remote_cache is not None and remote_cache_key is not None:
-                remote_cache.put(remote_cache_key, data)  # type: ignore[arg-type]
-
-            if log.isEnabledFor(logging.DEBUG):
-                type_str = "coordesc" if found_by_coordesc else "heuristic"
-                log.debug("Save %s tuning result to %s", type_str, cache_filename)
-
     else:
-        save_cache_hook = None
+        if disabled:
+            log.debug("autotune caching is disabled by config.force_disable_caches")
 
     mutated_arg_names = inductor_meta.pop("mutated_arg_names", ())
 
@@ -1201,7 +1068,7 @@ def cached_autotune(
                     "profile_bandwidth_with_do_bench_using_profiling"
                 ],
                 configs=configs,
-                save_cache_hook=save_cache_hook,
+                save_cache_hook=autotune_cache and autotune_cache.save,
                 mutated_arg_names=mutated_arg_names,
                 heuristic_type=heuristic_type,
                 size_hints=size_hints,
@@ -1213,7 +1080,7 @@ def cached_autotune(
             triton_meta=triton_meta,
             inductor_meta=inductor_meta,
             configs=configs,
-            save_cache_hook=save_cache_hook,
+            save_cache_hook=autotune_cache and autotune_cache.save,
             mutated_arg_names=mutated_arg_names,
             heuristic_type=heuristic_type,
             size_hints=size_hints,
@@ -1278,10 +1145,10 @@ def _check_max_grid_x(size_hints, x, num_warps):
     while (num_blocks * num_warps * warp_size) > max_grid_x and x < size_hints[0]:
         x *= 2  # Scale up XBLOCK if grid exceeds limits
         num_blocks = num_blocks // 2
-        if x >= max_grid_x:
-            raise AssertionError(
-                "Reduction config exceeds cudaDeviceProp maxGridSize. Please raise a pytorch issue"
-            )
+    if (num_blocks * num_warps * warp_size) > max_grid_x:
+        raise AssertionError(
+            "Reduction config exceeds cudaDeviceProp maxGridSize. Please raise a pytorch issue"
+        )
     return x, num_blocks
 
 
@@ -1476,43 +1343,31 @@ def pointwise(
     bs = max(256, min(numel // 128, 1024))
 
     hinted_configs = autotune_hints_to_configs(
-        inductor_meta.get("autotune_hints", set()), size_hints, bs
+        inductor_meta.get("autotune_hints", set()),
+        size_hints,
+        bs,
+        triton_meta["device"],
     )
 
     triton_config_with_settings = functools.partial(
         triton_config, min_elem_per_thread=min_elem_per_thread
     )
 
+    configs = None
     if len(size_hints) == 1:
         if disable_pointwise_autotuning(inductor_meta) and not (
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
         ):
-            return cached_autotune(
-                size_hints,
-                [triton_config_with_settings(size_hints, bs)],
-                triton_meta=triton_meta,
-                inductor_meta=inductor_meta,
-                heuristic_type=HeuristicType.POINTWISE,
-                filename=filename,
-            )
+            configs = [triton_config_with_settings(size_hints, bs)]
         else:
-            return cached_autotune(
-                size_hints,
-                [
-                    triton_config_with_settings(
-                        size_hints, bs, num_elements_per_warp=256
-                    ),
-                    triton_config_with_settings(
-                        size_hints, bs // 2, num_elements_per_warp=64
-                    ),
-                    *hinted_configs,
-                ],
-                triton_meta=triton_meta,
-                inductor_meta=inductor_meta,
-                heuristic_type=HeuristicType.POINTWISE,
-                filename=filename,
-            )
+            configs = [
+                triton_config_with_settings(size_hints, bs, num_elements_per_warp=256),
+                triton_config_with_settings(
+                    size_hints, bs // 2, num_elements_per_warp=64
+                ),
+                *hinted_configs,
+            ]
     if len(size_hints) == 2:
         if (
             disable_pointwise_autotuning(inductor_meta) or tile_hint == TileHint.SQUARE
@@ -1520,17 +1375,9 @@ def pointwise(
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
         ):
-            return cached_autotune(
-                size_hints,
-                [triton_config_with_settings(size_hints, 32, 32)],
-                triton_meta=triton_meta,
-                inductor_meta=inductor_meta,
-                heuristic_type=HeuristicType.POINTWISE,
-                filename=filename,
-            )
-        return cached_autotune(
-            size_hints,
-            [
+            configs = [triton_config_with_settings(size_hints, 32, 32)]
+        else:
+            configs = [
                 triton_config_with_settings(size_hints, 32, 32),
                 triton_config_with_settings(size_hints, 64, 64),  # ~8% better for fp16
                 triton_config_with_settings(size_hints, 256, 16),
@@ -1538,25 +1385,12 @@ def pointwise(
                 triton_config_with_settings(size_hints, bs, 1),
                 triton_config_with_settings(size_hints, 1, bs),
                 *hinted_configs,
-            ],
-            triton_meta=triton_meta,
-            inductor_meta=inductor_meta,
-            filename=filename,
-            heuristic_type=HeuristicType.POINTWISE,
-        )
+            ]
     if len(size_hints) == 3:
         if disable_pointwise_autotuning(inductor_meta):
-            return cached_autotune(
-                size_hints,
-                [triton_config_with_settings(size_hints, 16, 16, 16)],
-                triton_meta=triton_meta,
-                inductor_meta=inductor_meta,
-                heuristic_type=HeuristicType.POINTWISE,
-                filename=filename,
-            )
-        return cached_autotune(
-            size_hints,
-            [
+            configs = [triton_config_with_settings(size_hints, 16, 16, 16)]
+        else:
+            configs = [
                 triton_config_with_settings(size_hints, 16, 16, 16),
                 triton_config_with_settings(size_hints, 64, 8, 8),
                 triton_config_with_settings(size_hints, 8, 64, 8),
@@ -1565,13 +1399,18 @@ def pointwise(
                 triton_config_with_settings(size_hints, 1, bs, 1),
                 triton_config_with_settings(size_hints, 1, 1, bs),
                 *hinted_configs,
-            ],
-            triton_meta=triton_meta,
-            inductor_meta=inductor_meta,
-            filename=filename,
-            heuristic_type=HeuristicType.POINTWISE,
-        )
-    raise NotImplementedError(f"size_hints: {size_hints}")
+            ]
+
+    if not configs:
+        raise NotImplementedError(f"size_hints: {size_hints}")
+    return cached_autotune(
+        size_hints,
+        configs,
+        triton_meta=triton_meta,
+        inductor_meta=inductor_meta,
+        heuristic_type=HeuristicType.POINTWISE,
+        filename=filename,
+    )
 
 
 def _reduction_configs(
@@ -1874,16 +1713,38 @@ def split_scan_grid(xnumel, rnumel):
     return grid_fn
 
 
-def grid_combo_kernels(*numels, num_kernels, min_blocks, is_sequential):
+def grid_combo_kernels(
+    *numels, num_kernels, min_blocks, is_sequential, default_meta=None
+):
     """min_blocks is the minimal size of the grid x dimension"""
     if not is_sequential:
         # round robin dispatch
-        kernel_grid_fn = grid(*numels)
+        numels_agg = list(numels)
+        for i in range(len(numels_agg)):
+            if isinstance(numels_agg[i], (list, tuple)):
+                numels_agg[i] = max(max(numels_agg[i]), 0)  # noqa: PLW3301
+        kernel_grid_fn = grid(*numels_agg)
+
+        if isinstance(numels[-1], (list, tuple)):
+            min_blocks_d = max(-min(numels[-1]), 0) * num_kernels
+        else:
+            min_blocks_d = None
+        if min_blocks is None:
+            assert min_blocks_d is not None
+            min_blocks = min_blocks_d
+        else:
+            assert (
+                min_blocks_d is None or min_blocks == min_blocks_d
+            ), f"inconsistent min_blocks {min_blocks} vs  x grid {numels[-1]}"
     else:
         # sequential dispatch
         seq_numels = list(numels)
         # x numels are not used here, just a place holder
         seq_numels[-1] = 1024
+        for i in range(len(seq_numels) - 1):
+            if isinstance(seq_numels[i], (list, tuple)):
+                seq_numels[i] = max(seq_numels[i])
+
         kernel_grid_fn = grid(*seq_numels)
 
     def get_grid_dim(numel, block):
@@ -1894,6 +1755,7 @@ def grid_combo_kernels(*numels, num_kernels, min_blocks, is_sequential):
         return ceildiv(numel, block)
 
     def grid_fn(meta):
+        assert min_blocks is not None, "min_blocks must be a number"
         cuda_grid = list(kernel_grid_fn(meta))
         cuda_grid[0] = max(num_kernels * cuda_grid[0], min_blocks)
         return tuple(cuda_grid)
@@ -1910,4 +1772,13 @@ def grid_combo_kernels(*numels, num_kernels, min_blocks, is_sequential):
         cuda_grid[0] = x_grid
         return tuple(cuda_grid)
 
-    return grid_fn if not is_sequential else seq_grid_fn
+    def grid_fn_default_meta(meta):
+        return grid_fn(default_meta)
+
+    def seq_grid_fn_default_meta(meta):
+        return seq_grid_fn(default_meta)
+
+    if default_meta is None:
+        return grid_fn if not is_sequential else seq_grid_fn
+    else:
+        return grid_fn_default_meta if not is_sequential else seq_grid_fn_default_meta
