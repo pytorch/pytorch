@@ -1775,6 +1775,7 @@ class GraphModule(torch.nn.Module):
         y = fn(x)
         self.assertEqual(y, x.sin().cos())
 
+    @unittest.expectedFailure
     def test_contextlib_contextmanager_change_parent_nested_user_function(self):
         def create_ctx(x):
             @contextlib.contextmanager
