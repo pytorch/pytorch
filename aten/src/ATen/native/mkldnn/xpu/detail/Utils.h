@@ -10,6 +10,7 @@
 #include <oneapi/dnnl/dnnl_sycl.hpp>
 #include <oneapi/dnnl/dnnl_version.h>
 
+#include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 
 #define ONEDNN_SUPPORT_DETERMINISTIC (DNNL_VERSION_MAJOR >=3 && DNNL_VERSION_MINOR >=4)
 
@@ -55,7 +56,47 @@ bool binary_valid(
 
 bool use_channels_last_for_conv(
     const at::Tensor& src,
-    const at::Tensor& weight,
-    bool is_transpose);
+    const at::Tensor& weight);
+
+dnnl::memory::format_tag conv_src_fmt(
+    const int64_t ndim,
+    const bool is_channels_last = false);
+
+dnnl::memory::dims compatible_weight_dims(
+    const int64_t ndim,
+    const int64_t groups,
+    const int64_t oc,
+    const int64_t ic,
+    const IntArrayRef wsizes);
+
+// dnnl::memory::dims compatible_dilation(IntArrayRef& dilation);
+
+dnnl::memory::format_tag conv_weight_fmt(
+    const int64_t ndim,
+    const bool grouped = false,
+    const bool is_channels_last = false);
+
+template <typename Vec>
+dnnl::memory::dims compatible_dilation(Vec&& dilation){
+    dnnl::memory::dims ret = dilation.vec();
+    for(auto it = ret.begin(); it != ret.end(); it++){
+        *it -=1;
+    }
+    return ret;
+}
+
+template <typename T>
+dnnl::memory dnnl_memory_from_host_scalar(
+    T host_value,
+    Tensor& holder,
+    dnnl::engine& engine) {
+  auto options = at::TensorOptions()
+                     .dtype(c10::CppTypeToScalarType<T>::value)
+                     .device(kXPU);
+  holder = at::empty({1}, options).fill_(host_value);
+  dnnl::memory::desc md = get_onednn_md(holder);
+  dnnl::memory mem = make_onednn_memory(md, engine, holder.data_ptr());
+  return mem;
+}
 
 } // namespace at::native::onednn

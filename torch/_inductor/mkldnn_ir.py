@@ -41,8 +41,8 @@ def _prepare_convolution_fusion_create(
     This function is a helper function to prepare inputs, layout and constant args
     for convolution post-op fusion's create function, including deciding the output
     layout (channels first or channels last), realizing inputs and make them etc. The
-    function only supports the CPU device since conv post-op fusion kernel is only
-    supported on CPU right now.
+    function only supports the CPU/XPU device since conv post-op fusion kernel is only
+    supported on CPU/XPU right now.
     """
 
     # Port from aten/src/ATen/native/ConvUtils.h: _conv_input_size
@@ -161,7 +161,7 @@ def _prepare_convolution_fusion_create(
     else:
         output_stride = make_channels_last_strides_for(output_size)
 
-    assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
+    assert x.get_device().type in ["xpu", "cpu"] and weight.get_device().type in ["cpu", "xpu"]
     inputs = [x, weight]
 
     kernel_layout = FixedLayout(
@@ -206,7 +206,8 @@ def _prepare_linear_fusion_create(
     req_stride_order = list(reversed(range(len(x.get_size()))))
 
     x = cls.require_stride_order(x, req_stride_order)
-    assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
+    assert x.get_device().type in ["cpu", "xpu"] and weight.get_device().type in ["cpu", "xpu"]
+    assert x.get_device().type == weight.get_device().type
     inputs = [x, weight]
 
     output_stride = FlexibleLayout.contiguous_strides(output_size)

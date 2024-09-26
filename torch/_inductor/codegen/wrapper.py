@@ -1595,7 +1595,6 @@ class WrapperCodeGen(CodeGen):
         elif isinstance(arg, (str, int, float, bool)):
             return str(arg)
         else:
-            breakpoint()
             raise NotImplementedError(f"Unsupported type {type(arg)}")
 
     def generate_kernel_call(
