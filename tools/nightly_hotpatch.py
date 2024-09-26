@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 
-import sys
-import os
-import subprocess
-import urllib.request
-import tempfile
-import shutil
 import argparse
-from pathlib import Path
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import urllib.request
+from typing import cast, List, NoReturn, Optional
 
 
-def parse_arguments():
+def parse_arguments() -> argparse.Namespace:
     """
     Parses command-line arguments using argparse.
 
@@ -46,7 +46,8 @@ def parse_arguments():
         "-d",
         type=str,
         default=None,
-        help="Optional. Specify the target directory to apply the patch. If not provided, the script will use the PyTorch installation path.",
+        help="Optional. Specify the target directory to apply the patch. "
+        "If not provided, the script will use the PyTorch installation path.",
     )
 
     parser.add_argument(
@@ -60,7 +61,7 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def get_pytorch_path():
+def get_pytorch_path() -> str:
     """
     Retrieves the installation path of PyTorch in the current environment.
 
@@ -73,17 +74,28 @@ def get_pytorch_path():
     try:
         import torch
 
-        torch_path = torch.__path__[0]
-        parent_path = os.path.dirname(torch_path)
+        torch_paths: List[str] = cast(List[str], torch.__path__)
+        torch_path: str = torch_paths[0]
+        parent_path: str = os.path.dirname(torch_path)
         print(f"PyTorch is installed at: {torch_path}")
         print(f"Parent directory for patching: {parent_path}")
         return parent_path
     except ImportError:
-        print("Error: PyTorch is not installed in the current Python environment.")
-        sys.exit(1)
+        handle_import_error()
 
 
-def download_patch(pr_number, repo_url, download_dir):
+def handle_import_error() -> NoReturn:
+    """
+    Handle the case where PyTorch is not installed and exit the program.
+
+    Exits:
+        NoReturn: This function will terminate the program.
+    """
+    print("Error: PyTorch is not installed in the current Python environment.")
+    sys.exit(1)
+
+
+def download_patch(pr_number: int, repo_url: str, download_dir: str) -> str:
     """
     Downloads the patch file for a given PR from the specified GitHub repository.
 
@@ -119,13 +131,13 @@ def download_patch(pr_number, repo_url, download_dir):
         sys.exit(1)
 
 
-def apply_patch(patch_file, target_dir, strip_count):
+def apply_patch(patch_file: str, target_dir: Optional[str], strip_count: int) -> None:
     """
     Applies the downloaded patch to the specified directory using the given strip count.
 
     Args:
         patch_file (str): The path to the patch file.
-        target_dir (str): The directory to apply the patch to.
+        target_dir (Optional[str]): The directory to apply the patch to. If None, uses PyTorch installation path.
         strip_count (int): The number of leading directories to strip from file paths in the patch.
 
     Exits:
@@ -148,10 +160,7 @@ def apply_patch(patch_file, target_dir, strip_count):
             print(f"Running command: {' '.join(patch_command)}")
             result = subprocess.run(patch_command, capture_output=True, text=True)
         else:
-            # Use the PyTorch installation path without specifying -d
-            patch_command.insert(
-                1, f"-d{target_dir}"
-            )  # Even if target_dir is not provided, get_pytorch_path() ensures it's set
+            patch_command.insert(1, f"-d{target_dir}")
             print(f"Running command: {' '.join(patch_command)}")
             result = subprocess.run(patch_command, capture_output=True, text=True)
 
@@ -172,7 +181,7 @@ def apply_patch(patch_file, target_dir, strip_count):
         sys.exit(1)
 
 
-def main():
+def main() -> None:
     """
     Main function to orchestrate the patch download and application process.
 
@@ -196,20 +205,13 @@ def main():
         target_dir = custom_target_dir
         print(f"Using custom target directory: {target_dir}")
     else:
-        # Get the path where PyTorch is installed
         target_dir = get_pytorch_path()
 
-    # Set the repository URL
     repo_url = "https://github.com/pytorch/pytorch"
 
-    # Download the PR patch from GitHub
     with tempfile.TemporaryDirectory() as tmpdirname:
         patch_file = download_patch(pr_number, repo_url, tmpdirname)
-
-        # Apply the patch to the specified directory with the given strip count
         apply_patch(patch_file, target_dir, strip_count)
-
-        # Clean up is handled automatically by TemporaryDirectory
 
 
 if __name__ == "__main__":
