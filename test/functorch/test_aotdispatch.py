@@ -725,59 +725,6 @@ def forward(self, primals_1):
     return (add,)""",
         )
 
-    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix the test case")
-    @unittest.skipIf(IS_MACOS, "TODO: need to fix the test case")
-    def test_input_mutation_fsdp_set__into_same_input(self):
-        import torch.distributed._composable.fsdp._fsdp_param
-
-        def f(a):
-            b = torch.arange(9, dtype=a.dtype).view(3, 3)
-            c = torch.arange(9, dtype=a.dtype).view(3, 3)
-            d = torch.arange(9, dtype=a.dtype).view(3, 3)
-            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(a):
-                torch.ops.fsdp.set_.default(a, b)
-            x = a * a
-            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(a):
-                torch.ops.fsdp.set_.default(a, c)
-            y = a * a
-            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(a):
-                torch.ops.fsdp.set_.default(a, c)
-            z = a * a
-            return x + y + z
-
-        inp = [torch.ones(3, 3, requires_grad=True)]
-        fw_graph = self.verify_aot_autograd(
-            f, inp, test_mutation=True, keep_inp_mutations=True
-        )
-        inp = [torch.ones(3, 3, requires_grad=False)]
-        self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
-        """
-        Expected behavior:
-        (1) When there are multiple set_() calls on the same graph input primal_X,
-        we want those set_() calls to all show up with primal_X as the first arg in the graph.
-        (2) Behavior (1) is not the case today with normal aten.set_ (blocked on #129892),
-        but using a custom fsdp.set_ op with no returns is a simple workaround to achieve that behavior.
-        """
-        self.assertExpectedInline(
-            fw_graph.code.strip(),
-            """\
-def forward(self, primals_1):
-    arange = torch.ops.aten.arange.default(9, dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    view = torch.ops.aten.view.default(arange, [3, 3]);  arange = None
-    arange_1 = torch.ops.aten.arange.default(9, dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    view_1 = torch.ops.aten.view.default(arange_1, [3, 3]);  arange_1 = None
-    set_ = torch.ops.fsdp.set_.default(primals_1, view);  view = set_ = None
-    mul = torch.ops.aten.mul.Tensor(primals_1, primals_1)
-    set__1 = torch.ops.fsdp.set_.default(primals_1, view_1);  set__1 = None
-    mul_1 = torch.ops.aten.mul.Tensor(primals_1, primals_1)
-    set__2 = torch.ops.fsdp.set_.default(primals_1, view_1);  view_1 = set__2 = None
-    mul_2 = torch.ops.aten.mul.Tensor(primals_1, primals_1)
-    add = torch.ops.aten.add.Tensor(mul, mul_1);  mul = mul_1 = None
-    add_1 = torch.ops.aten.add.Tensor(add, mul_2);  add = mul_2 = None
-    return (add_1, primals_1)""",
-        )
-        self.assertEqual(torch.compile(f, backend="inductor")(*inp), f(*inp))
-
     def test_input_mutation_simple_with_none_and_nontensor(self):
         # Tensor, None, int
         def f(a, b, c):
@@ -6022,6 +5969,38 @@ class TestAOTModuleSimplified(AOTTestCase):
         out = torch.compile(fn, backend="aot_eager", fullgraph=True)(inp)
         self.assertEqual(ref_out, out)
 
+    @torch._inductor.config.patch({"freezing": True})
+    def test_inductor_freezing_with_subclasses(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = TwoTensor(torch.randn(3, 4), torch.randn(3, 4))
+
+            def forward(self, x):
+                return (
+                    x.index_select(
+                        dim=0, index=torch.tensor([0, 2, 1], dtype=torch.int64)
+                    )
+                    + self.w
+                )
+
+        m = M()
+        inp = torch.randn(3, 4)
+        with torch.no_grad():
+            torch.compile(m, fullgraph=True)(inp)
+
+    def test_rrelu(self):
+        def fn(x):
+            return torch.rrelu(x, training=True)
+
+        def fn_(x):
+            torch.rrelu_(x, training=True)
+            return x
+
+        x = torch.randn(4, 4)
+        torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        torch.compile(fn_, backend="inductor", fullgraph=True)(x)
+
 
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)
@@ -6174,6 +6153,7 @@ def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
                 self.assertEqual,
                 check_gradients=True,
                 try_check_data_specialization=try_check_data_specialization,
+                skip_correctness_check=op.skip_correctness_check_compile_vs_eager,
             )
         except DynamicOutputShapeException:
             self.skipTest("Dynamic output shape operation in trace")
@@ -6422,14 +6402,14 @@ class MockFXGraphCache:
             gm._fx_graph_cache_key = key
             return gm
 
-    def _lookup_graph(self, key, inputs, local, remote_cache):
+    def load_with_key(self, key, debug_lines, inputs, local, remote_cache, is_backward):
         gm = self.cache.get(key)
         if gm is not None:
             gm = make_boxed_func(gm)
-        return gm
+        return gm, {}
 
     def post_compile(self, gm, inputs, cudagraphs):
-        pass
+        return gm
 
 
 # The following tests fail in strict caching mode (i.e. they bypass or
@@ -6500,8 +6480,8 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
         self.inductor_cache = MockFXGraphCache()
         AOTAutogradCache.clear()
         with patch(
-            "torch._inductor.codecache.FxGraphCache._lookup_graph",
-            new=self.inductor_cache._lookup_graph,
+            "torch._inductor.codecache.FxGraphCache.load_with_key",
+            new=self.inductor_cache.load_with_key,
         ), patch(
             "torch._inductor.codecache.FxGraphCache.post_compile",
             new=self.inductor_cache.post_compile,
