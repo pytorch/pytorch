@@ -234,7 +234,7 @@ class PackageExporter:
         elif isinstance(f, BinaryIO):  # is a byte buffer
             self.buffer = f
         else:
-            raise AttributeError(
+            raise TypeError(
                 "expected 'f' to be string, path, or a binary I/O object "
                 f"but got {type(f)}"
             )
