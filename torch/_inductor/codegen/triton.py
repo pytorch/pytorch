@@ -2736,7 +2736,7 @@ class TritonKernel(SIMDKernel):
         code = IndentedBuffer()
 
         size_hints = []
-        for numel in self.numels:
+        for numel in self.numels.values():
             numel_hint = V.graph.sizevars.symbolic_hint(numel)
             if not isinstance(numel_hint, (int, sympy.Integer)):
                 # This default heuristic hint was picked carefully: it is

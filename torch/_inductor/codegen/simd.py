@@ -684,7 +684,7 @@ class SIMDKernel(Kernel):
         simplify = V.graph.sizevars.simplify
         return any(
             simplify(idx_range) != simplify(iter_range)  # type: ignore[arg-type]
-            for idx_range, iter_range in zip(index_numels, self.numels)
+            for idx_range, iter_range in zip(index_numels, self.numels.values())
         )
 
     def index_to_str(self, index: sympy.Expr) -> str:
@@ -850,7 +850,7 @@ class SIMDKernel(Kernel):
         # for the "cat". However, I think it might be a bit overwhelming that
         # we add such complexity only for handling some particular cases for
         # benchmarking.
-        out_numel = V.graph.sizevars.size_hint(sympy_product(self.numels))
+        out_numel = V.graph.sizevars.size_hint(sympy_product(self.numels.values()))
         for i, arg in enumerate(call_args):
             # "buf" may be narrowed. In this case, the number of memory accesses
             # should be estimated based on the reinterpreted layout.
@@ -1844,6 +1844,7 @@ class SIMDScheduling(BaseScheduling):
                 for node in node_schedule
                 if isinstance(node, scheduler.SchedulerNode)
             ]
+
             new_tilings: OrderedSet[
                 Dict[str, sympy.Expr]
             ] = OrderedSet()
