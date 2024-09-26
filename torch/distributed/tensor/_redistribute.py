@@ -312,11 +312,13 @@ class Redistribute(torch.autograd.Function):
             output = input._local_tensor
             target_spec = current_spec
 
-        return dtensor.DTensor(
-            output,
-            target_spec,
-            requires_grad=input.requires_grad,
-        )
+        dtensor_meta_dict = dtensor.dtensor_meta_dict()
+        meta_hash = hash(target_spec) + hash(input.requires_grad)
+        dtensor_meta_dict[meta_hash] = {
+            "spec": target_spec,
+            "requires_grad": input.requires_grad,
+        }
+        return torch.ops.dtensor.create_dtensor(output, meta_hash)
 
     @staticmethod
     def backward(ctx, grad_output: "dtensor.DTensor"):  # type: ignore[override]

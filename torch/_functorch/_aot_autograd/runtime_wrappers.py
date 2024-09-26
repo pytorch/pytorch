@@ -68,6 +68,45 @@ from .utils import (
 
 zip = strict_zip
 
+lib = torch.library.Library("aot", "FRAGMENT")
+
+
+def unwrap_subclass_impl(x):
+    attrs = x.__tensor_flatten__()[0]
+    tensors = [getattr(x, a) for a in attrs]
+    for t in tensors:
+        assert not is_traceable_wrapper_subclass(
+            t
+        ), "Not supported nested subclass tangents for now"
+    return tensors
+
+
+lib.define("unwrap_subclass(Tensor x) -> Tensor[]")
+lib.impl("unwrap_subclass", unwrap_subclass_impl, "Autograd")
+lib.impl("unwrap_subclass", unwrap_subclass_impl, "Python")
+
+
+def unwrap_tensor_subclasses_for_compiled_autograd(all_args):
+    args_unwrapped = []
+    for a in all_args:
+        if is_traceable_wrapper_subclass(a):
+            curr_unwrapped = torch.ops.aot.unwrap_subclass(a)
+            args_unwrapped.extend(curr_unwrapped)
+        else:
+            args_unwrapped.append(a)
+    return tuple(args_unwrapped)
+
+
+def wrap_tensor_subclasses_for_compiled_autograd(outs, subclass_metas):
+    outs_wrapped = []
+    for subclass_meta in subclass_metas:
+        if isinstance(subclass_meta, int):
+            outs_wrapped.append(outs[subclass_meta])
+        else:
+            assert isinstance(subclass_meta, SubclassCreationMeta)
+            outs_wrapped.append(subclass_meta.creation_fn(outs, is_runtime=False))
+    return tuple(outs_wrapped)
+
 
 class CompilerWrapper:
     """
@@ -1865,9 +1904,10 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         )
                         for i, t in enumerate(all_args)
                     ]
-                    all_args = unwrap_tensor_subclasses(
-                        all_args, is_joint_structure=False
-                    )
+                    if ctx._is_compiled_autograd_tracing():
+                        all_args = unwrap_tensor_subclasses_for_compiled_autograd(all_args)
+                    else:
+                        all_args = unwrap_tensor_subclasses(all_args, is_joint_structure=False)
                     tangents_start_idx = (
                         len(all_args) - len_tangents - len(rng_args) - len(bw_tokens)
                     )
@@ -2053,10 +2093,15 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         CompiledFunction.maybe_subclass_metadata.grad_input_metas
                         is not None
                     )
-                    outs_wrapped = wrap_tensor_subclasses(
-                        out,
-                        subclass_metas=CompiledFunction.maybe_subclass_metadata.grad_input_metas,
-                    )
+                    if ctx._is_compiled_autograd_tracing():
+                        outs_wrapped = wrap_tensor_subclasses_for_compiled_autograd(
+                            out, CompiledFunction.maybe_subclass_metadata.grad_input_metas
+                        )
+                    else:
+                        outs_wrapped = wrap_tensor_subclasses(
+                            out,
+                            subclass_metas=CompiledFunction.maybe_subclass_metadata.grad_input_metas,
+                        )
                     return outs_wrapped
                 return out
 
