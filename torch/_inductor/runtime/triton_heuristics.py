@@ -656,14 +656,23 @@ class CachingAutotuner(KernelInterface):
             )
             return float("inf")
 
+        cpu_copies = self.copy_args_to_cpu_if_needed(*args, **kwargs)
+
         device_interface = self.get_device_interface()
         stream = device_interface.get_raw_stream(device_interface.current_device())
 
         def kernel_call():
-            cloned_args, cloned_kwargs = self.clone_args(*args, **kwargs)
+            # cloned_args, cloned_kwargs = self.clone_args(on_cpu_args, *args, **kwargs)
+            # launcher(
+            #     *cloned_args,
+            #     **cloned_kwargs,
+            #     grid=grid,
+            #     stream=stream,
+            # )
+            new_args, new_kwargs = self.prepare_args(cpu_copies, *args, **kwargs)
             launcher(
-                *cloned_args,
-                **cloned_kwargs,
+                *new_args,
+                **new_kwargs,
                 grid=grid,
                 stream=stream,
             )
@@ -673,7 +682,64 @@ class CachingAutotuner(KernelInterface):
 
             return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
 
-        return benchmarker.benchmark_gpu(kernel_call, rep=40)
+        result = benchmarker.benchmark_gpu(kernel_call, rep=40)
+        self.restore_copied_args(cpu_copies)
+        return result
+
+    def copy_args_to_cpu_if_needed(self, *args, **kwargs):
+        copies = {}
+        budget = torch.cuda.max_memory_allocated() - torch.cuda.memory_allocated()
+
+        def maybe_copy(name, arg):
+            if name in self.mutated_arg_names:
+                nonlocal budget
+                assert isinstance(arg, torch.Tensor)
+                assert not arg.is_cpu
+                size = arg.numel() * arg.element_size()
+                if size > budget:
+                    cpu_arg = torch.empty_strided(
+                        arg.size(),
+                        arg.stride(),
+                        dtype=arg.dtype,
+                        device="cpu",
+                        pin_memory=True,
+                    )
+                    cpu_arg.copy_(arg, non_blocking=True)
+                    copies[name] = (arg, cpu_arg)
+                else:
+                    budget -= size
+
+        for i, arg in enumerate(args):
+            maybe_copy(self.fn.arg_names[i], arg)
+
+        for name, arg in kwargs.items():
+            maybe_copy(name, arg)
+
+        return copies
+
+    def restore_copied_args(self, cpu_copies):
+        for _, pair in cpu_copies.items():
+            arg, cpu_arg = pair
+            arg.copy_(cpu_arg, non_blocking=True)
+
+    def prepare_args(self, cpu_copies, *args, **kwargs):
+        def prepare_arg(name, arg):
+            if name in cpu_copies:
+                arg.uniform_(0, 1)
+                return arg
+            elif name in self.mutated_arg_names:
+                return torch.rand_like(arg)
+            else:
+                return arg
+
+        new_args = [
+            prepare_arg(self.fn.arg_names[i], arg) for i, arg in enumerate(args)
+        ]
+        new_kwargs = {
+            name: prepare_arg(name, arg) for name, arg in kwargs.items()
+        }
+
+        return new_args, new_kwargs
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
         from ..compile_fx import clone_preserve_strides
