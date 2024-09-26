@@ -95,8 +95,6 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check for keep-going label and re-enabled test issues
-
       - name: Install PyTorch and run MPS tests
         id: test
         env:
