@@ -6016,7 +6016,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         y = torch.randn(8)
         out_ref = fn(x, y)
         out_test = torch.compile(fn, dynamic=True)(x, y)
-        breakpoint()
         self.assertEqual(out_ref, out_test)
 
     # https://github.com/pytorch/pytorch/issues/119162
