@@ -155,7 +155,6 @@ class _PipelineStageBase(ABC):
 
         # Forward infra
         self.args_recv_info: Dict[int, Tuple[InputInfo, ...]] = {}
-        self.set_requires_grad: Dict[int, bool] = {}
         self.act_send_info: Dict[int, List] = {}
 
         # Backward infra will created lazily
@@ -309,7 +308,7 @@ class _PipelineStageBase(ABC):
 
         # In case there is backward pass, set requires_grad for receive buffers
         # before first forward
-        if self.has_backward and not self.set_requires_grad[fwd_chunk_id]:
+        if self.has_backward:
             for a in recv_infos:
                 if isinstance(a, _RecvInfo):
                     a.buffer.requires_grad_(True)
@@ -860,11 +859,8 @@ class _PipelineStage(_PipelineStageBase):
         """
         Create send/recv infrastructures for activations (during forward)
         """
-        # Flag per chunk to keep track of whether we have set `requires_grad`
-        # for receive buffers. Format: {chunk : Boolean}
         for chunk in range(num_microbatches):
             self.args_recv_info[chunk] = self._create_act_recv_info()
-            self.set_requires_grad[chunk] = False
 
         # Send info during forward for each activation
         self.act_send_info = self._create_act_send_info()
@@ -1319,7 +1315,6 @@ class PipelineStage(_PipelineStageBase):
         # Receive info during forward
         # TODO: create args_recv_info lazily? (same needed for PipelineStage)
         for chunk_id in range(num_microbatches):
-            self.set_requires_grad[chunk_id] = False
             if not self.is_first:
                 # We assume that we always receive from stage - 1
                 recv_infos = tuple(
