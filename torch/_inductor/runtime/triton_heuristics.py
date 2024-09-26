@@ -696,7 +696,7 @@ class CachingAutotuner(KernelInterface):
                 assert isinstance(arg, torch.Tensor)
                 assert not arg.is_cpu
                 size = arg.numel() * arg.element_size()
-                if size > budget:
+                if torch.is_floating_point(arg) and size > budget:
                     cpu_arg = torch.empty_strided(
                         arg.size(),
                         arg.stride(),
@@ -723,12 +723,15 @@ class CachingAutotuner(KernelInterface):
             arg.copy_(cpu_arg, non_blocking=True)
 
     def prepare_args(self, cpu_copies, *args, **kwargs):
+        from ..compile_fx import clone_preserve_strides
+
         def prepare_arg(name, arg):
             if name in cpu_copies:
+                assert torch.is_floating_point(arg)
                 arg.uniform_(0, 1)
                 return arg
             elif name in self.mutated_arg_names:
-                return torch.rand_like(arg)
+                return clone_preserve_strides(arg)
             else:
                 return arg
 

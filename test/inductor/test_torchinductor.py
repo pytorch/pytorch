@@ -7785,6 +7785,8 @@ class CommonTemplate:
                 torch._dynamo.reset()
 
                 x = torch.ones(1024, device=self.device, dtype=torch.float32)
+                # Run once to exercise auto-tuning.
+                fn(x)
 
                 torch.manual_seed(1234)
                 a0 = fn(x).clone()
