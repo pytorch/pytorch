@@ -166,6 +166,9 @@ def _run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
         raise
 
 
+_nil = object()
+
+
 def sympy_interp(
     analysis,
     env: Dict[sympy.Symbol, Any],
@@ -186,8 +189,8 @@ def sympy_interp(
     if dtype is not None:
         return analysis.constant(expr, dtype)
     elif isinstance(expr, sympy.Symbol):
-        if expr in env:
-            return env[expr]
+        if (r := env.get(expr, _nil)) is not _nil:
+            return r
         elif missing_handler:
             return missing_handler(expr)
         else:
