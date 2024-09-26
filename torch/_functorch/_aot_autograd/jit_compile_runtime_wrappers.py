@@ -11,7 +11,6 @@ An aot_dispatch_* function:
 
 import itertools
 import logging
-import traceback
 from contextlib import nullcontext
 from typing import Any, Callable, List, Optional, Sequence, Tuple
 
@@ -671,31 +670,6 @@ def aot_dispatch_autograd(
                     placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_stride)
 
             compiled_bw_func = None
-            print(f"XXX_CHECK: num_symints_saved_for_bw:{num_symints_saved_for_bw}")
-            if num_symints_saved_for_bw > 0:
-                # XXX Ahead of time compilation of backward for dynamic shapes when some symints were saved for Backward
-                context = torch._C._DisableAutocast if disable_amp else nullcontext
-                with context():
-                    try:
-                        compiled_bw_func = aot_config.bw_compiler(
-                            bw_module, placeholder_list
-                        )
-                    except Exception as e:
-                        exc = e
-                        trace_structured(
-                            "artifact",
-                            metadata_fn=lambda: {
-                                "name": "eager_compile_backwards_failure",
-                                "encoding": "string",
-                            },
-                            payload_fn=lambda: "\n".join(
-                                traceback.format_exception(exc)
-                            ),
-                        )
-                        log.warning(
-                            "failed to eagerly compile backwards for dynamic, suppressing in case backwards not needed",
-                            exc_info=True,
-                        )
             # Compiled autograd will run the bw_module in the backward pass,
             # so recompilation need happen anyway if the backward pass is ever
             # called.

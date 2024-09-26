@@ -6015,13 +6015,11 @@ class TestAOTModuleSimplified(AOTTestCase):
         inps = inps_fn()
         torch._dynamo.mark_dynamic(inps[0], 0)
 
-        print("XXX COMPILE_SAVED_SYMINTS")
         out = torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=True)(
             *inps
         )
         out.sum().backward()
 
-        print("XXX COMPILE_NO_SAVED_SYMINTS")
         torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=False)(
             *inps_fn()
         ).sum().backward()
