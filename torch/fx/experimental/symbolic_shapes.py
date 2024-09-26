@@ -4993,7 +4993,7 @@ class ShapeEnv:
 
         # When specializing 'a == tgt', the equality should be also conveyed to
         # Z3, in case an expression uses 'a'.
-        self._add_target_expr(sympy.Eq(a, tgt))
+        self._add_target_expr(sympy.Eq(a, tgt, evaluate=False))
 
     def _add_divisible(self, expr: "sympy.Expr"):
         self.divisible.add(expr)
