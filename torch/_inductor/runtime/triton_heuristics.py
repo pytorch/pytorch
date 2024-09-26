@@ -279,16 +279,17 @@ class CachingAutotuner(KernelInterface):
                 for triton_config, compiled_binary in zip(
                     self.configs, compiled_binaries
                 ):
-                    assert len(self.size_hints) == 2
+                    assert len(self.size_hints) >= 2
                     xblock = triton_config.kwargs.get("XBLOCK", 1)
-                    rblock = triton_config.kwargs["R0_BLOCK"]
+                    reduction_kwargs = [kwarg for kwarg in triton_config.kwargs if kwarg.startswith("R")]
+                    rblocks = [triton_config.kwargs[kwarg] for kwarg in reduction_kwargs]
                     total_block = (self.size_hints[0] + xblock - 1) // xblock
                     nreg = getattr(compiled_binary, "n_regs", None)
                     if nreg is None:
                         continue
 
-                    # make sure rblock is not too small
-                    if rblock <= 64:
+                    # make sure rblocks are not too small
+                    if any(block <= 64 for block in rblocks):
                         continue
 
                     # each SM of A100 has 65536 32-bit registers. To maximize
@@ -331,7 +332,8 @@ class CachingAutotuner(KernelInterface):
                         # no need to improve occupancy
                         continue
                     new_config = copy.deepcopy(triton_config)
-                    new_config.kwargs["R0_BLOCK"] = rblock // 2
+                    for kwarg in reduction_kwargs:
+                        new_config.kwargs[kwargs] //= 2
                     if new_config in seen_configs:
                         continue
                     seen_configs.add(new_config)

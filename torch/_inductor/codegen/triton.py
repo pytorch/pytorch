@@ -325,13 +325,14 @@ class BlockPtrOptions:
             assert range_trees[0].prefix == "x"
             final_shape.pop(0)
 
+        reduction_ndim = V.kernel.num_reduction_dims
         if (
             not V.kernel.inside_reduction
-            and len(params.strides) == len(V.kernel.numels) - 1
+            and len(params.strides) == len(V.kernel.numels) - reduction_ndim
             and V.kernel.total_reduction_numel != 1
         ):
-            # Need to expand rank by 1 to match rank when self.inside_reduction=True
-            final_shape.append(sympy.Integer(1))
+            # Need to expand rank to match the rank used inside the reduction loop
+            final_shape += [sympy.Integer(1)] * reduction_ndim
 
         return BlockPtrOptions(
             params=params,
