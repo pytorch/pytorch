@@ -11,10 +11,9 @@ from utils.metrics import get_execution_time, MetricResult, Metrics
 import torch
 
 
-enable_profile = False
-
-
 # Create operator instances from desired operator names
+
+
 def create_operator_instances(
     operator_names: list[str],
     name_to_variant_list: dict[str, list[BaseOperator]],
@@ -55,10 +54,11 @@ def benchmark_operator(operator: BaseOperator, benchmark_config: BenchmarkConfig
             record_shapes=False,
             profile_memory=False,
             on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                f"./log/operator_{operator.full_name}", use_gzip=True
+                f"{benchmark_config.profile_folder}/operator_{operator.full_name}",
+                use_gzip=True,
             ),
         )
-        if enable_profile
+        if benchmark_config.profile
         else nullcontext()
     )
     with profiler_context:
@@ -75,7 +75,7 @@ def benchmark_operator(operator: BaseOperator, benchmark_config: BenchmarkConfig
             execution_time = []
             record_sample_context = (
                 torch.profiler.record_function(f"sample_{i}")
-                if enable_profile
+                if benchmark_config.profile
                 else nullcontext()
             )
 
@@ -87,7 +87,7 @@ def benchmark_operator(operator: BaseOperator, benchmark_config: BenchmarkConfig
 
                     record_repeat_context = (
                         torch.profiler.record_function(f"repeat_{repeat_idx}")
-                        if enable_profile
+                        if benchmark_config.profile
                         else nullcontext()
                     )
                     with record_repeat_context:
@@ -137,13 +137,25 @@ def benchmark_operator(operator: BaseOperator, benchmark_config: BenchmarkConfig
     default="",
 )
 @click.option("--profile", help="profile", is_flag=True, default=False)
+@click.option(
+    "--profile-folder",
+    help="set profile folder",
+    default="./log",
+)
 def run_benchmarks(
-    op, dtype, max_samples, device, phase, repeat, metrics, skip_variants, profile
+    op,
+    dtype,
+    max_samples,
+    device,
+    phase,
+    repeat,
+    metrics,
+    skip_variants,
+    profile,
+    profile_folder,
 ):
-    global enable_profile
-    enable_profile = profile
     # process arguments and generate benchmark config
-    dtype = dtype_mapping.get(dtype, torch.float32)  # Default to float32 if not found
+    dtype = dtype_mapping.get(dtype)
     metrics = [
         Metrics[metric.strip().upper()]
         for metric in metrics.split(",")
@@ -161,6 +173,8 @@ def run_benchmarks(
         max_samples=max_samples,
         repeat=repeat,
         metrics=metrics,
+        profile=profile,
+        profile_folder=profile_folder,
     )
 
     # This is a list of classes, not instances

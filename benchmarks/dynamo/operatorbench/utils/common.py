@@ -35,6 +35,8 @@ class BenchmarkConfig:
     max_samples: int
     repeat: int
     metrics: List[Metrics]
+    profile: bool
+    profile_folder: str
 
 
 class Phase(Enum):
