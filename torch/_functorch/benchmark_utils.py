@@ -215,15 +215,17 @@ def benchmark_utilization(
         optimize_ctx = contextlib.nullcontext()
 
     chrome_trace_file_name = os.path.join(trace_folder, trace_file_name + ".json")
+    
     total_length = dump_chrome_trace(
-        f,
-        input,
-        chrome_trace_file_name,
-        optimize_ctx,
-        [ProfilerActivity.CUDA],
-        num_runs=num_runs,
-        devices="cuda",
-    )
+    f,
+    input,
+    chrome_trace_file_name,
+    optimize_ctx,
+    [ProfilerActivity.CUDA],
+    num_runs=num_runs,
+    devices=["cuda"],  # Changed from "cuda" to ["cuda"]
+)
+
     utilization, mm_conv_utilization = compute_utilization(
         chrome_trace_file_name, total_length
     )
