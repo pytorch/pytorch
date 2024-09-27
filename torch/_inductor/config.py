@@ -927,7 +927,9 @@ class triton:
     # Note: This is orthogonal to descriptive_names - this is deciding whether
     # our triton kernel names should all be `triton_` (to maximize caching) or
     # whether they should be unique.
-    unique_kernel_names = os.environ.get("TORCHINDUCTOR_UNIQUE_KERNEL_NAMES") == "1"
+    unique_kernel_names = (
+        os.environ.get("TORCHINDUCTOR_UNIQUE_KERNEL_NAMES", "1") == "1"
+    )
 
     # should we put op names in kernel names
     # False: No special names (just triton__1, triton__2, etc.)
@@ -1149,7 +1151,7 @@ class rocm:
     use_preselected_instances: bool = False
 
 
-# Backend to use for CPU codegen either "cpp" or "halide" (experimental)
+# Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental)
 cpu_backend = "cpp"
 
 # Backend to use for CUDA codegen either "triton" or "halide" (experimental)
