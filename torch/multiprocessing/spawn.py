@@ -133,7 +133,8 @@ class ProcessContext:
         Args:
             timeout (float): Wait this long (in seconds) before giving up on waiting.
             grace_period (float): When any processes fail, wait this long (in seconds)
-                for others to shutdown gracefully before killing them.
+                for others to shutdown gracefully before terminating them. If they
+                still don't exit, wait another grace period before killing them.
         """
         # Ensure this function can be called even when we're done.
         if len(self.sentinels) == 0:
