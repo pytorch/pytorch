@@ -224,6 +224,13 @@ test_Bq_Bkv = [
     (5, 1),
 ]
 
+test_block_size = [
+    128,
+    256,
+    (128, 256),
+    (256, 128),
+]
+
 
 def query_key_value_clones(
     query: torch.Tensor,
@@ -814,6 +821,19 @@ class TestFlexAttention(InductorTestCase):
             S,
             D,
         )
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    @common_utils.parametrize("BLOCK_SIZE", test_block_size)
+    def test_builtin_score_mods_different_block_size(
+        self,
+        dtype: torch.dtype,
+        score_mod: Callable,
+        BLOCK_SIZE: Union[int, Tuple[int, int]],
+    ):
+        block_mask = create_block_mask(noop_mask, B, H, S, S, BLOCK_SIZE=BLOCK_SIZE)
+        self.run_test(score_mod, dtype, block_mask=block_mask)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1652,7 +1672,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_aot_eager_gradcheck(self, score_mod):
         make_tensor = functools.partial(
             torch.randn,
-            (2, 2, 128, 4),
+            (2, 2, 11, 4),
             device="cuda",
             dtype=torch.float64,
             requires_grad=True,
@@ -2082,14 +2102,16 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 self.skipTest("backend=flex_decode is unsupported on ROCM, for now")
             kernel_options = {"FORCE_USE_FLEX_ATTENTION": False}
             flex_call = torch.compile(flex_attention, fullgraph=True)
+            N_CTX = 96
         elif backend == "flex_attention":
             kernel_options = {"FORCE_USE_FLEX_ATTENTION": True}
             flex_call = torch.compile(flex_attention, fullgraph=True)
+            N_CTX = 196
         else:
             kernel_options = {}
             flex_call = flex_attention
+            N_CTX = 196
 
-        N_CTX = 96
         SLIDING_WINDOW = 64
         make_tensor = functools.partial(
             torch.randn,
@@ -2155,6 +2177,39 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(flex_q_grad, q.grad, atol=3e-3, rtol=2e-3)
         torch.testing.assert_close(flex_k_grad, k.grad, atol=3e-3, rtol=2e-3)
         torch.testing.assert_close(flex_v_grad, v.grad, atol=3e-3, rtol=2e-3)
+
+    def test_cpu_error_message(self):
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, 128, 16),
+            device="cpu",
+            dtype=torch.float32,
+            requires_grad=False,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        with self.assertRaisesRegex(
+            ValueError,
+            "FlexAttention is only supported on CUDA devices. Found input tensors on cpu device.",
+        ):
+            flex_attention(query, key, value)
+
+    @supported_platform
+    def test_mixed_device_error_message(self):
+        # Create tensors on different devices
+        cpu_tensor = torch.randn(2, 2, 128, 16, device="cpu")
+        cuda_tensor = torch.randn(2, 2, 128, 16, device="cuda")
+
+        # Use different devices for query, key, and value
+        query, key, value = cpu_tensor, cuda_tensor, cpu_tensor
+
+        expected_error_message = (
+            "Expected query, key, and value to have the same device type, "
+            f"but got query.device: {query.device}, key.device: {key.device}, "
+            f"and value.device: {value.device} instead."
+        )
+
+        with self.assertRaisesRegex(ValueError, expected_error_message):
+            flex_attention(query, key, value)
 
     @supported_platform
     def test_small_q_kv_len(self):
