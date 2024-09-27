@@ -476,15 +476,22 @@ class FSDPParam:
             unsharded_param = _from_local_no_grad(unsharded_param, self._tp_spec)
         if hasattr(self, "_unsharded_param"):
             assert ca.compiled_autograd_enabled
-            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
-                self._unsharded_param
-            ):
-                # NOTE: Under compile, if an unsharded param goes through
-                # resize_(full) -> copy_ -> resize_(0) pattern, we will remove those
-                # resize_ and copy_ ops in a compiler graph pass
-                # `remove_fsdp2_unsharded_param_graph_input_usage` to recover performance.
-                alloc_storage(self._unsharded_param)
-                torch.ops.fsdp.copy_(self._unsharded_param, unsharded_param)
+            if isinstance(self._unsharded_param, DTensor):
+                with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
+                    self._unsharded_param._local_tensor
+                ):
+                    alloc_storage(self._unsharded_param._local_tensor)
+                    torch.ops.fsdp.copy_(self._unsharded_param._local_tensor, unsharded_param._local_tensor)
+            else:
+                with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
+                    self._unsharded_param
+                ):
+                    # NOTE: Under compile, if an unsharded param goes through
+                    # resize_(full) -> copy_ -> resize_(0) pattern, we will remove those
+                    # resize_ and copy_ ops in a compiler graph pass
+                    # `remove_fsdp2_unsharded_param_graph_input_usage` to recover performance.
+                    alloc_storage(self._unsharded_param)
+                    torch.ops.fsdp.copy_(self._unsharded_param, unsharded_param)
         else:
             self._unsharded_param = nn.Parameter(
                 unsharded_param, requires_grad=self.sharded_param.requires_grad
@@ -626,7 +633,10 @@ class FSDPParam:
             graph inputs. They are created within the graph and is guaranteed to be freed
             by the end of the graph. They don't leak outside of the graph.
             """
-            self._unsharded_param.untyped_storage().resize_(0)
+            if isinstance(self._unsharded_param, DTensor):
+                self._unsharded_param._local_tensor.untyped_storage().resize_(0)
+            else:
+                self._unsharded_param.untyped_storage().resize_(0)
             self.all_gather_outputs = []
             self._unsharded_inner_tensors = []
         else:

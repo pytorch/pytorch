@@ -1,3 +1,37 @@
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
+# Copyright (c) Meta Platforms, Inc. and affiliates
+import inspect
+import warnings
+from typing import Any, Callable, cast, Optional, Sequence, Tuple
+
+import torch
+import torch.distributed.tensor._dispatch as op_dispatch
+import torch.distributed.tensor._random as random
+import torch.nn as nn
+from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
+from torch.distributed.tensor._collective_utils import check_tensor_meta, mesh_broadcast
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._random import (
+    is_rng_supported_mesh,
+    OffsetBasedRNGTracker,
+)
+from torch.distributed.tensor._redistribute import (
+    Redistribute,
+    redistribute_local_tensor,
+)
+from torch.distributed.tensor._utils import (
+    compute_global_tensor_info,
+    compute_local_shape_and_global_offset,
+    normalize_to_torch_size,
+)
+from torch.distributed.tensor.placement_types import (
+    Partial,
+    Placement,
+    Replicate,
+    Shard,
+)
+
 """
 NOTE: torch.distributed._tensor has been moved to torch.distributed.tensor.
 The imports here are purely for backward compatibility. We will remove these

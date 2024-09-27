@@ -101,7 +101,7 @@ class TestFullyShardCompile(FSDPTest):
 
     @property
     def world_size(self) -> int:
-        return 2
+        return 4
 
     def test_dynamo_trace_use_training_state(self):
         torch._dynamo.reset()
@@ -747,7 +747,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         )
 
     def _create_transformer_factory_fns(
-        self, all_requires_grad, *, activation_checkpoint=False
+        self, all_requires_grad, *, activation_checkpoint=False, apply_tp=False,
     ):
         seq_len = 16
         vocab_size = 8
@@ -756,13 +756,26 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         def model_init_fn():
             torch.manual_seed(self.rank)
             fsdp_config = {}
-            mesh = init_device_mesh("cuda", (self.world_size,))
+            if apply_tp:
+                dp_size = 2
+                tp_size = self.world_size // dp_size
+                global_mesh = init_device_mesh(
+                    "cuda",
+                    (dp_size, tp_size),
+                    mesh_dim_names=("dp", "tp"),
+                )
+                dp_mesh = global_mesh["dp"]
+                tp_mesh = global_mesh["tp"]
+            else:
+                dp_mesh = init_device_mesh("cuda", (self.world_size,))
             model_args = ModelArgs(
                 vocab_size=vocab_size,
                 n_layers=n_layers,
                 checkpoint_activations=activation_checkpoint,
             )
             model = Transformer(model_args)
+            if apply_tp:
+                model = Transformer.parallelize(model, tp_mesh, use_seq_parallel=True)
             if not all_requires_grad:
                 requires_grad_params = ["attention.wq", "attention.wv"]
                 requires_grad_param_count = 0
@@ -775,9 +788,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                             v.requires_grad_(False)
                 assert requires_grad_param_count == n_layers * len(requires_grad_params)
             for layer_id, mod in enumerate(model.layers):
-                fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
+                fully_shard(mod, mesh=dp_mesh, reshard_after_forward=True, **fsdp_config)
             model = fully_shard(
-                model, mesh=mesh, reshard_after_forward=True, **fsdp_config
+                model, mesh=dp_mesh, reshard_after_forward=True, **fsdp_config
             )
             optim = torch.optim.SGD(model.parameters(), lr=1e-4)
             return model, optim
@@ -974,6 +987,24 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
             )
 
+    def test_transformer_FSDP_TP_backend_inductor_fullgraph_True(self):
+        fullgraph = True
+        all_requires_grad = True
+        activation_checkpoint = False
+        log.warning(
+            f"fullgraph={fullgraph}, all_requires_grad={all_requires_grad}, activation_checkpoint={activation_checkpoint}"  # noqa: G004, G001
+        )
+        _, triton_codes = run_and_get_code(
+            lambda: self._test_traceable_fsdp(
+                *self._create_transformer_factory_fns(
+                    all_requires_grad=all_requires_grad,
+                    activation_checkpoint=activation_checkpoint,
+                    apply_tp=True,
+                ),
+                "inductor",
+                fullgraph=fullgraph,
+            )
+        )
 
 if __name__ == "__main__":
     run_tests()
