@@ -913,6 +913,17 @@ def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
         )
 
 
+def _validate_device(query: Tensor, key: Tensor, value: Tensor):
+    """TODO: Remove once non cuda device support is added
+    We only need to check query since we have already that q,k,v are on the same device
+    """
+    if query.device.type != "cuda":
+        raise ValueError(
+            "FlexAttention is only supported on CUDA devices. "
+            f"Found input tensors on {query.device.type} device."
+        )
+
+
 def flex_attention(
     query: Tensor,
     key: Tensor,
@@ -979,6 +990,7 @@ def flex_attention(
     # Some basic input validation
     _validate_sdpa_input(query, key, value)
     _validate_embed_dim(query, key, value)
+    _validate_device(query, key, value)
     if query.dim() != 4 or key.dim() != 4 or value.dim() != 4:
         raise NotImplementedError("NYI: query, key, and value must be 4D tensors")
     if (not enable_gqa) and query.size(-3) != key.size(-3):
