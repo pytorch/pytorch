@@ -250,6 +250,8 @@ class PrefixStoreTest(TestCase):
                 prefix_store = dist.PrefixStore("prefix", store)
                 self.assertEqual(prefix_store.underlying_store, store)
 
+        with self.assertRaises(ValueError):
+            dist.PrefixStore("prefix", None)
 
 class PrefixFileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
