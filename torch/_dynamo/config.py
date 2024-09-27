@@ -221,6 +221,8 @@ same_two_models_use_fp64 = True
 # This requires dynamic_shapes to be True.
 capture_scalar_outputs = os.environ.get("TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS") == "1"
 
+custom_ops_profile = None
+
 # Not all backends support operators that have dynamic output shape (e.g.,
 # nonzero, unique).  When this flag is set to False, we introduce a graph
 # break instead of capturing.  This requires dynamic_shapes to be True.

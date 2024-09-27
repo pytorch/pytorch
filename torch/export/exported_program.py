@@ -709,6 +709,7 @@ class ExportedProgram:
         self._verifiers = verifiers
         # Validate should be always the last step of the constructor.
         self.validate()
+        self._report = None
 
     @property
     @compatibility(is_backward_compatible=False)
