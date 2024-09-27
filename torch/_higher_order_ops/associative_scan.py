@@ -109,51 +109,54 @@ def create_fw_bw_graph_combinefn(combine_fn, xs, dim):
             )
 
         def joint_wrapper_x(*args):
-            ones = [torch.ones_like(el) for el in args[:num_xs]]
-            g_out = joint_graph(*(*ones, *args))
+            # ones = [torch.ones_like(el) for el in args[:num_xs]]
+            # g_out = joint_graph(*(*ones, *args))
+            g_out = joint_graph(*args)
             return [*g_out[:num_xs],]
         
         def joint_wrapper_h(*args):
-            ones = [torch.ones_like(el) for el in args[:num_xs]]
-            g_out = joint_graph(*(*ones, *args))
+            # ones = [torch.ones_like(el) for el in args[:num_xs]]
+            # g_out = joint_graph(*(*ones, *args))
+            g_out = joint_graph(*args)
             return [*g_out[num_xs:],]
         
-        def joint_wrapper_bwd_asssociative_scan(x: torch.Tensor, y: torch.Tensor):
-            # grad_L_h, grad_h_h = args[0][:num_xs], args[0][num_xs:2*num_xs]
-            # grad_L_x, g = args[1][:num_xs], args[1][num_xs:2*num_xs]
+        # def joint_wrapper_bwd_asssociative_scan(x: torch.Tensor, y: torch.Tensor):
+        #     # grad_L_h, grad_h_h = args[0][:num_xs], args[0][num_xs:2*num_xs]
+        #     # grad_L_x, g = args[1][:num_xs], args[1][num_xs:2*num_xs]
             
-            # def mul(x: torch.Tensor, y: torch.Tensor):
-            #     return x * y
+        #     # def mul(x: torch.Tensor, y: torch.Tensor):
+        #     #     return x * y
     
-            # g_out = mul(*grad_h_h, *g)
-            # g_out = [g_L_h + g_h * go for g_L_h, g_h, go in zip(x[:num_xs], x[num_xs:], y[num_xs:])]
-            g_out = [g_L_h + g_h * go for g_L_h, g_h, go in zip(y[:num_xs], y[num_xs:], x[num_xs:])]
+        #     # g_out = mul(*grad_h_h, *g)
+        #     # g_out = [g_L_h + g_h * go for g_L_h, g_h, go in zip(x[:num_xs], x[num_xs:], y[num_xs:])]
+        #     g_out = [g_L_h + g_h * go for g_L_h, g_h, go in zip(y[:num_xs], y[num_xs:], x[num_xs:])]
             
-            return (*x[:num_xs], *g_out)
+        #     return (*x[:num_xs], *g_out)
         
-        def joint_wrapper_bwd_scan(x: torch.Tensor, y: torch.Tensor):
-            g_out = [g_L_h + g_h * go for g_L_h, g_h, go in zip(y[:num_xs], y[num_xs:], x[num_xs:])]
-            return ((*g_out, *g_out), *g_out)
+        # def joint_wrapper_bwd_scan(x: torch.Tensor, y: torch.Tensor):
+        #     g_out = [g_L_h + g_h * go for g_L_h, g_h, go in zip(y[:num_xs], y[num_xs:], x[num_xs:])]
+        #     return ((*g_out, *g_out), *g_out)
 
-        joint_graph_x = _maybe_reenter_make_fx(joint_wrapper_x)(*fw_xs_1, *fw_xs_2)
-        joint_graph_h = _maybe_reenter_make_fx(joint_wrapper_h)(*fw_xs_1, *fw_xs_2)
-        # joint_graph_bwd_associative_scan = _maybe_reenter_make_fx(joint_wrapper_bwd_asssociative_scan)((*fw_outputs, *fw_xs_1), (*fw_outputs_2, *fw_xs_2))
+        joint_graph_x = _maybe_reenter_make_fx(joint_wrapper_x)(*fw_outputs, *fw_xs_1, *fw_xs_2)
+        joint_graph_h = _maybe_reenter_make_fx(joint_wrapper_h)(*fw_outputs, *fw_xs_1, *fw_xs_2)
+        # # joint_graph_bwd_associative_scan = _maybe_reenter_make_fx(joint_wrapper_bwd_asssociative_scan)((*fw_outputs, *fw_xs_1), (*fw_outputs_2, *fw_xs_2))
         
-        num_scan = xs[0].shape[dim]
-        fw_xs_1_s = [pytree.tree_map(_from_fun, x) for x in xs]
-        xs_joint = [torch.split(x, [1, num_scan - 1], dim=dim) for x in fw_xs_1_s]
-        xs_init, xs_grads = zip(*[[xs_j[0], xs_j[1]] for xs_j in xs_joint])
-        fw_xs_init = [pytree.tree_map(_from_fun, x) for x in xs_init]
-        fw_xs_grads = [pytree.tree_map(_from_fun, x) for x in xs_grads]
+        # num_scan = xs[0].shape[dim]
+        # fw_xs_1_s = [pytree.tree_map(_from_fun, x) for x in xs]
+        # xs_joint = [torch.split(x, [1, num_scan - 1], dim=dim) for x in fw_xs_1_s]
+        # xs_init, xs_grads = zip(*[[xs_j[0], xs_j[1]] for xs_j in xs_joint])
+        # fw_xs_init = [pytree.tree_map(_from_fun, x) for x in xs_init]
+        # fw_xs_grads = [pytree.tree_map(_from_fun, x) for x in xs_grads]
         
-        fw_outputs_s = [pytree.tree_map(_from_fun, x) for x in xs]
-        outs_joint = [torch.split(o, [1, num_scan - 1], dim=dim) for o in fw_outputs_s]
-        outs_init, outs_grads = zip(*[[xs_j[0], xs_j[1]] for xs_j in outs_joint])
-        fw_outs_init = [pytree.tree_map(_from_fun, x) for x in outs_init]
-        fw_outs_grads = [pytree.tree_map(_from_fun, x) for x in outs_grads]
-        joint_graph_bwd_associative_scan = _maybe_reenter_make_fx(joint_wrapper_bwd_scan)((*fw_xs_init, *fw_outs_init), (*fw_outs_grads, *fw_xs_grads))
+        # fw_outputs_s = [pytree.tree_map(_from_fun, x) for x in xs]
+        # outs_joint = [torch.split(o, [1, num_scan - 1], dim=dim) for o in fw_outputs_s]
+        # outs_init, outs_grads = zip(*[[xs_j[0], xs_j[1]] for xs_j in outs_joint])
+        # fw_outs_init = [pytree.tree_map(_from_fun, x) for x in outs_init]
+        # fw_outs_grads = [pytree.tree_map(_from_fun, x) for x in outs_grads]
+        # joint_graph_bwd_associative_scan = _maybe_reenter_make_fx(joint_wrapper_bwd_scan)((*fw_xs_init, *fw_outs_init), (*fw_outs_grads, *fw_xs_grads))
 
-        return fw_graph, joint_graph_x, joint_graph_h, joint_graph_bwd_associative_scan
+        # return fw_graph, joint_graph_x, joint_graph_h, joint_graph_bwd_associative_scan
+        return fw_graph, joint_graph_x, joint_graph_h
 
 
 class AssociativeScanOp(HigherOrderOperator):
@@ -219,11 +222,11 @@ def associative_scan(
             "Combine_mode must either 'pointwise' or 'generic', but got {combine_mode}"
         )
 
-    if not torch._dynamo.is_compiling():
-        with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-            return torch.compile(associative_scan, fullgraph=True)(
-                combine_fn, xs, dim, reverse=reverse, combine_mode=combine_mode
-            )
+    # if not torch._dynamo.is_compiling():
+    #     with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
+    #         return torch.compile(associative_scan, fullgraph=True)(
+    #             combine_fn, xs, dim, reverse=reverse, combine_mode=combine_mode
+    #         )
 
     leaves, spec = pytree.tree_flatten(xs)
 
@@ -429,7 +432,8 @@ def trace_associative_scan(
 
 @associative_scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def associative_scan_op_dense(combine_fn, xs, dim):
-    raise NotImplementedError("associative_scan is not implemented for eager")
+    # raise NotImplementedError("associative_scan is not implemented for eager")
+    return generic_associative_scan(combine_fn, xs, dim)
 
 
 class ScanAutogradOp(torch.autograd.Function):
@@ -440,39 +444,54 @@ class ScanAutogradOp(torch.autograd.Function):
         fw_graph,
         joint_graph_x, 
         joint_graph_h,
-        joint_graph_bwd_associative_scan,
+        # joint_graph_bwd_associative_scan,
         dim,
         num_xs,
         *flat_args,
     ):
         ctx._joint_graph_x = joint_graph_x
         ctx._joint_graph_h = joint_graph_h
-        ctx._joint_graph_bwd_associative_scan = joint_graph_bwd_associative_scan
+        # ctx._joint_graph_bwd_associative_scan = joint_graph_bwd_associative_scan
         ctx._dim = dim
         ctx._num_xs = num_xs
         xs = flat_args
+        
+        scan_length = xs[0].shape[dim]
+        ctx._scan_length = scan_length
 
         with torch._C._AutoDispatchBelowAutograd():
             outs = associative_scan_op(fw_graph, xs, dim)
             ctx.save_for_backward(*(*xs, *outs))
             
-            # #BW in FWD
-            # flat_grads = [torch.ones_like(el) for el in outs]
-            
+            # # #BW in FWD
             # mapped_joint_graph_x = torch.vmap(joint_graph_x, dim, dim)
             # mapped_joint_graph_h = torch.vmap(joint_graph_h, dim, dim)
             
-            # g_x = mapped_joint_graph_x(*xs, *outs)
-            # print(g_x)
+            # # Compute the derivatives of the parts of the combine_fn
+            # ones = torch.unsqueeze(torch.ones_like(first_slice_copy(xs[0], dim)), dim)
+            # zeros = torch.unsqueeze(torch.zeros_like(first_slice_copy(xs[0], dim)), dim)
             
-            # g_h = mapped_joint_graph_h(*xs, *outs)
-            # print(g_h)
+            # grads_x = mapped_joint_graph_x(*xs, *outs)
+            # grads_x = [torch.concat([aten.slice(torch.flip(g, [dim]), dim, 1, None, 1), ones], dim) for g in grads_x]
             
-            # # g_x = [torch.ones_like(el) for el in outs]
-            # # g_h = [torch.ones_like(el) for el in outs]
+            # grads_h = mapped_joint_graph_h(*xs, *outs)
+            # grads_h = [torch.flip(g, [dim]) for g in grads_h]
+        
+            # # Form the gradient matrix
+            # def cumprod_and_prepad(val, size):
+            #     return torch.concat([zeros] * max(size - 1 - val.shape[dim], 0.) + [ones] + [torch.cumprod(val, dim)], dim)
             
-            # g_hs = associative_scan_op(joint_graph_bwd_associative_scan, ((*flat_grads, *xs)), dim)
-            # print(g_hs)
+            # # ones_inp = [torch.unsqueeze(torch.ones_like(first_slice_copy(g, dim)), dim) for g in grads_h]
+            # # grads_h_ext = [torch.concat([o, aten.slice(h, dim, 0, -1, 1)], dim) for h, o in zip(grads_h, ones_inp)]
+            # # grads_h_ext = [torch.concat([o, h], dim) for h, o in zip(grads_x, ones_inp)]
+            
+            # # helper_mat = torch.triu(torch.ones(num_xs + 1, num_xs + 1))
+            # # helper_mat *= grads_h_ext
+            # # helper_mat = [[torch.cumprod(aten.slice(el, dim, 0, n, 1), dim) for el in grads_h_ext] for n in range(scan_length)]
+            # gradient_mat = [[cumprod_and_prepad(aten.slice(el, dim, n, -1, 1), scan_length)for n in range(0, scan_length, 1)]  for el in grads_h]
+            # # gradient_mat = [ for n in range(num_xs)]
+            
+            # grads = [torch.flip(torch.sum(torch.stack(g_mat, 0) * g_x, 0), [dim]) for g_mat, g_x in zip(gradient_mat, grads_x)]
             
         return *outs,
 
@@ -480,115 +499,112 @@ class ScanAutogradOp(torch.autograd.Function):
     def backward(ctx, *flat_grads):
         r"""
         This function computes the gradients of the scan operation.
-        It does so by constructing using an additional scan operator with the gradients
+        It does so by factorizing the components of the chainrule into
+        a elementwise multiplcation of a matrix and a vector.
+        The rows of the matrix can be efficiently computed using ``cumprod``.
 
         Args:
-            flat_grads (torch.Tensor): The tensor of flattened upstream gradients.
+            flat_grads (torch.Tensor): The tensor of upstream gradients, or anested pytree of tensors.
 
         Example::
 
+            #TODO: Use a more complicated example such as mul
             The ``fw_graph`` f(.,.), used in the forward function, is the operator used during the scan. For example
             def f(x: torch.Tensor, y: torch.Tensor):
-                next_carry = y = x * y
-                return next_carry, y
+                return x + y
 
-            The ``joint_graph`` g(.,.), used in the backward function, is the joint function of the function f(.,.).
-            It receives the upstream gradients and the inputs of f and computes the gradients
-            for x and y of f. For example for the function f above
-            def g(g_new_carry: torch.Tensor, g_y: torch.Tensor, x: torch.Tensor, y: torch.Tensor):
-                return g_y * y + g_new_carry * y, g_y * x + g_new_carry * x
+            The ``joint_graph`` g(.,.), used in the backward function, is the gradient of the function f(.,.).
+            It computes the gradients for x and y of f. For example for the function f above
+            def g(x: torch.Tensor, y: torch.Tensor):
+                return 1., 1.
+            In other words, the first output of g represents df(x,y)/dx, while the second one represents df(x,y)/dy.
+            This will be exploited in the algorithm below.
 
-            To use a scan operation for the backward path as well, the function f is modified such that it
-            returns all carries and not only the last one. In particular:
-            def f_autograd(x: torch.Tensor, y: torch.Tensor):
-                next_carry, y = f(x, y)
-                return next_carry, (next_carry, y)
+            The inputs to ``scan`` in the forward path are x_1, x_2, ..., x_T
+            The outputs of ``scan`` in the forward path are y_1, y_2, ..., y_T, where
+            y_1 = x_1
+            y_2 = f(y_1, x_2)
+            ...
+            y_T = f(y_{T-1}, x_T)
 
-            The inputs to ``scan`` in the forward path are init; xs_1, xs_2, ..., xs_T
-            With the modified function f, the outputs of ``scan`` in the forward path are (c_1, y_1), (c_2, y_2), ..., (c_T, y_T).
-            The backward function receives gradients for c_T -> g_c_T and for y_1, y_2, ... y_T -> g_y_1, g_y_2, ... g_y_T = g_ys
+            The gradients of y_T with respect to the vector x are computed as:
+            dy_T / dx = dy_T/dx_1 + dy_T/dx_2 + ... + dy_T/dx_T
 
-            The gradients of init and xs can then be computed as
-            xs_bwd = (*g_ys, *carries, *xs)
-            g_init, g_xs = scan(joint_graph, g_c_T, xs_bwd, dim, True)
+            A few examples:
+            dy_T/dx_T = df(y_{T-1}, x_T)/dx_T -> second output of g(y_{T-1}, x_T)
+
+            dy_T/dx_{T-1} = df(y_{T-1}, x_T)/dy_{T-1} . df(y_{T-2}, x_{T-1})/dx_{T-1}
+                          -> first output of g(y_{T-1}, x_T) . second output of g(y_{T-2}, x_{T-1})
+
+            dy_T/dx_{T-2} = df(y_{T-1}, x_T)/dy_{T-1}
+                            . df(y_{T-2}, x_{T-1})/dy_{T-2}
+                            . df(y_{T-3}, x_{T-2})/dx_{T-2}
+                          ->  first output of g(y_{T-1}, x_T)
+                            . first output of g(y_{T-2}, x_{T-1})
+                            . second output of g(y_{T-3}, x_{T-2})
+
+            A conceptually similar pattern can be observerd for dy_{T-1} / dx
+            dy_{T-1}/dx_T = 0
+
+            dy_{T-1}/dx_{T-1} = df(y_{T-2}, x_{T-1})/dx_{T-1} -> second output of g(y_{T-2}, x_{T-1})
+
+            dy_{T-1}/dx_{T-2} = df(y_{T-2}, x_{T-1})/dy_{T-2} . df(y_{T-3}, x_{T-2})/dx_{T-2}
+                              -> first output of g(y_{T-2}, x_{T-1})
+                              . second output of g(y_{T-3}, x_{T-2})
+
+            If one inspects the pattern carefully, it becomes aparant that there is a product of
+            'first outputs', followed by the last term which is a 'second output'.
+            This can be represented with a matrix-vector multiplication, where the rows of the matrix contain
+            the products of the 'first ouputs' and the vector contains the 'second outputs'.
+            Furthermore, the product of 'first outputs' is continuously expanded leftwards with
+            additional time steps. Therefore, the products can also be computed utilizing cumprod.
+            The final gradients can be computed using an elementwise matrix-vector multiplication.
 
         """
         from torch._higher_order_ops.scan import scan
 
         joint_graph_x = ctx._joint_graph_x
         joint_graph_h = ctx._joint_graph_h
-        joint_graph_bwd_associative_scan = ctx._joint_graph_bwd_associative_scan
+        # joint_graph_bwd_associative_scan = ctx._joint_graph_bwd_associative_scan
         dim = ctx._dim
         num_xs = ctx._num_xs
+        scan_length = ctx._scan_length
         
         # import pdb
         # pdb.set_trace()
         flat_args = ctx.saved_tensors
         xs, outs = flat_args[:num_xs], flat_args[num_xs:]
-        
+
         # pdb.set_trace()
         mapped_joint_graph_x = torch.vmap(joint_graph_x, dim, dim)
         mapped_joint_graph_h = torch.vmap(joint_graph_h, dim, dim)
         
         with torch._C._AutoDispatchBelowAutograd():
-            # pdb.set_trace()
-            g_x = mapped_joint_graph_x(*xs, *outs)
-            # g_x = [torch.concat([torch.flip(g, [dim])[1:], torch.unsqueeze(torch.ones_like(first_slice_copy(g, dim)), dim)], dim) for g in g_x]
-            g_x = [torch.concat([torch.unsqueeze(torch.ones_like(first_slice_copy(g, dim)), dim), g[:-1]], dim) for g in g_x]
-            # pdb.set_trace()
             
-            g_h = mapped_joint_graph_h(*xs, *outs)
-            # flat_grads = [torch.flip(fg, [dim]) for fg in flat_grads]
-            # g_h = [torch.concat([torch.zeros_like(g[0:1, :]), torch.flip(g, [dim])[1:]], dim) for g in g_h]
-            # g_h = [torch.concat([torch.unsqueeze(first_slice_copy(fg, dim), dim), torch.flip(g, [dim])[1:]], dim) for fg, g in zip(flat_grads, g_h)]
-            # g_h = [torch.concat([torch.unsqueeze(torch.zeros_like(first_slice_copy(g, dim)), dim), torch.flip(g, [dim])[:-1]], dim) for g in g_h]
-            # g_h = [torch.concat([torch.unsqueeze(first_slice_copy(fg, dim), dim), torch.flip(g, [dim])[:-1]], dim) for fg, g in zip(flat_grads, g_h)]
-            g_h = [torch.concat([torch.unsqueeze(first_slice_copy(fg, dim), dim), g[1:]], dim) for fg, g in zip(flat_grads, g_h)]
-            # pdb.set_trace()
-            
-            # g_hs = associative_scan_op(joint_graph_bwd_associative_scan, ((*flat_grads, *g_h)), dim)
-            # g_hs = g_hs[num_xs:]
+            # Compute the derivatives of the parts of the combine_fn
+            ones = torch.unsqueeze(torch.ones_like(first_slice_copy(xs[0], dim)), dim)
+            zeros = torch.unsqueeze(torch.zeros_like(first_slice_copy(xs[0], dim)), dim)
             
             # pdb.set_trace()
-            num_scan = flat_grads[0].shape[dim]
-            flat_grads_joint = [torch.split(fg, [1, num_scan - 1], dim=dim) for fg in flat_grads]
-            flat_grads_init, flat_grads = zip(*[[xs_j[0], xs_j[1]] for xs_j in flat_grads_joint])
-            g_h_joint = [torch.split(fg, [1, num_scan - 1], dim=dim) for fg in g_h]
-            g_h_init, g_h = zip(*[[xs_j[0], xs_j[1]] for xs_j in g_h_joint])
+            # Form the gradient matrix
+            def cumprod_and_prepad(val, size):
+                return torch.concat([zeros] * max(size - 1 - val.shape[dim], 0.) + [ones] + [torch.cumprod(val, dim)], dim)
             
             # pdb.set_trace()
-            g_hs = scan(joint_graph_bwd_associative_scan, ((*flat_grads_init, *g_h_init)), ((*flat_grads, *g_h)), dim=dim, reverse=True)
-            g_hs = g_hs[1:2]
-            g_hs = [torch.concat([g, g_h_i], dim) for g_h_i, g in zip(g_h_init, g_hs)]
-            # g_hs = [torch.flip(gh, [dim]) * gx for gh, gx in zip(g_hs, g_x)]
-            g_hs = [gh * gx for gh, gx in zip(g_hs, g_x)]
-            # print(g_hs)
+            grads_x = mapped_joint_graph_x(*flat_grads, *xs, *outs)
+            grads_x = [torch.concat([aten.slice(torch.flip(g, [dim]), dim, 1, None, 1), ones], dim) for g in grads_x]
             
-            
-            # xs = [torch.flip(elem, [dim]) for elem in xs]
-            # print(xs)
-            
-            # # pdb.set_trace()
-            # with torch._C._AutoDispatchBelowAutograd():
-            #     g_outs = associative_scan_op(joint_graph_h, outs, dim)
-
-            # print(g_outs)
-            # # pdb.set_trace()
-            
-            # g_outs = [fg + g for fg, g in zip(flat_grads, g_outs)]
-            
-            # print(g_outs)
             # pdb.set_trace()
+            grads_h = mapped_joint_graph_h(*flat_grads, *xs, *outs)
+            grads_h = [torch.flip(g, [dim]) for g in grads_h]
             
-            # g_scale = torch.concat([joint_graph_x(x, h)[0] for x, h in zip(torch.split(xs[0], 1, dim=dim), torch.split(outs[0], 1, dim=dim))], dim=dim)
-            # print(g_scale)
             # pdb.set_trace()
-            
-            # g_outs = [gs + g for gs, g in zip(g_scale, g_outs)]
-            
-            # print(g_outs)
+            gradient_mat = [[cumprod_and_prepad(aten.slice(el, dim, n, -1, 1), scan_length)for n in range(0, scan_length, 1)]  for el in grads_h]
+        
             # pdb.set_trace()
-            return *[None] * 6, *g_hs
+            grads = [torch.flip(torch.sum(torch.stack(g_mat, 0) * g_x, 0), [dim]) for g_mat, g_x in zip(gradient_mat, grads_x)]
+            
+            return *[None] * 5, *grads
 
 
 @associative_scan_op.py_impl(DispatchKey.Autograd)
@@ -620,14 +636,14 @@ def associative_scan_autograd(combine_fn, xs, dim):
         fw_graph,
         joint_graph_x,
         joint_graph_h,
-        joint_graph_bwd_associative_scan,
+        # joint_graph_bwd_associative_scan,
     ) = create_fw_bw_graph_combinefn(combine_fn, xs, dim)
 
     flat_out = ScanAutogradOp.apply(
         fw_graph,
         joint_graph_x, 
         joint_graph_h,
-        joint_graph_bwd_associative_scan,
+        # joint_graph_bwd_associative_scan,
         dim,
         num_leaves_xs,
         *xs,
