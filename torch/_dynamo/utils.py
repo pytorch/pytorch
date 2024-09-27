@@ -805,6 +805,10 @@ class CompilationMetrics:
     remote_cache_time_saved_s: Optional[float]
     structured_logging_overhead_s: Optional[float]
     config_suppress_errors: Optional[bool]
+    config_inline_inbuilt_nn_modules: Optional[bool]
+    region: Optional[str]
+    upstream_revision_epochtime: Optional[int]
+    specialize_float: Optional[bool]
 
 
 @dataclasses.dataclass
