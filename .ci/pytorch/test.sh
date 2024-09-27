@@ -375,9 +375,8 @@ test_inductor_cpp_wrapper_abi_compatible() {
   mkdir -p "$TEST_REPORTS_DIR"
 
   echo "Testing Inductor cpp wrapper mode with TORCHINDUCTOR_ABI_COMPATIBLE=1"
-  # cpu stack allocation causes segfault and needs more investigation
   PYTORCH_TESTING_DEVICE_ONLY_FOR="" python test/run_test.py --include inductor/test_cpu_cpp_wrapper
-  python test/run_test.py --include inductor/test_cuda_cpp_wrapper
+  python test/run_test.py --include inductor/test_cuda_cpp_wrapper inductor/test_cpu_repro
 
   TORCHINDUCTOR_CPP_WRAPPER=1 python benchmarks/dynamo/timm_models.py --device cuda --accuracy --amp \
     --training --inductor --disable-cudagraphs --only vit_base_patch16_224 \
