@@ -163,9 +163,6 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
   cudaDataType output_type;
   cusparseComputeType compute_type;
   auto compression_factor = 9;
-  #ifdef USE_ROCM
-    TORCH_CHECK(isHipSparseLtSupported(compressed_A.device().index()), "hipSPARSELt not supported on this platform.");
-  #endif
 
   switch(compressed_A.scalar_type())
   {
