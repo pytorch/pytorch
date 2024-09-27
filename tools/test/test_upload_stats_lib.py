@@ -180,6 +180,7 @@ class TestUploadStats(unittest.TestCase):
         }
 
         emit_should_include = {
+            **metric,
             "pr_number": PR_NUMBER,
         }
 
