@@ -5,6 +5,7 @@ import torch
 from torch._inductor import config
 from torch._inductor.utils import cache_on_self
 from torch.utils import _pytree
+import operator
 
 
 aten = torch.ops.aten
@@ -96,8 +97,174 @@ def _collect_reachable_nodes(
 
     return list(reversed(reachable_nodes))
 
+class AutoChunkerTransform:
+    """
+    Do the real transformation.
+
+    Put all the transformation in a separate class rather than inside AutoChunker
+    class so we don't need worry about invalidating cache in AutoChunker.
+    """
+    def __init__(self, analyzer, nodes_to_chunk):
+        print("enter AutoChunkerTransform")
+        assert len(nodes_to_chunk) > 0
+        self.analyzer = analyzer
+        self.nodes_to_chunk = nodes_to_chunk
+
+        # the first node is the source for chunking
+        source_node = nodes_to_chunk[0]
+
+        self.gm = analyzer.gm
+
+        source_node_chunks = self._chunk_source_node(source_node)
+
+        self.num_chunk = len(source_node_chunks)
+        
+        self.gm.print_readable()
+
+        final_replacement = {}
+
+        for chunk_id, source_node_chunk in enumerate(source_node_chunks):
+            chunk_replacement = {}
+            chunk_replacement[source_node] = source_node_chunk
+            source_node.meta["chunk_dim"] = 0
+
+            for node_id, orig_nd in enumerate(nodes_to_chunk[1:], start=1):
+                self._chunk_non_source_node(chunk_id, node_id, orig_nd, chunk_replacement, final_replacement)
+
+        for orig_nd, replace_nd in final_replacement.items():
+            if isinstance(replace_nd, list):
+                # a list to concat
+                replace_nd = self.gm.graph.call_function(aten.cat.default, (replace_nd, 0))
+            orig_nd.replace_all_uses_with(replace_nd)
+
+        self.gm.graph.eliminate_dead_code()
+        print("graph after chunking")
+        self.gm.print_readable()
+
+    def _chunk_non_source_node(self, chunk_id, node_id, orig_nd, chunk_replacement, final_replacement):
+        # Special handling for gradient of the first matmul input
+        if orig_nd is self.analyzer.gradient_matmul_input:
+            arg1 = orig_nd.args[0]
+            arg2 = orig_nd.args[1]
+
+            # chunked at the batch dimension
+            assert arg1.meta["chunk_dim"] == 0
+            assert "chunk_dim" not in arg2.meta  # weight is not chunked
+
+            # create accumulator (for cat) only for the first chunk
+            if chunk_id == 0:
+                final_replacement[orig_nd] = accum = [] # be a list to concat
+            else:
+                accum = final_replacement[orig_nd]
+
+            assert arg2 not in chunk_replacement
+            replace_nd = self.gm.graph.call_function(orig_nd.target, (chunk_replacement[arg1], arg2))
+            chunk_replacement[orig_nd] = replace_nd
+
+            # do the accumulation
+            accum.append(replace_nd)
+            return
+
+        # Special handling for gradient of the second matmul input
+        if orig_nd is self.analyzer.gradient_matmul_weight:
+            arg1 = orig_nd.args[0]
+            arg2 = orig_nd.args[1]
+
+            # chunked at the reduction dimension
+            assert arg1.meta["chunk_dim"] == 1
+            assert arg2.meta["chunk_dim"] == 0
+
+            # create accumulator (for add) only for the first chunk
+            if chunk_id == 0:
+                # This does not work since orig_nd will be replace by accum in the end.
+                # This results in an invalid fx graph
+                # accum = self.gm.graph.call_function(aten.zeros_like.default, (orig_nd,))
+                fake_tensor = _get_fake_tensor_from_node(orig_nd)
+                accum = self.gm.graph.call_function(aten.zeros.default, (fake_tensor.shape,), {"dtype": fake_tensor.dtype, "device": fake_tensor.device})
+                final_replacement[orig_nd] = accum
+            else:
+                accum = final_replacement[orig_nd]
+
+            replace_nd = self.gm.graph.call_function(orig_nd.target, (chunk_replacement[arg1], chunk_replacement[arg2]))
+            chunk_replacement[orig_nd] = replace_nd
+
+            # do the accumulation
+            self.gm.graph.call_function(aten.add_.Tensor, (accum, replace_nd))
+            return
+
+        # Special handling for sum
+        if orig_nd.target == aten.sum.default:
+            # create accumulator only for the first chunk
+            if chunk_id == 0:
+                fake_tensor = _get_fake_tensor_from_node(orig_nd)
+                accum = self.gm.graph.call_function(aten.zeros.default, tuple(), {"dtype": fake_tensor.dtype, "device": fake_tensor.device})
+                final_replacement[orig_nd] = accum
+            else:
+                accum = final_replacement[orig_nd]
+
+            replace_nd = self.gm.graph.call_function(orig_nd.target, (chunk_replacement[orig_nd.args[0]],))
+            chunk_replacement[orig_nd] = replace_nd
+
+            # do the accumulation
+            self.gm.graph.call_function(aten.add_.Tensor, (accum, replace_nd))
+            return
+
+        # Special handling for expanding the tangent
+        if orig_nd.target == aten.expand.default and "tangent" in orig_nd.args[0].name:
+            # Lookup the correct shape from the previous node which is the
+            # corresponding chunked node in the fwd pass
+            fwd_nd = self.nodes_to_chunk[node_id - 1]
+            assert isinstance(fwd_nd, torch.fx.Node)
+            assert "chunk_dim" in fwd_nd.args[0].meta
+            orig_nd.meta["chunk_dim"] = fwd_nd.args[0].meta["chunk_dim"]
+            chunk_dim = fwd_nd.args[0].meta["chunk_dim"]
+            chunked_shape = list(_get_fake_tensor_from_node(fwd_nd.args[0]).shape)
+            # TODO handle the non-divisible case
+            chunked_shape[chunk_dim] //= self.num_chunk
+            replace_nd = self.gm.graph.call_function(orig_nd.target, (chunked_shape,))
+            chunk_replacement[orig_nd] = replace_nd
+
+            return
+
+        # common case is, output has the same chunk_dim as the chunked input
+        if chunk_id == 0:
+            seen_chunk_dim = set()
+            for arg in _pytree.tree_flatten((orig_nd.args, orig_nd.kwargs))[0]:
+                if isinstance(arg, torch.fx.Node) and "chunk_dim" in arg.meta:
+                    assert arg.meta["chunk_dim"] not in seen_chunk_dim, orig_nd.format_node()
+                    seen_chunk_dim.add(arg.meta["chunk_dim"])
+    
+            assert len(seen_chunk_dim) == 1, orig_nd.format_node()
+            orig_nd.meta["chunk_dim"] = next(iter(seen_chunk_dim))
+
+            # permute is different
+            if orig_nd.target == aten.permute.default:
+                # TODO: need change to be more general
+                orig_nd.meta["chunk_dim"] = 1 - orig_nd.meta["chunk_dim"]
+
+        # do the replacement
+        new_args, new_kwargs = _pytree.tree_map(lambda nd: chunk_replacement[nd] if nd in chunk_replacement else nd, (orig_nd.args, orig_nd.kwargs))
+
+        replace_nd = self.gm.graph.call_function(orig_nd.target, new_args, new_kwargs)
+        chunk_replacement[orig_nd] = replace_nd
+
+    def _chunk_source_node(self, source_node):
+        bs = _get_fake_tensor_from_node(source_node).shape[0]
+        print(f"{bs=}")
+        self.num_chunk = 2
+        self.chunk_size = (bs + self.num_chunk - 1) // self.num_chunk
+        out_node = self.gm.graph.call_function(aten.split.Tensor, (source_node, self.chunk_size))
+        chunks = []
+        for i in range(self.num_chunk):
+            chunks.append(self.gm.graph.call_function(operator.getitem, (out_node, i)))
+        return chunks
+
 
 class AutoChunker:
+    """
+    This class mainly does analysis on the original graph.
+    The transformation happens in AutoChunkerTransform.
+    """
     def __init__(self, gm: torch.fx.GraphModule):
         self.gm = gm
         self.source_node = None
@@ -236,7 +403,6 @@ class AutoChunker:
             return
 
         gm = self.gm
-        gm.print_readable()
         graph = gm.graph
         source_nodes = _collect_source_nodes(graph)
         print(f"{source_nodes=}")
@@ -289,3 +455,11 @@ class AutoChunker:
         nodes_to_chunk = _merge_reachable_nodes(reachable_nodes, extra_reachable_nodes)
 
         print(f"{nodes_to_chunk=}")
+
+        print("\n>>>>>>>>>>")
+        for nd in nodes_to_chunk:
+            print(nd.format_node())
+        print("<<<<<<<<<<\n")
+
+        with self.gm.graph.inserting_before(nodes_to_chunk[-1]):
+            AutoChunkerTransform(self, nodes_to_chunk)

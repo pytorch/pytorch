@@ -19,7 +19,9 @@ class AutoChunkerTest(TestCase):
 
         def f(_input, weight):
             out = (_input * 2) @ weight
-            out.sum().backward()
+            _sum = out.sum()
+            _sum.backward()
+            return _sum
 
         opt_f = torch.compile(f)
         opt_f(_input, weight)
