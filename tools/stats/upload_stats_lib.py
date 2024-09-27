@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import io
 import json
+import math
 import os
 import time
 import zipfile
@@ -203,7 +204,7 @@ def remove_nan_inf(old: Any) -> Any:
     # Casta NaN, inf, -inf to string from float since json.dumps outputs invalid
     # json with them
     def _helper(o: Any) -> Any:
-        if isinstance(o, float) and (o == float("inf") or o == float("-inf") or o != o):
+        if isinstance(o, float) and (math.isinf(o) or math.isnan(o)):
             return str(o)
         if isinstance(o, list):
             return [_helper(v) for v in o]
