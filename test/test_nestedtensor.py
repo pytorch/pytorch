@@ -3673,13 +3673,16 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         weight = torch.randn(
             4, 3, requires_grad=True, dtype=torch.float64, device=device
         )
+        bias = torch.randn(4, requires_grad=True, dtype=torch.float64, device=device)
 
-        def grad_test_func(a, b, c, weight):
+        def grad_test_func(a, b, c, weight, bias):
             nt = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
-            out = torch.nn.functional.linear(nt, weight)
+            out = torch.nn.functional.linear(nt, weight, bias)
             return out.values()
 
-        gradcheck(grad_test_func, inputs=(a, b, c, weight), check_batched_grad=False)
+        gradcheck(
+            grad_test_func, inputs=(a, b, c, weight, bias), check_batched_grad=False
+        )
 
     def test_unary_pointwise(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
