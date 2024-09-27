@@ -68,7 +68,7 @@ class JitLlgaTestCase(JitTestCase):
         with torch.no_grad(), torch._jit_internal._disable_emit_hooks():
             if dtype == torch.bfloat16:
                 # We rely upon eager-mode AMP support for BF16
-                with torch.cpu.amp.autocast(cache_enabled=False, dtype=torch.bfloat16):
+                with torch.autocast(device_type="cpu", cache_enabled=False, dtype=torch.bfloat16):
                     traced = torch.jit.trace(m, x)
                     if isinstance(m, torch.nn.Module):
                         traced = torch.jit.freeze(traced)

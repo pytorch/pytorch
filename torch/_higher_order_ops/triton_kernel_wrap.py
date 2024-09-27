@@ -8,7 +8,6 @@ import threading
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Union
 
-import torch
 import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import Tensor
@@ -123,7 +122,6 @@ def generate_ttir(kernel, kwargs):
     from triton.runtime.autotuner import Autotuner
     from triton.runtime.jit import JITFunction
 
-    import torch
     import torch._inductor.ir
     from torch._subclasses.fake_tensor import FakeTensor
 
@@ -958,12 +956,6 @@ class TritonHOPifier:
 
         assert len(grids) != 0
 
-        def intify(x):
-            if isinstance(x, torch.SymInt):
-                return int(x)
-            else:
-                return x
-
         if isinstance(variable.kernel, JITFunction):
             constexprs = variable.kernel.constexprs
         else:
@@ -984,10 +976,6 @@ class TritonHOPifier:
                     combined_args_raw[arg_name] = ConstantVariable.create(
                         combined_args_raw[arg_name].evaluate_expr()
                     )
-
-        if len(set(pytree.tree_map(intify, grids))) == 1:
-            # If there's only one unique grid, lets simplify
-            grids = [grids[0]]
 
         return self.call_HOP(variable, grids, combined_args_raw, tx)
 
