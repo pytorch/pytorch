@@ -46,7 +46,7 @@ static bool isHipSparseLtSupported(int idx) {
     bool result = false;
     try {
         auto prop = at::cuda::getDeviceProperties(idx);
-        result = (supported_archs.count(prop->gcnArchName) > 0) && (ROCM_VERSION >= 63000);
+        result = (supported_archs.count(prop->gcnArchName) > 0);
     } catch (const std::exception&) {
         // If an exception occurs, we assume it's not supported
     }
@@ -71,6 +71,14 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
     cusparseLtMatDescriptor_t sparse_input_descriptor;
     cudaDataType type;
     auto compression_factor = 9;
+
+#ifdef USE_ROCM
+    int device_index = at::cuda::current_device();
+    TORCH_CHECK(isHipSparseLtSupported(device_index), 
+                "hipSPARSELt is not supported on this device. ",
+                "Supported architectures are: gfx940, gfx941, gfx942, gfx1200, gfx1201. ",
+                "Also, ROCm version must be >= 6.3.0");
+#endif
 
     switch(
         sparse_input.scalar_type()
@@ -163,6 +171,14 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
   cudaDataType output_type;
   cusparseComputeType compute_type;
   auto compression_factor = 9;
+
+#ifdef USE_ROCM
+    int device_index = at::cuda::current_device();
+    TORCH_CHECK(isHipSparseLtSupported(device_index), 
+                "hipSPARSELt is not supported on this device. ",
+                "Supported architectures are: gfx940, gfx941, gfx942, gfx1200, gfx1201. ",
+                "Also, ROCm version must be >= 6.3.0");
+#endif
 
   switch(compressed_A.scalar_type())
   {
