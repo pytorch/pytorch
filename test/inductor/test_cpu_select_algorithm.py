@@ -1582,9 +1582,12 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     )
     def test_aoti_linear(self, batch_size, in_features, out_features, bias, dtype):
         try:
-            from .test_aot_inductor_utils import AOTIRunnerUtil
-        except ImportError:
-            # skip this UT if relative import failed
+            try:
+                from . import test_aot_inductor_utils
+            except ImportError:
+                import test_aot_inductor_utils
+        except Exception:
+            # skip this UT if import failed
             return
 
         class M(torch.nn.Module):
@@ -1608,7 +1611,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         torch.manual_seed(0)
         with verify(dtype) as (atol, rtol), torch.no_grad():
             expected = mod(v)
-            actual = AOTIRunnerUtil.run(
+            actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
                 "cpu",
                 mod,
                 (v,),
@@ -1630,9 +1633,12 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self, batch_size, in_features, out_features, dtype
     ):
         try:
-            from .test_aot_inductor_utils import AOTIRunnerUtil
-        except ImportError:
-            # skip this UT if relative import failed
+            try:
+                from . import test_aot_inductor_utils
+            except ImportError:
+                import test_aot_inductor_utils
+        except Exception:
+            # skip this UT if import failed
             return
 
         class M(torch.nn.Module):
@@ -1660,7 +1666,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         torch.manual_seed(0)
         with verify(dtype) as (atol, rtol), torch.no_grad():
             expected = mod(v)
-            actual = AOTIRunnerUtil.run(
+            actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
                 "cpu",
                 mod,
                 (v,),

@@ -562,7 +562,17 @@ class CppPackedGemmTemplate(CppTemplate):
                 new_inputs[1] = W.to_dense() if W.is_mkldnn else W
             return new_inputs, layout_or_out
 
+        new_inputs, new_layout = reorder_and_filter(input_nodes, layout)
+
+        assert isinstance(new_inputs[1].layout, ir.FixedLayout)
+        view_size = new_inputs[1].layout.size
+        view_stride = new_inputs[1].layout.stride
+        view_offset = new_inputs[1].layout.offset
+
         def normalize_shapes(inputs, layout_or_out):
+            if isinstance(inputs[1], torch.Tensor):
+                # Assume W has been unwrap view
+                inputs[1] = inputs[1].as_strided(view_size, view_stride, view_offset)
             if not trans_w:
                 return inputs, layout_or_out
             new_inputs = list(inputs)
@@ -593,9 +603,7 @@ class CppPackedGemmTemplate(CppTemplate):
 
         # TODO(jgong5): decide proper number of threads per problem size
         num_threads = parallel_num_threads()
-        new_inputs, _ = normalize_shapes(
-            *maybe_to_dense(*reorder_and_filter(input_nodes, layout))
-        )
+        new_inputs, _ = normalize_shapes(*maybe_to_dense(new_inputs, new_layout))
         m, n, k, *_ = mm_args(new_inputs[0], new_inputs[1])
         output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
             new_inputs[0].get_dtype()
@@ -707,10 +715,6 @@ class CppPackedGemmTemplate(CppTemplate):
                 W_node = new_input_nodes[1]
                 assert W_node.get_name() in V.graph.constants
                 W = V.graph.constants[W_node.get_name()]
-                if isinstance(W_node, ir.BaseView):
-                    view_size = W_node.get_size()
-                    view_stride = W_node.get_stride()
-                    W = W.as_strided(view_size, view_stride).contiguous()
                 new_input_nodes[1] = W
                 new_input_nodes, _ = pack_weight(
                     *normalize_shapes(*maybe_to_dense(new_input_nodes, layout))
