@@ -130,6 +130,11 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
         if: ${{ contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu') && steps.check_arc_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
 
+      - name: Setup GPU_FLAG for docker run
+        id: setup-gpu-flag
+        run: echo "GPU_FLAG=--gpus all -e NVIDIA_DRIVER_CAPABILITIES=all" >> "${GITHUB_ENV}"
+        if: ${{ contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu') && steps.check_arc_runner.outputs.IN_CONTAINER_RUNNER == 'true' }}
+
       - name: Lock NVIDIA A100 40GB Frequency
         run: |
           sudo nvidia-smi -pm 1
