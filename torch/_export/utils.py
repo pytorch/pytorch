@@ -754,6 +754,7 @@ def placeholder_naming_pass(
 
     # map user input names with mod.forward() signature
     combined_args = _bind_signature_to_inputs(mod, fake_args, fake_kwargs)
+    print("ARGS", combined_args)
 
     flat_args_with_path, _ = tree_flatten_with_path(combined_args)
     user_input_names = [

@@ -751,7 +751,7 @@ def _export_to_aten_ir(
         for node in _mod.graph.nodes:
             if node.op in ["placeholder", "output"]:
                 node.meta.pop("nn_module_stack", None)
-                node.meta.pop("stack_trace", None)
+                node.meta.pop("stack_trace", None)    
 
     # Prettify names for placeholder nodes.
     placeholder_naming_pass(

@@ -313,7 +313,7 @@ def _split_decomp_table_to_cia_and_python_decomp(
 
 def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
     """
-    This is the default decomposition table which contains decomposition of
+ T200307782   This is the default decomposition table which contains decomposition of
     all ATEN operators to core aten opset. Use this API together with
     :func:`run_decompositions()`
     """
@@ -340,9 +340,11 @@ def _decompose_and_get_gm_with_new_signature_constants(
     )
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-    # TODO Merge this path with inference IR decomp, but it will require some additional work
-    # so I will leave it for now. T200307782
-    if ep.verifier.dialect == "TRAINING":
+
+    def _is_joint_ir_decomp(ep, joint_loss_index):
+        return joint_loss_index is not None or ep.graph_signature.backward_signature is not None
+        
+    if not _is_joint_ir_decomp(ep, joint_loss_index):
         mod = ep.module()
 
         fake_args = []
@@ -525,9 +527,10 @@ def _decompose_and_get_gm_with_new_signature_constants(
         )
         for i, spec in enumerate(ep.graph_signature.input_specs)
     ]
+
     output_specs = [
         OutputSpec(
-            spec.kind,
+            OutputKind.LOSS_OUTPUT if joint_loss_index is not None else spec.kind,
             update_arg(spec.arg, new_outputs[i]),
             old_new_placeholder_map.get(spec.target, spec.target),
         )
