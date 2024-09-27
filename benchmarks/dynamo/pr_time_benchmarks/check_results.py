@@ -105,7 +105,7 @@ def main():
 
         if result < low:
             fail = True
-            ratio = (float)(entry.expected_value - result) * 100 / entry.expected_value
+            ratio = float(entry.expected_value - result) * 100 / entry.expected_value
 
             print(
                 f"WIN: benchmark {key} failed, actual result {result} is {ratio:.2f}% lower than "
