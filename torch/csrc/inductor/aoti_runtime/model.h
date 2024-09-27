@@ -107,6 +107,9 @@ class AOTInductorModelBase {
 #ifdef USE_CUDA
     if (device_idx_ == -1) {
       AOTI_RUNTIME_DEVICE_CHECK(cudaGetDevice(&device_idx_));
+    } else {
+      // If device_idx_ is passed in, we need to set the current device to it
+      AOTI_RUNTIME_DEVICE_CHECK(cudaSetDevice(device_idx_));
     }
 #endif // USE_CUDA
   }
