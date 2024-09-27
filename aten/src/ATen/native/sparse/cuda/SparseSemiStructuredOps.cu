@@ -917,6 +917,17 @@ _to_sparse_semi_structured(const Tensor& dense) {
               __func__, " : Expected dense argument to be 2D tensor, got ",
               dense.dim(), " dims");
 
+#if defined(USE_ROCM)
+  // Generate sparse tensor using cuSPARSELt compression
+  auto sparse = torch._cslt_compress(dense);    
+  
+  // Extract the compressed data and metadata
+  auto compressed_data = sparse.values();
+  auto metadata = sparse.indices();
+  
+  return std::make_tuple(compressed_data, metadata);
+#endif
+
   // Determine PyTorch datatype for the metadata matrix.
   auto meta_dtype= at::kChar;
   auto ksparse = 0;
@@ -1009,22 +1020,11 @@ _to_sparse_semi_structured(const Tensor& dense) {
 
   auto meta_reordered_cpu = meta_cpu.new_empty({meta_nrows, meta_ncols});
 
-#ifdef USE_ROCM
-  using MetaLayout = ck::tensor_layout::gemm::RowMajor;
-  using MetaReorderedLayout = ck::tensor_layout::gemm::ColumnMajor;
-#else
   using MetaLayout = cutlass::layout::RowMajor;
   using MetaReorderedLayout = cutlass::layout::ColumnMajorInterleaved<2>;
-#endif
 
   if (meta_dtype == at::kShort) {
     using MetaElement = int16_t;
-#ifdef USE_ROCM
-    auto meta_cpu_ref =
-      ck::wrapper::make_tensor<ck::wrapper::MemoryTypeEnum::Generic>(meta_cpu.data_ptr<MetaElement>(), MetaLayout::packed({meta_nrows, meta_ncols}));
-    auto meta_reordered_cpu_ref =
-      ck::wrapper::make_tensor<ck::wrapper::MemoryTypeEnum::Generic>(meta_reordered_cpu.data_ptr<MetaElement>(), MetaReorderedLayout::packed({meta_nrows, meta_ncols}));
-#else
     auto meta_cpu_ref =
       cutlass::TensorRef<MetaElement, MetaLayout>(
           meta_cpu.data_ptr<MetaElement>(),
@@ -1034,24 +1034,11 @@ _to_sparse_semi_structured(const Tensor& dense) {
       cutlass::TensorRef<MetaElement, MetaReorderedLayout>(
           meta_reordered_cpu.data_ptr<MetaElement>(),
           MetaReorderedLayout::packed({meta_nrows, meta_ncols}));
-#endif
 
 //TODO: add ROCm support/CK tensor support
-#if defined(USE_ROCM)
-    reorder_meta(meta_reordered_cpu.data_ptr<int16_t>(),
-               meta_cpu.data_ptr<int16_t>(),
-               meta_nrows, meta_ncols);
-#else
     reorder_meta(meta_reordered_cpu_ref, meta_cpu_ref, meta_nrows, meta_ncols);
-#endif
   } else if (meta_dtype == at::kInt) {
     using MetaElement = int32_t;
-#ifdef USE_ROCM
-    auto meta_cpu_ref =
-      ck::wrapper::make_tensor<ck::wrapper::MemoryTypeEnum::Generic>(meta_cpu.data_ptr<MetaElement>(), MetaLayout::packed({meta_nrows, meta_ncols}));
-    auto meta_reordered_cpu_ref =
-      ck::wrapper::make_tensor<ck::wrapper::MemoryTypeEnum::Generic>(meta_reordered_cpu.data_ptr<MetaElement>(), MetaReorderedLayout::packed({meta_nrows, meta_ncols}));
-#else
     auto meta_cpu_ref =
       cutlass::TensorRef<MetaElement, MetaLayout>(
           meta_cpu.data_ptr<MetaElement>(),
@@ -1060,15 +1047,7 @@ _to_sparse_semi_structured(const Tensor& dense) {
       cutlass::TensorRef<MetaElement, MetaReorderedLayout>(
           meta_reordered_cpu.data_ptr<MetaElement>(),
           MetaReorderedLayout::packed({meta_nrows, meta_ncols}));
-#endif
-//TODO: add ROCm support/CK tensor support
-#if defined(USE_ROCM)
-    reorder_meta(meta_reordered_cpu.data_ptr<int32_t>(),
-               meta_cpu.data_ptr<int32_t>(),
-               meta_nrows, meta_ncols);
-#else
     reorder_meta(meta_reordered_cpu_ref, meta_cpu_ref, meta_nrows, meta_ncols);
-#endif
   }
 
   return std::make_tuple(sparse_cpu.to(dense.device()),
