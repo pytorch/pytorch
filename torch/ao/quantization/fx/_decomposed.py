@@ -955,7 +955,7 @@ def dequantize_per_token(
     Args:
        input (torch.Tensor): quantized Tensor (uint8, int8 etc.)
        scales (float64 torch.Tensor): quantization parameter for per token affine quantization
-       zero_points (int32 torch.Tensor): quantization parameter for per token affine quantization
+       zero_points (int64 torch.Tensor): quantization parameter for per token affine quantization
        quant_min (int): minimum quantized value for input Tensor
        quant_max (int): maximum quantized value for input Tensor
        dtype (torch.dtype): dtype (e.g. torch.uint8) for input Tensor
