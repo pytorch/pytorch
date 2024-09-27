@@ -14,6 +14,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import ParamSpec
 
 import torch
 import torch.library
@@ -21,7 +22,6 @@ from torch._ops import HigherOrderOperator, OperatorBase, OpOverload, OpOverload
 from torch._prims_common import CustomOutParamAnnotation
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.utils import _pytree as pytree
-from typing_extensions import ParamSpec
 
 
 __all__ = [
@@ -40,9 +40,9 @@ _P = ParamSpec("_P")
 
 # TODO: relax key type here; torch registrations should be possible to; but
 # right now this type is accurate
-global_decomposition_table: Dict[str, Dict[torch._ops.OperatorBase, Callable]] = (
-    defaultdict(dict)
-)
+global_decomposition_table: Dict[
+    str, Dict[torch._ops.OperatorBase, Callable]
+] = defaultdict(dict)
 
 decomposition_table = global_decomposition_table["post_autograd"]
 pre_autograd_decomposition_table = global_decomposition_table["pre_autograd"]
