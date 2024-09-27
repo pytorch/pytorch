@@ -20,7 +20,7 @@ from .. import config as inductor_config
 from ..codegen.common import BackendFeature
 from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
-from ..codegen.wrapper import WrapperCodeGen
+from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import FlexibleLayout, is_triton
 from ..lowering import register_lowering
 from ..select_algorithm import (
@@ -259,11 +259,13 @@ def _is_static_problem(inputs_tensors, layout):
     # have a static shape by attempting to convert the dimensions
     # to int
     static_shape = True
-    static_size = WrapperCodeGen.statically_known_list_of_ints_or_none(layout.size)
+    static_size = PythonWrapperCodegen.statically_known_list_of_ints_or_none(
+        layout.size
+    )
     if static_size is None:
         nonzero = True
         for s in layout.size:
-            sz = WrapperCodeGen.statically_known_int_or_none(s)
+            sz = PythonWrapperCodegen.statically_known_int_or_none(s)
             if sz is not None and sz == 0:
                 nonzero = False
                 break
@@ -390,7 +392,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         # broadcasting on the last dim of the bias term seems not to be working
         # in the linear GEMM epilogue used by addmm.
         if (
-            WrapperCodeGen.statically_known_int_or_none(inp_expanded.layout.stride[-1])
+            PythonWrapperCodegen.statically_known_int_or_none(
+                inp_expanded.layout.stride[-1]
+            )
             != 0
         ):
             CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
