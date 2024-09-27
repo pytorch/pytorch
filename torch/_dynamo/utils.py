@@ -3097,10 +3097,16 @@ def is_parameter_freezing():
     return torch._inductor.config.freezing and not torch.is_grad_enabled()
 
 
-def get_torch_function_mode_stack():
-    return [
+def get_torch_function_mode_stack(filter_ignored=True):
+    from .variables.torch_function import IGNORED_MODES
+
+    stack = [
         get_torch_function_mode_stack_at(i) for i in range(_len_torch_function_stack())
     ]
+    if filter_ignored:
+        stack = [mode for mode in stack if type(mode) not in IGNORED_MODES]
+
+    return stack
 
 
 def get_torch_function_mode_stack_at(ind):

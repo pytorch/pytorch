@@ -188,6 +188,13 @@ class IncorrectUsage(Exception):
     pass
 
 
+# TODO: I'm a little uncertain about what error classification we should have
+# for this.  This is potentially a user error, but regressions in
+# specialization in PyTorch proper could also trigger this problem
+class FailOnCacheLimitHit(Exception):
+    pass
+
+
 class ObservedException(TorchDynamoException):
     # An exception observed during the tracing. This exception is used by Dynamo to handle exceptions.
     pass

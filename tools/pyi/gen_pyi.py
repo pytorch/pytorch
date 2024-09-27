@@ -136,6 +136,7 @@ blocklist = [
     "requires_grad",
     "range",
     # defined in functional
+    "cumsum",
     "einsum",
     # Somehow, these are defined in both _C and in functional. Ick!
     "broadcast_tensors",
