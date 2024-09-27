@@ -182,7 +182,7 @@ class SubprocPool:
                 self.running = False
                 _send_msg(self.write_pipe, -1)
                 self.write_pipe.close()
-            self.process.wait(10)
+            self.process.wait(300)
         except OSError as e:
             log.warning("Ignored OSError in pool shutdown:  %s", e)
         finally:
