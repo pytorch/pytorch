@@ -6393,10 +6393,10 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
 
 
 @register_lowering(associative_scan_op, type_promotion_kind=None)
-def associative_scan(combine_fn: ir.Subgraph, xs, dim: int, additional_inputs: Tuple[torch.Tensor]):
+def associative_scan(combine_fn: ir.Subgraph, xs, dim: int, additional_inputs: List[torch.Tensor]):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
 
-    if additional_inputs != ():
+    if len(additional_inputs) > 0:
         raise RuntimeError(
             "Unable to generate code for associative_scan op, because there are lifted arguments"
         )

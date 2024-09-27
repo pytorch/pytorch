@@ -1058,16 +1058,16 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
         assert isinstance(xs, torch._dynamo.variables.lists.BaseListVariable)
 
-        dim_fake = (
-            dim.as_proxy()
-            if type(dim.as_proxy()) == int
-            else get_fake_value(dim.as_proxy().node, tx)
-        )
-        scan_length = get_fake_value(xs.items[0].as_proxy().node, tx).size()[dim_fake]
-        if scan_length == 0:
-            unimplemented(
-                "scan() operator doesn't support zero-sized tensors during tracing."
-            )
+        # dim_fake = (
+        #     dim.as_proxy()
+        #     if type(dim.as_proxy()) == int
+        #     else get_fake_value(dim.as_proxy().node, tx)
+        # )
+        # scan_length = get_fake_value(xs.items[0].as_proxy().node, tx).size()[dim_fake]
+        # if scan_length == 0:
+        #     unimplemented(
+        #         "scan() operator doesn't support zero-sized tensors during tracing."
+        #     )
 
         # Trace the subgraph
         # TODO: Fix these pointless new_empty calls appearing in the dynamo output graph.
@@ -1103,11 +1103,34 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             for t in additional_inputs.items
         ]
         sub_args = sub_args_inp + sub_args_additional_inputs
+        # sub_args = [
+        #     leaf.call_method(
+        #         tx,
+        #         "new_empty",
+        #         args=(
+        #             SourcelessBuilder.create(
+        #                 tx,
+        #                 leaf.size
+        #                 if leaf.size is not None
+        #                 else BuiltinVariable(getattr)
+        #                 .call_function(tx, [leaf, ConstantVariable.create("shape")], {})
+        #                 .items,
+        #             ),
+        #         ),
+        #         kwargs={
+        #             "dtype": SourcelessBuilder.create(tx, leaf.dtype),
+        #             "requires_grad": SourcelessBuilder.create(tx, leaf.requires_grad),
+        #         },
+        #     )
+        #     for leaf in itertools.chain(xs.items, xs.items)
+        # ]
+        # sub_args = sub_args + sub_args_additional_inputs
         (
             (combine_result, combine_treespec),
             combine_graph,
             combine_lifted_freevars,
-        ) = speculate_subgraph(tx,
+        ) = speculate_subgraph(
+            tx,
             combine_fn,
             sub_args,
             sub_kwargs={},
@@ -1133,6 +1156,8 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         _check_phs_position_match(combine_graph, list(combine_lifted_freevars.values()))
         combine_freevars_proxy = list(combine_lifted_freevars.keys())
 
+        # additional_inputs = list(arg for arg in combine_lifted_freevars.keys())
+
         if combine_result.python_type() != list:
             unimplemented(
                 f"Expected combine_fn to return a list if tensor but got {combine_result.python_type()}",
@@ -1141,6 +1166,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         xs_proxy = xs.as_proxy()
         combine_result_proxy = combine_result.as_proxy()
         additional_inputs_proxy = additional_inputs.as_proxy() + combine_freevars_proxy
+        
         for result, inp_proxy in zip(combine_result_proxy, xs_proxy):
             inp_meta = inp_proxy.node.meta["example_value"]
             combine_result_meta = result.node.meta["example_value"]
@@ -1163,6 +1189,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             xs_proxy,
             dim.as_proxy(),
             additional_inputs_proxy,
+            # additional_inputs,
         )
 
         with tx.fake_mode:

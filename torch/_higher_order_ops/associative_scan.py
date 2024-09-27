@@ -322,7 +322,7 @@ def trace_associative_scan(
     with disable_proxy_modes_tracing():
         sample_additional_inputs = [x.clone() for x in additional_inputs]
         sample_xs = [first_slice_copy(x, dim) for x in xs]
-        combine_graph = reenter_make_fx(combine_fn)(*sample_xs, *sample_additional_inputs)
+        combine_graph = reenter_make_fx(combine_fn)(*sample_xs, *sample_xs, *sample_additional_inputs)
 
     outputs = None
     for node in combine_graph.graph.nodes:
@@ -365,7 +365,7 @@ def trace_associative_scan(
 
 
 @associative_scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def associative_scan_op_dense(combine_fn, xs, dim, lifted_args):
+def associative_scan_op_dense(combine_fn, xs, dim, additional_inputs):
     raise NotImplementedError("associative_scan is not implemented for eager")
 
 
@@ -375,21 +375,21 @@ associative_scan_op.py_impl(DispatchKey.Autograd)(
 
 
 @associative_scan_op.py_impl(ProxyTorchDispatchMode)
-def associative_scan_proxy_mode(mode, combine_fn, xs, dim, lifted_args):
-    return trace_associative_scan(mode, associative_scan_op, combine_fn, xs, dim, lifted_args)
+def associative_scan_proxy_mode(mode, combine_fn, xs, dim, additional_inputs):
+    return trace_associative_scan(mode, associative_scan_op, combine_fn, xs, dim, additional_inputs)
 
 
 @associative_scan_op.py_impl(FakeTensorMode)
-def assoiciative_scan_fake_tensor_mode(mode, combine_fn, xs, dim, lifted_args):
+def assoiciative_scan_fake_tensor_mode(mode, combine_fn, xs, dim, additional_inputs):
     with mode:
         return [x.clone() for x in xs]
 
 
 @associative_scan_op.py_functionalize_impl
-def associative_scan_functionalize(ctx, combine_fn, xs, dim, lifted_args):
+def associative_scan_functionalize(ctx, combine_fn, xs, dim, additional_inputs):
     unwrapped_xs = ctx.unwrap_tensors(xs)
-    unwrapped_lifted_args = ctx.unwrap_tensors(lifted_args)
+    unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
     with ctx.redispatch_to_next() as m:
         functional_combine_fn = ctx.functionalize(combine_fn)
-        ret = associative_scan_op(functional_combine_fn, unwrapped_xs, dim, unwrapped_lifted_args)
+        ret = associative_scan_op(functional_combine_fn, unwrapped_xs, dim, unwrapped_additional_inputs)
     return ctx.wrap_tensors(ret)
