@@ -223,6 +223,13 @@ test_Bq_Bkv = [
     (5, 1),
 ]
 
+test_block_size = [
+    128,
+    256,
+    (128, 256),
+    (256, 128),
+]
+
 
 def query_key_value_clones(
     query: torch.Tensor,
@@ -653,6 +660,19 @@ class TestFlexAttention(InductorTestCase):
             S,
             D,
         )
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    @common_utils.parametrize("BLOCK_SIZE", test_block_size)
+    def test_builtin_score_mods_different_block_size(
+        self,
+        dtype: torch.dtype,
+        score_mod: Callable,
+        BLOCK_SIZE: Union[int, Tuple[int, int]],
+    ):
+        block_mask = create_block_mask(noop_mask, B, H, S, S, BLOCK_SIZE=BLOCK_SIZE)
+        self.run_test(score_mod, dtype, block_mask=block_mask)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1921,14 +1941,16 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 self.skipTest("backend=flex_decode is unsupported on ROCM, for now")
             kernel_options = {"FORCE_USE_FLEX_ATTENTION": False}
             flex_call = torch.compile(flex_attention, fullgraph=True)
+            N_CTX = 96
         elif backend == "flex_attention":
             kernel_options = {"FORCE_USE_FLEX_ATTENTION": True}
             flex_call = torch.compile(flex_attention, fullgraph=True)
+            N_CTX = 196
         else:
             kernel_options = {}
             flex_call = flex_attention
+            N_CTX = 196
 
-        N_CTX = 96
         SLIDING_WINDOW = 64
         make_tensor = functools.partial(
             torch.randn,
