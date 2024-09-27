@@ -18,8 +18,14 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Check if in a container runner
+      shell: bash
+      id: check_arc_runner
+      run: echo "IN_CONTAINER_RUNNER=$([ -f /.inarc ] && echo true || echo false)"  >> $GITHUB_OUTPUT
+
     - name: Clean workspace
       shell: bash
+      if: ${{ steps.check_arc_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
       env:
         NO_SUDO: ${{ inputs.no-sudo }}
       run: |
