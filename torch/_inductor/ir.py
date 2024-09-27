@@ -6245,11 +6245,8 @@ class MultiOutput(ExternKernel):
 
     def __init__(self, layout, input, indices: List[Tuple[Any, ...]]):
         super().__init__(None, layout, [input], ())
-        if not isinstance(self.layout, (ShapeAsConstantBuffer, MutationOutput)):
-            self.name = V.graph.register_buffer(self)
-            V.graph.register_operation(self)
-        else:
-            self.name = str(self.layout)
+        self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
         self.indices = indices
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
@@ -6567,6 +6564,7 @@ class WhileLoop(ExternKernel):
     cond_subgraph: Optional[Subgraph] = None
     body_subgraph: Optional[Subgraph] = None
     outputs: Optional[List[MultiOutput]] = None
+    mutated_inputs: Optional[List[TensorBox]] = None
     iter_idx_expr: Optional[sympy.Expr] = None
 
     def __init__(
@@ -6576,14 +6574,15 @@ class WhileLoop(ExternKernel):
         cond_subgraph: Subgraph,
         body_subgraph: Subgraph,
         layout: MultiOutputLayout,
+        mutated_inputs: List[TensorBox],
         iter_idx_expr: sympy.Symbol,
     ):
         self.carried_inputs = carried_inputs
         self.additional_inputs = additional_inputs
         self.cond_subgraph = cond_subgraph
         self.body_subgraph = body_subgraph
-        all_inputs = carried_inputs + additional_inputs
         self.iter_idx_expr = iter_idx_expr
+        self.mutated_inputs = mutated_inputs
 
         super().__init__(
             name=None,
@@ -6605,10 +6604,10 @@ class WhileLoop(ExternKernel):
         iter_idx_expr: Optional[sympy.Symbol] = None,
     ):
         mutated_inputs = [] if mutated_inputs is None else mutated_inputs
-        # looking for mutated input in carried_inputs. additional_inputs are read-only
-        mutated_indices = {carried_inputs.index(x): x for x in mutated_inputs}
+        mutated_indices = [carried_inputs.index(x) for x in mutated_inputs]
 
         carried_inputs = [cls.realize_input(x) for x in carried_inputs]
+        mutated_inputs = [carried_inputs[i] for i in mutated_indices]
         additional_inputs = [cls.realize_input(x) for x in additional_inputs]
         all_inputs = carried_inputs + additional_inputs
 
@@ -6652,6 +6651,7 @@ class WhileLoop(ExternKernel):
             body_subgraph=body_fn,
             # asserted above that there is at least one operand
             layout=MultiOutputLayout(device),
+            mutated_inputs=mutated_inputs,
             iter_idx_expr=iter_idx_expr,
         )
 
@@ -6663,29 +6663,38 @@ class WhileLoop(ExternKernel):
                     size=output.get_size(),
                     stride=output.get_stride(),
                     offset=output.get_layout().offset,
-                    # TODO: how to construt the output to denote this is the input?
-                )
-                if i not in mutated_indices
-                else mutated_indices[i].data.data.layout,  # type: ignore[attr-defined]
+                ),
                 while_loop,
                 [(list, i)],
             )
             for i, output in enumerate(body_outputs)
+            if i not in mutated_indices
         ]
 
         for inp, out in zip(carried_inputs, outputs):
-            # if a carried input of the while_loop is a graph input,
-            # it can be returned as is when the number of iterations
-            # is zero. due to this, we can't (generally) reuse the
-            # output buffers corresponding to the graph inputs, as
-            # the inputs may end up being mutated.
-            V.graph.never_reuse_buffers.add(out.get_name())
+            if inp.get_name() in V.graph.graph_inputs:
+                # if a carried input of the while_loop is a graph input,
+                # it can be returned as is when the number of iterations
+                # is zero. due to this, we can't (generally) reuse the
+                # output buffers corresponding to the graph inputs, as
+                # the inputs may end up being mutated.
+                V.graph.never_reuse_buffers.add(out.get_name())
 
         while_loop.outputs = outputs
+        while_loop.mutation_outputs.extend(
+            [
+                MutationOutput(NoneLayout(device), inp, while_loop)
+                for inp in while_loop.mutated_inputs  # type: ignore[union-attr]
+            ]
+        )
         return outputs
 
     def codegen(self, wrapper):
         wrapper.codegen_while_loop(self)
+
+    def get_mutation_names(self):
+        assert self.mutated_inputs is not None
+        return [inp.get_name() for inp in self.mutated_inputs]
 
 
 class EffectfulKernel(FallbackKernel):
