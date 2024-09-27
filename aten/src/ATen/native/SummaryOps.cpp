@@ -40,7 +40,7 @@ Tensor _bincount_cpu_template(
   if (max_val >= std::numeric_limits<int64_t>::max()) {
     AT_ERROR(
         "maximum value of input overflowed, it should be < ",
-        std::numeric_limits<input_t>::max(),
+        std::numeric_limits<int64_t>::max(),
         " but got ",
         max_val
     );
