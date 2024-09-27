@@ -10,7 +10,10 @@ from utils.metrics import get_execution_time, MetricResult, Metrics
 import torch
 
 
-enable_profile = False
+# mapping from operator name to the input list.
+# We use the same input list for different variants of the same operator.
+# {operator_name: input_list}
+input_mapping = {}
 
 
 # Create operator instances from desired operator names
@@ -40,7 +43,9 @@ def benchmark_operator(operator: BaseOperator, benchmark_config: BenchmarkConfig
     repeat = benchmark_config.repeat
     device = benchmark_config.device
     metrics = benchmark_config.metrics
-    num_samples = min(max_samples, len(operator.get_inputs(benchmark_config)))
+    num_samples = min(
+        max_samples, len(operator.get_inputs(input_mapping, benchmark_config))
+    )
 
     metric_result = MetricResult()
     metric_result.op_name = operator.name
@@ -54,36 +59,40 @@ def benchmark_operator(operator: BaseOperator, benchmark_config: BenchmarkConfig
             record_shapes=False,
             profile_memory=False,
             on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                f"./log/operator_{operator.full_name}", use_gzip=True
+                f"{benchmark_config.profile_folder}/operator_{operator.full_name}",
+                use_gzip=True,
             ),
         )
-        if enable_profile
+        if benchmark_config.profile
         else nullcontext()
     )
     with profiler_context:
         for i in range(num_samples):
-            input = operator.get_inputs(benchmark_config)[i]
-            input = operator.prepare_input_and_functions(input)
+            input = operator.get_inputs(input_mapping, benchmark_config)[i]
+            input = operator.prepare_input_and_functions(input, phase)
             if phase == Phase.FORWARD:
                 phase_fn = operator.forward
+            elif phase == Phase.BACKWARD:
+                phase_fn = operator.backward
             else:
                 phase_fn = operator.full
             metric_result.input.append(input)
             execution_time = []
             record_sample_context = (
                 torch.profiler.record_function(f"sample_{i}")
-                if enable_profile
+                if benchmark_config.profile
                 else nullcontext()
             )
-            
+
             with record_sample_context:
                 for repeat_idx in range(repeat):
+
                     def fn():
                         return phase_fn(input)
 
                     record_repeat_context = (
                         torch.profiler.record_function(f"repeat_{repeat_idx}")
-                        if enable_profile
+                        if benchmark_config.profile
                         else nullcontext()
                     )
                     with record_repeat_context:
@@ -134,14 +143,29 @@ def benchmark_operator(operator: BaseOperator, benchmark_config: BenchmarkConfig
     default="",
 )
 @click.option("--profile", help="profile", is_flag=True, default=False)
+@click.option(
+    "--profile-folder",
+    help="set profile folder",
+    default="./log",
+)
 @click.option("--channels-last", help="channels last", is_flag=True, default=False)
 def run_benchmarks(
-    op, dtype, max_samples, device, phase, repeat, metrics, skip_variants, profile, mode, channels_last
+    op,
+    dtype,
+    max_samples,
+    device,
+    phase,
+    repeat,
+    metrics,
+    skip_variants,
+    profile,
+    profile_folder,
 ):
-    global enable_profile
-    enable_profile = profile
+    global input_mapping
+    # Reset input mapping to avoid OOM and mismatch in different unit tests
+    input_mapping = {}
     # process arguments and generate benchmark config
-    dtype = dtype_mapping.get(dtype, torch.float32)  # Default to float32 if not found
+    dtype = dtype_mapping.get(dtype)
     metrics = [
         Metrics[metric.strip().upper()]
         for metric in metrics.split(",")
@@ -161,6 +185,8 @@ def run_benchmarks(
         metrics=metrics,
         channels_last=channels_last,
         mode=mode,
+        profile=profile,
+        profile_folder=profile_folder,
     )
 
     # This is a list of classes, not instances
