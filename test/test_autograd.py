@@ -69,7 +69,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
-    scoped_load_inline,
     set_warn_always_context,
     skipIfMps,
     skipIfNoLapack,
@@ -86,6 +85,7 @@ from torch.utils.checkpoint import (
     CheckpointPolicy,
     create_selective_checkpoint_contexts,
 )
+from torch.utils.cpp_extension import load_inline
 from torch.utils.flop_counter import FlopCounterMode
 
 
@@ -9856,19 +9856,19 @@ torch::Tensor custom_op_backed_by_autograd_fn(torch::Tensor x) {
   return CustomOpAutogradFunction::apply(x);
 }
 
-TORCH_LIBRARY(test_multigrad_all_hooks, m) {
+TORCH_LIBRARY(test_autograd_cpp_node, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
 
-        module, _ = scoped_load_inline(
-            name="test_multigrad_all_hooks",
+        module = load_inline(
+            name="test_autograd_cpp_node",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
         )
 
-        t4 = torch.ops.test_multigrad_all_hooks.custom_op_backed_by_autograd_fn(t4)
+        t4 = torch.ops.test_autograd_cpp_node.custom_op_backed_by_autograd_fn(t4)
 
         res = [None] * 4
         count = [0]

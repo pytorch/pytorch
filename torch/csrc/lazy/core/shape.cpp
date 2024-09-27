@@ -4,6 +4,7 @@
 
 #include <utility>
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 C10_DEFINE_bool(
     ltc_enable_symbolic_shapes,
     false,
@@ -124,7 +125,8 @@ void applySymbolicShapesOnLT(
     for (size_t i = 0; i < res_symbolic->size(); i++) {
       auto sym_dims = res_symbolic->at(i).symbolicDims();
       if (sym_dims.has_value()) {
-        result_shapes[i] = result_shapes[i].with_symbolic_dims(*sym_dims);
+        result_shapes[i] =
+            result_shapes[i].with_symbolic_dims(std::move(sym_dims));
       }
     }
   }
