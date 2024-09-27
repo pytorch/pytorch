@@ -2619,6 +2619,26 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         self.assertNotIn(libname, code)
         self.assertNotIn(opname, code)
 
+    @requires_gpu
+    @patch.object(torch._dynamo.config, "cache_size_limit", 1)
+    def test_triton_dynamic_grid_no_recompile(self):
+        libname = "my_cool_namespace"
+        opname = "my_triton_operator"
+
+        @torch._library.triton_op(f"{libname}::{opname}", mutates_args={})
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+            capture_triton(add_kernel)[(n_elements,)](x, y, output, n_elements, 16)
+            return output
+
+        @torch.compile(fullgraph=True, dynamic=True)
+        def f(x):
+            return add(x, x)
+
+        f(torch.randn(8, device=GPU_TYPE))
+        f(torch.randn(16, device=GPU_TYPE))
+
     @unittest.skipIf(not has_triton_package(), "requires triton")
     def test_capture_triton_meta(self):
         import triton
