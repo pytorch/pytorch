@@ -116,6 +116,7 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
   std::scoped_lock l{lock_};
   if (!untuned_file.good()) {
     TORCH_WARN_ONCE("failed to open file for writing; untuned gemm will not be saved");
+    return;
   } else {
     bool isNew = false;
     auto it = untuned_results_.find(op_signature);
@@ -131,7 +132,6 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
     }
 
     if (isNew) {
-      std::string device = c10::str(int(c10::cuda::current_device()));
       untuned_file << op_signature << "," << params_signature << std::endl;
       TUNABLE_LOG3("Untuned,", op_signature, ",", params_signature);
     }
