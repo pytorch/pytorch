@@ -1067,6 +1067,22 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
             dense_result = torch.mm(A_fp8_sparse, B_fp8)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+ and sm_89 and MI300+ devices")
+    def test_sparse_semi_structured_scaled_mm_fp8(self, device) -> None:
+        (k, l, m) = (32, 64, 32)
+        x = rand_sparse_semi_structured_mask(k, l, dtype=torch.float8_e4m3fn, device=device)
+        y = torch.full((m, l), .25, device=device, dtype=torch.float8_e4m3fn).t()
+        scale_a = torch.tensor(1.0, device=device)
+        scale_b = torch.tensor(1.0, device=device)
+        out_fp8 = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b, out_dtype=torch.float8_e4m3fn)
+
+        x_sparse = to_sparse_semi_structured(x)
+        out_fp8_sparse = torch._scaled_mm(x_sparse, y, scale_a=scale_a, scale_b=scale_b, out_dtype=torch.float8_e4m3fn)
+        # this fails on ROCm currently because hipblaslt doesn't have amax op
+        out_fp32 = out_fp8.to(torch.float32)
+        out_fp32_sparse = out_fp8_sparse.to(torch.float32)
+        torch.testing.assert_close(out_fp32, out_fp32_sparse, rtol=1e-1, atol=1e-1)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+ and sm_89 and MI300+ devices")
     @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.float32])
     @parametrize("dense_input_shape", [(256, 128)])
     def test_sparse_semi_structured_scaled_mm(

@@ -228,6 +228,10 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
     {
         switch (out_dtype)
         {
+            case at::ScalarType::Float8_e4m3fn:
+                output_type = CUDA_R_8F_E4M3;
+                C_type = CUDA_R_16F;
+                break;
             case at::ScalarType::Half:
                 output_type = CUDA_R_16F;
                 C_type = CUDA_R_16F;
