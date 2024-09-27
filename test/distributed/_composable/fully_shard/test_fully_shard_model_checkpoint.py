@@ -21,7 +21,7 @@ from torch.testing._internal.common_dist_composable import (
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     _zero_model,
-    CUDAInitMode,
+    DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
     TransformerWithSharedParams,
@@ -124,7 +124,7 @@ class TestModelCheckpointing(FSDPTest):
         local_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             deterministic=True,
         )
 
@@ -155,7 +155,7 @@ class TestModelCheckpointing(FSDPTest):
         load_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
         )
         _zero_model(load_model, zero_buffers=True, summon_full=False)
         fully_shard(
