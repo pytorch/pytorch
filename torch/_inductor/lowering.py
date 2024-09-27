@@ -6220,15 +6220,27 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
+    fx_all_inputs = V.graph.current_node.args[-2] + V.graph.current_node.args[-1]  # type: ignore[operator]
+    fake_all_inputs = [x.meta["val"] for x in fx_all_inputs]  # type: ignore[union-attr]
+
+    for subgraph in (cond_fn, body_fn):
+        if subgraph.graph is None:
+            # create and lower subgraphs
+            subgraph.graph = V.graph.make_subgraph(
+                gm=subgraph.graph_module,
+                example_inputs=fx_all_inputs,  # type: ignore[arg-type]
+                subgraph_name=subgraph.name,
+            )
+            with V.set_graph_handler(subgraph.graph):
+                subgraph.graph.run(*fake_all_inputs)
+
     result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
     return list(map(TensorBox.create, result))
 
 
 # This is a spcialized version of select, where we're certain that
 # the idx will be valid (the idx are generated in wrapper of scan).
-@register_lowering(
-    torch._higher_order_ops.scan.scan_slice_view, type_promotion_kind=None
-)
+@register_lowering(torch.ops._scan.unsafe_select, type_promotion_kind=None)
 def scan_slice_view(dst, dim, idx):
     return squeeze(slice_(dst, dim, idx, idx + 1, step=1, clamp=False), dim)
 
@@ -6237,72 +6249,122 @@ def scan_slice_view(dst, dim, idx):
 def scan(combine_subgraph, init, xs, dim, reverse, additional_inputs):
     from torch._dynamo.source import GlobalSource
     from torch._higher_order_ops.scan import _extract_carry_and_out, stack_y
+    from torch._inductor.pattern_matcher import fwd_only
     from torch.fx.experimental.symbolic_shapes import DimDynamic
 
-    # Create a clone of init that act as the first carry to subgraph
-    init = [clone(x) for x in init]
-
     num_init_leaves = len(init)
-    num_xs = len(xs)
     specialized_dim = int(dim)
 
-    def extract_scan_args(combine_subgraph, init, xs, dim, reverse, additional_inputs):
-        return combine_subgraph, init, xs, dim, reverse, additional_inputs
-
-    assert combine_subgraph.graph is None
-    _, fx_init, fx_xs, _, _, fx_additional_inputs = extract_scan_args(
-        *V.graph.current_node.args
-    )
-
-    fake_init = [node.meta["val"] for node in fx_init]
-    fake_xs = [node.meta["val"] for node in fx_xs]
-    fake_additional_inputs = [node.meta["val"] for node in fx_additional_inputs]
-    scan_length = fake_xs[0].size()[specialized_dim]
+    _, fx_init, fx_xs, _, _, fx_additional_inputs = V.graph.current_node.args
+    fake_init = [node.meta["val"] for node in fx_init]  # type: ignore[union-attr]
+    fake_xs = [node.meta["val"] for node in fx_xs]  # type: ignore[union-attr]
+    fake_additional_inputs = [node.meta["val"] for node in fx_additional_inputs]  # type: ignore[union-attr]
+    fake_xs_subgraph = [t.select(specialized_dim, 0) for t in fake_xs]
+    fake_scan_length = fake_xs[0].size()[specialized_dim]
+    # We fake propogate subgraph to get the shape of fake_ys_outs
     with V.graph.fake_mode:
-        _, fake_ys_sliced = _extract_carry_and_out(
+        _, fake_ys_subgraph = _extract_carry_and_out(
             combine_subgraph.graph_module(
-                *(
-                    fake_init
-                    + [t.select(specialized_dim, 0) for t in fake_xs]
-                    + fake_additional_inputs
-                )
+                *(fake_init + fake_xs_subgraph + fake_additional_inputs)
             ),
             num_init_leaves,
         )
-        fake_ys_outs = [stack_y(y, scan_length) for y in fake_ys_sliced]
-
-    combine_subgraph.graph_module = ir.SequentialScan._to_out_variant_graph(
-        combine_subgraph.graph_module,
-        fake_ys_outs,
-        specialized_dim,
-        num_init_leaves,
-        num_xs,
-    )
-
-    shape_env = V.graph.fake_mode.shape_env
-    fake_idx = shape_env.create_symintnode(  # type: ignore[union-attr]
-        shape_env.create_unspecified_symbol(  # type: ignore[union-attr]
+    fake_ys_outs = [stack_y(y, fake_scan_length) for y in fake_ys_subgraph]
+    fake_idx = V.graph.fake_mode.shape_env.create_symintnode(  # type: ignore[union-attr]
+        V.graph.fake_mode.shape_env.create_unspecified_symbol(  # type: ignore[union-attr]
             0, source=GlobalSource("scan_idx"), dynamic_dim=DimDynamic.DYNAMIC
         ),
         hint=0,
         source=GlobalSource("scan_idx"),
     )
-    example_inputs = (
-        fake_init + fake_xs + fake_additional_inputs + fake_ys_outs + [fake_idx]
+    fake_args, tree_spec = pytree.tree_flatten(
+        [fake_init, fake_xs, fake_additional_inputs, fake_ys_outs, fake_idx]
     )
-    # create and lower subgraphs
-    combine_subgraph.graph = V.graph.make_subgraph(
-        gm=combine_subgraph.graph_module,
-        example_inputs=example_inputs,  # type: ignore[arg-type]
-        subgraph_name=combine_subgraph.name,
-    )
-    with V.set_graph_handler(combine_subgraph.graph):
-        combine_subgraph.graph.run(*example_inputs)  # type: ignore[arg-type]
 
-    result = ir.SequentialScan.create(
-        combine_subgraph, init, xs, dim, reverse, additional_inputs, fake_idx
+    # Note: we lower scan into while_loop by constructing cond_fn and body_fn.
+    # The cond_fn and body_fn are out variants, where ys_outs is passed in as a pre-allocated
+    # buffer and we pass in an additional SymInt to represent the current iteration idx.
+    # Tracing the graph produces a new graph, where the nodes depends on the value of symint
+    # to select from xs of input and copy into a slice of ys_outs.
+    def cond_fn_out(*flat_args):
+        init, xs, additional_inputs, ys_outs, idx = pytree.tree_unflatten(
+            flat_args, tree_spec
+        )
+        return idx < xs[0].size()[specialized_dim]
+
+    def body_fn_out(*flat_args):
+        init, xs, additional_inputs, ys_outs, idx = pytree.tree_unflatten(
+            flat_args, tree_spec
+        )
+        scan_idx = idx if not reverse else xs[0].size()[specialized_dim] - idx - 1
+        sub_xs = []
+        for x in xs:
+            sub_xs.append(torch.ops._scan.unsafe_select(x, dim, scan_idx))
+
+        new_carry, ys = _extract_carry_and_out(
+            combine_subgraph.graph_module(
+                *(list(init) + sub_xs + list(additional_inputs))
+            ),
+            num_init_leaves,
+        )
+        for y, y_out in zip(ys, ys_outs):
+            y_out_slice = torch.ops._scan.unsafe_select(y_out, 0, scan_idx)
+            y_out_slice.copy_(y)
+        return *new_carry, *xs, *additional_inputs, *ys_outs
+
+    with V.graph.fake_mode:
+        # Note:
+        # 1. fwd_only trace with real mode, we need to with current fake_mode otherwise
+        # factory functions will create real tensors instead of fake tensors.
+        # 2. We set run_functional_passes = False because body_fn_out is not functional
+        # due to the inplace write of ys_outs.
+        cond_gm = fwd_only(cond_fn_out, fake_args, run_functional_passes=False)
+        body_gm = fwd_only(body_fn_out, fake_args, run_functional_passes=False)
+
+    cond_subgraph = ir.Subgraph(
+        name=combine_subgraph.name + "_loop_cond", graph_module=cond_gm
     )
-    return list(map(TensorBox.create, result))
+    body_subgraph = ir.Subgraph(
+        name=combine_subgraph.name + "_loop_body", graph_module=body_gm
+    )
+
+    for subgraph in (cond_subgraph, body_subgraph):
+        # create and lower subgraphs
+        subgraph.graph = V.graph.make_subgraph(
+            gm=subgraph.graph_module,
+            example_inputs=fake_args,  # type: ignore[arg-type]
+            subgraph_name=subgraph.name,
+        )
+        with V.set_graph_handler(subgraph.graph):
+            subgraph.graph.run(*fake_args)
+
+    # Pre-alocate an out buffer to store the ys_outs
+    ys_out_buffer = [
+        empty_strided(
+            *V.graph.symbolic_sizes_strides(y),
+            device=y.device,
+            dtype=y.dtype,
+        )
+        for y in fake_ys_outs
+    ]
+    # TODO: have to force not re-using the buffer. Otherwise, the buffer may be
+    # reused but ys_outs maybe mutated by other operation. This happens in the
+    # scan-scan test case, where the output of previous scan ys_outs are used as xs
+    # in next iteration and the ys_output buffer re-uses previous buffer.
+    for out_buffer in ys_out_buffer:
+        V.graph.never_reuse_buffers.add(out_buffer.get_name())
+
+    carried_inputs = [*init, *xs, *additional_inputs, *ys_out_buffer]
+    output = ir.WhileLoop.create(
+        cond_fn=cond_subgraph,
+        body_fn=body_subgraph,
+        carried_inputs=carried_inputs,
+        additional_inputs=[],
+        mutated_inputs=ys_out_buffer,
+        iter_idx_expr=fake_idx.node.expr,
+    )
+    last_carry, _, _, ys_outs, _ = pytree.tree_unflatten(output + [fake_idx], tree_spec)
+    return list(map(TensorBox.create, last_carry + ys_outs))
 
 
 @register_lowering(associative_scan_op, type_promotion_kind=None)

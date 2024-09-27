@@ -52,8 +52,14 @@ def _extract_carry_and_out(flat_out: List[Any], num_carry: int):
 # Compared with aten.select, the lowring rule is more specialized
 # to the scan operator. For example, we skips a bunch of checks that we're
 # ceratin to be true for scan.
-def scan_slice_view(dst, dim, idx):
-    pass
+@torch.library.custom_op("_scan::unsafe_select", mutates_args=())  # type: ignore[misc]
+def _unsafe_select(t: torch.Tensor, dim: int, idx: int) -> torch.Tensor:
+    return torch.select(t, dim, idx)
+
+
+@torch.library.register_fake("_scan::unsafe_select")
+def _(t, dim, idx):
+    return t.select(dim, 0)
 
 
 def scan(
@@ -123,6 +129,7 @@ def scan(
     # TODO: Support _inductor lowering
     # TODO: Support Autograd
     # TODO: Unify handling of pytrees for control flow ops, such as cond, while_loop, etc.
+    # TODO: Unify the list inputs of control flow ops to tuple.
 
     if not torch._dynamo.is_compiling():
         from torch._dynamo.backends.debugging import (
@@ -207,6 +214,7 @@ class ScanOp(HigherOrderOperator):
         super().__init__("scan")
 
     def __call__(self, combine_fn, init, xs, dim, reverse, additional_inputs):
+        assert isinstance(additional_inputs, list), "additional_inputs must be a list."
         return super().__call__(combine_fn, init, xs, dim, reverse, additional_inputs)
 
 

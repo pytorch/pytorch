@@ -6245,8 +6245,11 @@ class MultiOutput(ExternKernel):
 
     def __init__(self, layout, input, indices: List[Tuple[Any, ...]]):
         super().__init__(None, layout, [input], ())
-        self.name = V.graph.register_buffer(self)
-        V.graph.register_operation(self)
+        if not isinstance(self.layout, (ShapeAsConstantBuffer, MutationOutput)):
+            self.name = V.graph.register_buffer(self)
+            V.graph.register_operation(self)
+        else:
+            self.name = str(self.layout)
         self.indices = indices
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
@@ -6564,6 +6567,7 @@ class WhileLoop(ExternKernel):
     cond_subgraph: Optional[Subgraph] = None
     body_subgraph: Optional[Subgraph] = None
     outputs: Optional[List[MultiOutput]] = None
+    iter_idx_expr: Optional[sympy.Expr] = None
 
     def __init__(
         self,
@@ -6572,11 +6576,14 @@ class WhileLoop(ExternKernel):
         cond_subgraph: Subgraph,
         body_subgraph: Subgraph,
         layout: MultiOutputLayout,
+        iter_idx_expr: sympy.Symbol,
     ):
         self.carried_inputs = carried_inputs
         self.additional_inputs = additional_inputs
         self.cond_subgraph = cond_subgraph
         self.body_subgraph = body_subgraph
+        all_inputs = carried_inputs + additional_inputs
+        self.iter_idx_expr = iter_idx_expr
 
         super().__init__(
             name=None,
@@ -6592,27 +6599,20 @@ class WhileLoop(ExternKernel):
         cls,
         cond_fn: Subgraph,
         body_fn: Subgraph,
-        carried_inputs: List[TensorBox],
-        additional_inputs: List[TensorBox],
+        carried_inputs: List[Union[TensorBox, ComputedBuffer]],
+        additional_inputs: List[Union[TensorBox, ComputedBuffer]],
+        mutated_inputs: Optional[List[Union[TensorBox, ComputedBuffer]]] = None,
+        iter_idx_expr: Optional[sympy.Symbol] = None,
     ):
+        mutated_inputs = [] if mutated_inputs is None else mutated_inputs
+        # looking for mutated input in carried_inputs. additional_inputs are read-only
+        mutated_indices = {carried_inputs.index(x): x for x in mutated_inputs}
+
         carried_inputs = [cls.realize_input(x) for x in carried_inputs]
         additional_inputs = [cls.realize_input(x) for x in additional_inputs]
         all_inputs = carried_inputs + additional_inputs
 
-        fx_all_inputs = V.graph.current_node.args[-2] + V.graph.current_node.args[-1]  # type: ignore[operator]
-        fake_all_inputs = [x.meta["val"] for x in fx_all_inputs]  # type: ignore[union-attr]
-
-        for subgraph in (cond_fn, body_fn):
-            if subgraph.graph is None:
-                # create and lower subgraphs
-                subgraph.graph = V.graph.make_subgraph(
-                    gm=subgraph.graph_module,
-                    example_inputs=fx_all_inputs,  # type: ignore[arg-type]
-                    subgraph_name=subgraph.name,
-                )
-                with V.set_graph_handler(subgraph.graph):
-                    subgraph.graph.run(*fake_all_inputs)
-
+        assert cond_fn.graph is not None and body_fn.graph is not None
         cond_outputs = cond_fn.graph.graph_outputs  # type: ignore[union-attr]
         body_outputs = body_fn.graph.graph_outputs  # type: ignore[union-attr]
 
@@ -6624,8 +6624,9 @@ class WhileLoop(ExternKernel):
 
         # make sure cond_fn returns a boolean scalar Tensor
         assert len(cond_outputs) == 1, cond_outputs
-        assert cond_outputs[0].get_dtype() == torch.bool, cond_outputs
-        assert len(cond_outputs[0].get_size()) == 0, cond_outputs
+        if not isinstance(cond_outputs[0], ShapeAsConstantBuffer):
+            assert cond_outputs[0].get_dtype() == torch.bool, cond_outputs
+            assert len(cond_outputs[0].get_size()) == 0, cond_outputs
 
         assert (
             len(all_inputs) > 0
@@ -6651,6 +6652,7 @@ class WhileLoop(ExternKernel):
             body_subgraph=body_fn,
             # asserted above that there is at least one operand
             layout=MultiOutputLayout(device),
+            iter_idx_expr=iter_idx_expr,
         )
 
         outputs = [
@@ -6661,7 +6663,10 @@ class WhileLoop(ExternKernel):
                     size=output.get_size(),
                     stride=output.get_stride(),
                     offset=output.get_layout().offset,
-                ),
+                    # TODO: how to construt the output to denote this is the input?
+                )
+                if i not in mutated_indices
+                else mutated_indices[i].data.data.layout,  # type: ignore[attr-defined]
                 while_loop,
                 [(list, i)],
             )
@@ -6669,233 +6674,18 @@ class WhileLoop(ExternKernel):
         ]
 
         for inp, out in zip(carried_inputs, outputs):
-            if inp.get_name() in V.graph.graph_inputs:
-                # if a carried input of the while_loop is a graph input,
-                # it can be returned as is when the number of iterations
-                # is zero. due to this, we can't (generally) reuse the
-                # output buffers corresponding to the graph inputs, as
-                # the inputs may end up being mutated.
-                V.graph.never_reuse_buffers.add(out.get_name())
+            # if a carried input of the while_loop is a graph input,
+            # it can be returned as is when the number of iterations
+            # is zero. due to this, we can't (generally) reuse the
+            # output buffers corresponding to the graph inputs, as
+            # the inputs may end up being mutated.
+            V.graph.never_reuse_buffers.add(out.get_name())
 
         while_loop.outputs = outputs
         return outputs
 
     def codegen(self, wrapper):
         wrapper.codegen_while_loop(self)
-
-
-class SequentialScan(ExternKernel):
-    combine_subgraph: Optional[Subgraph] = None
-    init: Optional[List[TensorBox]] = None
-    xs: Optional[List[TensorBox]] = None
-    dim: int = 0
-    reverse: bool = False
-    additional_inputs: Optional[List[TensorBox]] = None
-    outputs: Optional[List[MultiOutput]] = None
-    iter_idx_expr: Optional[sympy.Expr] = None
-
-    def __init__(
-        self,
-        combine_subgraph: Subgraph,
-        init: List[TensorBox],
-        xs: List[TensorBox],
-        dim: int,
-        reverse: bool,
-        additional_inputs: List[TensorBox],
-        layout: MultiOutputLayout,
-        iter_idx_expr: Optional[sympy.Symbol],
-    ):
-        self.combine_subgraph = combine_subgraph
-        self.init = init
-        self.xs = xs
-        self.dim = dim
-        self.reverse = reverse
-        self.additional_inputs = additional_inputs
-        self.iter_idx_expr = iter_idx_expr
-
-        super().__init__(
-            name=None,
-            layout=layout,  # type: ignore[arg-type]
-            inputs=init + xs + additional_inputs,  # type: ignore[list-item]
-        )
-
-        self.name = V.graph.register_buffer(self)
-        V.graph.register_operation(self)
-
-    @classmethod
-    def create(
-        cls,
-        combine_subgraph: Subgraph,
-        init: List[TensorBox],
-        xs: List[TensorBox],
-        dim: int,
-        reverse: bool,
-        additional_inputs: List[TensorBox],
-        iter_idx_expr: Optional[sympy.Symbol] = None,
-    ):
-        from torch._higher_order_ops.scan import _extract_carry_and_out
-
-        num_init_leaves = len(init)
-        init = [cls.realize_input(x) for x in init]
-        xs = [cls.realize_input(x) for x in xs]
-        scan_length = xs[0].get_size()[dim]
-        additional_inputs = [cls.realize_input(x) for x in additional_inputs]
-        all_inputs = init + xs + additional_inputs
-
-        carry, ys = _extract_carry_and_out(combine_subgraph.graph.graph_outputs, num_init_leaves)  # type: ignore[union-attr]
-
-        if _has_aliased_buffers(carry + ys):
-            raise AssertionError(
-                f"Output aliasing is currently not supported in compiled torch.scan. "
-                f"The outputs of the combine_fn subgraph of torch.scan are aliased: {combine_subgraph.graph.graph_outputs}"  # type: ignore[union-attr]
-            )
-        device = all_inputs[0].get_device()
-
-        # make sure init and outputs are structurally equivalent
-        assert len(carry) == num_init_leaves, (init, carry)
-        for i, (ini, c) in enumerate(zip(init, carry)):
-            assert ini.get_size() == c.get_size(), (i, ini, c, dim)
-            # assume all init and outputs are on the same device
-            # as the MultiOutputLayout below requires single device
-            assert ini.get_device() == c.get_device() == device, (i, ini, c, device)
-            assert ini.get_dtype() == c.get_dtype(), (i, ini, c)
-
-        sequential_scan = SequentialScan(
-            combine_subgraph=combine_subgraph,
-            init=init,
-            xs=xs,
-            dim=dim,
-            reverse=reverse,
-            additional_inputs=additional_inputs,
-            layout=MultiOutputLayout(device),
-            iter_idx_expr=iter_idx_expr,
-        )
-
-        # last_carry should have the same shape and stride as init
-        last_carry_output = [
-            MultiOutput(
-                FixedLayout(
-                    device=ini.get_device(),
-                    dtype=ini.get_dtype(),
-                    size=ini.get_size(),
-                    stride=ini.get_stride(),
-                ),
-                sequential_scan,
-                [(list, i)],
-            )
-            for i, ini in enumerate(init)
-        ]
-
-        def stacked_size_stride(y, scan_length):
-            sizes = [scan_length, *y.get_size()]
-            # This is a hacky way to get the stride of the stacked output
-            # Semantic-wise this is correct because scan will torch.stack the intermediates, so
-            # torch.stack will force the output become contingous.
-            return sizes, FlexibleLayout.contiguous_strides(sizes)
-
-        stacked_y_size_stride = [stacked_size_stride(y, scan_length) for y in ys]
-
-        stacked_output = [
-            MultiOutput(
-                FixedLayout(
-                    device=y.get_device(),
-                    dtype=y.get_dtype(),
-                    size=stacked_y_size_stride[i][0],
-                    stride=stacked_y_size_stride[i][1],
-                ),
-                sequential_scan,
-                [(list, i + num_init_leaves)],
-            )
-            for i, y in enumerate(ys)
-        ]
-
-        outputs = [*last_carry_output, *stacked_output]
-        sequential_scan.outputs = outputs
-        return outputs
-
-    def codegen(self, wrapper):
-        wrapper.codegen_sequential_scan(self)
-
-    # The signature before the transformation:
-    # gm(*init: List[Tensor],
-    #   *selected_inputs: List[Tensor],
-    #   *additional_inputs: List[Tensor]
-    # ) -> last_carry: List[Tensor], ys: List[Tensor]
-    #
-    # The signature after _to_out_variant_graph:
-    # gm_out_variant(*init: List[Tensor],
-    #   *xs: List[Tensor],
-    #   *additional_inputs: List[Tensor],
-    #   *ys_outs: List[Tensor]
-    #   *idx: SymInt,
-    # ) -> last_carry: List[Tensor], ys: List[Tensor]
-    #
-    # For example, if scan_length is 10, selected_inputs[0].shape is (3, 4), ys[0].shape is (5, 6)
-    # In gm_out_variant's input, xs[0].shape is (10, 3, 4), ys_outs[0].shape is (10, 5, 6).
-    # idx is a symint that's computed based on the iteration idx of the loop in wrapper codegen.
-    #
-    # Note: even though ys are copied into ys_outs directly and is not going to be used downsteram,
-    # we didn't delete them in the out variant graph in case they gets DCEed accidentally.
-    @staticmethod
-    def _to_out_variant_graph(
-        gm: torch.fx.GraphModule,
-        ys_outs: List[torch.Tensor],
-        dim: int,
-        num_init_leaves: int,
-        num_xs: int,
-    ) -> torch.fx.GraphModule:
-        from torch._higher_order_ops.scan import _extract_carry_and_out
-
-        phs = [node for node in gm.graph.nodes if node.op == "placeholder"]
-        xs_phs = phs[num_init_leaves : num_init_leaves + num_xs]
-        output_node = list(gm.graph.nodes)[-1]
-        assert output_node.op == "output"
-        # Add an idx node that's used to parameterize the tensor layout of out buffers ys_outs
-        # and xs inputs.
-        with gm.graph.inserting_after(phs[-1]):
-            idx_node = gm.graph.placeholder("idx")
-
-        # Add ys_outs to placeholders
-        ys_out_phs = []
-        with gm.graph.inserting_before(idx_node):
-            for i, ys in enumerate(ys_outs):
-                ph = gm.graph.placeholder(f"ys_outs{i}")
-                ys_out_phs.append(ph)
-
-        # Replace each original x with x[idx]
-        with gm.graph.inserting_after(idx_node):
-            for x_ph in xs_phs:
-                args = (x_ph, dim, idx_node)
-                selected_x = gm.graph.call_function(
-                    torch._higher_order_ops.scan.scan_slice_view,
-                    args,
-                )
-                # x_ph is the original gm's placeholder, which is a slice of x
-                selected_x.meta["val"] = x_ph.meta["val"].clone()
-                x_ph.replace_all_uses_with(selected_x)
-                # replace_all_uses_with alos replace the x_phs of scan_slice_viwe
-                # so we re-wreite it back
-                selected_x.args = args
-                x_ph.users.clear()
-                x_ph.users.setdefault(selected_x)
-
-        # For each y, call y_out[idx].copy_(y).
-        with gm.graph.inserting_before(output_node):
-            inner_last_carry, inner_ys = _extract_carry_and_out(
-                output_node.args[0], num_init_leaves
-            )
-            for fake_ys, ph, ys in zip(ys_outs, ys_out_phs, inner_ys):
-                # Outputs are always stacked along 0-th dimension
-                select_node = gm.graph.call_function(
-                    torch._higher_order_ops.scan.scan_slice_view, (ph, 0, idx_node)
-                )
-                select_node.meta["val"] = fake_ys.clone()
-                copy__node = gm.graph.call_function(
-                    torch.ops.aten.copy_.default, (select_node, ys)
-                )
-                copy__node.meta["val"] = fake_ys.clone()
-        gm.recompile()
-        return gm
 
 
 class EffectfulKernel(FallbackKernel):
