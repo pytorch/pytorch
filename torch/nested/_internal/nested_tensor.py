@@ -292,6 +292,13 @@ class NestedTensor(torch.Tensor):
         if fn is not None:
             return fn(*args, **kwargs)
 
+        # Poor man's redispatch for composite ops. This becomes relevant under inference
+        # mode, where disabling autograd key dispatch prevents decomposition.
+        dk = torch._C.DispatchKey.CompositeImplicitAutogradNestedTensor
+        if torch._C._dispatch_has_kernel_for_dispatch_key(func.name(), dk):
+            with torch.overrides.enable_reentrant_dispatch():
+                return func._op_dk(dk, *args, **kwargs)
+
         raise NotImplementedError(func)
 
     @classmethod
