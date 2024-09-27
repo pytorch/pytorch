@@ -1,6 +1,15 @@
 # Owner(s): ["module: inductor"]
 import os
 import sys
+import unittest
+
+
+try:
+    import triton  # noqa: F401
+except ImportError:
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("requires triton")  # noqa: B904
 
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
