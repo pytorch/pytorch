@@ -237,14 +237,6 @@ class SymbolicCallArg:
         return str(self.inner)
 
 
-# Default thread stack sizes vary by platform:
-# - Linux: 8 MB
-# - macOS: 512 KB
-# - Windows: 1 MB
-# Just pick something comfortably smaller than the smallest for now.
-MAX_STACK_ALLOCATION_SIZE = 1024 * 100
-
-
 class MemoryPlanningState:
     def __init__(self):
         super().__init__()
@@ -491,8 +483,6 @@ class PythonWrapperCodegen(CodeGen):
         self.expr_printer: Callable[[Any], str] = pexpr
         self.user_defined_kernel_cache: Dict[Tuple[Any, ...], Tuple[str, Any]] = {}
         self.unbacked_symbol_decls: Set[str] = set()  # str of sympy.Symbol
-        self.allow_stack_allocation: Optional[bool] = None
-        self.stack_allocated_buffers: Dict[BufferName, ir.Buffer] = {}
         self.computed_sizes: Set[sympy.Symbol] = set()
 
         # this is used for tracking which GraphLowering instance---parent graph
@@ -890,8 +880,6 @@ class PythonWrapperCodegen(CodeGen):
             # We disable planning during training because it presently increases peak memory consumption.
             if is_inference and config.memory_planning:
                 self.memory_plan()
-                # TODO: integrate memory planning & stack allocation?
-                self.allow_stack_allocation = False
             else:
                 self.memory_plan_reuse()
 
@@ -1001,12 +989,6 @@ class PythonWrapperCodegen(CodeGen):
         # in potentially nested scopes as the total allocated size
         total_allocated_buffer_size = sum(
             s.total_allocated_buffer_size for s in past_planning_states
-        )
-
-        self.allow_stack_allocation = (
-            self.allow_stack_allocation is not False
-            and config.allow_stack_allocation
-            and total_allocated_buffer_size <= MAX_STACK_ALLOCATION_SIZE
         )
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
@@ -1676,104 +1658,102 @@ class PythonWrapperCodegen(CodeGen):
 
         gpu: Defines whether the backend is GPU. Otherwise the backend is CPU.
 
-        triton: Defines whether the GPU backend uses Triton for codegen.
-                Otherwise it uses the CUDA language for codegen.
-                Only valid when gpu == True.
+        triton: Defines whether the backend uses Triton for codegen. Otherwise it uses the CUDA language when gpu=True,
+                and C++ when gpu=False.
         """
-        if gpu:
-            device_index, call_args_str = self.prepare_triton_kernel_call(
-                device_index, call_args
-            )
-            call_args_str = ", ".join(call_args_str)
-            stream_name = self.write_get_raw_stream(device_index, V.graph)
-            if triton:
-                self.write_triton_header_once()
-                if grid is None:
-                    grid_str = grid_fn
-                else:
-                    grid_str = ", ".join(self._grid_dim_str(item) for item in grid)
-                    if grid_extra_kwargs:
-                        grid_str = f"{grid_str}, {grid_extra_kwargs}"
-                    grid_str = f"{grid_fn}({grid_str})"
-                # add debug printer code for triton kernel calls at (jit) inductor level
-                debug_printer_manager = V.graph.wrapper_code.debug_printer
-                debug_printer_manager.set_printer_args(
-                    call_args, kernel_name, arg_types, None
-                )
-                with debug_printer_manager:
-                    self.writeline(
-                        f"{kernel_name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
-                    )
-                if (
-                    config.triton.autotune_at_compile_time
-                    and kernel_name not in self.kernel_autotune_names
-                ):
-                    # Create example args for autotune in a separate epilogue
-                    assert arg_types is not None and len(call_args) == len(
-                        arg_types
-                    ), "call_args and arg_types do not match"
-
-                    tensor_args = {}
-                    all_args = []
-                    if raw_args is None:
-                        # create a dummy raw_args for uniform behavior in the following loop
-                        raw_args = [None] * len(call_args)
-                    else:
-                        assert len(raw_args) == len(
-                            call_args
-                        ), "call_args and raw_args do not match"
-
-                    for i, (arg, arg_type, raw_arg) in enumerate(
-                        zip(call_args, arg_types, raw_args)
-                    ):
-                        key = None
-                        if isinstance(arg, str) and "=" in str(arg):
-                            # arg may be passed in a kwarg style, and then we need to extract its value
-                            key, arg = arg.split("=")
-
-                        if isinstance(arg_type, torch_dtype):
-                            # workspace allocation is already generated by `generate_workspace_allocation()`
-                            # in `TritonKernel.call_kernel()`.
-                            if arg == "workspace":
-                                arg_str = "workspace"
-                                tensor_args[arg] = arg_str
-                            elif arg not in tensor_args:
-                                arg_str = self.generate_example_arg_value(
-                                    arg, arg_type, raw_arg, i
-                                )
-                                tensor_args[arg] = arg_str
-                            else:
-                                arg_str = tensor_args[arg]
-                        else:
-                            arg_str = self.generate_example_arg_value(
-                                arg, arg_type, raw_arg, i
-                            )
-                        all_args.append(arg_str if key is None else f"{key}={arg_str}")
-
-                    if grid is None:
-                        grid_str = grid_fn
-                    else:
-                        grid_str = ", ".join(
-                            self.generate_example_arg_value(g, type(g)) for g in grid
-                        )
-                        if grid_extra_kwargs:
-                            grid_str = f"{grid_str}, {grid_extra_kwargs}"
-                        grid_str = f"{grid_fn}({grid_str})"
-
-                    self.kernel_autotune_calls.writeline(
-                        f"{kernel_name}.run({', '.join(all_args)}, grid={grid_str}, stream={stream_name})"
-                    )
-                    self.kernel_autotune_calls.writeline(
-                        f"del {', '.join(arg for arg in tensor_args.values())}\n",
-                    )
-                    self.kernel_autotune_names.add(kernel_name)
-            else:
-                stream_ptr = f"c_void_p({stream_name})"
-                self.writeline(
-                    f"{kernel_name}.{kernel_name}({call_args_str}, {stream_ptr})"
-                )
-        else:
+        if not (triton or gpu):
             self.writeline(self.wrap_kernel_call(kernel_name, call_args))
+            return
+
+        device_index, call_args_str = self.prepare_triton_kernel_call(
+            device_index, call_args
+        )
+        call_args_str = ", ".join(call_args_str)
+        stream_name = self.write_get_raw_stream(device_index, V.graph)
+
+        if not triton:
+            stream_ptr = f"c_void_p({stream_name})"
+            self.writeline(
+                f"{kernel_name}.{kernel_name}({call_args_str}, {stream_ptr})"
+            )
+            return
+
+        self.write_triton_header_once()
+        if grid is None:
+            grid_str = grid_fn
+        else:
+            grid_str = ", ".join(self._grid_dim_str(item) for item in grid)
+            if grid_extra_kwargs:
+                grid_str = f"{grid_str}, {grid_extra_kwargs}"
+            grid_str = f"{grid_fn}({grid_str})"
+        # add debug printer code for triton kernel calls at (jit) inductor level
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(call_args, kernel_name, arg_types, None)
+        with debug_printer_manager:
+            self.writeline(
+                f"{kernel_name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
+            )
+        if (
+            config.triton.autotune_at_compile_time
+            and kernel_name not in self.kernel_autotune_names
+        ):
+            # Create example args for autotune in a separate epilogue
+            assert arg_types is not None and len(call_args) == len(
+                arg_types
+            ), "call_args and arg_types do not match"
+
+            tensor_args = {}
+            all_args = []
+            if raw_args is None:
+                # create a dummy raw_args for uniform behavior in the following loop
+                raw_args = [None] * len(call_args)
+            else:
+                assert len(raw_args) == len(
+                    call_args
+                ), "call_args and raw_args do not match"
+
+            for i, (arg, arg_type, raw_arg) in enumerate(
+                zip(call_args, arg_types, raw_args)
+            ):
+                key = None
+                if isinstance(arg, str) and "=" in str(arg):
+                    # arg may be passed in a kwarg style, and then we need to extract its value
+                    key, arg = arg.split("=")
+
+                if isinstance(arg_type, torch_dtype):
+                    # workspace allocation is already generated by `generate_workspace_allocation()`
+                    # in `TritonKernel.call_kernel()`.
+                    if arg == "workspace":
+                        arg_str = "workspace"
+                        tensor_args[arg] = arg_str
+                    elif arg not in tensor_args:
+                        arg_str = self.generate_example_arg_value(
+                            arg, arg_type, raw_arg, i
+                        )
+                        tensor_args[arg] = arg_str
+                    else:
+                        arg_str = tensor_args[arg]
+                else:
+                    arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg, i)
+                all_args.append(arg_str if key is None else f"{key}={arg_str}")
+
+            if grid is None:
+                grid_str = grid_fn
+            else:
+                grid_str = ", ".join(
+                    self.generate_example_arg_value(g, type(g)) for g in grid
+                )
+                if grid_extra_kwargs:
+                    grid_str = f"{grid_str}, {grid_extra_kwargs}"
+                grid_str = f"{grid_fn}({grid_str})"
+
+            self.kernel_autotune_calls.writeline(
+                f"{kernel_name}.run({', '.join(all_args)}, grid={grid_str}, stream={stream_name})"
+            )
+            self.kernel_autotune_calls.writeline(
+                f"del {', '.join(arg for arg in tensor_args.values())}\n",
+            )
+            self.kernel_autotune_names.add(kernel_name)
 
     def writeline(self, line):
         self.lines.append(line)
@@ -1860,15 +1840,11 @@ class PythonWrapperCodegen(CodeGen):
             del_line = f"; {self.make_buffer_free(old)}"
 
         if old.get_size() == new.get_size() and old.get_stride() == new.get_stride():
-            if old_name in self.stack_allocated_buffers:
-                self.stack_allocated_buffers[new_name] = new
             return self.codegen_exact_buffer_reuse(old_name, new_name, del_line)
 
         reinterpret_view = self.codegen_reinterpret_view(
             old, new.get_size(), new.get_stride(), 0, self.wrapper_call
         )
-        if reinterpret_view in self.stack_allocated_buffers:
-            self.stack_allocated_buffers[new_name] = new
         return f"{self.declare_maybe_reference}{new_name} = {reinterpret_view}{del_line}  {self.comment} reuse"
 
     def codegen_deferred_allocation(self, name, layout):
