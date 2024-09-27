@@ -22,7 +22,6 @@ from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-from torch.utils.weak import TensorWeakRef
 
 
 static_inputs_log = torch._logging.getArtifactLogger(
@@ -981,12 +980,9 @@ def aot_module_simplified(
     if tracing_context := torch._guards.TracingContext.try_get():
         tracing_context.params_flat = params_flat
         (
-            params_flat_unwrap_subclasses,
+            tracing_context.params_flat_unwrap_subclasses,
             tracing_context.params_unwrapped_to_flat_index,
         ) = unwrap_tensor_subclasses_with_indices_to_original(params_flat)
-        tracing_context.params_flat_unwrap_subclasses = [
-            TensorWeakRef(p) for p in params_flat_unwrap_subclasses
-        ]
 
     aot_autograd_arg_pos_to_source = None
     # Then, the params 1:1 mapped sources, if relevant.
