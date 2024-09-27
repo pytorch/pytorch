@@ -263,7 +263,7 @@ class UserVisibleOutputStrideFixUpper:
         self, graph: torch.fx.Graph, user_visible_output_idxs: Optional[List[int]]
     ) -> None:
         self.graph = graph
-        self.output_idx_to_strides = {}
+        self.output_idx_to_strides: Dict[int, Tuple[int, ...]] = {}
 
         if user_visible_output_idxs is None:
             return
@@ -277,17 +277,30 @@ class UserVisibleOutputStrideFixUpper:
                 self.output_idx_to_strides[idx] = val.stride()
 
     def fixup(self) -> None:
+        from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
         output_node = self.graph.find_nodes(op="output")[0]
         new_outputs = list(output_node.args[0])
-        for idx, node in enumerate(new_outputs):
-            if idx not in self.output_idx_to_strides:
+
+        for idx, orig_strides in self.output_idx_to_strides.items():
+            node = new_outputs[idx]
+            val = node.meta.get("val")
+            if not isinstance(val, torch.Tensor):
                 continue
-            with self.graph.inserting_after(node):
-                new_output = self.graph.call_function(
-                    inductor_prims.force_stride_order,
-                    (node, self.output_idx_to_strides[idx]),
-                )
-                # User visible output tride fixup is performed before
-                # FakeTensorUpdater, so we can ommit setting .meta["val"].
-                new_outputs[idx] = new_output
+
+            new_strides = val.stride()
+            if (
+                new_strides != orig_strides
+                and len(free_unbacked_symbols(orig_strides)) == 0
+                and len(orig_strides)
+            ):
+                with self.graph.inserting_after(node):
+                    new_output = self.graph.call_function(
+                        inductor_prims.force_stride_order,
+                        (node, orig_strides),
+                    )
+                    # User visible output tride fixup is performed before
+                    # FakeTensorUpdater, so we can ommit setting .meta["val"].
+                    new_outputs[idx] = new_output
+
         output_node.args = (tuple(new_outputs),)
