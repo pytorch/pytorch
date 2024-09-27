@@ -105,7 +105,7 @@ function install_121 {
 }
 
 function install_124 {
-  echo "Installing CUDA 12.4.1 and cuDNN ${CUDNN_VERSION} and NCCL ${NCCL_VERSION} and cuSparseLt-0.5.2"
+  echo "Installing CUDA 12.4.1 and cuDNN ${CUDNN_VERSION} and NCCL ${NCCL_VERSION} and cuSparseLt-0.6.2"
   rm -rf /usr/local/cuda-12.4 /usr/local/cuda
   # install CUDA 12.4.1 in the same container
   wget -q https://developer.download.nvidia.com/compute/cuda/12.4.1/local_installers/cuda_12.4.1_550.54.15_linux.run

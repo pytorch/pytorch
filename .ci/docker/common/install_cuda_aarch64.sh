@@ -5,19 +5,19 @@ set -ex
 
 NCCL_VERSION=v2.21.5-1
 
-function install_cusparselt_052 {
+function install_cusparselt_062 {
     # cuSparseLt license: https://docs.nvidia.com/cuda/cusparselt/license.html
     mkdir tmp_cusparselt && pushd tmp_cusparselt
-    wget -q https://developer.download.nvidia.com/compute/cusparselt/redist/libcusparse_lt/linux-sbsa/libcusparse_lt-linux-sbsa-0.5.2.1-archive.tar.xz
-    tar xf libcusparse_lt-linux-sbsa-0.5.2.1-archive.tar.xz
-    cp -a libcusparse_lt-linux-sbsa-0.5.2.1-archive/include/* /usr/local/cuda/include/
-    cp -a libcusparse_lt-linux-sbsa-0.5.2.1-archive/lib/* /usr/local/cuda/lib64/
+    wget -q https://developer.download.nvidia.com/compute/cusparselt/redist/libcusparse_lt/linux-sbsa/libcusparse_lt-linux-sbsa-0.6.2.3-archive.tar.xz
+    tar xf libcusparse_lt-linux-sbsa-0.6.2.3-archive.tar.xz
+    cp -a libcusparse_lt-linux-sbsa-0.6.2.3-archive/include/* /usr/local/cuda/include/
+    cp -a libcusparse_lt-linux-sbsa-0.6.2.3-archive/lib/* /usr/local/cuda/lib64/
     popd
     rm -rf tmp_cusparselt
 }
 
 function install_124 {
-  echo "Installing CUDA 12.4.1 and cuDNN 9.1 and NCCL ${NCCL_VERSION} and cuSparseLt-0.5.2"
+  echo "Installing CUDA 12.4.1 and cuDNN 9.1 and NCCL ${NCCL_VERSION} and cuSparseLt-0.6.2"
   rm -rf /usr/local/cuda-12.4 /usr/local/cuda
   # install CUDA 12.4.1 in the same container
   wget -q https://developer.download.nvidia.com/compute/cuda/12.4.1/local_installers/cuda_12.4.1_550.54.15_linux_sbsa.run
@@ -44,7 +44,7 @@ function install_124 {
   cd ..
   rm -rf nccl
 
-  install_cusparselt_052
+  install_cusparselt_062
 
   ldconfig
 }
