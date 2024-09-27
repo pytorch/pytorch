@@ -393,25 +393,19 @@ Tensor xnnp_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
 template <bool ReLUFused = false>
 Tensor qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   check_inputs(qa, qb);
-
-  if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
-    TORCH_CHECK(
-        qa.scalar_type() == qb.scalar_type(),
-        "Both inputs to qadd must have same type");
-
 #ifdef USE_XNNPACK
-    if (qa.scalar_type() == kQInt8) {
-          return xnnp_add<c10::qint8, ReLUFused>(qa, qb, scale, zero_point);
-    }
+  if (qa.scalar_type() == kQInt8) {
+    return xnnp_add<c10::qint8, ReLUFused>(qa, qb, scale, zero_point);
+  }
 #endif // USE_XNNPACK
-
 #ifdef USE_PYTORCH_QNNPACK
+  if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
     if(qa.sizes() == qb.sizes() && /* qnnpack does not support boardcasting */
       qa.scalar_type() == kQUInt8) {
     return qnnpack_add<ReLUFused>(qa, qb, scale, zero_point);
     }
-#endif // USE_PYTORCH_QNNPACK
   }
+#endif // USE_PYTORCH_QNNPACK
   auto qc = at::_empty_affine_quantized(
       qa.sizes(),
       at::device(kCPU)
