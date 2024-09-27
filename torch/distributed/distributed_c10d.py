@@ -4256,7 +4256,7 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
         return
 
     opts = BarrierOptions()
-    opts.device = _get_pg_default_device(group)
+    opts.device = torch.device(_get_object_coll_device(group))
     if device_ids is not None:
         if isinstance(device_ids, list):
             opts.device_ids = device_ids
