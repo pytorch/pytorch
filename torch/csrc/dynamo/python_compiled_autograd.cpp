@@ -522,11 +522,13 @@ static PyObject* call_lambda(PyObject* dummy, PyObject* args) {
       cnt++;
     }
   }
+  std::cout << "cnt: " << cnt << std::endl;
   for (const auto& out : outs) {
     if (out.defined()) {
       cnt--;
     }
   }
+  std::cout << "cnt: " << cnt << std::endl;
   if (cnt != 0) {
     // impl.name should be a string of the form:
     // torch::autograd::CppNode<CustomOpAutogradFunction>
@@ -536,7 +538,7 @@ static PyObject* call_lambda(PyObject* dummy, PyObject* args) {
     throw std::runtime_error(
         "Compiled autograd could not automatically handle the custom C++ autograd function " +
         hint +
-        "because it returns undefined gradients for inputs that required gradients. " +
+        "because it returns undefined gradients for its input tensors. " +
         "Please manually enable this C++ autograd function by refering to the instructions in https://docs.google.com/document/d/11VucFBEewzqgkABIjebZIzMvrXr3BtcY1aGKpX61pJY/.");
   }
 

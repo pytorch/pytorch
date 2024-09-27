@@ -93,12 +93,10 @@ class TestCompiledAutograd(TestCase):
             counters["compiled_autograd"].clear()
             torch.manual_seed(123)
             expected = list(fn())
-            # print(f"expected={expected}")
             torch.manual_seed(123)
             with compiled_autograd.enable(compiler_fn):
                 opt_fn = torch.compile(fn) if compile_fn else fn
                 actual = list(opt_fn())
-                # print(f"actual={actual}")
             self.assertEqual(expected, actual)
             self.assertEqual(counters["compiled_autograd"]["captures"], captures)
             self.assertEqual(counters["compiled_autograd"]["compiles"], compiles)
@@ -1565,7 +1563,7 @@ main()
             f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
         )
 
-    def test_non_traceable_autograd_cpp_node(self):
+    def test_autograd_cpp_node_non_traceable(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
 
@@ -1586,13 +1584,13 @@ torch::Tensor custom_op_backed_by_autograd_fn(torch::Tensor x) {
   return CustomOpAutogradFunction::apply(x);
 }
 
-TORCH_LIBRARY(test_non_traceable_autograd_cpp_node, m) {
+TORCH_LIBRARY(test_autograd_cpp_node_non_traceable, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
 
         module, _ = scoped_load_inline(
-            name="test_non_traceable_autograd_cpp_node",
+            name="test_autograd_cpp_node_non_traceable",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
@@ -1600,10 +1598,10 @@ TORCH_LIBRARY(test_non_traceable_autograd_cpp_node, m) {
 
         def fn():
             x = torch.ones(10, 10, requires_grad=True)
-            out = torch.ops.test_non_traceable_autograd_cpp_node.custom_op_backed_by_autograd_fn(
+            out = torch.ops.test_autograd_cpp_node_non_traceable.custom_op_backed_by_autograd_fn(
                 x
             )
-            out2 = torch.ops.test_non_traceable_autograd_cpp_node.custom_op_backed_by_autograd_fn(
+            out2 = torch.ops.test_autograd_cpp_node_non_traceable.custom_op_backed_by_autograd_fn(
                 out
             )
             loss = out2.sum()
@@ -1654,7 +1652,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_non_variable_inputs_int, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        module, _ = scoped_load_inline(
             name="test_autograd_cpp_node_non_variable_inputs_int",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1662,24 +1660,18 @@ TORCH_LIBRARY(test_autograd_cpp_node_non_variable_inputs_int, m) {
         )
 
         def fn():
-            for i in [10, 100, 10]:  # , 20, 10]:
-                print(f"Running i={i}")
+            for i in [10, 100, 10, 20, 10]:
                 x = torch.ones(i, i, requires_grad=True)
                 y = i
                 out = torch.ops.test_autograd_cpp_node_non_variable_inputs_int.custom_op_backed_by_autograd_fn(
                     x, y
                 )
-                print("got out=", out)
                 loss = out.sum()
                 loss.backward()
                 yield x.grad
 
         # compiles for 10 (static) and 100 (dynamic)
-        with compiled_autograd.enable(torch.compile(backend="aot_eager")):
-            list(fn())
-        # print("WTF")
-        # self.assertEqual(True, False)
-        # self.check_output_and_recompiles(fn, 2)
+        self.check_output_and_recompiles(fn, 2)
 
     def test_autograd_cpp_node_non_variable_inputs_tensor(self):
         cpp_source = """
@@ -1710,7 +1702,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_non_variable_inputs_tensor, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        module, _ = scoped_load_inline(
             name="test_autograd_cpp_node_non_variable_inputs_tensor",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1718,24 +1710,20 @@ TORCH_LIBRARY(test_autograd_cpp_node_non_variable_inputs_tensor, m) {
         )
 
         def fn():
-            for i in [10, 100, 10, 20, 10]:
-                print(f"Running i={i}")
-                x = torch.ones(i, i, requires_grad=True)
-                y = torch.ones(i, i)
-                out = torch.ops.test_autograd_cpp_node_non_variable_inputs_tensor.custom_op_backed_by_autograd_fn(
-                    x, y
-                )
-                print("got out=", out)
-                loss = out.sum()
-                loss.backward()
-                yield x.grad
+            i = 10
+            x = torch.ones(i, i, requires_grad=True)
+            y = torch.ones(i, i)
+            out = torch.ops.test_autograd_cpp_node_non_variable_inputs_tensor.custom_op_backed_by_autograd_fn(
+                x, y
+            )
+            loss = out.sum()
+            loss.backward()
 
-        # compiles for 10 (static) and 100 (dynamic)
-        with compiled_autograd.enable(torch.compile(backend="aot_eager")):
-            list(fn())
-        # print("WTF")
-        # self.assertEqual(True, False)
-        # self.check_output_and_recompiles(fn, 2)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "https://docs.google.com/document/d/11VucFBEewzqgkABIjebZIzMvrXr3BtcY1aGKpX61pJY/",
+        ), compiled_autograd.enable(compiler_fn):
+            fn()
 
     def test_autograd_cpp_node(self):
         cpp_source = """
@@ -1749,7 +1737,7 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
   static torch::autograd::variable_list backward(
       torch::autograd::AutogradContext *ctx,
       torch::autograd::variable_list grad_output) {
-    return {torch::autograd::Variable()};
+    return grad_output;
   }
 };
 
@@ -1782,7 +1770,7 @@ TORCH_LIBRARY(test_autograd_cpp_node, m) {
         # compiles for 10 (static) and 100 (dynamic)
         self.check_output_and_recompiles(fn, 2)
 
-    def test_autograd_cpp_node_undefined(self):
+    def test_autograd_cpp_node_undefined_grad(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static torch::Tensor forward(
@@ -1802,31 +1790,31 @@ torch::Tensor custom_op_backed_by_autograd_fn(torch::Tensor x) {
   return CustomOpAutogradFunction::apply(x);
 }
 
-TORCH_LIBRARY(test_autograd_cpp_node_undefined, m) {
+TORCH_LIBRARY(test_autograd_cpp_node_undefined_grad, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
-            name="test_autograd_cpp_node_undefined",
+        module, _ = scoped_load_inline(
+            name="test_autograd_cpp_node_undefined_grad",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
         )
 
         def fn():
-            for i in [10, 100, 10, 20, 10]:
-                x = torch.ones(i, i, requires_grad=True)
-                out = torch.ops.test_autograd_cpp_node_undefined.custom_op_backed_by_autograd_fn(
-                    x
-                )
-                loss = out.sum()
-                loss.backward()
-                self.assertIsNone(x.grad)
-                yield x.grad
+            x = torch.ones(10, 10, requires_grad=True)
+            out = torch.ops.test_autograd_cpp_node_undefined_grad.custom_op_backed_by_autograd_fn(
+                x
+            )
+            loss = out.sum()
+            loss.backward()
 
-        # compiles for 10 (static) and 100 (dynamic)
-        self.check_output_and_recompiles(fn, 2)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "https://docs.google.com/document/d/11VucFBEewzqgkABIjebZIzMvrXr3BtcY1aGKpX61pJY/",
+        ), compiled_autograd.enable(compiler_fn):
+            fn()
 
     def test_autograd_cpp_node_id(self):
         cpp_source = """
@@ -1955,7 +1943,9 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
     assert(dict.at("string") == 1.0);
 
     torch::autograd::variable_list grad_inputs(3);
-    grad_inputs[0] = x + y + torch::sum(fixed) + i;
+    grad_inputs[0] = x;
+    grad_inputs[1] = y;
+    grad_inputs[2] = fixed;
     return grad_inputs;
   }
 };
@@ -2221,6 +2211,7 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
 
     torch::autograd::variable_list grad_inputs(2);
     grad_inputs[0] = x + y + i;
+    grad_inputs[1] = x + y + i;
     return grad_inputs;
   }
 };
