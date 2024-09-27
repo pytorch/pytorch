@@ -20,4 +20,3 @@ class Operator(FusedLinearCrossEntropyOperator):
             H=H, V=V, dtype=self.benchmark_config.dtype
         ).to(self.benchmark_config.device.value)
         self.operator = torch.compile(self.operator)
-
