@@ -3734,6 +3734,26 @@ class CPUReproTests(TestCase):
         # TODO(jgong5): change to 1 with vectorized uint64 load
         assert metrics.generated_cpp_vec_kernel_count == 0
 
+    def test_convert_int8_to_half_vec(self):
+        src_dtypes = [torch.int8, torch.uint8]
+        dst_dtypes = [torch.bfloat16, torch.half]
+        _simd_lens = [isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()]
+        for src_dtype, dst_dtype, _simd_len in itertools.product(
+            src_dtypes, dst_dtypes, _simd_lens
+        ):
+
+            def fn(x):
+                return x.to(dst_dtype)
+
+            low = 0 if src_dtype == torch.uint8 else -100
+
+            x = torch.randint(low, 100, (32, 32), dtype=src_dtype)
+            with config.patch({"cpp.simdlen": _simd_len}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(fn, (x,))
+                check_metrics_vec_kernel_count(1)
+
     def test_convert_int32_to_int64_vec(self):
         def fn(x):
             return x.to(torch.int64)

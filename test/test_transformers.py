@@ -55,7 +55,6 @@ from torch.testing._internal.common_cuda import (
 
 if not IS_FBCODE:
     from test_cpp_extensions_open_device_registration import (
-        remove_build_path,
         generate_faked_module
     )
 
@@ -3848,7 +3847,7 @@ class TestAttnBias(NNTestCase):
 class TestSDPAPrivateUse1Only(NNTestCase):
     @classmethod
     def setUpClass(cls):
-        remove_build_path()
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
         cls.module = torch.utils.cpp_extension.load(
             name="custom_device_extension",
             sources=[

@@ -497,6 +497,10 @@ in_compiled_autograd_region = False
 
 @contextlib.contextmanager
 def enable(compiler_fn):
+    # we need to import this, because user might not have imported it if they directly use this context manager
+    # we need to lazily import it, because of circular dependencies
+    import torch._inductor.cudagraph_trees
+
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
         functools.partial(AutogradCompilerInstance, compiler_fn)
     )

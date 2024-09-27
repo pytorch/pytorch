@@ -1099,7 +1099,13 @@ def use_triton_template(layout, *, enable_int32=False, enable_float8=False):
     if enable_float8:
         layout_dtypes.extend([torch.float8_e4m3fn, torch.float8_e5m2])
     return (
-        _use_template_for_cuda(layout, layout_dtypes)
+        (
+            (
+                layout.device.type == "cuda"
+                and _use_template_for_cuda(layout, layout_dtypes)
+            )
+            or (layout.device.type == "cpu" and layout.dtype in layout_dtypes)
+        )
         and _use_autotune_backend("TRITON")
         and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
     )
@@ -1791,16 +1797,18 @@ class BoxedBool:
 
 @contextlib.contextmanager
 def collect_defined_kernels(kernel_list):
-    from .codegen.wrapper import WrapperCodeGen
+    from .codegen.wrapper import PythonWrapperCodegen
 
-    orig_define_kernel = WrapperCodeGen.define_kernel
+    orig_define_kernel = PythonWrapperCodegen.define_kernel
 
     def new_define_kernel(wrapper, name, kernel_code, metadata, *args, **kwargs):
         nonlocal kernel_list
         kernel_list.append(kernel_code)
         return orig_define_kernel(wrapper, name, kernel_code, metadata, *args, **kwargs)
 
-    with unittest.mock.patch.object(WrapperCodeGen, "define_kernel", new_define_kernel):
+    with unittest.mock.patch.object(
+        PythonWrapperCodegen, "define_kernel", new_define_kernel
+    ):
         yield
 
 

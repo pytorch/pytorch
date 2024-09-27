@@ -2,8 +2,6 @@
 
 import _codecs
 import os
-import shutil
-import sys
 import tempfile
 import types
 import unittest
@@ -28,15 +26,6 @@ from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 
 TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
 TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
-
-
-def remove_build_path():
-    if sys.platform == "win32":
-        # Not wiping extensions build folder because Windows
-        return
-    default_build_root = torch.utils.cpp_extension.get_default_build_root()
-    if os.path.exists(default_build_root):
-        shutil.rmtree(default_build_root, ignore_errors=True)
 
 
 def generate_faked_module():
@@ -98,7 +87,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        remove_build_path()
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
 
         cls.module = torch.utils.cpp_extension.load(
             name="custom_device_extension",
