@@ -270,9 +270,11 @@ class UserVisibleOutputStrideFixUpper:
 
         outputs = graph.find_nodes(op="output")[0].args[0]
         for idx in user_visible_output_idxs:
-            val = outputs[idx].meta["val"]
-            assert isinstance(val, torch.Tensor), val
-            self.output_idx_to_strides[idx] = val.stride()
+            if not isinstance(outputs[idx], torch.fx.Node):
+                continue
+            val = outputs[idx].meta.get("val")
+            if isinstance(val, torch.Tensor):
+                self.output_idx_to_strides[idx] = val.stride()
 
     def fixup(self) -> None:
         output_node = self.graph.find_nodes(op="output")[0]

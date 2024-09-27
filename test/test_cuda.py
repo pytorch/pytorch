@@ -221,6 +221,20 @@ class TestCuda(TestCase):
         device_capability_no_argument = torch.cuda.get_device_capability()
         self.assertEqual(current_device_capability, device_capability_no_argument)
 
+    def test_cuda_get_device_properties(self):
+        # Testing the behaviour with None as an argument
+        current_device = torch.cuda.current_device()
+        current_device_properties = torch.cuda.get_device_properties(current_device)
+        device_properties_None = torch.cuda.get_device_properties(None)
+        self.assertEqual(current_device_properties, device_properties_None)
+
+        # Testing the behaviour for No argument
+        device_properties_no_argument = torch.cuda.get_device_properties()
+        self.assertEqual(current_device_properties, device_properties_no_argument)
+
+    @unittest.skipIf(
+        IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
+    )
     def test_out_of_memory(self):
         tensor = torch.zeros(1024, device="cuda")
 
@@ -5075,7 +5089,7 @@ class TestCudaAutocast(TestAutocast):
 
         dtypes = (torch.float16, torch.bfloat16) if TEST_BF16 else (torch.float16,)
         for dtype in dtypes:
-            with torch.cuda.amp.autocast(dtype=dtype):
+            with torch.autocast(device_type="cuda", dtype=dtype):
                 output = mymm(x, y)
                 self.assertTrue(output.dtype is dtype)
                 loss = output.sum()
