@@ -73,6 +73,7 @@ class BaseOperator:
         previous runs.
 
         Args:
+            input_mapping (Dict[str, List]): Mapping from operator name to the input list.
             benchmark_config (Optional[BenchmarkConfig]): Configuration for the benchmark.
 
         Returns:

@@ -12,6 +12,7 @@ import torch
 
 
 # mapping from operator name to the input list.
+# We use the same input list for different variants of the same operator.
 # {operator_name: input_list}
 input_mapping = {}
 
