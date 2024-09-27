@@ -326,11 +326,11 @@ def _collect_all_valid_cia_ops() -> Set["OperatorBase"]:
     cia_ops = torch._C._dispatch_get_registrations_for_dispatch_key(
         "CompositeImplicitAutograd"
     )
-    # Ignore quantized namespace ops
-    cia_ops = [name[6:] for name in cia_ops if name.startswith("aten::")]
+
     # Materialize all CIA ops first
     for op in cia_ops:
-        split_list = op.split(".")
+        namespace, op_name = tuple(op.split("::"))
+        split_list = op_name.split(".")
         # Sometime overload could be missing
         assert len(split_list) == 1 or len(split_list) == 2
         op_name = split_list[0]
@@ -338,16 +338,18 @@ def _collect_all_valid_cia_ops() -> Set["OperatorBase"]:
         if len(split_list) == 2:
             op_overload_name = split_list[1]
 
-        _ = getattr(getattr(torch.ops.aten, op_name), op_overload_name)
+        _ = getattr(getattr(getattr(torch.ops, namespace), op_name), op_overload_name)
 
     # Second step to finally compile the list of all valid ops
     cia_ops = set()
-    for op in torch.ops.aten:
-        op_packet = getattr(torch.ops.aten, op)
-        for overload in op_packet.overloads():
-            op_overload = getattr(op_packet, overload)
-            if _is_preservable_cia_op(op_overload):
-                cia_ops.add(op_overload)
+    for op_namespace_name in torch.ops._dir:
+        op_namespace = getattr(torch.ops, op_namespace_name)
+        for op in op_namespace:
+            op_packet = getattr(op_namespace, op)
+            for overload in op_packet.overloads():
+                op_overload = getattr(op_packet, overload)
+                if _is_preservable_cia_op(op_overload):
+                    cia_ops.add(op_overload)
     return cia_ops
 
 

@@ -299,12 +299,6 @@ def _split_decomp_table_to_cia_and_python_decomp(
             cia_ops_to_callable[op] = decomp_table[op]
             all_preservable_cia_ops.remove(op)
             del decomp_table[op]
-        # If it is a custom op, we want to still preserve or do whatever
-        # with it if it is a functional CIA.
-        elif _is_preservable_cia_op(op):
-            op_name = op.name()
-            assert not op_name.startswith("aten"), "This should be a custom op"
-            cia_ops_to_callable[op] = decomp_table[op]
 
         # By default we only query CIA ops above, but it could be that
 

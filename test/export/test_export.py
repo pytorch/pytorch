@@ -7337,14 +7337,19 @@ def forward(self, x, y):
 
         decomp_table = torch.export.core_aten_decompositions()
 
-        # FIXME (We need to design a proper way that doesn't need _preserve_ops)
-        ep = torch.export.export(M(), (torch.randn(4, 4),)).run_decompositions(
-            decomp_table,
-            _preserve_ops=(
-                torch.ops.testlib.foo_functional.default,
-                torch.ops.testlib.foo_mutated.default,
-            ),
-        )
+        if IS_FBCODE:
+            ep = torch.export.export(M(), (torch.randn(4, 4),)).run_decompositions(
+                decomp_table,
+                _preserve_ops=(
+                    torch.ops.testlib.foo_functional.default,
+                    torch.ops.testlib.foo_mutated.default,
+                ),
+            )
+        else:
+            ep = torch.export.export(M(), (torch.randn(4, 4),)).run_decompositions(
+                decomp_table,
+            )
+
 
         self.assertExpectedInline(
             str(ep.graph_module.code).strip(),
