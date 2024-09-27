@@ -70,7 +70,7 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
         return "aoti_torch_get_current_xpu_stream"
 
     def cpp_kernel_type(self):
-        return "sycl::kernel *"
+        return "std::unique_ptr<sycl::kernel>"
 
     def cpp_device_ptr(self):
         return "void *"

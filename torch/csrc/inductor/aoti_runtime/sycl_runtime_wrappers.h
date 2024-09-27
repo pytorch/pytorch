@@ -84,7 +84,7 @@ static ze_module_handle_t loadModule(
       data.size());
 }
 
-static sycl::kernel* getKernel(
+static std::unique_ptr<sycl::kernel> getKernel(
     sycl::queue& queue,
     ze_module_handle_t l0_module,
     const char* kernel_name) {
@@ -103,11 +103,10 @@ static sycl::kernel* getKernel(
   auto fun = sycl::make_kernel<sycl::backend::ext_oneapi_level_zero>(
       {mod, l0_kernel, sycl::ext::oneapi::level_zero::ownership::transfer},
       ctx);
-  auto kernel_ptr = new sycl::kernel(fun);
-  return kernel_ptr;
+  return std::make_unique<sycl::kernel>(fun);
 }
 
-static sycl::kernel* loadKernel(
+static std::unique_ptr<sycl::kernel> loadKernel(
     sycl::queue& queue,
     std::string filePath,
     const std::string& funcName,
@@ -123,7 +122,7 @@ static sycl::kernel* loadKernel(
 }
 
 static void launchKernel(
-    sycl::kernel* kernel_ptr,
+    std::unique_ptr<sycl::kernel>& kernel_ptr,
     uint32_t gridX,
     uint32_t gridY,
     uint32_t gridZ,
