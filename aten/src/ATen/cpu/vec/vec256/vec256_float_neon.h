@@ -417,7 +417,7 @@ public:
     );
   }
   Vectorized<float> erfinv() const {
-    return map(c10::calc_erfinv);
+    return map(calc_erfinv);
   }
   Vectorized<float> exp() const {
     return USE_SLEEF(
