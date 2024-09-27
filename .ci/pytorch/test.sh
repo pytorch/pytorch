@@ -532,6 +532,11 @@ test_perf_for_dashboard() {
         cp "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv" \
           "$TEST_REPORTS_DIR/${backend}_cudagraphs_low_precision_${suite}_quant_${mode}_${device}_${target}.csv"
       fi
+      if [[ "$DASHBOARD_TAG" == *default_cpu_f32-true* ]]; then
+        $TASKSET python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --float32 --backend "$backend" --disable-cudagraphs "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_float32_${mode}_${device}_${target}.csv"
+      fi
     done
   done
 }
