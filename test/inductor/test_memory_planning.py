@@ -3,7 +3,12 @@
 import sys
 import unittest
 
-from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfRocm, xfailIfXpu
+from torch.testing._internal.common_utils import (
+    IS_CI,
+    IS_WINDOWS,
+    skipIfRocm,
+    xfailIfXpu,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
