@@ -42,8 +42,8 @@ def main():
         reader = csv.reader(f)
         for row in reader:
             entry = ExpectedFileEntry(
-                benchmark_name=row[0],
-                metric_name=row[1],
+                benchmark_name=row[0].strip(),
+                metric_name=row[1].strip(),
                 expected_value=int(row[2]),
                 noise_margin=float(row[3]),
             )
@@ -58,7 +58,9 @@ def main():
         reader = csv.reader(f)
         for row in reader:
             entry = ResultFileEntry(
-                benchmark_name=row[0], metric_name=row[1], actual_value=int(row[2])
+                benchmark_name=row[0].strip(),
+                metric_name=row[1].strip(),
+                actual_value=int(row[2]),
             )
 
             key = (entry.benchmark_name, entry.metric_name)
