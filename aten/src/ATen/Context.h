@@ -562,7 +562,7 @@ inline void manual_seed(uint64_t seed) {
     }
   }
 
-  const auto xpu_num_gpus = detail::getXPUHooks().getNumGPUs();
+  const auto xpu_num_gpus = detail::getXPUHooks().deviceCount();
   if (hasXPU() && xpu_num_gpus) {
     for (const auto i : c10::irange(xpu_num_gpus)) {
       auto xpu_gen = globalContext().defaultGenerator(
