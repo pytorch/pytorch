@@ -12022,7 +12022,7 @@ class TestConsistency(TestCaseMPS):
         'var_mean_unbiased',
         'acosh', 'asinh', 'asin',
         'masked.std',
-        'nn.functional.avg_pool2d', # NS: Only for backward pass
+        'nn.functional.avg_pool2d',  # NS: Only for backward pass
         'nn.functional.normalize',
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
