@@ -25,6 +25,11 @@ on:
         required: false
         type: boolean
         default: true
+      default_cpu_f32:
+        description: Run inductor_default with f32 precision?
+        required: false
+        type: boolean
+        default: true
       dynamic:
         description: Run inductor_dynamic_shapes?
         required: false
@@ -119,7 +124,7 @@ jobs:
       build-environment: linux-jammy-aarch64-py3.10
       # Turn off dynamic-shapes and aotinductor tests for now, to have faster iteration for debugging perf instability.
       # Will change this back
-      dashboard-tag: training-false-inference-true-default-true-dynamic-false-aotinductor-false
+      dashboard-tag: training-false-inference-true-default-true-default_cpu_f32-true-dynamic-false-aotinductor-false
       docker-image: ${{ needs.linux-jammy-aarch64-py3_10-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-aarch64-py3_10-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
@@ -135,7 +140,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     with:
       build-environment: linux-jammy-aarch64-py3.10
-      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-aotinductor-${{ inputs.aotinductor }}
+      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-default_cpu_f32-${{ inputs.default_cpu_f32 }}-dynamic-${{ inputs.dynamic }}-aotinductor-${{ inputs.aotinductor }}
       docker-image: ${{ needs.linux-jammy-aarch64-py3_10-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-aarch64-py3_10-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
