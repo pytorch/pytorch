@@ -3799,7 +3799,8 @@ class ComputedBuffer(OperationBuffer):
 
         support_vars = index_vars + reduce_vars
         should_merge_loops = (
-            self.get_device().type != "cuda" or not config.loop_ordering_after_fusion
+            self.get_device().type not in ("cuda", "xpu")
+            or not config.loop_ordering_after_fusion
         )
         iter_ranges, iter_reindex, _ = simplify_and_reorder(
             index_vars,
