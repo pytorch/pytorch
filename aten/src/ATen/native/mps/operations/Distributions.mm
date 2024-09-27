@@ -74,6 +74,10 @@ Tensor& random_mps_impl(Tensor& self,
         if constexpr (std::is_same_v<scalar_t, int64_t>) {
           return MPSDataTypeInt32;
         }
+        // for bernoully always use float32
+        if constexpr (std::is_same_v<scalar_t, bool>) {
+          return MPSDataTypeFloat32;
+        }
         switch (self.scalar_type()) {
           case kHalf:
             return MPSDataTypeFloat16;
