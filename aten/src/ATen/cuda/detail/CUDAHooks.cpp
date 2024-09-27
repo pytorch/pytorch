@@ -241,6 +241,9 @@ DeviceIndex current_device() {
   return -1;
 }
 
+/**
+ * DEPRECATED: use getCurrentDevice() instead
+ */
 DeviceIndex CUDAHooks::current_device() const {
   return at::cuda::detail::current_device();
 }
@@ -445,6 +448,10 @@ int CUDAHooks::getNumGPUs() const {
 
 DeviceIndex CUDAHooks::deviceCount() const {
   return at::cuda::device_count();
+}
+
+DeviceIndex CUDAHooks::getCurrentDevice() const {
+  return at::cuda::detail::current_device();
 }
 
 #ifdef USE_ROCM

@@ -106,8 +106,7 @@ class TORCH_API Context {
             opt_device_type.value())) { // passed device not an accelerator
       return false;
     }
-    return getAcceleratorHooksInterface(opt_device_type)
-        .isPinnedPtr(data);
+    return getAcceleratorHooksInterface(opt_device_type).isPinnedPtr(data);
   }
   Allocator* getPinnedMemoryAllocator(
       std::optional<c10::DeviceType> device_type = std::nullopt) {

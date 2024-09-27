@@ -50,6 +50,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   void cuFFTClearPlanCache(DeviceIndex device_index) const override;
   int getNumGPUs() const override;
   DeviceIndex deviceCount() const override;
+  DeviceIndex getCurrentDevice() const override;
 
 #ifdef USE_ROCM
   bool isGPUArch(DeviceIndex device_index, const std::vector<std::string>& archs) const override;
