@@ -16,6 +16,8 @@ struct TORCH_API VariableInfo {
   std::vector<c10::SymInt> size;
   bool requires_grad;
   bool is_empty;
+  // needed for NJTs since they only support zeros_like()
+  std::optional<Variable> the_var;
 };
 
 } // namespace torch::autograd
