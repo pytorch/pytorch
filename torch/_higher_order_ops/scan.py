@@ -48,10 +48,10 @@ def _extract_carry_and_out(flat_out: List[Any], num_carry: int):
     return flat_out[:num_carry], flat_out[num_carry:]
 
 
-# An empty function that's used for inductor lowering in lowering.py
-# Compared with aten.select, the lowring rule is more specialized
+# An custom op that's used for lowering scan in inductor.
+# Compared with aten.select, the lowering rule for this is more specialized
 # to the scan operator. For example, we skips a bunch of checks that we're
-# ceratin to be true for scan.
+# certain is true for scan.
 @torch.library.custom_op("_scan::unsafe_select", mutates_args=())  # type: ignore[misc]
 def _unsafe_select(t: torch.Tensor, dim: int, idx: int) -> torch.Tensor:
     return torch.select(t, dim, idx)

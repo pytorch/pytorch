@@ -6238,10 +6238,9 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
     return list(map(TensorBox.create, result))
 
 
-# This is a spcialized version of select, where we're certain that
-# the idx will be valid (the idx are generated in wrapper of scan).
+# This is a spcialized version of select because we're certain that the idx is valid
 @register_lowering(torch.ops._scan.unsafe_select, type_promotion_kind=None)
-def scan_slice_view(dst, dim, idx):
+def _(dst, dim, idx):
     return squeeze(slice_(dst, dim, idx, idx + 1, step=1, clamp=False), dim)
 
 
@@ -6312,10 +6311,10 @@ def scan(combine_subgraph, init, xs, dim, reverse, additional_inputs):
             return *new_carry, *xs, *additional_inputs, *ys_outs
 
         # Note:
-        # 1. fwd_only trace with real mode, we need to with current fake_mode otherwise
+        # 1. fwd_only trace with real mode, we need to trace under current fake_mode otherwise
         # factory functions will create real tensors instead of fake tensors.
         # 2. We set run_functional_passes = False because body_fn_out is not functional
-        # due to the inplace write of ys_outs.
+        # due to the inplace writes.
         cond_gm = fwd_only(cond_fn_out, fake_args, run_functional_passes=False)
         body_gm = fwd_only(body_fn_out, fake_args, run_functional_passes=False)
 
@@ -6339,7 +6338,7 @@ def scan(combine_subgraph, init, xs, dim, reverse, additional_inputs):
     subgraph_ys_outs = pytree.tree_unflatten(
         body_subgraph.graph.graph_outputs + [fake_idx], tree_spec  # type: ignore[union-attr]
     )[3]
-    # Pre-alocate an out buffer to store the ys_outs
+    # Pre-allocate an out buffer to store the ys_outs
     ys_out_buffer = [
         empty_strided(
             size=y.get_size(),
@@ -6349,8 +6348,6 @@ def scan(combine_subgraph, init, xs, dim, reverse, additional_inputs):
         )
         for y in subgraph_ys_outs
     ]
-    for out_buffer in ys_out_buffer:
-        V.graph.mark_buffer_mutated(out_buffer.get_name())
 
     carried_inputs = [*init, *xs, *additional_inputs, *ys_out_buffer]
     output = ir.WhileLoop.create(
@@ -6361,6 +6358,10 @@ def scan(combine_subgraph, init, xs, dim, reverse, additional_inputs):
         mutated_inputs=ys_out_buffer,
         iter_idx_expr=fake_idx.node.expr,
     )
+
+    for out_buffer in ys_out_buffer:
+        V.graph.mark_buffer_mutated(out_buffer.get_name())
+
     last_carry, _, _, ys_outs, _ = pytree.tree_unflatten(
         output + ys_out_buffer + [fake_idx], tree_spec
     )
