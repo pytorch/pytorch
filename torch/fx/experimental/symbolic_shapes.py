@@ -111,6 +111,7 @@ __all__ = [
     "guard_size_oblivious", "check_consistent",
     "compute_unbacked_bindings", "ConvertIntKey",
     "rebind_unbacked", "resolve_unbacked_bindings", "is_accessor_node",
+    "SymIntEqByExpr",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -120,6 +121,42 @@ CURRENT_NODE_KEY = "current_node"
 
 def log_lru_cache_stats(wrapped_f):
     log.debug("lru_cache_stats %s: %s", wrapped_f.__name__, wrapped_f.cumulative_cache_info())
+
+
+class SymIntEqByExpr:
+    """
+    This is a wrapper around SymInt which has alternative semantics for
+    equality.  Specifically, instead of erroring or guarding, we
+    instead will hash/compare equality based on the underlying sympy
+    expression; e.g., s0 and s1 will always compare as False.
+
+    NB: This does NOT do fancy analysis that maybe_evaluate_static does;
+    we can only reason through equalities that occur because to expressions
+    canonicalize to the same expression via regular simplification.
+    """
+    val: Union[torch.SymInt, int]
+
+    def __init__(self, val):
+        self.val = val
+
+    def __repr__(self):
+        return repr(self.val)
+
+    def _extract(self):
+        if isinstance(self.val, torch.SymInt):
+            return self.val.node.expr
+        else:
+            return sympy.Integer(self.val)
+
+    def __eq__(self, other):
+        # int equality fastpath
+        if type(self.val) is int and type(self.other) is int:
+            return self.val == self.other
+
+        return self._extract() == other._extract()
+
+    def __hash__(self):
+        return hash(self._extract())
 
 
 # Wrapper on lru_cache that reports statistics at process end
