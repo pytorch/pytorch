@@ -2526,7 +2526,6 @@ class Scheduler:
             ms_fused_choice = None
 
             triton_choices = 0
-
             for choice, unfused_time in sorted(
                 choice_timings.items(), key=lambda x: x[1]
             ):
@@ -2543,7 +2542,7 @@ class Scheduler:
                 # TODO - parallel compile triton templates
                 # TODO - should prune/skip choices that are not within certain % of best choice
                 with multi_node.swap_as_triton_caller(choice):
-                    ms_fused, _ = self.benchmark_fused_nodes(node_list_fused)
+                    ms_fused, path = self.benchmark_fused_nodes(node_list_fused)
 
                     if ms_fused < min_ms_fused:
                         min_ms_fused = ms_fused
@@ -2993,20 +2992,35 @@ class Scheduler:
             )
 
             if node1.get_buffer_names() & unsupported_prologue_args:
-                why(
-                    "prologue fusion not implemented for kernel or for these kernel inputs"
-                )
+                why("prologue fusion not implemented for kernel for these inputs")
                 return False
 
             if node1.has_aliasing_or_mutation() or node1.has_aliasing_or_mutation():
                 why("template prologue can only fuse functional pointwise nodes")
                 return False
 
-            # TODO - could potentially relax constraint if node is used multiple times inside template
-            if (
-                not len(node1.outputs) == 1
-                and len(node1.outputs[0].users) == 1
-                and node1.outputs[0].users[0].node is node2
+            prologue_nodes = (
+                node1.snodes if isinstance(node1, FusedSchedulerNode) else [node1]
+            )
+            for node in prologue_nodes[:-1]:
+                node_outs = node.get_outputs()
+                for out in node_outs:
+                    if not all(user.node in prologue_nodes for user in out.users):
+                        why("template prologue can only fuse nodes with a single use")
+                        return False
+
+            template_snodes = (
+                [node2]
+                if not isinstance(node2, FusedSchedulerNode)
+                else [n for n in node2.snodes if n.is_template()]
+            )
+            assert len(template_snodes) == 1
+            template_snode = template_snodes[0]
+
+            if not (
+                len(prologue_nodes[-1].outputs) == 1
+                and len(prologue_nodes[-1].outputs[0].users) == 1
+                and prologue_nodes[-1].outputs[0].users[0].node is template_snode
             ):
                 why("template prologue can only fuse nodes with a single use")
                 return False
@@ -3383,7 +3397,6 @@ class Scheduler:
         Any buffers that are both created and have a last use in the
         same kernel can be removed.
         """
-
         fused_node_names = OrderedSet(
             self.name_to_buf[buf].defining_op.get_name()
             for buf in V.kernel.store_buffer_names

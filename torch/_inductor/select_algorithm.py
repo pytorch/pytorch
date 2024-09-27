@@ -176,8 +176,8 @@ class TritonTemplateKernel(TritonKernel):
 
         self.subgraph_bodies: Dict[str, SubgraphInfo] = {}
 
-        self.prologue_replaced_args: List[str] = []
         self._inputs_with_prologue_fusion: OrderedSet[str] = OrderedSet()
+        self.final_prologue_buffers = []
 
         # The following attributes are all used for triton kernel codegen.
         # They are swapped onto the TritonTemplateKernel object by
@@ -334,7 +334,9 @@ class TritonTemplateKernel(TritonKernel):
         for name, input_node in zip(argnames, named_args):
             arg_name = f"arg_{name}"
             self.named_input_nodes[name] = input_node
-            if input_node.get_name() in self.prologue_replaced_args:
+            if input_node.get_name() in V.graph.removed_buffers:
+                continue
+            if input_node.get_name() in self.final_prologue_buffers:
                 continue
 
             self.args.input_buffers[input_node.get_name()] = arg_name
@@ -342,7 +344,9 @@ class TritonTemplateKernel(TritonKernel):
         # The args may be duplicated, so renaming must be after args are de-duplicated.
         for name in argnames:
             input_node = self.named_input_nodes[name]
-            if input_node.get_name() in self.prologue_replaced_args:
+            if input_node.get_name() in V.graph.removed_buffers:
+                continue
+            if input_node.get_name() in self.final_prologue_buffers:
                 continue
             arg_name = self.args.input_buffers[input_node.get_name()]
             if input_node.get_layout().offset == 0:
@@ -353,8 +357,11 @@ class TritonTemplateKernel(TritonKernel):
 
         for input_node in self.input_nodes[len(self.input_nodes) - self.suffix_args :]:
             # get args in correct order
-            if input_node.get_name() in self.prologue_replaced_args:
+            if input_node.get_name() in V.graph.removed_buffers:
                 continue
+            if input_node.get_name() in self.final_prologue_buffers:
+                continue
+
             self.args.input(input_node.get_name())
 
         def hook():
@@ -482,7 +489,6 @@ class TritonTemplateKernel(TritonKernel):
             indent_width (int): The number of spaces to use for indentation.
         """
 
-        prologue_called = False
         load_code = None
 
         self._inputs_with_prologue_fusion.add(input_name)
@@ -535,9 +541,10 @@ class TritonTemplateKernel(TritonKernel):
                     value: "CSEVariable",
                     mode: "StoreMode" = None,
                 ):
-                    nonlocal prologue_called
-                    prologue_called = True
-                    V.kernel.compute.writeline(f"{output_name} = {value}")
+                    V.kernel.store_buffer_names.add(name)
+                    V.kernel.cse.store_cache[name] = value
+                    if name in V.kernel.final_prologue_buffers:
+                        V.kernel.compute.writeline(f"{output_name} = {value}")
 
             self.ops_handler = StoreOutputSubstitution
 
@@ -575,7 +582,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.cse.invalidate(set())
                 self.codegen_body()
                 self.cse.invalidate(set())
-                if not prologue_called:
+                if input_node.get_name() not in self.final_prologue_buffers:
                     self.body.writeline(load_code)
 
                 return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()

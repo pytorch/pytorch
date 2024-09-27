@@ -1477,7 +1477,7 @@ class SIMDScheduling(BaseScheduling):
                     node.codegen(index_vars)
 
     def codegen_template(
-        self, template_node: BaseSchedulerNode, epilogue_nodes: List[BaseSchedulerNode], prologue_nodes: List[BaseSchedulerNode], *, only_gen_src_code=False
+        self, template_node, epilogue_nodes, prologue_nodes, *, only_gen_src_code=False
     ) -> Optional[str]:
         """
         Codegen a triton template
@@ -1488,13 +1488,17 @@ class SIMDScheduling(BaseScheduling):
         assert rnumel == 1
         kernel, render = template_node.node.make_kernel_render(template_node.node)
 
-        buf_name_to_prologue_node: Dict[str, BaseSchedulerNode] = {}
+        buf_name_to_prologue_group = {}
+        template_reads = template_node.used_buffer_names()
+        prologue_group = []
         for prologue in prologue_nodes:
             names = prologue.get_buffer_names()
-            assert len(names) == 1
-            if not only_gen_src_code:
-                V.graph.removed_buffers.add(next(iter(names)))
-            buf_name_to_prologue_node[next(iter(names))] = prologue
+            prologue_group.append(prologue)
+            if prologue.get_buffer_names() & template_reads:
+                assert len(names) == 1
+                buf_name_to_prologue_group[next(iter(names))] = prologue_group
+                kernel.final_prologue_buffers.append(next(iter(names)))
+                prologue_group = []
 
         with kernel:
             if not only_gen_src_code:
@@ -1502,9 +1506,6 @@ class SIMDScheduling(BaseScheduling):
                 # so they are necessarily not allocated
                 for node in [template_node, *epilogue_nodes]:
                     node.mark_run()
-
-            for buf_name in buf_name_to_prologue_node:
-                kernel.prologue_replaced_args.append(buf_name)
 
             partial_code = render()
 
@@ -1515,16 +1516,19 @@ class SIMDScheduling(BaseScheduling):
 
             for input_name, buffer in kernel.named_input_nodes.items():
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
-                if prologue_node := buf_name_to_prologue_node.get(
+                if prologue_group := buf_name_to_prologue_group.get(
                     buffer.get_name(), None
                 ):
                     # TODO - this doesnt work with libdevice calls, potentially other bugs
                     # upcasting to fp32 and downcasting gives large slowdown
                     with config.patch("triton.codegen_upcast_to_fp32", False):
                         with kernel.set_subgraph_body(subgraph_name):
-                            prologue_node.codegen(
-                                kernel.split_and_set_ranges(prologue_node.get_ranges())
-                            )
+                            for prologue_node in prologue_group:
+                                prologue_node.codegen(
+                                    kernel.split_and_set_ranges(
+                                        prologue_node.get_ranges()
+                                    )
+                                )
                             kernel.cse.invalidate(set())
 
         if not isinstance(partial_code, str):

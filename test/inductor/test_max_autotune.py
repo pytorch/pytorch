@@ -895,6 +895,19 @@ class TestPrologueFusion(TestCase):
             )
         )
 
+    def check_code(self, code_str, num_kernels, num_allocs, num_deallocs):
+        FileCheck().check("def call").check_count(
+            ".run", num_kernels, exactly=True
+        ).run(code_str)
+
+        FileCheck().check("def call").check_count(
+            "empty_strided", num_allocs, exactly=True
+        ).run(code_str)
+
+        FileCheck().check("def call").check_count(
+            "del", num_deallocs, exactly=True
+        ).run(code_str)
+
     @parametrize("size", (256, 249))
     def test_upcast(self, size):
         M = N = K = size
@@ -907,16 +920,7 @@ class TestPrologueFusion(TestCase):
 
         out, code = run_and_get_code(torch.compile(foo), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
-
-        # just emit a single kernel
-        FileCheck().check("def call").check_count(".run", 1, exactly=True).run(code[0])
-
-        f = FileCheck().check("def call")
-        # single allocation, two deallocations
-        f.check_count("empty_strided", 1, exactly=True).check_count(
-            "del", count=2, exactly=True
-        )
-        f.run(code[0])
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
     def test_downcast(self):
         # per heuristics, dont fuse a downcast into a mm because it would lead to more reads inside kernel
@@ -929,33 +933,84 @@ class TestPrologueFusion(TestCase):
 
         out, code = run_and_get_code(torch.compile(foo), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
-        # two kernels
-        FileCheck().check("def call").check_count(".run", 2, exactly=True).run(code[0])
+        self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
     @parametrize("size", (256,))
     @config.patch(force_disable_caches=True)
     def test_multiple_fusions(self, size):
         M = N = K = size
-        torch._inductor.metrics.generated_kernel_count = 0
 
         def foo(x, y):
-            return ((x - 2) @ (y + 2)) * 2
+            return ((x - 3) @ (y + 3)) * 3
 
         x = torch.rand([M, K], dtype=torch.float, device="cuda")
-        y = torch.rand([M, K], dtype=torch.float, device="cuda")
+        y = torch.rand([K, N], dtype=torch.float, device="cuda")
 
         out, code = run_and_get_code(torch.compile(foo), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
-        
-        # one triton kernel
-        FileCheck().check("def call").check_count(".run", 1, exactly=True).run(code[0])
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
-        f = FileCheck().check("def call")
-        # single allocation, two deallocations
-        f.check_count("empty_strided", 1, exactly=True).check_count(
-            "del", count=2, exactly=True
-        )
-        f.run(code[0])
+        # check that we do not CSE any variables between prologues, epilogues
+        FileCheck().check("def triton").check_count("= 3.0", 3, exactly=True).check(
+            "tl.store"
+        ).run(code[0])
+
+    def test_multiple_inputs(self):
+        M = N = K = 256
+
+        def foo(x, y, z):
+            return (x + y).to(torch.float) @ z
+
+        x = torch.rand([M, K], dtype=torch.float16, device="cuda")
+        y = torch.rand([M, K], dtype=torch.float16, device="cuda")
+        z = torch.rand([K, N], dtype=torch.float, device="cuda")
+
+        out, code = run_and_get_code(torch.compile(foo), x, y, z)
+        self.assertEqual(out, foo(x, y, z), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
+
+    def test_storage_offset_prologue(self):
+        def foo(a):
+            q = a[:64, :]
+            k = a[64:, :]
+            return torch.mm(q + 2, k - 2)
+
+        inp = torch.randn(128, 64, device="cuda")
+        out, code = run_and_get_code(torch.compile(foo), inp)
+        self.assertEqual(out, foo(inp), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=1)
+
+    @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
+    def test_prologue_multiple_nodes(self):
+        M = K = N = 256
+
+        def foo(x, y):
+            return ((((x * 2) - 1) / 2) @ (y * 4)) * 3.0
+
+        x = torch.rand([M, K], dtype=torch.float, device="cuda")
+        y = torch.rand([K, N], dtype=torch.float, device="cuda")
+
+        out, code = run_and_get_code(torch.compile(foo), x, y)
+        self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+
+    @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
+    def test_prologue_read_into_both_inputs(self):
+        M = K = N = 256
+
+        # not supported today. it could be, but typically the pointwise nodes would get
+        # inlined into separate nodes.
+
+        def foo(x):
+            y = (x + 1) * 2
+            return y @ (y - 2)
+
+        x = torch.rand([M, K], dtype=torch.float, device="cuda")
+
+        out, code = run_and_get_code(torch.compile(foo), x)
+        self.assertEqual(out, foo(x), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=2, num_allocs=3, num_deallocs=4)
+
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
