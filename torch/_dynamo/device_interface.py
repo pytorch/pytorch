@@ -306,7 +306,7 @@ class CpuInterface(DeviceInterface):
         def elapsed_time(self, end_event) -> float:
             return (end_event.time - self.time) * 1000
 
-        def record(self):
+        def record(self, stream=None):
             self.time = time.perf_counter()
 
     @staticmethod
