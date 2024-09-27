@@ -12,6 +12,7 @@ import onnx
 import parameterized
 import pytorch_test_common
 import torchvision
+from autograd_helper import CustomFunction as CustomFunction2
 from pytorch_test_common import (
     skipIfNoCuda,
     skipIfUnsupportedMaxOpsetVersion,
@@ -21,7 +22,7 @@ from pytorch_test_common import (
 import torch
 import torch.onnx
 import torch.utils.cpp_extension
-from torch.onnx import _constants, TrainingMode, utils
+from torch.onnx import _constants, OperatorExportTypes, TrainingMode, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx.symbolic_helper import _unpack_list, parse_args
 from torch.testing._internal import common_utils
@@ -62,6 +63,7 @@ class _BaseTestCase(pytorch_test_common.ExportTestCase):
         input,
         do_constant_folding=True,
         training=TrainingMode.EVAL,
+        operator_export_type=OperatorExportTypes.ONNX,
         input_names=None,
         dynamic_axes=None,
     ):
@@ -76,6 +78,7 @@ class _BaseTestCase(pytorch_test_common.ExportTestCase):
             input,
             do_constant_folding=do_constant_folding,
             _disable_torch_constant_prop=True,
+            operator_export_type=operator_export_type,
             training=training,
             input_names=input_names,
             dynamic_axes=dynamic_axes,
@@ -223,6 +226,7 @@ class TestUtilityFuns(_BaseTestCase):
                 return out, out2
 
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.randn(2, 3)
         y = torch.randn(2, 4)
         t = torch.randn(2, 7)
@@ -243,6 +247,7 @@ class TestUtilityFuns(_BaseTestCase):
                 return b + x
 
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.ones(3, 2)
         graph, _, __ = self._model_to_graph(
             TransposeModule(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
@@ -262,6 +267,7 @@ class TestUtilityFuns(_BaseTestCase):
                 return b + x
 
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.ones(2, 3)
         graph, _, __ = self._model_to_graph(
             ReduceModule(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
@@ -279,6 +285,7 @@ class TestUtilityFuns(_BaseTestCase):
                 return b + x
 
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.ones(2, 3)
         graph, _, __ = self._model_to_graph(
             NormModule(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
@@ -295,6 +302,7 @@ class TestUtilityFuns(_BaseTestCase):
                 return b + x
 
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.ones(1, 3)
         graph, _, __ = self._model_to_graph(
             NarrowModule(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
@@ -313,6 +321,7 @@ class TestUtilityFuns(_BaseTestCase):
                 return b + x
 
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.ones(1, 3)
         graph, _, __ = self._model_to_graph(
             SliceIndexExceedsDimModule(),
@@ -336,6 +345,7 @@ class TestUtilityFuns(_BaseTestCase):
                 return b + x, c + d
 
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.ones(1, 3)
         graph, _, __ = self._model_to_graph(
             SliceNegativeIndexModule(),
@@ -357,6 +367,7 @@ class TestUtilityFuns(_BaseTestCase):
                 return b + 1, c + x
 
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.ones(1, 3)
         model = GatherModule()
         model(x)
@@ -375,6 +386,7 @@ class TestUtilityFuns(_BaseTestCase):
                 return b + x
 
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.ones(1, 2, 3)
         graph, _, __ = self._model_to_graph(
             UnsqueezeModule(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1, 2]}
@@ -396,6 +408,7 @@ class TestUtilityFuns(_BaseTestCase):
                 return self.prelu(x) + a
 
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.randn(2, 3, 4, 5, 8, 7)
         graph, _, __ = self._model_to_graph(
             PReluModel(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2, 3, 4, 5]}
@@ -413,6 +426,7 @@ class TestUtilityFuns(_BaseTestCase):
                 return torch.squeeze(a) + x + torch.squeeze(a)
 
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.ones(2, 3)
         graph, _, __ = self._model_to_graph(
             SqueezeModule(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
@@ -429,6 +443,7 @@ class TestUtilityFuns(_BaseTestCase):
                 return torch.squeeze(a, dim=-3) + x
 
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.ones(2, 3)
         graph, _, __ = self._model_to_graph(
             SqueezeAxesModule(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
@@ -464,6 +479,7 @@ class TestUtilityFuns(_BaseTestCase):
                 return x + d
 
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.ones(2, 3)
         graph, _, __ = self._model_to_graph(
             ConcatModule(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
@@ -484,6 +500,7 @@ class TestUtilityFuns(_BaseTestCase):
                 return self.mygru(input, initial_state)
 
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         input = torch.randn(5, 3, 7)
         h0 = torch.randn(1, 3, 3)
         graph, _, __ = self._model_to_graph(
@@ -514,6 +531,7 @@ class TestUtilityFuns(_BaseTestCase):
                 return torch.matmul(A, torch.transpose(self.B, -1, -2))
 
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         A = torch.randn(2, 3)
         graph, _, __ = self._model_to_graph(
             MatMulNet(), (A,), input_names=["A"], dynamic_axes={"A": [0, 1]}
@@ -536,6 +554,7 @@ class TestUtilityFuns(_BaseTestCase):
                 return x * b
 
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.randn(4, 5)
         graph, _, __ = self._model_to_graph(
             ReshapeModule(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
@@ -559,6 +578,7 @@ class TestUtilityFuns(_BaseTestCase):
 
         x = torch.randn(2, 5)
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         graph, _, __ = self._model_to_graph(
             Module(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
         )
@@ -581,6 +601,7 @@ class TestUtilityFuns(_BaseTestCase):
 
         x = torch.randn(2, 5)
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         graph, _, __ = self._model_to_graph(
             Module(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
         )
@@ -603,10 +624,12 @@ class TestUtilityFuns(_BaseTestCase):
 
         x = torch.randn(2, 5)
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         graph, params_dict, __ = self._model_to_graph(
             Module(),
             (x,),
             do_constant_folding=True,
+            operator_export_type=OperatorExportTypes.ONNX,
             input_names=["x"],
             dynamic_axes={"x": [0, 1]},
         )
@@ -632,10 +655,12 @@ class TestUtilityFuns(_BaseTestCase):
 
         x = torch.randn(2, 5)
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         graph, params_dict, __ = self._model_to_graph(
             Module(),
             (x,),
             do_constant_folding=True,
+            operator_export_type=OperatorExportTypes.ONNX,
             input_names=["x"],
             dynamic_axes={"x": [0, 1]},
         )
@@ -661,6 +686,7 @@ class TestUtilityFuns(_BaseTestCase):
 
         x = torch.randn(2, 5)
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         graph, _, __ = self._model_to_graph(
             Module(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
         )
@@ -680,6 +706,7 @@ class TestUtilityFuns(_BaseTestCase):
 
         x = torch.randn(2, 5)
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         graph, _, __ = self._model_to_graph(
             ShapeModule(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
         )
@@ -1278,6 +1305,62 @@ class TestUtilityFuns(_BaseTestCase):
         self.assertEqual(add_scope_names, expected_add_scope_names)
         self.assertEqual(mul_scope_names, expected_mul_scope_names)
 
+    def test_aten_fallthrough(self):
+        # Test aten export of op with no symbolic
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return torch.erfc(x)
+
+        x = torch.randn(2, 3, 4)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        graph, _, __ = self._model_to_graph(
+            Module(),
+            (x,),
+            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
+            input_names=["x"],
+            dynamic_axes={"x": [0, 1, 2]},
+        )
+        iter = graph.nodes()
+        self.assertEqual(next(iter).kind(), "aten::erfc")
+
+    def test_custom_op_fallthrough(self):
+        # Test custom op
+        op_source = """
+        #include <torch/script.h>
+
+        torch::Tensor custom_add(torch::Tensor self, torch::Tensor other) {
+          return self + other;
+        }
+
+        static auto registry =
+          torch::RegisterOperators("custom_namespace::custom_op", &custom_add);
+        """
+
+        torch.utils.cpp_extension.load_inline(
+            name="custom_add",
+            cpp_sources=op_source,
+            is_python_module=False,
+            verbose=True,
+        )
+
+        class FooModel(torch.nn.Module):
+            def forward(self, input, other):
+                # Calling custom op
+                return torch.ops.custom_namespace.custom_op(input, other)
+
+        x = torch.randn(2, 3, 4, requires_grad=False)
+        y = torch.randn(2, 3, 4, requires_grad=False)
+        model = FooModel()
+        graph, _, __ = self._model_to_graph(
+            model,
+            (x, y),
+            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_FALLTHROUGH,
+            input_names=["x", "y"],
+            dynamic_axes={"x": [0, 1, 2], "y": [0, 1, 2]},
+        )
+        iter = graph.nodes()
+        self.assertEqual(next(iter).kind(), "custom_namespace::custom_op")
+
     # gelu is exported as onnx::Gelu for opset >= 20
     @skipIfUnsupportedMaxOpsetVersion(19)
     def test_custom_opsets_gelu(self):
@@ -1351,6 +1434,49 @@ class TestUtilityFuns(_BaseTestCase):
         self.assertEqual(graph.opset_import[1].domain, "com.microsoft")
         self.assertEqual(graph.opset_import[1].version, 1)
 
+    def test_onnx_fallthrough(self):
+        # Test aten export of op with symbolic for aten
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return torch.digamma(x)
+
+        x = torch.randn(100, 128)
+        graph, _, __ = self._model_to_graph(
+            Module(),
+            (x,),
+            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
+            input_names=["x"],
+            dynamic_axes={"x": [0, 1]},
+        )
+        iter = graph.nodes()
+        self.assertEqual(next(iter).kind(), "aten::digamma")
+
+    # prim::ListConstruct is exported as onnx::SequenceConstruct for opset >= 11
+    @skipIfUnsupportedMaxOpsetVersion(10)
+    def test_prim_fallthrough(self):
+        # Test prim op
+        class PrimModule(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                if isinstance(x, list):
+                    y = x
+                else:
+                    y = [x]
+                return y
+
+        x = torch.tensor([2])
+        model = PrimModule()
+        model.eval()
+        graph, _, __ = self._model_to_graph(
+            model,
+            (x,),
+            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
+            input_names=["x"],
+            dynamic_axes={"x": [0]},
+        )
+        iter = graph.nodes()
+        self.assertEqual(next(iter).kind(), "prim::ListConstruct")
+
     def test_custom_layer_tuple(self):
         class CustomFunction(torch.autograd.Function):
             @staticmethod
@@ -1374,6 +1500,72 @@ class TestUtilityFuns(_BaseTestCase):
         iter = graph.nodes()
         self.assertEqual(next(iter).kind(), "CustomNamespace::Custom")
 
+    def test_autograd_onnx_fallthrough(self):
+        class CustomFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input):
+                ctx.save_for_backward(input)
+                return input.clamp(min=0)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (input,) = ctx.saved_tensors
+                grad_input = grad_output.clone()
+                grad_input[input < 0] = 0
+                return grad_input
+
+        class Custom(torch.nn.Module):
+            def forward(self, input):
+                return CustomFunction.apply(input)
+
+        model = Custom()
+        batch = torch.FloatTensor(1, 3)
+
+        graph, _, _ = self._model_to_graph(
+            model,
+            batch,
+            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
+            input_names=["batch"],
+            dynamic_axes={"batch": [0, 1]},
+        )
+        iter = graph.nodes()
+        self.assertEqual(next(iter).kind(), "prim::PythonOp")
+
+    def test_autograd_module_name(self):
+        class CustomFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input):
+                ctx.save_for_backward(input)
+                return input.clamp(min=0)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (input,) = ctx.saved_tensors
+                grad_input = grad_output.clone()
+                grad_input[input < 0] = 0
+                return grad_input
+
+        class Custom(torch.nn.Module):
+            def forward(self, input):
+                return CustomFunction.apply(input) + CustomFunction2.apply(input)
+
+        model = Custom()
+        batch = torch.FloatTensor(1, 3)
+
+        graph, _, _ = self._model_to_graph(
+            model,
+            batch,
+            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
+            input_names=["batch"],
+            dynamic_axes={"batch": [0, 1]},
+        )
+        iter = graph.nodes()
+        autograd1 = next(iter)
+        autograd2 = next(iter)
+        self.assertEqual(autograd1.kind(), "prim::PythonOp")
+        self.assertEqual(autograd2.kind(), "prim::PythonOp")
+        self.assertNotEqual(autograd1.s("module"), autograd2.s("module"))
+
     def test_unused_initializers(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -1389,10 +1581,12 @@ class TestUtilityFuns(_BaseTestCase):
 
         x = torch.randn(20, 16, 50, 100)
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         _, params_dict, __ = self._model_to_graph(
             Model(),
             (x,),
             do_constant_folding=False,
+            operator_export_type=OperatorExportTypes.ONNX,
             input_names=["x"],
             dynamic_axes={"x": [0, 1, 2, 3]},
         )
@@ -1416,10 +1610,12 @@ class TestUtilityFuns(_BaseTestCase):
         model = torch.jit.script(MyModule())
         x = torch.randn(10, 3, 128, 128)
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         graph, _, __ = self._model_to_graph(
             model,
             (x,),
             do_constant_folding=True,
+            operator_export_type=OperatorExportTypes.ONNX,
             training=torch.onnx.TrainingMode.TRAINING,
             input_names=["x"],
             dynamic_axes={"x": [0, 1, 2, 3]},
@@ -1487,10 +1683,12 @@ class TestUtilityFuns(_BaseTestCase):
         input_1 = torch.tensor([11])
         input_2 = torch.tensor([12])
         GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         graph, _, __ = self._model_to_graph(
             MyModule(),
             (input_1, input_2),
             do_constant_folding=True,
+            operator_export_type=OperatorExportTypes.ONNX,
             input_names=["input_1", "input_2"],
             dynamic_axes={"input_1": [0], "input_2": [0]},
         )
