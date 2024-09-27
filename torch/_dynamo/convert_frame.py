@@ -1106,7 +1106,11 @@ class ConvertFrame:
         frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
         skip: int = 0,
     ) -> Optional[
-        Union[GuardedCode, torch._C._dynamo.eval_frame.SkipCodeRecursiveFlag]
+        Union[
+            GuardedCode,
+            torch._C._dynamo.eval_frame.SkipCodeRecursiveFlag,
+            torch._C._dynamo.eval_frame.CacheLimitHitFlag,
+        ]
     ]:
         counters["frames"]["total"] += 1
         try:
@@ -1177,6 +1181,10 @@ class ConvertFrame:
             # to signal to Dynamo eval frame to skip the current frame and any recursive calls.
             if isinstance(e, SkipCodeRecursiveException):
                 return torch._C._dynamo.eval_frame.skip_code_recursive_flag
+            elif isinstance(e, CacheLimitExceeded):
+                # signal to Dynamo to run this frame on run-only mode, skipping recursively if
+                # no valid cache entry is found.
+                return torch._C._dynamo.eval_frame.cache_limit_hit_flag
 
         return None
 

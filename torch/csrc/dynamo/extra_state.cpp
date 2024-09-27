@@ -57,6 +57,14 @@ FrameState* extract_frame_state(ExtraState* extra_state) {
   return (FrameState*)extra_state->frame_state.ptr();
 }
 
+bool extra_state_cache_limit_hit(ExtraState* extra_state) {
+  return extra_state->cache_limit_hit;
+}
+
+void set_extra_state_cache_limit_hit(ExtraState* extra_state, bool value) {
+  extra_state->cache_limit_hit = value;
+}
+
 ExtraState* get_extra_state(PyCodeObject* code) {
   ExtraState* extra = nullptr;
   _PyCode_GetExtra((PyObject*)code, extra_index, (void**)&extra);
