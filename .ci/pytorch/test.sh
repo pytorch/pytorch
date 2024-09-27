@@ -712,6 +712,10 @@ test_inductor_set_cpu_affinity(){
     export KMP_BLOCKTIME=1
   fi
   cores=$(test_inductor_get_core_number)
+  # Set number of cores to 16 on Aarch64 for performance runs.
+  if [[ "${TEST_CONFIG}" == *aarch64* && $cores -gt 16 ]]; then
+    cores=16
+  fi
   export OMP_NUM_THREADS=$cores
   end_core=$((cores-1))
   export TASKSET="taskset -c 0-$end_core"
