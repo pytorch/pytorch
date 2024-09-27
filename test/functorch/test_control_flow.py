@@ -35,15 +35,6 @@ from torch.testing._internal.common_utils import (
 )
 
 
-# say we have a tensor of shape [3, 4, 5, 6]
-# shift_first_dim_to(t, 3) -> [4, 5, 6, 3]
-def shift_first_dim_to(t, to_dim: int):
-    assert to_dim >= 0 and to_dim < t.ndim
-    sz_list = list(t.size())
-    dims = list(range(1, to_dim + 1)) + [0] + list(range(to_dim + 1, t.ndim))
-    return t.permute(*dims)
-
-
 # TODO: pull these helpers from AOTAutograd later
 def to_fun(t):
     if isinstance(t, torch.Tensor):
@@ -1599,7 +1590,7 @@ def forward(self, pred_1, x_1):
                 if not reverse:
                     result_exp_PT = op_pt(x, rnd_scan_dim)
                     res_list = list(result)
-                    res_list[1] = shift_first_dim_to(res_list[1], rnd_scan_dim)
+                    res_list[1] = res_list[1].movedim(0, rnd_scan_dim)
                     self.assertEqual(res_list[1], result_exp_PT)
 
     @skipIfRocm(msg="Unsupported on ROCM yet")
@@ -2079,7 +2070,7 @@ def forward(self, pred_1, x_1):
                 dim=1,
                 reverse=reverse,
             )
-            o1 = pytree.tree_map(lambda t: shift_first_dim_to(t, 1), o1)
+            o1 = pytree.tree_map(lambda t: t.movedim(0, 1), o1)
             o2 = scan(
                 get_scan_combine_fn("add", False),
                 init2,
@@ -2098,7 +2089,7 @@ def forward(self, pred_1, x_1):
             dim=1,
             reverse=reverse,
         )[1]
-        xs = pytree.tree_map(lambda t: shift_first_dim_to(t, 1), xs)
+        xs = pytree.tree_map(lambda t: t.movedim(0, 1), xs)
         expected_result = _fake_scan(
             get_scan_combine_fn("add", False),
             init=init2,
@@ -2517,7 +2508,7 @@ def forward(self, pred_1, x_1):
         if not reverse:
             result_exp_PT = op_pt(x, dim)
             result = list(result)
-            result[1] = pytree.tree_map(lambda t: shift_first_dim_to(t, dim), result[1])
+            result[1] = pytree.tree_map(lambda t: t.movedim(0, dim), result[1])
             self.assertEqual(result[1], result_exp_PT)
 
     @requires_cuda
