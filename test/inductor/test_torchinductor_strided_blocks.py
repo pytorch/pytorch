@@ -497,12 +497,13 @@ class TritonBlockPointerTest(InductorTestCase):
                 else:
                     self.assertNotIn(tile_name, program)
 
-    @parametrize("reduction_op", [torch.sum, torch.argmax])
     @parametrize(
-        "view_size,num_block_pointers,num_triton_kernels",
+        "view_size,num_block_pointers,num_triton_kernels,reduction_op",
         [
-            ((15, 15), 1, 1),  # Non-power of 2
-            ((129, 129), 3, 2),  # Test a large size, with loops.
+            ((15, 15), 1, 1, torch.sum),  # Non-power of 2
+            ((129, 129), 3, 2, torch.sum),  # Test a large size, with loops.
+            ((15, 15), 1, 1, torch.argmax),  # Non-power of 2
+            ((129, 129), 1, 1, torch.argmax),  # Test a large size, with loops.
         ],
     )
     def test_nd_tiling_odd_shapes_reduce(

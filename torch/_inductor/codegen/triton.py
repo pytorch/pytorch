@@ -2042,15 +2042,15 @@ class TritonKernel(SIMDKernel):
         assert self.inside_reduction
         masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
 
-        # rindex = r0_index * R1_BLOCK * ... * Rn_BLOCK + ... + rn_index
-        rtypes = [symt for symt in list(TritonSymbols.reduction_types)[:self.num_reduction_dims]]
-        rblocks = [TritonSymbols.block_sizes[symt] for symt in rtypes]
-        rn_inds = [sympy.Symbol(f"{prefix_str[symt]}index", integer=True, nonnegative=True) for symt in rtypes]
-        rblock_coeffs = [
-            sympy_product(rblocks[idx + 1:])
-            for idx in range(len(rblocks) - 1)
+        # rindex = r0_index * r1_numel * ... * rn_numel + ... + rn_index
+        rprefixes= [prefix_str[symt] for symt in list(TritonSymbols.reduction_types)[:self.num_reduction_dims]]
+        rnumels = [sympy.Symbol(f"{prefix}numel", integer=True, positive=True) for prefix in rprefixes]
+        rn_inds = [sympy.Symbol(f"{prefix}index", integer=True, nonnegative=True) for prefix in rprefixes]
+        ridx_coeffs = [
+            sympy_product(rnumels[idx + 1:])
+            for idx in range(len(rprefixes) - 1)
         ] + [sympy.Integer(1)]
-        rindex = sympy_dot(rblock_coeffs, rn_inds)
+        rindex = sympy_dot(ridx_coeffs, rn_inds)
         self.indexing_code.splice(f"rindex = {rindex}")
 
         # rmask = r0_mask & ... & rn_mask
