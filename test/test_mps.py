@@ -693,8 +693,6 @@ def mps_ops_modifier(ops):
         'index_reducemean': None,
         'index_reduceamax': None,
         'index_reduceamin': None,
-        'isneginf': None,
-        'isposinf': None,
         'kthvalue': None,
         'lcm': None,
         'linalg.cholesky': None,
@@ -2166,6 +2164,19 @@ class TestMPS(TestCaseMPS):
 
     def test_linear3D_no_bias_backward(self):
         self._linear_helper(in_features=2, out_features=3, shape=((4, 5, 2)), bias=True, backward_pass=True)
+
+    @xfailIf(product_version < 14.0)
+    def test_linear_large(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/122045
+        x_cpu = torch.randn(9, 1024, 1, device='cpu')
+        w_cpu = torch.randn(50304, 1, device='cpu')
+        x_mps = x_cpu.detach().clone().to('mps')
+        w_mps = w_cpu.detach().clone().to('mps')
+
+        out_cpu = F.linear(x_cpu, w_cpu, None)
+        out_mps = F.linear(x_mps, w_mps, None)
+
+        self.assertEqual(out_cpu, out_mps)
 
     def test_uniform(self):
         low = torch.zeros(5, 5, requires_grad=True)
@@ -7734,6 +7745,11 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(np.arange(7, 1, -1), torch.arange(7, 1, -1, device='mps'))
         self.assertEqual(np.arange(1, 2, .3, dtype=np.float32), torch.arange(1, 2, .3, device='mps'))
         self.assertEqual(np.arange(6.3, dtype=np.float32), torch.arange(6.3, device='mps'))
+        # To be removed
+        if product_version >= 14.0:
+            def do_arange(start=1.2, end=10.3, dtype=torch.bfloat16, device='cpu'):
+                return torch.arange(start, end, device=device, dtype=dtype)
+            self.assertEqual(do_arange(device='mps'), do_arange(device='cpu'))
 
     def test_arange_empty(self):
         out_mps = torch.tensor([], device="mps")

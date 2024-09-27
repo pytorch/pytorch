@@ -37,6 +37,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_MULTIGPU,
     requires_gpu,
 )
+from torch.testing._internal.triton_utils import requires_cuda
 from torch.utils._triton import has_triton
 
 
@@ -377,7 +378,7 @@ class TestFxGraphCache(TestCase):
         )
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0 if inlined else 1)
 
-    @requires_gpu()
+    @requires_cuda
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     def test_flex_attention_caching(self):
