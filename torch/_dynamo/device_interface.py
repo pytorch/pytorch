@@ -299,7 +299,7 @@ class CpuDeviceProperties:
 
 
 class CpuInterface(DeviceInterface):
-    class Event(_EventBase):
+    class Event(torch.Event):
         def __init__(self, enable_timing=True):
             self.time = 0.0
 
