@@ -37,9 +37,9 @@ at::DataPtr InefficientStdFunctionContext::makeDataPtr(
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-C10_API at::Allocator* allocator_array[at::COMPILE_TIME_MAX_DEVICE_TYPES];
+static at::Allocator* allocator_array[at::COMPILE_TIME_MAX_DEVICE_TYPES];
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-C10_API uint8_t allocator_priority[at::COMPILE_TIME_MAX_DEVICE_TYPES] = {0};
+C10_API static uint8_t allocator_priority[at::COMPILE_TIME_MAX_DEVICE_TYPES] = {0};
 
 void SetAllocator(at::DeviceType t, at::Allocator* alloc, uint8_t priority) {
   if (priority >= allocator_priority[static_cast<int>(t)]) {
