@@ -7862,27 +7862,27 @@ class TestMPS(TestCaseMPS):
 
     # Test normal
     def test_normal(self):
-        def helper(shape, mean=0.0, std=1.0):
-            mps_out = torch.normal(mean, std, shape, device='mps')
+        def helper(shape, mean=0.0, std=1.0, dtype=torch.float):
+            mps_out = torch.normal(mean, std, shape, device='mps', dtype=dtype)
 
             mean_array = np.ones(shape)
             mean_array *= mean
-            cpu_mean_tensor = torch.tensor(mean_array, device='cpu', dtype=torch.float, requires_grad=False)
+            cpu_mean_tensor = torch.tensor(mean_array, device='cpu', dtype=dtype, requires_grad=False)
             mean_tensor = cpu_mean_tensor.detach().clone().to('mps')
 
             std_array = np.ones(shape)
             std_array *= std
-            cpu_std_tensor = torch.tensor(std_array, device='cpu', dtype=torch.float, requires_grad=False)
+            cpu_std_tensor = torch.tensor(std_array, device='cpu', dtype=dtype, requires_grad=False)
             std_tensor = cpu_std_tensor.detach().clone().to('mps')
 
             # test out
-            mps_out = torch.zeros(shape, device='mps')
+            mps_out = torch.zeros(shape, device='mps', dtype=dtype)
             torch.normal(mean_tensor, std, out=mps_out)
 
-            mps_out = torch.zeros(shape, device='mps')
+            mps_out = torch.zeros(shape, device='mps', dtype=dtype)
             torch.normal(mean, std_tensor, out=mps_out)
 
-            mps_out = torch.zeros(shape, device='mps')
+            mps_out = torch.zeros(shape, device='mps', dtype=dtype)
             torch.normal(mean_tensor, std_tensor, out=mps_out)
 
             # test without out
@@ -7898,6 +7898,16 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 3, 4, 5, 6))
         helper((100, 100), 2.5, 1.2)
+
+        # Test invalid inputs
+        with self.assertRaises(TypeError):
+            helper((10, 10), 10, 11, dtype=torch.int32)
+
+        if product_version >= 14.0:
+            helper((10, 10), 2.5, 1.2, dtype=torch.bfloat16)
+        else:
+            with self.assertRaises(TypeError):
+                helper((10, 10), 2.5, 1.2, dtype=torch.bfloat16)
 
     def test_bernoulli(self):
         shape = (10, 10)
