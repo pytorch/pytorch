@@ -2,6 +2,7 @@
 import csv
 import itertools
 import sys
+import time
 import warnings
 from contextlib import nullcontext
 
@@ -241,12 +242,17 @@ def benchmark(
         output_fd = open(filename, "w")
         output_csv = csv.writer(output_fd)
         output_csv.writerow(
-            ["Operator"]
-            + [
-                f"{a} {b}"
-                for a, b in itertools.product(
-                    backend_names, [f"{x * 100:.0f}th" for x in quantiles_thresholds]
-                )
+            [
+                "operator",
+                *[
+                    f"{a} {b}"
+                    for a, b in itertools.product(
+                        backend_names,
+                        [f"{x * 100:.0f}th" for x in quantiles_thresholds],
+                    )
+                ],
+                "elapsed",
+                *map("{} abs".format, ["eager", *backend_names]),
             ]
         )
 
@@ -263,6 +269,7 @@ def benchmark(
     for operator in ops:
         if skip_operator(operator):
             continue
+        start = time.perf_counter()
         inp_gen = loader.get_inputs_for_operator(operator, dtype=dtype, device=device)
         timings = []
         inputs_list = []
@@ -332,7 +339,10 @@ def benchmark(
         for backend, (low, mid, high) in zip(backend_names, speedups):
             sys.stdout.write(f"{backend}={mid:.4f}x ({low:.4f}-{high:.4f}) ")
             row.extend(map("{:.6f}".format, [low, mid, high]))
-        sys.stdout.write("\n")
+        elapsed = time.perf_counter() - start
+        row.append(f"{elapsed:1f}")
+        row.extend(map("{:.8f}".format, np.mean(timings, axis=0).tolist()))
+        sys.stdout.write(f"took {elapsed:.0f}s\n")
         sys.stdout.flush()
         if output_csv:
             output_csv.writerow(row)

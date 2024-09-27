@@ -39,7 +39,7 @@ idx_cl(
 template <
     typename scalar_t,
     typename index_t,
-    typename std::enable_if<std::is_same<c10::Half, scalar_t>::value>::type* =
+    typename std::enable_if_t<std::is_same_v<c10::Half, scalar_t>>* =
         nullptr>
 __device__ __forceinline__ void fastSpecializedAtomicAdd(
     scalar_t* tensor,
@@ -79,7 +79,7 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
 template <
     typename scalar_t,
     typename index_t,
-    typename std::enable_if<std::is_same<c10::BFloat16, scalar_t>::value>::type* =
+    typename std::enable_if_t<std::is_same_v<c10::BFloat16, scalar_t>>* =
         nullptr>
 __device__ __forceinline__ void fastSpecializedAtomicAdd(
     scalar_t* tensor,
@@ -120,7 +120,7 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
 template <
     typename scalar_t,
     typename index_t,
-    typename std::enable_if<!std::is_same<c10::Half, scalar_t>::value && !std::is_same<c10::BFloat16, scalar_t>::value >::type* =
+    typename std::enable_if_t<!std::is_same_v<c10::Half, scalar_t> && !std::is_same_v<c10::BFloat16, scalar_t>>* =
         nullptr>
 __device__ __forceinline__ void fastSpecializedAtomicAdd(
     scalar_t* tensor,
