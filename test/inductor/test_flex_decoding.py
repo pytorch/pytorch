@@ -23,7 +23,7 @@ from torch.nn.attention.flex_attention import (
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
-from torch.testing._internal.common_utils import skipIfRocm
+from torch.testing._internal.common_utils import skipIfRocm, TEST_WITH_ROCM
 from torch.utils._triton import has_triton
 
 
@@ -66,10 +66,8 @@ test_dtypes = (
 
 test_dtypes_fast = [torch.float16]
 
-# TODO: support smaller page sizes such as 16 and 32.
-# currently flex_decoding autotune requires minimal BLOCK_N of 64,
-# which further requires page sizes to be multiples of 64.
 test_page_sizes = [64, 128, 256]
+
 
 # --------- Useful score mod functions for testing ---------
 def _causal(
@@ -387,18 +385,6 @@ class TestFlexDecoding(InductorTestCase):
 
         n_pages = max(Q_S, KV_S) // page_size * 4
 
-        if block_mask is None:
-            def generate_causal_offset(offset: torch.Tensor):
-                def causal_offset_mask(b, h, q_idx, kv_idx):
-                    return (offset + q_idx) >= kv_idx
-
-                return causal_offset_mask
-
-            mod = generate_causal_offset(
-                torch.tensor(192, device="cuda", dtype=torch.int32)
-            )
-            block_mask = create_block_mask(mod, max_batch_size, 1, 1, S)
-
         # allocate cache
         MAX_CACHED_SEQ_LEN = n_pages * page_size
         k_cache = torch.zeros(
@@ -472,17 +458,17 @@ class TestFlexDecoding(InductorTestCase):
             score_mod, q, k, v, block_mask, dtype, block_mask.BLOCK_SIZE[1]
         )
 
-        compiled_sdpa = torch.compile(
-            create_attention(
-                converted_score_mod,
-                converted_block_mask,
-                enable_gqa=(not Q_H == KV_H),
-            )
-        )
+        compiled_sdpa = torch.compile(flex_attention)
 
         # compute
         compiled_out, compiled_lse = compiled_sdpa(
-            q, k_cache, v_cache, return_lse=True, block_mask=converted_block_mask
+            q,
+            k_cache,
+            v_cache,
+            return_lse=True,
+            block_mask=converted_block_mask,
+            score_mod=converted_score_mod,
+            enable_gqa=(not Q_H == KV_H),
         )
         return compiled_out, compiled_lse
 
@@ -504,8 +490,8 @@ class TestFlexDecoding(InductorTestCase):
             score_mod is not None or block_mask is not None
         ), "Must provide score_mod or block_mask"
         assert Q_H % KV_H == 0
-        # if TEST_WITH_ROCM and Q_H != KV_H:
-        #     self.skipTest("enable_gqa=True is unsupported on ROCM, for now")
+        if TEST_WITH_ROCM and Q_H != KV_H:
+            self.skipTest("enable_gqa=True is unsupported on ROCM, for now")
 
         q = torch.randn(
             (Q_B, Q_H, Q_S, QK_D),
@@ -531,7 +517,6 @@ class TestFlexDecoding(InductorTestCase):
         if block_mask is None:
             block_mask = create_block_mask(noop_mask, Q_B, 1, 1, KV_S)
 
-        # TODO: consider use flex_attention directly.
         sdpa_partial = create_attention(
             score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
         )
@@ -1310,7 +1295,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(bias_mod)
         self.run_test_with_paged_attention(bias_mod)
 
-    # TODO: Add a similar test. We cannot use this one since paged attention does not support backward.
     @skipIfRocm
     @supported_platform
     def test_fully_masked_out_rows_0_check_gqa(self):
@@ -1344,7 +1328,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         loss.backward()
         self.assertEqual(query.grad[:, :, M:, :].sum(), 0)
 
-    # TODO: Add a similar test
     @supported_platform
     def test_windowed_no_mask_vs_sdpa(self):
         score_mod = _generate_windowed(1000)
@@ -1358,7 +1341,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test_with_call(attention, sdpa_attention, Q_H=16, KV_H=16, Q_S=8)
 
-    # TODO: Add a similar test
     @supported_platform
     def test_windowed_full_mask_vs_sdpa(self):
         def mask_mod(b, h, q, kv):
@@ -1378,7 +1360,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test_with_call(attention, sdpa_attention, Q_H=16, KV_H=16, Q_S=8)
 
-    # TODO: Add a similar test
     @supported_platform
     def test_windowed_partial_block_vs_sdpa(self):
         def mask_mod(b, h, q, kv):
@@ -1394,7 +1375,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test_with_call(attention, sdpa_attention, Q_H=16, KV_H=16, Q_S=8)
 
-    # TODO: Add a similar test
     @supported_platform
     def test_windowed_no_mask_vs_sdpa_paged_attention(self):
         score_mod = _generate_windowed(1000)
