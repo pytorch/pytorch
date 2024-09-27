@@ -221,6 +221,17 @@ class TestCuda(TestCase):
         device_capability_no_argument = torch.cuda.get_device_capability()
         self.assertEqual(current_device_capability, device_capability_no_argument)
 
+    def test_cuda_get_device_properties(self):
+        # Testing the behaviour with None as an argument
+        current_device = torch.cuda.current_device()
+        current_device_properties = torch.cuda.get_device_properties(current_device)
+        device_properties_None = torch.cuda.get_device_properties(None)
+        self.assertEqual(current_device_properties, device_properties_None)
+
+        # Testing the behaviour for No argument
+        device_properties_no_argument = torch.cuda.get_device_properties()
+        self.assertEqual(current_device_properties, device_properties_no_argument)
+
     def test_out_of_memory(self):
         tensor = torch.zeros(1024, device="cuda")
 
@@ -3579,7 +3590,8 @@ class TestCudaMallocAsync(TestCase):
         torch.cuda.memory.empty_cache()
         mb = 1024 * 1024
         _, all_memory = torch.cuda.memory.mem_get_info()
-        total_allowed = 120 * mb
+        pre_reserved = torch.cuda.memory_reserved()
+        total_allowed = 120 * mb + pre_reserved
         fraction_allowed = total_allowed / all_memory
         assert int(fraction_allowed * all_memory) == total_allowed
         torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
@@ -3609,7 +3621,8 @@ class TestCudaMallocAsync(TestCase):
         torch.cuda.memory.empty_cache()
         mb = 1024 * 1024
         _, all_memory = torch.cuda.memory.mem_get_info()
-        total_allowed = 120 * mb
+        pre_reserved = torch.cuda.memory_reserved()
+        total_allowed = 120 * mb + pre_reserved
         fraction_allowed = total_allowed / all_memory
         assert int(fraction_allowed * all_memory) == total_allowed
         torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
