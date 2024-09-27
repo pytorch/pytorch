@@ -115,6 +115,7 @@ def scan(
     # TODO: Support _inductor lowering
     # TODO: Support Autograd
     # TODO: Unify handling of pytrees for control flow ops, such as cond, while_loop, etc.
+    # TODO: Unify the list inputs of control flow ops to tuple.
 
     if not torch._dynamo.is_compiling():
         from torch._dynamo.backends.debugging import (
@@ -199,6 +200,7 @@ class ScanOp(HigherOrderOperator):
         super().__init__("scan")
 
     def __call__(self, combine_fn, init, xs, dim, reverse, additional_inputs):
+        assert isinstance(additional_inputs, list), "additional_inputs must be a list."
         return super().__call__(combine_fn, init, xs, dim, reverse, additional_inputs)
 
 
