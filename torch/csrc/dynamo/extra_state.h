@@ -126,10 +126,13 @@ ExtraState* init_and_set_extra_state(PyCodeObject* code);
 //  - f_locals: Borrowed
 // return:
 //   - Py_None or PyCodeObject: Borrowed reference.
-PyObject* lookup(
+//   - Py_None or PyObject: Trace id of the compiled code.
+void lookup(
     ExtraState* extra_state,
     PyObject* f_locals,
-    PyObject* backend);
+    PyObject* backend,
+    PyObject** maybe_cached_code,
+    const char** trace_annotation);
 
 // Create a new cache entry at extra_state holding on to guarded_code.
 // Ownership contract

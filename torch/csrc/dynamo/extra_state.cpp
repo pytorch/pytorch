@@ -101,10 +101,12 @@ bool backend_match(PyObject* saved_backend, PyObject* backend) {
   return true;
 }
 
-PyObject* lookup(
+void lookup(
     ExtraState* extra_state,
     PyObject* f_locals,
-    PyObject* backend) {
+    PyObject* backend,
+    PyObject** maybe_cached_code,
+    const char** trace_annotation) {
   size_t index = 0;
   CacheEntry* found = nullptr;
   py::handle locals(f_locals);
@@ -137,7 +139,8 @@ PyObject* lookup(
         // this function is called from C, so we cannot repropagate
         // the exception
         e.restore();
-        return nullptr;
+        *maybe_cached_code = nullptr;
+        return;
       }
     }
     if (valid) {
@@ -148,9 +151,11 @@ PyObject* lookup(
   }
   if (found) {
     extra_state->move_to_front(found);
-    return found->code.ptr();
+    *maybe_cached_code = found->code.ptr();
+    *trace_annotation = found->trace_annotation.c_str();
+    return;
   }
-  return py::none().ptr();
+  *maybe_cached_code = py::none().ptr();
 }
 
 CacheEntry* create_cache_entry(

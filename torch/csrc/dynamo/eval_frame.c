@@ -481,9 +481,11 @@ inline static PyObject* eval_custom_code(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
+    const char* trace_annotation,
     int throw_flag,
     int free_vars_copied) {
-  _PytorchRecordFunctionState* rf = _pytorch_record_function_enter("Torch-Compiled Region");
+
+  _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(trace_annotation);
   PyObject* result = eval_custom_code_impl(
     tstate,
     frame,
@@ -612,7 +614,9 @@ static PyObject* _custom_eval_frame(
   if (callback == Py_False) {
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
     _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
-    PyObject* maybe_cached_code = lookup(extra, locals, backend);
+    PyObject* maybe_cached_code = NULL;
+    const char* trace_annotation = "";
+    lookup(extra, locals, backend, &maybe_cached_code, &trace_annotation);
     _pytorch_record_function_exit(rf);
 
     Py_DECREF(locals);
@@ -629,7 +633,7 @@ static PyObject* _custom_eval_frame(
     // used cached version
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
     *should_clear_frame = 1;
-    return eval_custom_code(tstate, frame, cached_code, throw_flag, 0);
+    return eval_custom_code(tstate, frame, cached_code, trace_annotation, throw_flag, 0);
   }
   DEBUG_CHECK(PyDict_CheckExact(locals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
@@ -641,7 +645,9 @@ static PyObject* _custom_eval_frame(
   eval_frame_callback_set(Py_None);
 
   _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
-  PyObject* maybe_cached_code = lookup(extra, locals, backend);
+  PyObject* maybe_cached_code = NULL;
+  const char* trace_annotation = "";
+  lookup(extra, locals, backend, &maybe_cached_code, &trace_annotation);
   _pytorch_record_function_exit(rf);
   if (maybe_cached_code == NULL) {
     // Python error
@@ -656,7 +662,7 @@ static PyObject* _custom_eval_frame(
     eval_frame_callback_set(callback);
     *should_clear_frame = 1;
     Py_DECREF(locals);
-    return eval_custom_code(tstate, frame, cached_code, throw_flag, free_vars_copied);
+    return eval_custom_code(tstate, frame, cached_code, trace_annotation, throw_flag, free_vars_copied);
   }
   // cache miss
   CacheEntry* cache_entry = extract_cache_entry(extra);
@@ -699,7 +705,8 @@ static PyObject* _custom_eval_frame(
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
     *should_clear_frame = 1;
-    return eval_custom_code(tstate, frame, CacheEntry_get_code(new_cache_entry), throw_flag, free_vars_copied);
+    return eval_custom_code(tstate, frame, CacheEntry_get_code(new_cache_entry),
+      CacheEntry_get_trace_annotation(new_cache_entry), throw_flag, free_vars_copied);
   } else {
     DEBUG_TRACE("create skip %s", get_frame_name(frame));
     Py_DECREF(result);
