@@ -141,15 +141,16 @@ extern "C" {{export_declaration}}
         constexpr int64_t n_group_id = 0;
         constexpr int64_t n_slice_id = 0;
         constexpr int64_t m_block_start = 0;
-        constexpr int64_t m_block_end = Mr_blocks;
         constexpr int64_t n_block_start = 0;
         constexpr int64_t n_block_end = Nr_blocks;
         constexpr int64_t k_block_start = 0;
         constexpr int64_t k_block_end = Kr_blocks;
     {%- if is_dynamic_M %}
         const int64_t num_Mc_blocks_per_thread = num_Mc_blocks;
+        const int64_t m_block_end = Mr_blocks;
     {%- else %}
         constexpr int64_t num_Mc_blocks_per_thread = num_Mc_blocks;
+        constexpr int64_t m_block_end = Mr_blocks;
     {%- endif %}
 {%- endif %}
         {{ micro_gemm.codegen_init(kernel) }}
