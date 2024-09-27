@@ -199,6 +199,23 @@ def read_from_s3(
     return [json.loads(result) for result in results if result]
 
 
+def remove_nan_inf(old: Any) -> Any:
+    # Casta NaN, inf, -inf to string from float since json.dumps outputs invalid
+    # json with them
+    def _helper(o: Any) -> Any:
+        if isinstance(o, float) and (o == float("inf") or o == float("-inf") or o != o):
+            return str(o)
+        if isinstance(o, list):
+            return [_helper(v) for v in o]
+        if isinstance(o, dict):
+            return {_helper(k): _helper(v) for k, v in o.items()}
+        if isinstance(o, tuple):
+            return tuple(_helper(v) for v in o)
+        return o
+
+    return _helper(old)
+
+
 def upload_workflow_stats_to_s3(
     workflow_run_id: int,
     workflow_run_attempt: int,

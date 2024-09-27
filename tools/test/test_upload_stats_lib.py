@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import decimal
 import inspect
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -13,7 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.stats.upload_metrics import add_global_metric, emit_metric
-from tools.stats.upload_stats_lib import BATCH_SIZE, upload_to_rockset
+from tools.stats.upload_stats_lib import BATCH_SIZE, remove_nan_inf, upload_to_rockset
 
 
 sys.path.remove(str(REPO_ROOT))
@@ -179,7 +180,7 @@ class TestUploadStats(unittest.TestCase):
         }
 
         emit_should_include = {
-            **metric,
+            "info": metric,
             "pr_number": PR_NUMBER,
         }
 
@@ -335,6 +336,28 @@ class TestUploadStats(unittest.TestCase):
                 expected_number_of_requests,
             )
 
+    def test_remove_nan_inf(self) -> None:
+        checks = [
+            (float("inf"), '"inf"', "Infinity"),
+            (float("nan"), '"nan"', "NaN"),
+            ({1: float("inf")}, '{"1": "inf"}', '{"1": Infinity}'),
+            ([float("nan")], '["nan"]', '[NaN]'),
+            ({1: [float("nan")]}, '{"1": ["nan"]}', '{"1": [NaN]}'),
+        ]
+
+        for input, clean, unclean in checks:
+            clean_output = json.dumps(remove_nan_inf(input))
+            unclean_output = json.dumps(input)
+            self.assertEqual(
+                clean_output,
+                clean,
+                f"Expected {clean} when input is {unclean}, got {clean_output}",
+            )
+            self.assertEqual(
+                unclean_output,
+                unclean,
+                f"Expected {unclean} when input is {unclean}, got {unclean_output}",
+            )
 
 if __name__ == "__main__":
     unittest.main()
