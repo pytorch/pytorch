@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 import functools
 import inspect
-from typing import Dict, List, TYPE_CHECKING
+from typing import Any, Dict, List, TYPE_CHECKING
 
 import torch
 from torch.fx.experimental._backward_state import BackwardState
@@ -213,6 +213,9 @@ class DeviceMeshVariable(DistributedVariable):
 
     def as_python_constant(self):
         return self.value
+
+    def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
+        raise NotImplementedError
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "ndim":

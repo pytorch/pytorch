@@ -261,7 +261,7 @@ class Vectorized<double> {
   }
 
   Vectorized<double> erfinv() const {
-    return map(c10::calc_erfinv);
+    return map(calc_erfinv);
   }
 
   Vectorized<double> angle() const {

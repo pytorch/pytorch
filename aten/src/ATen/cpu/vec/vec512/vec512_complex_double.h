@@ -364,16 +364,16 @@ public:
                                                       0xFFFFFFFFFFFFFFFF));
   }
   Vectorized<c10::complex<double>> operator<(const Vectorized<c10::complex<double>>& other [[maybe_unused]]) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_CHECK_STD_ERROR(false, "not supported for complex numbers");
   }
   Vectorized<c10::complex<double>> operator<=(const Vectorized<c10::complex<double>>& other [[maybe_unused]]) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_CHECK_STD_ERROR(false, "not supported for complex numbers");
   }
   Vectorized<c10::complex<double>> operator>(const Vectorized<c10::complex<double>>& other [[maybe_unused]]) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_CHECK_STD_ERROR(false, "not supported for complex numbers");
   }
   Vectorized<c10::complex<double>> operator>=(const Vectorized<c10::complex<double>>& other [[maybe_unused]]) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_CHECK_STD_ERROR(false, "not supported for complex numbers");
   }
 
   Vectorized<c10::complex<double>> eq(const Vectorized<c10::complex<double>>& other) const;

@@ -48,7 +48,7 @@ struct CoreMLConfig {
   bool allow_low_precision = true;
 };
 
-static std::string tensorListToShapesStr(const GenericList& tensors) {
+std::string tensorListToShapesStr(GenericList tensors) {
   std::string str("[");
   for (const auto featureIdx : c10::irange(tensors.size())) {
     if (featureIdx > 0) {
@@ -68,7 +68,7 @@ static std::string tensorListToShapesStr(const GenericList& tensors) {
   return str;
 }
 
-static bool type_validity(const std::vector<TensorSpec>& specs) {
+bool type_validity(const std::vector<TensorSpec>& specs) {
   for (const TensorSpec& spec : specs) {
     if (spec.dtype != c10::ScalarType::Float) {
       return false;
@@ -77,14 +77,14 @@ static bool type_validity(const std::vector<TensorSpec>& specs) {
   return true;
 }
 
-static void from_json(const nlohmann::json& j, TensorSpec& spec) {
+void from_json(const nlohmann::json& j, TensorSpec& spec) {
   j[0].get_to(spec.name);
   std::string type_string;
   j[1].get_to(type_string);
   spec.dtype = scalar_type(type_string);
 }
 
-static void from_json(const nlohmann::json& j, CoreMLConfig& config) {
+void from_json(const nlohmann::json& j, CoreMLConfig& config) {
   j.at("backend").get_to(config.backend);
   std::string allow_low_precision_string;
   j.at("allow_low_precision").get_to(allow_low_precision_string);

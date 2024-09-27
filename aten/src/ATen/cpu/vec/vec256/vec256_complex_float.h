@@ -331,16 +331,16 @@ public:
     return _mm256_cmp_ps(values, other.values, _CMP_NEQ_UQ);
   }
   Vectorized<c10::complex<float>> operator<(const Vectorized<c10::complex<float>>& /*other*/) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_CHECK_STD_ERROR(false, "not supported for complex numbers");
   }
   Vectorized<c10::complex<float>> operator<=(const Vectorized<c10::complex<float>>& /*other*/) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_CHECK_STD_ERROR(false, "not supported for complex numbers");
   }
   Vectorized<c10::complex<float>> operator>(const Vectorized<c10::complex<float>>& /*other*/) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_CHECK_STD_ERROR(false, "not supported for complex numbers");
   }
   Vectorized<c10::complex<float>> operator>=(const Vectorized<c10::complex<float>>& /*other*/) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_CHECK_STD_ERROR(false, "not supported for complex numbers");
   }
 
   Vectorized<c10::complex<float>> eq(const Vectorized<c10::complex<float>>& other) const;
