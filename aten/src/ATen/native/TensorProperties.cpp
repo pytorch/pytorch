@@ -68,6 +68,10 @@ c10::SymInt sym_storage_offset(const Tensor& self) {
   return self.sym_storage_offset();
 }
 
+c10::SymInt sym_data_ptr(const Tensor& self) {
+  return (int64_t)(self.data_ptr());
+}
+
 int64_t size(const Tensor& self, Dimname dim) {
   size_t pos_dim = dimname_to_position(self, dim);
   return self.sizes()[pos_dim];

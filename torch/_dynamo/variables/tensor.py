@@ -761,7 +761,19 @@ class TensorVariable(VariableTracker):
         unimplemented("Tensor.backward")
 
     def method_data_ptr(self, *args, **kwargs):
-        unimplemented("Tensor.data_ptr")
+        from torch._dynamo.variables.torch import TorchInGraphFunctionVariable
+
+        from ..symbolic_convert import InstructionTranslator
+
+        tx = InstructionTranslator.current_tx()
+        # Rewrite Tensor.data_ptr to call aten.sym_data_ptr.
+        # In the future we want Tensor.data_ptr (in Python) to call
+        # sym_data_ptr (and thereby extend our symbolic data_ptr handling
+        # to make_fx tracing), but we need more fixes (e.g. torch.tensor tracing)
+        # to work for this to actually be useful in e2e use cases.
+        return TorchInGraphFunctionVariable(
+            torch.ops.aten.sym_data_ptr.default
+        ).call_function(tx, (self, *args), kwargs)
 
     def method_item(self, *args, **kwargs):
         if not config.capture_scalar_outputs:

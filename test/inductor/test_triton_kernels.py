@@ -70,6 +70,36 @@ class KernelTests(torch._inductor.test_case.TestCase):
         # not crash
 
     @requires_gpu
+    def test_data_ptr_packing(self):
+        @triton.jit
+        def add_kernel(xyz, BLOCK_SIZE: "tl.constexpr", n_elements):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x_ptr = tl.load(xyz + 0).to(tl.pointer_type(tl.float32))
+            y_ptr = tl.load(xyz + 1).to(tl.pointer_type(tl.float32))
+            z_ptr = tl.load(xyz + 2).to(tl.pointer_type(tl.float32))
+
+            x = tl.load(x_ptr + offsets, mask=mask)
+            y = tl.load(y_ptr + offsets, mask=mask)
+            output = x + y
+            tl.store(z_ptr + offsets, output, mask=mask)
+
+        # @torch.compile(fullgraph=True)
+        def f(x, y):
+            z = torch.zeros_like(x)
+            n_elements = x.numel()
+            xyz = torch.tensor([x.data_ptr(), y.data_ptr(), z.data_ptr()], dtype=torch.long, device="cuda")
+            add_kernel[(n_elements,)](xyz, 4, n_elements)
+            return z
+
+        x = torch.randn(3, device="cuda")
+        y = torch.randn(3, device="cuda")
+        z = f(x, y)
+        self.assertEqual(z, x + y)
+
+    @requires_gpu
     def test_triton_kernel_higher_order_func(self):
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 

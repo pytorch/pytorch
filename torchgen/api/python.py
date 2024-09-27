@@ -1168,6 +1168,7 @@ SUPPORTED_RETURN_TYPES = {
     "at::Scalar",
     "bool",
     "int64_t",
+    "c10::SymInt",
     "void*",
     "void",
     "at::QScheme",

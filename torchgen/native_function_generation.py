@@ -66,6 +66,7 @@ FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "_validate_compressed_sparse_indices",  # no return
     "allclose",  # returns a boolean
     "dense_dim",  # returns an int
+    "sym_data_ptr",  # returns an int
     "equal",  # returns a boolean
     "is_coalesced",  # returns an boolean
     "is_pinned",  # returns a boolean

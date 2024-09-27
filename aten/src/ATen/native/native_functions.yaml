@@ -5402,6 +5402,13 @@
   dispatch:
     CompositeExplicitAutograd: detach_
 
+- func: sym_data_ptr(Tensor self) -> SymInt
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: sym_data_ptr
+
 - func: size.int(Tensor self, int dim) -> int
   variants: function
   device_check: NoCheck

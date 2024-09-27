@@ -147,6 +147,11 @@ def dispatch_to_op_implementations_dict(fake_mode, func, *args, **kwargs):
     return op_implementations_dict[func](fake_mode, func, *args, **kwargs)
 
 
+@register_op_impl(torch.ops.aten.sym_data_ptr.default)
+def _(fake_mode, func, x):
+    return fake_mode.shape_env.create_unbacked_symint()
+
+
 @register_op_impl(_is_tensor_constructor)
 @register_op_impl([*_like_tensor_constructors])
 def constructors(fake_mode, func, *args, **kwargs):
