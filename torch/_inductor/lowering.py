@@ -6251,6 +6251,9 @@ def scan(combine_subgraph, init, xs, dim, reverse, additional_inputs):
     from torch._inductor.pattern_matcher import fwd_only
     from torch.fx.experimental.symbolic_shapes import DimDynamic
 
+    if torch._inductor.config.cpp_wrapper:
+        raise NotImplementedError("scan is not supported with cpp_wrapper yet.")
+
     num_init_leaves = len(init)
     specialized_dim = int(dim)
 
@@ -6280,6 +6283,9 @@ def scan(combine_subgraph, init, xs, dim, reverse, additional_inputs):
         )
 
         # Note: we lower scan into while_loop by constructing cond_fn and body_fn.
+        # We need the out variant graph because, for ys_outs, if we append them to a list then
+        # stack them together after the loop, we'll waste a lot of memory and it's also time
+        # consuming. We could optimize the overhead away by pre-allocating the memory.
         # The cond_fn and body_fn are out variants, where ys_outs is passed in as a pre-allocated
         # buffer and we pass in an additional SymInt to represent the current iteration idx.
         # Tracing the graph produces a new graph, where the nodes depends on the value of symint
