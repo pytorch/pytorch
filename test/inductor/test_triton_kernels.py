@@ -1622,7 +1622,8 @@ def forward(self, x_1, output_1):
         compiled_out = torch.compile(f, dynamic=True)(x)
         self.assertEqual(compiled_out, eager_out)
 
-    @requires_gpu
+    # TODO enable this test case on XPU.
+    @requires_cuda
     @parametrize("cfg", ["normal", "cpp_wrapper", "cpp_abi"])
     def test_triton_kernel_dtype_view(self, cfg):
         # https://github.com/pytorch/pytorch/issues/136159
