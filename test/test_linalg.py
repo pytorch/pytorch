@@ -2351,7 +2351,7 @@ class TestLinalg(TestCase):
             if self.device_type != 'cpu' and randrange(100) < 95:
                 return  # too many cpu <==> device copies
 
-            a = np.array(x.cpu(), copy=False)
+            a = np.asarray(x.cpu())
             expected = np.linalg.norm(a, "nuc", axis=axes)
 
             ans = torch.norm(x, "nuc", dim=axes)
