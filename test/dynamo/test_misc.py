@@ -2644,6 +2644,19 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(res, [np.array([0]), np.array([1]), np.array([2])])
         self.assertEqual(cnts.frame_count, 1)
 
+    @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
+    def test_unspecialized_float_add(self):
+        def fn(x, y):
+            return x + y
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn_opt = torch._dynamo.optimize(cnt)(fn)
+
+        x = torch.arange(3)
+        self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
+        self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
+        self.assertEqual(cnt.frame_count, 1)
+
     # cache size limit needs to be larger than the `dtypes` list size
     @torch._dynamo.config.patch(cache_size_limit=12)
     def test_dtypes_no_graphbreaks(self):
