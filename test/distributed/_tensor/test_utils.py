@@ -24,6 +24,12 @@ class UtilTest(DTensorTestBase):
     def world_size(self):
         return 8
 
+    def _compute_start_end_offsets(self, global_offset, local_size, n_dim):
+        offset = []
+        for i in range(n_dim):
+            offset.append(((global_offset[i]), (global_offset[i] + local_size[i])))
+        return offset
+
     @with_comms
     def test_compute_local_shape_and_global_offset_1D(self):
         one_d_placements = [[Shard(0)], [Replicate()]]
@@ -42,10 +48,8 @@ class UtilTest(DTensorTestBase):
                 local_size, global_offset = compute_local_shape_and_global_offset(
                     global_shape, device_mesh, placements
                 )
-
-                # TODO: make this test cleaner and work for nD
-                dim0_start = global_offset[0]
-                dim0_end = global_offset[0] + local_size[0]
+                dim = self._compute_start_end_offsets(global_offset, local_size, 1)
+                dim0_start, dim0_end = dim[0][0], dim[0][1]
 
                 # Check the local tensor of dtensor is exactly the same
                 # if we slice the global_tensor with local_size and global_offset
@@ -75,11 +79,9 @@ class UtilTest(DTensorTestBase):
                     global_shape, device_mesh, placements
                 )
 
-                # TODO: make this test cleaner and work for nD
-                dim0_start = global_offset[0]
-                dim0_end = global_offset[0] + local_size[0]
-                dim1_start = global_offset[1]
-                dim1_end = global_offset[1] + local_size[1]
+                dim = self._compute_start_end_offsets(global_offset, local_size, 2)
+                dim0_start, dim0_end = dim[0][0], dim[0][1]
+                dim1_start, dim1_end = dim[1][0], dim[1][1]
 
                 # Check the local tensor of dtensor is exactly the same
                 # if we slice the global_tensor with local_size and global_offset
