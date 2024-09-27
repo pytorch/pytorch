@@ -11,10 +11,10 @@ CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
   this->compile_id = guarded_code.attr("compile_id");
   py::object trace_annotation = guarded_code.attr("trace_annotation");
   const char* trace_annotation_str = PyUnicode_AsUTF8(trace_annotation.ptr());
-  if (trace_annotation == nullptr) {
-    this->trace_annotation = "Unknown";
-  } else {
+  if (trace_annotation) {
     this->trace_annotation = std::string(trace_annotation_str);
+  } else {
+    this->trace_annotation = "Unknown";
   }
   // TODO - clean this up when enable_cpp_guard_manager is True by default
   if (py::hasattr(this->check_fn, "root")) {
