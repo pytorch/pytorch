@@ -27,6 +27,7 @@ from torch._inductor.codecache import (
     write_atomic,
 )
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
 
 from .runtime_wrappers import (
@@ -252,6 +253,9 @@ def autograd_cache_key(
 class FXGraphCacheLoadable:
     fx_graph_cache_key: str
 
+    def is_backward(self):
+        return False
+
     def load(self, example_inputs, fx_config: Dict[str, BoxedBool]) -> CompiledFxGraph:
         # [Note: AOTAutogradCache and FXGraphCache Guard interactions]
         # As mentioned, AOTAutograd takes in the symint inputs from dynamo's list of arguments.
@@ -261,15 +265,35 @@ class FXGraphCacheLoadable:
         # (This does not mean that the tensor values passed in are the same: only that their symints are).
         # That is, AOTAutograd and Inductor never create new guards based on symints with different sources
         # than those passed to it by inductor.
-        result = FxGraphCache._lookup_graph(
-            self.fx_graph_cache_key, example_inputs, local=True, remote_cache=None
+
+        # TODO: We don't cache debug lines for now, but we should for improved debugging
+        remote_cache = None
+        if should_use_remote_fx_graph_cache():
+            remote_cache = FxGraphCache.get_remote_cache()
+
+        result, cache_info = FxGraphCache.load_with_key(
+            self.fx_graph_cache_key,
+            [],
+            example_inputs,
+            local=True,
+            remote_cache=remote_cache,
+            is_backward=self.is_backward(),
         )
         if result is None:
             log.info("FXGraphCache cache miss for key %s", self.fx_graph_cache_key)
-            counters["inductor"]["fxgraph_cache_miss"] += 1
             raise FXGraphCacheMiss
+
+        # No need to log chromium event because AOTAutograd will log that immediately for us
+        torch._logging.trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "fx_graph_cache_hash",
+                "encoding": "json",
+            },
+            payload_fn=lambda: json.dumps(cache_info),
+        )
+
         FxGraphCache.post_compile(result, example_inputs, fx_config["cudagraphs"])
-        counters["inductor"]["fxgraph_cache_hit"] += 1
         result._boxed_call = True
         return result
 
@@ -279,6 +303,9 @@ class CompiledForward(FXGraphCacheLoadable):
     """
     Cacheable entry for a forward function
     """
+
+    def is_backward(self):
+        return False
 
 
 @dataclass
@@ -290,6 +317,9 @@ class CompiledBackward(FXGraphCacheLoadable):
     # Used by AOTDispatchAutograd.post_compile
     backward_state_indices: List[int]
     num_symints_saved_for_bw_: int
+
+    def is_backward(self):
+        return True
 
 
 @dataclass

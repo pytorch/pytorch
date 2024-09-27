@@ -4,9 +4,7 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 enum RRefProxyType { RPC_SYNC, RPC_ASYNC, REMOTE };
 
@@ -79,6 +77,4 @@ class PYBIND11_EXPORT PyRRef {
   std::optional<py::object> type_;
 };
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

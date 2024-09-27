@@ -375,9 +375,8 @@ test_inductor_cpp_wrapper_abi_compatible() {
   mkdir -p "$TEST_REPORTS_DIR"
 
   echo "Testing Inductor cpp wrapper mode with TORCHINDUCTOR_ABI_COMPATIBLE=1"
-  # cpu stack allocation causes segfault and needs more investigation
   PYTORCH_TESTING_DEVICE_ONLY_FOR="" python test/run_test.py --include inductor/test_cpu_cpp_wrapper
-  python test/run_test.py --include inductor/test_cuda_cpp_wrapper
+  python test/run_test.py --include inductor/test_cuda_cpp_wrapper inductor/test_cpu_repro
 
   TORCHINDUCTOR_CPP_WRAPPER=1 python benchmarks/dynamo/timm_models.py --device cuda --accuracy --amp \
     --training --inductor --disable-cudagraphs --only vit_base_patch16_224 \
@@ -1402,8 +1401,8 @@ test_linux_aarch64() {
        inductor/test_max_autotune inductor/test_memory_planning inductor/test_metrics inductor/test_multi_kernel inductor/test_pad_mm \
        inductor/test_pattern_matcher inductor/test_perf inductor/test_profiler inductor/test_select_algorithm inductor/test_smoke \
        inductor/test_split_cat_fx_passes inductor/test_standalone_compile inductor/test_torchinductor \
-       inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes \
-       --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose inductor/test_memory
+       inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes inductor/test_memory \
+       --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then

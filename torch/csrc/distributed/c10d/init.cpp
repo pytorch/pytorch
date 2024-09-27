@@ -1080,7 +1080,12 @@ This class does not support ``__members__`` property.)");
           "wait_signal",
           &SymmetricMemory::wait_signal,
           py::arg("src_rank"),
-          py::arg("channel") = 0);
+          py::arg("channel") = 0)
+      .def(
+          "stream_write_value32",
+          &SymmetricMemory::stream_write_value32,
+          py::arg("addr"),
+          py::arg("val"));
 
   auto store =
       py::class_<::c10d::Store, c10::intrusive_ptr<::c10d::Store>, PythonStore>(

@@ -70,6 +70,7 @@ from .exc import (
     augment_exc_message,
     BackendCompilerFailed,
     CacheLimitExceeded,
+    FailOnCacheLimitHit,
     format_error_msg,
     InternalTorchDynamoError,
     SkipCodeRecursiveException,
@@ -112,7 +113,6 @@ from .utils import (
     troubleshooting_url,
     write_record_to_file,
 )
-from .variables.torch_function import torch_function_mode_stack_state_mgr
 
 
 np: Optional[ModuleType]
@@ -211,18 +211,15 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             prior_fwd_from_src = torch.fx.graph_module._forward_from_src
             torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
             cleanup = setup_compile_debug()
+
             exit_stack = contextlib.ExitStack()
             exit_stack.enter_context(
                 torch.fx._symbolic_trace._maybe_revert_all_patches()
             )
-            exit_stack.enter_context(torch_function_mode_stack_state_mgr)
             try:
                 return fn(*args, **kwargs)
             finally:
                 cleanup.close()
-                assert (
-                    torch._C._len_torch_function_stack() == 0
-                ), "Torch function mode stack state changed while dynamo tracing, please report a bug"
                 exit_stack.close()
                 torch._C._set_grad_enabled(prior_grad_mode)
                 torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
@@ -862,7 +859,11 @@ def _compile(
                 format_guard_failures(),
                 troubleshooting_url,
             )
-            if config.skip_code_recursive_on_cache_limit_hit and justknobs_check(
+            if config.fail_on_cache_limit_hit:
+                raise FailOnCacheLimitHit(
+                    f"{limit_type} reached, because fail_on_cache_limit_hit = True this is a HARD failure"
+                )
+            elif config.skip_code_recursive_on_cache_limit_hit and justknobs_check(
                 "pytorch/compiler:skip_code_recursive_on_cache_limit_hit"
             ):
                 raise CacheLimitExceeded(f"{limit_type} reached")
