@@ -511,6 +511,10 @@ class CppMicroGemmAMX(CppMicroGemm):
 {{declare_kernel}} {
     {{kernel.assert_function}}(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
     {{kernel.assert_function}}(K % 2 == 0, "K dimension must be multiple of 2");
+{%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
+    // create a buffer for tiles of B.
+    alignas(4096) {{input_t}} bf16_weights_buf[(K / 16) * 512];
+{%- endif %}
     // TODO(jgong5): loop unroll for M and N
     for (int64_t m = 0; m < M; m += {{block_m}}) {
         int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
@@ -527,6 +531,7 @@ class CppMicroGemmAMX(CppMicroGemm):
                     B + n,
                     C + m * ldc + n,
 {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
+                    bf16_weights_buf,
                     m,
 {%- endif %}
                     K,
@@ -546,6 +551,7 @@ class CppMicroGemmAMX(CppMicroGemm):
                     B + n,
                     C + m_tail * ldc + n,
 {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
+                    bf16_weights_buf,
                     m,
 {%- endif %}
                     K,
@@ -561,6 +567,7 @@ class CppMicroGemmAMX(CppMicroGemm):
 """
 
     TEMPLATE_KERNEL = r"""
+
 template <bool accum>
 inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
     AMXState& amx_state,
@@ -568,6 +575,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
     const {{input2_t}}* {{restrict_keyword}} B,
     {{output_t}}* {{restrict_keyword}} C,
 {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
+    {{input_t}}* bf16_weights_buf,
     int64_t m,
 {%- endif %}
     int64_t K,
@@ -611,9 +619,6 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
     }
 
 {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
-    // create a buffer for tiles of B.
-    alignas(4096) {{input_t}} bf16_weights_buf[(K / 16) * 512];
-
     int num_b_rows = (last_k_offset > 0) ? 16 : (tail_k_size * sizeof({{input_t}})) / 4;
     int b_tile_ptr_stride = ldb * {{vnni_size}};
 
@@ -624,7 +629,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
     };
 
     auto load_B_in_buf = [&]({{input2_t}}* B_ptr, int idx) {
-        {{input_t}}* base_addr = &bf16_weights_buf[idx];
+        {{input_t}}* base_addr = bf16_weights_buf + idx;
         {{kernel.unroll_pragma(8)}}
         for (int i = 0; i < num_b_rows; i++) {
             load_B_row(
