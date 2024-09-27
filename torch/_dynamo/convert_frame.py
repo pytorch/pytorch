@@ -929,6 +929,9 @@ def _compile(
         start_possibly_missed_reinplacing_opportunities = torch._dynamo.utils.counters[
             "inductor"
         ]["possibly_missed_reinplacing_opportunities"]
+        start_possibly_missed_reinplacing_bytes = torch._dynamo.utils.counters[
+            "inductor"
+        ]["start_possibly_missed_reinplacing_bytes"]
         guarded_code = None
         try:
             guarded_code = compile_inner(code, one_graph, hooks, transform)
@@ -1011,6 +1014,18 @@ def _compile(
                 remote_cache_time_saved = frame_phase_timing[frame_key].get(
                     "remote_cache_time_saved", 0
                 )
+                possibly_missed_reinplacing_bytes = (
+                    torch._dynamo.utils.counters["inductor"][
+                        "possibly_missed_reinplacing_bytes"
+                    ]
+                    - start_possibly_missed_reinplacing_bytes
+                )
+                if possibly_missed_reinplacing_bytes != 0:
+                    signpost_event(
+                        "inductor",
+                        "auto_functionalize",
+                        {"missed_reinplacing_bytes": possibly_missed_reinplacing_bytes},
+                    )
             else:
                 guard_count = None
                 shape_env_guard_count = None
