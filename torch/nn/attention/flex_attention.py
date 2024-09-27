@@ -684,8 +684,8 @@ def _convert_block_mask_to_mask(
 def _create_sparse_block_from_block_mask(
     block_mask: Tuple[Tensor, Optional[Tensor]],
     mask_mod: Optional[Callable],
-    Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
     KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
+    Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
 ) -> BlockMask:
     partial_blocks, full_blocks = block_mask
 
@@ -700,7 +700,7 @@ def _create_sparse_block_from_block_mask(
         partial_bm[1],
         full_bm[0],
         full_bm[1],
-        BLOCK_SIZE=(Q_BLOCK_SIZE, KV_BLOCK_SIZE),
+        BLOCK_SIZE=(KV_BLOCK_SIZE, Q_BLOCK_SIZE),
         mask_mod=mask_mod,
     )
 
@@ -851,7 +851,7 @@ def create_block_mask(
             mask_mod, B, H, Q_LEN, KV_LEN, device, KV_BLOCK_SIZE, Q_BLOCK_SIZE
         )
         block_mask = _create_sparse_block_from_block_mask(
-            (partial_block_mask, full_block_mask), mask_mod, Q_BLOCK_SIZE, KV_BLOCK_SIZE
+            (partial_block_mask, full_block_mask), mask_mod
         )
     return block_mask
 
@@ -910,6 +910,17 @@ def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
         raise ValueError(
             f"NYI: Currently value embedding dimension must be less than or equal to query embedding dimension. "
             f"Got Ev={value.size(-1)} and E={query.size(-1)}."
+        )
+
+
+def _validate_device(query: Tensor, key: Tensor, value: Tensor):
+    """TODO: Remove once non cuda device support is added
+    We only need to check query since we have already that q,k,v are on the same device
+    """
+    if query.device.type != "cuda":
+        raise ValueError(
+            "FlexAttention is only supported on CUDA devices. "
+            f"Found input tensors on {query.device.type} device."
         )
 
 
@@ -979,6 +990,7 @@ def flex_attention(
     # Some basic input validation
     _validate_sdpa_input(query, key, value)
     _validate_embed_dim(query, key, value)
+    _validate_device(query, key, value)
     if query.dim() != 4 or key.dim() != 4 or value.dim() != 4:
         raise NotImplementedError("NYI: query, key, and value must be 4D tensors")
     if (not enable_gqa) and query.size(-3) != key.size(-3):
