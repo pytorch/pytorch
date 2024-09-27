@@ -827,7 +827,7 @@ def _get_non_persistent_buffers(mod: torch.nn.Module) -> Set[str]:
     Returns set of non-persistent buffers in a module and its submodules.
     """
     result = set()
-    for name, m in mod.named_modules():
+    for name, m in mod.named_modules(remove_duplicate=False):
         for b in m._non_persistent_buffers_set:
             result.add(f"{name}.{b}" if name else b)
     return result
