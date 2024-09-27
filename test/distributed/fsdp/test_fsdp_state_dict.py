@@ -46,7 +46,7 @@ from torch.testing._internal.common_fsdp import (
     _broadcast_state_dict,
     _get_state_dict,
     _zero_model,
-    CUDAInitMode,
+    DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
     get_full_params,
@@ -387,7 +387,7 @@ class TestFSDPStateDict(FSDPTest):
         model_ac = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
         )
         # Manually wrap FSDP without AC
         model_no_ac = deepcopy(model_ac)
@@ -439,7 +439,7 @@ class TestFSDPStateDict(FSDPTest):
             TransformerWithSharedParams.init,
             self.process_group,
             FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             {"auto_wrap_policy": auto_wrap_policy},
         )
 
@@ -468,7 +468,7 @@ class TestFSDPStateDict(FSDPTest):
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             fsdp_kwargs,
         )
         # Force model parameters and buffers to be nonzero
@@ -485,7 +485,7 @@ class TestFSDPStateDict(FSDPTest):
         new_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
         )
         _zero_model(new_model, zero_buffers=True)
         # Only load the checkpoint on rank 0
@@ -1210,7 +1210,7 @@ class TestFSDPStateDict(FSDPTest):
                 fsdp_model = TransformerWithSharedParams.init(
                     pg,
                     FSDPInitMode.RECURSIVE,
-                    CUDAInitMode.CUDA_BEFORE,
+                    DEVICEInitMode.DEVICE_BEFORE,
                     fsdp_kwargs,
                 )
                 FSDP.set_state_dict_type(fsdp_model, StateDictType.SHARDED_STATE_DICT)
@@ -1240,7 +1240,7 @@ class TestFSDPStateDict(FSDPTest):
         model = TransformerWithSharedParams.init(
             my_pg,
             FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
         )
         with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT):
             state_dict = model.state_dict()
