@@ -26,7 +26,7 @@ import numpy.typing as npt
 import torch
 import torch._C._onnx as _C_onnx
 from torch import _C
-from torch.onnx import _constants, _experimental, utils
+from torch.onnx import _constants, _experimental, _exporter_states, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import onnx_proto_utils
 from torch.types import Number
@@ -586,6 +586,7 @@ def _onnx_graph_from_model(
     """
     # TODO: refactor utils.py to remove duplicated code of context setup. See #78834
     opset_version = export_options.opset_version
+    operator_export_type = export_options.operator_export_type
     export_modules_as_functions = export_options.export_modules_as_functions
     training = export_options.training
     verbose = export_options.verbose
@@ -598,10 +599,16 @@ def _onnx_graph_from_model(
 
     utils._setup_trace_module_map(model, export_modules_as_functions)
 
+    if not operator_export_type:
+        operator_export_type = _C_onnx.OperatorExportTypes.ONNX
+
     GLOBALS.export_onnx_opset_version = opset_version
+    GLOBALS.operator_export_type = operator_export_type
 
     with utils.exporter_context(model, training, verbose):
-        do_constant_folding = export_options.do_constant_folding
+        do_constant_folding = utils._decide_constant_folding(
+            export_options.do_constant_folding, operator_export_type, training
+        )
 
         if dynamic_axes is None:
             dynamic_axes = {}
@@ -612,9 +619,11 @@ def _onnx_graph_from_model(
         onnx_graph, _, _ = utils._model_to_graph(
             model,
             export_inputs,
-            input_names=input_names,
-            output_names=output_names,
-            do_constant_folding=do_constant_folding,
+            verbose,
+            input_names,
+            output_names,
+            operator_export_type,
+            do_constant_folding,
             training=training,
             dynamic_axes=dynamic_axes,
         )
@@ -629,6 +638,7 @@ def _onnx_graph_from_aten_graph(
 ) -> tuple[torch.Graph, dict[str, Any]]:
     if params_dict is None:
         params_dict = {}
+    operator_export_type = export_options.operator_export_type
     dynamic_axes = export_options.dynamic_axes or {}
     input_names = export_options.input_names
     training = export_options.training
@@ -636,12 +646,18 @@ def _onnx_graph_from_aten_graph(
     opset_version = export_options.opset_version or _constants.ONNX_DEFAULT_OPSET
 
     GLOBALS.export_onnx_opset_version = opset_version
+    GLOBALS.operator_export_type = operator_export_type
+
+    do_constant_folding = utils._decide_constant_folding(
+        do_constant_folding, operator_export_type, training
+    )
 
     # TODO: Below is doing aten graph to onnx. It should be abstracted as a
     # function in torch/onnx/utils.py.
     graph = graph.copy()
     graph = utils._optimize_graph(
         graph,
+        operator_export_type,
         params_dict=params_dict,
         dynamic_axes=dynamic_axes,
         input_names=input_names,
@@ -682,31 +698,33 @@ def _onnx_proto_from_onnx_graph(
     onnx_graph: torch.Graph,
     export_options: _experimental.ExportOptions,
     params_dict: dict[str, Any],
-) -> bytes:
+) -> tuple[bytes, Mapping[str, bytes]]:
     opset_version = export_options.opset_version or _constants.ONNX_DEFAULT_OPSET
     dynamic_axes = export_options.dynamic_axes or {}
+    operator_export_type = export_options.operator_export_type
     val_keep_init_as_ip = utils._decide_keep_init_as_input(
         export_options.keep_initializers_as_inputs,
+        operator_export_type,
         opset_version,
     )
-    add_node_names = True
+    val_add_node_names = utils._decide_add_node_names(True, operator_export_type)
     custom_opsets = export_options.custom_opsets or {}
 
-    proto, _, _, _ = onnx_graph._export_onnx(  # type: ignore[attr-defined]
+    proto, export_map, _, _ = onnx_graph._export_onnx(  # type: ignore[attr-defined]
         params_dict,
         opset_version,
         dynamic_axes,
         False,
-        _C_onnx.OperatorExportTypes.ONNX,
+        operator_export_type,
         not export_options.verbose,
         val_keep_init_as_ip,
         custom_opsets,
-        add_node_names,
+        val_add_node_names,
         "",
         {},
     )
 
-    return proto
+    return proto, export_map
 
 
 def check_export_model_diff(
@@ -871,9 +889,12 @@ def verify_aten_graph(
         graph, export_options, params_dict
     )
 
-    proto = _onnx_proto_from_onnx_graph(graph, export_options, onnx_params_dict)
+    proto, export_map = _onnx_proto_from_onnx_graph(
+        graph, export_options, onnx_params_dict
+    )
     model_f: str | io.BytesIO = io.BytesIO()
-    onnx_proto_utils._export_file(proto, model_f)
+    export_type = _exporter_states.ExportTypes.PROTOBUF_FILE
+    onnx_proto_utils._export_file(proto, model_f, export_type, export_map)
 
     # NOTE: Verification is unstable. Try catch to emit information for debugging.
     try:
@@ -1297,7 +1318,7 @@ class GraphInfo:
             self.graph, self.export_options, self.params_dict
         )
 
-        proto = _onnx_proto_from_onnx_graph(
+        proto, _ = _onnx_proto_from_onnx_graph(
             onnx_graph, self.export_options, onnx_params_dict
         )
         return OnnxTestCaseRepro.create_test_case_repro(

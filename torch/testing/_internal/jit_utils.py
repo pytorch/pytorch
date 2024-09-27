@@ -5,6 +5,7 @@ from torch.autograd import Variable
 from torch.autograd.function import _nested_map
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
 
+from torch.onnx import OperatorExportTypes
 import torch
 import torch.cuda
 import torch.jit
@@ -338,6 +339,10 @@ class JitTestCase(JitCommonTestCase):
         out_nodes = nodes(graph)
         perform_assert(graph, kind, len(out_nodes), num_kind_nodes,
                        consider_subgraphs)
+
+    def assertExpectedONNXGraph(self, g, *args, **kwargs):
+        g = torch.onnx._optimize_trace(g, operator_export_type=OperatorExportTypes.ONNX)
+        self.assertExpectedGraph(g, *args, **kwargs)
 
     def assertExpectedGraph(self, trace, *args, **kwargs):
         if isinstance(trace, torch._C.Graph):

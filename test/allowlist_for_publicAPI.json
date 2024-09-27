@@ -658,6 +658,7 @@
   ],
   "torch.onnx": [
     "Dict",
+    "OperatorExportTypes",
     "Optional",
     "TensorProtoDataType",
     "TrainingMode"
