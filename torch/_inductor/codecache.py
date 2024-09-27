@@ -67,6 +67,7 @@ from torch._inductor.codegen.rocm.compile_command import (
 )
 from torch._utils_internal import log_cache_bypass
 
+from .remote_cache import create_cache
 from .utils import _align
 
 
@@ -1268,18 +1269,22 @@ class FxGraphCache:
             log.debug("fx graph cache no shape env")
             raise BypassFxGraphCache("No shape env")
 
-        # HigherOrderOperators should be handled on a case-by-case basis.
-        # Currently, we just skip caching if we have any.
-        # We also skip if there are any torchbind objects.
-        for node in gm.graph.nodes:
-            if isinstance(node.target, torch._ops.HigherOrderOperator):
-                raise BypassFxGraphCache(
-                    f"Can't cache HigherOrderOperator: {node.target.name()}"
-                )
-            if node.op == "getattr" and isinstance(
-                getattr(gm, node.target), torch._C.ScriptObject
-            ):
-                raise BypassFxGraphCache("Can't cache torchbind objects")
+        # We skip caching if there are any torchbind objects.
+        for module in gm.modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
+            for node in module.graph.nodes:
+                if (
+                    isinstance(node.target, torch._ops.HigherOrderOperator)
+                    and not node.target.cacheable()
+                ):
+                    raise BypassFxGraphCache(
+                        f"Can't cache HigherOrderOperator: {node.target.name()}"
+                    )
+                if node.op == "getattr" and isinstance(
+                    getattr(gm, node.target), torch._C.ScriptObject
+                ):
+                    raise BypassFxGraphCache("Can't cache torchbind objects")
 
     @staticmethod
     def prepare_key(
@@ -1323,25 +1328,13 @@ class FxGraphCache:
         """
         Attempts to load the remote cache, returns None on error.
         """
-        remote_cache = None
         cache_id = "fx-graph-v1"
-        try:
-            if config.is_fbcode():
-                from torch._inductor.fb.remote_cache import FbRemoteFxGraphCache
-
-                remote_cache = FbRemoteFxGraphCache(cache_id)
-            else:
-                from torch._inductor.remote_cache import RemoteFxGraphCache
-
-                remote_cache = RemoteFxGraphCache(cache_id)
-        except ModuleNotFoundError as e:
-            # No need for a stack trace on this error
-            remote_cache = None
-            log.warning("Unable to create a remote cache: %s", e)
-        except Exception:
-            remote_cache = None
-            log.warning("Unable to create a remote cache", exc_info=True)
-        return remote_cache
+        return create_cache(
+            cache_id,
+            config.is_fbcode(),
+            "FbRemoteFxGraphCache",
+            "RemoteFxGraphCache",
+        )
 
     @staticmethod
     def load_with_key(
