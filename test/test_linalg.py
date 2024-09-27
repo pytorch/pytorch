@@ -5241,7 +5241,9 @@ class TestLinalg(TestCase):
                 tau_shape = [*A_cpu.shape[:-2], A_cpu.shape[-1]]
                 tau = torch.empty(tau_shape, dtype=dtype).view(-1, A_cpu.shape[-1])
                 for A_i, reflectors_i, tau_i in zip(A_cpu.contiguous().view(*flattened_batch_shape), reflectors, tau):
-                    reflectors_tmp, tau_i[:] = map(torch.from_numpy, np.linalg.qr(A_i, mode='raw'))
+                    reflectors_tmp, tau_i[:] = (
+                        torch.from_numpy(x) if isinstance(x, np.ndarray) else x for x in np.linalg.qr(A_i, mode='raw')
+                    )
                     reflectors_i[:] = reflectors_tmp.T
                 reflectors = reflectors.view(*A_cpu.shape)
                 tau = tau.view(tau_shape)
