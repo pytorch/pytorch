@@ -12066,14 +12066,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.interpolate',
         'nn.functional.upsample_bilinear',
         'nn.functional.upsample_nearest',
-
-        # for macOS 12
-        'masked.normalize', 'masked.sum', 'masked.var',
-        'outer',
-        'sum_to_size', 'sum',
-        'mul',
-        'nansum', 'nanmean',
-        'norm',
+        'norm', 'masked.normalize',
     }
 
     FP32_LOW_PRECISION_LIST = {
