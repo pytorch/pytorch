@@ -271,7 +271,8 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
             torch.mm(torch.zeros(2, 3), torch.ones(3, 3)), torch.ones(3, 4)
         )
         self.assertEqual(result, reference)
-        torch.onnx.export(mte, (torch.ones(2, 3),), verbose=False)
+        f = io.BytesIO()
+        torch.onnx.export(mte, (torch.ones(2, 3),), f, verbose=False)
 
     def test_onnx_export_speculate(self):
         class Foo(torch.jit.ScriptModule):
@@ -346,7 +347,8 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         mod = DictModule()
         mod.train(False)
 
-        torch.onnx.export(mod, (x_in,))
+        f = io.BytesIO()
+        torch.onnx.export(mod, (x_in,), f)
 
         with self.assertRaisesRegex(RuntimeError, r"DictConstruct.+is not supported."):
             torch.onnx.export(torch.jit.script(mod), (x_in,))
