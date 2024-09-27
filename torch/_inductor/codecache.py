@@ -1254,6 +1254,13 @@ class FxGraphCache:
         Check some conditions that would preclude caching and raise BypassFxGraphCache
         to bypass in case caching is not possible.
         """
+        if config.freezing and not torch._utils_internal.justknobs_check(
+            "pytorch/inductor:allow_freezing_with_caching"
+        ):
+            raise BypassFxGraphCache(
+                "Freezing may introduce constants that aren't static across runs"
+            )
+
         if config.aot_inductor.use_runtime_constant_folding:
             raise BypassFxGraphCache(
                 "Runtime constant folding may introduce constants that aren't static across runs"
