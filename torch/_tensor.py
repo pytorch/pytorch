@@ -859,6 +859,10 @@ class Tensor(torch._C.TensorBase):
 
         See :func:`torch.cumsum`
         """
+        if axis is not None and dim is not None:
+            raise RuntimeError("expected either 'dim' or 'axis' to be given, not both")
+        elif axis is not None:
+            dim = axis
         if has_torch_function_unary(self):
             return handle_torch_function(
                 Tensor.cumsum,
@@ -867,9 +871,11 @@ class Tensor(torch._C.TensorBase):
                 dim,
                 dtype=dtype,
                 out=out,
-                axis=axis,
             )
-        return torch.cumsum(self, dim, dtype=dtype, out=out, axis=axis)
+        if out is None:
+            return torch.cumsum(self, dim, dtype=dtype)
+        else:
+            return torch.cumsum(self, dim, dtype=dtype, out=out)
 
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
