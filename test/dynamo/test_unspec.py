@@ -622,6 +622,20 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(f(x, math.nan), cf(x, math.nan))
         self.assertExpectedInline(cnts.frame_count, """3""")  # nan always recompiles
 
+    @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=False)
+    def test_unspec_float_input_f64(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def f(x, y):
+            return x + y
+
+        cf = torch.compile(backend=cnts, fullgraph=True)(f)
+
+        x = torch.zeros(3, dtype=torch.float64)
+        # 17 digits of precision so unrepresentable in float32
+        flt = 1.2345678901234567
+        self.assertEqual(f(x, flt), cf(x, flt))
+
     @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=True)
     def test_unspec_float_output(self):
         cnts = torch._dynamo.testing.CompileCounter()

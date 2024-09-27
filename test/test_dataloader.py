@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfNoDill,
     skipIfRocm,
+    skipIfXpu,
     slowTest,
     TEST_CUDA,
     TEST_NUMPY,
@@ -1383,6 +1384,9 @@ except RuntimeError as e:
             del loader1_it
             del loader2_it
 
+    # This case pass on Intel GPU, but currently expected failure on other device,
+    # please don't forget to remove this skip when remove the xfailIfLinux.
+    @skipIfXpu
     # https://github.com/pytorch/pytorch/issues/128551
     @xfailIfLinux
     def test_segfault(self):
