@@ -5975,6 +5975,7 @@ class TestAOTModuleSimplified(AOTTestCase):
             def __init__(self):
                 super().__init__()
                 self.w = TwoTensor(torch.randn(3, 4), torch.randn(3, 4))
+                self.wt = torch.randn(3, 4)
 
             def forward(self, x):
                 return (
@@ -5982,6 +5983,7 @@ class TestAOTModuleSimplified(AOTTestCase):
                         dim=0, index=torch.tensor([0, 2, 1], dtype=torch.int64)
                     )
                     + self.w
+                    + self.wt
                 )
 
         m = M()
@@ -6026,6 +6028,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         ).sum().backward()
 
     @skipIfTorchDynamo()
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_non_aot_bw_compile_int32_64_shapes(self):
         class MyFunc(torch.autograd.Function):
             @staticmethod
@@ -6045,12 +6048,8 @@ class TestAOTModuleSimplified(AOTTestCase):
         f_compiled = torch.compile(f, fullgraph=True, dynamic=True)
 
         # int32 indices
-        ref_x = torch.randn(
-            6, 5, device="cuda", dtype=torch.float16, requires_grad=True
-        )
-        ref_y = torch.randn(
-            4, 5, device="cuda", dtype=torch.float16, requires_grad=True
-        )
+        ref_x = torch.randn(6, 5, dtype=torch.float16, requires_grad=True)
+        ref_y = torch.randn(4, 5, dtype=torch.float16, requires_grad=True)
 
         x = ref_x.clone().detach().requires_grad_()
         y = ref_y.clone().detach().requires_grad_()
