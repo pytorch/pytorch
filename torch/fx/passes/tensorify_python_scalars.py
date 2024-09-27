@@ -1,16 +1,12 @@
+from __future__ import annotations
+
 import logging
 from typing import Any, TYPE_CHECKING, Union
 
 import torch
-
-
-if TYPE_CHECKING:
-    from torch.fx.experimental.symbolic_shapes import ShapeEnv
-else:
-    ShapeEnv = Any
-
 import torch.fx as fx
 from torch.fx._utils import lazy_format_graph_code
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph_module import GraphModule
 
 # TODO: refactor
@@ -160,39 +156,19 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
             # Look for tensor.item() calls on placeholders
             if unbacked_bindings := node.meta.get("unbacked_bindings"):
                 for s, keypath in unbacked_bindings.items():
-
-                    def go(
-                        node: fx.Node, keypath: tuple[Any, ...]
-                    ) -> Union[fx.Node, None]:
-                        if keypath == ():
-                            return node
-                        elif (
-                            hasattr(keypath[0], "name")
-                            and keypath[0].name == "item"
-                            and isinstance(keypath[0], CallMethodKey)
-                        ):
-                            return go(
-                                graph.call_method(keypath[0].name, (node,)), keypath[1:]
-                            )
-                        else:
-                            return None
-
-                    src_node = go(node, keypath)
                     if (
-                        src_node is not None
-                        and src_node.op == "call_function"
-                        and src_node.target
-                        is torch.ops.aten._local_scalar_dense.default
+                        node is not None
+                        and node.op == "call_function"
+                        and node.target is torch.ops.aten._local_scalar_dense.default
                     ):
-                        # TODO: dtype conversion, so that we don't keep at too
-                        # low precision
+                        dtype = node.args[0].meta["val"].dtype
+                        if dtype == torch.float32:
+                            continue
 
-                        assert isinstance(src_node.args[0], fx.Node), src_node.args[0]
+                        assert isinstance(node.args[0], fx.Node), node.args[0]
 
-                        expr_to_tensor_proxy[s] = fx.Proxy(
-                            src_node.args[0], tracer=tracer
-                        )
-                        expr_to_sym_proxy[s] = fx.Proxy(src_node, tracer=tracer)
+                        expr_to_tensor_proxy[s] = fx.Proxy(node.args[0], tracer=tracer)
+                        expr_to_sym_proxy[s] = fx.Proxy(node, tracer=tracer)
 
             elif (sym_expr := _get_sym_val(node)) is not None:
                 if sym_expr not in expr_to_sym_proxy and not isinstance(
@@ -211,16 +187,27 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                         transform = True
                         # TODO: populate meta on these
                         try:
-                            res = graph.call_function(
-                                torch.ops.prims.convert_element_type.default,
-                                (
-                                    _sympy_interp(zf.node.expr).node,
-                                    node.meta["val"].dtype,
-                                ),
-                            )
+                            interp_node = _sympy_interp(zf.node.expr).node
                         except NotImplementedError:
                             transform = False
                             break
+
+                        # Compute in higher precision if dtype is low precision
+                        compute_dtype = (
+                            torch.float32
+                            if node.meta["val"].dtype in [torch.float16, torch.bfloat16]
+                            else node.meta["val"].dtype
+                        )
+
+                        # Promote computation to the higher precision if necessary
+                        res = graph.call_function(
+                            torch.ops.prims.convert_element_type.default,
+                            (
+                                interp_node,
+                                compute_dtype,
+                            ),
+                        )
+
                         args.append(res)
                     else:
                         args.append(a)
@@ -231,6 +218,15 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                         torch.ops.aten.add.Tensor,
                         tuple(args),
                     )
+
+                    if node.meta["val"].dtype in [torch.float16, torch.bfloat16]:
+                        res2 = graph.call_function(
+                            torch.ops.prims.convert_element_type.default,
+                            (
+                                res2,
+                                node.meta["val"].dtype,
+                            ),
+                        )
 
                     node.replace_all_uses_with(res2, propagate_meta=True)
                     graph.erase_node(node)

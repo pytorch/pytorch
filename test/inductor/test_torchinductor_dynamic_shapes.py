@@ -33,6 +33,9 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
+from torch._dynamo.testing import (
+    CompileCounterWithBackend,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 
@@ -936,6 +939,41 @@ class TestInductorDynamic(TestCase):
             return torch.zeros(y, device=device)
 
         f(torch.tensor([5] * 320))
+
+    @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
+    def test_unspecialized_float_add(self):
+        def fn(x, y):
+            return x + y
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn_opt = torch._dynamo.optimize(cnt)(fn)
+
+        x = torch.arange(3)
+        self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
+        self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
+        self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
+    def test_low_precision_add(self):
+        def fn(x, y):
+            return x + y
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn_opt = torch._dynamo.optimize(cnt)(fn)
+
+        # Low-precision inputs
+        x = torch.arange(3, dtype=torch.float16)
+        self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
+        self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
+
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Test for bfloat16
+        x_bf16 = torch.arange(3, dtype=torch.bfloat16)
+        self.assertEqual(fn(x_bf16, 2.0), fn_opt(x_bf16, 2.0))
+        self.assertEqual(fn(x_bf16, 3.0), fn_opt(x_bf16, 3.0))
+
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_sort_dynamic_shape_with_check(self, device):
         if TEST_WITH_ROCM or torch.device(device).type != GPU_TYPE:
