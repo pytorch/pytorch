@@ -2042,6 +2042,17 @@ class TritonKernel(SIMDKernel):
         assert self.inside_reduction
         masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
 
+        # rindex = r0_index * R1_BLOCK * ... * Rn_BLOCK + ... + rn_index
+        rtypes = [symt for symt in list(TritonSymbols.reduction_types)[:self.num_reduction_dims]]
+        rblocks = [TritonSymbols.block_sizes[symt] for symt in rtypes]
+        rn_inds = [sympy.Symbol(f"{prefix_str[symt]}index", integer=True, nonnegative=True) for symt in rtypes]
+        rblock_coeffs = [
+            sympy_product(rblocks[idx + 1:])
+            for idx in range(len(rblocks) - 1)
+        ] + [sympy.Integer(1)]
+        rindex = sympy_dot(rblock_coeffs, rn_inds)
+        self.indexing_code.splice(f"rindex = {rindex}")
+
         # rmask = r0_mask & ... & rn_mask
         def string_and(x: str, y: str) -> str:
             return f"{x} & {y}"
@@ -2113,6 +2124,7 @@ class TritonKernel(SIMDKernel):
 
         def final_argreduce(buffer, result_var, value, index):
             value = self.reduction_collapse_dims(buffer, value)
+            index = self.reduction_collapse_dims(buffer, index)
             buffer.splice(
                 f"""\
                 _, {result_var}_tmp = triton_helpers.{root_op}_with_index({value}, {index}, {dim})
