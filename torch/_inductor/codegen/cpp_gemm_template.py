@@ -555,24 +555,26 @@ class CppPackedGemmTemplate(CppTemplate):
                 assert len(input_indices) >= 2
                 return [inputs[idx] for idx in input_indices], layout_or_out
 
-        def maybe_to_dense(inputs, layout_or_out):
-            new_inputs = list(inputs)
-            if isinstance(inputs[1], torch.Tensor):
-                W = inputs[1]
-                new_inputs[1] = W.to_dense() if W.is_mkldnn else W
-            return new_inputs, layout_or_out
-
         new_inputs, new_layout = reorder_and_filter(input_nodes, layout)
-
         assert isinstance(new_inputs[1].layout, ir.FixedLayout)
+        # Note that MKLDNN Tensor gets the wrong stride, thus
+        # don't use it for MKLDNN Tensor
         view_size = new_inputs[1].layout.size
         view_stride = new_inputs[1].layout.stride
         view_offset = new_inputs[1].layout.offset
 
-        def normalize_shapes(inputs, layout_or_out):
+        def maybe_to_dense(inputs, layout_or_out):
+            new_inputs = list(inputs)
             if isinstance(inputs[1], torch.Tensor):
-                # Assume W has been unwrap view
-                inputs[1] = inputs[1].as_strided(view_size, view_stride, view_offset)
+                W = inputs[1]
+                if W.is_mkldnn:
+                    new_inputs[1] = W.to_dense()
+                else:
+                    # Assume W has been unwrap view
+                    new_inputs[1] = W.as_strided(view_size, view_stride, view_offset)
+            return new_inputs, layout_or_out
+
+        def normalize_shapes(inputs, layout_or_out):
             if not trans_w:
                 return inputs, layout_or_out
             new_inputs = list(inputs)
