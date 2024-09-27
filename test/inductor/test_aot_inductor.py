@@ -1542,6 +1542,41 @@ class AOTInductorTestsTemplate:
                 result_cuda = optimized(*example_inputs)
             self.assertTrue(same(result_cpu, result_cuda.cpu()))
 
+    @requires_multigpu()
+    def test_on_cuda_device1(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        try:
+            torch.cuda.get_device_properties(1)
+        except AssertionError:
+            raise unittest.SkipTest("CUDA device 1 is not available") from None
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(10, 16)
+                self.relu = torch.nn.ReLU()
+                self.fc2 = torch.nn.Linear(16, 1)
+                self.sigmoid = torch.nn.Sigmoid()
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = self.relu(x)
+                x = self.fc2(x)
+                x = self.sigmoid(x)
+                return x
+
+        device = "cuda:1"
+        model = Model().to(device)
+        example_inputs = (torch.randn(8, 10, device=device),)
+        expected = model(*example_inputs)
+
+        so_path = AOTIRunnerUtil.compile(model, example_inputs)
+        optimized = AOTIRunnerUtil.load(device, so_path)
+        actual = optimized(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
     def test_pytree_inputs(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -3458,6 +3493,44 @@ class AOTInductorTestsTemplate:
                     count,
                 ).run(code)
 
+    def test_aoti_debug_printer_cpp_kernel(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("cpu test case only")
+
+        # a simple cpp kernel test case for testing the debug printer codegen
+        # on cpp kernel cpu device.
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                t = torch.tensor(x.size(-1), device="cpu", dtype=torch.float)
+                t = torch.sqrt(t * 3)
+                return x * t
+
+        example_inputs = (torch.randn(4, 4, device="cpu"),)
+
+        kernel_calls = [
+            ("cpp_fused_mul_sqrt_0", 2),
+        ]
+
+        with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
+            result, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+            # check the c shim print_tensor_handle call is triggered by the config and injected the cpp output code as expected
+            self.assertEqual("aoti_torch_print_tensor_handle" in code, True)
+            # check the codegen for debug printing around the actual kernel call is expected
+            for kernel_call, count in kernel_calls:
+                FileCheck().check_count(
+                    f"before_launch - {kernel_call}",
+                    count,
+                ).run(code)
+                FileCheck().check_count(
+                    f"after_launch - {kernel_call}",
+                    count,
+                ).run(code)
+
     def test_size_from_multi_output(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -3745,6 +3818,9 @@ if not IS_FBCODE:
                 is_skip=True
             ),
             "test_view_outputs": fail_minimal_arrayref_interface(is_skip=True),
+            "test_aoti_debug_printer_cpp_kernel": fail_with_and_without_stack_allocation(
+                is_skip=True
+            ),
         }
     ),
     # The following test passes internally but fails in OSS CI. To be investigated.
@@ -3869,6 +3945,9 @@ copy_tests(
             ("non_abi_compatible_cpu",), is_skip=True
         ),
         "test_custom_op_with_reinterpret_view_inputs": TestFailure(
+            ("non_abi_compatible_cpu",), is_skip=True
+        ),
+        "test_aoti_debug_printer_cpp_kernel": TestFailure(
             ("non_abi_compatible_cpu",), is_skip=True
         ),
     },
