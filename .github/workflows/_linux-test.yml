@@ -80,8 +80,14 @@ jobs:
             All testing is done inside the container, to start an interactive session run:
               docker exec -it $(docker container ps --format '{{.ID}}') bash
 
+      # TODO, for testing, remove later
       - name: Checkout PyTorch
-        uses: ./.github/actions/checkout-pytorch
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          submodules: recursive
+          quiet-checkout: true
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
