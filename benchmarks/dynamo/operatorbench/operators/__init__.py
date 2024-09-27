@@ -3,7 +3,7 @@ import os
 import pathlib
 import sys
 import types
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from utils.common import BenchmarkConfig
 from utils.metrics import Device
@@ -40,7 +40,8 @@ class BaseOperator:
     variant = None
     benchmark_config = None
     full_name = None
-    example_inputs_list = []
+    # example_inputs_list = []
+    # example_input_used_config = None
 
     def __init__(self, benchmark_config: BenchmarkConfig):
         """
@@ -54,7 +55,11 @@ class BaseOperator:
             self.full_name = f"{self.name}.{self.variant}"
 
     @classmethod
-    def get_inputs(cls, benchmark_config: Optional[BenchmarkConfig] = None):
+    def get_inputs(
+        cls,
+        input_mapping: Dict[str, List],
+        benchmark_config: Optional[BenchmarkConfig] = None,
+    ):
         """
         Get or generate example inputs for the operator.
 
@@ -73,12 +78,13 @@ class BaseOperator:
         Returns:
             list: List of example inputs.
         """
-        if not cls.example_inputs_list:
+        if cls.name not in input_mapping:
             assert (
                 benchmark_config is not None
             ), "Benchmark config is required to generate inputs"
-            cls.generate_inputs(benchmark_config)
-        return cls.example_inputs_list
+            generated_inputs = cls.generate_inputs(benchmark_config)
+            input_mapping[cls.name] = generated_inputs
+        return input_mapping[cls.name]
 
     @classmethod
     def generate_inputs(cls, benchmark_config: BenchmarkConfig):

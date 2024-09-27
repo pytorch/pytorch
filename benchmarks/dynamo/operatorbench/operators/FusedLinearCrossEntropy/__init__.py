@@ -29,6 +29,7 @@ class FusedLinearCrossEntropyOperator(BaseOperator):
 
     @classmethod
     def generate_inputs(cls, benchmark_config: BenchmarkConfig):
+        example_inputs_list = []
         # May need OOM check
         for BT in [2**i for i in range(12, 16)]:
             _input = torch.randn(
@@ -42,7 +43,8 @@ class FusedLinearCrossEntropyOperator(BaseOperator):
                 V, (BT, 1), dtype=torch.long, device=benchmark_config.device.value
             ).squeeze(1)
             # This operator needs two inputs
-            cls.example_inputs_list.append((_input, target))
+            example_inputs_list.append((_input, target))
+        return example_inputs_list
 
     def forward(self, input: Any):
         return self.operator(input)

@@ -11,9 +11,12 @@ from utils.metrics import get_execution_time, MetricResult, Metrics
 import torch
 
 
+# mapping from operator name to the input list.
+# {operator_name: input_list}
+input_mapping = {}
+
+
 # Create operator instances from desired operator names
-
-
 def create_operator_instances(
     operator_names: list[str],
     name_to_variant_list: dict[str, list[BaseOperator]],
@@ -40,7 +43,9 @@ def benchmark_operator(operator: BaseOperator, benchmark_config: BenchmarkConfig
     repeat = benchmark_config.repeat
     device = benchmark_config.device
     metrics = benchmark_config.metrics
-    num_samples = min(max_samples, len(operator.get_inputs(benchmark_config)))
+    num_samples = min(
+        max_samples, len(operator.get_inputs(input_mapping, benchmark_config))
+    )
 
     metric_result = MetricResult()
     metric_result.op_name = operator.name
@@ -63,7 +68,7 @@ def benchmark_operator(operator: BaseOperator, benchmark_config: BenchmarkConfig
     )
     with profiler_context:
         for i in range(num_samples):
-            input = operator.get_inputs(benchmark_config)[i]
+            input = operator.get_inputs(input_mapping, benchmark_config)[i]
             input = operator.prepare_input_and_functions(input, phase)
             if phase == Phase.FORWARD:
                 phase_fn = operator.forward
@@ -154,6 +159,9 @@ def run_benchmarks(
     profile,
     profile_folder,
 ):
+    global input_mapping
+    # Reset input mapping to avoid OOM and mismatch in different unit tests
+    input_mapping = {}
     # process arguments and generate benchmark config
     dtype = dtype_mapping.get(dtype)
     metrics = [
