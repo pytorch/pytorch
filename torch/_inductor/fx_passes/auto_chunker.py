@@ -6,6 +6,8 @@ from torch._inductor import config
 from torch._inductor.utils import cache_on_self
 from torch.utils import _pytree
 import operator
+from torch._dynamo.utils import detect_fake_mode
+from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 
 aten = torch.ops.aten
@@ -140,6 +142,20 @@ class AutoChunkerTransform:
         self.gm.graph.eliminate_dead_code()
         print("graph after chunking")
         self.gm.print_readable()
+        self._fake_tensor_prop()
+
+    def _fake_tensor_prop(self):
+        inputs = []
+        for nd in self.gm.graph.nodes:
+            if nd.op == "placeholder":
+                fake_tensor = _get_fake_tensor_from_node(nd)
+                if fake_tensor is not None:
+                    inputs.append(fake_tensor)
+                else:
+                    inputs.append(nd)
+
+        fake_mode = detect_fake_mode(inputs)
+        FakeTensorProp(self.gm, mode=fake_mode).propagate_dont_convert_inputs(*inputs)
 
     def _chunk_non_source_node(self, chunk_id, node_id, orig_nd, chunk_replacement, final_replacement):
         # Special handling for gradient of the first matmul input
@@ -180,7 +196,10 @@ class AutoChunkerTransform:
                 # This results in an invalid fx graph
                 # accum = self.gm.graph.call_function(aten.zeros_like.default, (orig_nd,))
                 fake_tensor = _get_fake_tensor_from_node(orig_nd)
-                accum = self.gm.graph.call_function(aten.zeros.default, (fake_tensor.shape,), {"dtype": fake_tensor.dtype, "device": fake_tensor.device})
+                # zeros cause error in inductor: AssertionError: both a fallback and a decomp for same op: aten.zeros.default
+                # Use full instead
+                # accum = self.gm.graph.call_function(aten.zeros.default, (fake_tensor.shape,), {"dtype": fake_tensor.dtype, "device": fake_tensor.device})
+                accum = self.gm.graph.call_function(aten.full.default, (fake_tensor.shape, 0), {"dtype": fake_tensor.dtype, "device": fake_tensor.device})
                 final_replacement[orig_nd] = accum
             else:
                 accum = final_replacement[orig_nd]
@@ -197,7 +216,7 @@ class AutoChunkerTransform:
             # create accumulator only for the first chunk
             if chunk_id == 0:
                 fake_tensor = _get_fake_tensor_from_node(orig_nd)
-                accum = self.gm.graph.call_function(aten.zeros.default, tuple(), {"dtype": fake_tensor.dtype, "device": fake_tensor.device})
+                accum = self.gm.graph.call_function(aten.full.default, (tuple(), 0), {"dtype": fake_tensor.dtype, "device": fake_tensor.device})
                 final_replacement[orig_nd] = accum
             else:
                 accum = final_replacement[orig_nd]
@@ -221,7 +240,7 @@ class AutoChunkerTransform:
             chunked_shape = list(_get_fake_tensor_from_node(fwd_nd.args[0]).shape)
             # TODO handle the non-divisible case
             chunked_shape[chunk_dim] //= self.num_chunk
-            replace_nd = self.gm.graph.call_function(orig_nd.target, (chunked_shape,))
+            replace_nd = self.gm.graph.call_function(orig_nd.target, (orig_nd.args[0], chunked_shape,))
             chunk_replacement[orig_nd] = replace_nd
 
             return
@@ -251,7 +270,7 @@ class AutoChunkerTransform:
     def _chunk_source_node(self, source_node):
         bs = _get_fake_tensor_from_node(source_node).shape[0]
         print(f"{bs=}")
-        self.num_chunk = 2
+        self.num_chunk = 4 # TODO don't hardcode
         self.chunk_size = (bs + self.num_chunk - 1) // self.num_chunk
         out_node = self.gm.graph.call_function(aten.split.Tensor, (source_node, self.chunk_size))
         chunks = []
