@@ -240,6 +240,13 @@ def stage_backward_weight(
         )
         weights_edges = tuple(GradientEdge(w, 0) for w in param_group["params"])
 
+        # Break a reference cycle caused inside stage_backward_input->get_hook->hook
+        # The summarized cycle is:
+        # `hook` -> cell -> param_group -> intermediates -> `hook`
+        # becuase we install the hook function onto each of the intermediate autograd nodes.
+        # We need to keep intermediates alive up until backward_weight, but we can free it now.
+        del param_group["intermediates"]
+
         assert all(len(g) == 1 for g in param_group["grads"])
         # [NEW!] Able to pass a GradientEdge to autograd.grad as output
         # We do not need to retain_graph because... guarantee no overlap?
