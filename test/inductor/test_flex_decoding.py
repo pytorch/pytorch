@@ -383,7 +383,7 @@ class TestFlexDecoding(InductorTestCase):
         # test with different batch size
         max_batch_size = max(Q_B, KV_B) + 3
 
-        n_pages = max(Q_S, KV_S) // page_size * 4
+        n_pages = (max(Q_S, KV_S) + page_size - 1) // page_size * 4
 
         # allocate cache
         MAX_CACHED_SEQ_LEN = n_pages * page_size
@@ -405,33 +405,33 @@ class TestFlexDecoding(InductorTestCase):
         )
 
         # "randomly" initialize the page table
-        paged_cache = PagedAttention(
+        paged_attention = PagedAttention(
             n_pages, page_size, max_batch_size, MAX_CACHED_SEQ_LEN
         )
-        paged_cache.allocate_until_length(
+        paged_attention.allocate_until_length(
             torch.tensor([KV_S // 4, KV_S // 2, KV_S // 4, KV_S // 3], device="cuda")
         )
-        paged_cache.allocate_until_length(
+        paged_attention.allocate_until_length(
             torch.tensor([KV_S // 4, KV_S // 2, KV_S // 2, KV_S // 2], device="cuda")
         )
-        paged_cache.allocate_until_length(
+        paged_attention.allocate_until_length(
             torch.tensor([KV_S // 2, KV_S, KV_S // 2, KV_S], device="cuda")
         )
-        paged_cache.allocate_until_length(
+        paged_attention.allocate_until_length(
             torch.tensor([KV_S, KV_S, KV_S, KV_S], device="cuda")
         )
 
         # update cache with k and v
         input_pos = torch.arange(KV_S, device="cuda", dtype=torch.int32)
         batch_idx = torch.arange(KV_B, device="cuda", dtype=torch.int32)
-        paged_cache.update(batch_idx, input_pos, k, k_cache)
-        paged_cache.update(batch_idx, input_pos, v, v_cache)
+        paged_attention.update(batch_idx, input_pos, k, k_cache)
+        paged_attention.update(batch_idx, input_pos, v, v_cache)
 
         # convert block mask and score mod
-        converted_block_mask = paged_cache.convert_logical_block_mask(
+        converted_block_mask = paged_attention.convert_logical_block_mask(
             block_mask, MAX_CACHED_SEQ_LEN
         )
-        converted_score_mod = paged_cache.get_score_mod(score_mod)
+        converted_score_mod = paged_attention.get_score_mod(score_mod)
 
         return k_cache, v_cache, converted_block_mask, converted_score_mod
 
