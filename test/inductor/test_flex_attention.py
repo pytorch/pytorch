@@ -306,12 +306,22 @@ class TestFlexAttention(InductorTestCase):
         Q_H: int = H,
         Q_S: int = S,
         Q_D: int = D,
-        KV_B: int = B,
-        KV_H: int = H,
-        KV_S: int = S,
-        V_D: int = D,
+        KV_B: Optional[int] = None,
+        KV_H: Optional[int] = None,
+        KV_S: Optional[int] = None,
+        V_D: Optional[int] = None,
         block_mask: Optional[BlockMask] = None,
     ):
+        if KV_B is None:
+            KV_B = Q_B
+        if KV_H is None:
+            KV_H = Q_H
+        if KV_S is None:
+            KV_S = Q_S
+        if V_D is None:
+            V_D = Q_D
+        if TEST_WITH_ROCM and Q_H != KV_H:
+            self.skipTest("enable_gqa=True is unsupported on ROCM, for now")
         q = torch.randn(
             (Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
         )
@@ -1481,7 +1491,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_aot_eager_gradcheck(self, score_mod):
         make_tensor = functools.partial(
             torch.randn,
-            (2, 2, 128, 4),
+            (2, 2, 11, 4),
             device="cuda",
             dtype=torch.float64,
             requires_grad=True,
@@ -1851,6 +1861,42 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_call(attention, Q_S=S - 1, KV_S=S - 1)
 
     @supported_platform
+    def test_modular_indexing(self):
+        B, H, N, D = 100, 12, 128, 64
+        dtype = torch.bfloat16
+        device = torch.device("cuda")
+
+        class Attention(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bias = torch.randn(B, N, N, H, device=device, dtype=dtype)
+
+            def forward(
+                self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+            ) -> torch.Tensor:
+                score_mod = generate_score_mod(self.bias)
+                o = flex_attention(q, k, v, score_mod=score_mod)
+                return o
+
+        def generate_score_mod(bias):
+            bias = (2 * bias).view(B, H, N, N).contiguous()
+
+            def score_mod(score, batch, head, q_idx, k_idx):
+                attn_bias = bias[batch, head, q_idx, k_idx]
+                return score + attn_bias
+
+            return score_mod
+
+        m = Attention().cuda().eval().to(dtype)
+        m = torch.compile(m, mode="default", fullgraph=False)
+
+        q = torch.randn(B, H, N, D, device=device, dtype=dtype)
+        k = torch.randn(B, H, N, D, device=device, dtype=dtype)
+        v = torch.randn(B, H, N, D, device=device, dtype=dtype)
+
+        m(q, k, v)
+
+    @supported_platform
     def test_force_write_lse(self):
         make_tensor = functools.partial(
             torch.randn,
@@ -1948,6 +1994,39 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(flex_q_grad, q.grad, atol=3e-3, rtol=2e-3)
         torch.testing.assert_close(flex_k_grad, k.grad, atol=3e-3, rtol=2e-3)
         torch.testing.assert_close(flex_v_grad, v.grad, atol=3e-3, rtol=2e-3)
+
+    def test_cpu_error_message(self):
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, 128, 16),
+            device="cpu",
+            dtype=torch.float32,
+            requires_grad=False,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        with self.assertRaisesRegex(
+            ValueError,
+            "FlexAttention is only supported on CUDA devices. Found input tensors on cpu device.",
+        ):
+            flex_attention(query, key, value)
+
+    @supported_platform
+    def test_mixed_device_error_message(self):
+        # Create tensors on different devices
+        cpu_tensor = torch.randn(2, 2, 128, 16, device="cpu")
+        cuda_tensor = torch.randn(2, 2, 128, 16, device="cuda")
+
+        # Use different devices for query, key, and value
+        query, key, value = cpu_tensor, cuda_tensor, cpu_tensor
+
+        expected_error_message = (
+            "Expected query, key, and value to have the same device type, "
+            f"but got query.device: {query.device}, key.device: {key.device}, "
+            f"and value.device: {value.device} instead."
+        )
+
+        with self.assertRaisesRegex(ValueError, expected_error_message):
+            flex_attention(query, key, value)
 
     @supported_platform
     def test_small_q_kv_len(self):
