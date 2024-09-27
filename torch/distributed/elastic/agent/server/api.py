@@ -567,6 +567,7 @@ class SimpleElasticAgent(ElasticAgent):
 
         Slow Path: when workers have different roles and world sizes. We use the
         the following algorithm:
+
         1. Each agent writes its configuration(group_rank, group_world_size
            , num_workers) to the common store.
         2. The rank 0 agent reads all the role_info from the store and
