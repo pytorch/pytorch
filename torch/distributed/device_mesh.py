@@ -509,7 +509,7 @@ else:
                     new_group(
                         backend="cpu:gloo,cuda:nccl",
                         ranks=ranks,
-                        group_desc="mesh_dim_world",
+                        group_desc="mesh_default",
                     )
                     if torch.cuda.is_available()
                     and get_backend(default_group) == "gloo"
@@ -549,9 +549,9 @@ else:
                         # Temporarily reverting to resolve test timeout while root-causing.
                         # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
                         group_desc = (
-                            f"mesh_dim_{self.mesh_dim_names[dim]}"
+                            f"mesh_{self.mesh_dim_names[dim]}"
                             if self.mesh_dim_names
-                            else None
+                            else f"mesh_dim_{dim}"
                         )
                         dim_group = new_group(
                             ranks=subgroup_ranks,
