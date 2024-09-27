@@ -387,12 +387,10 @@ class TritonPrinter(PythonPrinter):
         )
 
     def _print_Float(self, expr):
-        # Use a tensor here to get float64. Otherwise the constant is
-        # truncated to float32.
         if config.is_fbcode() and torch.version.hip:
             ret = f"{expr}"
         else:
-            ret = f"tl.full([1], {expr}, tl.float64)"
+            ret = f"tl.full([], {expr}, tl.float64)"
         return ret
 
     def _print_ToFloat(self, expr):
