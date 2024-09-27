@@ -146,17 +146,9 @@ def call_module_hooks_from_backward_state(
 
 def fill_uninitialized(inputs: List[torch.Tensor]):
     res = []
-    device = None
-    for inp in inputs:
-        if inp is not None:
-            device = inp.device
-            break
-
-    assert device is not None
     for inp in inputs:
         if inp is None:
-            # TODO: need to match METADATA
-            res.append(torch.empty(0, device=device))
+            res.append(torch.empty(0))
         else:
             res.append(inp)
 

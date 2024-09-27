@@ -195,19 +195,25 @@ struct CppNode : public Node {
     // it is unlikely for them to collide at the same time
     args.collect(static_cast<uint64_t>(typeid(T).hash_code()));
     args.collect(std::string(typeid(T).name()));
+    // but the symint wont be passed to the op
+    args.collect(output_info_);
+    args.collect(input_info_);
 
     // TODO: pass some things by copy
     std::function<variable_list(variable_list)> lambda =
         [&](variable_list&& inputs) { return apply(std::move(inputs)); };
     args.collect(this, std::move(lambda), is_variable_input_, input_info_);
-    // TODO: when guards?
-    return;
   }
 
   variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) override {
-    return saved.lift(variable_list(inputs));
+    saved.before(output_info_);
+    saved.before(input_info_);
+    auto grads = saved.lift(variable_list(inputs));
+    saved.after(output_info_);
+    saved.after(input_info_);
+    return grads;
   }
 };
 

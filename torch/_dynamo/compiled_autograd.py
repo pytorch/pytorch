@@ -178,21 +178,27 @@ class AutogradCompilerInstance:
                 inputs: List[torch.Tensor], idx: int
             ) -> List[torch.Tensor]:
                 print(f"Calling lifted c++ node at idx={idx}")
-                outs = torch._C._dynamo.compiled_autograd.call_lambda(inputs, idx)
-                device = None
-                for out in outs:
-                    if out is not None:
-                        device = out.device
-                        break
-                assert device is not None
-
-                # gradient layout contract doesn't enforce output strides to match input strides
-                return [
-                    out.clone().contiguous()
-                    if out is not None
-                    else torch.empty(0, device=device)
-                    for out in outs
+                cppouts = torch._C._dynamo.compiled_autograd.call_lambda(inputs, idx)
+                filtered_output_metadatas = [
+                    o for o in output_metadatas if o is not None
                 ]
+                assert len(cppouts) == len(filtered_output_metadatas)
+                # what happens when shit is marked as dynamic...
+                pyouts = []
+                for i, cppout in enumerate(cppouts):
+                    if cppout is None:
+                        layout, device, dtype, size = filtered_output_metadatas[i]
+                        pyouts.append(
+                            torch.empty(
+                                size=size, dtype=dtype, layout=layout, device=device
+                            )
+                        )
+                    else:
+                        # strides could be anything, and can cause issue with
+                        # downstream stride dependent operations
+                        pyouts.append(cppout.clone().contiguous())
+
+                return pyouts
 
             def _(inputs, idx):
                 grad_ins: List[torch.Tensor] = []
@@ -213,8 +219,10 @@ class AutogradCompilerInstance:
 
             next_op += 1
 
-        # torch.empty for all undefined inputs
-        proxies = self.fx_tracer.create_proxy(
+        # Undefined tensors in C++ will be passed to Python as None
+        # but custom ops signature does not support Optional[torch.Tensor]
+        # To work around this, we create torch.empty as the interface just for the custom op
+        fill_proxies = self.fx_tracer.create_proxy(
             kind="call_function",
             target=fill_uninitialized,
             args=(self.to_proxy(inputs),),
@@ -222,13 +230,29 @@ class AutogradCompilerInstance:
         )
         with disable_proxy_modes_tracing():
             processed_inputs = [maybe_clone(x) for x in inputs]
-            self.bind_tensors_to_proxies(processed_inputs, proxies)
+            self.bind_tensors_to_proxies(processed_inputs, fill_proxies)
 
-        cpp_node_proxies = cpp_node_op_i(proxies, self.scalars_proxy[idx])
+        cpp_node_proxies = cpp_node_op_i(fill_proxies, self.scalars_proxy[idx])
         with disable_proxy_modes_tracing():
             self.bind_tensors_to_proxies(grad_ins, cpp_node_proxies)
 
         return grad_ins
+        # grad_ins may be torch.empty i.e. None i.e. undefined output variables
+        # but torch.empty is not considered undefined
+        # empty is:
+        # .dim() == 1
+        # .size(0) == 0
+        # unfill_proxies = self.fx_tracer.create_proxy(
+        #     kind="call_function",
+        #     target=unfill_uninitialized,
+        #     args=(self.to_proxy(grad_ins),),
+        #     kwargs={},
+        # )
+        # with disable_proxy_modes_tracing():
+        #     processed_outputs = [maybe_clone(x) for x in grad_ins]
+        #     self.bind_tensors_to_proxies(processed_outputs, unfill_proxies)
+
+        # return processed_outputs
 
     def proxy_call_backward(
         self,
@@ -420,7 +444,8 @@ class AutogradCompilerInstance:
                 for i in runtime_inputs_to_move:
                     inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
-                return compiled_fn(inputs, sizes, scalars, hooks)
+                with disable():
+                    return compiled_fn(inputs, sizes, scalars, hooks)
             finally:
                 in_compiled_autograd_region = False
 

@@ -1737,7 +1737,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_non_variable_inputs_tensor, m) {
         # self.assertEqual(True, False)
         # self.check_output_and_recompiles(fn, 2)
 
-    @unittest.skip("Flaky, cache from test ordering affects test. #135369")
+    # @unittest.skip("Flaky, cache from test ordering affects test. #135369")
     def test_autograd_cpp_node(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -1750,7 +1750,7 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
   static torch::autograd::variable_list backward(
       torch::autograd::AutogradContext *ctx,
       torch::autograd::variable_list grad_output) {
-    return grad_output;
+    return {torch::autograd::Variable()};
   }
 };
 
@@ -1778,6 +1778,52 @@ TORCH_LIBRARY(test_autograd_cpp_node, m) {
                 )
                 loss = out.sum()
                 loss.backward()
+                yield x.grad
+
+        # compiles for 10 (static) and 100 (dynamic)
+        self.check_output_and_recompiles(fn, 2)
+
+    def test_autograd_cpp_node_undefined(self):
+        cpp_source = """
+struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
+  static torch::Tensor forward(
+      torch::autograd::AutogradContext* ctx,
+      const torch::Tensor& x) {
+    return x;
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext *ctx,
+      torch::autograd::variable_list grad_output) {
+    return {torch::autograd::Variable()};
+  }
+};
+
+torch::Tensor custom_op_backed_by_autograd_fn(torch::Tensor x) {
+  return CustomOpAutogradFunction::apply(x);
+}
+
+TORCH_LIBRARY(test_autograd_cpp_node_undefined, m) {
+    m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
+}
+        """
+
+        module = torch.utils.cpp_extension.load_inline(
+            name="test_autograd_cpp_node_undefined",
+            cpp_sources=cpp_source,
+            functions="custom_op_backed_by_autograd_fn",
+            verbose=True,
+        )
+
+        def fn():
+            for i in [10, 100, 10, 20, 10]:
+                x = torch.ones(i, i, requires_grad=True)
+                out = torch.ops.test_autograd_cpp_node_undefined.custom_op_backed_by_autograd_fn(
+                    x
+                )
+                loss = out.sum()
+                loss.backward()
+                self.assertIsNone(x.grad)
                 yield x.grad
 
         # compiles for 10 (static) and 100 (dynamic)
@@ -2812,10 +2858,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         inp = torch.rand(10, 10, requires_grad=True)
         out = torch.utils.checkpoint.checkpoint(fn, inp, use_reentrant=True)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"\(e.g. reentrant checkpointing\), this is not supported yet\.",
-        ), torch._dynamo.compiled_autograd.enable(torch.compile):
+        with torch._dynamo.compiled_autograd.enable(torch.compile):
             out.backward()
 
 

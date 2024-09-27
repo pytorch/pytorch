@@ -382,19 +382,19 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
 
   tensor_impl->pyobj_slot()->set_owns_pyobj(true);
 
-// Resurrect the Python object.  This is something CPython does
-// internally occasionally, see
-// https://github.com/python/cpython/blob/b98eba5bc2ffbe7a0ed49d540ebc4f756ae61985/Objects/object.c#L248-L259
-// so we just copy the pattern here.  Note that we don't have to worry
-// about saving and restoring the refcount (as the quoted code does)
-// because we actually DO need to reset the refcount to one here, we
-// can't assume that some other code has taken care of it.
-// NB: this will overreport _Py_RefTotal but based on inspection of object.c
-// there is no way to avoid this
-#ifdef Py_TRACE_REFS
-  _Py_AddToAllObjects(reinterpret_cast<PyObject*>(self), 1);
-#endif
-  Py_INCREF(self);
+  // Resurrect the Python object.  This is something CPython does
+  // internally occasionally, see
+  // https://github.com/python/cpython/blob/b98eba5bc2ffbe7a0ed49d540ebc4f756ae61985/Objects/object.c#L248-L259
+  // so we just copy the pattern here.  Note that we don't have to worry
+  // about saving and restoring the refcount (as the quoted code does)
+  // because we actually DO need to reset the refcount to one here, we
+  // can't assume that some other code has taken care of it.
+  // NB: this will overreport _Py_RefTotal but based on inspection of object.c
+  // there is no way to avoid this
+
+  // When resurrecting, we MUST use _Py_NewReference and not Py_INCREF to
+  // ensure the PyObject is in a valid state
+  _Py_NewReference((PyObject*)self);
 
   // Flip THPVariable to be non-owning
   // (near use-after-free miss here: fresh MaybeOwned is created breaking
@@ -1091,6 +1091,7 @@ int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
       "' to a tensor located on device with index '",
       var.get_device(),
       "'. Please ensure that the gradient and the tensor are on the same device");
+  std::cout << "grad defined=" << grad.defined() << std::endl;
   TORCH_CHECK(
       grad.sym_sizes().equals(var.sym_sizes()),
       "attempting to assign a gradient of size '",

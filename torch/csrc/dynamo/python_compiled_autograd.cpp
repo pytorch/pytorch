@@ -323,6 +323,7 @@ static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args);
 // This class defines the info required to call the C++ autograd function at
 // runtime
 struct CustomOpImpl {
+  std::string name;
   std::function<variable_list(variable_list)> lambda;
   std::unique_ptr<at::IValue> idx;
   std::vector<std::optional<VariableInfo>> output_info;
@@ -409,6 +410,7 @@ static at::IValue* lambda_collect(
   }
   auto idx = custom_op_impls->impls.size();
   custom_op_impls->impls.emplace_back(CustomOpImpl{
+      fn->name(),
       std::move(lambda),
       std::make_unique<at::IValue>(static_cast<int64_t>(idx)),
       std::move(output_info_for_vars)});
@@ -432,6 +434,7 @@ static at::IValue* lambda_collect(
     }
   }
   return custom_op_impls->impls[idx].idx.get();
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
 }
 
 PyObject* to_py_size(const std::vector<c10::SymInt>& size) {
@@ -512,6 +515,31 @@ static PyObject* call_lambda(PyObject* dummy, PyObject* args) {
   size_t cppidx = PyLong_AsSize_t(idx);
   auto& impl = custom_op_impls->impls[cppidx];
   variable_list outs = impl.lambda(std::move(cppinputs));
+
+  size_t cnt = 0;
+  for (const auto& info : impl.output_info) {
+    if (info.has_value()) {
+      cnt++;
+    }
+  }
+  for (const auto& out : outs) {
+    if (out.defined()) {
+      cnt--;
+    }
+  }
+  if (cnt != 0) {
+    // impl.name should be a string of the form:
+    // torch::autograd::CppNode<CustomOpAutogradFunction>
+    std::size_t start = impl.name.find('<');
+    std::size_t end = impl.name.find('>');
+    std::string hint = impl.name.substr(start + 1, end - start - 1);
+    throw std::runtime_error(
+        "Compiled autograd could not automatically handle the custom C++ autograd function " +
+        hint +
+        "because it returns undefined gradients for inputs that required gradients. " +
+        "Please manually enable this C++ autograd function by refering to the instructions in https://docs.google.com/document/d/11VucFBEewzqgkABIjebZIzMvrXr3BtcY1aGKpX61pJY/.");
+  }
+
   auto it = custom_op_impls->lifted_nodes.find(cppidx);
   TORCH_INTERNAL_ASSERT(it != custom_op_impls->lifted_nodes.end());
   std::shared_ptr<Node> node = it->second;
@@ -783,7 +811,20 @@ CacheNode* _compiled_autograd_impl(
           set_node_origin, "OIO", node_name.get(), i, pyobj, nullptr));
 
       SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
+      std::cout << "apply_with_saved on " << call.node->name() << std::endl;
+      int z = 0;
+      for (const auto& input : inputs) {
+        std::cout << "inputs[" << z << "] defined=" << input.defined()
+                  << std::endl;
+      }
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
+      std::cout << call.node->name() << " " << outputs.size() << " outputs"
+                << std::endl;
+      int j = 0;
+      for (const auto& output : outputs) {
+        std::cout << "outputs[" << j << "] defined=" << output.defined()
+                  << std::endl;
+      }
 
       saved.debug_asserts();
       saved.before(call.node->next_edges());
