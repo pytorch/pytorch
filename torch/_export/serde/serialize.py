@@ -1108,6 +1108,7 @@ class GraphModuleSerializer(metaclass=Final):
             ],
             in_spec=treespec_dumps(module_call_signature.in_spec, TREESPEC_VERSION),
             out_spec=treespec_dumps(module_call_signature.out_spec, TREESPEC_VERSION),
+            forward_arg_names=names if (names := module_call_signature.forward_arg_names) else None
         )
 
     def serialize_module_call_graph(
@@ -2256,6 +2257,7 @@ class GraphModuleDeserializer(metaclass=Final):
             ],
             in_spec=treespec_loads(module_call_signature.in_spec),
             out_spec=treespec_loads(module_call_signature.out_spec),
+            forward_arg_names=names if (names := module_call_signature.forward_arg_names) else None,
         )
 
     def deserialize_module_call_graph(
