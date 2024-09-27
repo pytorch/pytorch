@@ -460,7 +460,6 @@ def process_inputs(
                 return x
             if isinstance(x, FakeTensor):
                 assert x.fake_mode is fake_mode
-                return x
             if is_traceable_wrapper_subclass(x):
                 attrs, _ = x.__tensor_flatten__()
                 if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):

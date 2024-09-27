@@ -1,37 +1,10 @@
-# mypy: allow-untyped-decorators
-# mypy: allow-untyped-defs
-# Copyright (c) Meta Platforms, Inc. and affiliates
-import inspect
-import warnings
-from typing import Any, Callable, cast, Optional, Sequence, Tuple
+"""
+NOTE: torch.distributed._tensor has been moved to torch.distributed.tensor.
+The imports here are purely for backward compatibility. We will remove these
+imports in a few releases
 
-import torch
-import torch.distributed.tensor._dispatch as op_dispatch
-import torch.distributed.tensor._random as random
-import torch.nn as nn
-from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
-from torch.distributed.tensor._collective_utils import check_tensor_meta, mesh_broadcast
-from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-from torch.distributed.tensor._random import (
-    is_rng_supported_mesh,
-    OffsetBasedRNGTracker,
-)
-from torch.distributed.tensor._redistribute import (
-    Redistribute,
-    redistribute_local_tensor,
-)
-from torch.distributed.tensor._utils import (
-    compute_global_tensor_info,
-    compute_local_shape_and_global_offset,
-    normalize_to_torch_size,
-)
-from torch.distributed.tensor.placement_types import (
-    Partial,
-    Placement,
-    Replicate,
-    Shard,
-)
-
+TODO: throw warnings when this module imported
+"""
 
 __all__ = [
     "DTensor",
@@ -68,7 +41,41 @@ aten = torch.ops.aten
 #
 # So from_local/to_local must be Autograd functions.
 #
+
+_dtensor_meta_dict = {}
+
+
+def dtensor_meta_dict():
+    global _dtensor_meta_dict
+    return _dtensor_meta_dict
+
+
+lib = torch.library.Library("dtensor", "FRAGMENT")
+
+
+def create_dtensor_impl(x, meta_hash):
+    dtensor_meta = dtensor_meta_dict()[meta_hash]
+    return DTensor(
+        x, spec=dtensor_meta["spec"], requires_grad=dtensor_meta["requires_grad"]
+    )
+
+
+def to_local_impl(x):
+    return x.to_local()
+
+
+lib.define("create_dtensor(Tensor x, int meta_hash) -> Tensor")
+lib.define("to_local(Tensor x) -> Tensor")
+
+lib.impl("create_dtensor", create_dtensor_impl, "Autograd")
+lib.impl("create_dtensor", create_dtensor_impl, "Python")
+lib.impl("to_local", to_local_impl, "Autograd")
+lib.impl("to_local", to_local_impl, "Python")
+
+
 class _ToTorchTensor(torch.autograd.Function):
+    _compiled_autograd_should_lift = False
+
     @staticmethod
     def forward(  # type: ignore[override]
         ctx,
@@ -106,17 +113,21 @@ class _ToTorchTensor(torch.autograd.Function):
             ),
         )
 
+        meta_hash = hash(grad_spec) + hash(grad_output.requires_grad)
+        dtensor_meta_dict()[meta_hash] = {
+            "spec": grad_spec,
+            "requires_grad": grad_output.requires_grad,
+        }
+        out = torch.ops.dtensor.create_dtensor(grad_output, meta_hash)
         return (
-            DTensor(
-                grad_output,
-                grad_spec,
-                requires_grad=grad_output.requires_grad,
-            ),
+            out,
             None,
         )
 
 
 class _FromTorchTensor(torch.autograd.Function):
+    _compiled_autograd_should_lift = False
+
     @staticmethod
     def forward(  # type: ignore[override]
         ctx,  # pyre-ignore[2]: Parameter must be annotated.
@@ -209,7 +220,8 @@ class _FromTorchTensor(torch.autograd.Function):
 
         # TODO: backward is also differentiable now, add a test
         # to test higher level gradients.
-        return grad_output.to_local(), None, None, None, None, None
+        out = torch.ops.dtensor.to_local(grad_output)
+        return out, None, None, None, None, None
 
 
 class DTensor(torch.Tensor):
@@ -250,8 +262,7 @@ class DTensor(torch.Tensor):
         """
         Construct a DTensor from a local tensor, device mesh, and placement and
         other tensor properties (i.e. shape, requires_grad, strides, etc).
-
-        .. note:: This is not a public API and it's only supposed to be used by the
+        Note: This is not a public API and it's only supposed to be used by the
             operator implementations and internals. If you want to construct a
             DTensor from a local tensor, consider using ``DTensor.from_local``, if
             you want to construct a DTensor from a "global" tensor (where you
@@ -283,7 +294,7 @@ class DTensor(torch.Tensor):
 
     # pyre-fixme[14]: `__repr__` overrides method defined in `DTensor` inconsistently.
     # pyre-fixme[3]: Return type must be annotated.
-    def __repr__(self):  # type: ignore[override]
+    def __repr__(self):
         # TODO: consider all_gather the local tensors for better debugging
         return f"DTensor(local_tensor={self._local_tensor}, device_mesh={self._spec.mesh}, placements={self._spec.placements})"
 
@@ -311,11 +322,12 @@ class DTensor(torch.Tensor):
             spec.placements,
             tensor_meta=unflatten_tensor_meta,
         )
-        return DTensor(
-            local_tensor,
-            unflatten_spec,
-            requires_grad=requires_grad,
-        )
+        meta_hash = hash(unflatten_spec) + hash(requires_grad)
+        dtensor_meta_dict()[meta_hash] = {
+            "spec": unflatten_spec,
+            "requires_grad": requires_grad,
+        }
+        return torch.ops.dtensor.create_dtensor(local_tensor, meta_hash)
 
     def __coerce_tangent_metadata__(self):
         if not any(isinstance(p, Partial) for p in self.placements):
@@ -631,7 +643,7 @@ def distribute_tensor(
     same. The ``tensor`` to distribute is the logical or "global" tensor, and the API would use
     the ``tensor`` from first rank of the DeviceMesh dimension as the source of truth to perserve
     the single-device semantic. If you want to construct a DTensor in the middle of the Autograd
-    computation, please use :meth:`DTensor.from_local` instead.
+    computation, please use ``DTensor.from_local`` instead.
 
     Args:
         tensor (torch.Tensor): torch.Tensor to be distributed. Note that if you
@@ -653,7 +665,7 @@ def distribute_tensor(
 
     .. note::
         When initialize the DeviceMesh with the ``xla`` device_type, ``distribute_tensor``
-        return `XLAShardedTensor` instead. see `this issue <https://github.com/pytorch/pytorch/issues/92909>`__
+        return `XLAShardedTensor` instead. see [link](https://github.com/pytorch/pytorch/issues/92909)
         for more details. The XLA integration is experimental and subject to change.
     """
 
@@ -796,8 +808,7 @@ def distribute_module(
 
     .. note::
         When initialize the DeviceMesh with the ``xla`` device_type, ``distribute_module``
-        return nn.Module with PyTorch/XLA SPMD annotated parameters. See
-        `this issue <https://github.com/pytorch/pytorch/issues/92909>`__
+        return nn.Module with PyTorch/XLA SPMD annotated parameters. See [link](https://github.com/pytorch/pytorch/issues/92909)
         for more details. The XLA integration is experimental and subject to change.
 
     """
@@ -931,10 +942,7 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     torch_stride = torch._prims_common.make_contiguous_strides_for(size)
 
     # get local tensor shape
-    local_shape, _ = compute_local_shape_and_global_offset(
-        size, device_mesh, placements
-    )
-
+    local_shape = compute_local_shape(size, device_mesh, placements)
     # initialize the local tensor
     if init_op == torch.full:
         fill_value = kwargs.pop("fill_value", 0)
@@ -1069,8 +1077,8 @@ def full(  # type: ignore[no-untyped-def]
     placements: Optional[Sequence[Placement]] = None,
 ) -> DTensor:
     """
-    Returns a :class:`DTensor` filled with ``fill_value`` according to ``device_mesh`` and
-    ``placements``, with the shape defined by the argument ``size``.
+    Returns a :class:`DTensor` filled with ``fill_value``. The scalar value type should match
+        ``device_mesh.device_type``.
 
     Args:
         size (int...): a sequence of integers defining the shape of the output :class:`DTensor`.
@@ -1115,8 +1123,8 @@ def rand(  # type: ignore[no-untyped-def]
 ) -> DTensor:
     """
     Returns a :class:`DTensor` filled with random numbers from a uniform distribution
-    on the interval ``[0, 1)``. The shape of the tensor is defined by the variable
-    argument ``size``.
+        on the interval ``[0, 1)``. The shape of the tensor is defined by the variable
+        argument ``size``.
 
     Args:
         size (int...): a sequence of integers defining the shape of the output :class:`DTensor`.
@@ -1159,8 +1167,8 @@ def randn(  # type: ignore[no-untyped-def]
 ) -> DTensor:
     """
     Returns a :class:`DTensor` filled with random numbers from a normal distribution
-    with mean 0 and variance 1. The shape of the tensor is defined by the variable
-    argument ``size``.
+        with mean 0 and variance 1. The shape of the tensor is defined by the variable
+        argument ``size``.
 
     Args:
         size (int...): a sequence of integers defining the shape of the output :class:`DTensor`.

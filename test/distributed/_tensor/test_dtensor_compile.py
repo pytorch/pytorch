@@ -195,6 +195,22 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
+    def test_compiled_autograd(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            return x * x + 2
+
+        param = torch.randn(4, 4, requires_grad=True)
+        x = DTensor.from_local(param, mesh, [Shard(0)], run_check=False)
+
+        res = fn(x)
+        with torch._dynamo.utils.maybe_enable_compiled_autograd(
+            True, fullgraph=True, dynamic=False
+        ):
+            res.to_local().sum().backward()
+
     def test_dtensor_attribute_access_on_intermediate(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 

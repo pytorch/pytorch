@@ -70,7 +70,9 @@ class AutogradCompilerInstance:
             shape_env=self.shape_env,
         )
         self.fx_tracer = PythonKeyTracer()
-        self.proxy_mode = ProxyTorchDispatchMode(self.fx_tracer, "symbolic")
+        self.proxy_mode = ProxyTorchDispatchMode(
+            self.fx_tracer, "symbolic", pre_dispatch=True
+        )
         self.hooks_proxy: Optional[Proxy] = None
         self.graph_placeholders = ["inputs", "sizes", "scalars", "hooks"]
 
