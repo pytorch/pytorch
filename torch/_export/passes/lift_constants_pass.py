@@ -146,7 +146,7 @@ def lift_constants_pass(
         tuple(node.meta["val"] for node in gm.graph.nodes if node.op == "placeholder")
     )
 
-    first_user_input_loc, first_user_input = 0, None
+    first_user_input_loc, first_user_input = 0, next(iter(gm.graph.nodes))
     for node in gm.graph.nodes:
         if node.op == "placeholder" and node.name in graph_signature.user_inputs:
             first_user_input = node

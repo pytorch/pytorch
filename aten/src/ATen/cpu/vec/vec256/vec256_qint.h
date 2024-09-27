@@ -75,7 +75,7 @@ inline __m256i pack_saturate_and_clamp<int32_t>(
     int32_t /*min_val*/,
     int32_t /*max_val*/) {
   // This function is for linkage only, will not be used
-  AT_ERROR("pack_saturate_and_clamp<int32_t> is not supported");
+  TORCH_CHECK_STD_ERROR(false, "pack_saturate_and_clamp<int32_t> is not supported");
 }
 
 template <>
