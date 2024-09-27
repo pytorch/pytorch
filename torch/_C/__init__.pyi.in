@@ -1156,6 +1156,8 @@ def _set_sdp_use_mem_efficient(
 ) -> None: ...  # THPModule_setSDPUseMemEfficient
 def _get_math_sdp_enabled() -> _bool: ...  # THPModule_userEnabledMathSDP
 def _set_sdp_use_math(arg: _bool) -> None: ...  # THPModule_setSDPUseMath
+def _get_math_sdp_allow_fp16_bf16_reduction() -> _bool: ...  # THPModule_allowFP16BF16ReductionMathSDP
+def _set_math_sdp_allow_fp16_bf16_reduction(arg: _bool) -> None: ...  # THPModule_setAllowFP16BF16ReductionMathSDP
 def _get_overrideable_sdp_enabled() -> _bool: ...  # THPModule_userEnabledOverrideableSDP
 def _set_sdp_use_overrideable(arg: _bool) -> None: ...  # THPModule_setSDPUseOverrideable
 def _get_cudnn_sdp_enabled() -> _bool: ...  # THPModule_userEnabledMathSDP
