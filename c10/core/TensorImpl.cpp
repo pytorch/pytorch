@@ -82,7 +82,7 @@ TensorImpl::TensorImpl(
     const caffe2::TypeMeta data_type)
     // Use std::forward to suppress static analyzer false positive.
     : TensorImpl(
-          std::forward<Storage>(storage),
+          std::move(storage),
           key_set,
           data_type,
           storage.device()) {}
