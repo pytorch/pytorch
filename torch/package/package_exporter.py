@@ -232,7 +232,7 @@ class PackageExporter:
         if isinstance(f, (Path, str)):
             f = os.fspath(f)
             self.buffer: Optional[BinaryIO] = None
-        elif isinstance(f, BinaryIO):  # is a byte buffer
+        elif isinstance(f, io.IOBase):  # is a byte buffer
             self.buffer = f
         else:
             raise TypeError(
