@@ -583,7 +583,7 @@ Vectorized<float> inline fmsub(const Vectorized<float>& a, const Vectorized<floa
 // kernel for transposing mxn where m, n <= 16
 // M + (M + 1) / 2 * 2 + (M + 3) / 4 * 4 + (M + 7) / 8 * 8 + 2 * N instructions
 inline void transpose_mxn_16x16(const float* src, int64_t ld_src, float* dst, int64_t ld_dst, int M, int N) {
-  TORCH_CHECK(M <= 16 && N <= 16, "transpose_mxn<float> expects M, N <= 16.");
+  TORCH_CHECK_STD_ERROR(M <= 16 && N <= 16, "transpose_mxn<float> expects M, N <= 16.");
   // load from src to registers
   __m512 input[16];
   int i;

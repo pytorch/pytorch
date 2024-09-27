@@ -1350,7 +1350,7 @@ static inline void _transpose_mxn_half_32_32(__m512i r[], __m512i d[]) {
 template<>
 inline void transpose_mxn<BFloat16>(const BFloat16* src, int64_t ld_src, BFloat16* dst, int64_t ld_dst, int M, int N) {
   // load from src
-  TORCH_CHECK(M <= 32 && N <= 32, "transpose_mxn<BFloat16> expects M, N <= 32.");
+  TORCH_CHECK_STD_ERROR(M <= 32 && N <= 32, "transpose_mxn<BFloat16> expects M, N <= 32.");
   __m512i r[32];
   int i;
   if (N == 32) {
@@ -1391,7 +1391,7 @@ inline void transpose_mxn(const BFloat16* src, int64_t ld_src, BFloat16* dst, in
 
 template<>
 inline void transpose_mxn<Half>(const Half* src, int64_t ld_src, Half* dst, int64_t ld_dst, int M, int N) {
-  TORCH_CHECK(M <= 32 && N <= 32, "transpose_mxn<Half> expects M, N <= 32.");
+  TORCH_CHECK_STD_ERROR(M <= 32 && N <= 32, "transpose_mxn<Half> expects M, N <= 32.");
   // load from src
   __m512i r[32];
   int i;
