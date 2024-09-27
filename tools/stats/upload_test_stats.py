@@ -288,7 +288,10 @@ if __name__ == "__main__":
     if args.head_branch == "main" and args.head_repository == "pytorch/pytorch":
         # For jobs on main branch, upload everything.
         upload_workflow_stats_to_s3(
-            args.workflow_run_id, args.workflow_run_attempt, "test_run", remove_nan_inf(test_cases)
+            args.workflow_run_id,
+            args.workflow_run_attempt,
+            "test_run",
+            remove_nan_inf(test_cases),
         )
 
     upload_additional_info(args.workflow_run_id, args.workflow_run_attempt, test_cases)

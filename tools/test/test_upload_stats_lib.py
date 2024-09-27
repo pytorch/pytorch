@@ -341,7 +341,7 @@ class TestUploadStats(unittest.TestCase):
             (float("inf"), '"inf"', "Infinity"),
             (float("nan"), '"nan"', "NaN"),
             ({1: float("inf")}, '{"1": "inf"}', '{"1": Infinity}'),
-            ([float("nan")], '["nan"]', '[NaN]'),
+            ([float("nan")], '["nan"]', "[NaN]"),
             ({1: [float("nan")]}, '{"1": ["nan"]}', '{"1": [NaN]}'),
         ]
 
@@ -358,6 +358,7 @@ class TestUploadStats(unittest.TestCase):
                 unclean,
                 f"Expected {unclean} when input is {unclean}, got {unclean_output}",
             )
+
 
 if __name__ == "__main__":
     unittest.main()
