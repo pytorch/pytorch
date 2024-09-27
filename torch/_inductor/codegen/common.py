@@ -232,6 +232,7 @@ def get_wrapper_codegen_for_device(device: str, cpp_wrapper: bool = False):
 def init_backend_registration():
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
+    from .cpp_wrapper_cpu_array_ref import CppWrapperCpuArrayRef
     from .cpp_wrapper_gpu import CppWrapperGpu
     from .cuda_combined_scheduling import CUDACombinedScheduling
     from .halide import HalideScheduling
@@ -239,12 +240,16 @@ def init_backend_registration():
     from .wrapper import PythonWrapperCodegen
 
     if get_scheduling_for_device("cpu") is None:
-        cpu_backends = {"cpp": CppScheduling, "halide": HalideScheduling}
+        cpu_backends = {
+            "cpp": CppScheduling,
+            "halide": HalideScheduling,
+            "triton": TritonScheduling,
+        }
         register_backend_for_device(
             "cpu",
             lambda *args, **kwargs: cpu_backends[config.cpu_backend](*args, **kwargs),
             PythonWrapperCodegen,
-            CppWrapperCpu,
+            CppWrapperCpuArrayRef if config.allow_stack_allocation else CppWrapperCpu,
         )
 
     if get_scheduling_for_device("cuda") is None:
@@ -301,6 +306,7 @@ def get_device_op_overrides(device: str):
     assert isinstance(device, str)
 
     if not device_op_overrides_dict.keys():
+        from . import cpu_device_op_overrides  # noqa: F401
         from .cuda import device_op_overrides  # noqa: F401
         from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
