@@ -4254,7 +4254,7 @@ class TestMPS(TestCaseMPS):
             self.assertFalse(x2.is_contiguous())
             return torch.concat((x1, x2), dim=dim)
         for dtype in MPS_DTYPES:
-            if dtype == torch.bool:
+            if dtype == torch.bool or (dtype.is_complex and product_version < 14.0):
                 continue
             data = torch.arange(48).to(dtype=dtype).reshape(1, 2, 4, 6)
             data = data.to(memory_format=torch.channels_last)
