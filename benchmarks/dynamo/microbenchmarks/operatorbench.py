@@ -25,6 +25,12 @@ aten = torch.ops.aten
 profile_enabled = False
 inductor_config_options = {
     "halide": {"cpu_backend": "halide", "cuda_backend": "halide"},
+    "autotune": {
+        "max_autotune_pointwise": True,
+        "max_autotune": True,
+        "max_autotune_gemm": True,
+        "coordinate_descent_tuning": True,
+    },
 }
 
 
