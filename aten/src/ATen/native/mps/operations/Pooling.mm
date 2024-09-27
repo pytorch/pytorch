@@ -312,7 +312,7 @@ static void avg_pool2d_template(const Tensor& input,
       if (cachedGraph.divisorTensor) {
         // workaround: custom divisor isn't supported by MPS backend, so we scale manually
         return [mpsGraph multiplicationWithPrimaryTensor:avgPoolTensor
-                                         secondaryTensor:cachedGraph.divisorTensor
+                                         secondaryTensor:mps::castMPSTensor(mpsGraph, cachedGraph.divisorTensor, [avgPoolTensor dataType])
                                                     name:nil];
       } else {
         return avgPoolTensor;
@@ -321,7 +321,7 @@ static void avg_pool2d_template(const Tensor& input,
       MPSGraphTensor* scaledGradTensor = cachedGraph.gradOutputTensor;
       if (cachedGraph.divisorTensor) {
         scaledGradTensor = [mpsGraph multiplicationWithPrimaryTensor:cachedGraph.gradOutputTensor
-                                                     secondaryTensor:cachedGraph.divisorTensor
+                                                     secondaryTensor:mps::castMPSTensor(mpsGraph, cachedGraph.divisorTensor, [scaledGradTensor dataType])
                                                                 name:nil];
       }
       MPSGraphTensor* avgPoolTensor = [mpsGraph avgPooling2DGradientWithGradientTensor:scaledGradTensor

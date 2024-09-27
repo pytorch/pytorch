@@ -1007,8 +1007,6 @@ def mps_ops_modifier(ops):
 
     SKIPLIST = {
         # Unsupported
-        # input types 'tensor<1x3x9x9xf16>' and 'tensor<1xf32>' are not broadcast compatible
-        'nn.functional.avg_pool2d': [torch.float16],
 
         # This doesn't work on M1, but is partially working on M2 with the exception of torch.float16
         'nn.functional.conv3d': None,
@@ -12024,6 +12022,7 @@ class TestConsistency(TestCaseMPS):
         'var_mean_unbiased',
         'acosh', 'asinh', 'asin',
         'masked.std',
+        'nn.functional.avg_pool2d', # NS: Only for backward pass
         'nn.functional.normalize',
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
