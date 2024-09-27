@@ -577,7 +577,13 @@ def decide_compile_threads() -> int:
         return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
     elif sys.platform == "win32":
         return 1
-    elif is_fbcode():
+    # TODO: For internal rollout, we use a killswitch to disable. The justknob should
+    # not be performed at import, however. So for fbcode, we assign compile_threads to
+    # None below and call this method lazily in async_compile.py. Remove this after
+    # rollout completes.
+    elif is_fbcode() and not torch._utils_internal.justknobs_check(
+        "pytorch/inductor:enable_parallel_compile"
+    ):
         return 1
     else:
         cpu_count = (
@@ -589,7 +595,8 @@ def decide_compile_threads() -> int:
         return min(32, cpu_count)
 
 
-compile_threads = decide_compile_threads()
+# TODO: Set directly after internal rollout.
+compile_threads: Optional[int] = None if is_fbcode() else decide_compile_threads()
 
 # gemm autotuning global cache dir
 if is_fbcode():
@@ -920,7 +927,9 @@ class triton:
     # Note: This is orthogonal to descriptive_names - this is deciding whether
     # our triton kernel names should all be `triton_` (to maximize caching) or
     # whether they should be unique.
-    unique_kernel_names = os.environ.get("TORCHINDUCTOR_UNIQUE_KERNEL_NAMES") == "1"
+    unique_kernel_names = (
+        os.environ.get("TORCHINDUCTOR_UNIQUE_KERNEL_NAMES", "1") == "1"
+    )
 
     # should we put op names in kernel names
     # False: No special names (just triton__1, triton__2, etc.)
@@ -1142,7 +1151,7 @@ class rocm:
     use_preselected_instances: bool = False
 
 
-# Backend to use for CPU codegen either "cpp" or "halide" (experimental)
+# Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental)
 cpu_backend = "cpp"
 
 # Backend to use for CUDA codegen either "triton" or "halide" (experimental)
