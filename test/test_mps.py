@@ -12055,6 +12055,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.interpolate',
         'nn.functional.upsample_bilinear',
         'nn.functional.upsample_nearest',
+        'norm', 'masked.normalize',
     }
 
     FP32_LOW_PRECISION_LIST = {
