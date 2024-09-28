@@ -11,7 +11,7 @@ import pickle
 import shutil
 import time
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.utils import counters, get_chromium_event_logger
@@ -39,7 +39,7 @@ from .runtime_wrappers import (
     RuntimeWrapper,
     SubclassMeta,
 )
-from .schemas import AOTConfig, ViewAndMutationMeta  # noqa: F401
+from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noqa: F401
 
 
 if TYPE_CHECKING:
@@ -343,6 +343,12 @@ class AOTAutogradCacheEntry:
     # Used by RuntimeWrapepr
     indices_of_inps_to_detach: List[int]
 
+    # Time taken to trace/compile the forward
+    # forward_time_taken includes AOTAutograd tracing time + inductor compilation time
+    # backward_time_taken is essentially just the time inductor took to compile
+    forward_time_taken_ns: int
+    backward_time_taken_ns: int
+
     # Turn cache entry into the original callable
     def wrap_post_compile(
         self,
@@ -489,6 +495,7 @@ class AOTAutogradCache:
         """
         gm = mod.gm if isinstance(mod, torch._dynamo.utils.GmWrapper) else mod
         compiled_fn = None
+        cache_info: Dict[str, Any] = {}
         cache_key = None
         debug_lines: List[str] = []
         cache_event_time = time.time_ns()
@@ -503,6 +510,15 @@ class AOTAutogradCache:
                 counters["aot_autograd"]["autograd_cache_hit"] += 1
                 cache_state = "hit"
                 cache_event_time = time.time_ns()
+                forward_time_saved = entry.forward_time_taken_ns // 1e6
+                backward_time_saved = entry.backward_time_taken_ns // 1e6
+                cache_info.update(
+                    {
+                        "forward_time_saved_ms": forward_time_saved,
+                        "backward_time_saved_ms": backward_time_saved,
+                        "time_saved_ms": forward_time_saved + backward_time_saved,
+                    }
+                )
             if compiled_fn is None:
                 log.info("AOTAutograd cache miss for key %s", cache_key)
                 counters["aot_autograd"]["autograd_cache_miss"] += 1
@@ -525,16 +541,19 @@ class AOTAutogradCache:
                 raise e
         if compiled_fn is None:
             # Set the cache key so we can save a cache result later
-            aot_config.cache_key = cache_key
+            if cache_key is not None:
+                aot_config.cache_info = AOTAutogradCacheInfo(cache_key, time.time_ns())
             compiled_fn = dispatch_and_compile()
-        cache_args = {
-            "key": cache_key,
-            "cache_state": cache_state,
-            "components": debug_lines,
-        }
+        cache_info.update(
+            {
+                "key": cache_key,
+                "cache_state": cache_state,
+                "components": debug_lines,
+            }
+        )
         chromium_log = get_chromium_event_logger()
         chromium_log.log_instant_event(
-            f"autograd_cache_{cache_state}", cache_event_time, metadata=cache_args
+            f"autograd_cache_{cache_state}", cache_event_time, metadata=cache_info
         )
         torch._logging.trace_structured(
             "artifact",
@@ -542,7 +561,7 @@ class AOTAutogradCache:
                 "name": "aotautograd_cache_hash",
                 "encoding": "json",
             },
-            payload_fn=lambda: json.dumps(cache_args),
+            payload_fn=lambda: json.dumps(cache_info),
         )
         return compiled_fn
 
