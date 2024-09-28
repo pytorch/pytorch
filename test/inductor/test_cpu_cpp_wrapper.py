@@ -105,7 +105,7 @@ def make_test_case(
     assert callable(func), "not a callable"
     func = slowTest(func) if slow else func
 
-    @config.patch(cpp_wrapper=True, search_autotune_cache=False, abi_compatible=True)
+    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
     def fn(self):
         tests.setUpClass()
         tests.setUp()
@@ -142,6 +142,7 @@ def make_test_case(
 
 
 if RUN_CPU:
+    config.abi_compatible = True
 
     class BaseTest(NamedTuple):
         name: str
@@ -167,16 +168,12 @@ if RUN_CPU:
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
             func_inputs=[
-                (
-                    None
-                    if config.abi_compatible
-                    else ["op_mkldnn__convolution_pointwise_binary.call"]
-                ),
-                (
-                    None
-                    if config.abi_compatible
-                    else ["op_mkldnn__convolution_pointwise__binary.call"]
-                ),
+                None
+                if config.abi_compatible
+                else ["op_mkldnn__convolution_pointwise_binary.call"],
+                None
+                if config.abi_compatible
+                else ["op_mkldnn__convolution_pointwise__binary.call"],
             ],
         ),
         BaseTest(
@@ -185,16 +182,12 @@ if RUN_CPU:
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
             func_inputs=[
-                (
-                    None
-                    if config.abi_compatible
-                    else ["op_mkldnn__convolution_pointwise__binary.call"]
-                ),
-                (
-                    None
-                    if config.abi_compatible
-                    else ["op_mkldnn__convolution_pointwise_binary.call"]
-                ),
+                None
+                if config.abi_compatible
+                else ["op_mkldnn__convolution_pointwise__binary.call"],
+                None
+                if config.abi_compatible
+                else ["op_mkldnn__convolution_pointwise_binary.call"],
             ],
         ),
         BaseTest(
@@ -293,15 +286,13 @@ if RUN_CPU:
             test_mkldnn_pattern_matcher.TestDynamicPatternMatcher(),
             condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
             func_inputs=[
-                (
-                    None
-                    if config.abi_compatible
-                    else [
-                        "op_onednn_qconv2d_pointwise_.call",
-                        "op_quantized_max_pool2d_.call",
-                        "op_onednn_qlinear_pointwise_tensor.call",
-                    ]
-                ),
+                None
+                if config.abi_compatible
+                else [
+                    "op_onednn_qconv2d_pointwise_.call",
+                    "op_quantized_max_pool2d_.call",
+                    "op_onednn_qlinear_pointwise_tensor.call",
+                ],
             ],
         ),
         BaseTest(

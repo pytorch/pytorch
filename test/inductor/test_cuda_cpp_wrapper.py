@@ -81,7 +81,7 @@ def make_test_case(
     assert callable(func), "not a callable"
     func = slowTest(func) if slow else func
 
-    @config.patch(cpp_wrapper=True, search_autotune_cache=False, abi_compatible=True)
+    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
     def fn(self):
         tests.setUpClass()
         tests.setUp()
@@ -118,6 +118,7 @@ def make_test_case(
 
 
 if RUN_CUDA:
+    config.abi_compatible = True
 
     class BaseTest(NamedTuple):
         name: str
