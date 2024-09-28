@@ -254,9 +254,9 @@ class _PipelineStageBase(ABC):
     def _prepare_forward_infra(
         self,
         num_microbatches: int,
-        args: Optional[Tuple[Any, ...]] = None,
+        args: Tuple[Any, ...],
         kwargs: Optional[Dict[str, Any]] = None,
-    ) -> Optional[Tuple[Any, ...]]:
+    ) -> Tuple[Any, ...]:
         raise NotImplementedError
 
     def _prepare_backward_infra(self, num_microbatches: int):
@@ -850,9 +850,9 @@ class _PipelineStage(_PipelineStageBase):
     def _prepare_forward_infra(
         self,
         num_microbatches: int,
-        args: Optional[Tuple[Any, ...]] = None,
+        args: Tuple[Any, ...],
         kwargs: Optional[Dict[str, Any]] = None,
-    ) -> Optional[Tuple[Any, ...]]:
+    ) -> Tuple[Any, ...]:
         """
         Create send/recv infrastructures for activations (during forward)
         """
@@ -864,7 +864,7 @@ class _PipelineStage(_PipelineStageBase):
 
         # Send info during forward for each activation
         self.act_send_info = self._create_act_send_info()
-        return None
+        return tuple()
 
     def get_stage_index_of_submod(
         self,
@@ -1280,6 +1280,12 @@ class PipelineStage(_PipelineStageBase):
                 "Otherwise, shape inference will be performed at runtime"
             )
         else:
+            logger.warning(
+                "Deprecation warning: passing input_args and performing init-time shape inference is deprecated. "
+                "PipelineStage now supports runtime shape inference using the real inputs provided to schedule step(). "
+                "Either delete `input_args` arg to `PipelineStage` to opt-into runtime shape inference, "
+                "or additionally pass `output_args` to `PipelineStage` to fully override shape inference. "
+            )
             self.inputs_meta = (
                 (input_args,) if isinstance(input_args, torch.Tensor) else input_args
             )
@@ -1320,7 +1326,7 @@ class PipelineStage(_PipelineStageBase):
 
     def _shape_inference(
         self,
-        args: Optional[Tuple[Any, ...]] = None,
+        args: Tuple[Any, ...],
         kwargs: Optional[Dict[str, Any]] = None,
     ):
         prev_stage_same_rank = (
@@ -1331,13 +1337,12 @@ class PipelineStage(_PipelineStageBase):
         )
         if kwargs is None:
             kwargs = {}
-
+        assert args is not None, "Args may be an empty list but not None"
         if self.is_first or prev_stage_same_rank:
-            assert args is not None and len(args)
             args = tree_map_only(torch.Tensor, lambda x: x.to("meta"), args)
         else:
             assert (
-                args is None
+                len(args) == 0
             ), "Can't supply input args for shape inference on non-first stage"
             objects = [None]
             logger.debug(
@@ -1346,8 +1351,9 @@ class PipelineStage(_PipelineStageBase):
             dist.recv_object_list(
                 objects, src=self.prev_stage, group=self.group, device=self.device
             )
-            args = objects[0]
-            assert isinstance(args, Iterable)
+            recv_args = objects[0]
+            assert isinstance(recv_args, tuple), type(recv_args)
+            args = recv_args
 
         # cache input shapes for use during recv buffer allocation
         self.inputs_meta = args
@@ -1367,7 +1373,7 @@ class PipelineStage(_PipelineStageBase):
         # communicate meta outputs not real outputs for two reasons
         # 1 - its faster (esp. since obj coll pickles tensor data!)
         # 2 - avoid activating a cuda context for the src rank when unpickling on the recv end!
-        outputs_meta = tree_map_only(torch.Tensor, lambda x: x.to("meta"), outputs)
+        outputs_meta = tuple(tree_map_only(torch.Tensor, lambda x: x.to("meta"), outputs))
         self._configure_outputs_meta(outputs_meta)
 
         if next_stage_same_rank or self.is_last:
@@ -1385,20 +1391,20 @@ class PipelineStage(_PipelineStageBase):
                 group=self.group,
                 device=self.device,
             )
-            outputs_meta = None
+            outputs_meta = tuple()
 
         return outputs_meta
 
     def _prepare_forward_infra(
         self,
         num_microbatches: int,
-        args: Optional[Tuple[Any, ...]] = None,
+        args: Tuple[Any, ...],
         kwargs: Optional[Dict[str, Any]] = None,
-    ) -> Optional[Tuple[Any, ...]]:
+    ) -> Tuple[Any, ...]:
         # TODO move self.device to an argument from step API (from its input tensors)?
         assert num_microbatches is not None, "TODO fix num_microbatches"
 
-        outputs = None
+        outputs: Tuple[Any, ...] = tuple()
         if self.inputs_meta is None:
             outputs = self._shape_inference(args, kwargs)
 

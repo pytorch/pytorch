@@ -1095,10 +1095,10 @@ class PipelineScheduleMulti(_PipelineSchedule):
         self.pipeline_order: Dict[int, List[Optional[_Action]]] = {}
         self.use_full_backward = use_full_backward
 
-    def _initialize_stages(self, args, kwargs):
+    def _initialize_stages(self, args: Tuple[Any, ...], kwargs):
         # may be 'none' value (if this stage sends its output shapes to the next stage via P2P)
         # or real value (if this stage and next stage are on the same device)
-        next_stage_args = None
+        next_stage_args: Tuple[Any, ...] = tuple()
         for stage in self._stages:
             if stage.is_first:
                 next_stage_args = stage._prepare_forward_infra(
