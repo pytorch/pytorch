@@ -5,9 +5,9 @@ if [[ -n "${CUDNN_VERSION}" ]]; then
     mkdir tmp_cudnn
     pushd tmp_cudnn
     if [[ ${CUDA_VERSION:0:2} == "12" ]]; then
-        CUDNN_NAME="cudnn-linux-x86_64-9.3.0.75_cuda12-archive"
+        CUDNN_NAME="cudnn-linux-x86_64-9.4.0.58_cuda12-archive"
     elif [[ ${CUDA_VERSION:0:2} == "11" ]]; then
-        CUDNN_NAME="cudnn-linux-x86_64-9.3.0.75_cuda11-archive"
+        CUDNN_NAME="cudnn-linux-x86_64-9.4.0.58_cuda11-archive"
     else
         print "Unsupported CUDA version ${CUDA_VERSION}"
         exit 1

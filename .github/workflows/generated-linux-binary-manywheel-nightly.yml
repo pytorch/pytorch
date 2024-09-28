@@ -38,19 +38,29 @@ concurrency:
 
 jobs:
 <<<<<<< HEAD
+<<<<<<< HEAD
   get-label-type:
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+=======
+  get-label-type:
+    name: get-label-type
+    uses: ./.github/workflows/_runner-determinator.yml
+>>>>>>> 2e46d77b466 (Try to update cudnn 9.4)
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+<<<<<<< HEAD
 =======
 >>>>>>> c34338fefef ([BE] Update CUDNN to 9.1.1.17)
+=======
+>>>>>>> 2e46d77b466 (Try to update cudnn 9.4)
   manywheel-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -60,15 +70,18 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cpu
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-cpu-build
+    needs:
+      - manywheel-py3_9-cpu-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -79,10 +92,11 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -101,6 +115,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu
     secrets:
@@ -112,6 +127,7 @@ jobs:
   manywheel-py3_9-cpu-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -122,15 +138,18 @@ jobs:
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-cpu-cxx11-abi-build
+    needs:
+      - manywheel-py3_9-cpu-cxx11-abi-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -142,10 +161,11 @@ jobs:
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -165,6 +185,7 @@ jobs:
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-cxx11-abi
     secrets:
@@ -176,6 +197,7 @@ jobs:
   manywheel-py3_9-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -186,16 +208,19 @@ jobs:
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda11_8
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.4.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-cuda11_8-build
+    needs:
+      - manywheel-py3_9-cuda11_8-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -207,10 +232,11 @@ jobs:
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda11_8
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -230,76 +256,9 @@ jobs:
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda11_8
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
-  manywheel-py3_9-cuda11_8-split-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu118
-      GPU_ARCH_VERSION: 11.8
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.9"
-      runner_prefix: amz2023.
-      build_name: manywheel-py3_9-cuda11_8-split
-      build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_9-cuda11_8-split-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-cuda11_8-split-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu118
-      GPU_ARCH_VERSION: 11.8
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.9"
-      build_name: manywheel-py3_9-cuda11_8-split
-      build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_9-cuda11_8-split-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_9-cuda11_8-split-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu118
-      GPU_ARCH_VERSION: 11.8
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.9"
-      build_name: manywheel-py3_9-cuda11_8-split
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -309,6 +268,7 @@ jobs:
   manywheel-py3_9-cuda12_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -319,16 +279,19 @@ jobs:
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda12_1
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.4.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda12_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-cuda12_1-build
+    needs:
+      - manywheel-py3_9-cuda12_1-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -340,10 +303,11 @@ jobs:
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_1
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -363,76 +327,9 @@ jobs:
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_1
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
-  manywheel-py3_9-cuda12_1-split-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.9"
-      runner_prefix: amz2023.
-      build_name: manywheel-py3_9-cuda12_1-split
-      build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_9-cuda12_1-split-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-cuda12_1-split-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.9"
-      build_name: manywheel-py3_9-cuda12_1-split
-      build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_9-cuda12_1-split-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_9-cuda12_1-split-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.9"
-      build_name: manywheel-py3_9-cuda12_1-split
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -442,6 +339,7 @@ jobs:
   manywheel-py3_9-cuda12_4-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -452,10 +350,12 @@ jobs:
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda12_4
       build_environment: linux-binary-manywheel
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -469,11 +369,16 @@ jobs:
 =======
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.2.65; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.0.44; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.119; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.0.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.0.142; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64'
 >>>>>>> 04d46d7008d (Update CUDNN to 9.3.0.75)
+=======
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.4.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+>>>>>>> 2e46d77b466 (Try to update cudnn 9.4)
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda12_4-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-cuda12_4-build
+    needs:
+      - manywheel-py3_9-cuda12_4-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -485,10 +390,11 @@ jobs:
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_4
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -508,180 +414,9 @@ jobs:
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_4
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
-  manywheel-py3_9-cuda12_4-split-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu124
-      GPU_ARCH_VERSION: 12.4
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.9"
-      runner_prefix: amz2023.
-      build_name: manywheel-py3_9-cuda12_4-split
-      build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.2.65; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.0.44; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.119; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.0.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.0.142; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64'
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_9-cuda12_4-split-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-cuda12_4-split-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu124
-      GPU_ARCH_VERSION: 12.4
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.9"
-      build_name: manywheel-py3_9-cuda12_4-split
-      build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_9-cuda12_4-split-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_9-cuda12_4-split-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu124
-      GPU_ARCH_VERSION: 12.4
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.9"
-      build_name: manywheel-py3_9-cuda12_4-split
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
-  manywheel-py3_9-rocm6_0-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.0
-      GPU_ARCH_VERSION: 6.0
-      GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
-      DESIRED_PYTHON: "3.9"
-      runner_prefix: amz2023.
-      build_name: manywheel-py3_9-rocm6_0
-      build_environment: linux-binary-manywheel
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_9-rocm6_0-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-rocm6_0-build
-    runs-on: linux.rocm.gpu
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.0
-      GPU_ARCH_VERSION: 6.0
-      GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
-      DESIRED_PYTHON: "3.9"
-    steps:
-      - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v3
-        name: Download Build Artifacts
-        with:
-          name: manywheel-py3_9-rocm6_0
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          quiet-checkout: true
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: ROCm set GPU_FLAG
-        run: |
-          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-      - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-        with:
-          docker-image: pytorch/manylinux-builder:rocm6.0-main
-      - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
-      - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
-  manywheel-py3_9-rocm6_0-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_9-rocm6_0-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.0
-      GPU_ARCH_VERSION: 6.0
-      GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
-      DESIRED_PYTHON: "3.9"
-      build_name: manywheel-py3_9-rocm6_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -691,6 +426,7 @@ jobs:
   manywheel-py3_9-rocm6_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -701,15 +437,18 @@ jobs:
       GPU_ARCH_VERSION: 6.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-rocm6_1
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-rocm6_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-rocm6_1-build
+    needs:
+      - manywheel-py3_9-rocm6_1-build
+      - get-label-type
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
@@ -723,11 +462,12 @@ jobs:
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_9-rocm6_1
@@ -784,8 +524,119 @@ jobs:
       GPU_ARCH_VERSION: 6.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-rocm6_1
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
+    uses: ./.github/workflows/_binary-upload.yml
+
+  manywheel-py3_9-rocm6_2-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.2
+      GPU_ARCH_VERSION: 6.2
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      use_split_build: False
+      DESIRED_PYTHON: "3.9"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build_name: manywheel-py3_9-rocm6_2
+      build_environment: linux-binary-manywheel
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  manywheel-py3_9-rocm6_2-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - manywheel-py3_9-rocm6_2-build
+      - get-label-type
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.2
+      GPU_ARCH_VERSION: 6.2
+      GPU_ARCH_TYPE: rocm
+      SKIP_ALL_TESTS: 1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      use_split_build: False
+      DESIRED_PYTHON: "3.9"
+    steps:
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_9-rocm6_2
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          quiet-checkout: true
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+          quiet-checkout: true
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux-builder:rocm6.2-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
+  manywheel-py3_9-rocm6_2-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_9-rocm6_2-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.2
+      GPU_ARCH_VERSION: 6.2
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      use_split_build: False
+      DESIRED_PYTHON: "3.9"
+      build_name: manywheel-py3_9-rocm6_2
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -795,6 +646,7 @@ jobs:
   manywheel-py3_9-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -804,15 +656,18 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-xpu
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-xpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-xpu-build
+    needs:
+      - manywheel-py3_9-xpu-build
+      - get-label-type
     runs-on: linux.idc.xpu
     timeout-minutes: 240
     env:
@@ -825,6 +680,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
     permissions:
       id-token: write
@@ -841,7 +697,7 @@ jobs:
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_9-xpu
@@ -894,6 +750,7 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-xpu
     secrets:
@@ -905,6 +762,7 @@ jobs:
   manywheel-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -914,15 +772,18 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-cpu
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_10-cpu-build
+    needs:
+      - manywheel-py3_10-cpu-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -933,10 +794,11 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -955,6 +817,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu
     secrets:
@@ -966,6 +829,7 @@ jobs:
   manywheel-py3_10-cpu-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -976,15 +840,18 @@ jobs:
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_10-cpu-cxx11-abi-build
+    needs:
+      - manywheel-py3_10-cpu-cxx11-abi-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -996,10 +863,11 @@ jobs:
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1019,6 +887,7 @@ jobs:
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-cxx11-abi
     secrets:
@@ -1030,6 +899,7 @@ jobs:
   manywheel-py3_10-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1040,16 +910,19 @@ jobs:
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-cuda11_8
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.4.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_10-cuda11_8-build
+    needs:
+      - manywheel-py3_10-cuda11_8-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -1061,10 +934,11 @@ jobs:
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda11_8
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1084,76 +958,9 @@ jobs:
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda11_8
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
-  manywheel-py3_10-cuda11_8-split-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu118
-      GPU_ARCH_VERSION: 11.8
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.10"
-      runner_prefix: amz2023.
-      build_name: manywheel-py3_10-cuda11_8-split
-      build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_10-cuda11_8-split-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_10-cuda11_8-split-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu118
-      GPU_ARCH_VERSION: 11.8
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-cuda11_8-split
-      build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_10-cuda11_8-split-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_10-cuda11_8-split-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu118
-      GPU_ARCH_VERSION: 11.8
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-cuda11_8-split
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -1163,6 +970,7 @@ jobs:
   manywheel-py3_10-cuda12_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1173,16 +981,19 @@ jobs:
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-cuda12_1
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.4.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_10-cuda12_1-build
+    needs:
+      - manywheel-py3_10-cuda12_1-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -1194,10 +1005,11 @@ jobs:
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda12_1
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1217,143 +1029,9 @@ jobs:
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda12_1
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
-  manywheel-py3_10-cuda12_1-split-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.10"
-      runner_prefix: amz2023.
-      build_name: manywheel-py3_10-cuda12_1-split
-      build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_10-cuda12_1-split-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_10-cuda12_1-split-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-cuda12_1-split
-      build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_10-cuda12_1-split-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_10-cuda12_1-split-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-cuda12_1-split
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
-  manywheel-py3_10-cuda12_1-full-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
-      use_split_build: False
-      DESIRED_PYTHON: "3.10"
-      runner_prefix: amz2023.
-      build_name: manywheel-py3_10-cuda12_1-full
-      build_environment: linux-binary-manywheel
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_10-cuda12_1-full-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_10-cuda12_1-full-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
-      use_split_build: False
-      DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-cuda12_1-full
-      build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_10-cuda12_1-full-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_10-cuda12_1-full-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
-      use_split_build: False
-      DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-cuda12_1-full
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -1363,6 +1041,7 @@ jobs:
   manywheel-py3_10-cuda12_4-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1373,10 +1052,12 @@ jobs:
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-cuda12_4
       build_environment: linux-binary-manywheel
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -1390,11 +1071,16 @@ jobs:
 =======
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.2.65; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.0.44; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.119; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.0.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.0.142; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64'
 >>>>>>> 04d46d7008d (Update CUDNN to 9.3.0.75)
+=======
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.4.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+>>>>>>> 2e46d77b466 (Try to update cudnn 9.4)
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_4-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_10-cuda12_4-build
+    needs:
+      - manywheel-py3_10-cuda12_4-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -1406,10 +1092,11 @@ jobs:
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda12_4
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1429,180 +1116,9 @@ jobs:
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda12_4
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
-  manywheel-py3_10-cuda12_4-split-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu124
-      GPU_ARCH_VERSION: 12.4
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.10"
-      runner_prefix: amz2023.
-      build_name: manywheel-py3_10-cuda12_4-split
-      build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.2.65; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.0.44; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.119; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.0.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.0.142; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64'
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_10-cuda12_4-split-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_10-cuda12_4-split-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu124
-      GPU_ARCH_VERSION: 12.4
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-cuda12_4-split
-      build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_10-cuda12_4-split-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_10-cuda12_4-split-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu124
-      GPU_ARCH_VERSION: 12.4
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-cuda12_4-split
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
-  manywheel-py3_10-rocm6_0-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.0
-      GPU_ARCH_VERSION: 6.0
-      GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
-      DESIRED_PYTHON: "3.10"
-      runner_prefix: amz2023.
-      build_name: manywheel-py3_10-rocm6_0
-      build_environment: linux-binary-manywheel
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_10-rocm6_0-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_10-rocm6_0-build
-    runs-on: linux.rocm.gpu
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.0
-      GPU_ARCH_VERSION: 6.0
-      GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
-      DESIRED_PYTHON: "3.10"
-    steps:
-      - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v3
-        name: Download Build Artifacts
-        with:
-          name: manywheel-py3_10-rocm6_0
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          quiet-checkout: true
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: ROCm set GPU_FLAG
-        run: |
-          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-      - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-        with:
-          docker-image: pytorch/manylinux-builder:rocm6.0-main
-      - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
-      - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
-  manywheel-py3_10-rocm6_0-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_10-rocm6_0-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.0
-      GPU_ARCH_VERSION: 6.0
-      GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
-      DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-rocm6_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -1612,6 +1128,7 @@ jobs:
   manywheel-py3_10-rocm6_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1622,15 +1139,18 @@ jobs:
       GPU_ARCH_VERSION: 6.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-rocm6_1
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-rocm6_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_10-rocm6_1-build
+    needs:
+      - manywheel-py3_10-rocm6_1-build
+      - get-label-type
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
@@ -1644,11 +1164,12 @@ jobs:
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_10-rocm6_1
@@ -1705,8 +1226,119 @@ jobs:
       GPU_ARCH_VERSION: 6.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-rocm6_1
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
+    uses: ./.github/workflows/_binary-upload.yml
+
+  manywheel-py3_10-rocm6_2-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.2
+      GPU_ARCH_VERSION: 6.2
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      use_split_build: False
+      DESIRED_PYTHON: "3.10"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build_name: manywheel-py3_10-rocm6_2
+      build_environment: linux-binary-manywheel
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  manywheel-py3_10-rocm6_2-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - manywheel-py3_10-rocm6_2-build
+      - get-label-type
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.2
+      GPU_ARCH_VERSION: 6.2
+      GPU_ARCH_TYPE: rocm
+      SKIP_ALL_TESTS: 1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      use_split_build: False
+      DESIRED_PYTHON: "3.10"
+    steps:
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_10-rocm6_2
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          quiet-checkout: true
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+          quiet-checkout: true
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux-builder:rocm6.2-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
+  manywheel-py3_10-rocm6_2-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_10-rocm6_2-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.2
+      GPU_ARCH_VERSION: 6.2
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      use_split_build: False
+      DESIRED_PYTHON: "3.10"
+      build_name: manywheel-py3_10-rocm6_2
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -1716,6 +1348,7 @@ jobs:
   manywheel-py3_10-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1725,15 +1358,18 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-xpu
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-xpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_10-xpu-build
+    needs:
+      - manywheel-py3_10-xpu-build
+      - get-label-type
     runs-on: linux.idc.xpu
     timeout-minutes: 240
     env:
@@ -1746,6 +1382,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
     permissions:
       id-token: write
@@ -1762,7 +1399,7 @@ jobs:
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_10-xpu
@@ -1815,6 +1452,7 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-xpu
     secrets:
@@ -1826,6 +1464,7 @@ jobs:
   manywheel-py3_11-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1835,15 +1474,18 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-cpu
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_11-cpu-build
+    needs:
+      - manywheel-py3_11-cpu-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -1854,10 +1496,11 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1876,6 +1519,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu
     secrets:
@@ -1887,6 +1531,7 @@ jobs:
   manywheel-py3_11-cpu-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1897,15 +1542,18 @@ jobs:
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_11-cpu-cxx11-abi-build
+    needs:
+      - manywheel-py3_11-cpu-cxx11-abi-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -1917,10 +1565,11 @@ jobs:
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -1940,6 +1589,7 @@ jobs:
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-cxx11-abi
     secrets:
@@ -1951,6 +1601,7 @@ jobs:
   manywheel-py3_11-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -1961,16 +1612,19 @@ jobs:
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-cuda11_8
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.4.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_11-cuda11_8-build
+    needs:
+      - manywheel-py3_11-cuda11_8-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -1982,10 +1636,11 @@ jobs:
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda11_8
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -2005,76 +1660,9 @@ jobs:
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda11_8
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
-  manywheel-py3_11-cuda11_8-split-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu118
-      GPU_ARCH_VERSION: 11.8
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.11"
-      runner_prefix: amz2023.
-      build_name: manywheel-py3_11-cuda11_8-split
-      build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_11-cuda11_8-split-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_11-cuda11_8-split-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu118
-      GPU_ARCH_VERSION: 11.8
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.11"
-      build_name: manywheel-py3_11-cuda11_8-split
-      build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_11-cuda11_8-split-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_11-cuda11_8-split-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu118
-      GPU_ARCH_VERSION: 11.8
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.11"
-      build_name: manywheel-py3_11-cuda11_8-split
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -2084,6 +1672,7 @@ jobs:
   manywheel-py3_11-cuda12_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -2094,16 +1683,19 @@ jobs:
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-cuda12_1
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.4.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_11-cuda12_1-build
+    needs:
+      - manywheel-py3_11-cuda12_1-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -2115,10 +1707,11 @@ jobs:
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_1
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -2138,6 +1731,7 @@ jobs:
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_1
     secrets:
@@ -2146,9 +1740,10 @@ jobs:
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  manywheel-py3_11-cuda12_1-split-build:
+  manywheel-py3_11-cuda12_1-full-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -2159,17 +1754,18 @@ jobs:
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
-      use_split_build: True
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
-      runner_prefix: amz2023.
-      build_name: manywheel-py3_11-cuda12_1-split
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build_name: manywheel-py3_11-cuda12_1-full
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_11-cuda12_1-split-test:  # Testing
+  manywheel-py3_11-cuda12_1-full-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_11-cuda12_1-split-build
+    needs:
+      - manywheel-py3_11-cuda12_1-full-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -2181,20 +1777,20 @@ jobs:
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
-      use_split_build: True
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
-      build_name: manywheel-py3_11-cuda12_1-split
+      build_name: manywheel-py3_11-cuda12_1-full
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_11-cuda12_1-split-upload:  # Uploading
+  manywheel-py3_11-cuda12_1-full-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: manywheel-py3_11-cuda12_1-split-test
+    needs: manywheel-py3_11-cuda12_1-full-test
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -2205,9 +1801,9 @@ jobs:
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
-      use_split_build: True
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
-      build_name: manywheel-py3_11-cuda12_1-split
+      build_name: manywheel-py3_11-cuda12_1-full
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -2217,6 +1813,7 @@ jobs:
   manywheel-py3_11-cuda12_4-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -2227,10 +1824,12 @@ jobs:
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-cuda12_4
       build_environment: linux-binary-manywheel
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -2244,11 +1843,16 @@ jobs:
 =======
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.2.65; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.0.44; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.119; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.0.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.0.142; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64'
 >>>>>>> 04d46d7008d (Update CUDNN to 9.3.0.75)
+=======
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.4.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+>>>>>>> 2e46d77b466 (Try to update cudnn 9.4)
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_4-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_11-cuda12_4-build
+    needs:
+      - manywheel-py3_11-cuda12_4-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -2260,10 +1864,11 @@ jobs:
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_4
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -2283,180 +1888,9 @@ jobs:
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_4
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
-  manywheel-py3_11-cuda12_4-split-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu124
-      GPU_ARCH_VERSION: 12.4
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.11"
-      runner_prefix: amz2023.
-      build_name: manywheel-py3_11-cuda12_4-split
-      build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.2.65; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.0.44; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.119; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.0.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.0.142; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64'
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_11-cuda12_4-split-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_11-cuda12_4-split-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu124
-      GPU_ARCH_VERSION: 12.4
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.11"
-      build_name: manywheel-py3_11-cuda12_4-split
-      build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_11-cuda12_4-split-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_11-cuda12_4-split-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu124
-      GPU_ARCH_VERSION: 12.4
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.11"
-      build_name: manywheel-py3_11-cuda12_4-split
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
-  manywheel-py3_11-rocm6_0-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.0
-      GPU_ARCH_VERSION: 6.0
-      GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
-      DESIRED_PYTHON: "3.11"
-      runner_prefix: amz2023.
-      build_name: manywheel-py3_11-rocm6_0
-      build_environment: linux-binary-manywheel
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_11-rocm6_0-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_11-rocm6_0-build
-    runs-on: linux.rocm.gpu
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.0
-      GPU_ARCH_VERSION: 6.0
-      GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
-      DESIRED_PYTHON: "3.11"
-    steps:
-      - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v3
-        name: Download Build Artifacts
-        with:
-          name: manywheel-py3_11-rocm6_0
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          quiet-checkout: true
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: ROCm set GPU_FLAG
-        run: |
-          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-      - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-        with:
-          docker-image: pytorch/manylinux-builder:rocm6.0-main
-      - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
-      - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
-  manywheel-py3_11-rocm6_0-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_11-rocm6_0-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.0
-      GPU_ARCH_VERSION: 6.0
-      GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
-      DESIRED_PYTHON: "3.11"
-      build_name: manywheel-py3_11-rocm6_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -2466,6 +1900,7 @@ jobs:
   manywheel-py3_11-rocm6_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -2476,15 +1911,18 @@ jobs:
       GPU_ARCH_VERSION: 6.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-rocm6_1
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-rocm6_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_11-rocm6_1-build
+    needs:
+      - manywheel-py3_11-rocm6_1-build
+      - get-label-type
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
@@ -2498,11 +1936,12 @@ jobs:
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_11-rocm6_1
@@ -2559,8 +1998,119 @@ jobs:
       GPU_ARCH_VERSION: 6.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-rocm6_1
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
+    uses: ./.github/workflows/_binary-upload.yml
+
+  manywheel-py3_11-rocm6_2-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.2
+      GPU_ARCH_VERSION: 6.2
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      use_split_build: False
+      DESIRED_PYTHON: "3.11"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build_name: manywheel-py3_11-rocm6_2
+      build_environment: linux-binary-manywheel
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  manywheel-py3_11-rocm6_2-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - manywheel-py3_11-rocm6_2-build
+      - get-label-type
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.2
+      GPU_ARCH_VERSION: 6.2
+      GPU_ARCH_TYPE: rocm
+      SKIP_ALL_TESTS: 1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      use_split_build: False
+      DESIRED_PYTHON: "3.11"
+    steps:
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_11-rocm6_2
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          quiet-checkout: true
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+          quiet-checkout: true
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux-builder:rocm6.2-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
+  manywheel-py3_11-rocm6_2-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_11-rocm6_2-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.2
+      GPU_ARCH_VERSION: 6.2
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      use_split_build: False
+      DESIRED_PYTHON: "3.11"
+      build_name: manywheel-py3_11-rocm6_2
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -2570,6 +2120,7 @@ jobs:
   manywheel-py3_11-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -2579,15 +2130,18 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-xpu
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-xpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_11-xpu-build
+    needs:
+      - manywheel-py3_11-xpu-build
+      - get-label-type
     runs-on: linux.idc.xpu
     timeout-minutes: 240
     env:
@@ -2600,6 +2154,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
     permissions:
       id-token: write
@@ -2616,7 +2171,7 @@ jobs:
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_11-xpu
@@ -2669,6 +2224,7 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-xpu
     secrets:
@@ -2680,6 +2236,7 @@ jobs:
   manywheel-py3_12-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -2689,15 +2246,18 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-cpu
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_12-cpu-build
+    needs:
+      - manywheel-py3_12-cpu-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -2708,10 +2268,11 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -2730,6 +2291,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu
     secrets:
@@ -2741,6 +2303,7 @@ jobs:
   manywheel-py3_12-cpu-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -2751,15 +2314,18 @@ jobs:
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cpu-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_12-cpu-cxx11-abi-build
+    needs:
+      - manywheel-py3_12-cpu-cxx11-abi-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -2771,10 +2337,11 @@ jobs:
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -2794,6 +2361,7 @@ jobs:
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu-cxx11-abi
     secrets:
@@ -2805,6 +2373,7 @@ jobs:
   manywheel-py3_12-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -2815,16 +2384,19 @@ jobs:
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-cuda11_8
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.4.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_12-cuda11_8-build
+    needs:
+      - manywheel-py3_12-cuda11_8-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -2836,10 +2408,11 @@ jobs:
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda11_8
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -2859,76 +2432,9 @@ jobs:
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda11_8
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
-  manywheel-py3_12-cuda11_8-split-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu118
-      GPU_ARCH_VERSION: 11.8
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.12"
-      runner_prefix: amz2023.
-      build_name: manywheel-py3_12-cuda11_8-split
-      build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_12-cuda11_8-split-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_12-cuda11_8-split-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu118
-      GPU_ARCH_VERSION: 11.8
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.12"
-      build_name: manywheel-py3_12-cuda11_8-split
-      build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_12-cuda11_8-split-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_12-cuda11_8-split-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu118
-      GPU_ARCH_VERSION: 11.8
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.12"
-      build_name: manywheel-py3_12-cuda11_8-split
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -2938,6 +2444,7 @@ jobs:
   manywheel-py3_12-cuda12_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -2948,16 +2455,19 @@ jobs:
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-cuda12_1
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.4.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda12_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_12-cuda12_1-build
+    needs:
+      - manywheel-py3_12-cuda12_1-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -2969,10 +2479,11 @@ jobs:
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda12_1
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -2992,76 +2503,9 @@ jobs:
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda12_1
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
-  manywheel-py3_12-cuda12_1-split-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.12"
-      runner_prefix: amz2023.
-      build_name: manywheel-py3_12-cuda12_1-split
-      build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_12-cuda12_1-split-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_12-cuda12_1-split-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.12"
-      build_name: manywheel-py3_12-cuda12_1-split
-      build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_12-cuda12_1-split-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_12-cuda12_1-split-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.12"
-      build_name: manywheel-py3_12-cuda12_1-split
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -3071,6 +2515,7 @@ jobs:
   manywheel-py3_12-cuda12_4-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -3081,10 +2526,12 @@ jobs:
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-cuda12_4
       build_environment: linux-binary-manywheel
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -3098,11 +2545,16 @@ jobs:
 =======
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.2.65; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.0.44; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.119; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.0.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.0.142; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64'
 >>>>>>> 04d46d7008d (Update CUDNN to 9.3.0.75)
+=======
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.4.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+>>>>>>> 2e46d77b466 (Try to update cudnn 9.4)
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda12_4-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_12-cuda12_4-build
+    needs:
+      - manywheel-py3_12-cuda12_4-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -3114,10 +2566,11 @@ jobs:
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda12_4
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -3137,180 +2590,9 @@ jobs:
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda12_4
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
-  manywheel-py3_12-cuda12_4-split-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu124
-      GPU_ARCH_VERSION: 12.4
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.12"
-      runner_prefix: amz2023.
-      build_name: manywheel-py3_12-cuda12_4-split
-      build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.2.65; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.0.44; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.119; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.0.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.0.142; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64'
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_12-cuda12_4-split-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_12-cuda12_4-split-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu124
-      GPU_ARCH_VERSION: 12.4
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.12"
-      build_name: manywheel-py3_12-cuda12_4-split
-      build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_12-cuda12_4-split-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_12-cuda12_4-split-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu124
-      GPU_ARCH_VERSION: 12.4
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.12"
-      build_name: manywheel-py3_12-cuda12_4-split
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
-  manywheel-py3_12-rocm6_0-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.0
-      GPU_ARCH_VERSION: 6.0
-      GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
-      DESIRED_PYTHON: "3.12"
-      runner_prefix: amz2023.
-      build_name: manywheel-py3_12-rocm6_0
-      build_environment: linux-binary-manywheel
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_12-rocm6_0-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_12-rocm6_0-build
-    runs-on: linux.rocm.gpu
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.0
-      GPU_ARCH_VERSION: 6.0
-      GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
-      DESIRED_PYTHON: "3.12"
-    steps:
-      - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v3
-        name: Download Build Artifacts
-        with:
-          name: manywheel-py3_12-rocm6_0
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          quiet-checkout: true
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: ROCm set GPU_FLAG
-        run: |
-          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-      - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-        with:
-          docker-image: pytorch/manylinux-builder:rocm6.0-main
-      - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
-      - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
-  manywheel-py3_12-rocm6_0-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_12-rocm6_0-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.0
-      GPU_ARCH_VERSION: 6.0
-      GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.0-main
-      DESIRED_PYTHON: "3.12"
-      build_name: manywheel-py3_12-rocm6_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -3320,6 +2602,7 @@ jobs:
   manywheel-py3_12-rocm6_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -3330,15 +2613,18 @@ jobs:
       GPU_ARCH_VERSION: 6.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-rocm6_1
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-rocm6_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_12-rocm6_1-build
+    needs:
+      - manywheel-py3_12-rocm6_1-build
+      - get-label-type
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
@@ -3352,11 +2638,12 @@ jobs:
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_12-rocm6_1
@@ -3413,8 +2700,119 @@ jobs:
       GPU_ARCH_VERSION: 6.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-rocm6_1
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
+    uses: ./.github/workflows/_binary-upload.yml
+
+  manywheel-py3_12-rocm6_2-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.2
+      GPU_ARCH_VERSION: 6.2
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      use_split_build: False
+      DESIRED_PYTHON: "3.12"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build_name: manywheel-py3_12-rocm6_2
+      build_environment: linux-binary-manywheel
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  manywheel-py3_12-rocm6_2-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - manywheel-py3_12-rocm6_2-build
+      - get-label-type
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.2
+      GPU_ARCH_VERSION: 6.2
+      GPU_ARCH_TYPE: rocm
+      SKIP_ALL_TESTS: 1
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      use_split_build: False
+      DESIRED_PYTHON: "3.12"
+    steps:
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_12-rocm6_2
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          quiet-checkout: true
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+          quiet-checkout: true
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux-builder:rocm6.2-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
+  manywheel-py3_12-rocm6_2-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_12-rocm6_2-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.2
+      GPU_ARCH_VERSION: 6.2
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      use_split_build: False
+      DESIRED_PYTHON: "3.12"
+      build_name: manywheel-py3_12-rocm6_2
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -3424,6 +2822,7 @@ jobs:
   manywheel-py3_12-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -3433,15 +2832,18 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-xpu
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-xpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_12-xpu-build
+    needs:
+      - manywheel-py3_12-xpu-build
+      - get-label-type
     runs-on: linux.idc.xpu
     timeout-minutes: 240
     env:
@@ -3454,6 +2856,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
     permissions:
       id-token: write
@@ -3470,7 +2873,7 @@ jobs:
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_12-xpu
@@ -3523,6 +2926,7 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-xpu
     secrets:
@@ -3534,6 +2938,7 @@ jobs:
   manywheel-py3_13-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -3543,15 +2948,18 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.13"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-cpu
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_13-cpu-build
+    needs:
+      - manywheel-py3_13-cpu-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -3562,10 +2970,11 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -3584,6 +2993,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu
     secrets:
@@ -3595,6 +3005,7 @@ jobs:
   manywheel-py3_13-cpu-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -3605,15 +3016,18 @@ jobs:
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
       DESIRED_PYTHON: "3.13"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cpu-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_13-cpu-cxx11-abi-build
+    needs:
+      - manywheel-py3_13-cpu-cxx11-abi-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -3625,10 +3039,11 @@ jobs:
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu-cxx11-abi
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -3648,6 +3063,7 @@ jobs:
       GPU_ARCH_TYPE: cpu-cxx11-abi
       DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu-cxx11-abi
     secrets:
@@ -3659,6 +3075,7 @@ jobs:
   manywheel-py3_13-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -3669,16 +3086,19 @@ jobs:
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      use_split_build: False
       DESIRED_PYTHON: "3.13"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-cuda11_8
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.4.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_13-cuda11_8-build
+    needs:
+      - manywheel-py3_13-cuda11_8-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -3690,10 +3110,11 @@ jobs:
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda11_8
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -3713,76 +3134,9 @@ jobs:
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda11_8
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
-  manywheel-py3_13-cuda11_8-split-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu118
-      GPU_ARCH_VERSION: 11.8
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.13"
-      runner_prefix: amz2023.
-      build_name: manywheel-py3_13-cuda11_8-split
-      build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu11==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_13-cuda11_8-split-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_13-cuda11_8-split-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu118
-      GPU_ARCH_VERSION: 11.8
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.13"
-      build_name: manywheel-py3_13-cuda11_8-split
-      build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_13-cuda11_8-split-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_13-cuda11_8-split-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu118
-      GPU_ARCH_VERSION: 11.8
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.13"
-      build_name: manywheel-py3_13-cuda11_8-split
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -3792,6 +3146,7 @@ jobs:
   manywheel-py3_13-cuda12_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -3802,16 +3157,19 @@ jobs:
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.13"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-cuda12_1
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.4.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cuda12_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_13-cuda12_1-build
+    needs:
+      - manywheel-py3_13-cuda12_1-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -3823,10 +3181,11 @@ jobs:
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda12_1
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -3846,76 +3205,9 @@ jobs:
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
+      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda12_1
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
-  manywheel-py3_13-cuda12_1-split-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.13"
-      runner_prefix: amz2023.
-      build_name: manywheel-py3_13-cuda12_1-split
-      build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_13-cuda12_1-split-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_13-cuda12_1-split-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.13"
-      build_name: manywheel-py3_13-cuda12_1-split
-      build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_13-cuda12_1-split-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: manywheel-py3_13-cuda12_1-split-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: manywheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-main
-      use_split_build: True
-      DESIRED_PYTHON: "3.13"
-      build_name: manywheel-py3_13-cuda12_1-split
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -3925,6 +3217,7 @@ jobs:
   manywheel-py3_13-cuda12_4-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -3935,10 +3228,12 @@ jobs:
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      use_split_build: False
       DESIRED_PYTHON: "3.13"
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-cuda12_4
       build_environment: linux-binary-manywheel
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -3952,11 +3247,16 @@ jobs:
 =======
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.2.65; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.0.44; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.119; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.0.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.0.142; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64'
 >>>>>>> 04d46d7008d (Update CUDNN to 9.3.0.75)
+=======
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.4.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+>>>>>>> 2e46d77b466 (Try to update cudnn 9.4)
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cuda12_4-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_13-cuda12_4-build
+    needs:
+      - manywheel-py3_13-cuda12_4-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -3968,10 +3268,11 @@ jobs:
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda12_4
       build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -3991,6 +3292,7 @@ jobs:
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda12_4
     secrets:
@@ -3999,68 +3301,116 @@ jobs:
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  manywheel-py3_13-cuda12_4-split-build:
+  manywheel-py3_13-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu124
-      GPU_ARCH_VERSION: 12.4
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
-      use_split_build: True
+      DESIRED_CUDA: xpu
+      GPU_ARCH_TYPE: xpu
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.13"
-      runner_prefix: amz2023.
-      build_name: manywheel-py3_13-cuda12_4-split
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build_name: manywheel-py3_13-xpu
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.3.0.75; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.2.65; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.0.44; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.119; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.0.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.0.142; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.99; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_13-cuda12_4-split-test:  # Testing
+  manywheel-py3_13-xpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_13-cuda12_4-split-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
+    needs:
+      - manywheel-py3_13-xpu-build
+      - get-label-type
+    runs-on: linux.idc.xpu
+    timeout-minutes: 240
+    env:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu124
-      GPU_ARCH_VERSION: 12.4
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
-      use_split_build: True
+      DESIRED_CUDA: xpu
+      GPU_ARCH_TYPE: xpu
+      SKIP_ALL_TESTS: 1
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.13"
-      build_name: manywheel-py3_13-cuda12_4-split
-      build_environment: linux-binary-manywheel
-      runner_prefix: amz2023.
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_13-cuda12_4-split-upload:  # Uploading
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Setup XPU
+        uses: ./.github/actions/setup-xpu
+      - name: configure aws credentials
+        id: aws_creds
+        uses: aws-actions/configure-aws-credentials@v1.7.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+          aws-region: us-east-1
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_13-xpu
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          quiet-checkout: true
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: main
+          submodules: recursive
+          repository: pytorch/builder
+          path: builder
+          quiet-checkout: true
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux2_28-builder:xpu-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown XPU
+        uses: ./.github/actions/teardown-xpu
+  manywheel-py3_13-xpu-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: manywheel-py3_13-cuda12_4-split-test
+    needs: manywheel-py3_13-xpu-test
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu124
-      GPU_ARCH_VERSION: 12.4
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
-      use_split_build: True
+      DESIRED_CUDA: xpu
+      GPU_ARCH_TYPE: xpu
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      use_split_build: False
       DESIRED_PYTHON: "3.13"
-      build_name: manywheel-py3_13-cuda12_4-split
+      build_name: manywheel-py3_13-xpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}

@@ -28,10 +28,10 @@ function install_124 {
 
   # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
   mkdir tmp_cudnn && cd tmp_cudnn
-  wget -q https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-sbsa/cudnn-linux-sbsa-9.3.0.75_cuda12-archive.tar.xz -O cudnn-linux-sbsa-9.3.0.75_cuda12-archive.tar.xz
-  tar xf cudnn-linux-sbsa-9.3.0.75_cuda12-archive.tar.xz
-  cp -a cudnn-linux-sbsa-9.3.0.75_cuda12-archive/include/* /usr/local/cuda/include/
-  cp -a cudnn-linux-sbsa-9.3.0.75_cuda12-archive/lib/* /usr/local/cuda/lib64/
+  wget -q https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-sbsa/cudnn-linux-sbsa-9.4.0.58_cuda12-archive.tar.xz -O cudnn-linux-sbsa-9.4.0.58_cuda12-archive.tar.xz
+  tar xf cudnn-linux-sbsa-9.4.0.58_cuda12-archive.tar.xz
+  cp -a cudnn-linux-sbsa-9.4.0.58_cuda12-archive/include/* /usr/local/cuda/include/
+  cp -a cudnn-linux-sbsa-9.4.0.58_cuda12-archive/lib/* /usr/local/cuda/lib64/
   cd ..
   rm -rf tmp_cudnn
 

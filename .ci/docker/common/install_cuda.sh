@@ -3,7 +3,7 @@
 set -ex
 
 NCCL_VERSION=v2.21.5-1
-CUDNN_VERSION=9.3.0.75
+CUDNN_VERSION=9.4.0.58
 
 function install_cusparselt_040 {
     # cuSparseLt license: https://docs.nvidia.com/cuda/cusparselt/license.html

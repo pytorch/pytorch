@@ -370,6 +370,7 @@ def generate_wheels_matrix(
             # TODO: Enable python 3.13 on rocm, aarch64, windows
             if (
                 gpu_arch_type == "rocm" or (os != "linux" and os != "linux-s390x")
+<<<<<<< HEAD
             ) and (python_version == "3.13" or python_version == "3.13t"):
                 continue
 
@@ -379,6 +380,11 @@ def generate_wheels_matrix(
             ) and python_version == "3.13t":
                 continue
 
+=======
+            ) and python_version == "3.13":
+                continue
+
+>>>>>>> 2e46d77b466 (Try to update cudnn 9.4)
             if use_split_build and (
                 arch_version not in ["12.4", "12.1", "11.8", "cpu"] or os != "linux"
             ):
@@ -458,7 +464,11 @@ def generate_wheels_matrix(
                             ".", "_"
                         ),
                         "pytorch_extra_install_requirements": (
+<<<<<<< HEAD
                             PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"]
+=======
+                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"]  # fmt: skip
+>>>>>>> 2e46d77b466 (Try to update cudnn 9.4)
                             if os != "linux" and gpu_arch_type != "xpu"
                             else ""
                         ),
