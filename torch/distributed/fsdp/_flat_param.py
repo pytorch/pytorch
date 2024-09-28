@@ -169,7 +169,7 @@ class _ShardParamInfo(NamedTuple):
     numel_in_shard: Optional[int]
     # Use to get part of the parameter in the local shard from a flattened
     # version of the unsharded parameter, e.g.
-    # `param.flatten()[intra_param_start_idx : intra_param_end_idx + 1]`
+    # `param.as_strided(size=(param.numel(),), stride=(1,))[intra_param_start_idx : intra_param_end_idx + 1]`
     intra_param_start_idx: Optional[int]
     intra_param_end_idx: Optional[int]  # inclusive
 
@@ -183,6 +183,8 @@ class FlatParamShardMetadata(NamedTuple):
             shard of the parameters; see :class:`FlatParameter`.
         param_shapes (Tuple[torch.Size, ...]): Parameter shapes of this rank's
             shard of the parameters; see :class:`FlatParameter`.
+        param_strides (Tuple[torch.Size, ...]): Parameter strides of this rank's
+            shard of the parameters; see :class:`FlatParameter`.
         param_numels (Tuple[int, ...]): Parameter numels of this rank's shard
             of the parameters; see :class:`FlatParameter`.
         param_offsets (Tuple[Tuple[int, int], ...]): [start, end] offsets (in
@@ -192,6 +194,7 @@ class FlatParamShardMetadata(NamedTuple):
 
     param_names: Tuple[str, ...]
     param_shapes: Tuple[torch.Size, ...]
+    param_strides: Tuple[torch.Size, ...]
     param_numels: Tuple[int, ...]
     param_offsets: Tuple[Tuple[int, int], ...]
 
@@ -259,6 +262,7 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
         _param_infos (Tuple[ParamInfo, ...]): Each parameter's parameter info
             entry; see :class:`ParamInfo` for details.
         _shapes (Tuple[torch.Size, ...]): Each parameter's original shape.
+        _strides (Tuple[torch.Size, ...]): Each parameter's original stride.
         _fqns (Tuple[str, ...]): Each parameter's fully-qualified name (FQN)
             prefixed from the ``_fully_sharded_module``. The names are
             guaranteed to be unique in the subtree rooted at that module.
@@ -336,6 +340,7 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
     _num_params: int
     _param_infos: Tuple[ParamInfo, ...]
     _shapes: Tuple[torch.Size, ...]
+    _strides: Tuple[torch.Size, ...]
     _fqns: Tuple[str, ...]
     _param_extensions: Tuple[Optional[Any], ...]
     _numels_with_padding: Tuple[int, ...]
@@ -377,6 +382,7 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
         param_infos: List[ParamInfo],
         numels: List[int],
         shapes: List[torch.Size],
+        strides: List[torch.Size],
         fqns: List[str],
         shared_param_infos: List[SharedParamInfo],
         param_extensions: List[Optional[Any]],
@@ -399,11 +405,13 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
             See the Attributes in the class docstring.
         """
         assert len(param_infos) == len(shapes)
+        assert len(param_infos) == len(strides)
         assert len(param_infos) == len(fqns)
         assert len(param_infos) == len(param_extensions)
         self._num_params = len(param_infos)
         self._param_infos = param_infos
         self._shapes = shapes
+        self._strides = strides
         self._fqns = fqns
         self._param_extensions = param_extensions
         self._is_padding_mask = is_padding_mask
@@ -638,6 +646,7 @@ class FlatParamHandle:
         param_infos: List[ParamInfo] = []
         numels: List[int] = []
         shapes: List[torch.Size] = []
+        strides: List[torch.Size] = []
         fqns: List[str] = []
         shared_param_infos: List[SharedParamInfo] = []
         shared_param_memo: Dict[
@@ -692,6 +701,7 @@ class FlatParamHandle:
                     param_infos.append(ParamInfo(param_name, submodule, submodule_name))
                     numels.append(param.numel())
                     shapes.append(param.shape)
+                    strides.append(param.stride())
                     fqn = (
                         submodule_name + "." + param_name
                         if submodule_name
@@ -746,6 +756,7 @@ class FlatParamHandle:
             param_infos,
             numels,
             shapes,
+            strides,
             fqns,
             shared_param_infos,
             param_extensions,
@@ -828,7 +839,11 @@ class FlatParamHandle:
                     )
                     flat_tensors.append(padding_tensor)
                     total_numel += numel_to_pad
-                flat_tensors.append(torch.flatten(_detach_if_needed(tensor)))
+                flat_tensors.append(
+                    _detach_if_needed(tensor).as_strided(
+                        size=(tensor.numel(),), stride=(1,)
+                    )
+                )
                 total_numel += tensor.numel()
             numel_to_pad = self.world_size - (total_numel % self.world_size)
             if numel_to_pad > 0 and numel_to_pad < self.world_size:
@@ -839,7 +854,10 @@ class FlatParamHandle:
                 total_numel += numel_to_pad
         else:
             flat_tensors = [
-                torch.flatten(_detach_if_needed(tensor)) for tensor in tensors
+                _detach_if_needed(tensor).as_strided(
+                    size=(tensor.numel(),), stride=(1,)
+                )
+                for tensor in tensors
             ]
         return torch.cat(flat_tensors, dim=0)
 
@@ -1046,7 +1064,9 @@ class FlatParamHandle:
         shape (which is true in the expected usage), then this method does not
         allocate any new tensor memory.
         """
-        chunks = torch.flatten(tensor).chunk(world_size)
+        chunks = tensor.as_strided(size=(tensor.numel(),), stride=(1,)).chunk(
+            world_size
+        )
         if len(chunks) < (rank + 1):
             # This rank gets an empty chunk fully padded with zeros since there
             # are not enough chunks across ranks
@@ -1119,11 +1139,13 @@ class FlatParamHandle:
         """
         fqns_list = []
         shapes_list = []
+        strides_list = []
         numels_list = []
         shard_param_offsets = []
-        for fqn, shape, numel, shard_param_info in zip(
+        for fqn, shape, stride, numel, shard_param_info in zip(
             self.flat_param._fqns,
             self.flat_param._shapes,
+            self.flat_param._strides,
             self.flat_param._numels,
             self.flat_param._shard_param_infos,
         ):
@@ -1131,6 +1153,7 @@ class FlatParamHandle:
                 continue
             fqns_list.append(fqn)
             shapes_list.append(shape)
+            strides_list.append(stride)
             numels_list.append(numel)
             shard_param_offsets.append(
                 (
@@ -1141,6 +1164,7 @@ class FlatParamHandle:
         return FlatParamShardMetadata(
             tuple(fqns_list),
             tuple(shapes_list),
+            tuple(strides_list),
             tuple(numels_list),
             tuple(shard_param_offsets),
         )
@@ -1820,13 +1844,14 @@ class FlatParamHandle:
             tensor = flat_param
         views = (
             _ext_post_unflatten_transform(
-                subtensor.view(shape),
+                subtensor.as_strided(size=shape, stride=stride),
                 param_extension,
                 self._fsdp_extension,
             )
-            for (subtensor, shape, param_extension) in zip(
+            for (subtensor, shape, stride, param_extension) in zip(
                 torch.split(tensor, flat_param._numels, dim=0),
                 flat_param._shapes,
+                flat_param._strides,
                 flat_param._param_extensions,
             )
         )
@@ -1857,7 +1882,9 @@ class FlatParamHandle:
                 continue
             views.append(
                 _ext_post_unflatten_transform(
-                    split.view(flat_param._shapes[idx]),
+                    split.as_strided(
+                        size=flat_param._shapes[idx], stride=flat_param._strides[idx]
+                    ),
                     flat_param._param_extensions[idx],
                     self._fsdp_extension,
                 )
