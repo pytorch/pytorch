@@ -576,9 +576,28 @@ def _fused_matmul_reduce_scatter_impl(
     x = x.flatten(0, -2)
     shards = x.chunk(group.size())
 
+    A_scale_shards = None
+    if (A_scale := kwargs.get("scale_a")) is not None:
+        if A_scale.numel() > 1:
+            if A_scale.shape[:-1] != A.shape[:-1]:
+                raise ValueError(
+                    "For non-TensorWise scaling, the leading dims of A_scale "
+                    "must match the leading dims of A "
+                    f"(A shape: {A.shape}, scale_a shape: {A_scale.shape})"
+                )
+            A_scale = A_scale.movedim(scatter_dim, 0).contiguous().flatten(0, -2)
+            A_scale_shards = A_scale.chunk(group.size())
+        elif A_scale.numel() != 1:
+            raise ValueError(f"Invalid A_scale shape: {A_scale.shape}")
+
     # Computing block-wise matmul along the first dim of A
     def chunk_producer(rank: int, out: torch.Tensor) -> None:
-        mm_out_op(shards[rank], B, **kwargs, out=out)
+        if A_scale_shards is not None:
+            # Row-wise scaling
+            _kwargs = {**kwargs, "scale_a": A_scale_shards[rank]}
+            mm_out_op(shards[rank], B, **_kwargs, out=out)
+        else:
+            mm_out_op(shards[rank], B, **kwargs, out=out)
 
     stacked_partials = x.new_empty(x.shape[0], B.shape[1], dtype=out_dtype or A.dtype)
 
@@ -660,6 +679,17 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
     out_dtype: Optional[torch.dtype] = None,
     use_fast_accum: bool = False,
 ) -> torch.Tensor:
+    if A_scale.numel() > 1:
+        if A_scale.shape[:-1] != A.shape[:-1]:
+            raise ValueError(
+                "For non-TensorWise scaling, the leading dims of A_scale "
+                "must match the leading dims of A "
+                f"(A shape: {A.shape}, scale_a shape: {A_scale.shape})"
+            )
+        A_scale = A_scale.flatten(0, -2).contiguous()
+    elif A_scale.numel() != 1:
+        raise ValueError(f"Invalid A_scale shape: {A_scale.shape}")
+
     C = torch._scaled_mm(
         A.flatten(0, -2).contiguous(),
         B,
