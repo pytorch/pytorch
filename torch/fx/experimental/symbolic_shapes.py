@@ -60,7 +60,7 @@ from torch._logging import trace_structured, structured
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymBool, SymFloat, SymInt
-from torch._guards import ShapeGuard, Source, TracingContext
+from torch._guards import ShapeGuard, Source, TracingContext, SLoc
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.functions import (
     Application, FloorDiv, Mod, PythonMod, IsNonOverlappingAndDenseIndicator, CleanDiv, FloorToInt, CeilToInt
@@ -2499,6 +2499,12 @@ class ShapeEnvSettings:
     allow_complex_guards_as_runtime_asserts: bool
 
 
+@dataclass
+class ValueRangesSLoc:
+    lower: SLoc
+    upper: SLoc
+
+
 class ShapeEnv:
     # This is a wrapper over the actual __init__ function.
     #
@@ -2635,12 +2641,17 @@ class ShapeEnv:
         # range may contain ints which may not actually appear in
         # practice
         self.var_to_range: Dict[sympy.Symbol, ValueRanges] = {}
+        self.var_to_range_sloc: Dict[sympy.Symbol, ValueRangesSLoc] = {}
         self.source_name_to_debug_name: Dict[str, str] = {}
         self.var_to_sources: Dict[sympy.Symbol, List[Source]] = {}
         self.var_to_stack: Dict[sympy.Symbol, CapturedTraceback] = {}
+        # Maps a source to the *original* symbol that was assigned to it
+        self.source_to_var: Dict[str, sympy.Symbol] = {}
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
         self.replacements: Dict[sympy.Symbol, sympy.Expr] = {}
+        # The sloc of the guard that triggered this replacement to be added
+        self.replacements_slocs: Dict[sympy.Symbol, SLoc] = {}
         self.unbacked_renamings: Dict[sympy.Symbol, sympy.Symbol] = {}
         # Set holds a % b expressions that evaluate to 0.
         self.divisible: Set[sympy.Expr] = set()
@@ -3507,10 +3518,10 @@ class ShapeEnv:
 
     def _log_create_unbacked_symbol(self, prefix: str, symbol, vr: ValueRanges):
         is_debug = config.extended_debug_create_symbol is not None and str(symbol) in config.extended_debug_create_symbol.split(',')
-        fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
+        sloc, maybe_extra_debug = self._get_stack_summary(is_debug)
         log.info(
-            "%s %s [%s, %s]%s (%s)%s",
-            prefix, symbol, vr.lower, vr.upper, maybe_user_loc, format_frame(fsummary), maybe_extra_debug, stack_info=is_debug
+            "%s %s [%s, %s] %s%s",
+            prefix, symbol, vr.lower, vr.upper, sloc, maybe_extra_debug, stack_info=is_debug
         )
 
     @record_shapeenv_event()
@@ -3524,6 +3535,8 @@ class ShapeEnv:
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = ValueRanges.unknown()
         assert vr.is_float
+        sloc = self._get_sloc()
+        self.var_to_range_sloc[symbol] = ValueRangesSLoc(sloc, sloc)
 
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, float)
@@ -3543,6 +3556,8 @@ class ShapeEnv:
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = self._default_unspecified_value_range()
         assert vr.is_int
+        sloc = self._get_sloc()
+        self.var_to_range_sloc[symbol] = ValueRangesSLoc(sloc, sloc)
 
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, int)
@@ -3567,6 +3582,8 @@ class ShapeEnv:
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = ValueRanges(0, 1)
         assert vr.is_int
+        sloc = self._get_sloc("default value range for unbacked SymBool")
+        self.var_to_range_sloc[symbol] = ValueRangesSLoc(sloc, sloc)
 
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, bool)
@@ -3675,6 +3692,8 @@ class ShapeEnv:
         else:
             raise AssertionError(f"unhandled dynamic_dim {dynamic_dim}")
 
+        sloc = self._get_sloc()
+
         if val in (0, 1) and specialize_zero_one:
             r = self.val_to_var[val]
         elif not duck or val not in self.val_to_var:
@@ -3685,6 +3704,7 @@ class ShapeEnv:
                 sympy_expr = make_symbol(SymT.SIZE, len(self.var_to_val), positive=positive, integer=True)
             else:
                 sympy_expr = make_symbol(SymT.FLOAT, len(self.var_to_val), positive=positive, real=True)
+            self.source_to_var[source_name] = sympy_expr
             # We always associate vars to vals
             if isinstance(val, int):
                 self.var_to_val[sympy_expr] = sympy.Integer(val)
@@ -3710,6 +3730,16 @@ class ShapeEnv:
 
                     # Apply default range, which assumes not zero-one
                     self.var_to_range[sympy_expr] = self._default_value_range()
+                    self.var_to_range_sloc[sympy_expr] = ValueRangesSLoc(
+                        self._get_sloc(
+                            "user code shown is first use of this value--the guard itself is not "
+                            "due user code but due to 0/1 specialization in the framework; to "
+                            "avoid specialization try torch._dynamo.mark_unbacked(tensor, dim)"
+                            if self.specialize_zero_one
+                            else None
+                        ),
+                        sloc
+                    )
                 else:
                     self.var_to_range[sympy_expr] = self._default_unspecified_value_range()
 
@@ -3717,7 +3747,7 @@ class ShapeEnv:
                 # we can proactively narrow to that range
                 if isinstance(constraint_dim, StrictMinMaxConstraint):
                     assert not duck
-                    self.var_to_range[sympy_expr] &= constraint_dim.vr
+                    self._update_var_to_range(constraint_dim.vr)
 
                 vr = self.var_to_range[sympy_expr]
                 assert vr.is_int
@@ -3728,6 +3758,7 @@ class ShapeEnv:
                 range_str = f"[{vr.lower}, {vr.upper}]"
             elif isinstance(val, float):
                 self.var_to_range[sympy_expr] = vr = ValueRanges(-sympy.oo, sympy.oo)
+                self.var_to_range_sloc[sympy_expr] = ValueRangesSLoc(sloc, sloc)
                 range_str = f"[{vr.lower}, {vr.upper}]"
                 assert vr.is_float
             else:
@@ -3747,11 +3778,11 @@ class ShapeEnv:
                     ", for more info run with "
                     f'TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL="{sympy_expr}"'
                 )
-            fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
+            sloc, maybe_extra_debug = self._get_stack_summary(is_debug)
             self.log.info(
-                "create_symbol %s = %s for %s %s%s (%s)%s%s",
+                "create_symbol %s = %s for %s %s %s%s%s",
                 sympy_expr, val, source.name(), range_str,
-                maybe_user_loc, format_frame(fsummary), maybe_more_info, maybe_extra_debug, stack_info=is_debug
+                sloc, maybe_more_info, maybe_extra_debug, stack_info=is_debug
             )
 
             self.counter["create_symbol"] += 1
@@ -3759,6 +3790,7 @@ class ShapeEnv:
             # This implements duck-shaping: input sizes that match are assigned
             # the same symint
             r = self.val_to_var[val]
+            self.source_to_var[source_name] = r
             self.log.debug("create_symbol %s duck sized %s", r, source.name())
 
         if isinstance(r, sympy.Symbol):
@@ -3805,7 +3837,10 @@ class ShapeEnv:
             return c_render
         return c.render(source)
 
-    def produce_guards(
+    def produce_guards(self, *args, **kwargs) -> List[str]:
+        return self.produce_guards_verbose(*args, **kwargs)[0]
+
+    def produce_guards_verbose(
         self,
         placeholders,
         sources,
@@ -3819,7 +3854,7 @@ class ShapeEnv:
         _simplified=False,
         # Indicates if we should produce guards for known static values.
         ignore_static=True,
-    ) -> List[str]:
+    ) -> Tuple[List[str], List[str]]:  # regular, verbose
         """
         Generates a list of guards strings which, when evaluated in a context that
         defines tensors for all the sources, returns True or False depending
@@ -4161,6 +4196,7 @@ class ShapeEnv:
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
         #    This does a lot of work: it covers duck sizing and equality guards.
         exprs = []
+        verbose_exprs = []
         self.dim_constraints = DimConstraints(
             symbol_to_source,
             self.var_to_val,
@@ -4170,9 +4206,9 @@ class ShapeEnv:
 
         if not _simplified:
             for source, expr in input_guards:
+                srcname = source.name()
                 if self._translation_validation_enabled:
                     # Ignore sources that were not turned into SymInts.
-                    srcname = source.name()
                     if srcname in self.source_to_symbol:
                         self._add_target_expr(sympy.Eq(self.source_to_symbol[srcname], expr))
 
@@ -4196,7 +4232,22 @@ class ShapeEnv:
                     self.dim_constraints.add_equality(source, expr)
 
                 sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
-                exprs.append(f"{source_ref(source)} == {sexpr}")
+                res = f"{source_ref(source)} == {sexpr}"
+                exprs.append(res)
+                if (s0 := self.source_to_var.get(srcname)) is not None:
+                    if source != (canonical_source := self.var_to_sources[s0][0]):
+                        verbose_exprs.append(
+                            f"{res}  # duck sizing added this equality because these "
+                            f"variables had the same size {self.var_to_val[s0]} "
+                            "(to avoid this specialization, set torch.fx.experimental._config.use_duck_shape = False)"
+                        )
+                    elif (sloc := self.replacements_slocs.get(s0)) is not None:
+                        verbose_exprs.append(f"{res}  # {sloc}")
+                    else:
+                        verbose_exprs.append(f"{res}  # (unknown var {s0}, please file a bug)")
+                else:
+                    verbose_exprs.append(f"{res}  # (unknown source {srcname}, please file a bug)")
+
                 if (
                     isinstance(source, TensorPropertySource)
                     and source.prop is TensorProperty.SIZE
@@ -4254,6 +4305,7 @@ class ShapeEnv:
                     is_trivial = self.dim_constraints.add(expr)
                 guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
                 exprs.append(guard_expr)
+                verbose_exprs.append(f"{guard_expr}  # {guard.sloc}")
                 self._add_target_expr(expr)
                 # A non-relational constraint on a single sizevar can violate
                 # a constraint
@@ -4278,7 +4330,7 @@ class ShapeEnv:
                         else:
                             raise AssertionError(f"unrecognized constraint {c}")
             except Exception:
-                self.log.warning("Failing guard allocated at: \n%s", ''.join(guard.stack.format()))
+                self.log.warning("Failing guard allocated at %s", guard.sloc)
                 raise
 
         # First, issue all guards.
@@ -4308,9 +4360,11 @@ class ShapeEnv:
                 if symbol not in self.var_to_range:
                     continue
                 r = self.var_to_range[symbol]
+            vr_sloc = self.var_to_range_sloc[symbol]
 
             assert sources
             bounds = []
+            rf = source_ref(sources[0])
             if r.lower not in (-sympy.oo, -int_oo):
                 if any(is_dim(source) for source in sources):
                     self.dim_constraints.add(sympy.Ge(symbol, r.lower))
@@ -4318,14 +4372,17 @@ class ShapeEnv:
                 # default
                 if not _simplified or r.lower != self._default_value_range().lower:
                     bounds.append(str(r.lower))
-            bounds.append(source_ref(sources[0]))
+                verbose_exprs.append(f"{r.lower} <= {rf}  # {vr_sloc.lower}")
+            bounds.append(rf)
             if r.upper not in (sympy.oo, int_oo):
                 if any(is_dim(source) for source in sources):
                     self.dim_constraints.add(sympy.Le(symbol, r.upper))
                 # nontrivial upper bound is always interesting
                 bounds.append(str(r.upper))
+                verbose_exprs.append(f"{rf} <= {r.upper}  # {vr_sloc.upper}")
             if len(bounds) > 1:
                 exprs.append(" <= ".join(bounds))
+                # NB: verbose_exprs are done above
 
                 # Check constraints
                 constraints = symbol_to_constraints[symbol]
@@ -4352,7 +4409,7 @@ class ShapeEnv:
             # if you have something like an equality guard, nan will play
             # merry hell with the reasoning.
             if symbol_is_type(symbol, SymT.FLOAT):
-                exprs.append(f"not __math_isnan({source_ref(sources[0])})")
+                exprs.append((f"not __math_isnan({source_ref(sources[0])})", self.var_to_guard[symbol]))
 
         if constraint_violations:
             warn_msgs = []
@@ -4418,7 +4475,7 @@ class ShapeEnv:
         # Only run translation validation when we are not passing custom guards
         if guards is None:
             self._check_translation_validate()
-        return exprs
+        return exprs, verbose_exprs
 
     def produce_guards_expression(
         self,
@@ -4856,7 +4913,7 @@ class ShapeEnv:
         )
         return GuardOnDataDependentSymNode(expr, msg)
 
-    def _update_var_to_range(self, symbol, vr):
+    def _update_var_to_range(self, symbol, vr, vr_sloc: Optional[ValueRangesSLoc] = None):
         lower, upper = vr.lower, vr.upper
 
         # If we have a size-like unbacked SymInt, refuse to refine the range to be
@@ -4874,10 +4931,21 @@ class ShapeEnv:
             r = ValueRanges(lower, upper)
             self.log.debug("_update_var_to_range %s = %s (new)", symbol, r)
             self.var_to_range[symbol] = r
+            if vr_sloc is None:
+                sloc = self._get_sloc()
+                vr_sloc = ValueRangesSLoc(sloc, sloc)
+            self.var_to_range_sloc[symbol] = vr_sloc
         else:
             old = self.var_to_range[symbol]
             new = old & ValueRanges(lower, upper)
             if new != old:
+                if vr_sloc is None:
+                    sloc = self._get_sloc()
+                    vr_sloc = ValueRangesSLoc(sloc, sloc)
+                if new.lower != old.lower:
+                    self.var_to_range_sloc[symbol].lower = vr_sloc.lower
+                if new.upper != old.upper:
+                    self.var_to_range_sloc[symbol].upper = vr_sloc.upper
                 self.var_to_range[symbol] = new
                 self.log.debug("_update_var_to_range %s = %s (update)", symbol, new)
 
@@ -4931,7 +4999,7 @@ class ShapeEnv:
                     # done.
                     rat_b_bound = self.bound_sympy(r[1])
                     b_bound = ValueRanges(CeilToInt(rat_b_bound.lower), FloorToInt(rat_b_bound.upper))
-                    self._update_var_to_range(b, b_bound)
+                    self._update_var_to_range(b, b_bound, self.var_to_range_sloc[a])
                     tgt_bound = self.bound_sympy(tgt)
                     assert tgt_bound.issubset(src_bound)
 
@@ -5004,6 +5072,11 @@ class ShapeEnv:
                 self.log.debug("SPECIALIZATION", stack_info=True)
         log.info("set_replacement %s = %s (%s) %s", a, tgt, msg, tgt_bound)
         self.replacements[a] = tgt
+        # NB: the replacement may get refined, but the user will find the
+        # FIRST one most useful (TODO: Maybe we could consider tracking all of
+        # them)
+        if a not in self.replacements_slocs:
+            self.replacements_slocs[a] = self._get_sloc()
         self._update_version_counter()
 
         # When specializing 'a == tgt', the equality should be also conveyed to
@@ -5199,28 +5272,28 @@ class ShapeEnv:
             log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val, stack_info=True)
 
 
-    def _get_stack_summary(self, is_debug: bool = False):
-        fsummary = None
-        frame = inspect.currentframe()
-        try:
-            while frame is not None:
-                if frame.f_code.co_filename not in uninteresting_files():
-                    fsummary = traceback.FrameSummary(
-                        frame.f_code.co_filename,
-                        frame.f_lineno,
-                        frame.f_code.co_name,
-                    )
-                    break
-                frame = frame.f_back
-        finally:
-            del frame
+    def _get_stack_summary(self, is_debug: bool = False, framework_loc: Optional[str] = None) -> Tuple[SLoc, str]:
+        if framework_loc is None:
+            frame = inspect.currentframe()
+            try:
+                while frame is not None:
+                    if frame.f_code.co_filename not in uninteresting_files():
+                        framework_loc = traceback.FrameSummary(
+                            frame.f_code.co_filename,
+                            frame.f_lineno,
+                            frame.f_code.co_name,
+                        )
+                        break
+                    frame = frame.f_back
+            finally:
+                del frame
 
         # NB: this stack is truncated, but it's fine because the main
         # stack_info will give you the rest of the info you need
-        maybe_user_loc = ""
+        maybe_user_loc = None
         user_tb = TracingContext.extract_stack()
         if user_tb:
-            maybe_user_loc = " at " + format_frame(user_tb[-1])
+            maybe_user_loc = format_frame(user_tb[-1], line=True)
 
         maybe_extra_debug = ""
         if is_debug and user_tb:
@@ -5238,13 +5311,19 @@ class ShapeEnv:
                 "TORCHDYNAMO_EXTENDED_DEBUG_CPP=1"
             )
 
-        return fsummary, maybe_user_loc, maybe_extra_debug
+        return SLoc(framework_loc, maybe_user_loc), maybe_extra_debug
+
+    # Pass in framework_loc to override the framework location info
+    def _get_sloc(self, framework_loc: Optional[str] = None) -> SLoc:
+        sloc, _ = self._get_stack_summary(framework_loc=framework_loc)
+        return sloc
+
 
     def _log_guard(self, prefix: str, g, forcing_spec: bool):
         if self.log.isEnabledFor(logging.INFO):
             str_g = str(g)
             is_debug = config.extended_debug_guard_added is not None and str_g == config.extended_debug_guard_added
-            fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
+            sloc, maybe_extra_debug = self._get_stack_summary(is_debug)
             maybe_more_info = ""
             if not is_debug:
                 maybe_more_info = (
@@ -5252,11 +5331,10 @@ class ShapeEnv:
                     f'TORCHDYNAMO_EXTENDED_DEBUG_GUARD_ADDED="{str_g}"'
                 )
             self.log.info(
-                "%s %s [guard added]%s (%s)%s%s",
+                "%s %s [guard added] %s%s%s",
                 prefix if not forcing_spec else f"{prefix} (forcing_spec)",
                 str_g,
-                maybe_user_loc,
-                format_frame(fsummary),
+                sloc,
                 maybe_more_info,
                 maybe_extra_debug,
                 stack_info=is_debug,
@@ -5433,8 +5511,7 @@ class ShapeEnv:
                     # at this point, we've evaluated the concrete expr value, and have
                     # flipped/negated the guard if necessary. Now we know what to guard
                     # or defer to runtime assert on.
-                    stack = CapturedTraceback.extract(skip=1)
-                    guard = ShapeGuard(g, stack)
+                    guard = ShapeGuard(g, self._get_sloc())
                     self.guards.append(guard)
                     self.axioms.update(dict(self.get_implications(self.simplify(g))))
                 else:
@@ -5479,8 +5556,6 @@ class ShapeEnv:
         This destroys the stacks. If you really want to keep them, we
         just need some way to break references on code objects.
         """
-        for g in self.guards:
-            g.stack.cleanup()
         for s in self.var_to_stack.values():
             s.cleanup()
         for ras in self.deferred_runtime_asserts.values():
