@@ -223,7 +223,7 @@ void translate_exception_to_python(const std::exception_ptr& e_ptr) {
         "called with invalid exception pointer");
     std::rethrow_exception(e_ptr);
   }
-  CATCH_ALL_ERRORS(return )
+  CATCH_ALL_ERRORS(return)
 }
 
 TypeError::TypeError(const char* format, ...) {

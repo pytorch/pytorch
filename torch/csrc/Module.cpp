@@ -1631,15 +1631,14 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
-static void THCPStream_init(PyObject* module);
-static void THCPEvent_init(PyObject* module);
-static void THCPGraph_init(PyObject* module);
-static void THCPMemPool_init(PyObject* module);
-
 #ifdef USE_CUDA
-static PyMethodDef* THCPModule_methods();
+void THCPStream_init(PyObject* module);
+void THCPEvent_init(PyObject* module);
+void THCPGraph_init(PyObject* module);
+void THCPMemPool_init(PyObject* module);
+PyMethodDef* THCPModule_methods();
 namespace torch::cuda {
-static void initModule(PyObject* module);
+void initModule(PyObject* module);
 } // namespace torch::cuda
 #endif
 
@@ -1654,7 +1653,7 @@ void initModule(PyObject* module);
 
 #ifdef USE_ITT
 namespace torch::profiler {
-static void initIttBindings(PyObject* module);
+void initIttBindings(PyObject* module);
 } // namespace torch::profiler
 #endif
 
