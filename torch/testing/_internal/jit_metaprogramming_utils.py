@@ -710,7 +710,8 @@ def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
     f_args_variable = deepcopy(unpack_variables(args_variable))
     out_var = deepcopy(f_args_variable)
 
-    args, mod = f_args_variable, create_script_module(
+
+    _args, mod = f_args_variable, create_script_module(
         None, nn_module, constructor_args, *f_args_variable
     )(*f_args_variable)
 
