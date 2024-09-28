@@ -484,12 +484,10 @@ class TritonPrinter(PythonPrinter):
         )
 
     def _print_Float(self, expr):
-        # Use a tensor here to get float64. Otherwise the constant is
-        # truncated to float32.
         if config.is_fbcode() and torch.version.hip:
             ret = f"{expr}"
         else:
-            ret = f"tl.full([1], {expr}, tl.float64)"
+            ret = f"tl.full([], {expr}, tl.float64)"
         return ret
 
     def _print_ToFloat(self, expr):
@@ -2691,11 +2689,6 @@ class TritonKernel(SIMDKernel):
 
         if name is None:
             code.splice(gen_common_triton_imports())
-            device_type = V.graph.scheduler.get_current_device_or_throw().type
-            if device_type == "cpu":
-                code.splice("triton_helpers.set_driver_to_cpu()")
-            else:
-                code.splice("triton_helpers.set_driver_to_gpu()")
 
             if config.benchmark_kernel:
                 code.splice(self.imports_for_benchmark_kernel())
@@ -2933,7 +2926,7 @@ class TritonKernel(SIMDKernel):
             call_args,
             grid,
             current_device.index,
-            gpu=current_device.type != "cpu",
+            gpu=True,
             triton=True,
             arg_types=arg_types,
             grid_fn=self._get_grid_fn_str(),
