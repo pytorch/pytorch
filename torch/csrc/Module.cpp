@@ -346,7 +346,9 @@ static PyObject* THPModule_setNumInteropThreads(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPModule_setDefaultTensorType(PyObject* _unused, PyObject* type) {
+static PyObject* THPModule_setDefaultTensorType(
+    PyObject* _unused,
+    PyObject* type) {
   HANDLE_TH_ERRORS
   torch::tensors::py_set_default_tensor_type(type);
   Py_RETURN_NONE;
@@ -699,13 +701,17 @@ static PyObject* THPModule_setSDPUseFlash(PyObject* _unused, PyObject* arg) {
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
-static PyObject* THPModule_userEnabledFlashSDP(PyObject* _unused, PyObject* noargs) {
+static PyObject* THPModule_userEnabledFlashSDP(
+    PyObject* _unused,
+    PyObject* noargs) {
   if (at::globalContext().userEnabledFlashSDP())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
 }
-static PyObject* THPModule_setSDPUseMemEfficient(PyObject* _unused, PyObject* arg) {
+static PyObject* THPModule_setSDPUseMemEfficient(
+    PyObject* _unused,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
@@ -716,7 +722,9 @@ static PyObject* THPModule_setSDPUseMemEfficient(PyObject* _unused, PyObject* ar
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
-static PyObject* userEnabledMemEfficientSDP(PyObject* _unused, PyObject* noargs) {
+static PyObject* userEnabledMemEfficientSDP(
+    PyObject* _unused,
+    PyObject* noargs) {
   if (at::globalContext().userEnabledMemEfficientSDP())
     Py_RETURN_TRUE;
   else
@@ -733,7 +741,9 @@ static PyObject* THPModule_setSDPUseMath(PyObject* _unused, PyObject* arg) {
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
-static PyObject* THPModule_userEnabledMathSDP(PyObject* _unused, PyObject* noargs) {
+static PyObject* THPModule_userEnabledMathSDP(
+    PyObject* _unused,
+    PyObject* noargs) {
   if (at::globalContext().userEnabledMathSDP())
     Py_RETURN_TRUE;
   else
@@ -760,7 +770,9 @@ static PyObject* THPModule_allowFP16BF16ReductionMathSDP(
   else
     Py_RETURN_FALSE;
 }
-static PyObject* THPModule_setSDPUseOverrideable(PyObject* _unused, PyObject* arg) {
+static PyObject* THPModule_setSDPUseOverrideable(
+    PyObject* _unused,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
@@ -790,14 +802,18 @@ static PyObject* THPModule_setSDPUseCuDNN(PyObject* _unused, PyObject* arg) {
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
-static PyObject* THPModule_userEnabledCuDNNSDP(PyObject* _unused, PyObject* noargs) {
+static PyObject* THPModule_userEnabledCuDNNSDP(
+    PyObject* _unused,
+    PyObject* noargs) {
   if (at::globalContext().userEnabledCuDNNSDP())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
 }
 
-static PyObject* THPModule_setUserEnabledCuDNN(PyObject* _unused, PyObject* arg) {
+static PyObject* THPModule_setUserEnabledCuDNN(
+    PyObject* _unused,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
@@ -809,14 +825,18 @@ static PyObject* THPModule_setUserEnabledCuDNN(PyObject* _unused, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPModule_userEnabledCuDNN(PyObject* _unused, PyObject* noargs) {
+static PyObject* THPModule_userEnabledCuDNN(
+    PyObject* _unused,
+    PyObject* noargs) {
   if (at::globalContext().userEnabledCuDNN())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
 }
 
-static PyObject* THPModule_setUserEnabledMkldnn(PyObject* _unused, PyObject* arg) {
+static PyObject* THPModule_setUserEnabledMkldnn(
+    PyObject* _unused,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
@@ -828,14 +848,18 @@ static PyObject* THPModule_setUserEnabledMkldnn(PyObject* _unused, PyObject* arg
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPModule_userEnabledMkldnn(PyObject* _unused, PyObject* noargs) {
+static PyObject* THPModule_userEnabledMkldnn(
+    PyObject* _unused,
+    PyObject* noargs) {
   if (at::globalContext().userEnabledMkldnn())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
 }
 
-static PyObject* THPModule_setDeterministicCuDNN(PyObject* _unused, PyObject* arg) {
+static PyObject* THPModule_setDeterministicCuDNN(
+    PyObject* _unused,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
@@ -847,14 +871,18 @@ static PyObject* THPModule_setDeterministicCuDNN(PyObject* _unused, PyObject* ar
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPModule_deterministicCuDNN(PyObject* _unused, PyObject* noargs) {
+static PyObject* THPModule_deterministicCuDNN(
+    PyObject* _unused,
+    PyObject* noargs) {
   if (at::globalContext().deterministicCuDNN())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
 }
 
-static PyObject* THPModule_setDeterministicMkldnn(PyObject* _unused, PyObject* arg) {
+static PyObject* THPModule_setDeterministicMkldnn(
+    PyObject* _unused,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
@@ -866,7 +894,9 @@ static PyObject* THPModule_setDeterministicMkldnn(PyObject* _unused, PyObject* a
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPModule_deterministicMkldnn(PyObject* _unused, PyObject* noargs) {
+static PyObject* THPModule_deterministicMkldnn(
+    PyObject* _unused,
+    PyObject* noargs) {
   if (at::globalContext().deterministicMkldnn())
     Py_RETURN_TRUE;
   else
@@ -927,7 +957,9 @@ static PyObject* THPModule_deterministicFillUninitializedMemory(
     Py_RETURN_FALSE;
 }
 
-static PyObject* THPModule_setUserEnabledNNPACK(PyObject* _unused, PyObject* arg) {
+static PyObject* THPModule_setUserEnabledNNPACK(
+    PyObject* _unused,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
@@ -939,7 +971,9 @@ static PyObject* THPModule_setUserEnabledNNPACK(PyObject* _unused, PyObject* arg
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPModule_userEnabledNNPACK(PyObject* _unused, PyObject* noargs) {
+static PyObject* THPModule_userEnabledNNPACK(
+    PyObject* _unused,
+    PyObject* noargs) {
   if (at::globalContext().userEnabledNNPACK())
     Py_RETURN_TRUE;
   else
@@ -974,7 +1008,9 @@ static PyObject* THPModule_warn(PyObject* _unused, PyObject* noargs) {
 }
 
 // Used only for testing C++ to Python warning translations.
-static PyObject* THPModule_warnDeprecation(PyObject* _unused, PyObject* noargs) {
+static PyObject* THPModule_warnDeprecation(
+    PyObject* _unused,
+    PyObject* noargs) {
   HANDLE_TH_ERRORS
   TORCH_WARN_DEPRECATION("Test message for TORCH_WARN_DEPRECATION");
   Py_RETURN_NONE;
@@ -1000,7 +1036,9 @@ static PyObject* THPModule_benchmarkCuDNN(PyObject* _unused, PyObject* noargs) {
   Py_RETURN_FALSE;
 }
 
-static PyObject* THPModule_setAllowTF32CuBLAS(PyObject* _unused, PyObject* arg) {
+static PyObject* THPModule_setAllowTF32CuBLAS(
+    PyObject* _unused,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
@@ -1012,7 +1050,9 @@ static PyObject* THPModule_setAllowTF32CuBLAS(PyObject* _unused, PyObject* arg) 
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPModule_allowTF32CuBLAS(PyObject* _unused, PyObject* noargs) {
+static PyObject* THPModule_allowTF32CuBLAS(
+    PyObject* _unused,
+    PyObject* noargs) {
   if (at::globalContext().allowTF32CuBLAS()) {
     Py_RETURN_TRUE;
   }
@@ -1065,7 +1105,9 @@ static PyObject* THPModule_allowBF16ReductionCuBLAS(
   Py_RETURN_FALSE;
 }
 
-static PyObject* THPModule_setAllowFP16ReductionCPU(PyObject* _unused, PyObject* arg) {
+static PyObject* THPModule_setAllowFP16ReductionCPU(
+    PyObject* _unused,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
@@ -1077,7 +1119,9 @@ static PyObject* THPModule_setAllowFP16ReductionCPU(PyObject* _unused, PyObject*
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPModule_allowFP16ReductionCPU(PyObject* _unused, PyObject* noargs) {
+static PyObject* THPModule_allowFP16ReductionCPU(
+    PyObject* _unused,
+    PyObject* noargs) {
   if (at::globalContext().allowFP16ReductionCPU()) {
     Py_RETURN_TRUE;
   }
@@ -1131,7 +1175,9 @@ static PyObject* THPModule_qEngine(PyObject* _unused, PyObject* noargs) {
       static_cast<int64_t>(at::globalContext().qEngine()));
 }
 
-static PyObject* THPModule_supportedQEngines(PyObject* _unused, PyObject* noargs) {
+static PyObject* THPModule_supportedQEngines(
+    PyObject* _unused,
+    PyObject* noargs) {
   auto qengines = at::globalContext().supportedQEngines();
   auto list =
       THPObjectPtr(PyList_New(static_cast<Py_ssize_t>(qengines.size())));
@@ -1146,7 +1192,9 @@ static PyObject* THPModule_supportedQEngines(PyObject* _unused, PyObject* noargs
   return list.release();
 }
 
-static PyObject* THPModule_isEnabledXNNPACK(PyObject* _unused, PyObject* noargs) {
+static PyObject* THPModule_isEnabledXNNPACK(
+    PyObject* _unused,
+    PyObject* noargs) {
   if (at::globalContext().isXNNPACKAvailable())
     Py_RETURN_TRUE;
   else
@@ -1176,7 +1224,9 @@ static PyObject* THPModule_checkSparseTensorInvariants(
     Py_RETURN_FALSE;
 }
 
-static PyObject* THPModule_willEngineExecuteNode(PyObject* _unused, PyObject* arg) {
+static PyObject* THPModule_willEngineExecuteNode(
+    PyObject* _unused,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   bool isTHPFunction = THPFunction_Check(arg);
   bool isTHPCppFunction = torch::autograd::THPCppFunction_Check(arg);
@@ -1241,7 +1291,9 @@ static PyObject* THPModule_getCurrentGraphTaskExecutionOrder(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPModule_getCurrentGraphTaskId(PyObject* _unused, PyObject* noargs) {
+static PyObject* THPModule_getCurrentGraphTaskId(
+    PyObject* _unused,
+    PyObject* noargs) {
   HANDLE_TH_ERRORS
   return THPUtils_packInt64(torch::autograd::get_current_graph_task_id());
   END_HANDLE_TH_ERRORS

@@ -118,7 +118,7 @@ could not be completed because the input matrix is singular.",
 
 namespace torch {
 
-void processErrorMsgInplace(std::string& str) {
+static void processErrorMsgInplace(std::string& str) {
   // Translate Aten types to their respective pytorch ones
   constexpr std::array<std::pair<c10::string_view, c10::string_view>, 64>
       changes{{
@@ -223,7 +223,7 @@ void translate_exception_to_python(const std::exception_ptr& e_ptr) {
         "called with invalid exception pointer");
     std::rethrow_exception(e_ptr);
   }
-  CATCH_ALL_ERRORS(return)
+  CATCH_ALL_ERRORS(return )
 }
 
 TypeError::TypeError(const char* format, ...) {
@@ -251,7 +251,7 @@ PyWarningHandler::PyWarningHandler() noexcept(true)
 }
 
 // Get the Python warning type for a warning
-PyObject* map_warning_to_python_type(const c10::Warning& warning) {
+static PyObject* map_warning_to_python_type(const c10::Warning& warning) {
   struct Visitor {
     PyObject* operator()(const c10::UserWarning&) const {
       return PyExc_UserWarning;
