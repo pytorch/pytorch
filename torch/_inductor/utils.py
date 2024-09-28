@@ -44,8 +44,7 @@ from unittest import mock
 import sympy
 
 import torch
-
-from ..utils._cxx_pytree import tree_map_only
+from torch.utils._pytree import tree_map_only
 
 
 GPU_TYPES = ["cuda", "xpu"]
