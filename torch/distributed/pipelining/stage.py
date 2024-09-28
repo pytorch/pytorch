@@ -1314,6 +1314,7 @@ class PipelineStage(_PipelineStageBase):
                 else dist.get_global_rank(self.group, peer_rank)
             )
 
+        # TODO: we name this 'stage' but we really mean 'rank'! this is bad!
         self.prev_stage = stage_global_rank((self.group_rank - 1) % self.group_size)
         self.next_stage = stage_global_rank((self.group_rank + 1) % self.group_size)
 
@@ -1329,16 +1330,13 @@ class PipelineStage(_PipelineStageBase):
         args: Tuple[Any, ...],
         kwargs: Optional[Dict[str, Any]] = None,
     ):
-        prev_stage_same_rank = (
-            self.stage_index_to_group_rank[self.prev_stage] == self.group_rank
-        )
-        next_stage_same_rank = (
-            self.stage_index_to_group_rank[self.next_stage] == self.group_rank
-        )
         if kwargs is None:
             kwargs = {}
         assert args is not None, "Args may be an empty list but not None"
-        if self.is_first or prev_stage_same_rank:
+        if (
+            self.is_first
+            or self.stage_index_to_group_rank[self.stage_index - 1] == self.group_rank
+        ):
             args = tree_map_only(torch.Tensor, lambda x: x.to("meta"), args)
         else:
             assert (
@@ -1346,7 +1344,7 @@ class PipelineStage(_PipelineStageBase):
             ), "Can't supply input args for shape inference on non-first stage"
             objects = [None]
             logger.debug(
-                "%s receiving from stage %s", self.stage_index, self.prev_stage
+                "%s receiving from stage %s", self.stage_index, self.stage_index - 1
             )
             dist.recv_object_list(
                 objects, src=self.prev_stage, group=self.group, device=self.device
@@ -1373,18 +1371,21 @@ class PipelineStage(_PipelineStageBase):
         # communicate meta outputs not real outputs for two reasons
         # 1 - its faster (esp. since obj coll pickles tensor data!)
         # 2 - avoid activating a cuda context for the src rank when unpickling on the recv end!
-        outputs_meta = tuple(tree_map_only(torch.Tensor, lambda x: x.to("meta"), outputs))
+        outputs_meta = tuple(
+            tree_map_only(torch.Tensor, lambda x: x.to("meta"), outputs)
+        )
         self._configure_outputs_meta(outputs_meta)
 
-        if next_stage_same_rank or self.is_last:
-            logger.debug(
-                "%s skipping send to stage %s",
-                self.stage_index,
-                self.next_stage,
-            )
+        if (
+            self.is_last
+            or self.stage_index_to_group_rank[self.stage_index + 1] == self.group_rank
+        ):
+            logger.debug("%s skipping send to next stage", self.stage_index)
 
         else:
-            logger.debug("%s sending to stage %s", self.stage_index, self.next_stage)
+            logger.debug(
+                "%s sending to stage %s", self.stage_index, self.stage_index + 1
+            )
             dist.send_object_list(
                 [outputs_meta],
                 dst=self.next_stage,
