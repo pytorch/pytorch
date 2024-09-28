@@ -2209,8 +2209,10 @@ def must_add_nn_module_guards(guard):
         isinstance(guard.originating_source, DefaultsSource)
         # Guard using dict tags if the config flag is set
         or (
-            config.guard_nn_modules_using_dict_tags
-            and guard.create_fn is GuardBuilder.NN_MODULE
+            #config.guard_nn_modules_using_dict_tags
+            #and
+            # boolean value removed here, value was always true. Remedy to issue #136862
+            guard.create_fn is GuardBuilder.NN_MODULE
         )
     )
 

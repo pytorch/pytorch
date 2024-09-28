@@ -661,7 +661,8 @@ class AutogradFunctionVariable(VariableTracker):
         if (
             requires_grad
             and torch.is_grad_enabled()
-            and config.capture_autograd_function
+            #and config.capture_autograd_function
+            # boolean value removed here, value was always true. Remedy to issue #136862
         ):
             from torch._functorch.autograd_function import (
                 autograd_function_forward_rewritten,
