@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from typing import TypeVar
+from typing import ClassVar, Optional, Type
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -33,12 +33,9 @@ _BN_CLASS_MAP = {
 }
 
 
-MOD = TypeVar("MOD", bound=nn.modules.conv._ConvNd)
-
-
 class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
     _version = 2
-    _FLOAT_MODULE = MOD
+    _FLOAT_MODULE: ClassVar[Type[nn.modules.conv._ConvNd]]
 
     def __init__(
         self,
@@ -365,7 +362,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
         assert mod.qconfig, "Input float module must have a valid qconfig"
         qconfig = mod.qconfig
-        conv, bn = mod[0], mod[1]
+        conv, bn = mod[0], mod[1]  # type: ignore[index]
         qat_convbn = cls(
             conv.in_channels,
             conv.out_channels,
@@ -434,7 +431,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
             return conv
 
 
-class ConvBn1d(_ConvBnNd, nn.Conv1d):
+class ConvBn1d(_ConvBnNd, nn.Conv1d):  # type: ignore[misc]
     r"""
     A ConvBn1d module is a module fused from Conv1d and BatchNorm1d,
     attached with FakeQuantize modules for weight,
@@ -451,10 +448,10 @@ class ConvBn1d(_ConvBnNd, nn.Conv1d):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_BN_MODULE = nn.BatchNorm1d
-    _FLOAT_RELU_MODULE: None = None
-    _FLOAT_MODULE = nni.ConvBn1d
-    _FLOAT_CONV_MODULE = nn.Conv1d
+    _FLOAT_BN_MODULE: ClassVar[Type[nn.BatchNorm1d]] = nn.BatchNorm1d
+    _FLOAT_RELU_MODULE: ClassVar[Optional[Type[nn.Module]]] = None
+    _FLOAT_MODULE: ClassVar[Type[nn.Module]] = nni.ConvBn1d  # type: ignore[assignment,misc]
+    _FLOAT_CONV_MODULE: ClassVar[Type[nn.Conv1d]] = nn.Conv1d
 
     def __init__(
         self,
@@ -520,12 +517,12 @@ class ConvBnReLU1d(ConvBn1d):
 
     """
     # base class defines _FLOAT_MODULE as "ConvBn1d"
-    _FLOAT_MODULE = nni.ConvBnReLU1d  # type: ignore[assignment]
-    _FLOAT_CONV_MODULE = nn.Conv1d
-    _FLOAT_BN_MODULE = nn.BatchNorm1d
-    _FLOAT_RELU_MODULE = nn.ReLU  # type: ignore[assignment]
+    _FLOAT_MODULE: ClassVar[Type[nn.Module]] = nni.ConvBnReLU1d  # type: ignore[assignment,misc]
+    _FLOAT_CONV_MODULE: ClassVar[Type[nn.Conv1d]] = nn.Conv1d
+    _FLOAT_BN_MODULE: ClassVar[Type[nn.BatchNorm1d]] = nn.BatchNorm1d
+    _FLOAT_RELU_MODULE: ClassVar[Optional[Type[nn.Module]]] = nn.ReLU
     # module class after fusing bn into conv
-    _FUSED_FLOAT_MODULE = nni.ConvReLU1d
+    _FUSED_FLOAT_MODULE: ClassVar[Optional[Type[nn.Module]]] = nni.ConvReLU1d
 
     def __init__(
         self,
@@ -585,10 +582,10 @@ class ConvReLU1d(nnqat.Conv1d, nni._FusedModule):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = nni.ConvReLU1d  # type: ignore[assignment]
-    _FLOAT_CONV_MODULE = nn.Conv1d
-    _FLOAT_BN_MODULE: None = None
-    _FLOAT_RELU_MODULE = nn.ReLU
+    _FLOAT_MODULE: ClassVar[Type[nni.ConvReLU1d]] = nni.ConvReLU1d  # type: ignore[assignment, misc]
+    _FLOAT_CONV_MODULE: ClassVar[Type[nn.Conv1d]] = nn.Conv1d
+    _FLOAT_BN_MODULE: ClassVar[Optional[Type[nn.Module]]] = None
+    _FLOAT_RELU_MODULE: ClassVar[Optional[Type[nn.Module]]] = nn.ReLU
 
     def __init__(
         self,
@@ -631,7 +628,7 @@ class ConvReLU1d(nnqat.Conv1d, nni._FusedModule):
         )
 
 
-class ConvBn2d(_ConvBnNd, nn.Conv2d):
+class ConvBn2d(_ConvBnNd, nn.Conv2d):  # type: ignore[misc]
     r"""
     A ConvBn2d module is a module fused from Conv2d and BatchNorm2d,
     attached with FakeQuantize modules for weight,
@@ -648,10 +645,10 @@ class ConvBn2d(_ConvBnNd, nn.Conv2d):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = nni.ConvBn2d
-    _FLOAT_CONV_MODULE = nn.Conv2d
-    _FLOAT_BN_MODULE = nn.BatchNorm2d
-    _FLOAT_RELU_MODULE: None = None
+    _FLOAT_MODULE: ClassVar[Type[nni.ConvBn2d]] = nni.ConvBn2d  # type: ignore[assignment,misc]
+    _FLOAT_CONV_MODULE: ClassVar[Type[nn.Conv2d]] = nn.Conv2d
+    _FLOAT_BN_MODULE: ClassVar[Optional[Type[nn.Module]]] = nn.BatchNorm2d
+    _FLOAT_RELU_MODULE: ClassVar[Optional[Type[nn.Module]]] = None
 
     def __init__(
         self,
@@ -717,12 +714,12 @@ class ConvBnReLU2d(ConvBn2d):
 
     """
     # base class defines _FLOAT_MODULE as "ConvBn2d"
-    _FLOAT_MODULE = nni.ConvBnReLU2d  # type: ignore[assignment]
-    _FLOAT_CONV_MODULE = nn.Conv2d
-    _FLOAT_BN_MODULE = nn.BatchNorm2d
-    _FLOAT_RELU_MODULE = nn.ReLU  # type: ignore[assignment]
+    _FLOAT_MODULE: ClassVar[Type[nni.ConvBnReLU2d]] = nni.ConvBnReLU2d  # type: ignore[assignment, misc]
+    _FLOAT_CONV_MODULE: ClassVar[Type[nn.Conv2d]] = nn.Conv2d
+    _FLOAT_BN_MODULE: ClassVar[Type[nn.BatchNorm2d]] = nn.BatchNorm2d
+    _FLOAT_RELU_MODULE: ClassVar[Optional[Type[nn.Module]]] = nn.ReLU  # type: ignore[assignment,misc]
     # module class after fusing bn into conv
-    _FUSED_FLOAT_MODULE = nni.ConvReLU2d
+    _FUSED_FLOAT_MODULE: ClassVar[Optional[Type[nni.ConvReLU2d]]] = nni.ConvReLU2d
 
     def __init__(
         self,
@@ -782,10 +779,10 @@ class ConvReLU2d(nnqat.Conv2d, nni._FusedModule):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = nni.ConvReLU2d  # type: ignore[assignment]
-    _FLOAT_CONV_MODULE = nn.Conv2d
-    _FLOAT_BN_MODULE: None = None
-    _FLOAT_RELU_MODULE = nn.ReLU
+    _FLOAT_MODULE: ClassVar[Type[nn.Module]] = nni.ConvReLU2d  # type: ignore[assignment, misc]
+    _FLOAT_CONV_MODULE: ClassVar[Type[nn.Conv2d]] = nn.Conv2d
+    _FLOAT_BN_MODULE: ClassVar[Optional[Type[nn.Module]]] = None
+    _FLOAT_RELU_MODULE: ClassVar[Optional[Type[nn.Module]]] = nn.ReLU
 
     def __init__(
         self,
@@ -828,7 +825,7 @@ class ConvReLU2d(nnqat.Conv2d, nni._FusedModule):
         )
 
 
-class ConvBn3d(_ConvBnNd, nn.Conv3d):
+class ConvBn3d(_ConvBnNd, nn.Conv3d):  # type: ignore[misc]
     r"""
     A ConvBn3d module is a module fused from Conv3d and BatchNorm3d,
     attached with FakeQuantize modules for weight,
@@ -845,10 +842,10 @@ class ConvBn3d(_ConvBnNd, nn.Conv3d):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = nni.ConvBn3d
-    _FLOAT_CONV_MODULE = nn.Conv3d
-    _FLOAT_BN_MODULE = nn.BatchNorm3d
-    _FLOAT_RELU_MODULE: None = None
+    _FLOAT_MODULE: ClassVar[Type[nni.ConvBn3d]] = nni.ConvBn3d  # type: ignore[assignment,misc]
+    _FLOAT_CONV_MODULE: ClassVar[Type[nn.Conv3d]] = nn.Conv3d
+    _FLOAT_BN_MODULE: ClassVar[Optional[Type[nn.Module]]] = nn.BatchNorm3d
+    _FLOAT_RELU_MODULE: ClassVar[Optional[Type[nn.Module]]] = None
 
     def __init__(
         self,
@@ -913,12 +910,12 @@ class ConvBnReLU3d(ConvBn3d):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = nni.ConvBnReLU3d  # type: ignore[assignment]
-    _FLOAT_CONV_MODULE = nn.Conv3d
-    _FLOAT_BN_MODULE = nn.BatchNorm3d
-    _FLOAT_RELU_MODULE = nn.ReLU  # type: ignore[assignment]
+    _FLOAT_MODULE: ClassVar[Type[nni.ConvBnReLU3d]] = nni.ConvBnReLU3d  # type: ignore[assignment, misc]
+    _FLOAT_CONV_MODULE: ClassVar[Type[nn.Conv3d]] = nn.Conv3d
+    _FLOAT_BN_MODULE: ClassVar[Type[nn.BatchNorm3d]] = nn.BatchNorm3d
+    _FLOAT_RELU_MODULE: ClassVar[Optional[Type[nn.ReLU]]] = nn.ReLU  # type: ignore[assignment, misc]
     # module class after fusing bn into conv
-    _FUSED_FLOAT_MODULE = nni.ConvReLU3d
+    _FUSED_FLOAT_MODULE: ClassVar[Optional[Type[nni.ConvReLU3d]]] = nni.ConvReLU3d
 
     def __init__(
         self,
@@ -980,10 +977,10 @@ class ConvReLU3d(nnqat.Conv3d, nni._FusedModule):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = nni.ConvReLU3d  # type: ignore[assignment]
-    _FLOAT_CONV_MODULE = nn.Conv3d
-    _FLOAT_BN_MODULE: None = None
-    _FLOAT_RELU_MODULE = nn.ReLU
+    _FLOAT_MODULE: ClassVar[Type[nni.ConvReLU3d]] = nni.ConvReLU3d  # type: ignore[assignment,misc]
+    _FLOAT_CONV_MODULE: ClassVar[Type[nn.Conv3d]] = nn.Conv3d
+    _FLOAT_BN_MODULE: ClassVar[Optional[Type[nn.Module]]] = None
+    _FLOAT_RELU_MODULE: ClassVar[Optional[Type[nn.Module]]] = nn.ReLU
 
     def __init__(
         self,

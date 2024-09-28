@@ -1,12 +1,14 @@
 # mypy: allow-untyped-defs
-import contextlib
-import copy
 
 import torch
 from torch._higher_order_ops.wrap import wrap_with_set_grad_enabled
 
 from ..utils import node_inline_, nodes_filter, nodes_first, nodes_map, sequential_split
-from .replace_with_hop_pass_util import _replace_with_hop_helper
+from .replace_with_hop_pass_util import (
+    _replace_with_hop_helper,
+    _replace_with_hop_pass_helper,
+    _sequential_split_and_maybe_inline_subgraphs_helper,
+)
 
 
 def _is_set_grad_enabled_node(node: torch.fx.Node):
@@ -85,60 +87,24 @@ def _sequential_split_and_maybe_inline_subgraphs(
     # args names. We need to fix the graph signature.
     new_gm = sequential_split(gm, _is_set_grad_enabled_node)
 
-    replace_ctx = contextlib.nullcontext()
-    new_signature = None
-    if graph_signature is not None:
-        # Cannot deep copy a real ScriptObject, which is referenced
-        # in the FakeScriptObject. Copy should be good enough to guard
-        # against accidental mutation to original graph_signature.
-        new_signature = copy.copy(graph_signature)
-        new_gm_out_node = next(reversed(new_gm.graph.find_nodes(op="output")))
-        assert new_gm_out_node.op == "output" and len(new_gm_out_node.args[0]) == len(
-            new_signature.output_specs
-        )
-        for arg_node, out_spec in zip(
-            new_gm_out_node.args[0], new_signature.output_specs
-        ):
-            if arg_node is None:
-                assert out_spec.arg.value is None
-            elif out_spec.arg.name != arg_node.name:
-                out_spec.arg.name = arg_node.name
+    def _maybe_inline_or_replace_with_hop(node: torch.fx.Node):
+        if _is_set_grad_enabled_sub_mod(node, omit_if_same_with_ambient=True):
+            _replace_with_hop(node)
+        else:
+            _remove_set_grad_and_inline(node)
 
-        replace_ctx = new_gm._set_replace_hook(new_signature.get_replace_hook())  # type: ignore[assignment]
-
-    with replace_ctx:
-
-        def _maybe_inline_or_replace_with_hop(node: torch.fx.Node):
-            if _is_set_grad_enabled_sub_mod(node, omit_if_same_with_ambient=True):
-                _replace_with_hop(node)
-            else:
-                _remove_set_grad_and_inline(node)
-
-        nodes_map(
-            list(new_gm.graph.nodes),
-            lambda node: (
-                _maybe_inline_or_replace_with_hop(node)
-                if node.op == "call_module"
-                else node
-            ),
-        )
-    new_gm.recompile()
-    return new_gm, new_signature
+    return _sequential_split_and_maybe_inline_subgraphs_helper(
+        new_gm, graph_signature, _maybe_inline_or_replace_with_hop
+    )
 
 
 def replace_set_grad_with_hop_pass(gm: torch.fx.GraphModule, graph_signature):
-    new_gm, new_signature = _sequential_split_and_maybe_inline_subgraphs(
-        gm, graph_signature
+    """
+    Split gm into sub-graph-modules using `sequential_split_and_maybe_inline_subgraphs`, and
+    then recursively call itself on each of the submodules.
+    """
+    return _replace_with_hop_pass_helper(
+        gm,
+        graph_signature,
+        _sequential_split_and_maybe_inline_subgraphs,
     )
-    # recursively call
-    for node in new_gm.graph.nodes:
-        if node.op == "get_attr":
-            subgm = getattr(new_gm, node.target)
-            if not isinstance(subgm, torch.fx.GraphModule):
-                continue
-            new_subgm, _ = replace_set_grad_with_hop_pass(subgm, None)
-            setattr(new_gm, node.target, new_subgm)
-
-    new_gm.recompile()
-    new_gm.graph.lint()
-    return new_gm, new_signature

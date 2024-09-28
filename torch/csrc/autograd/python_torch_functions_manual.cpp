@@ -41,8 +41,7 @@ using at::TensorOptions;
 using torch::utils::check_out_type_matches;
 using namespace torch::autograd::utils;
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject* THPVariableFunctionsModule = nullptr;
@@ -665,6 +664,10 @@ void initTorchFunctions(PyObject* module) {
             !at::functionalization::impl::isFunctionalTensor(o));
         at::functionalization::impl::replace_(t, o);
       });
+  py_module.def("_is_functional_tensor_base", [](const at::Tensor& t) {
+    TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
+    return at::functionalization::impl::isBaseTensor(t);
+  });
   py_module.def("_functionalize_is_multi_output_view", [](const at::Tensor& t) {
     TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
     auto t_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
@@ -796,5 +799,4 @@ void initTorchFunctions(PyObject* module) {
       });
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

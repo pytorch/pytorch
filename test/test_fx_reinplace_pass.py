@@ -3,6 +3,9 @@ import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.fx.passes.reinplace import reinplace
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch._dynamo.source import ConstantSource
+from torch.fx.experimental.sym_node import SymNode
 
 try:
     from functorch.experimental import functionalize
@@ -357,6 +360,42 @@ def forward(self):
     slice_5 = torch.ops.aten.slice.Tensor(slice_4, 1, 2, 9223372036854775807);  slice_4 = slice_5 = None
     return zeros
     """)
+
+    def test_reinplace_sym_input(self):
+        # Symbolic input test: the out-of-place add() call should be converted
+        # into add_(), and symbolic input won't cause any error.
+        def f(x, index):
+            a = torch.select(x, 0, index)
+            clone = a.clone()
+            b = clone.add(1)
+            return b
+
+        x = torch.randn((4, 8, 16, 16), requires_grad=False)
+        index = 2
+        shape_env = ShapeEnv()
+        symbol = shape_env.create_symbol(index, source=ConstantSource(
+            f"__testing_only{len(shape_env.var_to_val)}"))
+        sym_index = torch.SymInt(SymNode(symbol, shape_env, int, hint=index))
+
+        inpt = [x, sym_index]
+        f2 = reinplace(make_fx(f)(*inpt), *inpt)
+
+        real_inpt = [x, index]
+        expected_out = f(*real_inpt)
+        actual_out = f2(*real_inpt)
+        self.assertEqual(actual_out, expected_out)
+        print(f2.code)
+        self.assertExpectedInline(f2.code, """\
+
+
+
+def forward(self, x_1, index_1):
+    select = torch.ops.aten.select.int(x_1, 0, index_1);  x_1 = index_1 = None
+    clone = torch.ops.aten.clone.default(select);  select = None
+    add = torch.ops.aten.add_.Tensor(clone, 1);  add = None
+    return clone
+    """)
+
 
 if __name__ == '__main__':
     run_tests()

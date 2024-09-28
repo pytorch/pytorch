@@ -979,13 +979,13 @@ def _annotate_cat(
         inputs = cat_node.args[0]
 
         input_qspec_map = {}
-        input_act0 = inputs[0]
+        input_act0 = inputs[0]  # type: ignore[index]
         if isinstance(input_act0, Node):
             input_qspec_map[input_act0] = input_act_qspec
 
-        shared_with_input0_qspec = SharedQuantizationSpec((input_act0, cat_node))
-        for input_act in inputs[1:]:
-            input_qspec_map[input_act] = shared_with_input0_qspec
+        shared_with_input0_qspec = SharedQuantizationSpec((input_act0, cat_node))  # type: ignore[arg-type]
+        for input_act in inputs[1:]:  # type: ignore[index]
+            input_qspec_map[input_act] = shared_with_input0_qspec  # type: ignore[index]
 
         output_act_qspec = shared_with_input0_qspec
 

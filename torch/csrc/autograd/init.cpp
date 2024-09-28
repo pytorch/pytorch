@@ -311,6 +311,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       "_prepare_profiler",
       prepareProfiler,
       py::call_guard<py::gil_scoped_release>());
+  m.def(
+      "_toggle_collection_dynamic",
+      toggleCollectionDynamic,
+      py::call_guard<py::gil_scoped_release>());
   m.def("_add_metadata_json", addMetadataJson); // Only if `USE_KINETO` is set
   m.def("_kineto_step", profilerStep); // Only if `USE_KINETO` is set
   m.def("kineto_available", []() { return torch::profiler::kKinetoAvailable; });
@@ -1276,7 +1280,7 @@ PyObject* THPModule_increment_version(
 }
 
 // autograd methods on torch._C
-static PyMethodDef methods[] = { // NOLINT
+static PyMethodDef methods[] = {
     {"_set_grad_enabled",
      castPyCFunctionWithKeywords(set_grad_enabled),
      METH_VARARGS | METH_KEYWORDS,

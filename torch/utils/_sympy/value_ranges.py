@@ -87,7 +87,9 @@ def simple_sympify(e):
 def sympy_generic_le(lower, upper):
     if isinstance(lower, sympy.Expr):
         assert isinstance(upper, sympy.Expr)
-        return lower <= upper
+        # instead of lower <= upper, we do upper >= lower since upper is mostly int_oo
+        # and we have better code paths there.
+        return upper >= lower
     else:
         # only negative condition is True > False
         assert isinstance(lower, SympyBoolean) and isinstance(upper, SympyBoolean), (
@@ -552,9 +554,9 @@ class SymPyValueRangeAnalysis:
 
         def safe_mul(a, b):
             # Make unknown() * wrap(0.0) == wrap(0.0)
-            if a == 0.0:
+            if a == 0.0 or a == 0:
                 return a
-            elif b == 0.0:
+            elif b == 0.0 or b == 0:
                 return b
             else:
                 return a * b
@@ -590,7 +592,7 @@ class SymPyValueRangeAnalysis:
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
         if 0 in b:
-            return ValueRanges.unknown()
+            return ValueRanges.unknown_int()
         products = []
         for x, y in itertools.product([a.lower, a.upper], [b.lower, b.upper]):
             r = FloorDiv(x, y)

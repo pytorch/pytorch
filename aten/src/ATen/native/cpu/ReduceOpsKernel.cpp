@@ -210,7 +210,7 @@ void norm_kernel_cpu_impl(TensorIterator& iter, const double& val) {
 static void norm_kernel_tensor_iterator_impl(
     TensorIterator& iter,
     const Scalar& p) {
-  double val;
+  double val = 0;
   if (p.isIntegral(false)) {
     val = p.to<int64_t>();
   } else if (p.isFloatingPoint()) {

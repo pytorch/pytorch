@@ -10,6 +10,9 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 import torch
 import torch.export._trace
 from torch import _C
+from torch._export.passes.replace_quantized_ops_with_standard_ops_pass import (
+    replace_quantized_ops_with_standard_ops,
+)
 from torch.export.exported_program import ExportedProgram
 from torch.export.graph_signature import (
     ConstantArgument,
@@ -201,6 +204,8 @@ _TORCH_DTYPE_TO_ENUM = {
     torch.complex64: 9,
     torch.complex128: 10,
     torch.bool: 11,
+    torch.qint8: 12,
+    torch.quint8: 13,
     torch.bfloat16: 15,
 }
 
@@ -636,6 +641,19 @@ class TS2FXGraphConverter:
                 fx_node = self.fx_graph.placeholder(normalized_name)
 
             self.name_to_node[name] = fx_node
+
+    def convert_aten_Float(self, node: torch._C.Node):
+        def to_float_tensor(t):
+            return t.to(dtype=torch.float).item()
+
+        inp_list = [
+            self.get_fx_value_by_ir_value(inp) for inp in node.inputs()
+        ]  # noqa: C416
+        fx_node = self.fx_graph.call_function(
+            to_float_tensor,
+            tuple(inp_list),
+        )
+        self.name_to_node[node.output().debugName()] = fx_node
 
     def convert_aten_tensor(self, node: torch._C.Node):
         """aten::tensor creates a constant tensor ad-hoc --> GetAttr"""
@@ -1325,7 +1343,7 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
             self.name_to_node,
             # Dummy node.
             torch.fx.Node(
-                None,
+                None,  # type: ignore[arg-type]
                 "mock",
                 "call_function",
                 lambda: None,
@@ -1420,6 +1438,9 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
             self.name_to_constant,
         )
         gm = graph_converter.convert()
+
+        # Post-proccessing step to deal with quantized operators.
+        replace_quantized_ops_with_standard_ops(gm)
         log.info("GraphModule: %s", gm.print_readable(print_output=False))
 
         ep = self.retrace_as_exported_program(
