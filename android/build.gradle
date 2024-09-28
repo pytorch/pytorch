@@ -1,0 +1,40 @@
+allprojects {
+    buildscript {
+        ext {
+            minSdkVersion = 21
+            targetSdkVersion = 28
+            compileSdkVersion = 28
+            buildToolsVersion = '28.0.3'
+
+            coreVersion = "1.2.0"
+            extJUnitVersion = "1.1.1"
+            runnerVersion = "1.2.0"
+            rulesVersion = "1.2.0"
+            junitVersion = "4.12"
+
+            fbjniJavaOnlyVersion = "0.2.2"
+            soLoaderNativeLoaderVersion = "0.10.5"
+        }
+
+        repositories {
+            google()
+            mavenLocal()
+            mavenCentral()
+            jcenter()
+        }
+
+        dependencies {
+            classpath 'com.android.tools.build:gradle:4.1.2'
+            classpath 'com.vanniktech:gradle-maven-publish-plugin:0.14.2'
+        }
+    }
+
+    repositories {
+        google()
+        jcenter()
+    }
+}
+
+ext.deps = [
+        jsr305: 'com.google.code.findbugs:jsr305:3.0.1',
+]
