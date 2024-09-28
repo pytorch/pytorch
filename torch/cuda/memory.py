@@ -998,23 +998,12 @@ class MemPool(_MemPool):
 
     @property
     def allocator(self) -> Optional[_cuda_CUDAAllocator]:
-        r"""Returns the allocator this MemPool routes allocations to"""
+        r"""Returns the allocator this MemPool routes allocations to."""
         return super().allocator
 
-    def use_count(self, device: Union[Device, int] = None):
-        r"""Returns the number of use_mem_pool context managers using this pool.
-
-        Args:
-            device (torch.device or int, optional): selected device. Returns
-                the use count of a pool on the current device, given by
-                :func:`~torch.cuda.current_device`, if :attr:`device` is ``None``
-                (default).
-
-        """
-        device_index = (
-            torch.cuda.current_device() if device is None else _get_device_index(device)
-        )
-        return _cuda_getPoolUseCount(device_index, self.id)
+    def use_count(self):
+        r"""Returns the reference count of this pool."""
+        return super().use_count()
 
 
 class MemPoolContext(_MemPoolContext):
