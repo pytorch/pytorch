@@ -3624,18 +3624,12 @@ def fail_non_abi_compatible_cuda(is_skip=False):
 
 # test_failures, xfail by default, set is_skip=True to skip
 CPU_TEST_FAILURES = {
-    # TODO: error: ‘complex64’ was not declared in this scope
-    "test_add_complex": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: test_conv_freezing_abi_compatible_cpu fails,
     #   AssertionError: None, i.e. optional output is not supported
     "test_conv_freezing": fail_with_and_without_stack_allocation(is_skip=True),
     # TODO: test_deconv_freezing_abi_compatible_cpu fails,
     #   AssertionError: None, i.e. optional output is not supported
     "test_deconv_freezing": fail_with_and_without_stack_allocation(is_skip=True),
-    # FIXME: failed with Segfault while exiting the Python runtime
-    "test_duplicate_constant_folding": fail_with_and_without_stack_allocation(
-        is_skip=True
-    ),
     # TODO: use of deleted function RAIIAtenTensorHandle
     "test_dup_unbacked_sym_decl": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: use of deleted function RAIIAtenTensorHandle
@@ -3660,8 +3654,6 @@ CPU_TEST_FAILURES = {
     # minimal arrayref interface only works with CPU; test crashes.
     # https://github.com/pytorch/pytorch/issues/122983
     "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
-    # TODO: AssertionError: unsupported Optional type in convert_arg_type: Generator
-    "test_normal_functional": fail_with_and_without_stack_allocation(is_skip=True),
     # TODO: The same issue as https://github.com/pytorch/pytorch/issues/122978
     # error: cannot convert ArrayRefTensor<float> to AtenTensorHandle
     "test_reuse_kernel_dynamic": fail_minimal_arrayref_interface(is_skip=True),
@@ -3669,25 +3661,8 @@ CPU_TEST_FAILURES = {
     "test_repeat_output": fail_stack_allocation(is_skip=True),
     # TODO: failed internally
     "test_multiple_output_alias": fail_with_and_without_stack_allocation(is_skip=True),
-    # segfault
-    "test_buffer_mutation_1": fail_stack_allocation(is_skip=True),
-    # segfault
-    "test_buffer_mutation_2": fail_stack_allocation(is_skip=True),
-    # segfault
-    "test_bool_input": fail_stack_allocation(is_skip=True),
-    # segfault
-    "test_int_list_input": fail_stack_allocation(is_skip=True),
-    # segfault
     # 'AOTInductorTestABICompatibleCpuWithStackAllocation' object has no attribute 'code_check_count'
     "test_buffer_mutation_3": fail_stack_allocation(is_skip=True),
-    # FIXME: failed with Segfault while exiting the Python runtime
-    "test_scatter_fallback": fail_stack_allocation(is_skip=True),
-    # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
-    "test_scatter_reduce_fallback": fail_minimal_arrayref_interface(is_skip=True),
-    # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
-    "test_index_put_fallback": fail_minimal_arrayref_interface(is_skip=True),
-    # https://github.com/pytorch/pytorch/issues/122984
-    "test_index_put_with_none_index": fail_minimal_arrayref_interface(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_constant": fail_stack_allocation(is_skip=True),
     # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
