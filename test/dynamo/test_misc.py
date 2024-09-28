@@ -7632,7 +7632,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
     @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
-    def test_multiply_precision_f16(self):
+    def test_unspecialized_float_multiply_precision_f16(self):
         def fn(x, y):
             return x * y
 
@@ -7645,7 +7645,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnt.frame_count, 1)
 
     @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
-    def test_multiply_precision_f32(self):
+    def test_unspecialized_float_multiply_precision_f32(self):
         def fn(x, y):
             return x * y
 
@@ -7658,7 +7658,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnt.frame_count, 1)
 
     @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
-    def test_multiply_precision_f64(self):
+    def test_unspecialized_float_multiply_precision_f64(self):
         def fn(x, y):
             return x * y
 
