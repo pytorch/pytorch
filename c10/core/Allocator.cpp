@@ -1,5 +1,5 @@
-#include <array>
 #include <c10/core/Allocator.h>
+#include <array>
 
 #include <c10/util/ThreadLocalDebugInfo.h>
 
@@ -37,8 +37,10 @@ at::DataPtr InefficientStdFunctionContext::makeDataPtr(
       device};
 }
 
-static std::array<at::Allocator*,at::COMPILE_TIME_MAX_DEVICE_TYPES> allocator_array{};
-static std::array<uint8_t, at::COMPILE_TIME_MAX_DEVICE_TYPES> allocator_priority{};
+static std::array<at::Allocator*, at::COMPILE_TIME_MAX_DEVICE_TYPES>
+    allocator_array{};
+static std::array<uint8_t, at::COMPILE_TIME_MAX_DEVICE_TYPES>
+    allocator_priority{};
 
 void SetAllocator(at::DeviceType t, at::Allocator* alloc, uint8_t priority) {
   if (priority >= allocator_priority[static_cast<int>(t)]) {
