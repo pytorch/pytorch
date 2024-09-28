@@ -3960,6 +3960,10 @@ CUDACachingAllocator::CUDAAllocator* MemPool::allocator() {
   return allocator_;
 }
 
+int MemPool::use_count() {
+  return CUDACachingAllocator::getPoolUseCount(device_, id_);
+}
+
 // Note that active_mempool_ is a global variable here
 // and not inside MemPoolContext class, because in windows we
 // can't use __declspec(dllexport) and __declspec(thread)

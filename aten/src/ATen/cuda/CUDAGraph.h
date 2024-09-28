@@ -2,6 +2,7 @@
 
 #include <ATen/Tensor.h>
 #include <c10/core/Device.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/flat_hash_map.h>
@@ -16,7 +17,7 @@ namespace cuda {
 
 // Standalone way to get a unique mempool id usable as a pool=... argument
 // to CUDAGraph::capture_begin
-TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
+TORCH_CUDA_CPP_API std::shared_ptr<c10::cuda::MemPool> graph_pool_handle();
 
 struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph();
@@ -29,12 +30,12 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void register_generator_state(c10::intrusive_ptr<at::CUDAGeneratorState> state);
   void register_generator_state(const at::Generator& generator);
   void capture_begin(
-      MempoolId_t pool = {0, 0},
+      std::shared_ptr<c10::cuda::MemPool> pool = nullptr,
       cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal);
   void capture_end();
   void replay();
   void reset();
-  MempoolId_t pool();
+  std::shared_ptr<c10::cuda::MemPool> pool();
   void enable_debug_mode();
   void debug_dump(const std::string& debug_path);
 
@@ -68,6 +69,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   //
   // Sharing a mempool across graphs saves memory, and it's safe if you
   // know you'll replay those graphs in the same order you captured them.
+  std::shared_ptr<c10::cuda::MemPool> mempool_;
   MempoolId_t mempool_id_;
 
   // Stream on which capture began
