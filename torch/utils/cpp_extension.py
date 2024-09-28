@@ -1180,8 +1180,7 @@ def include_paths(device_type: str = "cpu") -> List[str]:
     Get the include paths required to build a C++ or CUDA or SYCL extension.
 
     Args:
-        cuda: If `True`, includes CUDA-specific include paths.
-
+        device_type: Defaults to "cpu".
     Returns:
         A list of include path strings.
     """
@@ -1221,7 +1220,7 @@ def library_paths(device_type: str = "cpu") -> List[str]:
     Get the library paths required to build a C++ or CUDA extension.
 
     Args:
-        cuda: If `True`, includes CUDA-specific library paths.
+        device_type: Defaults to "cpu".
 
     Returns:
         A list of library path strings.

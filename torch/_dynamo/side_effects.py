@@ -590,40 +590,44 @@ class SideEffects:
                 )
 
             elif isinstance(var, variables.ConstDictVariable):
+                # Reconstruct works as follow:
+                # (1) codegen(...) each pair of key/value
+                # (2) create a new dictionary with the pairs of key/values above
+                # (3) clear the original dictionary
+                #   + only if a key was removed from the input dict
+                # (4) update the original dictionary with the dict created in (2)
+
                 cg(var.mutable_local.source)  # type: ignore[attr-defined]
                 cg.load_method("update")
                 cg(var, allow_cache=False)
 
-                cg(var.mutable_local.source)  # type: ignore[attr-defined]
-                cg.load_method("clear")
+                if var.should_reconstruct_all:
+                    cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                    cg.load_method("clear")
 
                 suffixes.append(
                     [
-                        *create_call_method(0),  # clear
-                        create_instruction("POP_TOP"),
                         *create_call_method(1),  # update
                         create_instruction("POP_TOP"),
                     ]
                 )
+
+                if var.should_reconstruct_all:
+                    suffixes.append(
+                        [
+                            *create_call_method(0),  # clear
+                            create_instruction("POP_TOP"),
+                        ]
+                    )
+
             elif isinstance(
                 var, variables.torch_function.TorchFunctionModeStackVariable
             ):
-                # Needed in the finally block for stack restoration
-                cg.add_push_null(
-                    lambda: cg.load_import_from(
-                        utils.__name__, "get_torch_function_mode_stack"
-                    )
-                )
-                cg.call_function(0, False)
-                name = variables.torch_function.get_prev_stack_var_name()
-                cg.code_options["co_varnames"] += (name,)
-                cg.append_output(create_instruction("STORE_FAST", argval=name))
                 cg.add_push_null(
                     lambda: cg.load_import_from(
                         utils.__name__, "set_torch_function_mode_stack"
                     )
                 )
-
                 cg.foreach(var.symbolic_stack)
                 cg.append_output(
                     create_instruction("BUILD_LIST", arg=len(var.symbolic_stack))

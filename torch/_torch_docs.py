@@ -12463,7 +12463,7 @@ ready to be used as a periodic window with functions like
 :meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
 above formula is in fact :math:`\text{window\_length} + 1`. Also, we always have
 ``torch.blackman_window(L, periodic=True)`` equal to
-``torch.blackman_window(L + 1, periodic=False)[:-1])``.
+``torch.blackman_window(L + 1, periodic=False)[:-1]``.
 
 .. note::
     If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
