@@ -123,7 +123,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     else:
                         # arg is a scalar
                         new_args.append(arg)
-                self.writeline(self.wrap_kernel_call(kernel_name, new_args))
+                # debug printer related logic for cpp kernel type.
+                debug_printer_manager = V.graph.wrapper_code.debug_printer
+                debug_printer_manager.set_printer_args(
+                    call_args,
+                    kernel_name,
+                    None,
+                    None,
+                    "cpp",
+                )
+                with debug_printer_manager:
+                    self.writeline(self.wrap_kernel_call(kernel_name, new_args))
             else:
                 self.writeline(self.wrap_kernel_call(kernel_name, call_args))
 

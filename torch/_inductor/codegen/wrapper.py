@@ -987,7 +987,7 @@ class PythonWrapperCodegen(CodeGen):
 
         # conservatively use the sum of all allocated buffer sizes
         # in potentially nested scopes as the total allocated size
-        total_allocated_buffer_size = sum(
+        total_allocated_buffer_size = sum(  # noqa: F841
             s.total_allocated_buffer_size for s in past_planning_states
         )
 

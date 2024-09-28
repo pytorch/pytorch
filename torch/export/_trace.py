@@ -60,11 +60,7 @@ from torch._guards import detect_fake_mode
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._utils_internal import log_export_usage
-from torch.export.dynamic_shapes import (
-    _check_dynamic_shapes,
-    _combine_args,
-    _transform_shapes_for_default_dynamic,
-)
+from torch.export.dynamic_shapes import _check_dynamic_shapes, _combine_args
 from torch.export.exported_program import OutputKind
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -547,10 +543,6 @@ def _export_to_torch_ir(
     kwargs = kwargs or {}
     combined_args = _combine_args(f, args, kwargs)
     _check_dynamic_shapes(combined_args, dynamic_shapes)
-    transformed_dynamic_shapes = _transform_shapes_for_default_dynamic(
-        combined_args, dynamic_shapes
-    )
-
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
         try:
             module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
@@ -559,7 +551,8 @@ def _export_to_torch_ir(
             ), _ignore_backend_decomps():
                 gm_torch_level, _ = torch._dynamo.export(
                     f,
-                    dynamic_shapes=transformed_dynamic_shapes,  # type: ignore[arg-type]
+                    dynamic_shapes=dynamic_shapes,  # type: ignore[arg-type]
+                    assume_static_by_default=True,
                     tracing_mode="symbolic",
                     disable_constraint_solver=disable_constraint_solver,
                     # currently the following 2 flags are tied together for export purposes,
@@ -1639,7 +1632,7 @@ def _non_strict_export(
         fake_kwargs,
         equalities_inputs,
         original_signature,
-        transformed_dynamic_shapes,
+        dynamic_shapes,
     ) = make_fake_inputs(
         mod,
         args,
@@ -1655,15 +1648,13 @@ def _non_strict_export(
         return produce_guards_and_solve_constraints(
             fake_mode=fake_mode,
             gm=gm,
-            dynamic_shapes=transformed_dynamic_shapes,
+            dynamic_shapes=dynamic_shapes,
             equalities_inputs=equalities_inputs,
             original_signature=original_signature,
             _is_torch_jit_trace=_is_torch_jit_trace,
         )
 
-    with fake_mode, _NonStrictTorchFunctionHandler(), torch._dynamo.config.patch(
-        assume_static_by_default=False
-    ):
+    with fake_mode, _NonStrictTorchFunctionHandler():
         with _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (
             patched_mod,
             new_fake_args,
