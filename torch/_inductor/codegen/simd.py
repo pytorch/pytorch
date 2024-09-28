@@ -356,14 +356,14 @@ class SIMDKernel(Kernel):
     def want_no_x_dim(self):
         return False
 
-    def initialize_range_tree(self, pid_cache):
-        no_r_dim = not self.inside_reduction or self.numels[-1] == 1
+    def construct_range_trees(self, pid_cache, inside_reduction, numels, no_x_dim):
+        no_r_dim = not inside_reduction or numels[-1] == 1
 
         prefixes = "zyxr"
-        active_prefixes = prefixes[-len(self.numels) :]
+        active_prefixes = prefixes[-len(numels) :]
 
         grid_dims = "xyz"
-        if self.no_x_dim:
+        if no_x_dim:
             tensor_dims = "r"
         elif no_r_dim:
             tensor_dims = "xyz"
@@ -372,15 +372,16 @@ class SIMDKernel(Kernel):
 
         tensor_dims = "".join(p for p in tensor_dims if p in active_prefixes)
 
+        range_trees = []
         for i, prefix in enumerate(active_prefixes):
             is_reduction = prefix == "r"
             tensor_dim = tensor_dims.find(prefix) if prefix in tensor_dims else None
             grid_dim = None if is_reduction else grid_dims.find(prefix)
             index = i if grid_dim is None else grid_dim
-            self.range_trees.append(
+            range_trees.append(
                 IterationRangesRoot(
                     f"{prefix}index",
-                    self.numels[i],
+                    numels[i],
                     prefix,
                     index,
                     self,
@@ -391,6 +392,13 @@ class SIMDKernel(Kernel):
                     has_zdim="z" in active_prefixes,
                 )
             )
+        return range_trees
+
+    def initialize_range_tree(self, pid_cache):
+        range_trees = self.construct_range_trees(
+            pid_cache, self.inside_reduction, self.numels, self.no_x_dim
+        )
+        self.range_trees.extend(range_trees)
 
     def finalize_indexing(self, indices: Sequence[sympy.Expr]):
         """
@@ -533,6 +541,7 @@ class SIMDKernel(Kernel):
         def add_range(i, expr):
             expr = sv.simplify(expr)
             if not sv.statically_known_multiple_of(remaining[i], expr):
+                breakpoint()
                 raise CantSplit
             # guard on the last item out
             remaining[i] = FloorDiv(remaining[i], expr)
@@ -984,14 +993,16 @@ class SIMDScheduling(BaseScheduling):
 
         if not node1.is_reduction() and not node2.is_reduction():
             if not (numel1 == numel2 and rnumel1 == rnumel2):
-                why(
-                    "numel/rnumel mismatch (non-reduce) (%s, %s), (%s, %s)",
-                    numel1,
-                    numel2,
-                    rnumel1,
-                    rnumel2,
-                )
-                return False
+                # prologue fusion input sizes differ from output group
+                if not node2.is_template():
+                    why(
+                        "numel/rnumel mismatch (non-reduce) (%s, %s), (%s, %s)",
+                        numel1,
+                        numel2,
+                        rnumel1,
+                        rnumel2,
+                    )
+                    return False
 
             for n, node_name in zip((node1, node2), ("node1", "node2")):
                 if n.is_template():
@@ -1517,7 +1528,7 @@ class SIMDScheduling(BaseScheduling):
             for input_name, buffer in kernel.named_input_nodes.items():
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
                 if prologue_group := buf_name_to_prologue_group.get(
-                    buffer.get_name(), None
+                    buffer.get_name(), []
                 ):
                     # TODO - this doesnt work with libdevice calls, potentially other bugs
                     # upcasting to fp32 and downcasting gives large slowdown

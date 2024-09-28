@@ -65,6 +65,7 @@ DEBUG = False
 
 if TYPE_CHECKING:
     from torch._inductor.codegen.common import CSEVariable
+    from torch._inductor.codegen.simd import IterationRangesRoot
     from torch._inductor.ops_handler import StoreMode
 
 
@@ -122,6 +123,8 @@ class SubgraphInfo:
     loads: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
     stores: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
     ops_handler: Optional[V.WrapperHandler] = None  # type: ignore[name-defined]
+    range_trees: Optional[List["IterationRangesRoot"]] = None
+    numels = None  # type: ignore[var-annotated]
 
     def to_dict(self):
         return {
@@ -149,11 +152,13 @@ class TritonTemplateKernel(TritonKernel):
         *,
         index_dtype,
     ) -> None:
+        # breakpoint()
         super().__init__(
             sympy_product(output_node.get_size()),
             sympy.Integer(1),
             index_dtype=index_dtype,
         )
+        self.index_dtype = index_dtype
         self.input_nodes = input_nodes
         self.output_node = output_node
         self.named_input_nodes = {}  # type: ignore[var-annotated]
@@ -177,7 +182,7 @@ class TritonTemplateKernel(TritonKernel):
         self.subgraph_bodies: Dict[str, SubgraphInfo] = {}
 
         self._inputs_with_prologue_fusion: OrderedSet[str] = OrderedSet()
-        self.final_prologue_buffers = []
+        self.final_prologue_buffers: List[str] = []
 
         # The following attributes are all used for triton kernel codegen.
         # They are swapped onto the TritonTemplateKernel object by
@@ -204,6 +209,8 @@ class TritonTemplateKernel(TritonKernel):
         assert body_name in self.subgraph_bodies, body_name
 
         for key, value in self.subgraph_bodies[body_name].to_dict().items():
+            if key in ("range_trees", "numels") and value is None:
+                continue
             setattr(self, key, value)
 
         context = (
@@ -490,15 +497,22 @@ class TritonTemplateKernel(TritonKernel):
         """
 
         load_code = None
-
         self._inputs_with_prologue_fusion.add(input_name)
+        input_node = self.named_input_nodes[input_name]
+        groups = (sympy_product(input_node.get_size()), sympy.Integer(1))
+        range_trees = self.construct_range_trees(
+            pid_cache=None, inside_reduction=False, numels=groups, no_x_dim=False
+        )
+
+        original_range_tree = self.range_trees
         with self.create_subgraph_body(f"<LOAD_INPUT_{input_name}>"):
             assert isinstance(indices, (list, tuple))
             assert isinstance(output_name, str)
             assert isinstance(mask, (str, type(None)))
+            self.range_trees = range_trees
+            self.numels = [V.graph.sizevars.simplify(s) for s in groups]
             indices = list(map(TritonPrinter.paren, indices))
             index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
-            input_node = self.named_input_nodes[input_name]
 
             lengths = [V.graph.sizevars.simplify(s) for s in input_node.get_size()]
             assert len(indices) == len(lengths)
@@ -507,14 +521,11 @@ class TritonTemplateKernel(TritonKernel):
             indices = list(map(TritonPrinter.paren, indices))
 
             index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
-            lengths = [
-                V.graph.sizevars.simplify(s) for s in self.output_node.get_size()
-            ]
             assert len(indices) == len(lengths)
 
             # glue to make generated code use same indexing from template
             for name, range_tree_entry in zip(
-                indices, self.range_trees[0].construct_entries(lengths)
+                indices, original_range_tree[0].construct_entries(lengths)
             ):
                 range_tree_entry.set_name(name)
             contiguous_index = sympy_dot(
@@ -522,7 +533,7 @@ class TritonTemplateKernel(TritonKernel):
             )
             contiguous_index = self.rename_indexing(contiguous_index)
             self.body.writeline("xindex = " + texpr(contiguous_index))
-            self.range_trees[0].lookup(
+            original_range_tree[0].lookup(
                 sympy.Integer(1), sympy_product(lengths)
             ).set_name("xindex")
             self.template_mask = mask if mask is not None else "None"

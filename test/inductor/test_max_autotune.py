@@ -908,12 +908,12 @@ class TestPrologueFusion(TestCase):
             "del", num_deallocs, exactly=True
         ).run(code_str)
 
-    @parametrize("size", (256, 249))
-    def test_upcast(self, size):
-        M = N = K = size
+    @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
+    def test_upcast(self, sizes):
+        M, K, N = sizes
 
         x = torch.rand([M, K], dtype=torch.float16, device="cuda")
-        y = torch.rand([M, K], dtype=torch.float, device="cuda")
+        y = torch.rand([K, N], dtype=torch.float, device="cuda")
 
         def foo(x, y):
             return x.to(y.dtype) @ y
@@ -924,9 +924,9 @@ class TestPrologueFusion(TestCase):
 
     def test_downcast(self):
         # per heuristics, dont fuse a downcast into a mm because it would lead to more reads inside kernel
-        M = N = K = 256
+        M, K, N = (64, 128, 256)
         x = torch.rand([M, K], dtype=torch.float, device="cuda")
-        y = torch.rand([M, K], dtype=torch.float16, device="cuda")
+        y = torch.rand([K, N], dtype=torch.float16, device="cuda")
 
         def foo(x, y):
             return x.to(y.dtype) @ y
@@ -935,13 +935,14 @@ class TestPrologueFusion(TestCase):
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
-    @parametrize("size", (256,))
-    @config.patch(force_disable_caches=True)
-    def test_multiple_fusions(self, size):
-        M = N = K = size
+    def _test_multiple_fusions_impl(self, sizes, prologue_fusion=True):
+        M, K, N = sizes
 
         def foo(x, y):
-            return ((x - 3) @ (y + 3)) * 3
+            if prologue_fusion:
+                return ((x - 1.1) @ (y + 1.1)) * 1.1
+            else:
+                return x @ y
 
         x = torch.rand([M, K], dtype=torch.float, device="cuda")
         y = torch.rand([K, N], dtype=torch.float, device="cuda")
@@ -951,12 +952,26 @@ class TestPrologueFusion(TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
         # check that we do not CSE any variables between prologues, epilogues
-        FileCheck().check("def triton").check_count("= 3.0", 3, exactly=True).check(
-            "tl.store"
-        ).run(code[0])
+        if prologue_fusion:
+            FileCheck().check("def triton").check_count("= 1.1", 3, exactly=True).check(
+                "tl.store"
+            ).run(code[0])
 
-    def test_multiple_inputs(self):
-        M = N = K = 256
+    @parametrize("sizes", ((64, 128, 256), (64, 64, 64)))
+    def test_multiple_fusions(self, sizes):
+        self._test_multiple_fusions_impl(sizes)
+
+    @unittest.expectedFailure  # triton bug
+    def test_multiple_fusions_failure(self):
+        self._test_multiple_fusions_impl((64, 120, 64))
+
+    # and yet, extremely similar code passes..
+    def test_multiple_fusions_prologue_bad_shape_success(self):
+        self._test_multiple_fusions_impl((64, 120, 64), prologue_fusion=False)
+
+    @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
+    def test_multiple_inputs(self, sizes):
+        M, K, N = sizes
 
         def foo(x, y, z):
             return (x + y).to(torch.float) @ z
@@ -964,9 +979,9 @@ class TestPrologueFusion(TestCase):
         x = torch.rand([M, K], dtype=torch.float16, device="cuda")
         y = torch.rand([M, K], dtype=torch.float16, device="cuda")
         z = torch.rand([K, N], dtype=torch.float, device="cuda")
-
+        out_eager = foo(x, y, z)
         out, code = run_and_get_code(torch.compile(foo), x, y, z)
-        self.assertEqual(out, foo(x, y, z), atol=0.05, rtol=0.05)
+        self.assertEqual(out, out_eager, atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
 
     def test_storage_offset_prologue(self):
@@ -981,8 +996,9 @@ class TestPrologueFusion(TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=1)
 
     @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
-    def test_prologue_multiple_nodes(self):
-        M = K = N = 256
+    @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
+    def test_prologue_multiple_nodes(self, sizes):
+        M, K, N = sizes
 
         def foo(x, y):
             return ((((x * 2) - 1) / 2) @ (y * 4)) * 3.0
@@ -995,7 +1011,8 @@ class TestPrologueFusion(TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
     @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
-    def test_prologue_read_into_both_inputs(self):
+    @parametrize("benchmark_fusion", (True, False))
+    def test_prologue_read_into_both_inputs(self, benchmark_fusion):
         M = K = N = 256
 
         # not supported today. it could be, but typically the pointwise nodes would get
@@ -1005,11 +1022,14 @@ class TestPrologueFusion(TestCase):
             y = (x + 1) * 2
             return y @ (y - 2)
 
-        x = torch.rand([M, K], dtype=torch.float, device="cuda")
+        with config.patch(benchmark_epilogue_fusion=benchmark_fusion):
+            x = torch.rand([M, K], dtype=torch.float, device="cuda")
 
-        out, code = run_and_get_code(torch.compile(foo), x)
-        self.assertEqual(out, foo(x), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=2, num_allocs=3, num_deallocs=4)
+            out, code = run_and_get_code(torch.compile(foo), x)
+            self.assertEqual(out, foo(x), atol=0.05, rtol=0.05)
+            # not guaranteed to fuse, but still checking correctness
+            if not benchmark_fusion:
+                self.check_code(code[0], num_kernels=2, num_allocs=3, num_deallocs=4)
 
 
 if __name__ == "__main__":

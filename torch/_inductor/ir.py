@@ -3906,20 +3906,26 @@ class TemplateBuffer(OperationBuffer):
         name = self.get_name()
         indexer = self.layout.make_indexer()
 
-        inp_names = [inp.get_name() for inp in self.inputs]
-        inp_indexers = [inp.layout.make_indexer() for inp in self.inputs]
-
         def dummy(index, rindex):
             assert len(rindex) == 0
-
-            for inp_name, inp_indexer in zip(inp_names, inp_indexers):
-                ops.load(inp_name, inp_indexer(index))
-
             return ops.store(name, indexer(index), "fake")
 
-        return dependencies.extract_read_writes(
+        deps = dependencies.extract_read_writes(
             dummy, self.get_size(), (), normalize=normalize
         )
+
+        for inp in self.inputs:
+            indexer = inp.layout.make_indexer()
+
+            def dummy(index, rindex):
+                assert len(rindex) == 0
+                ops.load(inp.get_name(), indexer(index))
+
+            deps.reads |= dependencies.extract_read_writes(
+                dummy, inp.get_size(), (), normalize=True
+            ).reads
+
+        return deps
 
     def get_reduction_size(self):
         return 1
