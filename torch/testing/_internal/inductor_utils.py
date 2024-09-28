@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import logging
 import torch
 import re
 import unittest
@@ -21,6 +22,8 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
 )
+
+log: logging.Logger = logging.getLogger(__name__)
 
 def test_cpu():
     try:
@@ -72,6 +75,11 @@ def skipDeviceIf(cond, msg, *, device):
     if cond:
         def decorate_fn(fn):
             def inner(self, *args, **kwargs):
+                if not hasattr(self, "device"):
+                    warn_msg = "Expect the test class to have attribute device but not found. "
+                    if hasattr(self, "device_type"):
+                        warn_msg += "Consider using the skip device decorators in common_device_type.py"
+                    log.warning(warn_msg)
                 if self.device == device:
                     raise unittest.SkipTest(msg)
                 return fn(self, *args, **kwargs)

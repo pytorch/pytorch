@@ -36,6 +36,9 @@ typedef struct ExtraState ExtraState;
 
 #ifdef __cplusplus
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(
+    "-Wdeprecated-copy-with-user-provided-dtor")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-copy-dtor")
 typedef struct VISIBILITY_HIDDEN CacheEntry {
   // check the guards: lambda: <locals of user function>: bool
   py::object check_fn;
@@ -58,6 +61,8 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   // Warning: returns a reference whose lifetime is controlled by C++
   py::object next();
 } CacheEntry;
+C10_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()
 
 #endif
 

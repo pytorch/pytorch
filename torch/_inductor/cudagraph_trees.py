@@ -1578,7 +1578,7 @@ class CUDAGraphNode:
         self, inputs: List[InputType]
     ) -> List[Union[torch.Tensor, int]]:
         """
-        Allocate inputs for non static, non cudagraph managraphed managed tensors in the memory pool
+        Allocate inputs for non static, non cudagraph managed tensors in the memory pool
         and copy over the tensor values.
         """
 

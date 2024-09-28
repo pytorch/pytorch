@@ -2445,6 +2445,17 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 exactly=True,
             ).run("\n".join(captured_output))
 
+        @torch._inductor.config.patch("cpp_wrapper", 1)
+        def test_cpp_wrapper(self):
+            def f(x):
+                return torch.sin(x)
+
+            compiled = torch.compile(f, mode="reduce-overhead")
+            example_input = torch.randn(10, device="cuda")
+            compiled_result = self.run_twc(compiled, example_input)
+            eager_result = f(example_input)
+            self.assertEqual(compiled_result, eager_result)
+
     instantiate_parametrized_tests(CudaGraphTreeTests)
 
 if __name__ == "__main__":

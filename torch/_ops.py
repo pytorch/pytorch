@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import abc
 import contextlib
 import ctypes
 import importlib
@@ -238,13 +239,13 @@ _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
 ]
 
 
-class HigherOrderOperator(OperatorBase):
+class HigherOrderOperator(OperatorBase, abc.ABC):
     # The HigherOrderOperator will appear as torch.ops.higher_order.{name}
     #
     # If you're creating a new HigherOrderOperator, please do not change the
     # default. Adding operators to the global torch.ops namespace is a bad
     # practice due to name collisions.
-    def __init__(self, name):
+    def __init__(self, name, *, cacheable=False):
         super().__init__()
         if type(self) is HigherOrderOperator:
             raise RuntimeError(
@@ -257,6 +258,7 @@ class HigherOrderOperator(OperatorBase):
         _higher_order_ops[name] = self
         self._ns = "higher_order"
         self.__module__ = "torch.ops.higher_order"
+        self._cacheable = cacheable
 
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
 
@@ -279,6 +281,9 @@ class HigherOrderOperator(OperatorBase):
     @property
     def namespace(self):
         return self._ns
+
+    def cacheable(self):
+        return self._cacheable
 
     def fallthrough(self, dispatch_key):
         self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
@@ -410,6 +415,7 @@ class HigherOrderOperator(OperatorBase):
         assert not isinstance(kernel, DispatchKey)
         return kernel(*args, **kwargs)
 
+    @abc.abstractmethod
     def __call__(self, /, *args, **kwargs):
         # Dynamo already traces the body of HigherOrderOp beforehand when it
         # so no need to trace into it.
@@ -432,9 +438,6 @@ class HigherOrderOperator(OperatorBase):
 
     def __str__(self):
         return f"{self.name()}"
-
-    # def __repr__(self):
-    #     return f"torch.ops._higher_order_ops.{self._name}"
 
     def name(self):
         return self._name

@@ -48,6 +48,7 @@ quantized_decomposed = torch.ops.quantized_decomposed
 inductor_decompositions = get_decompositions(
     [
         aten._adaptive_avg_pool2d_backward,
+        aten.addmv,
         aten.arange,
         aten.bitwise_and_,
         aten.bitwise_or_,
@@ -650,10 +651,10 @@ def wrapped_quantized_linear(
     out_zero_point: torch.Tensor,
     out_channel: int,
 ) -> torch.Tensor:
-    packed_weight = torch.ops._quantized.wrapped_linear_prepack(
+    packed_weight = torch.ops._quantized._wrapped_linear_prepack(
         weight, weight_scale, weight_zero_point, bias
     )
-    return torch.ops._quantized.wrapped_quantized_linear_prepacked(
+    return torch.ops._quantized._wrapped_quantized_linear_prepacked(
         input,
         input_scale,
         input_zero_point,

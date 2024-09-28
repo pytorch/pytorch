@@ -1815,6 +1815,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
 
     def test_init_process_group_for_all_backends(self):
         for backend in dist.Backend.backend_list:
+            excepted_backend = backend
             # skip if the backend is not available on the system
             if backend == dist.Backend.UNDEFINED:
                 continue
@@ -1830,6 +1831,11 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
             elif backend == dist.Backend.UCC:
                 if not dist.is_ucc_available():
                     continue
+            # Multi-threaded PG is defined as a pure python class.
+            # Its pg.name() does not going through Pybind, so its backend name
+            # is still "threaded" instead of "custom".
+            elif backend != "threaded":
+                excepted_backend = "custom"
 
             with tempfile.NamedTemporaryFile(delete=False) as f:
                 store = dist.FileStore(f.name, self.world_size)
@@ -1842,7 +1848,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
                 pg = c10d._get_default_group()
                 self.assertEqual(pg.rank(), self.rank)
                 self.assertEqual(pg.size(), self.world_size)
-                self.assertEqual(pg.name(), str(backend))
+                self.assertEqual(pg.name(), str(excepted_backend))
 
                 dist.destroy_process_group()
 

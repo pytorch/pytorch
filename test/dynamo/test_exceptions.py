@@ -4,6 +4,7 @@ import torch
 import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._functorch.config
+import torch.nn
 import torch.utils.checkpoint
 
 
@@ -267,6 +268,29 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         x = torch.ones(4)
         self.assertEqual(mod(x), opt_mod(x))
 
+    def test_attribute_error_from_getattr(self):
+        class Mock:
+            def __init__(self):
+                self.a = 5
+
+            def __getattr__(self, name):
+                if name != "a":
+                    raise AttributeError("missing")
+                return self.__dict__["a"]
+
+        mock = Mock()
+
+        def fn(x):
+            if hasattr(mock, "b"):
+                return torch.cos(x)
+            return torch.sin(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_stop_iteration(self):
         def zip_longest(*iterables, fillvalue=None):
             # Get the iterators for each iterable
@@ -293,6 +317,21 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         ref = fn(x, y)
         res = opt_fn(x, y)
         self.assertEqual(ref, res)
+
+    def test_nn_reraise(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                raise ValueError("woof")
+                return x + 2
+
+        m = M()
+        m.register_forward_pre_hook(lambda m, go: None)
+
+        torch._dynamo.utils.clear_compilation_metrics()
+        opt_call = torch.compile(lambda x: m(x), backend="eager")
+        self.assertRaises(ValueError, lambda: opt_call(torch.randn(3)))
+        metrics = torch._dynamo.utils.get_compilation_metrics()
+        self.assertEqual(metrics[0].fail_reason, "Observed exception")
 
     def test_key_error(self):
         def fn(x, d):

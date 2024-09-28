@@ -733,7 +733,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 128, kernel_size=3, stride=1)
                 self.unary_fn = copy.deepcopy(unary_op)
-                self.conv2 = torch.nn.Conv2d(128, 128, kernel_size=3, stride=1)
+                self.conv2 = torch.nn.Conv2d(
+                    128, 128, kernel_size=3, stride=1, bias=False
+                )
                 self.unary_fn2 = copy.deepcopy(unary_op)
 
             def forward(self, x):
@@ -889,8 +891,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.conv2 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
                 self.add_fn = add_fn
                 self.relu = torch.nn.ReLU()
-                self.conv3 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
-                self.conv4 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.conv3 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1, bias=False)
+                self.conv4 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1, bias=False)
                 self.add_fn2 = add_fn
                 self.relu2 = torch.nn.ReLU()
                 self.use_relu = use_relu
@@ -1800,12 +1802,17 @@ class TestPatternMatcher(TestPatternMatcherBase):
                         mod,
                         (v,),
                         [
+                            "torch.ops.onednn.qlinear_pointwise.tensor",
+                            "torch.ops.onednn.qlinear_pointwise.binary",
+                        ]
+                        if config.abi_compatible
+                        else [
                             "op_onednn_qlinear_pointwise_tensor.call",
                             "op_onednn_qlinear_pointwise_binary_tensor.call",
                         ],
                         [],
                         check_quantization=True,
-                        num_include_ops=[2, 2],
+                        num_include_ops=[4, 4] if config.abi_compatible else [2, 2],
                     )
                 else:
                     # For python wrapper
@@ -2077,7 +2084,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     def test_qflatten(self):
         r"""
-        This testcase will quantize Conv2d->AdaptiveAvgPool2d->flatten pattern.
+        This testcase will quantize Conv2d->AdaptiveAvgPool2d->flatten->cat pattern.
         """
 
         class M(torch.nn.Module):
@@ -2092,8 +2099,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
 
             def forward(self, x):
-                return torch.flatten(
-                    self.adaptive_avg_pool2d(self.relu(self.conv(x))), 1
+                return torch.cat(
+                    [
+                        torch.flatten(
+                            self.adaptive_avg_pool2d(self.relu(self.conv(x))), 1
+                        )
+                    ]
                 )
 
         mod = M().eval()
@@ -2578,19 +2589,36 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     def test_woq_int8(self):
         class M(torch.nn.Module):
-            def forward(self, x, weight, scales):
-                return torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
+            def __init__(self, is_permute):
+                super().__init__()
+                self.is_permute = is_permute
 
-        mod = M().eval()
+            def forward(self, x, weight, scales):
+                if self.is_permute:
+                    weight = weight.t()
+                    m = torch.mm(
+                        x.reshape(-1, x.shape[-1]),
+                        weight.to(x.dtype),
+                    )
+                    y = m * scales.to(m.dtype)
+                    y = y.reshape(*x.shape[:-1], y.shape[-1])
+                    return y
+                else:
+                    return (
+                        torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
+                    )
+
         x_shape = (1, 1, 256)
-        w_shape = (12, 256)
         s_shape = 12
         x_strides = [
             (256, 256, 1),  # linear dispatching to mm
             (256, 32, 1),  # linear dispatching to bmm
         ]
-        for x_stride in x_strides:
+        is_permutes = [False, True]
+        for x_stride, is_permute in itertools.product(x_strides, is_permutes):
+            mod = M(is_permute=is_permute).eval()
             x = torch.randn(x_shape, dtype=torch.bfloat16).as_strided(x_shape, x_stride)
+            w_shape = (12, 256)
             w = torch.randint(-128, 127, w_shape, dtype=torch.int8)
             s = torch.randn(s_shape, dtype=torch.bfloat16)
 

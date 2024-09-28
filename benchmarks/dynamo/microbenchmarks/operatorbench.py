@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from contextlib import nullcontext
+
 import click
 import numpy as np
 from operator_inp_utils import OperatorInputsLoader
@@ -16,11 +18,13 @@ from torch.utils._pytree import tree_map_only
 
 
 aten = torch.ops.aten
+profile_enabled = False
 
 
 def compute_speedups(
     operator, models, example_inputs, repeats, accuracy_checking=False, device="cuda"
 ):
+    global profile_enabled
     expected = models[0](*example_inputs)
     if accuracy_checking:
         for model in models[1:]:
@@ -35,20 +39,32 @@ def compute_speedups(
 
     timings = np.zeros((repeats, len(models)), np.float64)
     for rep in range(repeats):
-        # interleave the runs to handle frequency scaling and load changes
-        for m, model in enumerate(models):
-            if device == "cuda":
-                model(*example_inputs)
-
-                # benchmarker.benchmark_gpu() clears L2 cache to hide the latency of CPU launch time
-                # along with cuda synchronization
-                timings[rep, m] = benchmarker.benchmark_gpu(
-                    lambda: model(*example_inputs)
+        record_rep_context = (
+            torch.profiler.record_function(f"rep_{rep}")
+            if profile_enabled
+            else nullcontext()
+        )
+        with record_rep_context:
+            # interleave the runs to handle frequency scaling and load changes
+            for m, model in enumerate(models):
+                record_model_context = (
+                    torch.profiler.record_function(f"model_{m}")
+                    if profile_enabled
+                    else nullcontext()
                 )
-            else:
-                from torch._inductor.utils import timed
+                with record_model_context:
+                    if device == "cuda":
+                        model(*example_inputs)
 
-                timings[rep, m] = timed(model, example_inputs)
+                        # benchmarker.benchmark_gpu() clears L2 cache to hide the latency of CPU launch time
+                        # along with cuda synchronization
+                        timings[rep, m] = benchmarker.benchmark_gpu(
+                            lambda: model(*example_inputs)
+                        )
+                    else:
+                        from torch._inductor.utils import timed
+
+                        timings[rep, m] = timed(model, example_inputs)
     return np.median(timings, axis=0)
 
 
@@ -171,6 +187,7 @@ def skip_operator(operator):
 @click.option(
     "--channels-last", help="force inputs to channels last", is_flag=True, default=False
 )
+@click.option("--profile", help="profile the benchmark", is_flag=True, default=False)
 def benchmark(
     suite,
     op,
@@ -183,7 +200,9 @@ def benchmark(
     inp_file,
     start_idx,
     channels_last,
+    profile,
 ):
+    global profile_enabled
     if inp_file is not None:
         loader = OperatorInputsLoader(inp_file)
     else:
@@ -209,6 +228,8 @@ def benchmark(
         ops = [eval(op)]
 
     max_samples = max_samples + start_idx
+    profile_enabled = profile
+
     for operator in ops:
         if skip_operator(operator):
             continue
@@ -216,10 +237,31 @@ def benchmark(
         print(f"Running {operator}")
         inp_gen = loader.get_inputs_for_operator(operator, dtype=dtype, device=device)
         timings = []
-
-        for i in range(min(max_samples, 1000000)):
+        inputs_list = []
+        for _ in range(min(max_samples, 1000000)):
             try:
                 inps = next(inp_gen)
+                inputs_list.append(inps)
+            except StopIteration:
+                break
+
+        profiler_context = (
+            torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ],
+                record_shapes=False,
+                profile_memory=False,
+                on_trace_ready=torch.profiler.tensorboard_trace_handler(
+                    f"./log/operator_{operator}", use_gzip=True
+                ),
+            )
+            if profile_enabled
+            else nullcontext()
+        )
+        with profiler_context as prof:
+            for i, inps in enumerate(inputs_list):
                 if inps is None:
                     break
                 if i < start_idx:
@@ -230,28 +272,32 @@ def benchmark(
                     args, kwargs = tree_map_only(
                         torch.Tensor, to_channels_last, (args, kwargs)
                     )
-
-            except StopIteration:
-                break
-            try:
-                # aten, nvfuser, inductor
-                timings.append(
-                    microbenchmark(
-                        operator,
-                        args,
-                        kwargs,
-                        dtype,
-                        accuracy_checking,
-                        repeats,
-                        measure_nvfuser,
-                        device,
+                try:
+                    iter_context = (
+                        torch.profiler.record_function(f"iter_{i}")
+                        if profile_enabled
+                        else nullcontext()
                     )
-                )
-            except Exception as e:
-                print(f"error {operator}")
-                print(e)
-                # comment out this line to avoid blocking other tests
-                # raise e
+                    with iter_context:
+                        # aten, nvfuser, inductor
+                        timings.append(
+                            microbenchmark(
+                                operator,
+                                args,
+                                kwargs,
+                                dtype,
+                                accuracy_checking,
+                                repeats,
+                                measure_nvfuser,
+                                device,
+                            )
+                        )
+
+                except Exception as e:
+                    print(f"error {operator}")
+                    print(e)
+                    # comment out this line to avoid blocking other tests
+                    # raise e
 
         if not timings:
             continue
