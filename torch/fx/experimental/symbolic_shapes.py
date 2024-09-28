@@ -3859,6 +3859,10 @@ class ShapeEnv:
         return c.render(source)
 
     def produce_guards(self, *args, **kwargs) -> List[str]:
+        """
+        Like produce_guards_verbose, but only returns the non-verbose guard expressions
+        (no verbose guards produced.)
+        """
         return self.produce_guards_verbose(*args, **kwargs)[0]
 
     def produce_guards_verbose(
