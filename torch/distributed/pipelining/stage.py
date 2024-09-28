@@ -306,13 +306,6 @@ class _PipelineStageBase(ABC):
         """
         recv_infos: Tuple[InputInfo, ...] = self.args_recv_info[fwd_chunk_id]
 
-        # In case there is backward pass, set requires_grad for receive buffers
-        # before first forward
-        if self.has_backward:
-            for a in recv_infos:
-                if isinstance(a, _RecvInfo):
-                    a.buffer.requires_grad_(True)
-
         return self._get_recv_ops(recv_infos)
 
     def get_bwd_recv_ops(self, bwd_chunk_id: int) -> List[dist.P2POp]:
@@ -692,7 +685,7 @@ class _PipelineStageBase(ABC):
 
                 # TODO: we dont need to save this, add to dw_runner?
                 self.backward_state[bwd_chunk_id] = (
-                    input_values,
+                    bwd_kwargs["input_values"],
                     param_groups,
                     bwd_kwargs["stage_output"],
                     bwd_kwargs["output_grads"],
@@ -913,6 +906,10 @@ class _PipelineStage(_PipelineStageBase):
                 example_value.dtype,
             )
             buffer = _make_tensor_from_meta(example_value, self.device)
+            # In case there is backward pass, set requires_grad for receive buffers
+            # before first forward
+            if self.has_backward:
+                buffer.requires_grad_(True)
 
             return _RecvInfo(
                 arg_node.name,
@@ -1327,6 +1324,10 @@ class PipelineStage(_PipelineStageBase):
                         for inp in self.inputs_meta
                     ]
                 )
+                # In case there is backward pass, set requires_grad for receive buffers
+                if self.has_backward:
+                    for r in recv_infos:
+                        r.buffer.requires_grad_(True)
 
                 self.args_recv_info[chunk_id] = recv_infos
             else:
