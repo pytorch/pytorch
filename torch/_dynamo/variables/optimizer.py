@@ -349,6 +349,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
                     gm._parameters.pop(name, None)
                     if tc.params_flat:
                         tc.params_flat.clear()
+                    if tc.params_flat_unwrap_subclasses:
+                        tc.params_flat_unwrap_subclasses.clear()
 
             weakref.finalize(value, clear_static_tensor_refs)
 

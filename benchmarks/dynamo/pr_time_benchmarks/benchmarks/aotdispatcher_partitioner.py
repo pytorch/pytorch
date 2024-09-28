@@ -3,7 +3,7 @@ import sys
 from benchmark_base import BenchmarkBase
 
 import torch
-from torch.testing._internal.two_tensor import TwoTensor
+
 
 class Benchmark(BenchmarkBase):
     def name(self):

@@ -5,6 +5,7 @@ from benchmark_base import BenchmarkBase
 import torch
 from torch.testing._internal.two_tensor import TwoTensor
 
+
 class Benchmark(BenchmarkBase):
     def __init__(self, *, training, subclass):
         self._training = training
@@ -12,7 +13,7 @@ class Benchmark(BenchmarkBase):
         self._device = "cpu"
 
     def name(self):
-        prefix = f"aotdispatcher"
+        prefix = "aotdispatcher"
         if self._training:
             prefix += "_training"
         else:
@@ -29,10 +30,16 @@ class Benchmark(BenchmarkBase):
         return "100 inputs, 100 outputs, each input is added once"
 
     def _prepare_once(self):
-        args = [torch.ones(100, requires_grad=self._training, device=self._device) for _ in range(100)]
+        _args = [
+            torch.ones(100, requires_grad=self._training, device=self._device)
+            for _ in range(100)
+        ]
         if self._subclass:
-            args = [TwoTensor(x, x.clone().detach().requires_grad_(self._training)) for x in args]
-        self.args = args
+            _args = [
+                TwoTensor(x, x.clone().detach().requires_grad_(self._training))
+                for x in _args
+            ]
+        self._args = _args
 
     def _prepare(self):
         torch._dynamo.reset()
@@ -43,7 +50,7 @@ class Benchmark(BenchmarkBase):
             outs = [torch.add(x, x) for x in args]
             return outs
 
-        f(*self.args)
+        f(*self._args)
 
 
 def main():
