@@ -162,7 +162,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                         and node.target is torch.ops.aten._local_scalar_dense.default
                     ):
                         dtype = node.args[0].meta["val"].dtype
-                        if dtype == torch.float32:
+                        if dtype != torch.float64:
                             continue
 
                         assert isinstance(node.args[0], fx.Node), node.args[0]
@@ -198,8 +198,6 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                             if node.meta["val"].dtype in [torch.float16]
                             else node.meta["val"].dtype
                         )
-
-                        # Promote computation to the higher precision if necessary
                         res = graph.call_function(
                             torch.ops.prims.convert_element_type.default,
                             (
