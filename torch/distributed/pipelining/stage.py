@@ -1400,6 +1400,7 @@ class PipelineStage(_PipelineStageBase):
         # TODO move self.device to an argument from step API (from its input tensors)?
         assert num_microbatches is not None, "TODO fix num_microbatches"
 
+        outputs = None
         if self.inputs_meta is None:
             outputs = self._shape_inference(args, kwargs)
 
