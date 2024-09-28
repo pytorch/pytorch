@@ -10325,52 +10325,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
 
-    def test_searchsorted(self):
-        def fn(sorted_sequence, values, out_int32, right, side, sorter):
-            return torch.searchsorted(
-                sorted_sequence,
-                values,
-                out_int32=out_int32,
-                right=right,
-                side=side,
-                sorter=sorter,
-            )
-
-        shapes = (
-            ((1,), (16, 16)),  # scalar sorted_sequence
-            ((16,), ()),  # scalar values
-            ((32,), (16, 16)),  # 1-D sorted_sequence
-            ((16, 32), (16, 16)),  # N-D sorted_sequence
-            ((3, 5), (3, 7)),  # prime dimensioned sequence, to flush out indexing bugs
-        )
-        booleans = (False, True)
-
-        for (seq_shape, value_shape), out_int32, right in itertools.product(
-            shapes, booleans, booleans
-        ):
-            unsorted_sequence = torch.rand(seq_shape)
-            sorted_sequence, sorting_indices = torch.sort(unsorted_sequence)
-            values = torch.rand(value_shape)
-
-            side = "right" if right else "left"
-            self.common(
-                fn,
-                (sorted_sequence, values, out_int32, right, side, None),
-                check_lowp=False,
-            )
-            self.common(
-                fn,
-                (
-                    unsorted_sequence,
-                    values,
-                    out_int32,
-                    right,
-                    side,
-                    sorting_indices,
-                ),
-                check_lowp=False,
-            )
-
     def test_bucketize(self):
         def fn(input, boundaries, out_int32, right):
             return torch.bucketize(input, boundaries, out_int32=out_int32, right=right)
@@ -11438,7 +11392,7 @@ class CommonTemplate:
 
 @dataclasses.dataclass
 class TestFailure:
-    suffixes: Tuple[str, ...]
+    suffixes: Tuple[str]
     is_skip: bool = False
     __test__: bool = False
 
@@ -12082,7 +12036,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 self.assertExpectedInline(
                     "\n".join(lines),
                     """\
-        tmp0 = tl.reshape(tl.load(block_ptr0, boundary_check=[3], padding_option='zero', eviction_policy='evict_last'), [XBLOCK, RBLOCK])
+        tmp0 = tl.reshape(tl.broadcast_to(tl.load(block_ptr0, boundary_check=[2], padding_option='zero', eviction_policy='evict_last')[:, None, :, :], [((511 + XBLOCK) // 512), ((1) * ((1) <= (((511 + XBLOCK) // 512))) + (((511 + XBLOCK) // 512)) * ((((511 + XBLOCK) // 512)) < (1))), ((512) * ((512) <= (XBLOCK)) + (XBLOCK) * ((XBLOCK) < (512))), RBLOCK]), [XBLOCK, RBLOCK])
         tmp1 = tl.load(block_ptr1, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",  # noqa: B950 line too long
                 )
 
