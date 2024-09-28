@@ -190,7 +190,10 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                             transform = False
                             break
 
-                        # Compute in higher precision if dtype is low precision
+                        # Upcast to higher float32 precision during computation if dtype is float16. Later
+                        # on we will downcast back to float16 after the computation is done. Checkout the
+                        # elementwise_dtypes function for more context:
+                        # https://github.com/pytorch/pytorch/blob/main/torch/_prims_common/__init__.py#L1379
                         compute_dtype = (
                             torch.float32
                             if node.meta["val"].dtype == torch.float16
@@ -215,9 +218,8 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                         tuple(args),
                     )
 
-                    # Downcast back to lower precision after doing the computation in
-                    # higher precision. Checkout the elementwise_dtypes function for more
-                    # context: https://github.com/pytorch/pytorch/blob/main/torch/_prims_common/__init__.py#L1379
+                    # After doing the computation in float32 precision, downcast back down to
+                    # float16 precision.
                     if node.meta["val"].dtype == torch.float16:
                         res2 = graph.call_function(
                             torch.ops.prims.convert_element_type.default,
