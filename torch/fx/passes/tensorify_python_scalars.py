@@ -177,7 +177,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                     expr_to_sym_proxy[sym_expr] = fx.Proxy(node, tracer=tracer)
 
             # Look for functions to convert
-            if node.op == "call_function" and node.target is torch.ops.aten.add.Tensor:
+            if node.op == "call_function" and node.target is torch.ops.aten.mul.Tensor:
                 args = []
                 transform = False
                 for a in node.args:
@@ -195,7 +195,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                         # Compute in higher precision if dtype is low precision
                         compute_dtype = (
                             torch.float32
-                            if node.meta["val"].dtype in [torch.float16, torch.bfloat16]
+                            if node.meta["val"].dtype in [torch.float16]
                             else node.meta["val"].dtype
                         )
 
@@ -213,13 +213,13 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                         args.append(a)
 
                 if transform:
-                    # Call torch.ops.aten.add.Tensor function and insert the node into the graph
+                    # Call torch.ops.aten.mul.Tensor function and insert the node into the graph
                     res2 = graph.call_function(
-                        torch.ops.aten.add.Tensor,
+                        torch.ops.aten.mul.Tensor,
                         tuple(args),
                     )
 
-                    if node.meta["val"].dtype in [torch.float16, torch.bfloat16]:
+                    if node.meta["val"].dtype in [torch.float16]:
                         res2 = graph.call_function(
                             torch.ops.prims.convert_element_type.default,
                             (

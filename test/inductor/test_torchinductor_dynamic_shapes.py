@@ -941,9 +941,9 @@ class TestInductorDynamic(TestCase):
         f(torch.tensor([5] * 320))
 
     @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
-    def test_unspecialized_float_add(self):
+    def test_unspecialized_float_multiply(self):
         def fn(x, y):
-            return x + y
+            return x * y
 
         cnt = CompileCounterWithBackend("inductor")
         fn_opt = torch._dynamo.optimize(cnt)(fn)
@@ -954,26 +954,19 @@ class TestInductorDynamic(TestCase):
         self.assertEqual(cnt.frame_count, 1)
 
     @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
-    def test_low_precision_add(self):
+    def test_low_precision_multiply(self):
         def fn(x, y):
-            return x + y
+            return x * y
 
         cnt = CompileCounterWithBackend("inductor")
         fn_opt = torch._dynamo.optimize(cnt)(fn)
 
-        # Low-precision inputs
-        x = torch.arange(3, dtype=torch.float16)
-        self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
-        self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
+        x = torch.tensor(9.734375, dtype=torch.float16)
+        y = 1.00048828125
+        self.assertEqual(fn_opt(x, y), fn(x,y))
 
+        # Ensure we only compiled one frame for float16
         self.assertEqual(cnt.frame_count, 1)
-
-        # Test for bfloat16
-        x_bf16 = torch.arange(3, dtype=torch.bfloat16)
-        self.assertEqual(fn(x_bf16, 2.0), fn_opt(x_bf16, 2.0))
-        self.assertEqual(fn(x_bf16, 3.0), fn_opt(x_bf16, 3.0))
-
-        self.assertEqual(cnt.frame_count, 2)
 
     def test_sort_dynamic_shape_with_check(self, device):
         if TEST_WITH_ROCM or torch.device(device).type != GPU_TYPE:
