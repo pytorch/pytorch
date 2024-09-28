@@ -1060,6 +1060,11 @@ This class does not support ``__members__`` property.)");
             return reinterpret_cast<uintptr_t>(
                 symm_mem->get_signal_pad_ptrs_dev());
           })
+      .def_property_readonly(
+          "multicast_ptr",
+          [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
+            return reinterpret_cast<uintptr_t>(symm_mem->get_multicast_ptr());
+          })
       .def_property_readonly("buffer_size", &SymmetricMemory::get_buffer_size)
       .def_property_readonly(
           "signal_pad_size", &SymmetricMemory::get_signal_pad_size)

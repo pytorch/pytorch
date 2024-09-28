@@ -451,7 +451,7 @@ def forward(self, x_1):
 
     def test_pre_dispatch_functionalization(self):
         def f(x):
-            a = FunctionalTensorMode(pre_dispatch=True)
+            a = FunctionalTensorMode(pre_dispatch=True, export=True)
             with a:
                 x_unwrapped = FunctionalTensor.to_functional(x)
                 y = torch.matmul(x_unwrapped, x_unwrapped)
@@ -476,7 +476,7 @@ def forward(self, x_1):
 
     def test_pre_dispatch_functionalization_view_op(self):
         def f(x):
-            a = FunctionalTensorMode(pre_dispatch=True)
+            a = FunctionalTensorMode(pre_dispatch=True, export=True)
             with a:
                 x_unwrapped = FunctionalTensor.to_functional(x)
                 y = torch.matmul(x_unwrapped, x_unwrapped)
