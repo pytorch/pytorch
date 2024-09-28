@@ -256,7 +256,7 @@ class _PipelineStageBase(ABC):
         num_microbatches: int,
         args: Optional[Tuple[Any, ...]] = None,
         kwargs: Optional[Dict[str, Any]] = None,
-    ):
+    ) -> Optional[Tuple[Any, ...]]:
         raise NotImplementedError
 
     def _prepare_backward_infra(self, num_microbatches: int):
@@ -307,13 +307,6 @@ class _PipelineStageBase(ABC):
         for this stage.
         """
         recv_infos: Tuple[InputInfo, ...] = self.args_recv_info[fwd_chunk_id]
-
-        # In case there is backward pass, set requires_grad for receive buffers
-        # before first forward
-        if self.has_backward:
-            for a in recv_infos:
-                if isinstance(a, _RecvInfo):
-                    a.buffer.requires_grad_(True)
 
         return self._get_recv_ops(recv_infos)
 
@@ -694,7 +687,7 @@ class _PipelineStageBase(ABC):
 
                 # TODO: we dont need to save this, add to dw_runner?
                 self.backward_state[bwd_chunk_id] = (
-                    input_values,
+                    bwd_kwargs["input_values"],
                     param_groups,
                     bwd_kwargs["stage_output"],
                     bwd_kwargs["output_grads"],
@@ -859,7 +852,7 @@ class _PipelineStage(_PipelineStageBase):
         num_microbatches: int,
         args: Optional[Tuple[Any, ...]] = None,
         kwargs: Optional[Dict[str, Any]] = None,
-    ):
+    ) -> Optional[Tuple[Any, ...]]:
         """
         Create send/recv infrastructures for activations (during forward)
         """
@@ -871,6 +864,7 @@ class _PipelineStage(_PipelineStageBase):
 
         # Send info during forward for each activation
         self.act_send_info = self._create_act_send_info()
+        return None
 
     def get_stage_index_of_submod(
         self,
@@ -920,6 +914,10 @@ class _PipelineStage(_PipelineStageBase):
                 example_value.dtype,
             )
             buffer = _make_tensor_from_meta(example_value, self.device)
+            # In case there is backward pass, set requires_grad for receive buffers
+            # before first forward
+            if self.has_backward:
+                buffer.requires_grad_(True)
 
             return _RecvInfo(
                 arg_node.name,
@@ -1396,7 +1394,7 @@ class PipelineStage(_PipelineStageBase):
         num_microbatches: int,
         args: Optional[Tuple[Any, ...]] = None,
         kwargs: Optional[Dict[str, Any]] = None,
-    ) -> None:
+    ) -> Optional[Tuple[Any, ...]]:
         # TODO move self.device to an argument from step API (from its input tensors)?
         assert num_microbatches is not None, "TODO fix num_microbatches"
 
@@ -1420,6 +1418,10 @@ class PipelineStage(_PipelineStageBase):
                         for inp in self.inputs_meta
                     ]
                 )
+                # In case there is backward pass, set requires_grad for receive buffers
+                if self.has_backward:
+                    for r in recv_infos:
+                        r.buffer.requires_grad_(True)
 
                 self.args_recv_info[chunk_id] = recv_infos
             else:
