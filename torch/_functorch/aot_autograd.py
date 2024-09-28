@@ -678,6 +678,7 @@ def _create_aot_dispatcher_function(
                             num_intermediate_bases=fw_metadata.num_intermediate_bases,
                             keep_input_mutations=aot_config.keep_inference_input_mutations,
                             traced_tangents=fw_metadata.traced_tangents,
+                            traced_tangent_memory_formats=fw_metadata.traced_tangent_memory_formats,
                             subclass_inp_meta=fw_metadata.subclass_inp_meta,
                             subclass_fw_graph_out_meta=fw_metadata.subclass_fw_graph_out_meta,
                             subclass_tangent_meta=fw_metadata.subclass_tangent_meta,
@@ -1050,7 +1051,7 @@ def aot_module_simplified(
         static_input_indices=static_input_indices,
         is_export=False,
         no_tangents=False,
-        cache_key=None,
+        cache_info=None,
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     fake_flat_args = process_inputs(full_args, aot_config, fake_mode, shape_env)

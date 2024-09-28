@@ -1517,8 +1517,9 @@ def safe_expand(r):
 @lru_cache(None)
 def _maybe_evaluate_static_worker(
     expr: sympy.Expr,
-    symbol_info: Tuple[Tuple[sympy.Symbol, ValueRanges, sympy.Integer], ...],
+    symbol_info: Tuple[Tuple[sympy.Symbol, ValueRanges, sympy.Integer, bool], ...],
     unbacked_only: bool,
+    size_oblivious: bool
 ):
     """
     This variant of ShapeEnv._maybe_evaluate_static has no dependence on
@@ -1531,20 +1532,33 @@ def _maybe_evaluate_static_worker(
     new_shape_env = {}
     new_range_env = {}
     for idx, sinfo in enumerate(symbol_info):
-        k, vr, hint = sinfo
-        if isinstance(hint, SingletonInt):
+        k, vr, val, is_size_like = sinfo
+        if isinstance(val, SingletonInt):
             # Skip var_ranges logic for SingletonInt which is only used
             # for jagged layout NestedTensors today
             continue
-
-        lower = vr.lower
-
+        if size_oblivious and is_size_like:
+            lower = max(2, vr.lower)
+            # Clamping size-oblivious to some quantity below sys.maxsize
+            # helps us determine that f(u0) != sys.maxsize, which is a
+            # test that is looking for sys.maxsize as a sentinel, but you
+            # don't really want to worry about it for unbacked SymInts.
+            # This is similar to the flavor where size oblivious omits
+            # 0/1, it changes semantics but in a benign way.
+            upper = min(2 ** 48, vr.upper)
+            # This is a bit dodgy: what this means is that there was a
+            # size-like unbacked symbol whose upper bound < 2.  This
+            # causes... problems.
+            if lower <= upper:
+                vr = ValueRanges(lower, upper)
+        else:
+            lower = vr.lower
         # Don't do anything if we don't have a nontrivial lower bound
         # Also don't do anything if we asked only to simplify unbacked
         # SymInt
         if (
             lower is -int_oo or
-            (unbacked_only and hint is not None) or
+            (unbacked_only and val is not None) or
             not vr.is_int
         ):
             new_range_env[k] = vr
@@ -2633,7 +2647,6 @@ class ShapeEnv:
         )
 
         self.guards: List[ShapeGuard] = []
-        self.axioms: Dict[sympy.Expr, sympy.Expr] = {}
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
         self.var_to_val: Dict[sympy.Symbol, sympy.Integer] = {}
@@ -2849,6 +2862,9 @@ class ShapeEnv:
             "_prev_cache_key",
             "_version_counter",
             "dim_constraints",
+            # source locations are OK to diverge
+            "var_to_range_sloc",
+            "replacements_slocs",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -3752,7 +3768,7 @@ class ShapeEnv:
                 # we can proactively narrow to that range
                 if isinstance(constraint_dim, StrictMinMaxConstraint):
                     assert not duck
-                    self._update_var_to_range(sympy_expr, constraint_dim.vr)
+                    self._update_var_to_range(sympy_expr, constraint_dim.vr, is_constraint=True)
 
                 vr = self.var_to_range[sympy_expr]
                 assert vr.is_int
@@ -4707,61 +4723,33 @@ class ShapeEnv:
         expr = canonicalize_bool_expr(expr)
 
         # Pattern matching
+        symbols = tuple(expr.free_symbols)
         if axioms is None:
-            subst = self.axioms
-        else:
-            subst = {}
-            for e in axioms:
-                if e.free_symbols.issubset(expr.free_symbols):
-                    subst.update(dict(self.get_implications(self.simplify(e))))
+            axioms = self.get_axioms(symbols, compute_hint=compute_hint)
+        subst = {}
+        for e in axioms:
+            if e.free_symbols.issubset(expr.free_symbols):
+                subst.update(dict(self.get_implications(self.simplify(e))))
 
         expr = expr.xreplace(subst)
-        # TODO: compute hint might have gotten broken here
 
         fs = expr.free_symbols
 
         if not fs and (expr.is_number or expr.is_Boolean):
             return expr
 
-        def adjust_vr(k, vr):
-            # Check if the range can solve it statically quickly
-            if not (size_oblivious and k in self.size_like):
-                return vr
-
-            lower = max(2, vr.lower)
-            # Clamping size-oblivious to some quantity below sys.maxsize
-            # helps us determine that f(u0) != sys.maxsize, which is a
-            # test that is looking for sys.maxsize as a sentinel, but you
-            # don't really want to worry about it for unbacked SymInts.
-            # This is similar to the flavor where size oblivious omits
-            # 0/1, it changes semantics but in a benign way.
-            upper = min(2 ** 48, vr.upper)
-            # This is a bit dodgy: what this means is that there was a
-            # size-like unbacked symbol whose upper bound < 2.  This
-            # causes... problems.  When this happens, just ignore the
-            # preexisting upper bound
-            if lower > upper:
-                upper = max(lower, 2 ** 48)
-            return ValueRanges(lower, upper)
-
         if var_to_range is None:
-            if size_oblivious:  # micro-optimization
-                var_ranges = {k: adjust_vr(k, v) for k, v in self.var_to_range.items()}
-            else:
-                var_ranges = self.var_to_range
+            var_ranges = self.var_to_range
         else:
-            var_ranges = {k: adjust_vr(k, v) for k, v in var_to_range}
-
-        out = bound_sympy(expr, var_ranges)
-        if out.is_singleton():
-            return out.lower
+            var_ranges = dict(var_to_range)
 
         symbol_info = tuple(
-            (s, var_ranges.get(s), self.var_to_val.get(s))
+            (s, var_ranges.get(s), self.var_to_val.get(s), s in self.size_like)
             for s in sorted(fs, key=lambda s: str(s))  # TODO: speed up sort?
         )
 
-        return _maybe_evaluate_static_worker(expr, symbol_info, unbacked_only)
+        r = _maybe_evaluate_static_worker(expr, symbol_info, unbacked_only, size_oblivious)
+        return r
 
     @_lru_cache
     def replace(self, expr: "sympy.Expr") -> "sympy.Expr":
@@ -4895,7 +4883,7 @@ class ShapeEnv:
                 f"ATTENTION: guard_size_oblivious would fix the error, evaluating expression to {size_oblivious_result}.\n"
                 "Maybe you need to add guard_size_oblivious to framework code, see doc below for more guidance.\n\n"
             )
-        fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(True)
+        sloc, maybe_extra_debug = self._get_stack_summary(True)
         if expr.is_integer:
             desc = "Could not extract specialized integer from data-dependent expression"
         else:
@@ -4904,8 +4892,7 @@ class ShapeEnv:
             f"{desc} {expr} (unhinted: {unhinted_expr}).  "
             f"(Size-like symbols: {', '.join(map(str, size_like_symbols)) or 'none'})\n\n"
             f"{size_oblivious_result_msg}"
-            "Potential framework code culprit (scroll up for full backtrace):\n"
-            f"{''.join(traceback.StackSummary.from_list([fsummary]).format())}\n"
+            "Caused by: {sloc}\n"
             'For more information, run with TORCH_LOGS="dynamic"\n'
             "For extended logs when we create symbols, also add "
             f"TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL=\"{','.join(map(str, expr.free_symbols))}\"\n"
@@ -4918,7 +4905,7 @@ class ShapeEnv:
         )
         return GuardOnDataDependentSymNode(expr, msg)
 
-    def _update_var_to_range(self, symbol, vr, vr_sloc: Optional[ValueRangesSLoc] = None):
+    def _update_var_to_range(self, symbol, vr, vr_sloc: Optional[ValueRangesSLoc] = None, *, is_constraint=False):
         lower, upper = vr.lower, vr.upper
 
         # If we have a size-like unbacked SymInt, refuse to refine the range to be
@@ -4956,7 +4943,12 @@ class ShapeEnv:
 
         if (v := self.var_to_val.get(symbol)) is not None:
             r = self.var_to_range[symbol]
-            assert v in r, f"{v} not in {r}"
+            if v not in r:
+                # For constraint failure, delay this for later
+                # TODO: Rework all of this, the constraint logic is very
+                # duplicative with regular reasoning
+                if not is_constraint:
+                    assert v in r, f"{v} not in {r}"
 
     def _set_replacement(self, a: "sympy.Symbol", tgt: "sympy.Expr", msg: str) -> None:
         """
@@ -5518,7 +5510,6 @@ class ShapeEnv:
                     # or defer to runtime assert on.
                     guard = ShapeGuard(g, self._get_sloc())
                     self.guards.append(guard)
-                    self.axioms.update(dict(self.get_implications(self.simplify(g))))
                 else:
                     # it's fine to defer simple guards here without checking,
                     # the _maybe_guard_rel() call above will set replacements if possible,
@@ -5628,7 +5619,6 @@ class ShapeEnv:
             # and the guard in question has no unbacked SymInts in front
             ix = cands[-1] if cands else None
             self.deferred_runtime_asserts.setdefault(ix, []).append(ra)
-            self.axioms.update(dict(self.get_implications(self.simplify(expr))))
             self.num_deferred_runtime_asserts += 1
             self._update_version_counter()
             self._log_guard("runtime_assert", orig_expr, forcing_spec=False)
