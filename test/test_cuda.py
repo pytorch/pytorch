@@ -5089,7 +5089,7 @@ class TestCudaAutocast(TestAutocast):
 
         dtypes = (torch.float16, torch.bfloat16) if TEST_BF16 else (torch.float16,)
         for dtype in dtypes:
-            with torch.cuda.amp.autocast(dtype=dtype):
+            with torch.autocast(device_type="cuda", dtype=dtype):
                 output = mymm(x, y)
                 self.assertTrue(output.dtype is dtype)
                 loss = output.sum()
