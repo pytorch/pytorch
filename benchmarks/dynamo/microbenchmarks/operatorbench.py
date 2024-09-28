@@ -114,20 +114,14 @@ def microbenchmark(
     torch.jit._builtins._register_builtin(
         torch.ops.aten.convolution_backward.default, "aten::convolution_backward"
     )
-    if device == "cuda":
-        cudagraphs_eager = cudagraphs_inner(
-            gm, gm_args, copy_outputs=False, copy_inputs=False
-        )
-        compiled_fn = compile_fx(gm, gm_args)
-        cudagraphs_compiled = cudagraphs_inner(
-            compiled_fn, gm_args, copy_outputs=False, copy_inputs=False
-        )
-        compiled = [cudagraphs_eager, cudagraphs_compiled]
-    else:
-        compiled_fn = compile_fx(gm, gm_args)
-        compiled = [gm, compiled_fn]
+    compiled = [gm]
     for config in inductor_configs:
+        t = -time.perf_counter()
         compiled.append(compile_fx(gm, gm_args, config_patches=config))
+        t += time.perf_counter()
+        if t > 10:
+            print(f"slow compile inductor {t:.1f}s {config}")
+
     if measure_nvfuser:
         g = convert_to_jit(gm, gm_args)
         cudagraphs_jit = cudagraphs_inner(
@@ -250,7 +244,7 @@ def benchmark(
 
     assert dtype in ("float16", "float32"), f"got {dtype}"
 
-    inductor_configs = []
+    inductor_configs = [{}]
     backend_names = ["inductor"]
     for name in inductor_config or ():
         backend_names.append(name)
