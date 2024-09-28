@@ -1482,8 +1482,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def codegen_device(self, device):
         if config.abi_compatible:
-            self.used_cached_devices.add(device.type)
-            return f"cached_torch_device_type_{device.type}, {device.index if device.index else 0}"
+            assert device.type in DEVICE_TO_ATEN, (
+                device.type + " not found in DEVICE_TO_ATEN"
+            )
+            device_str = DEVICE_TO_ATEN[device.type][5:].lower()  # remove "at::k"
+            self.used_cached_devices.add(device_str)
+            return f"cached_torch_device_type_{device_str}, {device.index if device.index else 0}"
         else:
             return (
                 f"c10::Device({DEVICE_TO_ATEN[device.type]}, {device.index})"
