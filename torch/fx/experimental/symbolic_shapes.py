@@ -111,6 +111,7 @@ __all__ = [
     "guard_size_oblivious", "check_consistent",
     "compute_unbacked_bindings", "ConvertIntKey",
     "rebind_unbacked", "resolve_unbacked_bindings", "is_accessor_node",
+    "ValueRangesSLoc",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -2501,6 +2502,9 @@ class ShapeEnvSettings:
 
 @dataclass
 class ValueRangesSLoc:
+    """
+    Locations of the guards that triggered lower and upper bound.
+    """
     lower: SLoc
     upper: SLoc
 
@@ -3742,12 +3746,13 @@ class ShapeEnv:
                     )
                 else:
                     self.var_to_range[sympy_expr] = self._default_unspecified_value_range()
+                    self.var_to_range_sloc[sympy_expr] = ValueRangesSLoc(sloc, sloc)
 
                 # Small performance optimization: if we have a min-max constraint,
                 # we can proactively narrow to that range
                 if isinstance(constraint_dim, StrictMinMaxConstraint):
                     assert not duck
-                    self._update_var_to_range(constraint_dim.vr)
+                    self._update_var_to_range(sympy_expr, constraint_dim.vr)
 
                 vr = self.var_to_range[sympy_expr]
                 assert vr.is_int
@@ -4357,9 +4362,7 @@ class ShapeEnv:
         for symbol, sources in symbol_to_source.items():
             r = self.var_to_range.get(symbol)
             if r is None:
-                if symbol not in self.var_to_range:
-                    continue
-                r = self.var_to_range[symbol]
+                continue
             vr_sloc = self.var_to_range_sloc[symbol]
 
             assert sources
