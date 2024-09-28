@@ -17,6 +17,7 @@ from typing import (
     Iterator,
     List,
     Optional,
+    Set,
     Tuple,
     Type,
     TYPE_CHECKING,
@@ -270,11 +271,13 @@ def _override_decomp_aten_to_variants():
 
 
 def _split_decomp_table_to_cia_and_python_decomp(
-    decomp_table: Dict[torch._ops.OperatorBase, Callable]
+    decomp_table: Dict[torch._ops.OperatorBase, Callable],
+    additional_custom_ops: Set[torch._ops.OperatorBase],
 ) -> Tuple[Dict[torch._ops.OperatorBase, Callable], ...]:
     from torch._decomp import _collect_all_valid_cia_ops, _is_preservable_cia_op
 
     all_preservable_cia_ops = set(_collect_all_valid_cia_ops())
+    all_preservable_cia_ops = all_preservable_cia_ops.union(additional_custom_ops)
     cia_ops_to_callable = {}
 
     for op in list(decomp_table.keys()):
@@ -1082,6 +1085,16 @@ class ExportedProgram:
             elif _is_preservable_cia_op(op):
                 _decomp_table[op] = _special_op_to_preserve_cia
 
+        additional_custom_cia_ops = set()
+        for module in self.graph_module.modules():
+            if isinstance(module, torch.fx.GraphModule):
+                for node in module.graph.nodes:
+                    if node.op == "call_function" and _is_preservable_cia_op(
+                        node.target
+                    ):
+                        if node.target.name().split("::")[0] != "aten":
+                            additional_custom_cia_ops.add(node.target)
+
         # Note [Seperating decomp_table into CIA decomps and non-CIA decomps]
         # At this point, we have a decomp_table that contains decomp behaviour for
         # both CIA and post-autograd ops.
@@ -1097,7 +1110,9 @@ class ExportedProgram:
         (
             cia_to_decomp,
             python_decomp_table,
-        ) = _split_decomp_table_to_cia_and_python_decomp(_decomp_table)
+        ) = _split_decomp_table_to_cia_and_python_decomp(
+            _decomp_table, additional_custom_cia_ops
+        )
 
         return _decompose_exported_program(
             self,
