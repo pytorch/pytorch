@@ -70,6 +70,7 @@ from .exc import (
     augment_exc_message,
     BackendCompilerFailed,
     CacheLimitExceeded,
+    FailOnCacheLimitHit,
     format_error_msg,
     InternalTorchDynamoError,
     SkipCodeRecursiveException,
@@ -858,7 +859,11 @@ def _compile(
                 format_guard_failures(),
                 troubleshooting_url,
             )
-            if config.skip_code_recursive_on_cache_limit_hit and justknobs_check(
+            if config.fail_on_cache_limit_hit:
+                raise FailOnCacheLimitHit(
+                    f"{limit_type} reached, because fail_on_cache_limit_hit = True this is a HARD failure"
+                )
+            elif config.skip_code_recursive_on_cache_limit_hit and justknobs_check(
                 "pytorch/compiler:skip_code_recursive_on_cache_limit_hit"
             ):
                 raise CacheLimitExceeded(f"{limit_type} reached")
@@ -924,6 +929,9 @@ def _compile(
         start_possibly_missed_reinplacing_opportunities = torch._dynamo.utils.counters[
             "inductor"
         ]["possibly_missed_reinplacing_opportunities"]
+        start_possibly_missed_reinplacing_bytes = torch._dynamo.utils.counters[
+            "inductor"
+        ]["start_possibly_missed_reinplacing_bytes"]
         guarded_code = None
         try:
             guarded_code = compile_inner(code, one_graph, hooks, transform)
@@ -1006,6 +1014,18 @@ def _compile(
                 remote_cache_time_saved = frame_phase_timing[frame_key].get(
                     "remote_cache_time_saved", 0
                 )
+                possibly_missed_reinplacing_bytes = (
+                    torch._dynamo.utils.counters["inductor"][
+                        "possibly_missed_reinplacing_bytes"
+                    ]
+                    - start_possibly_missed_reinplacing_bytes
+                )
+                if possibly_missed_reinplacing_bytes != 0:
+                    signpost_event(
+                        "inductor",
+                        "auto_functionalize",
+                        {"missed_reinplacing_bytes": possibly_missed_reinplacing_bytes},
+                    )
             else:
                 guard_count = None
                 shape_env_guard_count = None
@@ -1082,7 +1102,11 @@ class ConvertFrame:
         frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
         skip: int = 0,
     ) -> Optional[
-        Union[GuardedCode, torch._C._dynamo.eval_frame.SkipCodeRecursiveFlag]
+        Union[
+            GuardedCode,
+            torch._C._dynamo.eval_frame.SkipCodeRecursiveFlag,
+            torch._C._dynamo.eval_frame.CacheLimitHitFlag,
+        ]
     ]:
         counters["frames"]["total"] += 1
         try:
@@ -1153,6 +1177,10 @@ class ConvertFrame:
             # to signal to Dynamo eval frame to skip the current frame and any recursive calls.
             if isinstance(e, SkipCodeRecursiveException):
                 return torch._C._dynamo.eval_frame.skip_code_recursive_flag
+            elif isinstance(e, CacheLimitExceeded):
+                # signal to Dynamo to run this frame on run-only mode, skipping recursively if
+                # no valid cache entry is found.
+                return torch._C._dynamo.eval_frame.cache_limit_hit_flag
 
         return None
 

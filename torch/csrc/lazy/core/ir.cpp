@@ -90,15 +90,6 @@ Node::Node(
   }
 }
 
-Node::Node(
-    OpKind op,
-    OpList operands,
-    const std::function<Shape()>& shape_fn,
-    size_t num_outputs)
-    : Node(op, operands, std::vector<Shape>{}, num_outputs) {
-  addComputedShape(shape_fn);
-}
-
 Node::Node(OpKind op, OpList operands, size_t num_outputs)
     : Node(op, operands, std::vector<Shape>{}, num_outputs) {}
 
