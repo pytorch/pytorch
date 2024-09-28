@@ -271,6 +271,9 @@ class TestFlexAttention(InductorTestCase):
         v_gold: torch.Tensor,
         v_ref: torch.Tensor,
         v: torch.Tensor,
+        bias_gold: Optional[Tuple[torch.Tensor]] = None,
+        bias_ref: Optional[Tuple[torch.Tensor]] = None,
+        bias: Optional[Tuple[torch.Tensor]] = None,
     ):
         dtype = ref_out.dtype
         with torch.no_grad():
@@ -284,7 +287,7 @@ class TestFlexAttention(InductorTestCase):
             # Checkout output
             self._check_equal(golden_out, ref_out, compiled_out, fudge_factor, "Out")
 
-            # Check gradients
+            # Check q/k/v gradients
             q_fudge_factor = 1.0 * fudge_factor
             self._check_equal(
                 q_gold.grad, q_ref.grad, q.grad, q_fudge_factor, "Grad_Query"
@@ -297,6 +300,18 @@ class TestFlexAttention(InductorTestCase):
             self._check_equal(
                 v_gold.grad, v_ref.grad, v.grad, v_fudge_factor, "Grad_Value"
             )
+
+            # Check captured bias gradients if they exist
+            if bias_gold is not None:
+                for i, (b_gold, b_ref, b) in enumerate(zip(bias_gold, bias_ref, bias)):
+                    b_fudge_factor = 1.0 * fudge_factor
+                    self._check_equal(
+                        b_gold.grad,
+                        b_ref.grad,
+                        b.grad,
+                        b_fudge_factor,
+                        f"Grad_Bias_{i}",
+                    )
 
     def run_test(
         self,
@@ -1849,6 +1864,65 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                     ref_error * 1.2 > flex_error,
                     f"Ref error: {ref_error}, Flex Error: {flex_error}",
                 )
+
+    @supported_platform
+    def test_comparison_vs_sdpa_with_learnable_bias(self):
+        B, H, S, D = 1, 1, 256, 64
+        bias = torch.randn(
+            2 * S, device="cuda", dtype=torch.float16, requires_grad=True
+        )
+        # Define flex attention score_mod with bias
+        bias_flex = bias.detach().clone().requires_grad_(True)
+
+        def rel_pos(score, b, h, q_idx, kv_idx):
+            return score + bias_flex[q_idx + kv_idx]
+
+        # Define eager SDPA implicit bias
+        bias_indices = torch.arange(S)[:, None] + torch.arange(S)
+        bias_spda_ref = bias.detach().clone().requires_grad_(True)
+        implicit_bias_spda_ref = bias_spda_ref[bias_indices]
+        bias_spda_gold = (
+            bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
+        )
+        implicit_bias_spda_gold = bias_spda_gold[bias_indices]
+
+        make_tensor = functools.partial(
+            torch.ones,
+            (B, H, S, D),
+            device="cuda",
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        q_ref, k_ref, v_ref = make_tensor(), make_tensor(), make_tensor()
+        q_gold, k_gold, v_gold = query_key_value_clones(
+            q_ref, k_ref, v_ref, torch.float64
+        )
+        q_flex, k_flex, v_flex = query_key_value_clones(q_ref, k_ref, v_ref)
+
+        out_ref = torch.nn.functional.scaled_dot_product_attention(
+            q_ref, k_ref, v_ref, attn_mask=implicit_bias_spda_ref
+        )
+        out_ref.sum().backward()
+        out_gold = torch.nn.functional.scaled_dot_product_attention(
+            q_gold, k_gold, v_gold, attn_mask=implicit_bias_spda_gold
+        )
+        out_gold.sum().backward()
+        out_flex = flex_attention(q_flex, k_flex, v_flex, score_mod=rel_pos)
+        out_flex.sum().backward()
+
+        for ref, flex, gold in [
+            (out_ref, out_flex, out_gold),
+            (q_ref.grad, q_flex.grad, q_gold.grad),
+            (k_ref.grad, k_flex.grad, k_gold.grad),
+            (v_ref.grad, v_flex.grad, v_gold.grad),
+            (bias_spda_ref.grad, bias_flex.grad, bias_spda_gold.grad),
+        ]:
+            ref_error = rmse(ref, gold)
+            flex_error = rmse(flex, gold)
+            self.assertTrue(
+                ref_error * 1.2 > flex_error,
+                f"Ref error: {ref_error}, Flex eager Error: {flex_error}",
+            )
 
     @supported_platform
     def test_causal_block_non_divisible(self):
