@@ -24,6 +24,15 @@ from torch.utils._pytree import tree_map_only
 
 aten = torch.ops.aten
 profile_enabled = False
+inductor_config_options = {
+    "halide": {"cpu_backend": "halide", "cuda_backend": "halide"},
+    "autotune": {
+        "max_autotune_pointwise": True,
+        "max_autotune": True,
+        "max_autotune_gemm": True,
+        "coordinate_descent_tuning": True,
+    },
+}
 
 
 def maybe_record_function(name):
@@ -92,24 +101,27 @@ def to_channels_last(ten):
 
 
 def microbenchmark(
-    operator, args, kwargs, accuracy_checking, repeats, measure_nvfuser, device
+    operator,
+    args,
+    kwargs,
+    accuracy_checking,
+    repeats,
+    inductor_configs,
+    measure_nvfuser,
+    device,
 ):
     gm, gm_args = gen_gm_and_inputs(operator, args, kwargs)
     torch.jit._builtins._register_builtin(
         torch.ops.aten.convolution_backward.default, "aten::convolution_backward"
     )
-    if device == "cuda":
-        cudagraphs_eager = cudagraphs_inner(
-            gm, gm_args, copy_outputs=False, copy_inputs=False
-        )
-        compiled_fn = compile_fx(gm, gm_args)
-        cudagraphs_compiled = cudagraphs_inner(
-            compiled_fn, gm_args, copy_outputs=False, copy_inputs=False
-        )
-        compiled = [cudagraphs_eager, cudagraphs_compiled]
-    else:
-        compiled_fn = compile_fx(gm, gm_args)
-        compiled = [gm, compiled_fn]
+    compiled = [gm]
+    for config in inductor_configs:
+        t = -time.perf_counter()
+        compiled.append(compile_fx(gm, gm_args, config_patches=config))
+        t += time.perf_counter()
+        if t > 10:
+            print(f"slow compile inductor {t:.1f}s {config}")
+
     if measure_nvfuser:
         g = convert_to_jit(gm, gm_args)
         cudagraphs_jit = cudagraphs_inner(
@@ -184,6 +196,11 @@ def skip_operator(operator):
     "--repeats", help="how many times to repeat for perf measurement", default=3
 )
 @click.option(
+    "--inductor-config",
+    multiple=True,
+    help="Custom inductor config, options: " + ", ".join(inductor_config_options),
+)
+@click.option(
     "--measure-nvfuser/--no-measure-nvfuser",
     help="default we only measure inductor",
     default=False,
@@ -202,6 +219,7 @@ def benchmark(
     max_samples,
     accuracy_checking,
     repeats,
+    inductor_config,
     measure_nvfuser,
     device,
     inp_file,
@@ -226,7 +244,11 @@ def benchmark(
 
     assert dtype in ("float16", "float32"), f"got {dtype}"
 
+    inductor_configs = [{}]
     backend_names = ["inductor"]
+    for name in inductor_config or ():
+        backend_names.append(name)
+        inductor_configs.append(inductor_config_options[name])
     if measure_nvfuser:
         backend_names.append("nvfuser")
 
@@ -314,6 +336,7 @@ def benchmark(
                                 kwargs,
                                 accuracy_checking,
                                 repeats,
+                                inductor_configs,
                                 measure_nvfuser,
                                 device,
                             )
