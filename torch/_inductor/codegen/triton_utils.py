@@ -68,12 +68,13 @@ def signature_to_meta(
     signature: List[KernelArgType],
     *,
     size_dtype: str,
+    argdefs: List[str],
     indices: Optional[List[int]] = None,
-) -> Dict[int, str]:
+) -> Dict[str, str]:
     if indices is None:
         indices = list(range(len(signature)))
     return {
-        i: signature_of(arg, size_dtype=size_dtype)
+        argdefs[i]: signature_of(arg, size_dtype=size_dtype)
         for i, arg in zip(indices, signature)
     }
 
