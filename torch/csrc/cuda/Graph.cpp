@@ -3,6 +3,7 @@
 #include <pybind11/chrono.h>
 
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <ATen/cuda/CUDAGraph.h>
@@ -23,19 +24,20 @@ void THCPGraph_init(PyObject* module) {
   // but CI linter and some builds prefer "module".
   auto torch_C_m = py::handle(module).cast<py::module>();
 
-  torch_C_m.def("_graph_pool_handle", &::at::cuda::graph_pool_handle);
+  torch_C_m.def("_graph_pool_handle", []() {
+    torch::utils::device_lazy_init(at::kCUDA);
+    return ::at::cuda::graph_pool_handle();
+  });
 
   shared_ptr_class_<::at::cuda::CUDAGraph>(torch_C_m, "_CUDAGraph")
       .def(py::init<>())
       .def(
           "capture_begin",
           [](::at::cuda::CUDAGraph& self,
-             std::optional<c10::cuda::MempoolId_t> pool_opt,
+             std::optional<std::shared_ptr<c10::cuda::MemPool>> pool_opt,
              std::string capture_error_mode) {
             cudaStreamCaptureMode capture_mode;
-            c10::cuda::MempoolId_t pool = pool_opt.has_value()
-                ? pool_opt.value()
-                : c10::cuda::MempoolId_t{0, 0};
+            auto pool = pool_opt.has_value() ? pool_opt.value() : nullptr;
             if (capture_error_mode == "global") {
               capture_mode = cudaStreamCaptureModeGlobal;
             } else if (capture_error_mode == "thread_local") {

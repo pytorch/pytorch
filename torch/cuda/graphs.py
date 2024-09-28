@@ -32,7 +32,7 @@ def is_current_stream_capturing():
 
 # Python shim helps Sphinx process docstrings more reliably.
 def graph_pool_handle():
-    r"""Return an opaque token representing the id of a graph memory pool.
+    r"""Return a torch.cuda.MemPool object.
 
     See :ref:`Graph memory management<graph-memory-management>`.
 
