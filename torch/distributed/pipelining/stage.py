@@ -254,6 +254,8 @@ class _PipelineStageBase(ABC):
     def _prepare_forward_infra(
         self,
         num_microbatches: int,
+        args: Optional[Tuple[Any, ...]] = None,
+        kwargs: Optional[Dict[str, Any]] = None,
     ):
         raise NotImplementedError
 
@@ -855,10 +857,15 @@ class _PipelineStage(_PipelineStageBase):
     def _prepare_forward_infra(
         self,
         num_microbatches: int,
+        args: Optional[Tuple[Any, ...]] = None,
+        kwargs: Optional[Dict[str, Any]] = None,
     ):
         """
         Create send/recv infrastructures for activations (during forward)
         """
+        # TODO(whc)
+        # this method should be deleted once lazy buffer allocation is implemented
+        # for now, it ignores args/kwargs becuase it should not need to do shape inference
         for chunk in range(num_microbatches):
             self.args_recv_info[chunk] = self._create_act_recv_info()
 
@@ -1259,33 +1266,40 @@ class PipelineStage(_PipelineStageBase):
         stage_index: int,
         num_stages: int,
         device: torch.device,
-        input_args: Union[torch.Tensor, Tuple[torch.Tensor, ...]],
+        input_args: Optional[Union[torch.Tensor, Tuple[torch.Tensor, ...]]] = None,
         output_args: Optional[Union[torch.Tensor, Tuple[torch.Tensor, ...]]] = None,
         group: Optional[dist.ProcessGroup] = None,
         dw_builder: Optional[Callable[[], Callable[..., None]]] = None,
     ):
         super().__init__(submodule, stage_index, num_stages, device, group, dw_builder)
         self.inputs: Optional[List[torch.Tensor]] = None
-
+        self.inputs_meta: Optional[Tuple[torch.Tensor, ...]] = None
         # Note: inputs and submod should ideally be on meta device. We decided not to assert this (yet) becuase it
         # might be breaking for existing users.
-        self.inputs_meta = (
-            (input_args,) if isinstance(input_args, torch.Tensor) else input_args
-        )
-        if output_args is None:
-            try:
-                output_args = submodule(*self.inputs_meta)
-                output_args = tree_map_only(
-                    torch.Tensor, lambda x: x.to("meta"), output_args
-                )
-            except Exception as e:
-                raise RuntimeError(
-                    "Failed to perform pipeline shape inference- are your inputs on the same device as your module?"
-                ) from e
-        assert output_args is not None  # for mypy
-        self._configure_outputs_meta(
-            (output_args,) if isinstance(output_args, torch.Tensor) else output_args
-        )
+        if input_args is None:
+            assert output_args is None, (
+                "If specifying output_args, input_args must also be specified. "
+                "Otherwise, shape inference will be performed at runtime"
+            )
+        else:
+            self.inputs_meta = (
+                (input_args,) if isinstance(input_args, torch.Tensor) else input_args
+            )
+            if output_args is None:
+                try:
+                    output_args = submodule(*self.inputs_meta)
+                    output_args = tree_map_only(
+                        torch.Tensor, lambda x: x.to("meta"), output_args
+                    )
+                except Exception as e:
+                    raise RuntimeError(
+                        "Failed to perform pipeline shape inference- are your inputs on the same device as your module?"
+                    ) from e
+            assert output_args is not None  # for mypy
+            self._configure_outputs_meta(
+                (output_args,) if isinstance(output_args, torch.Tensor) else output_args
+            )
+
         # these are the buffers used in backwards send/recv, they are allocated later
         self.outputs_grad: List[torch.Tensor] = []
 
@@ -1302,16 +1316,94 @@ class PipelineStage(_PipelineStageBase):
         logger.debug(
             f"finished pipeline stage init, {self.stage_index=}, {self.is_first=}, "  # noqa: G004
             f"{self.is_last=}, {self.num_stages=}, "
-            f"inputs: {[inp.shape for inp in self.inputs_meta]}, "
-            f"output: {[output.shape for output in self.get_outputs_meta()]}"
+            f"inputs: {[inp.shape for inp in self.inputs_meta] if self.inputs_meta is not None else None}, "
+            f"output: {[output.shape for output in self.get_outputs_meta()] if self.inputs_meta is not None else None}"
         )
+
+    def _shape_inference(
+        self,
+        args: Optional[Tuple[Any, ...]] = None,
+        kwargs: Optional[Dict[str, Any]] = None,
+    ):
+        prev_stage_same_rank = (
+            self.stage_index_to_group_rank[self.prev_stage] == self.group_rank
+        )
+        next_stage_same_rank = (
+            self.stage_index_to_group_rank[self.next_stage] == self.group_rank
+        )
+        if kwargs is None:
+            kwargs = {}
+
+        if self.is_first or prev_stage_same_rank:
+            assert args is not None and len(args)
+            args = tree_map_only(torch.Tensor, lambda x: x.to("meta"), args)
+        else:
+            assert (
+                args is None
+            ), "Can't supply input args for shape inference on non-first stage"
+            objects = [None]
+            logger.debug(
+                "%s receiving from stage %s", self.stage_index, self.prev_stage
+            )
+            dist.recv_object_list(
+                objects, src=self.prev_stage, group=self.group, device=self.device
+            )
+            args = objects[0]
+            assert isinstance(args, Iterable)
+
+        # cache input shapes for use during recv buffer allocation
+        self.inputs_meta = args
+        args = tree_map_only(
+            torch.Tensor, lambda x: torch.zeros_like(x, device=self.device), args
+        )
+
+        # set attributes needed for forward
+        with torch.no_grad():
+            logger.debug("%s running forward", self.stage_index)
+            outputs = self.submod(*args, **kwargs)
+
+        # if single tensor, convert so it is always a list
+        if isinstance(outputs, torch.Tensor):
+            outputs = [outputs]
+
+        # communicate meta outputs not real outputs for two reasons
+        # 1 - its faster (esp. since obj coll pickles tensor data!)
+        # 2 - avoid activating a cuda context for the src rank when unpickling on the recv end!
+        outputs_meta = tree_map_only(torch.Tensor, lambda x: x.to("meta"), outputs)
+        self._configure_outputs_meta(outputs_meta)
+
+        if next_stage_same_rank or self.is_last:
+            logger.debug(
+                "%s skipping send to stage %s",
+                self.stage_index,
+                self.next_stage,
+            )
+
+        else:
+            logger.debug("%s sending to stage %s", self.stage_index, self.next_stage)
+            dist.send_object_list(
+                [outputs_meta],
+                dst=self.next_stage,
+                group=self.group,
+                device=self.device,
+            )
+            outputs_meta = None
+
+        return outputs_meta
 
     def _prepare_forward_infra(
         self,
         num_microbatches: int,
+        args: Optional[Tuple[Any, ...]] = None,
+        kwargs: Optional[Dict[str, Any]] = None,
     ) -> None:
         # TODO move self.device to an argument from step API (from its input tensors)?
+        assert num_microbatches is not None, "TODO fix num_microbatches"
 
+        if self.inputs_meta is None:
+            outputs = self._shape_inference(args, kwargs)
+
+        assert self.inputs_meta is not None
         # Receive info during forward
         # TODO: create args_recv_info lazily? (same needed for PipelineStage)
         for chunk_id in range(num_microbatches):
@@ -1346,6 +1438,8 @@ class PipelineStage(_PipelineStageBase):
                 self.act_send_info[idx] = [self.stage_index + 1]
             else:
                 self.act_send_info[idx] = []
+
+        return outputs
 
     def _create_grad_recv_info(
         self,

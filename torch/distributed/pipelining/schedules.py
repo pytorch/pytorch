@@ -1229,9 +1229,19 @@ class PipelineScheduleMulti(_PipelineSchedule):
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
 
         if not self._stages_initialized:
+            # may be 'none' value (if this stage sends its output shapes to the next stage via P2P)
+            # or real value (if this stage and next stage are on the same device)
+            next_stage_args: Optional[Tuple[Any, ...]] = None
             for stage in self._stages:
-                # TODO: why do i pass args/kwargs here? its not used?
-                stage._prepare_forward_infra(self._n_microbatches)
+                if stage.is_first:
+                    next_stage_args = stage._prepare_forward_infra(
+                        self._n_microbatches, arg_mbs[0], kwarg_mbs[0]
+                    )
+                else:
+                    next_stage_args = stage._prepare_forward_infra(
+                        self._n_microbatches, next_stage_args, kwarg_mbs[0]
+                    )
+
                 if self._has_backward:
                     stage._prepare_backward_infra(self._n_microbatches)
             self._stages_initialized = True
@@ -1463,9 +1473,19 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
         if not self._stages_initialized:
+            # may be 'none' value (if this stage sends its output shapes to the next stage via P2P)
+            # or real value (if this stage and next stage are on the same device)
+            next_stage_args = None
             for stage in self._stages:
-                # TODO: why do i pass args/kwargs here? its not used?
-                stage._prepare_forward_infra(self._n_microbatches)
+                if stage.is_first:
+                    next_stage_args = stage._prepare_forward_infra(
+                        self._n_microbatches, arg_mbs[0], kwarg_mbs[0]
+                    )
+                else:
+                    next_stage_args = stage._prepare_forward_infra(
+                        self._n_microbatches, next_stage_args, kwarg_mbs[0]
+                    )
+
                 if self._has_backward:
                     stage._prepare_backward_infra(self._n_microbatches)
             self._stages_initialized = True
