@@ -14,7 +14,6 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import ParamSpec
 
 import torch
 import torch.library
@@ -22,6 +21,7 @@ from torch._ops import HigherOrderOperator, OperatorBase, OpOverload, OpOverload
 from torch._prims_common import CustomOutParamAnnotation
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.utils import _pytree as pytree
+from typing_extensions import ParamSpec
 
 
 __all__ = [
@@ -40,9 +40,9 @@ _P = ParamSpec("_P")
 
 # TODO: relax key type here; torch registrations should be possible to; but
 # right now this type is accurate
-global_decomposition_table: Dict[
-    str, Dict[torch._ops.OperatorBase, Callable]
-] = defaultdict(dict)
+global_decomposition_table: Dict[str, Dict[torch._ops.OperatorBase, Callable]] = (
+    defaultdict(dict)
+)
 
 decomposition_table = global_decomposition_table["post_autograd"]
 pre_autograd_decomposition_table = global_decomposition_table["pre_autograd"]
@@ -307,21 +307,7 @@ def _is_preservable_cia_op(op: "OperatorBase") -> bool:
 
 
 @lru_cache(maxsize=1)
-def _collect_all_valid_cia_ops() -> Set["OperatorBase"]:
-    """
-    This is an util function that gets the all CIA functional ops.
-
-    The algorithm is in 2 steps:
-      1. We first query C++ dispatcher to get the list of CIA ops
-         and then we call getattr on torch.ops.aten to lazily populate
-         them.
-
-      2. Sometimes, handful of ops have CIA registered in python dispatcher
-         but not on the C++ side, these can't be caught at the first step.
-         So we walk again to get the final list.
-
-    Note that the output of this function should never be modified
-    """
+def _materialize_cpp_cia_ops() -> Set["OperatorBase"]:
     # First step to lazily populate torch.ops.aten
     cia_ops = torch._C._dispatch_get_registrations_for_dispatch_key(
         "CompositeImplicitAutograd"
@@ -340,16 +326,69 @@ def _collect_all_valid_cia_ops() -> Set["OperatorBase"]:
 
         _ = getattr(getattr(getattr(torch.ops, namespace), op_name), op_overload_name)
 
+
+@lru_cache(maxsize=1)
+def _collect_all_valid_cia_ops_for_namespace(namespace: str) -> Set["OperatorBase"]:
+    assert hasattr(torch.ops, namespace)
+    op_namespace = getattr(torch.ops, namespace)
+    cia_ops = set()
+    for op in op_namespace:
+        op_packet = getattr(op_namespace, op)
+        for overload in op_packet.overloads():
+            op_overload = getattr(op_packet, overload)
+            if _is_preservable_cia_op(op_overload):
+                cia_ops.add(op_overload)
+    return cia_ops
+
+
+@lru_cache(maxsize=1)
+def _collect_all_valid_cia_aten_ops() -> Set["OperatorBase"]:
+    """
+    This is an util function that gets the all CIA functional ops.
+
+    The algorithm is in 2 steps:
+      1. We first query C++ dispatcher to get the list of CIA ops
+         and then we call getattr on torch.ops.aten to lazily populate
+         them.
+
+      2. Sometimes, handful of ops have CIA registered in python dispatcher
+         but not on the C++ side, these can't be caught at the first step.
+         So we walk again to get the final list.
+
+    Note that the output of this function should never be modified
+    """
+    # First step to lazily populate torch.ops.aten
+    _materialize_cpp_cia_ops()
+
+    # Second step to finally compile the list of all valid aten ops
+    return _collect_all_valid_cia_ops_for_namespace("aten")
+
+
+@lru_cache(maxsize=1)
+def _collect_all_valid_cia_ops() -> Set["OperatorBase"]:
+    """
+    This is an util function that gets the all CIA functional ops.
+
+    The algorithm is in 2 steps:
+      1. We first query C++ dispatcher to get the list of CIA ops
+         and then we call getattr on torch.ops.aten to lazily populate
+         them.
+
+      2. Sometimes, handful of ops have CIA registered in python dispatcher
+         but not on the C++ side, these can't be caught at the first step.
+         So we walk again to get the final list.
+
+    Note that the output of this function should never be modified
+    """
+    # First step to lazily populate torch.ops.aten
+    _materialize_cpp_cia_ops()
+
     # Second step to finally compile the list of all valid ops
     cia_ops = set()
     for op_namespace_name in torch.ops._dir:
-        op_namespace = getattr(torch.ops, op_namespace_name)
-        for op in op_namespace:
-            op_packet = getattr(op_namespace, op)
-            for overload in op_packet.overloads():
-                op_overload = getattr(op_packet, overload)
-                if _is_preservable_cia_op(op_overload):
-                    cia_ops.add(op_overload)
+        cia_ops = cia_ops.union(
+            _collect_all_valid_cia_ops_for_namespace(op_namespace_name)
+        )
     return cia_ops
 
 
@@ -428,7 +467,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
         if k in cia_ops_that_should_be_removed:
             del decomp_table[k]
 
-    for op in _collect_all_valid_cia_ops():
+    for op in _collect_all_valid_cia_aten_ops():
         decomp_table[op] = _get_decomp_for_cia(op)
     return decomp_table
 
@@ -440,7 +479,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
 # be decomposed implicitly.
 def _decomp_table_to_post_autograd_aten():
     decomp_table = {}
-    for k in _collect_all_valid_cia_ops():
+    for k in _collect_all_valid_cia_aten_ops():
         decomp_table[k] = _get_decomp_for_cia(k)
     return decomp_table
 
