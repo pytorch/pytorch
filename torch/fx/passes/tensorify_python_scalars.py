@@ -218,7 +218,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                         tuple(args),
                     )
 
-                    # After doing the computation in float32 precision, downcast back down to
+                    # If we upcasted from float16 to float32 during computation, downcast back down to
                     # float16 precision.
                     if node.meta["val"].dtype == torch.float16:
                         res2 = graph.call_function(
