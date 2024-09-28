@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, TYPE_CHECKING, Union
+from typing import Union
 
 import torch
 import torch.fx as fx
 from torch.fx._utils import lazy_format_graph_code
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch.fx.graph_module import GraphModule
+from torch.fx.experimental.symbolic_shapes import ShapeEnv  # noqa: TCH001
+from torch.fx.graph_module import GraphModule  # noqa: TCH001
 
 # TODO: refactor
 from torch.fx.passes.runtime_assert import _get_sym_val
@@ -72,8 +72,6 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
         None
     """
     import sympy
-
-    from torch.fx.experimental.symbolic_shapes import CallMethodKey
 
     graph = gm.graph
     tracer = fx.proxy.GraphAppendingTracer(graph)
@@ -155,7 +153,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
         ):
             # Look for tensor.item() calls on placeholders
             if unbacked_bindings := node.meta.get("unbacked_bindings"):
-                for s, keypath in unbacked_bindings.items():
+                for s in unbacked_bindings.keys():
                     if (
                         node is not None
                         and node.op == "call_function"

@@ -11,7 +11,7 @@ from typing import List, Tuple
 
 import torch
 import torch.library
-from torch._dynamo.testing import make_test_cls_with_patches
+from torch._dynamo.testing import CompileCounterWithBackend, make_test_cls_with_patches
 from torch._inductor import metrics
 from torch._inductor.codegen.common import device_codegens, register_backend_for_device
 from torch._inductor.codegen.cpp import CppScheduling
@@ -32,9 +32,6 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-)
-from torch._dynamo.testing import (
-    CompileCounterWithBackend,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
@@ -951,21 +948,6 @@ class TestInductorDynamic(TestCase):
         x = torch.arange(3)
         self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
         self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
-        self.assertEqual(cnt.frame_count, 1)
-
-    @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
-    def test_low_precision_multiply(self):
-        def fn(x, y):
-            return x * y
-
-        cnt = CompileCounterWithBackend("inductor")
-        fn_opt = torch._dynamo.optimize(cnt)(fn)
-
-        x = torch.tensor(9.734375, dtype=torch.float16)
-        y = 1.00048828125
-        self.assertEqual(fn_opt(x, y), fn(x,y))
-
-        # Ensure we only compiled one frame for float16
         self.assertEqual(cnt.frame_count, 1)
 
     def test_sort_dynamic_shape_with_check(self, device):

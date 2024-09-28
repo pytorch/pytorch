@@ -18,13 +18,15 @@ from typing import Any, Callable, List, Optional, Sequence, Tuple
 import torch
 import torch.utils.dlpack
 from torch import Tensor
-from torch._dynamo.utils import lazy_format_graph_code
+from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
 from torch._guards import CompileContext, TracingContext
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
+from torch.fx.graph_module import GraphModule
+from torch.fx.passes.tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
 
 from .. import config
@@ -176,6 +178,10 @@ def aot_dispatch_base(
             )
 
         with TracingContext.report_output_strides() as fwd_output_strides:
+            fake_mode = detect_fake_mode()
+            if fake_mode is not None:
+                assert isinstance(fw_module, GraphModule)
+                tensorify_python_scalars(fw_module, fake_mode.shape_env)
             compiled_fw = compiler(fw_module, updated_flat_args)
 
         if fakified_out_wrapper.needs_post_compile:

@@ -7631,6 +7631,45 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
+    @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
+    def test_multiply_precision_f16(self):
+        def fn(x, y):
+            return x * y
+
+        cnt = CompileCounterWithBackend("aot_eager")
+        fn_opt = torch._dynamo.optimize(cnt)(fn)
+        x = torch.tensor(9.734375, dtype=torch.float16)
+        y = 1.00048828125
+
+        self.assertEqual(fn_opt(x, y), fn(x, y))
+        self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
+    def test_multiply_precision_f32(self):
+        def fn(x, y):
+            return x * y
+
+        cnt = CompileCounterWithBackend("aot_eager")
+        fn_opt = torch._dynamo.optimize(cnt)(fn)
+        x = torch.tensor(9.734375, dtype=torch.float32)
+        y = 1.00048828125
+
+        self.assertEqual(fn_opt(x, y), fn(x, y))
+        self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
+    def test_multiply_precision_f64(self):
+        def fn(x, y):
+            return x * y
+
+        cnt = CompileCounterWithBackend("aot_eager")
+        fn_opt = torch._dynamo.optimize(cnt)(fn)
+        x = torch.tensor(9.734375, dtype=torch.float64)
+        y = 1.00048828125
+
+        self.assertEqual(fn_opt(x, y), fn(x, y))
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_anomaly_aot_autograd(self):
         def fail():
             raise AssertionError("fail")
