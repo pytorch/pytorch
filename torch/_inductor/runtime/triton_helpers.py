@@ -1,7 +1,5 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-import warnings
-
 import triton
 import triton.language as tl
 
@@ -31,32 +29,6 @@ except ImportError:
 
     def _log2(x):
         raise NotImplementedError
-
-
-def set_driver_to_cpu():
-    driver = triton.runtime.driver
-    if backend := triton.backends.backends.get("cpu", None):
-        if isinstance(driver.active, backend.driver):
-            # Don't re-initialize backend if it is already active
-            return
-        driver.set_active(backend.driver())
-        return
-    # This can be a hard error once triton-cpu is merged into fbcode
-    warnings.warn(
-        "Could not find an active CPU backend. Generated kernels will not be executable!"
-    )
-
-
-def set_driver_to_gpu():
-    driver = triton.runtime.driver
-    for name, backend in triton.backends.backends.items():
-        if backend.driver.is_active() and name != "cpu":
-            if isinstance(driver.active, backend.driver):
-                # Don't re-initialize backend if it is already active
-                return
-            driver.set_active(backend.driver())
-            return
-    raise RuntimeError("Could not find an active GPU backend")
 
 
 @triton.jit
