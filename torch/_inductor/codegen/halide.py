@@ -1639,7 +1639,6 @@ class HalideKernel(SIMDKernel):
             name,
             call_args,
             gpu=False,  # grid/stream is handled internally in halide
-            triton=False,
         )
 
     def generate_assert(self, check):
