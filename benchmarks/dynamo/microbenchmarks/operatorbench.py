@@ -350,7 +350,7 @@ def benchmark(
                 except Exception as e:
                     print(f"error {operator} input {i}: {type(e).__name__}: {e}")
                     # comment out this line to avoid blocking other tests
-                    # raise e
+                    raise e
 
         if not timings:
             continue
