@@ -150,8 +150,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             self.is_constant = False
 
         assert isinstance(
-            fn,
-            (types.BuiltinFunctionType, types.FunctionType, torch.jit.ScriptFunction),
+            fn, (types.FunctionType, torch.jit.ScriptFunction)
         ), f"expected FunctionType found {typestr(fn)} {fn}"
         # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
         # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
@@ -1147,3 +1146,12 @@ class TritonKernelVariable(VariableTracker):
 
         # Bail out to parent's implementation
         return super().call_method(tx, name, args, kwargs)
+
+    def specialize_symbolic(self, arg: Any) -> Any:
+        from .constant import ConstantVariable
+        from .tensor import SymNodeVariable
+
+        # See [Note: Specialize tl.constexpr args in user-defined triton kernels]
+        if isinstance(arg, SymNodeVariable):
+            return ConstantVariable.create(arg.evaluate_expr())
+        return arg
