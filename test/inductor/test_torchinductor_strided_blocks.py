@@ -34,6 +34,26 @@ max_block: int = TRITON_MAX_BLOCK["X"]
 @config.patch("triton.use_block_ptr", True)
 @instantiate_parametrized_tests
 class TritonBlockPointerTest(InductorTestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._stack = contextlib.ExitStack()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._stack.close()
+        super().tearDownClass()
+
+    def setUp(self):
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        super().setUp()
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.reset()
+
     def run_and_compare(
         self,
         func: Callable[..., Any],
@@ -59,6 +79,7 @@ class TritonBlockPointerTest(InductorTestCase):
         with config.patch(config_patches):
             compiled = torch.compile(func, backend="inductor", **compile_kwargs)
             result, code = run_and_get_code(compiled, *args)
+
 
         # Check numerical accuracy
         ref_tensors = flatten_tensors(func(*args))
@@ -502,6 +523,8 @@ class TritonBlockPointerTest(InductorTestCase):
         [
             ((15, 15), 1, 1, torch.sum),  # Non-power of 2
             ((129, 129), 3, 2, torch.sum),  # Test a large size, with loops.
+            ((3, 3), 1, 1, torch.argmax),  # Non-power of 2
+            ((11, 11), 1, 1, torch.argmax),  # Non-power of 2
             ((15, 15), 1, 1, torch.argmax),  # Non-power of 2
             ((129, 129), 1, 1, torch.argmax),  # Test a large size, with loops.
         ],
@@ -519,8 +542,12 @@ class TritonBlockPointerTest(InductorTestCase):
 
         device = torch.device(GPU_TYPE)
         full_size = tuple(2 * dim for dim in view_size)
-        full = torch.randn(full_size).to(device)
+
+        # Guarantee uniqueness of data, for argmax
+        numel = torch.empty(full_size).numel()
+        full = torch.randperm(numel).reshape(full_size).to(device) - numel / 2
         view = torch.as_strided(full, view_size, full.stride())
+        assert torch.unique(view).numel() == view.numel()
 
         # Expect at least 1 block pointer for the input.
         # Add 2 more if we generate 2 kernels.
