@@ -83,7 +83,7 @@ class LoopBody:
     indexing_exprs_name: Dict[sympy.Expr, str]
     submodules: Dict[str, Any]
     subblocks: Dict[str, LoopBodyBlock]
-    indirect_vars: List[str]
+    indirect_vars: List[sympy.Symbol]
     indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr]
     root_block: LoopBodyBlock
     memory_usage: Dict[MemoryUsageType, List[MemoryEntry]]

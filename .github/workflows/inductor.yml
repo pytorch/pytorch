@@ -58,8 +58,7 @@ jobs:
           { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_cpp_wrapper_abi_compatible", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
         ]}
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-inductor-test:
     name: cuda12.1-py3.10-gcc9-sm86
@@ -69,8 +68,7 @@ jobs:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
   linux-focal-cuda12_1-py3_12-gcc9-inductor-build:
     name: cuda12.1-py3.12-gcc9-sm86
@@ -86,6 +84,7 @@ jobs:
           { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
         ]}
+    secrets: inherit
 
   linux-focal-cuda12_1-py3_12-gcc9-inductor-test:
     name: cuda12.1-py3.12-gcc9-sm86
@@ -95,6 +94,7 @@ jobs:
       build-environment: linux-focal-cuda12.1-py3.12-gcc9-sm86
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_12-gcc9-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_12-gcc9-inductor-build.outputs.test-matrix }}
+    secrets: inherit
 
   linux-jammy-cpu-py3_12-inductor-halide-build:
     name: linux-jammy-cpu-py3.12-gcc11-inductor-halide
@@ -108,6 +108,7 @@ jobs:
         { include: [
           { config: "inductor-halide", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
         ]}
+    secrets: inherit
 
   linux-jammy-cpu-py3_12-inductor-halide-test:
     name: linux-jammy-cpu-py3.12-gcc11-inductor-halide
@@ -117,6 +118,7 @@ jobs:
       build-environment: linux-jammy-py3.12-gcc11
       docker-image: ${{ needs.linux-jammy-cpu-py3_12-inductor-halide-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_12-inductor-halide-build.outputs.test-matrix }}
+    secrets: inherit
 
   linux-focal-cuda12_4-py3_10-gcc9-inductor-build:
     # Should be synced with the one in inductor-periodic.yml but this only runs inductor_timm
@@ -134,8 +136,7 @@ jobs:
           { config: "inductor_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
         ]}
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
   linux-focal-cuda12_4-py3_10-gcc9-inductor-test:
     name: cuda12.4-py3.10-gcc9-sm86
@@ -146,8 +147,7 @@ jobs:
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm86
       docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-inductor-build.outputs.test-matrix }}
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
   linux-jammy-cpu-py3_9-gcc11-inductor-build:
     name: linux-jammy-cpu-py3.9-gcc11-inductor
@@ -201,8 +201,7 @@ jobs:
           { config: "cpu_inductor_freezing_avx2_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.10xlarge.avx2" },
           { config: "cpu_inductor_freezing_avx2_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.10xlarge.avx2" },
         ]}
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
   linux-jammy-cpu-py3_9-gcc11-inductor-test:
     name: linux-jammy-cpu-py3.9-gcc11-inductor
@@ -212,5 +211,4 @@ jobs:
       build-environment: linux-jammy-py3.9-gcc11-build
       docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit

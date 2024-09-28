@@ -284,10 +284,6 @@ std::unordered_set<std::string> _get_mobile_model_contained_types(
 std::unordered_set<std::string> _get_mobile_model_contained_types(
     const std::vector<IValue>& bytecode_ivalues) {
   std::unordered_set<std::string> contained_types;
-  // To avoid parsing same type twice, declare $parsed_type_names_records and
-  // use type name (string, ex: "Dict[int, Tuple[Tensor, Tensor, Tensor]]") as
-  // the hash to record which types are parsed.
-  std::unordered_set<std::string> parsed_type_names_records;
   for (const auto i : c10::irange(1, bytecode_ivalues.size())) {
     const auto& method_tuple = bytecode_ivalues.at(i).toTupleRef().elements();
     auto type_table_tuple =
@@ -299,7 +295,6 @@ std::unordered_set<std::string> _get_mobile_model_contained_types(
     // for example: "Dict[int, Tuple[Tensor, Tensor, Tensor]]"
     std::vector<std::string> type_name_list;
     for (const auto& type_definition : type_table) {
-      std::unordered_set<std::string> type_tokens;
       std::string type_name = type_definition.toStringRef();
       type_name_list.emplace_back(type_name);
     }
