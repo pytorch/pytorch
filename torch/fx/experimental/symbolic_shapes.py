@@ -3432,8 +3432,6 @@ class ShapeEnv:
         guess
 
         """
-        source_name = source.name() if source else None
-
         if self._translation_validation_enabled and source is not None:
             # Create a new symbol for this source.
             symbol = self._create_symbol_for_source(source)
@@ -3471,8 +3469,6 @@ class ShapeEnv:
             source: Optional[Source] = None,
     ):
         """Create a SymFloat value from a symbolic expression"""
-        source_name = source.name() if source else None
-
         if self._translation_validation_enabled and source is not None:
             # Create a new symbol for this source.
             symbol = self._create_symbol_for_source(source)
@@ -4820,7 +4816,7 @@ class ShapeEnv:
                 f"ATTENTION: guard_size_oblivious would fix the error, evaluating expression to {size_oblivious_result}.\n"
                 "Maybe you need to add guard_size_oblivious to framework code, see doc below for more guidance.\n\n"
             )
-        fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(True)
+        fsummary, _maybe_user_loc, maybe_extra_debug = self._get_stack_summary(True)
         if expr.is_integer:
             desc = "Could not extract specialized integer from data-dependent expression"
         else:
@@ -5319,7 +5315,6 @@ class ShapeEnv:
         # If an error is raised before the end of this function, we remove the FX node
         # inserted, and re-raise the error.
         guard = None
-        tb = None
 
         try:
             if orig_expr.is_number:
