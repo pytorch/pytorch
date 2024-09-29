@@ -690,7 +690,6 @@ from a multi-output view call"
         )
 
         output_tangents_start_idx = len(f_input_tangents)
-        output_tangents_end_idx = output_tangents_start_idx + len(f_output_tangents)  # noqa: F841
         tangents_and_memory_formats = [
             coerce_tangent_and_suggest_memory_format(tt)
             for i, tt in enumerate(traced_tangents)
