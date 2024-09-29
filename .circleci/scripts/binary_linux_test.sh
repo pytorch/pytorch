@@ -26,13 +26,12 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
   retry conda create -qyn testenv python="$DESIRED_PYTHON"
   source activate testenv >/dev/null
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
+
   python_path="/opt/python/cp\$python_nodot-cp\${python_nodot}"
-  # Prior to Python 3.8 paths were suffixed with an 'm'
-  if [[ -d  "\${python_path}/bin" ]]; then
-    export PATH="\${python_path}/bin:\$PATH"
-  elif [[ -d "\${python_path}m/bin" ]]; then
-    export PATH="\${python_path}m/bin:\$PATH"
+  if [[ "$python_nodot" == "313t" ]]; then
+    python_path="/opt/python/cp313-cp\${python_nodot}"
   fi
+  export PATH="\${python_path}/bin:\$PATH"
 fi
 
 EXTRA_CONDA_FLAGS=""
