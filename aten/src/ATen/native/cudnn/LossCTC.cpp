@@ -141,7 +141,7 @@ bool _use_cudnn_ctc_loss_tensor(
         Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
         Tensor tlc =
             target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
-        IntArrayRef il(ilc.data_ptr<int64_t>(), ilc.numel());
+        IntArrayRef il(ilc.const_data_ptr<int64_t>(), ilc.numel());
         IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
         use_cudnn = use_cudnn && (tl[b] < 256) && (tl[b] <= il[b]);
         if (!use_cudnn) {
