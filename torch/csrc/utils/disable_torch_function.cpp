@@ -80,9 +80,8 @@ static PyMethodDef DisableTorchFunctionSubclass_methods[] = { // NOLINT
     {nullptr, nullptr, 0, nullptr}};
 
 PyTypeObject DisableTorchFunctionSubclassType = {
-    PyVarObject_HEAD_INIT(
-        nullptr,
-        0) "torch._C.DisableTorchFunctionSubclass", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C.DisableTorchFunctionSubclass", /* tp_name */
     sizeof(DisableTorchFunctionSubclass), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
@@ -155,9 +154,8 @@ static PyMethodDef DisableTorchFunction_methods[] = { // NOLINT
     {nullptr, nullptr, 0, nullptr}};
 
 PyTypeObject DisableTorchFunctionType = {
-    PyVarObject_HEAD_INIT(
-        nullptr,
-        0) "torch._C.DisableTorchFunction", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C.DisableTorchFunction", /* tp_name */
     sizeof(DisableTorchFunction), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
