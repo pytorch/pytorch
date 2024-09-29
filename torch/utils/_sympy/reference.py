@@ -421,7 +421,7 @@ class TensorReferenceAnalysis:
 
     @staticmethod
     def floordiv(a, b):
-        return torch.ops.aten.floor_divide(a, b)
+        return torch.ops.aten.true_divide.Tensor(a, b)
 
     @staticmethod
     def truncdiv(a, b):
