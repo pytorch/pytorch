@@ -123,10 +123,12 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                 dtype = torch.float64
                 c = float(expr)
 
+            node = graph.call_function(
+                torch.ops.aten.scalar_tensor.default, (c,), {"dtype": dtype}
+            )
+            node.meta["val"] = torch.tensor(c, dtype=dtype)
             expr_to_tensor_proxy[expr] = fx.Proxy(
-                graph.call_function(
-                    torch.ops.aten.scalar_tensor.default, (c,), {"dtype": dtype}
-                ),
+                node,
                 tracer=tracer,
             )
 
