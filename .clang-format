@@ -84,6 +84,7 @@ SpacesInSquareBrackets: false
 Standard:        c++17
 StatementMacros:
   - PyObject_HEAD
+  - PyObject_VAR_HEAD
 TabWidth:        8
 UseTab:          Never
 ---
