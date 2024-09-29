@@ -93,3 +93,4 @@ AlignAfterOpenBracket: Align
 ObjCBlockIndentWidth: 2
 ObjCSpaceAfterProperty: false
 ObjCSpaceBeforeProtocolList: false
+...
