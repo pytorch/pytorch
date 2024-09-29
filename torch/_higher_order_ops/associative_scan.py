@@ -31,6 +31,8 @@ from .utils import _from_fun, _maybe_reenter_make_fx, create_fw_bw_graph
 
 aten = torch._ops.ops.aten
 
+# TODO: These functions can be merged with the corresponding functions from scan
+# once it is merged
 def first_slice_copy(t: torch.Tensor, dim: int) -> torch.Tensor:
     return torch.select_copy(t, dim, 0)
 
@@ -94,8 +96,8 @@ def create_fw_bw_graph_combinefn(combine_fn, xs, dim):
 
     with suspend_functionalization(), disable_functional_mode():
         with disable_proxy_modes_tracing():
-            fw_xs_1 = [pytree.tree_map(_from_fun, x).select(dim, 0) for x in xs]
-            fw_xs_2 = [pytree.tree_map(_from_fun, x).select(dim, 1) for x in xs]
+            fw_xs_1 = [first_slice_copy(pytree.tree_map(_from_fun, x), dim) for x in xs]
+            fw_xs_2 = [first_slice_copy(pytree.tree_map(_from_fun, x), dim) for x in xs]
             outs = combine_fn(*fw_xs_1, *fw_xs_2)
 
             fw_outputs = [pytree.tree_map(_from_fun, o) for o in outs]
