@@ -407,7 +407,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         backend,
         fwd_fullgraph,
     ):
-        def fwd_bwd_fn(model, inp):
+        def fwd_bwd(model, inp):
             out = model(inp)
             loss = out.sum()
             loss.backward()
@@ -431,24 +431,24 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
         def test_compiled():
             model, optim = model_init_fn()
-            fwd_bwd_fn_with_model = functools.partial(fwd_bwd_fn, model)
+            fwd_bwd_fn = functools.partial(fwd_bwd, model)
             # FSDP2 does lazy init using 1st run, so run it once to init using eager mode
-            run_iters(fwd_bwd_fn_with_model, optim, n_iter=1)
+            run_iters(fwd_bwd_fn, optim, n_iter=1)
 
             counters.clear()
             with self._remove_fsdp2_unsharded_param_graph_input_usage_with_optional_checks(
                 model, fwd_fullgraph
             ):
-                fwd_bwd_fn_with_model_compiled = torch.compile(
+                fwd_bwd_fn_compiled = torch.compile(
                     # NOTE: we can't set `fullgraph=True` here because we will always graph-break
-                    # on `loss.backward()` call in `fwd_bwd_fn()`. This is okay as long as
+                    # on `loss.backward()` call in `fwd_bwd()`. This is okay as long as
                     # it's the only graph-break in forward pass.
-                    fwd_bwd_fn_with_model,
+                    fwd_bwd_fn,
                     backend=backend,
                     fullgraph=False,
                 )
                 res = run_iters(
-                    fwd_bwd_fn_with_model_compiled,
+                    fwd_bwd_fn_compiled,
                     optim,
                     compiled_autograd_backend=backend,
                 )
@@ -459,11 +459,11 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
         def test_eager():
             model, optim = model_init_fn()
-            fwd_bwd_fn_with_model = functools.partial(fwd_bwd_fn, model)
+            fwd_bwd_fn = functools.partial(fwd_bwd, model)
             # FSDP2 does lazy init using 1st run, so run it once to init using eager mode
-            run_iters(fwd_bwd_fn_with_model, optim, n_iter=1)
+            run_iters(fwd_bwd_fn, optim, n_iter=1)
 
-            res = run_iters(fwd_bwd_fn_with_model, optim)
+            res = run_iters(fwd_bwd_fn, optim)
             return res
 
         torch._dynamo.reset()
