@@ -142,6 +142,7 @@ def get_scan_combine_fn(name, associative=True):
         A_i, Bu_i = x
         A_j, Bu_j = y
         return A_j * A_i, A_j * Bu_i + Bu_j
+        # return A_j * A_i, Bu_i + Bu_j
 
     def tuple_fct(x, y):
         return (x[0] + y[0], x[1] * y[1])
@@ -1636,8 +1637,8 @@ def forward(self, pred_1, x_1):
         ),
     )
     def test_associative_scan_binary_operator(self, combine_mode, reverse, device, autograd):
-        state_dim = 20
-        timesteps = 10
+        state_dim = 10
+        timesteps = 20
         projected_inputs = torch.randn(
             timesteps, state_dim, requires_grad=autograd, device=device
         )
@@ -1660,18 +1661,40 @@ def forward(self, pred_1, x_1):
         )
         self.assertEqual([r.device.type for r in result], [device.type] * len(result))
         
+        x = torch.arange(1, 5, dtype=torch.float32, device=device, requires_grad=autograd)
+        y = torch.arange(1, 5, dtype=torch.float32, device=device, requires_grad=autograd)
+        elements = (x, y)
+        def add2(x, y):
+            return x[0] * y[0], x[0] * y[1] + 0. * x[1] + 0. * y[0] + 0. * y[1]
+        result = associative_scan(
+            add2,
+            elements,
+            0,
+            combine_mode=combine_mode,
+            reverse=reverse,
+        )
+        expected_result = _fake_associative_scan(
+            add2, elements, 0, reverse=reverse
+        )
+        self.assertEqual(
+            result,
+            expected_result,
+        )
+        
         if autograd:
             elements_flatten, _ = pytree.tree_flatten(elements)
             result_flatten, _ = pytree.tree_flatten(result)
             result_exp_flatten, _ = pytree.tree_flatten(expected_result)
             grad_out = [torch.ones_like(el) for el in result_exp_flatten]
+            expected_grad_out = [torch.ones_like(el) for el in result_exp_flatten]
             expected_grads = torch.autograd.grad(
-                result_exp_flatten, (*elements_flatten,), grad_out
+                result_exp_flatten, (*elements_flatten,), expected_grad_out
             )
             grads = torch.autograd.grad(
                 result_flatten, (*elements_flatten,), grad_out
             )
-            print([torch.sum(e) for e in expected_grads])
+            # print([torch.sum(e) for e in grads])
+            # print([torch.sum(e) for e in expected_grads])
             self.assertEqual(grads, expected_grads)
 
     @requires_cuda
