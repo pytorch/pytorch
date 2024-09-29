@@ -51,7 +51,7 @@ def _use_lazy_graph_module(should_use: bool):
 
 @compatibility(is_backward_compatible=False)
 def _get_graph_module_cls():
-    return _LazyGraphModule if _use_lazy_graph_module_flag else GraphModule
+    return _LazyGraphModule
 
 
 def _make_graph_module(*args, graph_module_cls=None, **kwargs):
