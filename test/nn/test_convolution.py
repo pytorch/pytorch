@@ -25,6 +25,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfMPS,
     expectedFailureMPS,
     expectedFailureMPSPre15,
+    skipMPS,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyCPU,
@@ -2048,11 +2049,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
             _test(t, weight_odd, mode)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
+    @skipMPS # Results in CI are inconsistent, forced to skip - <ISSUE LINK>
     @dtypes(torch.float, torch.cfloat)
-    @dtypesIfMPS(
-        *([torch.float] if product_version < 14.0 else [torch.float, torch.cfloat])
-    )  # Complex not supported on MacOS13
-    @expectedFailureMPSPre15  # Fails on MPS - https://github.com/pytorch/pytorch/issues/136031
     @parametrize_test("mode", ("valid", "same"))
     def test_conv3d_vs_scipy(self, device, dtype, mode):
         t = make_tensor((1, 5, 5, 10), device=device, dtype=dtype)
