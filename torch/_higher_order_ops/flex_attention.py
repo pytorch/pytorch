@@ -72,19 +72,59 @@ def _permute_strides(out: torch.Tensor, query_strides: Tuple[int, ...]) -> torch
 
 
 @torch.library.custom_op("mylib::zeros_and_scatter", mutates_args=())
-def zeros_and_scatter(shape: List[int], indices: List[Tensor], vals: Tensor) -> Tensor:
-    grad = torch.zeros(shape, device=vals.device)
+def zeros_and_scatter(
+    shape: List[int],
+    indices: List[Tensor],
+    indices_dims: List[int],
+    vals: Tensor,
+    rightmost: int,
+) -> Tensor:
+    grad = torch.zeros(shape, device=vals.device, dtype=vals.dtype)
+
+    if len(indices) > 1:
+        vals = vals.transpose(*indices_dims)
+        indices = list(torch.meshgrid(indices, indexing="ij"))
+
+    for i in range(3, rightmost, -1):
+        for j, idx in enumerate(indices):
+            indices[j] = idx.unsqueeze(-1)
+
+    for i, idx in enumerate(indices):
+        indices[i] = idx.expand(vals.shape)
+
     return torch.ops.aten.index_put(grad, indices, vals, accumulate=True)
 
 
 @zeros_and_scatter.register_fake
-def _(shape: List[int], indices: List[Tensor], vals: Tensor) -> Tensor:
+def _(
+    shape: List[int],
+    indices: List[Tensor],
+    indices_dims: List[int],
+    vals: Tensor,
+    rightmost: int,
+) -> Tensor:
     return torch.empty(shape, device=vals.device)
 
 
 @zeros_and_scatter.register_vmap
-def _(info, in_dims, shape, indices, val):
-    out = torch.ops.mylib.zeros_and_scatter(shape, indices, val)
+def _(info, in_dims, shape, indices, indices_dims, val, rightmost):
+    if torch._C._functorch.maybe_current_level() is None:
+        lvl = 0
+    else:
+        lvl = torch._C._functorch.maybe_current_level()
+
+    if len(indices_dims) == 0:
+        indices_dims = [-1] * len(in_dims[1])
+
+    for i, x in enumerate(in_dims[1]):
+        if x is not None:
+            indices_dims[i] = lvl
+            if rightmost == -1:
+                rightmost = lvl
+
+    out = torch.ops.mylib.zeros_and_scatter(
+        shape, indices, indices_dims, val, rightmost
+    )
     return out, None
 
 
@@ -105,7 +145,9 @@ class ModIndex(torch.autograd.Function):
     def backward(ctx, gradOut):
         indices = ctx.saved_tensors
         return (
-            torch.ops.mylib.zeros_and_scatter(ctx.input_shape, indices, gradOut),
+            torch.ops.mylib.zeros_and_scatter(
+                ctx.input_shape, indices, [], gradOut, -1
+            ),
             None,
         )
 
@@ -185,7 +227,7 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
         kernel_options: Dict[str, Any],
         score_mod_other_buffers: Tuple = (),
         mask_mod_other_buffers: Tuple = (),
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor, ...]]:
         if not all(
             isinstance(buf, torch.Tensor)
             for buf in score_mod_other_buffers + mask_mod_other_buffers
@@ -789,7 +831,7 @@ def sdpa_dense_backward(
     kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple,
     mask_mod_other_buffers: Tuple,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor]]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor, ...]]:
     # Get outputs before calling repeat interleave
     actual_grad_query = torch.empty_like(query)
     actual_grad_key = torch.empty_like(key)
@@ -930,7 +972,7 @@ def trace_flex_attention_backward(
     kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor]]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor, ...]]:
     """We already have the forward graph and joint graph from the forward pass, so we create a proxy attach both graphs"""
     example_out = flex_attention_backward(
         query,
@@ -1132,7 +1174,7 @@ def flex_attention_backward_fake_tensor_mode(
     kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor]]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor, ...]]:
     with mode:
         grad_query = torch.empty_like(query)
         grad_key = torch.empty_like(key)
