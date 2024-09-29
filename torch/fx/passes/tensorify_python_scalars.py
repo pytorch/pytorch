@@ -185,7 +185,6 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                         zf := a.meta["val"], torch.SymFloat
                     ):
                         transform = True
-                        # TODO: populate meta on these
                         try:
                             interp_node = _sympy_interp(zf.node.expr).node
                         except NotImplementedError:
@@ -208,6 +207,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                                 compute_dtype,
                             ),
                         )
+                        res.meta = node.meta
 
                         args.append(res)
                     else:
