@@ -4605,7 +4605,7 @@ class KernelGroup:
         new_kernel.codegen_loops(code, ws)
 
     def get_num_args(self):
-        arg_defs, call_args, arg_types = self.args.cpp_argdefs()
+        arg_defs, _call_args, _arg_types = self.args.cpp_argdefs()
         args_num = len(arg_defs)
         return args_num
 
@@ -4956,7 +4956,7 @@ class LoopNestWithSplit:
         loops = self.root
         for loop in loops:
             loop.parallel = par_depth
-        for i in range(1, par_depth):
+        for _ in range(1, par_depth):
             loops = loops[0].inner
             loops[0].collapsed = True
 

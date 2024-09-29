@@ -225,10 +225,8 @@ def run_functionalized_fw_and_collect_metadata(
                     "tensor subclasses"
                 )
 
-            if not isinstance(arg, Tensor):
-                new_arg = arg
-            else:
-                new_arg = from_fun(f_arg)
+            if isinstance(arg, Tensor):
+                from_fun(f_arg)
             mutates_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=False
             )
@@ -692,7 +690,7 @@ from a multi-output view call"
         )
 
         output_tangents_start_idx = len(f_input_tangents)
-        output_tangents_end_idx = output_tangents_start_idx + len(f_output_tangents)
+        output_tangents_end_idx = output_tangents_start_idx + len(f_output_tangents)  # noqa: F841
         tangents_and_memory_formats = [
             coerce_tangent_and_suggest_memory_format(tt)
             for i, tt in enumerate(traced_tangents)
