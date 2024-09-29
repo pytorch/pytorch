@@ -559,7 +559,10 @@ class OptimizeContext(_TorchDynamoContext):
 
             def call_compiled_autograd():
                 assert rebuild_ctx is not None
-                compiler_fn = rebuild_ctx()
+                extra_kwargs = {}
+                if config.compiled_autograd_fullgraph:
+                    extra_kwargs["nopython"] = True
+                compiler_fn = rebuild_ctx(**extra_kwargs)
                 ctx = torch._dynamo.compiled_autograd.enable(compiler_fn)
                 ctx.__enter__()
                 return functools.partial(ctx.__exit__, None, None, None)
@@ -710,8 +713,8 @@ def is_inductor_supported():
 
 
 def optimize(*args, **kwargs):
-    def rebuild_ctx():
-        return optimize(*args, **kwargs)
+    def rebuild_ctx(**extra_kwargs):
+        return optimize(*args, **{**kwargs, **extra_kwargs})
 
     return _optimize(rebuild_ctx, *args, **kwargs)
 
