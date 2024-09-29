@@ -2048,7 +2048,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             _test(t, weight_odd, mode)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
-    @skipMPS  # Results in CI are inconsistent, forced to skip - <ISSUE LINK>
+    @skipMPS  # Results in CI are inconsistent, forced to skip
     @dtypes(torch.float, torch.cfloat)
     @parametrize_test("mode", ("valid", "same"))
     def test_conv3d_vs_scipy(self, device, dtype, mode):
