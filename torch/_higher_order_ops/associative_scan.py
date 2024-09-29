@@ -90,10 +90,12 @@ def create_fw_bw_graph_combinefn(combine_fn, xs, dim):
         with disable_proxy_modes_tracing():
             num_xs = len(xs)
             fw_xs_1 = [pytree.tree_map(_from_fun, x).select(dim, 0) for x in xs]
-            fw_xs_2 = [pytree.tree_map(_from_fun, x).select(dim, 0) for x in xs]
+            fw_xs_2 = [pytree.tree_map(_from_fun, x).select(dim, 1) for x in xs]
             outs = combine_fn(*fw_xs_1, *fw_xs_2)
 
             fw_outputs = [pytree.tree_map(_from_fun, o) for o in outs]
+            # for el in fw_outputs:
+            #     el.requires_grad = True
             fw_outputs_2 = [pytree.tree_map(_from_fun, o) for o in outs]
             if any(not isinstance(out, torch.Tensor) for out in fw_outputs):
                 raise RuntimeError(
@@ -510,26 +512,49 @@ class ScanAutogradOp(torch.autograd.Function):
             
             # Compute the gradients of the loss output with respect to x and h
             flat_grads = [torch.ones_like(g) * 1 for g in xs]
-            flat_grads_init = [torch.ones_like(g) for g in xs]
-            grads = mapped_joint_graph(*[torch.flip(g, [dim]) for g in flat_grads_init], *xs, *outs)
-            grads_x, grads_h = grads[:num_xs], grads[num_xs:]
+            # flat_grads_init = [torch.ones_like(g) for g in xs]
+            # flat_grads_init = [torch.ones_like(xs[0])] + [torch.zeros_like(xs[1])]
+            # flat_grads_init = [torch.zeros_like(xs[0])] + [torch.ones_like(xs[1])]
+            # grads = mapped_joint_graph(*[torch.flip(g, [dim]) for g in flat_grads_init], *xs, *outs)
+            # grads_x, grads_h = grads[:num_xs], grads[num_xs:]
+            # grads = mapped_joint_graph(*[torch.flip(g, [dim]) for g in flat_grads_init], *outs, *xs)
+            def compute_grad_hs_xs():
+                
+                def compute_part_grads(flat_grad_ind):
+                    flat_grads_init = [torch.ones_like(x) if flat_grad_ind == ind else torch.zeros_like(x) for ind, x in enumerate(xs)]
+                    grads = mapped_joint_graph(*flat_grads_init, *[torch.concat([ones, aten.slice(o, dim, 0, -1, 1)], dim) for o in outs], *xs)
+                    # grads_h, grads_x = grads[:num_xs], grads[num_xs:]
+                    # return grads_h, grads_x
+                    return *grads,
+            
+                grad_parts = [torch.unsqueeze(g, 0) for g in compute_part_grads(0)]
+                for part_ind in range(1, num_xs):
+                    grad_parts = [torch.concat([gp, torch.unsqueeze(g, 0)], 0) for gp, g in zip(grad_parts, compute_part_grads(part_ind))]
+
+                return grad_parts
+            
+            grads_intermediate = compute_grad_hs_xs()
+            grads_h, grads_x = grads_intermediate[:num_xs], grads_intermediate[num_xs:]
+            
+            # g_x, g_h = joint_graph(*[torch.flip(g, [dim])[-1:] for g in flat_grads_init], *[x[-1:] for x in xs], *[x[-2:-1] for x in outs])
+            # g_x, g_h = joint_graph(*[torch.flip(g, [dim])[-1:] for g in flat_grads_init], *[x[-3:-2] for x in outs], *[x[-2:-1] for x in xs])
+            # g_x, g_h = fw_graph(*[x[-2:-1] for x in outs], *[x[-1:] for x in xs])
             
             # Compute the cumprod of the rows of the gradient matrix and fill the remainder with zeros
             def cumprod_and_prepad(fg, val, size):
-                return torch.concat([zeros] * max(size - 1 - val.shape[dim], 0) + [ones * fg] + [fg * torch.cumprod(val, dim)], dim)
-                # return torch.concat([zeros] * max(size - 1 - val.shape[dim], 0) + [ones] + [fg * torch.cumprod(val, dim)], dim)
+                return torch.concat([zeros] * max(size - 1 - val.shape[dim + 1], 0) + [ones * fg] + [fg * torch.sum(torch.cumprod(val, dim + 1), 0)], dim)
             
             #Compute the gradients for a single element of xs
             def compute_grad_xs(fg, g_x, g_h):
                 # g_x = torch.concat([aten.slice(torch.flip(g_x, [dim]), dim, 1, None, 1), ones], dim)
-                g_x = torch.concat([ones, aten.slice(torch.flip(g_x, [dim]), dim, 1, None, 1)], dim)
-                # g_x = torch.flip(g_x, [dim])
-                g_h = torch.flip(g_h, [dim])
+                g_x = torch.flip(g_x, [dim + 1])
+                g_h = torch.flip(g_h, [dim + 1])
                 # fg = torch.flip(fg, [dim])
-                fg = torch.concat([fg, ones], dim)
+                # fg = torch.concat([fg, ones], dim)
+                fg = torch.concat([torch.flip(fg, [dim]), ones], dim)
                 
-                gradient_mat = [cumprod_and_prepad(aten.slice(fg, dim, n + 0, n + 1, 1), aten.slice(g_h, dim, n, -1, 1), scan_length) for n in range(0, scan_length, 1)]
-                grads = torch.flip(torch.sum(torch.stack(gradient_mat, 0) * g_x, 0), [dim])
+                gradient_mat = [cumprod_and_prepad(aten.slice(fg, dim, n + 0, n + 1, 1), aten.slice(g_h, dim + 1, n, -1, 1), scan_length) for n in range(0, scan_length, 1)]
+                grads = torch.flip(torch.sum(torch.stack(gradient_mat, 0) * torch.sum(g_x, 0), 0), [dim])
                 
                 return grads
             
@@ -628,26 +653,46 @@ class ScanAutogradOp(torch.autograd.Function):
             # grads = mapped_joint_graph(*flat_grads, *xs, *outs)
             
             # grads = mapped_joint_graph(*[torch.flip(g, [dim]) for g in flat_grads], *xs, *outs)
-            grads = mapped_joint_graph(*[torch.ones_like(g) for g in flat_grads], *xs, *outs)
-            grads_x, grads_h = grads[:num_xs], grads[num_xs:]
+            # grads = mapped_joint_graph(*[torch.ones_like(g) for g in flat_grads], *xs, *outs)
+            # grads_x, grads_h = grads[:num_xs], grads[num_xs:]
             
-            # pdb.set_trace()
-            # Compute the cumprod of the rows of the gradient matrix and fill the remainder with zeros
+            def compute_grad_hs_xs():
+                
+                def compute_part_grads(flat_grad_ind):
+                    flat_grads_init = [torch.ones_like(x) if flat_grad_ind == ind else torch.zeros_like(x) for ind, x in enumerate(xs)]
+                    grads = mapped_joint_graph(*flat_grads_init, *[torch.concat([ones, aten.slice(o, dim, 0, -1, 1)], dim) for o in outs], *xs)
+                    # grads_h, grads_x = grads[:num_xs], grads[num_xs:]
+                    # return grads_h, grads_x
+                    return *grads,
+            
+                grad_parts = [torch.unsqueeze(g, 0) for g in compute_part_grads(0)]
+                for part_ind in range(1, num_xs):
+                    grad_parts = [torch.concat([gp, torch.unsqueeze(g, 0)], 0) for gp, g in zip(grad_parts, compute_part_grads(part_ind))]
+
+                return grad_parts
+            
+            grads_intermediate = compute_grad_hs_xs()
+            grads_h, grads_x = grads_intermediate[:num_xs], grads_intermediate[num_xs:]
+            
+            # g_x, g_h = joint_graph(*[torch.flip(g, [dim])[-1:] for g in flat_grads_init], *[x[-1:] for x in xs], *[x[-2:-1] for x in outs])
+            # g_x, g_h = joint_graph(*[torch.flip(g, [dim])[-1:] for g in flat_grads_init], *[x[-3:-2] for x in outs], *[x[-2:-1] for x in xs])
+            # g_x, g_h = fw_graph(*[x[-2:-1] for x in outs], *[x[-1:] for x in xs])
+            
             # Compute the cumprod of the rows of the gradient matrix and fill the remainder with zeros
             def cumprod_and_prepad(fg, val, size):
-                return torch.concat([zeros] * max(size - 1 - val.shape[dim], 0) + [ones * fg] + [fg * torch.cumprod(val, dim)], dim)
+                return torch.concat([zeros] * max(size - 1 - val.shape[dim + 1], 0) + [ones * fg] + [fg * torch.sum(torch.cumprod(val, dim + 1), 0)], dim)
             
             #Compute the gradients for a single element of xs
             def compute_grad_xs(fg, g_x, g_h):
-                g_x = torch.concat([aten.slice(torch.flip(g_x, [dim]), dim, 1, None, 1), ones], dim)
-                # g_x = torch.flip(g_x, [dim])
-                g_h = torch.flip(g_h, [dim])
+                # g_x = torch.concat([aten.slice(torch.flip(g_x, [dim]), dim, 1, None, 1), ones], dim)
+                g_x = torch.flip(g_x, [dim + 1])
+                g_h = torch.flip(g_h, [dim + 1])
                 # fg = torch.flip(fg, [dim])
                 # fg = torch.concat([fg, ones], dim)
                 fg = torch.concat([torch.flip(fg, [dim]), ones], dim)
                 
-                gradient_mat = [cumprod_and_prepad(aten.slice(fg, dim, n + 0, n + 1, 1), aten.slice(g_h, dim, n, -1, 1), scan_length) for n in range(0, scan_length, 1)]
-                grads = torch.flip(torch.sum(torch.stack(gradient_mat, 0) * g_x, 0), [dim])
+                gradient_mat = [cumprod_and_prepad(aten.slice(fg, dim, n + 0, n + 1, 1), aten.slice(g_h, dim + 1, n, -1, 1), scan_length) for n in range(0, scan_length, 1)]
+                grads = torch.flip(torch.sum(torch.stack(gradient_mat, 0) * torch.sum(g_x, 0), 0), [dim])
                 
                 return grads
             
