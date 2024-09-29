@@ -441,9 +441,11 @@ class InspectSignatureVariable(VariableTracker):
             if self.fn.__kwdefaults__:
                 wrap = functools.partial(wrap_bound_arg, tx=tx)
                 kwdefaults_sources = {
-                    k: None
-                    if self.source is None
-                    else DefaultsSource(self.source, k, is_kw=True)
+                    k: (
+                        None
+                        if self.source is None
+                        else DefaultsSource(self.source, k, is_kw=True)
+                    )
                     for k in self.fn.__kwdefaults__
                 }
                 defaults = {
@@ -658,11 +660,7 @@ class AutogradFunctionVariable(VariableTracker):
 
         VariableTracker.visit(visit, (args, kwargs))
 
-        if (
-            requires_grad
-            and torch.is_grad_enabled()
-            and config.capture_autograd_function
-        ):
+        if requires_grad and torch.is_grad_enabled():
             from torch._functorch.autograd_function import (
                 autograd_function_forward_rewritten,
             )
