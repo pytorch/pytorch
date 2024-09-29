@@ -455,6 +455,8 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 if fwd_fullgraph:
                     self.assertEqual(len(counters["graph_break"]), 1)
                     self.assertIn("Tensor.backward", counters["graph_break"])
+                else:
+                    self.assertGreater(len(counters["graph_break"]), 1)
                 return res
 
         def test_eager():
