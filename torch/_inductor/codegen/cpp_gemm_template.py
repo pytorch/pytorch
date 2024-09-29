@@ -556,9 +556,12 @@ class CppPackedGemmTemplate(CppTemplate):
                 return [inputs[idx] for idx in input_indices], layout_or_out
 
         new_inputs, new_layout = reorder_and_filter(input_nodes, layout)
+        assert new_inputs[1].get_name() in V.graph.constants
+        is_mkldnn_wgt = V.graph.constants[new_inputs[1].get_name()].is_mkldnn
+        if is_mkldnn_wgt:
+            assert not isinstance(new_inputs[1], ir.BaseView)
         assert isinstance(new_inputs[1].layout, ir.FixedLayout)
-        # Note that MKLDNN Tensor gets the wrong stride, thus
-        # don't use it for MKLDNN Tensor
+        # Note that the layout of MKLDNN Tensor is with the wrong stride
         view_size = new_inputs[1].layout.size
         view_stride = new_inputs[1].layout.stride
         view_offset = new_inputs[1].layout.offset
@@ -567,20 +570,23 @@ class CppPackedGemmTemplate(CppTemplate):
             new_inputs = list(inputs)
             if isinstance(inputs[1], torch.Tensor):
                 W = inputs[1]
-                if W.is_mkldnn:
-                    new_inputs[1] = W.to_dense()
-                else:
-                    # Assume W has been unwrap view
-                    new_inputs[1] = W.as_strided(view_size, view_stride, view_offset)
+                new_inputs[1] = W.to_dense() if W.is_mkldnn else W
             return new_inputs, layout_or_out
 
         def normalize_shapes(inputs, layout_or_out):
-            if not trans_w:
-                return inputs, layout_or_out
             new_inputs = list(inputs)
-            X = inputs[0]
-            W = inputs[1]
-            B = inputs[2] if has_bias else None
+            if not is_mkldnn_wgt and isinstance(new_inputs[1], torch.Tensor):
+                # With the assumptation that W is the storage of unwrap view
+                # thus view it back here
+                new_inputs[1] = new_inputs[1].as_strided(
+                    view_size, view_stride, view_offset
+                )
+
+            if not trans_w:
+                return new_inputs, layout_or_out
+            X = new_inputs[0]
+            W = new_inputs[1]
+            B = new_inputs[2] if has_bias else None
             if isinstance(W, ir.IRNode):
                 if trans_w:
                     if not isinstance(W, ir.TensorBox):
