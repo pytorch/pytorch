@@ -159,7 +159,7 @@ class CheckpointWrapperTest(TestCase):
                     if use_reentrant
                     else CheckpointImpl.NO_REENTRANT,
                 )
-                for i in range(self.n):
+                for _ in range(self.n):
                     l = nn.Sequential(
                         nn.Linear(256, 256), nn.Linear(256, 256), nn.Linear(256, 256)
                     )

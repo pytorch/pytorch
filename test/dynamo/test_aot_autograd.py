@@ -446,7 +446,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         a = torch.randn(3, 3, requires_grad=True)
         b = torch.randn(3, 3, requires_grad=True)
         a1, a2 = a.clone(), a.clone()
-        b1, b2 = b.clone(), b.clone()
+        _, b2 = b.clone(), b.clone()
 
         failure_reason = None
 
@@ -474,7 +474,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         c = torch.randn(3, 3, requires_grad=True)
         d = torch.randn(3, 3, requires_grad=True)
         c3, c4 = c.clone(), c.clone()
-        d3, d4 = d.clone(), d.clone()
+        _, d4 = d.clone(), d.clone()
 
         f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         f(c3, c3, 3, 3)
@@ -500,7 +500,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         b = torch.randn(3, 3, requires_grad=True)
         z = a
         a1, a2 = a.clone(), a.clone()
-        b1, b2 = b.clone(), b.clone()
+        _, b2 = b.clone(), b.clone()
 
         failure_reason = None
 
@@ -536,7 +536,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         a = torch.randn(3, 3, requires_grad=True)
         b = torch.randn(3, 3, requires_grad=True)
         a1, a2 = a.clone(), a.clone()
-        b1, b2 = b.clone(), b.clone()
+        _, b2 = b.clone(), b.clone()
 
         failure_reason = None
 
@@ -564,7 +564,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         c = torch.randn(3, 3, requires_grad=True)
         d = torch.randn(3, 3, requires_grad=True)
         c3, c4 = c.clone(), c.clone()
-        d3, d4 = d.clone(), d.clone()
+        _, d4 = d.clone(), d.clone()
 
         f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         f([3, 2, 1], [4, 5, 6], c3, c3)
@@ -586,7 +586,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         a = torch.randn(3, 3, requires_grad=True)
         b = torch.randn(3, 3, requires_grad=True)
         a1, a2 = a.clone(), a.clone()
-        b1, b2 = b.clone(), b.clone()
+        _, b2 = b.clone(), b.clone()
 
         failure_reason = None
 
@@ -614,7 +614,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         c = torch.randn(3, 3, requires_grad=True)
         d = torch.randn(3, 3, requires_grad=True)
         c3, c4 = c.clone(), c.clone()
-        d3, d4 = d.clone(), d.clone()
+        _, d4 = d.clone(), d.clone()
 
         f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         f(c3, c3)
@@ -635,7 +635,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         a = torch.randn(3, 3, requires_grad=True)
         b = torch.randn(3, 3, requires_grad=True)
         a1, a2, a3, a4 = a.clone(), a.clone(), a.clone(), a.clone()
-        b1, b2, b3, b4 = b.clone(), b.clone(), b.clone(), b.clone()
+        _, b2, b3, b4 = b.clone(), b.clone(), b.clone(), b.clone()
 
         failure_reason = None
 
@@ -663,7 +663,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         c = torch.randn(3, 3, requires_grad=True)
         d = torch.randn(3, 3, requires_grad=True)
         c3, c4 = c.clone(), c.clone()
-        d3, d4 = d.clone(), d.clone()
+        _, d4 = d.clone(), d.clone()
 
         f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         f(a3, b3, c3, c3)
@@ -1008,7 +1008,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             activities=[torch.profiler.ProfilerActivity.CPU],
             record_shapes=True,
         ) as kineto_prof:
-            res = model_instance(*args)
+            model_instance(*args)
         bwd_set = set()
         prof_str = "SeqNr|Thread|FwdThread|Name\n"
         for event in kineto_prof.events():
@@ -1182,7 +1182,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
             x = torch.randn(3, requires_grad=True)
             with self.assertRaisesRegex(RuntimeError, "Cannot access data pointer"):
-                y = torch.compile(f, backend="aot_eager", fullgraph=True)(x)
+                torch.compile(f, backend="aot_eager", fullgraph=True)(x)
             self.assertTrue(backward_called)
 
     # We don't know how to catch multiple mutations to the same memory location

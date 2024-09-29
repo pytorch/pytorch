@@ -331,7 +331,7 @@ def replay_shape_env_events(events):
             # We need to call create_mapping_fn every time, since the node list might
             # change after each event is replayed.
             event.run(shape_env)
-        except Exception as e:
+        except Exception:
             log.error("failed when running event: %s", event)
             raise
 

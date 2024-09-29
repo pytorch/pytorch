@@ -164,7 +164,7 @@ def associative_scan(
         pytree.tree_unflatten(leaves, spec),
         pytree.tree_unflatten(leaves, spec),
     )
-    out_leaves, tree_out = pytree.tree_flatten(out)
+    out_leaves, _tree_out = pytree.tree_flatten(out)
     if len(leaves) != len(out_leaves):
         raise RuntimeError(
             "The number of leaves of the pytree of the output of the operator needs to match the length of the pytree of the input"
@@ -364,7 +364,7 @@ def assoiciative_scan_fake_tensor_mode(mode, combine_fn, xs, dim):
 @associative_scan_op.py_functionalize_impl
 def associative_scan_functionalize(ctx, combine_fn, xs, dim):
     unwrapped_xs = ctx.unwrap_tensors(xs)
-    with ctx.redispatch_to_next() as m:
+    with ctx.redispatch_to_next():
         functional_combine_fn = ctx.functionalize(
             _maybe_run_with_interpreter(combine_fn)
         )

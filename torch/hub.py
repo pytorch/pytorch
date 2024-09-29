@@ -720,7 +720,7 @@ def download_url_to_file(
     # We deliberately do not use NamedTemporaryFile to avoid restrictive
     # file permissions being applied to the downloaded file.
     dst = os.path.expanduser(dst)
-    for seq in range(tempfile.TMP_MAX):
+    for _ in range(tempfile.TMP_MAX):
         tmp_dst = dst + "." + uuid.uuid4().hex + ".partial"
         try:
             f = open(tmp_dst, "w+b")

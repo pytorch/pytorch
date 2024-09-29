@@ -1510,7 +1510,7 @@ class TestFSDPOptimState(FSDPTest):
         ) = self._init_nested_model(wrap=False, use_multiple_param_groups=False)
         if should_check_method_fn("rekey_optim_state_dict"):
             with context_fn():
-                rekeyed_osd = FSDP.rekey_optim_state_dict(
+                FSDP.rekey_optim_state_dict(
                     fsdp_osd,  # from `full_optim_state_dict()`
                     OptimStateKeyType.PARAM_ID,
                     nonwrapped_model,
@@ -1650,7 +1650,7 @@ class TestFSDPOptimState(FSDPTest):
         )
 
         # Make optim1 has a different state.
-        for i in range(5):
+        for _ in range(5):
             batch = torch.rand(5, 8).cuda()
             loss = models[1](batch).sum()
             loss.backward()
@@ -1765,7 +1765,7 @@ class TestFSDPOptimState(FSDPTest):
         initializer = self._model_class[model_class]
 
         # First, run a wrapped model with full world size for a few iterations
-        model1, optim1, optim_input1 = initializer(
+        model1, optim1, _ = initializer(
             wrap=True,
             use_multiple_param_groups=use_multiple_param_groups,
         )
@@ -1788,7 +1788,7 @@ class TestFSDPOptimState(FSDPTest):
             new_group = dist.distributed_c10d._get_default_group()
         # Second, run a wrapped model with (possibly) halved world size and
         # (possibly) differing `optim_input` across ranks
-        model2, optim2, optim_input2 = initializer(
+        model2, optim2, _ = initializer(
             wrap=True,
             group=new_group,
             use_multiple_param_groups=use_multiple_param_groups,
@@ -1861,7 +1861,8 @@ class TestFSDPOptimState(FSDPTest):
             FSDP.optim_state_dict(model, optim), osd, check_same_param_keys=True
         )
         step()
-        osd_to_load = FSDP.optim_state_dict_to_load(
+
+        osd_to_load = FSDP.optim_state_dict_to_load(  # noqa: F841
             model, optim, osd, load_directly=True
         )
         self._check_same_state(
@@ -1994,7 +1995,7 @@ class TestFSDPOptimState(FSDPTest):
             loss.backward()
             fsdp_optim.step()
             orig_state_dict = deepcopy(fsdp_optim.state_dict())
-            optim_state_dict = FSDP.optim_state_dict(fsdp_model, fsdp_optim)
+            FSDP.optim_state_dict(fsdp_model, fsdp_optim)
             FSDP.optim_state_dict_to_load(
                 fsdp_model,
                 fsdp_optim,

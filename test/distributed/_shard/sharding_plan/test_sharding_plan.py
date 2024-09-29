@@ -42,7 +42,7 @@ class ChunkAllShardingPlanner(ShardingPlanner):
     def build_plan(self, module: nn.Module) -> ShardingPlan:
         named_params = module.named_parameters()
         plan = {}
-        for name, param in named_params:
+        for name, _ in named_params:
             plan[name] = ChunkShardingSpec(self.dim, placements=self.devices)
 
         return ShardingPlan(plan=plan)

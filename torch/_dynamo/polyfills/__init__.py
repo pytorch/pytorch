@@ -37,7 +37,7 @@ def index(iterator, item, start=0, end=None):
 
 
 def repeat(item, count):
-    for i in range(count):
+    for _ in range(count):
         yield item
 
 

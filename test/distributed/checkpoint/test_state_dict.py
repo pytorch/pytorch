@@ -87,7 +87,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
         # Train 10 steps.
         _dist_optim = [dist_optim] if not isinstance(dist_optim, list) else dist_optim
-        for i in range(10):
+        for _ in range(10):
             optim.zero_grad()
             for d_optim in _dist_optim:
                 d_optim.zero_grad()
