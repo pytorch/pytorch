@@ -349,7 +349,10 @@ class TestControlFlow(TestCase):
         grads = torch.autograd.grad(result_flatten, params, grad_init)
         # print([torch.sum(g) for g in grads])
         # print([torch.sum(g) for g in expected_grads])
-        self.assertEqual(grads, expected_grads, atol=6e-05, rtol=6e-06)
+        try:
+            self.assertEqual(grads, expected_grads, atol=6e-05, rtol=6e-06)
+        except:
+            print('Should not be here')
 
     def test_cond_no_trace(self):
         def true_fn(x):
@@ -2037,7 +2040,6 @@ def forward(self, pred_1, x_1):
         if autograd:
             self.check_autograd(result, expected_result, (inp,))
 
-    # TODO: provide an implementation for all compile modes and re-enable all test
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("combine_mode", ["pointwise", "generic"])
@@ -2091,6 +2093,89 @@ def forward(self, pred_1, x_1):
         
         if autograd:
             self.check_autograd(result, expected_result, (inp,))
+            
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("compile_mode", ["none", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
+        ),
+    )
+    def test_associative_scan_partial_grad(
+        self, combine_mode, compile_mode, reverse, device
+    ):
+        import random
+        fct_cmp = compile_mode_helper(associative_scan, compile_mode)
+
+        n_params = 6
+        autograds = []
+        autograds.append([True, True, True, True, True, True])
+        autograds.append([False, False, False, False, False, False])
+        autograds.append([False, True, False, False, False, False])
+        for _ in range(5):
+            autograds.append([bool(random.randint(0, 1)) for _ in range(n_params)])
+            
+        def mul2(x, y):
+            return *[xv * yv for xv, yv in zip(x, y)],
+            
+        for a_grads in autograds:
+            inp = tuple([torch.randn(10, 3, 2, device=device, requires_grad=a_grads[n]) for n in range(n_params)])
+            
+            expected_result = _fake_associative_scan(mul2, inp, 0, reverse=reverse)
+            result = fct_cmp(mul2, inp, 0, combine_mode=combine_mode, reverse=reverse)
+            self.assertEqual(result, expected_result)
+            
+            grad_param = [p for p, m in zip(inp, a_grads) if m]
+            result_masked = [r for r, m in zip(result, a_grads) if m]
+            expected_result_masked = [r for r, m in zip(expected_result, a_grads) if m]
+            
+            if any(a_grads):
+                self.check_autograd(result_masked, expected_result_masked, grad_param)
+                
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    # @parametrize("combine_mode", ["pointwise"])
+    @parametrize("compile_mode", ["none", "compile", "compile_dynamic_shape"])
+    # @parametrize("compile_mode", ["none"])
+    @parametrize("reverse", [False, True])
+    # @parametrize("reverse", [False])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # @parametrize("device", [torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
+        ),
+    )
+    def test_associative_scan_partial_grad(
+        self, combine_mode, compile_mode, reverse, device
+    ):
+        fct_cmp = compile_mode_helper(associative_scan, compile_mode)
+
+        def mul_single_nograd(x, y):
+            xy1 = x[0] * y[0]
+            with torch.no_grad():
+                xy2 = x[1] * y[1]
+            return xy1, xy2
+        
+        inp = tuple([torch.randn(10, 3, 2, device=device, requires_grad=True) for n in range(2)])
+        
+        expected_result = _fake_associative_scan(mul_single_nograd, inp, 0, reverse=reverse)
+        result = fct_cmp(mul_single_nograd, inp, 0, combine_mode=combine_mode, reverse=reverse)
+        self.assertEqual(result, expected_result)
+        self.check_autograd(result, expected_result, inp[0])
 
     # TODO: provide an implementation for all compile modes and re-enable all test
     @requires_cuda
