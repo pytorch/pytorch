@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import inspect
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Type, Union
 
 import torch
