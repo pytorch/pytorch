@@ -559,6 +559,8 @@ class CppPackedGemmTemplate(CppTemplate):
         assert new_inputs[1].get_name() in V.graph.constants
         is_mkldnn_wgt = V.graph.constants[new_inputs[1].get_name()].is_mkldnn
         if is_mkldnn_wgt:
+            # It shouldn't happen as viewing an mkldnn tensor, we can extend the
+            # implementation if it does.
             assert not isinstance(new_inputs[1], ir.BaseView)
         assert isinstance(new_inputs[1].layout, ir.FixedLayout)
         # Note that the layout of MKLDNN Tensor is with the wrong stride
