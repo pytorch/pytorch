@@ -31,7 +31,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_fsdp import (
-    CUDAInitMode,
+    DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
     subtest_name,
@@ -601,7 +601,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             model = TransformerWithSharedParams.init(
                 self.process_group,
                 FSDPInitMode.NO_FSDP,
-                CUDAInitMode.CUDA_BEFORE,
+                DEVICEInitMode.DEVICE_BEFORE,
                 {"mixed_precision": mp_config},
             )
             fsdp_model = FSDP(model, mixed_precision=mp_config)
@@ -827,7 +827,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             model = TransformerWithSharedParams.init(
                 self.process_group,
                 FSDPInitMode.NO_FSDP if use_composable else FSDPInitMode.RECURSIVE,
-                CUDAInitMode.CUDA_BEFORE,
+                DEVICEInitMode.DEVICE_BEFORE,
                 {"mixed_precision": mp_config},
             )
             if use_composable:
@@ -957,7 +957,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             model = TransformerWithSharedParams.init(
                 self.process_group,
                 FSDPInitMode.NO_FSDP if use_composable else FSDPInitMode.RECURSIVE,
-                CUDAInitMode.CUDA_BEFORE,
+                DEVICEInitMode.DEVICE_BEFORE,
                 {"mixed_precision": mp_config},
             )
             if use_composable:

@@ -375,9 +375,8 @@ test_inductor_cpp_wrapper_abi_compatible() {
   mkdir -p "$TEST_REPORTS_DIR"
 
   echo "Testing Inductor cpp wrapper mode with TORCHINDUCTOR_ABI_COMPATIBLE=1"
-  # cpu stack allocation causes segfault and needs more investigation
   PYTORCH_TESTING_DEVICE_ONLY_FOR="" python test/run_test.py --include inductor/test_cpu_cpp_wrapper
-  python test/run_test.py --include inductor/test_cuda_cpp_wrapper
+  python test/run_test.py --include inductor/test_cuda_cpp_wrapper inductor/test_cpu_repro
 
   TORCHINDUCTOR_CPP_WRAPPER=1 python benchmarks/dynamo/timm_models.py --device cuda --accuracy --amp \
     --training --inductor --disable-cudagraphs --only vit_base_patch16_224 \
@@ -713,6 +712,10 @@ test_inductor_set_cpu_affinity(){
     export KMP_BLOCKTIME=1
   fi
   cores=$(test_inductor_get_core_number)
+  # Set number of cores to 16 on Aarch64 for performance runs.
+  if [[ "${TEST_CONFIG}" == *aarch64* && $cores -gt 16 ]]; then
+    cores=16
+  fi
   export OMP_NUM_THREADS=$cores
   end_core=$((cores-1))
   export TASKSET="taskset -c 0-$end_core"
@@ -1402,8 +1405,8 @@ test_linux_aarch64() {
        inductor/test_max_autotune inductor/test_memory_planning inductor/test_metrics inductor/test_multi_kernel inductor/test_pad_mm \
        inductor/test_pattern_matcher inductor/test_perf inductor/test_profiler inductor/test_select_algorithm inductor/test_smoke \
        inductor/test_split_cat_fx_passes inductor/test_standalone_compile inductor/test_torchinductor \
-       inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes \
-       --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose inductor/test_memory
+       inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes inductor/test_memory \
+       --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
