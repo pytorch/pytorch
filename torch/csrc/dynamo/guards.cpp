@@ -46,7 +46,8 @@
 
 // Manually create _PyTupleIterObject struct
 typedef struct {
-  PyObject_HEAD Py_ssize_t it_index;
+  PyObject_HEAD
+  Py_ssize_t it_index;
   PyTupleObject* it_seq; /* Set to NULL when iterator is exhausted */
 } _PyTupleIterObject;
 
