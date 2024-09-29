@@ -1037,7 +1037,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
                 ret = ret + v
             return ret
 
-        from torch._dynamo.guards import build_guard_function, CLOSURE_VARS
+        from torch._dynamo.guards import build_guard_function
 
         x = {3: torch.randn(3), 2: torch.randn(3), 4: torch.randn(3)}
         _, guards = torch._dynamo.export(fn, x)
@@ -2643,19 +2643,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual([type(r) for r in res], [np.ndarray, np.ndarray, np.ndarray])
         self.assertEqual(res, [np.array([0]), np.array([1]), np.array([2])])
         self.assertEqual(cnts.frame_count, 1)
-
-    @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
-    def test_unspecialized_float_add(self):
-        def fn(x, y):
-            return x + y
-
-        cnt = CompileCounterWithBackend("inductor")
-        fn_opt = torch._dynamo.optimize(cnt)(fn)
-
-        x = torch.arange(3)
-        self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
-        self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
-        self.assertEqual(cnt.frame_count, 1)
 
     # cache size limit needs to be larger than the `dtypes` list size
     @torch._dynamo.config.patch(cache_size_limit=12)
@@ -7644,6 +7631,45 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
+    @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
+    def test_unspecialized_float_multiply_precision_f16(self):
+        def fn(x, y):
+            return x * y
+
+        cnt = CompileCounterWithBackend("aot_eager")
+        fn_opt = torch._dynamo.optimize(cnt)(fn)
+        x = torch.tensor(9.734375, dtype=torch.float16)
+        y = 1.00048828125
+
+        self.assertEqual(fn_opt(x, y), fn(x, y))
+        self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
+    def test_unspecialized_float_multiply_precision_f32(self):
+        def fn(x, y):
+            return x * y
+
+        cnt = CompileCounterWithBackend("aot_eager")
+        fn_opt = torch._dynamo.optimize(cnt)(fn)
+        x = torch.tensor(9.734375, dtype=torch.float32)
+        y = 1.00048828125
+
+        self.assertEqual(fn_opt(x, y), fn(x, y))
+        self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
+    def test_unspecialized_float_multiply_precision_f64(self):
+        def fn(x, y):
+            return x * y
+
+        cnt = CompileCounterWithBackend("aot_eager")
+        fn_opt = torch._dynamo.optimize(cnt)(fn)
+        x = torch.tensor(9.734375, dtype=torch.float64)
+        y = 1.00048828125
+
+        self.assertEqual(fn_opt(x, y), fn(x, y))
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_anomaly_aot_autograd(self):
         def fail():
             raise AssertionError("fail")
@@ -10015,6 +10041,9 @@ ShapeEnv not equal: field values don't match:
             """\
 ShapeEnv not equal: field values don't match:
 
+==> axioms: values don't match.
+  >  Left: {0 < Mod(s0, 3): False, Eq(0, Mod(s0, 3)): True, Eq(Mod(s0, 3), 0): True, False: False, Mod(s0, 3) <= 0: True, Ne(0, Mod(s0, 3)): False, Ne(Mod(s0, 3), 0): False, True: True}
+  > Right: {}
 ==> divisible: values don't match.
   >  Left: {Mod(s0, 3)}
   > Right: {}
@@ -10052,6 +10081,9 @@ ShapeEnv not equal: field values don't match:
             """\
 ShapeEnv not equal: field values don't match:
 
+==> axioms: values don't match.
+  >  Left: {False: False, True: True}
+  > Right: {}
 ==> guards: values don't match.
   >  Left: [Eq(s0, 3)]
   > Right: []
@@ -10093,6 +10125,9 @@ ShapeEnv not equal: field values don't match:
             """\
 ShapeEnv not equal: field values don't match:
 
+==> axioms: values don't match.
+  >  Left: {3 <= s0: True, s0 < 3: False}
+  > Right: {}
 ==> guards: values don't match.
   >  Left: [s0 >= 3]
   > Right: []
@@ -10125,6 +10160,9 @@ ShapeEnv not equal: field values don't match:
             """\
 ShapeEnv not equal: field values don't match:
 
+==> axioms: values don't match.
+  >  Left: {0 < PythonMod(u0, 3): False, Eq(0, PythonMod(u0, 3)): True, Eq(PythonMod(u0, 3), 0): True, False: False, Ne(0, PythonMod(u0, 3)): False, Ne(PythonMod(u0, 3), 0): False, PythonMod(u0, 3) <= 0: True, True: True}
+  > Right: {}
 ==> deferred_runtime_asserts: values don't match.
   >  Left: {u0: [Eq(PythonMod(u0, 3), 0)]}
   > Right: {}

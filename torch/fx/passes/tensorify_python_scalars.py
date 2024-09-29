@@ -1,17 +1,13 @@
+from __future__ import annotations
+
 import logging
-from typing import Any, TYPE_CHECKING, Union
+from typing import Union
 
 import torch
-
-
-if TYPE_CHECKING:
-    from torch.fx.experimental.symbolic_shapes import ShapeEnv
-else:
-    ShapeEnv = Any
-
 import torch.fx as fx
 from torch.fx._utils import lazy_format_graph_code
-from torch.fx.graph_module import GraphModule
+from torch.fx.experimental.symbolic_shapes import ShapeEnv  # noqa: TCH001
+from torch.fx.graph_module import GraphModule  # noqa: TCH001
 
 # TODO: refactor
 from torch.fx.passes.runtime_assert import _get_sym_val
@@ -61,6 +57,7 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 # TODO: make sure this runs before CPU->CUDA pass for cudagraph friendliness
 
 
+@torch.fx._compatibility.compatibility(is_backward_compatible=True)
 def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
     """
     Converts Python scalar operations into Tensor operations within the graph. This pass looks for
@@ -76,8 +73,6 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
         None
     """
     import sympy
-
-    from torch.fx.experimental.symbolic_shapes import CallMethodKey
 
     graph = gm.graph
     tracer = fx.proxy.GraphAppendingTracer(graph)
@@ -129,10 +124,12 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                 dtype = torch.float64
                 c = float(expr)
 
+            node = graph.call_function(
+                torch.ops.aten.scalar_tensor.default, (c,), {"dtype": dtype}
+            )
+            node.meta["val"] = torch.tensor(c, dtype=dtype)
             expr_to_tensor_proxy[expr] = fx.Proxy(
-                graph.call_function(
-                    torch.ops.aten.scalar_tensor.default, (c,), {"dtype": dtype}
-                ),
+                node,
                 tracer=tracer,
             )
 
@@ -159,40 +156,20 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
         ):
             # Look for tensor.item() calls on placeholders
             if unbacked_bindings := node.meta.get("unbacked_bindings"):
-                for s, keypath in unbacked_bindings.items():
-
-                    def go(
-                        node: fx.Node, keypath: tuple[Any, ...]
-                    ) -> Union[fx.Node, None]:
-                        if keypath == ():
-                            return node
-                        elif (
-                            hasattr(keypath[0], "name")
-                            and keypath[0].name == "item"
-                            and isinstance(keypath[0], CallMethodKey)
-                        ):
-                            return go(
-                                graph.call_method(keypath[0].name, (node,)), keypath[1:]
-                            )
-                        else:
-                            return None
-
-                    src_node = go(node, keypath)
+                for s in unbacked_bindings.keys():
                     if (
-                        src_node is not None
-                        and src_node.op == "call_function"
-                        and src_node.target
-                        is torch.ops.aten._local_scalar_dense.default
+                        node is not None
+                        and node.op == "call_function"
+                        and node.target is torch.ops.aten._local_scalar_dense.default
                     ):
-                        # TODO: dtype conversion, so that we don't keep at too
-                        # low precision
+                        dtype = node.args[0].meta["val"].dtype
+                        if dtype != torch.float64:
+                            continue
 
-                        assert isinstance(src_node.args[0], fx.Node), src_node.args[0]
+                        assert isinstance(node.args[0], fx.Node), node.args[0]
 
-                        expr_to_tensor_proxy[s] = fx.Proxy(
-                            src_node.args[0], tracer=tracer
-                        )
-                        expr_to_sym_proxy[s] = fx.Proxy(src_node, tracer=tracer)
+                        expr_to_tensor_proxy[s] = fx.Proxy(node.args[0], tracer=tracer)
+                        expr_to_sym_proxy[s] = fx.Proxy(node, tracer=tracer)
 
             elif (sym_expr := _get_sym_val(node)) is not None:
                 if sym_expr not in expr_to_sym_proxy and not isinstance(
@@ -201,7 +178,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                     expr_to_sym_proxy[sym_expr] = fx.Proxy(node, tracer=tracer)
 
             # Look for functions to convert
-            if node.op == "call_function" and node.target is torch.ops.aten.add.Tensor:
+            if node.op == "call_function" and node.target is torch.ops.aten.mul.Tensor:
                 args = []
                 transform = False
                 for a in node.args:
@@ -209,28 +186,51 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                         zf := a.meta["val"], torch.SymFloat
                     ):
                         transform = True
-                        # TODO: populate meta on these
                         try:
-                            res = graph.call_function(
-                                torch.ops.prims.convert_element_type.default,
-                                (
-                                    _sympy_interp(zf.node.expr).node,
-                                    node.meta["val"].dtype,
-                                ),
-                            )
+                            interp_node = _sympy_interp(zf.node.expr).node
                         except NotImplementedError:
                             transform = False
                             break
+
+                        # Upcast to higher float32 precision during computation if dtype is float16. Later
+                        # on we will downcast back to float16 after the computation is done. Checkout the
+                        # elementwise_dtypes function for more context:
+                        # https://github.com/pytorch/pytorch/blob/main/torch/_prims_common/__init__.py#L1379
+                        compute_dtype = (
+                            torch.float32
+                            if node.meta["val"].dtype == torch.float16
+                            else node.meta["val"].dtype
+                        )
+                        res = graph.call_function(
+                            torch.ops.prims.convert_element_type.default,
+                            (
+                                interp_node,
+                                compute_dtype,
+                            ),
+                        )
+                        res.meta = node.meta
+
                         args.append(res)
                     else:
                         args.append(a)
 
                 if transform:
-                    # Call torch.ops.aten.add.Tensor function and insert the node into the graph
+                    # Call torch.ops.aten.mul.Tensor function and insert the node into the graph
                     res2 = graph.call_function(
-                        torch.ops.aten.add.Tensor,
+                        torch.ops.aten.mul.Tensor,
                         tuple(args),
                     )
+
+                    # If we upcasted from float16 to float32 during computation, downcast back down to
+                    # float16 precision.
+                    if node.meta["val"].dtype == torch.float16:
+                        res2 = graph.call_function(
+                            torch.ops.prims.convert_element_type.default,
+                            (
+                                res2,
+                                node.meta["val"].dtype,
+                            ),
+                        )
 
                     node.replace_all_uses_with(res2, propagate_meta=True)
                     graph.erase_node(node)
