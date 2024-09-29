@@ -18,7 +18,7 @@ if __name__ == "__main__":
 class TestGetDefaultAttr(JitTestCase):
     def test_getattr_with_default(self):
         class A(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.init_attr_val = 1.0
 

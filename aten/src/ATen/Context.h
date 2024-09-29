@@ -52,7 +52,7 @@ class TORCH_API Context {
     } else if (device_type == at::kIPU) {
       return at::detail::getIPUHooks().getDefaultIPUGenerator(device.index());
     } else if (device_type == at::kPrivateUse1) {
-      return at::GetPrivateUse1HooksInterface()->getDefaultGenerator(
+      return at::detail::getPrivateUse1Hooks().getDefaultGenerator(
           device.index());
     } else {
       AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
@@ -73,6 +73,8 @@ class TORCH_API Context {
       return at::detail::getPrivateUse1Hooks();
     } else if (device_type == at::kMTIA) {
       return at::detail::getMTIAHooks();
+    } else if (device_type == at::kHIP) {
+      return at::detail::getHIPHooks();
     } else {
       AT_ERROR(
           c10::DeviceTypeName(device_type), " device type not an accelerator.");
@@ -89,13 +91,27 @@ class TORCH_API Context {
     } else if (device_type == at::kXPU) {
       return at::detail::getXPUHooks().getDeviceFromPtr(data);
     } else if (device_type == at::kPrivateUse1) {
-      return at::GetPrivateUse1HooksInterface()->getDeviceFromPtr(data);
+      return at::detail::getPrivateUse1Hooks().getDeviceFromPtr(data);
     } else {
       AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
     }
   }
-  static bool isPinnedPtr(const void* data) {
-    return detail::getCUDAHooks().isPinnedPtr(data);
+  bool isPinnedPtr(
+      const void* data,
+      std::optional<c10::DeviceType> device_type = std::nullopt) {
+    auto opt_device_type =
+        device_type.has_value() ? device_type : at::getAccelerator();
+    if (!opt_device_type.has_value() || // there is no accelerator
+        !at::isAccelerator(
+            opt_device_type.value())) { // passed device not an accelerator
+      return false;
+    }
+    return getAcceleratorHooksInterface(opt_device_type.value())
+        .isPinnedPtr(data);
+  }
+  Allocator* getPinnedMemoryAllocator(
+      std::optional<c10::DeviceType> device_type = std::nullopt) {
+    return getAcceleratorHooksInterface(device_type).getPinnedMemoryAllocator();
   }
   static bool hasOpenMP();
   static bool hasMKL();
@@ -166,7 +182,7 @@ class TORCH_API Context {
   void lazyInitPrivateUse1() {
     c10::call_once(thp_init, [&] {
       if (isPrivateUse1HooksRegistered()) {
-        at::GetPrivateUse1HooksInterface()->initPrivateUse1();
+        at::detail::getPrivateUse1Hooks().initPrivateUse1();
       }
     });
   }
@@ -217,6 +233,9 @@ class TORCH_API Context {
 
   void setSDPUseCuDNN(bool);
   bool userEnabledCuDNNSDP() const;
+
+  void setAllowFP16BF16ReductionMathSDP(bool);
+  bool allowFP16BF16ReductionMathSDP() const;
 
   void setSDPUseOverrideable(bool);
   bool userEnabledOverrideableSDP() const;
@@ -374,6 +393,7 @@ class TORCH_API Context {
   bool enabled_mathSDP = true;
   bool enabled_cudnnSDP = true;
   bool enabled_overrideable = true;
+  bool allow_fp16_bf16_reduction_mathSDP = false;
 #ifdef USE_ROCM
   bool benchmark_cudnn = true;
 #else

@@ -6,9 +6,12 @@ using APoT nonuniform quantization methods.
 
 import math
 
+
 r"""Converts floating point input into APoT number
     based on quantization levels
 """
+
+
 def float_to_apot(x, levels, indices, alpha):
     # clip values based on alpha
     if x < -alpha:
@@ -30,10 +33,13 @@ def float_to_apot(x, levels, indices, alpha):
 
     return best_idx
 
+
 r"""Converts floating point input into
     reduced precision floating point value
     based on quantization levels
 """
+
+
 def quant_dequant_util(x, levels, indices):
     levels_lst = list(levels)
     indices_lst = list(indices)
@@ -49,9 +55,12 @@ def quant_dequant_util(x, levels, indices):
 
     return best_fp
 
+
 r"""Converts APoT input into floating point number
 based on quantization levels
 """
+
+
 def apot_to_float(x_apot, levels, indices):
     idx = list(indices).index(x_apot)
     return levels[idx]

@@ -9,7 +9,7 @@ demonstration of these components in action:
     import torch
     # Simple module for demonstration
     class MyModule(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.param = torch.nn.Parameter(torch.rand(3, 4))
             self.linear = torch.nn.Linear(4, 5)

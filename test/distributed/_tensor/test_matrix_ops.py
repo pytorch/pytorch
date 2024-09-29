@@ -8,13 +8,13 @@ import torch
 import torch.nn.functional as F
 from torch.distributed._tensor import DeviceMesh, distribute_tensor
 from torch.distributed._tensor.api import DTensor
-from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.placement_types import (
     Partial,
     Placement,
     Replicate,
     Shard,
 )
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -302,8 +302,9 @@ class DistMatrixOpsTest(DTensorTestBase):
         # TODO: Add test cases where is_causal=False and an attention mask is provided.
         #       Gaps include missing op support for aten.masked_fill_.Scalar.
         is_causal = True
+        enable_gqa = False
         params = torch.backends.cuda.SDPAParams(
-            query, key, value, None, dropout_p, is_causal
+            query, key, value, None, dropout_p, is_causal, enable_gqa
         )
         if torch.backends.cuda.can_use_flash_attention(params, debug=False):
             available_backends.append(SDPBackend.FLASH_ATTENTION)

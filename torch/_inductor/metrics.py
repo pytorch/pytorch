@@ -8,7 +8,7 @@ import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Dict, List, Set, Tuple, TYPE_CHECKING, Union
+from typing import Dict, List, Set, Tuple, TYPE_CHECKING
 
 from torch._inductor import config
 from torch._inductor.utils import get_benchmark_name
@@ -16,12 +16,7 @@ from torch._inductor.utils import get_benchmark_name
 
 # Prevent circular import
 if TYPE_CHECKING:
-    from torch._inductor.scheduler import (
-        BaseSchedulerNode,
-        ExternKernelSchedulerNode,
-        NopKernelSchedulerNode,
-        SchedulerNode,
-    )
+    from torch._inductor.scheduler import BaseSchedulerNode
 
 # counter for tracking how many kernels have been generated
 generated_kernel_count = 0
@@ -29,7 +24,7 @@ generated_cpp_vec_kernel_count = 0
 num_bytes_accessed = 0
 nodes_num_elem: List[
     Tuple[
-        Union[NopKernelSchedulerNode, SchedulerNode, ExternKernelSchedulerNode],
+        BaseSchedulerNode,
         int,
     ]
 ] = []
@@ -54,6 +49,8 @@ cpp_outer_loop_fused_inner_counts: List[CppOuterLoopFusedCount] = []
 num_comprehensive_padding = 0
 num_matches_for_scatter_upon_const_tensor = 0
 
+num_loop_reordering = 0
+
 
 # reset all counters
 def reset():
@@ -65,6 +62,7 @@ def reset():
     global cpp_outer_loop_fused_inner_counts
     global num_comprehensive_padding
     global num_matches_for_scatter_upon_const_tensor
+    global num_loop_reordering
 
     generated_kernel_count = 0
     generated_cpp_vec_kernel_count = 0
@@ -76,6 +74,7 @@ def reset():
     cpp_outer_loop_fused_inner_counts.clear()
     num_comprehensive_padding = 0
     num_matches_for_scatter_upon_const_tensor = 0
+    num_loop_reordering = 0
 
 
 @dataclass
@@ -104,7 +103,7 @@ class CachedMetricsHelper:
     apply on a cache hit.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.cached_metrics = {}
         for metric in get_metric_fields():
             self.cached_metrics[metric] = globals()[metric]

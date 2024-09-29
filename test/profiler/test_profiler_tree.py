@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._pytree import tree_map
 
+
 # These functions can vary from based on platform and build (e.g. with CUDA)
 # and generally distract from rather than adding to the test.
 PRUNE_ALL = 1
@@ -555,7 +556,7 @@ class TestProfilerTree(TestCase):
     @ProfilerTree.test
     def test_profiler_experimental_tree_with_stack_and_modules(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layers = [
                     torch.nn.ReLU(),

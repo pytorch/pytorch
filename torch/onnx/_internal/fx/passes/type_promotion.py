@@ -3,21 +3,16 @@
 from __future__ import annotations
 
 import abc
-
 import dataclasses
 import inspect
 import logging
-from types import ModuleType
-
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence, TYPE_CHECKING
 
 import torch
 import torch._ops
 import torch.fx
 import torch.fx.traceback as fx_traceback
-
 from torch import _prims_common, _refs
-
 from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     wrappers as _prims_common_wrappers,
@@ -26,9 +21,13 @@ from torch._refs import linalg as _linalg_refs, nn as _nn_refs, special as _spec
 from torch._refs.nn import functional as _functional_refs
 from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
-
 from torch.onnx._internal.fx import _pass, diagnostics, type_utils as fx_type_utils
 from torch.utils import _python_dispatch, _pytree
+
+
+if TYPE_CHECKING:
+    from types import ModuleType
+
 
 logger = logging.getLogger(__name__)
 
@@ -77,16 +76,13 @@ class TypePromotionRule(abc.ABC):
     # A class that overrides __eq__() and does not define __hash__() will have its __hash__() implicitly set to None.
     # Ref: https://docs.python.org/3/reference/datamodel.html#object.__hash__
     @abc.abstractmethod
-    def __hash__(self) -> int:
-        ...
+    def __hash__(self) -> int: ...
 
     @abc.abstractmethod
-    def __repr__(self):
-        ...
+    def __repr__(self): ...
 
     @abc.abstractmethod
-    def __eq__(self, other: object) -> bool:
-        ...
+    def __eq__(self, other: object) -> bool: ...
 
     def is_valid(self) -> bool:
         """Check if the rule is valid."""
@@ -559,6 +555,9 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
         "aten", "digamma_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
     ElementwiseTypePromotionRule(
+        "aten", "dot", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    ),
+    ElementwiseTypePromotionRule(
         "aten", "elu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     ElementwiseTypePromotionRule(
@@ -874,10 +873,7 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
         "aten", "nll_loss", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     ElementwiseTypePromotionRule(
-        "aten", "normal", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-    ),
-    ElementwiseTypePromotionRule(
-        "aten", "normal_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+        "aten", "normal", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     ElementwiseTypePromotionRule(
         "aten", "pdist", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
@@ -927,9 +923,6 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
     ),
     ElementwiseTypePromotionRule(
         "aten", "rsqrt_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
-    ),
-    ElementwiseTypePromotionRule(
-        "aten", "rsub", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     ElementwiseTypePromotionRule(
         "aten", "selu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
@@ -1033,6 +1026,9 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
     ),
     ElementwiseTypePromotionRule(
         "aten", "trunc_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    ),
+    ElementwiseTypePromotionRule(
+        "aten", "vdot", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     ElementwiseTypePromotionRule(
         "aten", "where", [1, 2], [], ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
@@ -1716,7 +1712,7 @@ class InsertTypePromotion(_pass.Transform):
         fake_mode = self.fake_mode
         assert fake_mode is not None, "Cannot detect fake_mode."
 
-        with proxy_tensor.maybe_disable_fake_tensor_mode(), (
+        with fake_tensor.unset_fake_temporarily(), (
             fake_mode
         ), fx_traceback.preserve_node_meta():
             self.interpreter.run(*fake_args)

@@ -20,7 +20,7 @@ static Tensor getStepTensor(const Tensor& indices, const c10::SymInt& bdim_size,
   return range.view_symint(view_shape);
 }
 
-static std::tuple<Tensor,optional<int64_t>> embedding_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> embedding_batch_rule(
     const Tensor& weight, std::optional<int64_t> weight_bdim,
     const Tensor& indices, std::optional<int64_t> indices_bdim,
     c10::SymInt padding_idx, bool scale_grad_by_freq, bool sparse) {
@@ -50,7 +50,7 @@ static std::tuple<Tensor,optional<int64_t>> embedding_batch_rule(
   return std::make_tuple(std::move(result), 0);
 }
 
-static std::tuple<Tensor,optional<int64_t>>
+static std::tuple<Tensor, std::optional<int64_t>>
 embedding_dense_backward_batch_rule(
     const Tensor& grad_, std::optional<int64_t> grad_bdim,
     const Tensor& indices_, std::optional<int64_t> indices_bdim,
@@ -109,7 +109,7 @@ embedding_dense_backward_batch_rule(
  *       output: (BN)CD_{out}H_{out}W_{out}
  */
 template<typename F, F Func, typename... ExtraArgs>
-std::tuple<Tensor,optional<int64_t>>
+std::tuple<Tensor, std::optional<int64_t>>
 grid_sample_batch_rule(const Tensor& input, std::optional<int64_t> input_bdim, const Tensor& grid, std::optional<int64_t> grid_bdim, ExtraArgs... extra_args) {
   std::tuple<Tensor, std::optional<int64_t>> result;
   if (input_bdim && !grid_bdim) {
@@ -130,7 +130,7 @@ grid_sample_batch_rule(const Tensor& input, std::optional<int64_t> input_bdim, c
     out = reshape_dim_outof(0, input.sizes()[*grid_bdim], out);
     result = std::make_tuple(std::move(out), 0);
   } else {
-    result = std::make_tuple(Func(input, grid, std::forward<ExtraArgs>(extra_args)...), nullopt);
+    result = std::make_tuple(Func(input, grid, std::forward<ExtraArgs>(extra_args)...), std::nullopt);
   }
   return result;
 }
@@ -256,7 +256,7 @@ struct UpsampleBackwardBatchRuleHelper;
 
 template <typename F, F Func, typename A, typename B, typename C, typename... T>
 struct UpsampleBackwardBatchRuleHelper<F, Func, typelist<A, B, C, T...>> {
-  static std::tuple<Tensor,optional<int64_t>> apply(
+  static std::tuple<Tensor, std::optional<int64_t>> apply(
       const Tensor& grad_output, std::optional<int64_t> grad_output_bdim,
       c10::SymIntArrayRef output_size, c10::SymIntArrayRef input_size,
       T... extra_args) {
@@ -282,7 +282,7 @@ struct GridSampleBatchRuleHelper;
 
 template <typename F, F Func, typename T1, typename T2, typename... T>
 struct GridSampleBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
-  static std::tuple<Tensor,optional<int64_t>> apply(
+  static std::tuple<Tensor, std::optional<int64_t>> apply(
       const Tensor& input, std::optional<int64_t> input_batch_dim,
       const Tensor& grid, std::optional<int64_t> grid_batch_dim,
       T... extra_args) {

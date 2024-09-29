@@ -2,8 +2,7 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Eliminates common inputs among `aten::cat` ops.
 TORCH_API bool EliminateConcatCommonInputs(const std::shared_ptr<Graph>& graph);
@@ -15,5 +14,4 @@ TORCH_API void ExpandConcatAndEliminateRedundancy(
 
 TORCH_API bool CombineConcats(const std::shared_ptr<Graph>& graph);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

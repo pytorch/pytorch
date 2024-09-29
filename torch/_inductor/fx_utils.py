@@ -72,7 +72,7 @@ class FakeTensorUpdater:
     fake tensors stop changing.
     """
 
-    def __init__(self, graph: torch.fx.Graph):
+    def __init__(self, graph: torch.fx.Graph) -> None:
         self.processed_hashes = set()
         self.graph = graph
 

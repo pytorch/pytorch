@@ -108,7 +108,7 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
 
     # custom post grad pass
     class _CustomPass(PatternMatcherPass):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
 
         def __call__(self, g: torch.fx.graph.Graph):

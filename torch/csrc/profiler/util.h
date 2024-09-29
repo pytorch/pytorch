@@ -92,7 +92,7 @@ TORCH_API std::string shapesToStr(
 TORCH_API std::string strListToStr(const std::vector<std::string>& types);
 TORCH_API std::string inputOpIdsToStr(
     const std::list<std::pair<at::RecordFunctionHandle, int>>& input_op_ids);
-TORCH_API std::string ivalueToStr(const c10::IValue& val);
+TORCH_API std::string ivalueToStr(const c10::IValue& val, bool isString);
 TORCH_API std::string ivalueListToStr(const std::vector<c10::IValue>& list);
 TORCH_API std::vector<std::string> inputTypes(const at::RecordFunction& fn);
 
@@ -170,6 +170,8 @@ constexpr auto kProcessGroupName = "Process Group Name";
 constexpr auto kProcessGroupDesc = "Process Group Description";
 constexpr auto kGroupRanks = "Process Group Ranks";
 constexpr auto kRank = "Rank";
+constexpr auto kP2pSrc = "Src Rank";
+constexpr auto kP2pDst = "Dst Rank";
 #endif // USE_DISTRIBUTED
 
 } // namespace torch::profiler::impl
