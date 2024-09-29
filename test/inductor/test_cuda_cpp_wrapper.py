@@ -24,13 +24,13 @@ try:
             test_torchinductor_dynamic_shapes,
         )
     except ImportError:
-        import test_combo_kernels
+        import test_combo_kernels  # @manual=fbcode//caffe2/test/inductor:combo_kernels-library
 
-        import test_foreach
-        import test_pattern_matcher
-        import test_select_algorithm
-        import test_torchinductor
-        import test_torchinductor_dynamic_shapes
+        import test_foreach  # @manual=fbcode//caffe2/test/inductor:foreach-library
+        import test_pattern_matcher  # @manual=fbcode//caffe2/test/inductor:pattern_matcher-library
+        import test_select_algorithm  # @manual=fbcode//caffe2/test/inductor:select_algorithm-library
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+        import test_torchinductor_dynamic_shapes  # @manual=fbcode//caffe2/test/inductor:test_inductor-library_dynamic_shapes
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -64,25 +64,6 @@ test_failures_cuda_wrapper = {
 }
 
 
-if config.abi_compatible:
-    xfail_list = []
-    for test_name in xfail_list:
-        test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
-            ("cuda_wrapper",), is_skip=False
-        )
-        test_failures_cuda_wrapper[
-            f"{test_name}_dynamic_shapes"
-        ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=False)
-    skip_list = []
-    for test_name in skip_list:
-        test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
-            ("cuda_wrapper",), is_skip=True
-        )
-        test_failures_cuda_wrapper[
-            f"{test_name}_dynamic_shapes"
-        ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=True)
-
-
 def make_test_case(
     name,
     device,
@@ -100,7 +81,7 @@ def make_test_case(
     assert callable(func), "not a callable"
     func = slowTest(func) if slow else func
 
-    @config.patch(cpp_wrapper=True)
+    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
     def fn(self):
         tests.setUpClass()
         tests.setUp()
@@ -188,6 +169,7 @@ if RUN_CUDA:
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
         BaseTest("test_unspec_inputs"),
+        BaseTest("test_consecutive_split_cumprod"),
         BaseTest("test_pointwise_hermite_polynomial_he"),
         BaseTest("test_pointwise_hermite_polynomial_h"),
         BaseTest(

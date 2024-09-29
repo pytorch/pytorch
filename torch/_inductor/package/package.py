@@ -1,22 +1,23 @@
-import glob
 import json
+import logging
 import os
 import shlex
 import subprocess
-import tempfile
 import zipfile
 from pathlib import Path
-from typing import Callable, List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 import torch
 import torch._inductor
 import torch.utils._pytree as pytree
-from torch._inductor import config, exc
+from torch._inductor import exc
 from torch._inductor.cpp_builder import BuildOptionsBase, CppBuilder
 from torch.export._tree_utils import reorder_kwargs
 
-from .build_package import build_package_contents
 from .pt2_archive_constants import AOTINDUCTOR_DIR, ARCHIVE_VERSION
+
+
+log = logging.getLogger(__name__)
 
 
 class PT2ArchiveWriter:
@@ -154,84 +155,71 @@ def compile_so(aoti_dir: str, aoti_files: List[str], so_path: str) -> str:
     return output_so
 
 
-def package_aoti(aoti_output_dir: str) -> str:
+def package_aoti(archive_file: str, aoti_files: Union[str, Dict[str, str]]) -> str:
     """
     Saves the AOTInductor generated files to the PT2Archive format.
+
+    Args:
+        archive_file: The file name to save the package to.
+        aoti_files: This can either be a singular path to a directory containing
+        the AOTInductor files, or a dictionary mapping the model name to the
+        path to its AOTInductor generated files.
+    """
+    if isinstance(aoti_files, str):
+        aoti_files = {"model": aoti_files}
+
+    assert isinstance(aoti_files, dict)
+    assert archive_file.endswith(".pt2")
+
+    # Save using the PT2 packaging format
+    # (https://docs.google.com/document/d/1jLPp8MN8Whs0-VW9PmJ93Yg02W85tpujvHrTa1pc5x8/edit#heading=h.v2y2jgnwc56a)
+
+    with PT2ArchiveWriter(archive_file) as archive_writer:
+        for model_name, aoti_output_dir in aoti_files.items():
+            log.debug(
+                "Packaging AOTInductor files from %s with model name, %s",
+                aoti_output_dir,
+                model_name,
+            )
+            for root, dirs, files in os.walk(aoti_output_dir):
+                for file in files:
+                    log.debug(
+                        "Saving AOTI generated file %s to archive in %s%s/%s",
+                        os.path.join(root, file),
+                        AOTINDUCTOR_DIR,
+                        model_name,
+                        file,
+                    )
+                    archive_writer.write_file(
+                        f"{AOTINDUCTOR_DIR}{model_name}/{file}",
+                        os.path.join(root, file),
+                    )
+    return archive_file
+
+
+class AOTICompiledModel:
+    """
+    Callable AOT Inductor loaded model from a .pt2
     """
 
-    # Add a makefile and python script
-    build_package_filename = "build_package.py"
-    with open(os.path.join(aoti_output_dir, build_package_filename), "w") as f:
-        f.write(build_package_contents)
+    def __init__(self, loader: torch._C._aoti.AOTIModelPackageLoader) -> None:
+        self.loader = loader
 
-    with open(os.path.join(aoti_output_dir, "Makefile"), "w") as f:
-        f.write(f"all:\n\tpython3 {build_package_filename}\n")
-
-    if config.aot_inductor.output_path.endswith(".so"):
-        raise RuntimeError(
-            "Unable to save package as a .so. It should be a .pt2 format or a directory."
-        )
-    elif config.aot_inductor.output_path.endswith(".pt2"):
-        # Save using the PT2 packaging format
-        # (https://docs.google.com/document/d/1jLPp8MN8Whs0-VW9PmJ93Yg02W85tpujvHrTa1pc5x8/edit#heading=h.v2y2jgnwc56a)
-        archive_path = config.aot_inductor.output_path
-
-        with PT2ArchiveWriter(archive_path) as archive_writer:
-            package_files = glob.glob(f"{aoti_output_dir}/*")
-
-            for path in package_files:
-                filename = os.path.basename(path)
-                archive_writer.write_file(f"{AOTINDUCTOR_DIR}{filename}", path)
-
-        return archive_path
-
-    else:
-        # Directly put the files into the directory, without any archiving
-        return aoti_output_dir
-
-
-def load_package(path: str, device: str) -> Callable:  # type: ignore[type-arg]
-    if path.endswith(".so"):
-        raise RuntimeError(
-            "Unable to load .so. It should be a .pt2 format or a directory."
-        )
-
-    elif path.endswith(".pt2"):
-        so_path = os.path.splitext(path)[0]
-        with PT2ArchiveReader(path) as archive_reader:
-            file_names = archive_reader.get_file_names()
-
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                archive_reader.extractall(tmp_dir)
-                file_names = archive_reader.get_file_names()
-                aoti_files = [
-                    file for file in file_names if file.startswith(AOTINDUCTOR_DIR)
-                ]
-
-                so_path = compile_so(tmp_dir, aoti_files, so_path)
-
-    else:
-        assert os.path.isdir(path), "Must specify a directory or a .pt2 file"
-        aoti_files = [
-            os.path.join(root, file)
-            for root, dirs, files in os.walk(path)
-            for file in files
-        ]
-        so_path = compile_so(path, aoti_files, path)
-
-    if device == "cpu":
-        runner = torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)  # type: ignore[call-arg]
-    elif device == "cuda" or device.startswith("cuda:"):
-        runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)  # type: ignore[assignment, call-arg]
-    else:
-        raise RuntimeError("Unsupported device " + device)
-
-    def optimized(*args, **kwargs):  # type: ignore[no-untyped-def]
-        call_spec = runner.get_call_spec()  # type: ignore[attr-defined]
+    def __call__(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        call_spec = self.loader.get_call_spec()  # type: ignore[attr-defined]
         in_spec = pytree.treespec_loads(call_spec[0])
         out_spec = pytree.treespec_loads(call_spec[1])
         flat_inputs = pytree.tree_flatten((args, reorder_kwargs(kwargs, in_spec)))[0]
-        flat_outputs = runner.run(flat_inputs)  # type: ignore[attr-defined]
+        flat_outputs = self.loader.run(flat_inputs)  # type: ignore[attr-defined]
         return pytree.tree_unflatten(flat_outputs, out_spec)
 
-    return optimized
+    def get_metadata(self) -> Dict[str, str]:
+        return self.loader.get_metadata()  # type: ignore[attr-defined]
+
+
+def load_package(path: str, model_name: str = "model") -> AOTICompiledModel:  # type: ignore[type-arg]
+    if not path.endswith(".pt2"):
+        raise RuntimeError("Unable to load package. Path must be a .pt2 file.")
+
+    loader = torch._C._aoti.AOTIModelPackageLoader(path, model_name)  # type: ignore[call-arg]
+    return AOTICompiledModel(loader)

@@ -107,7 +107,7 @@ class CppTemplateKernel(CppKernel):
     def call_kernel(self, name: str, node: ir.CppTemplateBuffer):
         wrapper = V.graph.wrapper_code
         _, call_args, arg_types = self.args.cpp_argdefs()
-        wrapper.generate_kernel_call(name, call_args, cuda=False, arg_types=arg_types)
+        wrapper.generate_kernel_call(name, call_args, gpu=False, arg_types=arg_types)
 
     def dtype(self, node: ir.Buffer) -> str:
         return DTYPE_TO_CPP[node.get_dtype()]

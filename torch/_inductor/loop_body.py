@@ -11,6 +11,7 @@ import sympy
 
 import torch.fx
 from torch._dynamo.utils import identity
+from torch.fx.proxy import Scope, TracerBase
 from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
@@ -45,6 +46,16 @@ class InterpreterShim(torch.fx.Interpreter):
             return super().run(*args, **kwargs)
 
 
+# We don't need the nn.Module and constant handling in Tracer
+class LightTracer(TracerBase):
+    def __init__(self):
+        super().__init__()
+        self.graph = torch.fx.Graph(tracer_cls=self.__class__)  # type: ignore[arg-type]
+        self.scope = Scope("", None)
+        self.module_stack = {}  # type: ignore[assignment]
+        self.node_name_to_scope = {}
+
+
 class MemoryEntry(NamedTuple):
     index_name: str  # LoopBody.indexing_exprs[index_name]
     buffer_name: Optional[str]
@@ -72,7 +83,7 @@ class LoopBody:
     indexing_exprs_name: Dict[sympy.Expr, str]
     submodules: Dict[str, Any]
     subblocks: Dict[str, LoopBodyBlock]
-    indirect_vars: List[str]
+    indirect_vars: List[sympy.Symbol]
     indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr]
     root_block: LoopBodyBlock
     memory_usage: Dict[MemoryUsageType, List[MemoryEntry]]
@@ -115,7 +126,11 @@ class LoopBody:
         where we are just reordering/merging/splitting the args of an
         existing LoopBody.
         """
-        self.indexing_exprs = other.indexing_from_args(args)
+        indexing_exprs = other.indexing_from_args(args)
+        self.indexing_exprs = {
+            name: V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges)
+            for name, expr in indexing_exprs.items()
+        }
         self.subblocks = {k: v.clone(self) for k, v in other.subblocks.items()}
         self.indirect_vars = other.indirect_vars
         self.indirect_var_ranges = other.indirect_var_ranges
@@ -541,8 +556,7 @@ class LoopBodyBlock:
             def output(result):
                 tracer.create_proxy("output", "output", (result,), {})
 
-        tracer = torch.fx.Tracer()
-        tracer.graph = torch.fx.Graph(tracer_cls=tracer.__class__)
+        tracer = LightTracer()
         proxy_ops = tracer.create_proxy("placeholder", "ops", (), {})
 
         from .index_propagation import IndexPropagation

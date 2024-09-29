@@ -20,6 +20,7 @@ import builtins
 import math
 import warnings
 import inspect
+import functools
 
 __all__ = ["PythonCode", "CodeGen", "Graph"]
 
@@ -36,6 +37,8 @@ _origin_type_map = {
     frozenset: FrozenSet,
     tuple: Tuple,
 }
+
+_legal_ops = dict.fromkeys(['call_function', 'call_method', 'get_attr', 'call_module', 'placeholder', 'output'])
 
 
 # Signature for functions thattransforms the body (`list[str]`) of the
@@ -84,14 +87,11 @@ def _snake_case(s: str) -> str:
         ``mod.pascalCase``-> ``mod.pascal_case``
         ``mod.ALL_CAPS`` -> ``mod.all_caps``
     """
-    chars = []
-    prev_lower = False
-    for c in s:
-        if prev_lower and c.isupper():
-            chars.append('_')
-        chars.append(c.lower())
-        prev_lower = c.islower()
-    return ''.join(chars)
+    return _snake_case_sub(s).lower()
+
+
+# Replace occurrences where a lowercase letter is followed by an uppercase letter
+_snake_case_sub = functools.partial(re.compile(r'(?<=[a-z])([A-Z])').sub, r'_\1')
 
 
 def _is_from_torch(obj: Any) -> bool:
@@ -1010,7 +1010,7 @@ class Graph:
 
             The newly-created and inserted node.
         """
-        assert op in ('call_function', 'call_method', 'get_attr', 'call_module', 'placeholder', 'output')
+        assert op in _legal_ops
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
         assert isinstance(args, tuple), "args must be a tuple"

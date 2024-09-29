@@ -547,11 +547,6 @@ class VariableBuilder:
         if id_dispatch is not None:
             return id_dispatch(self, value)
 
-        # Note - There are some nested values where types mismatch!
-        # We want to get those out and wrap those.
-        if is_function_or_wrapper(value):
-            value = inspect.getattr_static(value, "_torchdynamo_inline", value)
-
         # Everything else (NB: order matters!)
         if is_traceable_wrapper_subclass(value) or istype(
             value, config.traceable_tensor_subclasses
@@ -644,7 +639,9 @@ class VariableBuilder:
                     source=self.source,
                 )
             else:
-                result = ConstDictVariable(result, type(value), source=self.source)
+                result = ConstDictVariable(
+                    result, user_cls=type(value), source=self.source
+                )
 
             return self.set_source_and_track_mutable(value, result)
         elif isinstance(value, torch.nn.Module):
@@ -830,7 +827,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.ID_MATCH)
             stream_proxy = self.tx.output.create_proxy(
                 "call_function",
-                torch.cuda.Stream,
+                type(value),
                 (),
                 {
                     "stream_id": value.stream_id,
@@ -848,6 +845,9 @@ class VariableBuilder:
         elif isinstance(value, (torch._C._SDPAParams)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return SDPAParamsVariable.create(self.tx, value, self.source)
+        elif isinstance(value, torch._C._SDPBackend):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return ConstantVariable(value)
         elif isinstance(value, _EventBase):
             self.install_guards(GuardBuilder.ID_MATCH)
             torch._dynamo.utils.store_user_object_weakref(value)
@@ -988,6 +988,13 @@ class VariableBuilder:
         elif is_lru_cache_wrapped_function(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return WrapperUserFunctionVariable(value, "__wrapped__", source=self.source)
+        elif is_function_or_wrapper(value) and inspect.getattr_static(
+            value, "_torchdynamo_inline", False
+        ):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return WrapperUserFunctionVariable(
+                value, "_torchdynamo_inline", source=self.source
+            )
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
             # For these wrappers, Dynamo points to the wrapped function,
@@ -1778,7 +1785,8 @@ class VariableBuilder:
             else:
                 # Apply the updates
                 for sub_state in st.all_states:
-                    update_frame_state(sub_state.input_sizes[name])
+                    if name in sub_state.input_sizes:
+                        update_frame_state(sub_state.input_sizes[name])
                 frame_state_entry = self.tx.output.frame_state[name]
 
             # TODO: This should be dynamic, as we in general do not
