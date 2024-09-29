@@ -421,7 +421,11 @@ class TensorReferenceAnalysis:
 
     @staticmethod
     def floordiv(a, b):
-        return torch.ops.aten.true_divide.Tensor(a, b)
+        # python test/inductor/test_torchinductor_dynamic_shapes.py TestInductorDynamicCUDA.test_interpolate_ceil_eq_cuda
+        raise NotImplementedError(
+            "TODO: debug why aten.floor_divide.default decomp is missing"
+        )
+        return torch.ops.aten.floor_divide.default(a, b)
 
     @staticmethod
     def truncdiv(a, b):
