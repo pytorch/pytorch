@@ -421,7 +421,7 @@ class TensorReferenceAnalysis:
 
     @staticmethod
     def floordiv(a, b):
-        return torch.ops.aten.div.Tensor_mode(a, b, rounding_mode = 'floor')
+        return torch.ops.aten.div.Tensor_mode(a, b, rounding_mode="floor")
 
     @staticmethod
     def truncdiv(a, b):

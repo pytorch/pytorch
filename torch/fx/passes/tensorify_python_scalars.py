@@ -57,6 +57,7 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 # TODO: make sure this runs before CPU->CUDA pass for cudagraph friendliness
 
 
+@torch.fx._compatibility.compatibility(is_backward_compatible=False)
 def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
     """
     Converts Python scalar operations into Tensor operations within the graph. This pass looks for
