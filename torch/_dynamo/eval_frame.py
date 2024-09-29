@@ -440,13 +440,10 @@ class _TorchDynamoContext:
                     return fn(*args, **kwargs)
 
             if is_jit_tracing():
-                if config.error_on_nested_jit_trace:
-                    raise RuntimeError(
-                        "Detected that you are using FX to torch.jit.trace "
-                        "a dynamo-optimized function. This is not supported at the moment."
-                    )
-                else:
-                    return fn(*args, **kwargs)
+                raise RuntimeError(
+                    "Detected that you are using FX to torch.jit.trace "
+                    "a dynamo-optimized function. This is not supported at the moment."
+                )
 
             cleanups = [enter() for enter in self.enter_exit_hooks]
             prior = _maybe_set_eval_frame(callback)
