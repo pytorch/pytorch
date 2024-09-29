@@ -1803,6 +1803,8 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
 
     def test_init_process_group_optional_backend(self):
         store = dist.FileStore(self.file_name, self.world_size)
+        if store is None:
+            self.skipTest("Skipping the test because 'store' is None")
         # creates both gloo and nccl backend
         if dist.is_gloo_available() and dist.is_nccl_available():
             dist.init_process_group(
@@ -1837,6 +1839,8 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
                 excepted_backend = "custom"
 
             store = dist.FileStore(self.file_name, self.world_size)
+            if store is None:
+                self.skipTest("Skipping the test because 'store' is None")
             dist.init_process_group(
                 backend=backend,
                 rank=self.rank,

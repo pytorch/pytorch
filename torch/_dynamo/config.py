@@ -9,10 +9,7 @@ from os.path import abspath, dirname
 from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
 
 import torch
-
-
-def is_fbcode():
-    return not hasattr(torch.version, "git_version")
+from torch._environment import is_fbcode
 
 
 # to configure logging for dynamo, aot, and inductor
