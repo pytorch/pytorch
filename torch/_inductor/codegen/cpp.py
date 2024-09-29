@@ -4508,6 +4508,9 @@ class CppScheduling(BaseScheduling):
         def template_buffer_has_other_users(
             template_buffer, outputs_by_name, epilogue_nodes
         ):
+            if not epilogue_nodes:
+                return False
+
             assert template_buffer.get_name() in outputs_by_name
             users = outputs_by_name[template_buffer.get_name()].users
             return not all(
@@ -4649,7 +4652,7 @@ class KernelGroup:
     def call_kernel(self, wrapper, kernel_name):
         _, call_args, arg_types = self.args.cpp_argdefs()
         wrapper.generate_kernel_call(
-            kernel_name, call_args, gpu=False, arg_types=arg_types
+            kernel_name, call_args, gpu=False, triton=False, arg_types=arg_types
         )
 
 

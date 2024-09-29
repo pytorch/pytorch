@@ -470,6 +470,24 @@ int CUDASymmetricMemory::get_world_size() {
   return world_size_;
 }
 
+void CUDASymmetricMemory::stream_write_value32(uintptr_t addr, uint32_t val) {
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+  auto driver_api = c10::cuda::DriverAPI::get();
+  // According to the documentation of CUstreamWriteValue_flags,
+  // cuStreamWriteValue32 will provide a memory fence before the write, which
+  // has similar semantics to __threadfence_system() but is scoped to the
+  // stream rather than a CUDA thread.
+  driver_api->cuStreamWriteValue32_(
+      at::cuda::getCurrentCUDAStream(),
+      reinterpret_cast<CUdeviceptr>((void*)addr),
+      val,
+      0);
+#else
+  TORCH_CHECK(
+      false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
+#endif
+}
+
 void* CUDASymmetricMemoryAllocator::alloc(
     size_t size,
     int device_idx,
