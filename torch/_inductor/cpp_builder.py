@@ -507,12 +507,33 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> List[str]:
     return cflags
 
 
+def _get_ffast_math_flags() -> List[str]:
+    # ffast-math is equivalent to these flags as in
+    # https://github.com/gcc-mirror/gcc/blob/4700ad1c78ccd7767f846802fca148b2ea9a1852/gcc/opts.cc#L3458-L3468
+    # however gcc<13 sets the FTZ/DAZ flags for runtime on x86 even if we have
+    # -ffast-math -fno-unsafe-math-optimizations because the flags for runtime
+    # are added by linking in crtfastmath.o. This is done by the spec file which
+    # only does globbing for -ffast-math.
+    flags = [
+        "fno-trapping-math",
+        "funsafe-math-optimizations",
+        "ffinite-math-only",
+        "fno-signed-zeros",
+        "fno-math-errno",
+    ]
+
+    if is_gcc():
+        flags.append("fexcess-precision=fast")
+
+    return flags
+
+
 def _get_optimization_cflags() -> List[str]:
     if _IS_WINDOWS:
         return ["O2"]
     else:
         cflags = ["O0", "g"] if config.aot_inductor.debug_compile else ["O3", "DNDEBUG"]
-        cflags.append("ffast-math")
+        cflags += _get_ffast_math_flags()
         cflags.append("fno-finite-math-only")
 
         if not config.cpp.enable_unsafe_math_opt_flag:
@@ -1166,8 +1187,8 @@ def _transform_cuda_paths(lpaths: List[str]) -> None:
                     break
 
 
-def get_cpp_torch_cuda_options(
-    cuda: bool,
+def get_cpp_torch_device_options(
+    device_type: str,
     aot_mode: bool = False,
     compile_only: bool = False,
 ) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str], List[str]]:
@@ -1190,10 +1211,10 @@ def get_cpp_torch_cuda_options(
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
 
-    include_dirs = cpp_extension.include_paths(cuda)
-    libraries_dirs = cpp_extension.library_paths(cuda)
+    include_dirs = cpp_extension.include_paths(device_type)
+    libraries_dirs = cpp_extension.library_paths(device_type)
 
-    if cuda:
+    if device_type == "cuda":
         definations.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
 
         if torch.version.hip is not None:
@@ -1208,6 +1229,11 @@ def get_cpp_torch_cuda_options(
             else:
                 libraries += ["c10_cuda", "cuda", "torch_cuda"]
 
+    if device_type == "xpu":
+        definations.append(" USE_XPU")
+        cflags += ["fsycl"]
+        libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
+
     if aot_mode:
         if config.is_fbcode():
             from torch._inductor.codecache import cpp_prefix_path
@@ -1215,7 +1241,7 @@ def get_cpp_torch_cuda_options(
             cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
             include_dirs += cpp_prefix_include_dir
 
-        if cuda and torch.version.hip is None:
+        if device_type == "cuda" and torch.version.hip is None:
             _transform_cuda_paths(libraries_dirs)
 
     if config.is_fbcode():
@@ -1224,7 +1250,7 @@ def get_cpp_torch_cuda_options(
         else:
             include_dirs.append(os.path.join(build_paths.cuda(), "include"))
 
-        if aot_mode and cuda:
+        if aot_mode and device_type == "cuda":
             if torch.version.hip is None:
                 if not compile_only:
                     # Only add link args, when compile_only is false.
@@ -1241,18 +1267,18 @@ def get_cpp_torch_cuda_options(
     )
 
 
-class CppTorchCudaOptions(CppTorchOptions):
+class CppTorchDeviceOptions(CppTorchOptions):
     """
     This class is inherited from CppTorchOptions, which automatic contains
     base cxx build options and torch common build options. And then it will
-    maintains cuda device related build args.
+    maintains cuda/xpu device related build args.
     """
 
     def __init__(
         self,
         vec_isa: VecISA = invalid_vec_isa,
         include_pytorch: bool = False,
-        cuda: bool = True,
+        device_type: str = "cuda",
         aot_mode: bool = False,
         compile_only: bool = False,
         use_absolute_path: bool = False,
@@ -1269,33 +1295,37 @@ class CppTorchCudaOptions(CppTorchOptions):
             use_mmap_weights=use_mmap_weights,
             extra_flags=extra_flags,
         )
+        if device_type == "xpu":
+            from torch.utils.cpp_extension import _join_sycl_home
 
-        cuda_definations: List[str] = []
-        cuda_include_dirs: List[str] = []
-        cuda_cflags: List[str] = []
-        cuda_ldflags: List[str] = []
-        cuda_libraries_dirs: List[str] = []
-        cuda_libraries: List[str] = []
-        cuda_passthough_args: List[str] = []
+            self._compiler = _join_sycl_home("bin", "icpx")
+
+        device_definations: List[str] = []
+        device_include_dirs: List[str] = []
+        device_cflags: List[str] = []
+        device_ldflags: List[str] = []
+        device_libraries_dirs: List[str] = []
+        device_libraries: List[str] = []
+        device_passthough_args: List[str] = []
 
         (
-            cuda_definations,
-            cuda_include_dirs,
-            cuda_cflags,
-            cuda_ldflags,
-            cuda_libraries_dirs,
-            cuda_libraries,
-            cuda_passthough_args,
-        ) = get_cpp_torch_cuda_options(
-            cuda=cuda, aot_mode=aot_mode, compile_only=compile_only
+            device_definations,
+            device_include_dirs,
+            device_cflags,
+            device_ldflags,
+            device_libraries_dirs,
+            device_libraries,
+            device_passthough_args,
+        ) = get_cpp_torch_device_options(
+            device_type=device_type, aot_mode=aot_mode, compile_only=compile_only
         )
-        _append_list(self._definations, cuda_definations)
-        _append_list(self._include_dirs, cuda_include_dirs)
-        _append_list(self._cflags, cuda_cflags)
-        _append_list(self._ldflags, cuda_ldflags)
-        _append_list(self._libraries_dirs, cuda_libraries_dirs)
-        _append_list(self._libraries, cuda_libraries)
-        _append_list(self._passthough_args, cuda_passthough_args)
+        _append_list(self._definations, device_definations)
+        _append_list(self._include_dirs, device_include_dirs)
+        _append_list(self._cflags, device_cflags)
+        _append_list(self._ldflags, device_ldflags)
+        _append_list(self._libraries_dirs, device_libraries_dirs)
+        _append_list(self._libraries, device_libraries)
+        _append_list(self._passthough_args, device_passthough_args)
         self._finalize_options()
 
 

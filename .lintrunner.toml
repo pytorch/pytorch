@@ -139,7 +139,7 @@ init_command = [
     'numpy==1.24.3 ; python_version == "3.8"',
     'numpy==1.26.0 ; python_version >= "3.9"',
     'expecttest==0.2.1',
-    'mypy==1.10.0',
+    'mypy==1.11.2',
     'sympy==1.12.1 ; python_version == "3.8"',
     'sympy==1.13.0 ; python_version >= "3.9"',
     'types-requests==2.27.25',
@@ -195,6 +195,7 @@ include_patterns = [
     # and excluding most sub-directories for now.
     'aten/src/ATen/*.h',
     'aten/src/ATen/*.cpp',
+    'aten/src/ATen/cuda/*.cpp',
     'aten/src/ATen/cpu/*.h',
     'aten/src/ATen/cpu/*.cpp',
     'aten/src/ATen/core/*.h',
@@ -224,7 +225,6 @@ exclude_patterns = [
     # CUDA files are also excluded.
     '**/fb/**',
     '**/*pb.h',
-    'aten/**/cuda/*pp',
     'c10/xpu/**/*.h',
     'c10/xpu/**/*.cpp',
     'c10/cuda/CUDAAlgorithm.h',
@@ -1584,6 +1584,27 @@ command = [
     '@{{PATHSFILE}}'
 ]
 is_formatter = true
+
+
+[[linter]]
+code = 'META_NO_CREATE_UNBACKED'
+include_patterns = [
+  "torch/_meta_registrations.py"
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=create_unbacked',
+    '--linter-name=META_NO_CREATE_UNBACKED',
+    '--error-name=no create_unbacked in meta registrations',
+    """--error-description=\
+        Data-dependent operators should have their meta \
+        registration in torch/_subclasses/fake_impls.py, \
+        not torch/_meta_registrations.py
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
 
 [[linter]]
 code = 'ATEN_CPU_GPU_AGNOSTIC'

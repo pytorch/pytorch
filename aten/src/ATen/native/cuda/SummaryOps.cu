@@ -262,7 +262,7 @@ Tensor _bincount_cuda_template(
         std::nullopt /* pin_memory */);
   }
   if (self.dim() != 1 ||
-      (!std::is_same<input_t, uint8_t>::value &&
+      (!std::is_same_v<input_t, uint8_t> &&
        *self.min().cpu().const_data_ptr<input_t>() < 0)) {
     AT_ERROR("bincount only supports 1-d non-negative integral inputs.");
   }

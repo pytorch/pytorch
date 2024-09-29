@@ -42,7 +42,7 @@ try:
     try:
         from . import test_torchinductor
     except ImportError:
-        import test_torchinductor
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -3422,7 +3422,6 @@ class CPUReproTests(TestCase):
                 dtype if dtype else torch.float32,
             )
 
-    @config.patch("cpp.enable_tiling_heuristics", False)
     def test_group_norm_vec(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -3433,29 +3432,27 @@ class CPUReproTests(TestCase):
                 return self.group_norm(x)
 
         options = itertools.product(
-            vec_dtypes, [torch.contiguous_format, torch.channels_last]
+            vec_dtypes, [torch.contiguous_format, torch.channels_last], [True, False]
         )
-        for dtype, fmt in options:
+        for dtype, fmt, dynamic in options:
             torch._dynamo.reset()
             metrics.reset()
             mod = M().eval()
             x = torch.randn((2, 90, 6, 6), dtype=dtype).to(memory_format=fmt)
             with torch.no_grad():
-                self.common(mod, (x,))
+                expected = mod(x)
+                compiled_m = torch.compile(mod, dynamic=dynamic)
+                actual, code = run_and_get_cpp_code(compiled_m, x)
+                self.assertEqual(expected, actual)
                 # 2 generated kernels (one for var_mean, the other for result)
                 check_metrics_vec_kernel_count(2)
 
-            # check loop split optimization
-            if fmt == torch.channels_last:
-                torch._dynamo.reset()
-                metrics.reset()
-                with torch.no_grad():
-                    opt_mod = torch.compile(mod)
-                    _, code = run_and_get_cpp_code(opt_mod, x)
-                # check that there are no non_contiguous loads
-                FileCheck().check_count("__at_align__ std::array", 0, exactly=True).run(
-                    code
-                )
+                # check loop split optimization
+                if fmt == torch.channels_last:
+                    # check that there are no non_contiguous loads
+                    FileCheck().check_count(
+                        "__at_align__ std::array", 0, exactly=True
+                    ).run(code)
 
     def test_int_div_vec(self):
         def fn(x, y, mode):
@@ -3736,6 +3733,26 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         # TODO(jgong5): change to 1 with vectorized uint64 load
         assert metrics.generated_cpp_vec_kernel_count == 0
+
+    def test_convert_int8_to_half_vec(self):
+        src_dtypes = [torch.int8, torch.uint8]
+        dst_dtypes = [torch.bfloat16, torch.half]
+        _simd_lens = [isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()]
+        for src_dtype, dst_dtype, _simd_len in itertools.product(
+            src_dtypes, dst_dtypes, _simd_lens
+        ):
+
+            def fn(x):
+                return x.to(dst_dtype)
+
+            low = 0 if src_dtype == torch.uint8 else -100
+
+            x = torch.randint(low, 100, (32, 32), dtype=src_dtype)
+            with config.patch({"cpp.simdlen": _simd_len}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(fn, (x,))
+                check_metrics_vec_kernel_count(1)
 
     def test_convert_int32_to_int64_vec(self):
         def fn(x):

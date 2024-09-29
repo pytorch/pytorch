@@ -756,24 +756,23 @@ class Node(_NodeBase):
         self.graph._graph_namespace._rename_object(self, name)
 
     def __setattr__(self, name: str, value: Any) -> None:
-        if name in _setattr_custom_handling:
-            if name == "name":
-                m = self.graph.owning_module
-                if getattr(m, "_replace_hook", None):
-                    assert isinstance(value, str)
-                    for user in self.users:
-                        m._replace_hook(old=self, new=value, user=user)
-            elif name in ("op", "target"):
-                table = getattr(self.graph, "_find_nodes_lookup_table", None)
-                if table and self in table:
-                    self.graph._find_nodes_lookup_table.remove(self)
-                    object.__setattr__(self, name, value)
-                    self.graph._find_nodes_lookup_table.insert(self)
-                    return
-
+        if name == 'name' and hasattr(self, "name"):
+            m = self.graph.owning_module
+            if getattr(m, "_replace_hook", None):
+                assert isinstance(value, str)
+                for user in self.users:
+                    m._replace_hook(old=self, new=value, user=user)
+        update = False
+        if (
+                hasattr(self, name) and
+                hasattr(self.graph, "_find_nodes_lookup_table") and
+                self in self.graph._find_nodes_lookup_table
+        ):
+            update = True
+            self.graph._find_nodes_lookup_table.remove(self)
         object.__setattr__(self, name, value)
-
-_setattr_custom_handling = dict.fromkeys(["name", "op", "target"])
+        if update:
+            self.graph._find_nodes_lookup_table.insert(self)
 
 @compatibility(is_backward_compatible=True)
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:

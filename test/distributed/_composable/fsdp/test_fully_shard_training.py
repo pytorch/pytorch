@@ -285,6 +285,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 "delay_before_all_gather": [False, True],
                 "delay_before_reduce_scatter": [False, True],
                 "delay_before_optim": [False, True],
+                "unshard_async_op": [False],
             },
             self._test_train_parity_multi_group,
         )
@@ -307,6 +308,28 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 "delay_before_all_gather": [False, True],
                 "delay_before_reduce_scatter": [False, True],
                 "delay_before_optim": [False, True],
+                "unshard_async_op": [False],
+            },
+            self._test_train_parity_multi_group,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    @test_compiled_fsdp(compile_compute_on_module=Transformer)
+    def test_train_parity_multi_group_unshard_async_op(self):
+        """
+        Tests train parity against DDP when using multiple parameter groups for
+        communication and setting ``unshard_async_op=True``.
+        """
+        self.run_subtests(
+            {
+                "reshard_after_forward": [True],
+                "device_type": ["cuda"],
+                "offload_policy": [OffloadPolicy()],
+                "delay_after_forward": [False, True],
+                "delay_before_all_gather": [False, True],
+                "delay_before_reduce_scatter": [False, True],
+                "delay_before_optim": [False, True],
+                "unshard_async_op": [True],
             },
             self._test_train_parity_multi_group,
         )
@@ -320,6 +343,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         delay_before_all_gather: bool,
         delay_before_reduce_scatter: bool,
         delay_before_optim: bool,
+        unshard_async_op: bool,
     ):
         # Only test individual delays or all four delays to save test time
         if (
@@ -359,6 +383,8 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             if isinstance(module, TransformerBlock):
                 fully_shard_fn(module)
         fully_shard_fn(model)
+        if unshard_async_op:
+            model._set_unshard_async_op(unshard_async_op)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
         delay_in_ms = 100
