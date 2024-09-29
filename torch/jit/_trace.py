@@ -55,6 +55,7 @@ def _create_interpreter_name_lookup_fn(frames_up=1):
             i += 1
 
         f_locals = frame.f_locals
+        f_globals = frame.f_globals
 
         for k, v in f_locals.items():
             if isinstance(v, torch.Tensor) and var is v:
@@ -135,7 +136,7 @@ class ONNXTracedModule(torch.nn.Module):
             else:
                 return tuple(out_vars)
 
-        graph, _out = torch._C._create_graph_by_tracing(
+        graph, out = torch._C._create_graph_by_tracing(
             wrapper,
             in_vars + module_state,
             _create_interpreter_name_lookup_fn(),
@@ -240,6 +241,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
     if not isinstance(args, tuple):
         args = (args,)
 
+    saved_args = _clone_inputs(args)
     if is_module:
         saved_state = copy.deepcopy(model.state_dict())
 

@@ -68,7 +68,7 @@ class _PyTreeExtensionContext:
     def _register_huggingface_model_output_extension(self):
         try:
             from transformers import modeling_outputs  # type: ignore[import]
-        except ImportError:
+        except ImportError as e:
             return
 
         def model_output_flatten(
