@@ -8,7 +8,8 @@
 ///////////////////////////////
 
 struct NodeBase {
-  PyObject_HEAD bool _erased;
+  PyObject_HEAD
+  bool _erased;
   NodeBase* _prev;
   NodeBase* _next;
 };
@@ -111,7 +112,8 @@ bool NodeBase_init(PyObject* module) {
 ////////////////////////////////
 
 struct NodeIter {
-  PyObject_HEAD bool _reversed;
+  PyObject_HEAD
+  bool _reversed;
   NodeBase* _root;
   NodeBase* _cur;
 };

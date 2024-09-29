@@ -44,7 +44,9 @@ ContinuationIndentWidth: 4
 Cpp11BracedListStyle: true
 DerivePointerAlignment: false
 DisableFormat:   false
-ForEachMacros:   [ FOR_EACH_RANGE, FOR_EACH, ]
+ForEachMacros:
+  - FOR_EACH_RANGE
+  - FOR_EACH
 IncludeCategories:
   - Regex:           '^<.*\.h(pp)?>'
     Priority:        1
@@ -79,7 +81,10 @@ SpacesInContainerLiterals: true
 SpacesInCStyleCastParentheses: false
 SpacesInParentheses: false
 SpacesInSquareBrackets: false
-Standard:        Cpp11
+Standard:        c++17
+StatementMacros:
+  - PyObject_HEAD
+  - PyObject_VAR_HEAD
 TabWidth:        8
 UseTab:          Never
 ---
