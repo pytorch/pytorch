@@ -24,8 +24,6 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     dtypesIfMPS,
     expectedFailureMPS,
-    expectedFailureMPSPre15,
-    skipMPS,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyCPU,
@@ -41,6 +39,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfRocm,
     skipCUDAIfRocmVersionLessThan,
     skipMeta,
+    skipMPS,
 )
 from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
@@ -2049,7 +2048,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             _test(t, weight_odd, mode)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
-    @skipMPS # Results in CI are inconsistent, forced to skip - <ISSUE LINK>
+    @skipMPS  # Results in CI are inconsistent, forced to skip - <ISSUE LINK>
     @dtypes(torch.float, torch.cfloat)
     @parametrize_test("mode", ("valid", "same"))
     def test_conv3d_vs_scipy(self, device, dtype, mode):
