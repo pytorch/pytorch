@@ -6,7 +6,6 @@ import torch
 import torch._dynamo.testing
 import torch._inductor.config as inductor_config
 import torch._inductor.test_case
-import torch.onnx.operators
 import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
 from torch import Tensor

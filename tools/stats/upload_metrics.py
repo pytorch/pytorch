@@ -5,6 +5,7 @@ import inspect
 import os
 import time
 import uuid
+from datetime import timezone
 from decimal import Decimal
 from typing import Any
 from warnings import warn
@@ -137,7 +138,9 @@ def emit_metric(
             "calling_file": calling_file,
             "calling_module": calling_module,
             "calling_function": calling_function,
-            "timestamp": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f"),
+            "timestamp": datetime.datetime.now(timezone.utc).strftime(
+                "%Y-%m-%d %H:%M:%S.%f"
+            ),
             **{m.name: m.value() for m in env_var_metrics if m.value()},
         }
     except ValueError as e:

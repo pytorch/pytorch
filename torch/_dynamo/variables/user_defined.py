@@ -180,7 +180,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             return super().var_getattr(tx, name)
 
-        obj = inspect.getattr_static(self.value, name, None)
+        try:
+            obj = inspect.getattr_static(self.value, name)
+        except AttributeError:
+            obj = None
 
         if isinstance(obj, staticmethod):
             return VariableTracker.create(tx, obj.__get__(self.value), source)
@@ -201,9 +204,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 sys.version_info >= (3, 12) and name == "__mro__"
             ):
                 return VariableTracker.create(tx, obj.__get__(self.value), source)
-
-        if inspect.ismemberdescriptor(obj) or inspect.isdatadescriptor(obj):
-            return VariableTracker.create(tx, getattr(self.value, name), source)
 
         if ConstantVariable.is_literal(obj):
             return ConstantVariable.create(obj)
@@ -406,22 +406,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and self.source
             and not is_forbidden_context_manager(self.value)
         ):
-            from torch.overrides import TorchFunctionMode
-
             from .ctx_manager import GenericContextWrappingVariable
-            from .torch_function import TorchFunctionModeVariable
-
-            if issubclass(
-                self.value, TorchFunctionMode
-            ) and TorchFunctionModeVariable.is_supported_torch_function_mode(
-                self.value
-            ):
-                var_cls = TorchFunctionModeVariable
-            else:
-                var_cls = GenericContextWrappingVariable
 
             cm_obj = tx.output.side_effects.track_object_new(
-                self.source, self.value, var_cls, {}
+                self.source, self.value, GenericContextWrappingVariable, {}
             )
             cm_obj.call_method(tx, "__init__", args, kwargs)
             return cm_obj
@@ -993,7 +981,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
             if isinstance(result, variables.DeletedVariable):
-                raise_observed_exception(AttributeError, tx, self)
+                raise_observed_exception(AttributeError, tx)
             return result
 
         if name == "__dict__":
@@ -1170,7 +1158,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return VariableTracker.create(tx, subobj)
 
         # Earlier we were returning GetAttrVariable but its incorrect. In absence of attr, Python raises AttributeError.
-        raise_observed_exception(AttributeError, tx, self)
+        raise_observed_exception(AttributeError, tx)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if self._check_for_getattribute():
