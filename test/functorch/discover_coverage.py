@@ -413,7 +413,7 @@ def get_statuses(for_subset=None, invert=False):
                     result.remove(decorator.test_name)
         return result
 
-    def get_all_aliases(op):
+    def get_all_aliases(op):  # noqa: F841
         opinfos = op_to_opinfo[op]
         result = []
         for opinfo in opinfos:

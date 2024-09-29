@@ -143,7 +143,6 @@ class Errors:
         """
         # TODO: instead of immediately concatenating the context in the msg,
         # attach it as metadata and make a decision how to format it later.
-        msg_w_ctx = msg
         for c in reversed(self.context):
             msg += "\n\n  * " + "\n    ".join(c.splitlines())
         self.errors.append(msg)
@@ -523,7 +522,7 @@ def verify(
         run_helper(torch_out, args, remained_onnx_input_idx)
 
         if isinstance(test_args, int):
-            for i in range(test_args):
+            for _ in range(test_args):
                 run(randomize_args(args), remained_onnx_input_idx)
         else:
             for test_arg in test_args:

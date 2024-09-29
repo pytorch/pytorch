@@ -4,10 +4,9 @@ rely on it for anything!**
 """
 import operator
 import sys
-from typing import Optional
 
 import torch
-from torch.fx import Graph, GraphModule, Node
+from torch.fx import Graph, GraphModule
 from torch.fx.graph import map_arg
 from torch.fx.proxy import Proxy
 from torch.nn.utils import fuse_conv_bn_weights
@@ -181,7 +180,7 @@ class ConvNormRelu(MinMaxObserver):
         parent_name, name = _parent_name(self.conv_node.target)
         setattr(quantizer.modules[parent_name], name, qconv)
         if self.bn_node is not None:
-            parent_bn, bn_name = _parent_name(self.bn_node.target)
+            _, bn_name = _parent_name(self.bn_node.target)
             # we can't just delete this because submodules's forwards (which are not longer use)
             # try to call it, so replace with something that does nothing.
             setattr(quantizer.modules[parent_name], bn_name, IdentityModule())
@@ -277,7 +276,6 @@ class Quantizer:
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
 
-        output_node: Optional[Node] = None
         for node in self.graph.nodes:
             if node.op == "placeholder":
                 result = next(args_iter)
@@ -322,7 +320,7 @@ class Quantizer:
                 return quant_env[n.name]
 
         def copy_recursive(node):
-            def load_or_emit(n):
+            def load_or_emit(n):  # noqa: F841
                 if n.name in env or e.name in quant_env:  # noqa: F821
                     return load_arg(n, quantized=False)
                 else:
