@@ -246,7 +246,6 @@ exclude_patterns = [
     'torch/csrc/inductor/aoti_torch/c/shim.h',
     'torch/csrc/jit/**/*',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
-    'torch/csrc/lazy/**/*',
 ]
 init_command = [
     'python3',
