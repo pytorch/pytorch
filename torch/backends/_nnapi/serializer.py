@@ -266,7 +266,7 @@ def broadcast_shapes(shape1, shape2):
 
 
 def get_conv_pool_shape(image_shape, args, out_ch, transpose):
-    batch, in_c, in_h, in_w = image_shape
+    batch, _in_c, in_h, in_w = image_shape
 
     # TODO: Handle dilation
     if args.dilation_h != 1 or args.dilation_w != 1:
@@ -443,7 +443,6 @@ class _NnapiSerializer:
         operand_id = len(self.operands)
         self.operands.append(toper)
         tsize = tensor_size(toper.op_type, toper.shape)
-        psize = ((tsize - 1) | 0x3) + 1
         self.values.append((operand_id, OperandValueSourceType.NUMBERED_BUFFER))
         buf_num = len(self.used_weights)
         offset = 0
@@ -917,7 +916,7 @@ class _NnapiSerializer:
         adder(self, node)
 
     def _identity(self, node):
-        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+        in_id, _in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
         jitval = node.outputsAt(0)
         self.jitval_operand_map[jitval] = in_id
 
@@ -1039,8 +1038,8 @@ class _NnapiSerializer:
 
         in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
 
-        start_ctype, start_dim = self.get_constant_value(node.inputsAt(1), "IntType")
-        end_ctype, end_dim = self.get_constant_value(node.inputsAt(2), "IntType")
+        _start_ctype, start_dim = self.get_constant_value(node.inputsAt(1), "IntType")
+        _end_ctype, end_dim = self.get_constant_value(node.inputsAt(2), "IntType")
 
         # channels last with channels == 1 or (height & width both 1)
         is_trivial_flatten = len(in_oper.shape) == 4 and (
@@ -1526,7 +1525,7 @@ class _NnapiSerializer:
     def add_pool2d_node(self, node, opcode):
         assert node.inputsSize() == 6
         assert node.outputsSize() == 1
-        image, kernel, stride, padding, dilation, ceil_mode = node.inputs()
+        image, kernel, stride, padding, dilation, _ceil_mode = node.inputs()
 
         stride = stride or kernel
 
@@ -1574,7 +1573,7 @@ class _NnapiSerializer:
             kernel,
             stride,
             padding,
-            ceil_mode,
+            _ceil_mode,
             count_include_pad,
             divisor_override,
         ) = node.inputs()
@@ -1673,7 +1672,7 @@ class _NnapiSerializer:
             scale_ctype, scale_arg = self.get_constant_value(scale_jit)  # type: ignore[possibly-undefined]
         else:
             scale_h_ctype, scale_h_arg = self.get_constant_value(scale_h_jit)  # type: ignore[possibly-undefined]
-            scale_w_ctype, scale_w_arg = self.get_constant_value(scale_w_jit)  # type: ignore[possibly-undefined]
+            scale_w_ctype, _scale_w_arg = self.get_constant_value(scale_w_jit)  # type: ignore[possibly-undefined]
 
             # The only way for the 4-argument overload of upsample_nearest2d to
             # have been added to the graph without error is if the scale_h and
@@ -1892,7 +1891,7 @@ class _NnapiSerializer:
         self.add_operation(NNAPI_OperationCode.FULLY_CONNECTED, inputs, outputs)
 
     def get_optional_bias(self, jit_bias, weight_tensor, transpose=False):
-        ctype, value = self.get_constant_value(jit_bias)
+        ctype, _value = self.get_constant_value(jit_bias)
         if ctype.kind() == "NoneType":
             bias_idx = 1 if transpose else 0
             nnapi_bias_tensor = torch.zeros(
@@ -1919,7 +1918,7 @@ class _NnapiSerializer:
         ) = node.inputs()
 
         _, weight_tensor = self.get_constant_value(jit_weight, "TensorType")
-        bias_id, bias_oper = self.get_optional_bias(jit_bias, weight_tensor)
+        bias_id, _bias_oper = self.get_optional_bias(jit_bias, weight_tensor)
         args = self.get_conv_pool_args_2d_from_jit(
             weight_tensor.shape[2:4], jit_stride, jit_pad, jit_dilation, jit_groups
         )
@@ -1958,7 +1957,7 @@ class _NnapiSerializer:
 
         _, weight_tensor = self.get_constant_value(jit_weight, "TensorType")
         _, transpose = self.get_constant_value(jit_transpose)
-        bias_id, bias_oper = self.get_optional_bias(jit_bias, weight_tensor, transpose)
+        bias_id, _bias_oper = self.get_optional_bias(jit_bias, weight_tensor, transpose)
         args = self.get_conv_pool_args_2d_from_jit(
             weight_tensor.shape[2:4], jit_stride, jit_pad, jit_dilation, jit_groups
         )
@@ -1979,7 +1978,7 @@ class _NnapiSerializer:
         assert node.inputsSize() == 3
         assert node.outputsSize() == 1
 
-        (jit_input, jit_dim, jit_half_to_float) = node.inputs()
+        jit_input, jit_dim, _jit_half_to_float = node.inputs()
         input_id, input_oper = self.get_tensor_operand_by_jitval_fixed_size(jit_input)
         _, dim = self.get_constant_value(jit_dim, "IntType")
 
@@ -2117,7 +2116,7 @@ class _NnapiSerializer:
 
         if depthwise:
             # Depthwise convolution
-            one, kern_h, kern_w, out_c = weight_oper.shape
+            one, _kern_h, _kern_w, out_c = weight_oper.shape
             assert one == 1
             assert out_c % in_c == 0
             channel_multiplier = out_c // in_c
@@ -2125,7 +2124,7 @@ class _NnapiSerializer:
             assert out_c == in_c
         else:
             # Full convolution
-            out_c, kern_h, kern_w, kern_d = weight_oper.shape
+            out_c, _kern_h, _kern_w, kern_d = weight_oper.shape
             assert kern_d == in_c
 
         assert out_c == bias_oper.shape[0]

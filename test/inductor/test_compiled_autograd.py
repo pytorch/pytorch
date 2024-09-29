@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+# ruff: noqa: F841
 import contextlib
 import dataclasses
 import functools
@@ -455,7 +456,6 @@ main()
 
             return torch.compile(gm, backend=inner_compiler)
 
-        fwd_compiler_fn = functools.partial(eager_with_check, is_bwd=False)
         bwd_compiler_fn = functools.partial(eager_with_check, is_bwd=True)
 
         def fn(inputs):
@@ -594,7 +594,7 @@ main()
         torch._dynamo.reset()
         handle = torch._dynamo.convert_frame.register_bytecode_hook(bytecode_hook)
         try:
-            out = compiled_fn(inputs)
+            compiled_fn(inputs)
             self.assertTrue(len(inputs) == 0)
         finally:
             handle.remove()
@@ -1590,7 +1590,7 @@ TORCH_LIBRARY(test_non_traceable_autograd_cpp_node, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        torch.utils.cpp_extension.load_inline(
             name="test_non_traceable_autograd_cpp_node",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1639,7 +1639,7 @@ TORCH_LIBRARY(test_autograd_cpp_node, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        torch.utils.cpp_extension.load_inline(
             name="test_autograd_cpp_node",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1707,7 +1707,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_id, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        torch.utils.cpp_extension.load_inline(
             name="test_autograd_cpp_node_id",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1804,7 +1804,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        torch.utils.cpp_extension.load_inline(
             name="test_autograd_cpp_node_saved",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1861,7 +1861,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        torch.utils.cpp_extension.load_inline(
             name="test_autograd_cpp_node_saved_dynamic",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1920,7 +1920,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_int, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        torch.utils.cpp_extension.load_inline(
             name="test_autograd_cpp_node_saved_int",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1978,7 +1978,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_float, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        torch.utils.cpp_extension.load_inline(
             name="test_autograd_cpp_node_saved_float",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -2069,7 +2069,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        torch.utils.cpp_extension.load_inline(
             name="test_autograd_cpp_node_data_dependent",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -2348,7 +2348,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        torch.utils.cpp_extension.load_inline(
             name="test_cudagraphs_cpu_scalar_used_in_cpp_custom_op",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",

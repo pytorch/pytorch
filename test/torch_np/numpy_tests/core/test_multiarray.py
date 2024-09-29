@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+# ruff: noqa: F841
 
 import builtins
 import collections.abc

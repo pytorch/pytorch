@@ -6,14 +6,14 @@ import torch
 
 def bench(nt_a, nt_b, niter):
     # Warmup
-    nt_c = nt_a.bmm(nt_b)
+    nt_a.bmm(nt_b)
 
     torch.cuda.synchronize()
     start_event = torch.cuda.Event(enable_timing=True)
     end_event = torch.cuda.Event(enable_timing=True)
     start_event.record()
     for iter in range(niter):
-        nt_c = nt_a.bmm(nt_b)
+        nt_a.bmm(nt_b)
     end_event.record()
     torch.cuda.synchronize()
     runtime = (start_event.elapsed_time(end_event)) / niter

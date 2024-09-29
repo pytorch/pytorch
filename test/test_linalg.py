@@ -1,4 +1,5 @@
 # Owner(s): ["module: linear algebra"]
+# ruff: noqa: F841
 
 import torch
 import numpy as np
