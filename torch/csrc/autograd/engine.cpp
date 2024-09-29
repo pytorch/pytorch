@@ -28,21 +28,17 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/ThreadLocal.h>
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
 
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstdint>
 #include <functional>
-#include <iostream>
 #include <memory>
 #include <mutex>
-#include <queue>
-#include <sstream>
+#include <optional>
 #include <string>
 #include <thread>
 #include <unordered_set>
@@ -649,8 +645,7 @@ void Engine::reentrant_thread_init() {
 }
 
 void Engine::thread_on_exception(
-    // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    std::shared_ptr<GraphTask> graph_task,
+    const std::shared_ptr<GraphTask>& graph_task,
     const std::shared_ptr<Node>& fn,
     std::exception& e) {
   graph_task->set_exception(std::current_exception(), fn);
@@ -735,10 +730,10 @@ void GraphTask::exec_post_processing() {
     for (const auto& leaf_stream : leaf_streams) {
       // stash_current_cuda/privateuse1_streams() stashed streams for all device
       // IDs that already had a CUDA/privateuse1 context before the GraphTask
-      // executed. For inactive devices, it stashed a c10::nullopt. I don't
+      // executed. For inactive devices, it stashed a std::nullopt. I don't
       // expect GraphTask's backward pass ran leaf nodes on any new devices, so
       // the stashed streams should be enough. If leaf_stream.device_index()
-      // happens to be for a new device, operator* on the c10::nullopt should
+      // happens to be for a new device, operator* on the std::nullopt should
       // throw an error.
       const auto caller_current_stream =
           // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
@@ -824,9 +819,15 @@ static variable_list call_tensor_pre_hooks(Node& fn, variable_list inputs) {
 static variable_list call_post_hooks(
     Node& fn,
     variable_list outputs,
-    const variable_list& inputs) {
+    const variable_list& inputs,
+    const bool had_post_hooks) {
   for (const auto& hook : fn.post_hooks()) {
-    outputs = (*hook)(outputs, inputs);
+    if (had_post_hooks) {
+      outputs = (*hook)(outputs, inputs);
+    } else {
+      variable_list null_inputs;
+      outputs = (*hook)(outputs, null_inputs);
+    }
   }
   return outputs;
 }
@@ -981,11 +982,8 @@ static variable_list call_function(
     return ss.str();
   });
 
-  if (has_post_hooks) {
-    // NOLINTNEXTLINE(bugprone-use-after-move)
-    return call_post_hooks(fn, std::move(outputs), inputs);
-  }
-  return outputs;
+  // NOLINTNEXTLINE(bugprone-use-after-move)
+  return call_post_hooks(fn, std::move(outputs), inputs, has_post_hooks);
 }
 
 void Engine::evaluate_function(
@@ -1554,7 +1552,7 @@ void GraphTask::stash_current_streams() {
               idx)) {
         caller_current_streams_[idx] = guard.getStream({accelerator, idx});
       } else {
-        caller_current_streams_[idx] = c10::nullopt;
+        caller_current_streams_[idx] = std::nullopt;
       }
     }
   }

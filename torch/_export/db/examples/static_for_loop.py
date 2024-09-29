@@ -12,6 +12,6 @@ class StaticForLoop(torch.nn.Module):
             ret.append(i + x)
         return ret
 
-example_inputs = (torch.randn(3, 2),)
+example_args = (torch.randn(3, 2),)
 tags = {"python.control-flow"}
 model = StaticForLoop()

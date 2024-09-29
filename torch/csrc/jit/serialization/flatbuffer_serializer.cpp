@@ -68,7 +68,7 @@ auto print_type(const c10::Type& t) -> std::optional<std::string> {
   if (auto dyn = t.castRaw<c10::DynamicType>()) {
     return dyn->fallback()->annotation_str();
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 class FlatbufferSerializer {
@@ -305,7 +305,7 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
     if (auto dyn = t.castRaw<c10::DynamicType>()) {
       return dyn->fallback()->annotation_str();
     }
-    return c10::nullopt;
+    return std::nullopt;
   };
 
   flatbuffers::Offset<mobile::serialization::Schema> schema_offset = 0;
@@ -518,7 +518,6 @@ flatbuffers::Offset<mobile::serialization::ObjectType> FlatbufferSerializer::
   } else {
     size_t num_attr = class_ptr->numAttributes();
     std::vector<flatbuffers::Offset<flatbuffers::String>> names;
-    std::vector<uint32_t> type_index;
     for (size_t i = 0; i < num_attr; ++i) {
       names.push_back(fbb.CreateSharedString(class_ptr->getAttributeName(i)));
     }

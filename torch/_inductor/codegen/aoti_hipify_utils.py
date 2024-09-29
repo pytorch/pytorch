@@ -2,8 +2,8 @@
 import re
 
 import torch
-
 from torch.utils.hipify.hipify_python import PYTORCH_MAP, PYTORCH_TRIE
+
 
 # It is not a good idea to directly apply hipify_torch to codegen, which will be vulnerable to cases like:
 #   "...

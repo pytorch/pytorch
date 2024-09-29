@@ -227,7 +227,7 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
   // sizes with only small prime factors can still be cached
   bool use_caching = true;
 #ifdef CUFFT_VERSION
-  if (10300 <= CUFFT_VERSION && CUFFT_VERSION < 10400) {
+  if constexpr (10300 <= CUFFT_VERSION && CUFFT_VERSION < 10400) {
     // Only cache plans for transforms with small prime factors
     use_caching = std::none_of(
         signal_size.begin() + 1, signal_size.end(), [](int64_t dim_size) {

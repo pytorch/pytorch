@@ -17,9 +17,7 @@ from unittest import main, mock, skip, TestCase
 from urllib.error import HTTPError
 
 from github_utils import gh_graphql
-
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
-
 from trymerge import (
     categorize_checks,
     DRCI_CHECKRUN_NAME,
@@ -38,6 +36,7 @@ from trymerge import (
     remove_job_name_suffix,
     validate_revert,
 )
+
 
 if "GIT_REMOTE_URL" not in os.environ:
     os.environ["GIT_REMOTE_URL"] = "https://github.com/pytorch/pytorch"

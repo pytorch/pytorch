@@ -58,7 +58,7 @@ Tensor dot_mps(const Tensor& self, const Tensor& other) {
 
   dot_check(self, other);
 
-  auto output = at::empty({}, self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  auto output = at::empty({}, self.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
 
   MPSStream* stream = at::mps::getCurrentMPSStream();
 

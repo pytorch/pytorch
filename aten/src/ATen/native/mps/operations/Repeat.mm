@@ -62,14 +62,6 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
   auto stream = at::mps::getCurrentMPSStream();
   auto inputDataType = getMPSDataType(expanded_tensor);
   auto outputDataType = getMPSDataType(result);
-  if (!is_macos_13_or_newer()) {
-    if (expanded_tensor.scalar_type() == kBool) {
-      inputDataType = MPSDataTypeInt8;
-    }
-    if (result.scalar_type() == kBool) {
-      outputDataType = MPSDataTypeInt8;
-    }
-  }
 
   @autoreleasepool {
     string key = "repeat_mps:" + getTensorsStringKey(self) + ":" + getArrayRefString(repeats);
@@ -150,7 +142,7 @@ void computeRepeatIndices(const index_t* repeat_ptr,
   });
 }
 
-Tensor repeat_interleave_mps(const Tensor& repeat_, c10::optional<int64_t> output_size) {
+Tensor repeat_interleave_mps(const Tensor& repeat_, std::optional<int64_t> output_size) {
   Tensor output;
   Tensor repeat = repeat_;
   if (repeat.scalar_type() == kLong && !is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS)) {

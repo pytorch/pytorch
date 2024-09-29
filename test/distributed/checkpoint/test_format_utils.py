@@ -4,7 +4,6 @@ import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
-
 import torch.nn.functional as F
 from torch.distributed._tensor.device_mesh import init_device_mesh
 from torch.distributed.checkpoint.format_utils import (
@@ -24,7 +23,7 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 class SimpleModelUneven(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         torch.manual_seed(0)
         self.net1 = nn.Linear(5, 10)

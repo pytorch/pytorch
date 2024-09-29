@@ -16,6 +16,6 @@ class NullContextManager(torch.nn.Module):
         with ctx:
             return x.sin() + x.cos()
 
-example_inputs = (torch.randn(3, 2),)
+example_args = (torch.randn(3, 2),)
 tags = {"python.context-manager"}
 model = NullContextManager()

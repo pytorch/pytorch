@@ -8,6 +8,7 @@ appropriate file under the `torch/ao/nn/quantized/modules`,
 while adding an import statement here.
 """
 
-__all__ = ['Dropout']
-
 from torch.ao.nn.quantized.modules.dropout import Dropout
+
+
+__all__ = ["Dropout"]

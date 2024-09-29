@@ -440,6 +440,20 @@ int CUDAHooks::getNumGPUs() const {
   return at::cuda::device_count();
 }
 
+#ifdef USE_ROCM
+bool CUDAHooks::isGPUArch(DeviceIndex device_index, const std::vector<std::string>& archs) const {
+  hipDeviceProp_t* prop = at::cuda::getDeviceProperties(device_index);
+  std::string device_arch = prop->gcnArchName;
+  for (std::string arch : archs) {
+      size_t substring = device_arch.find(arch);
+      if (substring != std::string::npos) {
+          return true;
+      }
+  }
+  return false;
+}
+#endif
+
 void CUDAHooks::deviceSynchronize(DeviceIndex device_index) const {
   at::DeviceGuard device_guard(at::Device(at::DeviceType::CUDA, device_index));
   c10::cuda::device_synchronize();

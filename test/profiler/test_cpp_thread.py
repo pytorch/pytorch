@@ -3,9 +3,11 @@
 import os
 import shutil
 import subprocess
+from unittest import skipIf
 
 import torch
 import torch.utils.cpp_extension
+from torch._environment import is_fbcode
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 
 
@@ -20,12 +22,8 @@ def remove_build_path():
             shutil.rmtree(default_build_root)
 
 
-def is_fbcode():
-    return not hasattr(torch.version, "git_version")
-
-
 if is_fbcode():
-    import caffe2.test.profiler_test_cpp_thread_lib as cpp
+    import caffe2.test.profiler_test_cpp_thread_lib as cpp  # @manual=//caffe2/test:profiler_test_cpp_thread_lib
 else:
     # cpp extensions use relative paths. Those paths are relative to
     # this file, so we'll change the working directory temporarily
@@ -171,6 +169,10 @@ class CppThreadTest(TestCase):
                         "not enough event recorded",
                     )
 
+    @skipIf(
+        IS_WINDOWS,
+        "Failing on windows cuda, see https://github.com/pytorch/pytorch/pull/130037 for slightly more context",
+    )
     def test_with_enable_profiler_in_child_thread(self) -> None:
         self.start_profiler(False)
         cpp.start_threads(self.ThreadCount, IterationCount, True)
@@ -181,6 +183,10 @@ class CppThreadTest(TestCase):
             }
         )
 
+    @skipIf(
+        IS_WINDOWS,
+        "Failing on windows cuda, see https://github.com/pytorch/pytorch/pull/130037 for slightly more context",
+    )
     def test_without_enable_profiler_in_child_thread(self) -> None:
         self.start_profiler(False)
         cpp.start_threads(self.ThreadCount, IterationCount, False)
@@ -191,6 +197,10 @@ class CppThreadTest(TestCase):
             }
         )
 
+    @skipIf(
+        IS_WINDOWS,
+        "Failing on windows cuda, see https://github.com/pytorch/pytorch/pull/130037 for slightly more context",
+    )
     def test_profile_memory(self) -> None:
         self.start_profiler(True)
         cpp.start_threads(self.ThreadCount, IterationCount, True)

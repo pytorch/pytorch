@@ -19,5 +19,5 @@ class Decorator(torch.nn.Module):
     def forward(self, x, y):
         return x + y
 
-example_inputs = (torch.randn(3, 2), torch.randn(3, 2))
+example_args = (torch.randn(3, 2), torch.randn(3, 2))
 model = Decorator()

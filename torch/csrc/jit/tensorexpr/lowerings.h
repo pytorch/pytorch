@@ -8,9 +8,7 @@
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 using ArgNone = std::monostate;
 using BufList = std::vector<tensorexpr::BufHandle>;
@@ -41,9 +39,7 @@ TORCH_API NNCLoweringFunction getStandardLoweringFor(const std::string& op);
 struct RegisterNNCLoweringsFunction {
   RegisterNNCLoweringsFunction(
       const std::vector<std::string>& schemas,
-      NNCLoweringFunction fn);
+      const NNCLoweringFunction& fn);
 };
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

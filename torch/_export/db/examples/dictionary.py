@@ -12,6 +12,6 @@ class Dictionary(torch.nn.Module):
         y = y * elements["x2"]
         return {"y": y}
 
-example_inputs = (torch.randn(3, 2), torch.tensor(4))
+example_args = (torch.randn(3, 2), torch.tensor(4))
 tags = {"python.data-structure"}
 model = Dictionary()

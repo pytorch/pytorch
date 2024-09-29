@@ -149,7 +149,6 @@ mobile::Code compileGraphToMobileCode(
 
   // operator names
   std::vector<std::string> method_names;
-  std::vector<int64_t> op_debug_handles;
   int next_new_op_index = 0;
 
   auto op_to_specified_args = code.op_to_num_specified_args();
@@ -166,7 +165,7 @@ mobile::Code compileGraphToMobileCode(
       // and is not allowed. For an operator with num_args = -1, it means the
       // number of arguments is not available for this operator, we don't do any
       // backward compatibility adaptation at runtime.
-      std::optional<int> num_args = c10::nullopt;
+      std::optional<int> num_args = std::nullopt;
       auto it = op_to_specified_args.find(unique_name);
       if (it != op_to_specified_args.end()) {
         num_args = it->second;

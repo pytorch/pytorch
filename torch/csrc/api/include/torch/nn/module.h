@@ -116,7 +116,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   ///   easier-to-use polymorphic interface.
   /// \endrst
   virtual std::shared_ptr<Module> clone(
-      const optional<Device>& device = nullopt) const;
+      const std::optional<Device>& device = std::nullopt) const;
 
   /// Applies the `function` to the `Module` and recursively to every submodule.
   /// The function must accept a `Module&`.
@@ -577,7 +577,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   // Private methods.
 
   /// Used in the implementation of `Cloneable`.
-  virtual void clone_(Module& other, const optional<Device>& device);
+  virtual void clone_(Module& other, const std::optional<Device>& device);
 
   /// The implementation of the various `to()` methods.
   template <typename... Ts>
@@ -604,7 +604,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   OrderedDict<std::string, std::shared_ptr<Module>> children_;
 
   /// The module's name (e.g. "LSTM").
-  mutable optional<std::string> name_;
+  mutable std::optional<std::string> name_;
 
   /// Whether the module is in training mode.
   bool is_training_{true};

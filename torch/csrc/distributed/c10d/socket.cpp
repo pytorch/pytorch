@@ -7,6 +7,7 @@
 #include <torch/csrc/distributed/c10d/socket.h>
 
 #include <cstring>
+#include <optional>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -31,13 +32,14 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated")
 #include <fmt/chrono.h>
 C10_DIAGNOSTIC_POP()
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <torch/csrc/distributed/c10d/error.h>
 #include <torch/csrc/distributed/c10d/exception.h>
 #include <torch/csrc/distributed/c10d/logging.h>
+#include <torch/csrc/distributed/c10d/socket_fmt.h>
 
 #include <c10/util/CallOnce.h>
-#include <c10/util/Optional.h>
 
 namespace c10d::detail {
 namespace {
@@ -140,10 +142,9 @@ class SocketImpl {
   static constexpr Handle invalid_socket = -1;
 #endif
 
-  explicit SocketImpl(
-      Handle hnd,
-      c10::optional<::addrinfo> remote = c10::nullopt) noexcept
-      : hnd_{hnd}, remote_(remote) {}
+  explicit SocketImpl(Handle hnd) noexcept : hnd_{hnd} {}
+
+  explicit SocketImpl(Handle hnd, const ::addrinfo& remote);
 
   SocketImpl(const SocketImpl& other) = delete;
 
@@ -181,7 +182,7 @@ class SocketImpl {
     return hnd_;
   }
 
-  const c10::optional<::addrinfo>& remote() const noexcept {
+  const std::optional<std::string>& remote() const noexcept {
     return remote_;
   }
 
@@ -191,8 +192,45 @@ class SocketImpl {
   bool setSocketFlag(int level, int optname, bool value) noexcept;
 
   Handle hnd_;
-  const c10::optional<::addrinfo> remote_;
+  const std::optional<std::string> remote_;
 };
+
+std::string formatSockAddr(const struct ::sockaddr* addr, socklen_t len) {
+  char host[NI_MAXHOST], port[NI_MAXSERV]; // NOLINT
+
+  if (int err = ::getnameinfo(
+          addr, len, host, NI_MAXHOST, port, NI_MAXSERV, NI_NUMERICSERV)) {
+    C10D_WARNING(
+        "The hostname of the client socket cannot be retrieved. err={}", err);
+
+    // if we can't resolve the hostname, display the IP address
+    if (addr->sa_family == AF_INET) {
+      struct sockaddr_in* psai = (struct sockaddr_in*)&addr;
+      char ip[INET_ADDRSTRLEN];
+      if (inet_ntop(addr->sa_family, &(psai->sin_addr), ip, INET_ADDRSTRLEN) !=
+          NULL) {
+        return fmt::format("{}:{}", ip, psai->sin_port);
+      }
+    } else if (addr->sa_family == AF_INET6) {
+      struct sockaddr_in6* psai = (struct sockaddr_in6*)&addr;
+      char ip[INET6_ADDRSTRLEN];
+      if (inet_ntop(
+              addr->sa_family, &(psai->sin6_addr), ip, INET6_ADDRSTRLEN) !=
+          NULL) {
+        return fmt::format("[{}]:{}", ip, psai->sin6_port);
+      }
+    }
+
+    C10_THROW_ERROR(
+        DistNetworkError,
+        fmt::format(
+            "failed to format addr, unknown family={}", addr->sa_family));
+  }
+  if (addr->sa_family == AF_INET) {
+    return fmt::format("{}:{}", host, port);
+  }
+  return fmt::format("[{}]:{}", host, port);
+}
 } // namespace c10d::detail
 
 //
@@ -208,45 +246,10 @@ struct formatter<::addrinfo> {
 
   template <typename FormatContext>
   decltype(auto) format(const ::addrinfo& addr, FormatContext& ctx) const {
-    char host[NI_MAXHOST], port[NI_MAXSERV]; // NOLINT
-
-    int r = ::getnameinfo(
-        addr.ai_addr,
-        addr.ai_addrlen,
-        host,
-        NI_MAXHOST,
-        port,
-        NI_MAXSERV,
-        NI_NUMERICSERV);
-    if (r != 0) {
-      // if we can't resolve the hostname, display the IP address
-      if (addr.ai_family == AF_INET) {
-        struct sockaddr_in* psai = (struct sockaddr_in*)addr.ai_addr;
-        char ip[INET_ADDRSTRLEN];
-        if (inet_ntop(addr.ai_family, &(psai->sin_addr), ip, INET_ADDRSTRLEN) !=
-            NULL) {
-          return fmt::format_to(ctx.out(), "{}:{}", ip, psai->sin_port);
-        }
-      } else if (addr.ai_family == AF_INET6) {
-        struct sockaddr_in6* psai = (struct sockaddr_in6*)addr.ai_addr;
-        char ip[INET6_ADDRSTRLEN];
-        if (inet_ntop(
-                addr.ai_family, &(psai->sin6_addr), ip, INET6_ADDRSTRLEN) !=
-            NULL) {
-          return fmt::format_to(ctx.out(), "[{}]:{}", ip, psai->sin6_port);
-        }
-      }
-      C10_THROW_ERROR(
-          DistNetworkError,
-          fmt::format(
-              "failed to format addr, unknown family={}", addr.ai_family));
-    }
-
-    if (addr.ai_addr->sa_family == AF_INET) {
-      return fmt::format_to(ctx.out(), "{}:{}", host, port);
-    } else {
-      return fmt::format_to(ctx.out(), "[{}]:{}", host, port);
-    }
+    return fmt::format_to(
+        ctx.out(),
+        "{}",
+        c10d::detail::formatSockAddr(addr.ai_addr, addr.ai_addrlen));
   }
 };
 
@@ -277,7 +280,7 @@ struct formatter<c10d::detail::SocketImpl> {
     addr.ai_addrlen = addr_len;
 
     auto remote = socket.remote();
-    std::string remoteStr = remote ? fmt::format("{}", *remote) : "none";
+    std::string remoteStr = remote ? *remote : "none";
 
     return fmt::format_to(
         ctx.out(),
@@ -291,6 +294,9 @@ struct formatter<c10d::detail::SocketImpl> {
 } // namespace fmt
 
 namespace c10d::detail {
+
+SocketImpl::SocketImpl(Handle hnd, const ::addrinfo& remote)
+    : hnd_{hnd}, remote_{fmt::format("{}", remote)} {}
 
 SocketImpl::~SocketImpl() {
 #ifdef _WIN32

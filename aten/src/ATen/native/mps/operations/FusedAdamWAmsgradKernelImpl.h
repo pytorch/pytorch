@@ -1,41 +1,39 @@
 #pragma once
 #include <ATen/core/Tensor.h>
 
-namespace at::native {
-namespace mps {
+namespace at::native::mps {
 
 void _fused_adamw_amsgrad_mps_impl_(
-    at::TensorList params,
-    at::TensorList grads,
-    at::TensorList exp_avgs,
-    at::TensorList exp_avg_sqs,
-    at::TensorList max_exp_avg_sqs,
-    at::TensorList state_steps,
+    TensorList params,
+    TensorList grads,
+    TensorList exp_avgs,
+    TensorList exp_avg_sqs,
+    TensorList max_exp_avg_sqs,
+    TensorList state_steps,
     const double lr,
     const double beta1,
     const double beta2,
     const double weight_decay,
     const double eps,
     const bool maximize,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf
+    const std::optional<Tensor>& grad_scale,
+    const std::optional<Tensor>& found_inf
 );
 
 void _fused_adamw_amsgrad_mps_impl_(
-    at::TensorList params,
-    at::TensorList grads,
-    at::TensorList exp_avgs,
-    at::TensorList exp_avg_sqs,
-    at::TensorList max_exp_avg_sqs,
-    at::TensorList state_steps,
-    const at::Tensor& lr,
+    TensorList params,
+    TensorList grads,
+    TensorList exp_avgs,
+    TensorList exp_avg_sqs,
+    TensorList max_exp_avg_sqs,
+    TensorList state_steps,
+    const Tensor& lr,
     const double beta1,
     const double beta2,
     const double weight_decay,
     const double eps,
     const bool maximize,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf
+    const std::optional<Tensor>& grad_scale,
+    const std::optional<Tensor>& found_inf
 );
-} //namespace mps
-}// namespace at::native
+} // namespace at::native::mps

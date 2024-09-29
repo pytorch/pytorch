@@ -17,7 +17,9 @@ from _pytest.python import Module
 from _pytest.reports import TestReport
 from _pytest.stash import StashKey
 from _pytest.terminal import _get_raw_skip_reason
+
 from pytest_shard_custom import pytest_addoptions as shard_addoptions, PytestShardPlugin
+
 
 if TYPE_CHECKING:
     from _pytest._code.code import ReprFileLocation
@@ -30,24 +32,9 @@ STEPCURRENT_CACHE_DIR = "cache/stepcurrent"
 
 def pytest_addoption(parser: Parser) -> None:
     group = parser.getgroup("general")
-    group.addoption(
-        "--scs",
-        action="store",
-        default=None,
-        dest="stepcurrent_skip",
-    )
-    group.addoption(
-        "--sc",
-        action="store",
-        default=None,
-        dest="stepcurrent",
-    )
-    group.addoption(
-        "--rs",
-        action="store",
-        default=None,
-        dest="run_single",
-    )
+    group.addoption("--scs", action="store", default=None, dest="stepcurrent_skip")
+    group.addoption("--sc", action="store", default=None, dest="stepcurrent")
+    group.addoption("--rs", action="store", default=None, dest="run_single")
 
     parser.addoption("--use-main-module", action="store_true")
     group = parser.getgroup("terminal reporting")

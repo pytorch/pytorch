@@ -27,7 +27,7 @@ Tensor scalar_tensor_static(const Scalar& s, std::optional<ScalarType> dtype_opt
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
   at::AutoDispatchBelowAutograd mode;
   Tensor result = at::detail::empty_cpu(
-      {}, dtype_opt, c10::nullopt, device_opt, c10::nullopt, c10::nullopt);
+      {}, dtype_opt, std::nullopt, device_opt, std::nullopt, std::nullopt);
   scalar_fill(result, s);
   return result;
 }
