@@ -1,5 +1,4 @@
 # Owner(s): ["module: custom-operators"]
-# ruff: noqa: F841
 
 import collections
 import itertools

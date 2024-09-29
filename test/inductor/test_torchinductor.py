@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-# ruff: noqa: F841
 import contextlib
 import copy
 import dataclasses
@@ -8110,6 +8109,18 @@ class CommonTemplate:
             return out, torch.view_as_real(z + 1)
 
         self.common(f, (torch.zeros((4, 2)),))
+
+    def test_softmax_backward_data(self):
+        def fn(a, b):
+            return aten._softmax_backward_data(a, b, dim=1, input_dtype=torch.float32)
+
+        self.common(
+            fn,
+            (
+                torch.randn(10, 10),
+                torch.randn(10, 10),
+            ),
+        )
 
     def test_randn_like_empty(self):
         class Model(torch.nn.Module):

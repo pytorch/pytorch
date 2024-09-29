@@ -1,5 +1,4 @@
 # mypy: allow-untyped-decorators
-# ruff: noqa: F841
 # mypy: allow-untyped-defs
 # Owner(s): ["module: tests"]
 

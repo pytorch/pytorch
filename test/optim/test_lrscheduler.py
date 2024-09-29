@@ -1,5 +1,4 @@
 # Owner(s): ["module: optimizer", "module: LrScheduler" ]
-# ruff: noqa: F841
 import copy
 import math
 import pickle

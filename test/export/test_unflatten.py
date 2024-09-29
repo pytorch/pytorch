@@ -495,8 +495,7 @@ class TestUnflatten(TestCase):
 
         inp = (torch.randn(4, 4), [torch.randn(4, 4), torch.randn(4, 4)])
         mod = Foo()
-
-        ep_strict = torch.export.export(mod, inp)  # noqa: F841
+        ep_strict = torch.export.export(mod, inp)
         ep_non_strict = torch.export.export(mod, inp, strict=False)
 
         gm_unflat_non_strict = unflatten(ep_non_strict)
@@ -608,7 +607,7 @@ class TestUnflatten(TestCase):
         init_torchbind_implementations()
 
         @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
-        class FakeFoo:  # noqa: F841
+        class FakeFoo:
             def __init__(self, x: int, y: int):
                 self.x = x
                 self.y = y
@@ -685,7 +684,7 @@ class TestUnflatten(TestCase):
         # The call chain looks like this:
         # A -> B -> C -> A.d
         ep = torch.export.export(a, (torch.randn(3),), strict=False)
-        unflatten(ep)
+        unflattened = unflatten(ep)
 
     def test_nested_leaf_non_strict(self):
         class Leaf(torch.nn.Module):

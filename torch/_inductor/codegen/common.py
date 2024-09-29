@@ -898,6 +898,11 @@ class OpOverrides:
         return ops.where(cond, ops.add(r, b), r)
 
     @staticmethod
+    def fma(x, y, z):
+        # for backends that don't override this (halide)
+        return ops.add(ops.mul(x, y), z)
+
+    @staticmethod
     def trunc_to_int(a, dtype):
         return ops.to_dtype(ops.trunc(a), dtype)
 
@@ -2156,7 +2161,7 @@ class KernelTemplate:
                         end = min(len(lines), self.lineno + 2)
                         for i in range(start, end):
                             if i == self.lineno - 1:
-                                error_info += f"{i+1}: --> {lines[i]}\n"
+                                error_info += f"{i + 1}: --> {lines[i]}\n"
                                 if hasattr(self.original_error, "column"):
                                     error_info += (
                                         "     "
@@ -2164,7 +2169,7 @@ class KernelTemplate:
                                         + "^\n"
                                     )
                             else:
-                                error_info += f"{i+1}:     {lines[i]}\n"
+                                error_info += f"{i + 1}:     {lines[i]}\n"
                     return error_info
 
             try:

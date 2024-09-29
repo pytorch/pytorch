@@ -1,5 +1,4 @@
 # Owner(s): ["module: tests"]
-# ruff: noqa: F841
 
 import itertools
 import math

@@ -1,5 +1,4 @@
 # Owner(s): ["oncall: jit"]
-# ruff: noqa: F841
 
 import os
 import re

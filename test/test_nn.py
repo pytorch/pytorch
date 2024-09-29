@@ -1,5 +1,4 @@
 # Owner(s): ["module: nn"]
-# ruff: noqa: F841
 
 import contextlib
 import math

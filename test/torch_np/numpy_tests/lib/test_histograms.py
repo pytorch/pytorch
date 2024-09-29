@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-# ruff: noqa: F841
 
 import functools
 from unittest import expectedFailure as xfail, skipIf

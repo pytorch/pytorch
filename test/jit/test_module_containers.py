@@ -355,7 +355,7 @@ class TestModuleContainers(JitTestCase):
 
         m = MyModule()
         self.checkModule(m, [torch.randn(2, 2)])
-        torch.jit.script(m)
+        mm = torch.jit.script(m)
 
     def test_moduledict_getitem(self):
         class MyModule(torch.nn.Module):

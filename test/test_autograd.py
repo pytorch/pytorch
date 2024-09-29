@@ -1,5 +1,4 @@
 # Owner(s): ["module: autograd"]
-# ruff: noqa: F841
 
 import collections
 import contextlib

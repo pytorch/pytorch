@@ -1,5 +1,4 @@
 # Owner(s): ["module: __torch_dispatch__"]
-# ruff: noqa: F841
 
 import logging
 import sys

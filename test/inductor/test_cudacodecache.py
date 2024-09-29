@@ -40,7 +40,9 @@ int saxpy(int n, float a, float *x, float *y) {
 class TestCUDACodeCache(InductorTestCase):
     def test_cuda_load(self):
         # Test both .o and .so compilation.
-        _, object_hash_key, source_code_path0 = CUDACodeCache.compile(_SOURCE_CODE, "o")
+        object_file_path, object_hash_key, source_code_path0 = CUDACodeCache.compile(
+            _SOURCE_CODE, "o"
+        )
         dll_wrapper, so_hash_key, source_code_path1 = CUDACodeCache.load(
             _SOURCE_CODE, "so"
         )
@@ -52,7 +54,7 @@ class TestCUDACodeCache(InductorTestCase):
         y = torch.rand(10).float().cuda()
         a = 5.0
         expected_y = a * x + y
-        dll_wrapper.saxpy(
+        res = dll_wrapper.saxpy(
             ctypes.c_int(10),
             ctypes.c_float(a),
             ctypes.c_void_p(x.data_ptr()),
@@ -75,7 +77,7 @@ class TestCUDACodeCache(InductorTestCase):
         y = torch.rand(5).float().cuda()
         a = 2.0
         expected_y = a * x + y
-        compiled_res.result().saxpy(
+        res = compiled_res.result().saxpy(
             ctypes.c_int(5),
             ctypes.c_float(a),
             ctypes.c_void_p(x.data_ptr()),

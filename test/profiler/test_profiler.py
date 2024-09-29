@@ -1,5 +1,4 @@
 # Owner(s): ["oncall: profiler"]
-# ruff: noqa: F841
 
 import collections
 import gc
