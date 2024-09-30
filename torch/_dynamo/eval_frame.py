@@ -560,8 +560,8 @@ class OptimizeContext(_TorchDynamoContext):
             def call_compiled_autograd():
                 assert rebuild_ctx is not None
                 extra_kwargs = {}
-                if config.compiled_autograd_fullgraph:
-                    extra_kwargs["nopython"] = True
+                if config.compiled_autograd_fullgraph is not None:
+                    extra_kwargs["nopython"] = config.compiled_autograd_fullgraph
                 compiler_fn = rebuild_ctx(**extra_kwargs)
                 ctx = torch._dynamo.compiled_autograd.enable(compiler_fn)
                 ctx.__enter__()
