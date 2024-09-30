@@ -1892,7 +1892,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         implicit_bias_spda_gold = bias_spda_gold[bias_indices]
 
-        self.test_learnable_bias_inner(
+        self._test_learnable_bias_inner(
             B,
             H,
             S,
@@ -1922,7 +1922,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         implicit_bias_spda_gold = bias_spda_gold
 
-        self.test_learnable_bias_inner(
+        self._test_learnable_bias_inner(
             B,
             H,
             S,
@@ -1951,7 +1951,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         implicit_bias_spda_gold = bias_spda_gold.transpose(-1, -2)
 
-        self.test_learnable_bias_inner(
+        self._test_learnable_bias_inner(
             B,
             H,
             S,
@@ -1982,7 +1982,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         implicit_bias_spda_gold = bias_spda_gold.transpose(-1, -2)
 
-        self.test_learnable_bias_inner(
+        self._test_learnable_bias_inner(
             B,
             H,
             S,
@@ -1995,7 +1995,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             bias_spda_gold,
         )
 
-    def test_learnable_bias_inner(
+    def _test_learnable_bias_inner(
         self,
         B,
         H,
