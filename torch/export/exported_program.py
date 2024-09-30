@@ -303,8 +303,6 @@ def _split_decomp_table_to_cia_and_python_decomp(
             all_preservable_cia_ops.remove(op)
             del decomp_table[op]
 
-        # By default we only query CIA ops above, but it could be that
-
     # If we reached here, it means user intentionally deleted these CIA ops from
     # decomp table.
     for k in all_preservable_cia_ops:
@@ -1082,6 +1080,8 @@ class ExportedProgram:
         for op in _preserve_ops:
             if op in _decomp_table:
                 del _decomp_table[op]
+            # This is needed when the op they want to preserve is a
+            # CIA op.
             elif _is_preservable_cia_op(op):
                 _decomp_table[op] = _special_op_to_preserve_cia
 
