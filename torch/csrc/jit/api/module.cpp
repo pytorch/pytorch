@@ -564,7 +564,6 @@ std::string Module::dump_to_str(
   std::stringstream parameters_ss;
   std::stringstream attributes_ss;
   std::stringstream methods_ss;
-  std::stringstream submodules_ss;
 
   for (const NameTensor& p : named_parameters(/*recurse=*/false)) {
     parameters_ss << p.name << " = ";

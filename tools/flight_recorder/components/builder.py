@@ -203,7 +203,11 @@ def build_collectives(
         entries = all_entries[first_rank]
         pg_name, desc = entries[0]["process_group"]
         profiling_name = entries[0]["profiling_name"]
-        pg_name = _pg_guids[(pg_name, first_rank)]
+        original_pg_name = pg_name  # For db build and logs printing, we want to use the original pg_name, not the hash one.
+        pg_desc = (
+            f"{original_pg_name}:{desc}" if desc != "undefined" else original_pg_name
+        )
+        pg_name = _pg_guids[(original_pg_name, first_rank)]
         collective_seq_id = entries[0]["collective_seq_id"]
         record_id = entries[0]["record_id"]
         input_sizes = entries[0]["input_sizes"]
@@ -262,7 +266,7 @@ def build_collectives(
                             all_entries[r].pop(i),  # type: ignore[index]
                             id=len(nccl_calls),
                             collective_id=collectives[-1].id if match else None,
-                            group_id=pg_name,
+                            group_id=original_pg_name,
                             global_rank=r,
                         )
                     )
@@ -308,7 +312,7 @@ def build_collectives(
             if (candidate_ranks | found_ranks) != expected_ranks:
                 mismatch[pg_name] += 1
                 print(
-                    f"Not all ranks joining collective for group {pg_name}:{desc} collective {profiling_name} ",
+                    f"Not all ranks joining collective {record_id} for group {pg_desc} collective {profiling_name} ",
                     f"Missing ranks are {expected_ranks - (candidate_ranks | found_ranks)} ",
                     f"{input_sizes} {output_sizes} {len(expected_ranks)} {collective_state} ",
                     f"\nCollective stack traces: \n{collective_frames}",
@@ -331,7 +335,7 @@ def build_collectives(
                         mismatch[pg_name] += 1
                         print(
                             f"Input/output mismatch in the collective {record_id} ",
-                            f"for group {pg_name}:{desc} collective {profiling_name} ",
+                            f"for group {pg_desc} collective {profiling_name} ",
                             f"input_numel {input_numel} output_numel {output_numel} ",
                             f"{input_sizes} {output_sizes} {len(expected_ranks)} {collective_state} ",
                             f"\nCollective stack traces: \n{collective_frames}",
@@ -355,12 +359,12 @@ def build_collectives(
             elif len(errors) > 0:
                 mismatch[pg_name] += 1
                 error_msg = ", ".join(
-                    f"Error rank {error[0]}, {str(error[1])}" for error in errors
+                    f"Culprit rank {error[0]}; {str(error[1])}" for error in errors
                 )
                 print(
-                    f"Collective {record_id} errors for group {pg_name}:{desc} collective {profiling_name} ",
+                    f"Collective {record_id} errors for group {pg_desc} collective {profiling_name} ",
                     f"{input_sizes} {output_sizes} {len(expected_ranks)} {collective_state} ",
-                    f"\nFound errors: {error_msg}\n",
+                    f"\nFound errors: {error_msg}.\n",
                     f"\nCollective stack traces: \n{collective_frames} ",
                 )
                 candidate_ranks.update(found_ranks)
@@ -372,7 +376,9 @@ def build_collectives(
             # 1. we found a match on all the ranks that are members of the group
             #  -> we create a Collective and remove the individual entries from their original lists
             if found_ranks == expected_ranks and mismatch[pg_name] == 0:
-                collectives.append(Collective(id=len(collectives), group_id=pg_name))
+                collectives.append(
+                    Collective(id=len(collectives), group_id=original_pg_name)
+                )
                 for r in found_ranks:
                     i = found_idx[r] if r != first_rank else 0
                     nccl_calls.append(
@@ -380,7 +386,7 @@ def build_collectives(
                             all_entries[r].pop(i),  # type: ignore[index]
                             id=len(nccl_calls),
                             collective_id=collectives[-1].id,
-                            group_id=pg_name,
+                            group_id=original_pg_name,
                             global_rank=r,
                         )
                     )
@@ -400,7 +406,7 @@ def build_collectives(
                             all_entries[r].pop(i),  # type: ignore[index]
                             id=len(nccl_calls),
                             collective_id=None,
-                            group_id=pg_name,
+                            group_id=original_pg_name,
                             global_rank=r,
                         )
                     )

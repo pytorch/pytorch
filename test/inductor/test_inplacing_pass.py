@@ -34,6 +34,10 @@ def num_reinplacing_failures():
     return counters["inductor"]["possibly_missed_reinplacing_opportunities"]
 
 
+def miss_inplaced_bytes():
+    return counters["inductor"]["possibly_missed_reinplacing_bytes"]
+
+
 @torch.library.custom_op("_reinplacing::sin", mutates_args={"result"})
 def sin(x: torch.Tensor, result: torch.Tensor) -> None:
     result.copy_(x.sin())
@@ -46,8 +50,8 @@ def sin_cos(x: torch.Tensor, out_sin: torch.Tensor, out_cos: torch.Tensor) -> No
 
 
 if HAS_GPU:
-    import triton
-    import triton.language as tl
+    import triton  # @manual
+    import triton.language as tl  # @manual
 
     @triton.jit
     def sin_kernel(
@@ -151,6 +155,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         # we're artificially creating this example to test the counter.
         # IF THIS NUMBER GOES TO ZERO, PLEASE FIND ANOTHER EXAMPLE
         self.assertEqual(num_reinplacing_failures(), 1)
+        self.assertEqual(miss_inplaced_bytes(), 12)
 
     def test_counters_functionalize_v2(self):
         counters.clear()
@@ -378,6 +383,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
             # We can inplace the base y. no clones emitted.
             self.assertEqual(num_reinplacing_failures(), 0)
+            self.assertEqual(miss_inplaced_bytes(), 0)
             self.assertEqual(post_grad_graphs.count("aten.clone"), 0)
 
     def test_lists_old_functionalize(self):
@@ -404,6 +410,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
             # Can't reinplace on views yet (1 for the "entire list" failing to reinplace)
             self.assertEqual(num_reinplacing_failures(), 1)
+            self.assertEqual(miss_inplaced_bytes(), 8)
 
             # Both list inputs failed to reinplace. So we should have emitted clones for them.
             self.assertEqual(post_grad_graphs.count("aten.clone"), 2)
