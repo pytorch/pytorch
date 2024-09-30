@@ -1061,6 +1061,8 @@ class TraceableTritonKernelWrapper:
             return self.kernel[self.grid](*args, **kwargs)
 
     def specialize_symbolic(self, arg: Any) -> Any:
+        import torch
+
         # See [Note: Specialize tl.constexpr args in user-defined triton kernels]
         if isinstance(arg, (torch.SymInt, torch.SymBool, torch.SymFloat)):
             return guard_scalar(arg)

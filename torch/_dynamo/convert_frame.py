@@ -804,7 +804,11 @@ def _compile(
             hooks.guard_fail_fn if hooks else None,
         )
 
-        guarded_code = GuardedCode(out_code, check_fn.check_fn, compile_id)
+        compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
+        annotation_str = "Torch-Compiled Region: " + compile_id_str
+        guarded_code = GuardedCode(
+            out_code, check_fn.check_fn, compile_id, annotation_str
+        )
 
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:
             # We should not run the guard_export_fn when Dynamo does not
@@ -1102,7 +1106,11 @@ class ConvertFrame:
         frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
         skip: int = 0,
     ) -> Optional[
-        Union[GuardedCode, torch._C._dynamo.eval_frame.SkipCodeRecursiveFlag]
+        Union[
+            GuardedCode,
+            torch._C._dynamo.eval_frame.SkipCodeRecursiveFlag,
+            torch._C._dynamo.eval_frame.CacheLimitHitFlag,
+        ]
     ]:
         counters["frames"]["total"] += 1
         try:
@@ -1173,6 +1181,10 @@ class ConvertFrame:
             # to signal to Dynamo eval frame to skip the current frame and any recursive calls.
             if isinstance(e, SkipCodeRecursiveException):
                 return torch._C._dynamo.eval_frame.skip_code_recursive_flag
+            elif isinstance(e, CacheLimitExceeded):
+                # signal to Dynamo to run this frame on run-only mode, skipping recursively if
+                # no valid cache entry is found.
+                return torch._C._dynamo.eval_frame.cache_limit_hit_flag
 
         return None
 
