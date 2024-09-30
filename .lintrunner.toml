@@ -246,7 +246,6 @@ exclude_patterns = [
     'torch/csrc/inductor/aoti_torch/c/shim.h',
     'torch/csrc/jit/**/*',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
-    'torch/csrc/lazy/**/*',
 ]
 init_command = [
     'python3',
@@ -1584,6 +1583,27 @@ command = [
     '@{{PATHSFILE}}'
 ]
 is_formatter = true
+
+
+[[linter]]
+code = 'META_NO_CREATE_UNBACKED'
+include_patterns = [
+  "torch/_meta_registrations.py"
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=create_unbacked',
+    '--linter-name=META_NO_CREATE_UNBACKED',
+    '--error-name=no create_unbacked in meta registrations',
+    """--error-description=\
+        Data-dependent operators should have their meta \
+        registration in torch/_subclasses/fake_impls.py, \
+        not torch/_meta_registrations.py
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
 
 [[linter]]
 code = 'ATEN_CPU_GPU_AGNOSTIC'
