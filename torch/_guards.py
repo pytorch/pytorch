@@ -26,7 +26,6 @@ from typing import (
     TypeVar,
 )
 
-from torch._C._dynamo.eval_frame import set_context_frame  # noqa: F401
 from torch.utils import _pytree as pytree
 from torch.utils._traceback import CapturedTraceback
 from torch.utils.weak import WeakTensorKeyDictionary
@@ -644,6 +643,8 @@ class TracingContext:
         # this is only set after aot_autograd
         self.aot_graph_name = None
         self.params_flat = None
+        self.params_flat_unwrap_subclasses = None
+        self.params_unwrapped_to_flat_index = None
         # this is for extended return calling convention from backend
         # compiler to aot_autograd
         # Per output, what the compiler specified stride of the output is,
@@ -782,15 +783,6 @@ def compile_context(context: Optional[CompileContext]):
     try:
         yield context
     finally:
-        if context is not None:
-            if context.compile_id is not None:
-                set_context_frame(
-                    (
-                        context.compile_id.frame_id,
-                        context.compile_id.frame_compile_id,
-                        context.attempt,
-                    )
-                )
         _TLS.compile_context = old_context
 
 

@@ -1240,6 +1240,7 @@ def main():
         "include/ATen/cpu/vec/vec256/zarch/*.h",
         "include/ATen/cpu/vec/vec512/*.h",
         "include/ATen/cpu/vec/*.h",
+        "include/ATen/cpu/vec/sve/*.h",
         "include/ATen/core/*.h",
         "include/ATen/cuda/*.cuh",
         "include/ATen/cuda/*.h",

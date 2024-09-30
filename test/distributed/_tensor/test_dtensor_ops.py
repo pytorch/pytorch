@@ -370,7 +370,6 @@ dtensor_fails = {
     xfail("ormqr"),
     xfail("ones"),
     xfail("pca_lowrank"),
-    xfail("permute_copy"),
     xfail("pinverse"),
     xfail("polar"),
     xfail("put"),

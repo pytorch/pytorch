@@ -30,7 +30,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.utils._triton import has_triton
 
 
 log = logging.getLogger(__name__)
@@ -44,8 +44,11 @@ def _is_fallback_op_in_snodes(snodes, op):
     return any(is_fallback_op(snode.node, op) for snode in snodes)
 
 
+orig_F_scaled_dot_product_attention = F.scaled_dot_product_attention
+
+
 class TestFullyShardCompileCompute(FSDPTest):
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_disable_compiling_hooks(self):
         self.run_subtests(
@@ -465,13 +468,21 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             res = run_iters(model, optim)
             return res
 
+        torch._dynamo.reset()
+        torch._dynamo.compiled_autograd.reset()
         with torch._dynamo.config.patch(
+            # NOTE: Setting fullgraph=False for forward (to allow graph-breaks) is a common scenario
+            # and in that case we need a standalone Compiled Autograd ctx that has fullgraph=True for backward.
+            # Hence here we explicitly set compiled_autograd=False and use the standalone Compiled Autograd ctx
+            # `maybe_compiled_autograd_ctx` created in `run_iters()`.
+            compiled_autograd=False,
             inline_inbuilt_nn_modules=True,
             skip_fsdp_hooks=False,
         ), torch._functorch.config.patch(
+            enable_autograd_cache=False,
             recompute_views=True,
-            cse=False,
         ), torch._inductor.config.patch(
+            force_disable_caches=True,
             reorder_for_compute_comm_overlap=True,
             reorder_for_compute_comm_overlap_passes=[
                 "sink_waits",
@@ -518,14 +529,14 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         return model_init_fn, input_creation_fn
 
     @skipIfRocm
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(), "aot_eager", fullgraph=True
         )
 
     @skipIfRocm
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_aot_eager_decomp_partition(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(),
@@ -534,7 +545,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         )
 
     @skipIfRocm
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_inductor(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(), "inductor", fullgraph=True
@@ -602,7 +613,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         return model_init_fn, input_creation_fn
 
     @skipIfRocm
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_aot_eager(self):
         for fullgraph in [True, False]:
             self._test_traceable_fsdp(
@@ -612,7 +623,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             )
 
     @skipIfRocm
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_aot_eager_decomp_partition(self):
         for fullgraph in [True, False]:
             self._test_traceable_fsdp(
@@ -622,9 +633,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             )
 
     @skipIfRocm
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    def test_nested_fully_shard_backend_inductor(self):
-        for fullgraph in [True, False]:
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_nested_fully_shard_backend_inductor_fullgraph_True(self):
+        for fullgraph in [True]:
             with self._reinplace_all_gather_with_optional_checks(
                 fullgraph
             ), self._maybe_run_decide_global_ordering_of_comms_with_checks(
@@ -650,8 +661,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     )
                 )
             if fullgraph:
-                self.assertTrue(
-                    len(triton_codes) == 2,
+                self.assertEqual(
+                    len(triton_codes),
+                    2,
                     "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
                 )
                 fwd_code = triton_codes[0]
@@ -715,13 +727,24 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         file_check, **bwd_rs_block_info
                     )
                 file_check.run(bwd_code)
-            else:
-                # TODO: when fullgraph=False and there is graph break in FWD graph,
-                # there are several recompiles, need to figure out why.
-                self.assertTrue(
-                    len(triton_codes) > 2,
-                    "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
-                )
+
+    @skipIfRocm
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_nested_fully_shard_backend_inductor_fullgraph_False(self):
+        _, triton_codes = run_and_get_code(
+            lambda: self._test_traceable_fsdp(
+                *self._create_nested_fully_shard_factory_fns(fullgraph=False),
+                "inductor",
+                fullgraph=False,
+            )
+        )
+        # TODO: when fullgraph=False and there is graph break in FWD graph,
+        # there are several recompiles, need to figure out why.
+        self.assertGreater(
+            len(triton_codes),
+            2,
+            "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
+        )
 
     def _create_transformer_factory_fns(
         self, all_requires_grad, *, activation_checkpoint=False
@@ -769,23 +792,21 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         return model_init_fn, input_creation_fn
 
     def _maybe_add_graph_break_to_sdpa(self, fullgraph):
-        def _sdpa_with_graph_break(orig_fn, fullgraph, *args, **kwargs):
-            if not fullgraph:
-                torch._dynamo.graph_break()
-            return orig_fn(*args, **kwargs)
+        def _sdpa_with_graph_break(*args, **kwargs):
+            torch._dynamo.graph_break()
+            return orig_F_scaled_dot_product_attention(*args, **kwargs)
 
-        return mock.patch.object(
-            F,
-            "scaled_dot_product_attention",
-            functools.partial(
+        if not fullgraph:
+            return mock.patch.object(
+                F,
+                "scaled_dot_product_attention",
                 _sdpa_with_graph_break,
-                F.scaled_dot_product_attention,
-                fullgraph,
-            ),
-        )
+            )
+        else:
+            return contextlib.nullcontext()
 
     @skipIfRocm
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_transformer_backend_aot_eager(self):
         for fullgraph, all_requires_grad in itertools.product(
             [True, False], [True, False]
@@ -802,7 +823,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 )
 
     @skipIfRocm
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout has worse accuracy after decomp, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_aot_eager_decomp_partition(self):
@@ -819,20 +840,17 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 )
 
     @skipIfRocm
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
-    def test_transformer_backend_inductor(self):
-        # TODO: enable fullgraph=False case
+    def test_transformer_backend_inductor_fullgraph_True(self):
         for fullgraph, all_requires_grad, activation_checkpoint in itertools.product(
             [True], [True, False], [True, False]
         ):
             log.warning(
                 f"fullgraph={fullgraph}, all_requires_grad={all_requires_grad}, activation_checkpoint={activation_checkpoint}"  # noqa: G004, G001
             )
-            with self._maybe_add_graph_break_to_sdpa(
-                fullgraph
-            ), self._reinplace_all_gather_with_optional_checks(
+            with self._reinplace_all_gather_with_optional_checks(
                 fullgraph
             ), self._maybe_run_decide_global_ordering_of_comms_with_checks(
                 fullgraph
@@ -861,8 +879,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     )
                 )
             if fullgraph:
-                self.assertTrue(
-                    len(triton_codes) == 2,
+                self.assertEqual(
+                    len(triton_codes),
+                    2,
                     "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
                 )
                 fwd_code = triton_codes[0]
@@ -922,13 +941,38 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                             file_check, **bwd_rs_block_info
                         )
                 file_check.run(bwd_code)
-            else:
-                # TODO: when fullgraph=False and there is graph break in FWD graph,
-                # there are several recompiles, need to figure out why.
-                self.assertTrue(
-                    len(triton_codes) > 2,
-                    "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
+
+    @skipIfRocm
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    # TODO: native_dropout causes CUDA IMA error, need to figure out why
+    @torch._inductor.config.patch(fallback_random=True)
+    def test_transformer_backend_inductor_fullgraph_False(self):
+        fullgraph = False
+        # TODO: fix numerical issue in activation_checkpoint=True case
+        for all_requires_grad, activation_checkpoint in itertools.product(
+            [True, False], [False]
+        ):
+            log.warning(
+                f"fullgraph={fullgraph}, all_requires_grad={all_requires_grad}, activation_checkpoint={activation_checkpoint}"  # noqa: G004, G001
+            )
+            with self._maybe_add_graph_break_to_sdpa(fullgraph):
+                _, triton_codes = run_and_get_code(
+                    lambda: self._test_traceable_fsdp(
+                        *self._create_transformer_factory_fns(
+                            all_requires_grad=all_requires_grad,
+                            activation_checkpoint=activation_checkpoint,
+                        ),
+                        "inductor",
+                        fullgraph=fullgraph,
+                    )
                 )
+            # TODO: when fullgraph=False and there is graph break in FWD graph,
+            # there are several recompiles, need to figure out why.
+            self.assertGreater(
+                len(triton_codes),
+                2,
+                "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
+            )
 
 
 if __name__ == "__main__":
