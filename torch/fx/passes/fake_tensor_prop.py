@@ -36,6 +36,7 @@ class FakeTensorProp(torch.fx.Interpreter):
         from torch.fx.experimental.symbolic_shapes import rebind_unbacked, compute_unbacked_bindings
 
         result = super().run_node(n)
+        assert self._mode.shape_env is not None
         rebind_unbacked(self._mode.shape_env, n, result)
 
         def extract_val(obj):

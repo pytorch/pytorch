@@ -2654,6 +2654,7 @@ def _local_scalar_dense(data):
     unbacked_bindings = resolve_unbacked_bindings(
         V.graph.sizevars.shape_env, V.graph.current_node.meta["unbacked_bindings"]
     )
+    assert unbacked_bindings is not None
     assert len(unbacked_bindings) == 1, unbacked_bindings
     # NB: Have to be very careful here.  V.graph.current_node.meta["val"]
     # seemingly also contains a symbol which you want to do binding for,
