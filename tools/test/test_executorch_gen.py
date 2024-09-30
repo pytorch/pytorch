@@ -1,13 +1,13 @@
+from __future__ import annotations
+
 import os
 import tempfile
 import unittest
-from typing import Dict
 
 import yaml
 
 from torchgen.executorch.model import ETKernelIndex, ETKernelKey
 from torchgen.gen import LineLoader
-
 from torchgen.gen_executorch import (
     ComputeCodegenUnboxedKernels,
     gen_functions_declarations,
@@ -23,6 +23,7 @@ from torchgen.model import (
     OperatorName,
 )
 from torchgen.selective_build.selector import SelectiveBuilder
+
 
 TEST_YAML = """
 - func: add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
@@ -345,7 +346,7 @@ class TestGenFunctionsDeclarations(unittest.TestCase):
             valid_tags=set(),
         )
 
-        backend_indices: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]] = {
+        backend_indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]] = {
             DispatchKey.CPU: {},
             DispatchKey.QuantizedCPU: {},
         }

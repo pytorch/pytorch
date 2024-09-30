@@ -4,8 +4,7 @@
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 void fuseAddReluImpl(std::shared_ptr<Graph>& graph) {
@@ -67,5 +66,4 @@ void FuseAddRelu(script::Module& module) {
 void FuseAddRelu(std::shared_ptr<Graph>& graph) {
   fuseAddReluImpl(graph);
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

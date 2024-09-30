@@ -5,13 +5,13 @@ import torch.nn.functional as F
 from torch.ao.nn.intrinsic import LinearReLU
 from torch.nn.utils.parametrize import (
     is_parametrized,
-    type_before_parametrizations,
     transfer_parametrizations_and_params,
+    type_before_parametrizations,
 )
 
-__all__ = [
-    "Linear"
-]
+
+__all__ = ["Linear"]
+
 
 class Linear(nn.Linear):
     r"""
@@ -30,11 +30,18 @@ class Linear(nn.Linear):
     """
     _FLOAT_MODULE = nn.Linear
 
-    def __init__(self, in_features, out_features, bias=True,
-                 qconfig=None, device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        bias=True,
+        qconfig=None,
+        device=None,
+        dtype=None,
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__(in_features, out_features, bias, **factory_kwargs)
-        assert qconfig, 'qconfig must be provided for QAT module'
+        assert qconfig, "qconfig must be provided for QAT module"
         self.qconfig = qconfig
         self.weight_fake_quant = qconfig.weight(factory_kwargs=factory_kwargs)
 
@@ -44,8 +51,8 @@ class Linear(nn.Linear):
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Create a qat module from a float module or qparams_dict
-            Args: `mod` a float module, either produced by torch.ao.quantization utilities
-            or directly from user
+        Args: `mod` a float module, either produced by torch.ao.quantization utilities
+        or directly from user
         """
         assert type_before_parametrizations(mod) == cls._FLOAT_MODULE, (
             " qat."
@@ -59,7 +66,12 @@ class Linear(nn.Linear):
             mod = mod[0]
 
         qconfig = mod.qconfig
-        qat_linear = cls(mod.in_features, mod.out_features, bias=mod.bias is not None, qconfig=qconfig)
+        qat_linear = cls(
+            mod.in_features,
+            mod.out_features,
+            bias=mod.bias is not None,
+            qconfig=qconfig,
+        )
 
         if is_parametrized(mod, "weight"):
             transfer_parametrizations_and_params(mod, qat_linear, "weight")
@@ -74,7 +86,9 @@ class Linear(nn.Linear):
         return qat_linear
 
     def to_float(self):
-        linear = torch.nn.Linear(self.in_features, self.out_features, self.bias is not None)
+        linear = torch.nn.Linear(
+            self.in_features, self.out_features, self.bias is not None
+        )
         linear.weight = torch.nn.Parameter(self.weight.detach())
         if self.bias is not None:
             linear.bias = torch.nn.Parameter(self.bias.detach())

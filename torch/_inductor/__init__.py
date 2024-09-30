@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch.fx
 import torch.utils._pytree as pytree
 
+
 __all__ = ["compile", "list_mode_options", "list_options", "cudagraph_mark_step_begin"]
 
 
@@ -29,6 +30,95 @@ def compile(
     return compile_fx(gm, example_inputs, config_patches=options)
 
 
+def aoti_compile_and_package(
+    exported_program,
+    args: Tuple[Any],
+    kwargs: Optional[Dict[str, Any]] = None,
+    *,
+    package_path: Optional[str] = None,
+    inductor_configs: Optional[Dict[str, Any]] = None,
+) -> str:
+    """
+    Compiles the exported program with AOTInductor, and packages it into a .pt2
+    artifact specified by the input package_path. To load the package, you can
+    call `torch._inductor.aoti_load_package(package_path)`.
+
+    To compile and save multiple models into a single .pt2 artifact, you can do
+    the following:
+    ```
+    ep1 = torch.export.export(M1(), ...)
+    aoti_file1 = torch._inductor.aot_compile(ep1, ...)
+    ep2 = torch.export.export(M2(), ...)
+    aoti_file2 = torch._inductor.aot_compile(ep2, ...)
+
+    from torch._inductor.package import package_aoti, load_package
+    package_aoti("my_package.pt2", {"model1": aoti_file1, "model2": aoti_file2})
+
+    compiled_model1 = load_package("my_package.pt2", "model1")
+    compiled_model2 = load_package("my_package.pt2", "model2")
+    ```
+
+    Args:
+        exported_program: An exported program created through a call from torch.export
+        args: Example positional inputs
+        kwargs: Optional example keyword inputs
+        package_path: Optional specified path to the generated .pt2 artifact.
+        inductor_configs: Optional dictionary of configs to control inductor.
+
+    Returns:
+        Path to the generated artifact
+    """
+    from torch._inductor.package import package_aoti
+    from torch.export import ExportedProgram
+
+    if not isinstance(exported_program, ExportedProgram):
+        raise ValueError("Only ExportedProgram is supported")
+
+    assert package_path is None or package_path.endswith(".pt2")
+
+    inductor_configs = inductor_configs or {}
+
+    if inductor_configs.get("aot_inductor.output_path"):
+        raise RuntimeError(
+            "Please pass in a package path to aot_inductor_compile() instead "
+            "of setting the aot_inductor.output_path config."
+        )
+    inductor_configs["aot_inductor.package"] = True
+
+    m = exported_program.module()
+    assert isinstance(m, torch.fx.GraphModule)
+
+    aoti_files = aot_compile(m, args, kwargs, options=inductor_configs)  # type: ignore[arg-type]
+
+    if package_path is None:
+        package_path = aoti_files + ".pt2"
+
+    res = package_aoti(package_path, aoti_files)
+    assert res == package_path
+    return package_path
+
+
+def aoti_load_package(path: str) -> Any:  # type: ignore[type-arg]
+    """
+    Loads the model from the PT2 package.
+
+    If multiple models were packaged into the PT2, this will load the default
+    model. To load a specific model, you can directly call the load API
+    ```
+    from torch._inductor.package import load_package
+
+    compiled_model1 = load_package("my_package.pt2", "model1")
+    compiled_model2 = load_package("my_package.pt2", "model2")
+    ```
+
+    Args:
+        path: Path to the .pt2 package
+    """
+    from torch._inductor.package import load_package
+
+    return load_package(path)
+
+
 def aot_compile(
     gm: torch.fx.GraphModule,
     args: Tuple[Any],
@@ -48,7 +138,13 @@ def aot_compile(
     Returns:
         Path to the generated shared library
     """
-    from .compile_fx import compile_fx_aot
+    from .compile_fx import compile_fx_aot, graph_returns_tuple
+
+    assert graph_returns_tuple(gm), (
+        "Graph output must be a tuple(). This is so that we can avoid "
+        "pytree processing of the outputs. Please change the module to "
+        "have tuple outputs."
+    )
 
     # We will serialize the pytree info into the .so as constant strings
     in_spec = None
@@ -77,9 +173,12 @@ def aot_compile(
     flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
         (args, kwargs or {})
     )
-    flat_example_inputs = tuple(
-        x[1] for x in flat_args_with_path if isinstance(x[1], torch.Tensor)
-    )
+
+    # Replace non-tensor (constant) inputs with Nones, since these are not being
+    # used anyways by the graph
+    flat_example_inputs = [
+        x[1] if isinstance(x[1], torch.Tensor) else None for x in flat_args_with_path
+    ]
 
     if in_spec is not None and received_spec != in_spec:
         raise ValueError(  # noqa: B904
@@ -104,7 +203,7 @@ def aot_compile(
 
     return compile_fx_aot(
         gm,
-        list(flat_example_inputs),
+        flat_example_inputs,  # type: ignore[arg-type]
         config_patches=options,
     )
 

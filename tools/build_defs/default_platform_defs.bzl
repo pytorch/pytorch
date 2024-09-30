@@ -1,5 +1,4 @@
 # Only used for PyTorch open source BUCK build
-# @lint-ignore-every BUCKRESTRICTEDSYNTAX
 
 def compose_platform_setting_list(settings):
     """Settings object:

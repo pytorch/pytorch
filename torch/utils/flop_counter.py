@@ -1,11 +1,11 @@
 # mypy: allow-untyped-defs
+# mypy: allow-untyped-decorators
 import torch
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
 from typing import List, Any, Dict, Optional, Union, Tuple, Iterator
 from collections import defaultdict
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch._decomp import register_decomposition
 from math import prod
 from functools import wraps
 import warnings
@@ -34,7 +34,20 @@ def register_flop_formula(targets, get_raw=False):
     def register_fun(flop_formula):
         if not get_raw:
             flop_formula = shape_wrapper(flop_formula)
-        register_decomposition(targets, registry=flop_registry, unsafe=True)(flop_formula)
+
+        def register(target):
+            if not isinstance(target, torch._ops.OpOverloadPacket):
+                raise ValueError(
+                    f"register_flop_formula(targets): expected each target to be "
+                    f"OpOverloadPacket (i.e. torch.ops.mylib.foo), got "
+                    f"{target} which is of type {type(target)}")
+            if target in flop_registry:
+                raise RuntimeError(f"duplicate registrations for {target}")
+            flop_registry[target] = flop_formula
+
+        # To handle allowing multiple aten_ops at once
+        torch.utils._pytree.tree_map_(register, targets)
+
         return flop_formula
 
     return register_fun
@@ -243,11 +256,25 @@ def sdpa_flop_count(query_shape, key_shape, value_shape):
     return total_flops
 
 
-@register_flop_formula([aten._scaled_dot_product_efficient_attention, aten._scaled_dot_product_flash_attention])
+@register_flop_formula([aten._scaled_dot_product_efficient_attention,
+                        aten._scaled_dot_product_flash_attention,
+                        aten._scaled_dot_product_cudnn_attention])
 def sdpa_flop(query_shape, key_shape, value_shape, *args, out_shape=None, **kwargs) -> int:
     """Count flops for self-attention."""
     # NB: We aren't accounting for causal attention here
     return sdpa_flop_count(query_shape, key_shape, value_shape)
+
+
+def _offsets_to_lengths(offsets, max_len):
+    """
+    If the offsets tensor is fake, then we don't know the actual lengths.
+    In that case, we can just assume the worst case; each batch has max length.
+    """
+    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.functional_tensor import FunctionalTensor
+    if not isinstance(offsets, (FakeTensor, FunctionalTensor)):
+        return offsets.diff().tolist()
+    return [max_len] * (offsets.size(0) - 1)
 
 
 def _unpack_flash_attention_nested_shapes(
@@ -283,8 +310,8 @@ def _unpack_flash_attention_nested_shapes(
         assert cum_seq_q is not None
         assert cum_seq_k is not None
         assert cum_seq_q.shape == cum_seq_k.shape
-        seq_q_lengths = (cum_seq_q[1:] - cum_seq_q[:-1]).tolist()
-        seq_k_lengths = (cum_seq_k[1:] - cum_seq_k[:-1]).tolist()
+        seq_q_lengths = _offsets_to_lengths(cum_seq_q, max_q)
+        seq_k_lengths = _offsets_to_lengths(cum_seq_k, max_k)
         for (seq_q_len, seq_k_len) in zip(seq_q_lengths, seq_k_lengths):
             new_query_shape = (1, h_q, seq_q_len, d_q)
             new_key_shape = (1, h_k, seq_k_len, d_k)
@@ -331,8 +358,8 @@ def _unpack_efficient_attention_nested_shapes(
         assert cu_seqlens_q is not None
         assert cu_seqlens_k is not None
         assert cu_seqlens_q.shape == cu_seqlens_k.shape
-        seqlens_q = (cu_seqlens_q[1:] - cu_seqlens_q[:-1]).tolist()
-        seqlens_k = (cu_seqlens_k[1:] - cu_seqlens_k[:-1]).tolist()
+        seqlens_q = _offsets_to_lengths(cu_seqlens_q, max_seqlen_q)
+        seqlens_k = _offsets_to_lengths(cu_seqlens_k, max_seqlen_k)
         for len_q, len_k in zip(seqlens_q, seqlens_k):
             new_query_shape = (1, h_q, len_q, d_q)
             new_key_shape = (1, h_k, len_k, d_k)
@@ -435,7 +462,9 @@ def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape
     return total_flops
 
 
-@register_flop_formula([aten._scaled_dot_product_efficient_attention_backward, aten._scaled_dot_product_flash_attention_backward])
+@register_flop_formula([aten._scaled_dot_product_efficient_attention_backward,
+                        aten._scaled_dot_product_flash_attention_backward,
+                        aten._scaled_dot_product_cudnn_attention_backward])
 def sdpa_backward_flop(grad_out_shape, query_shape, key_shape, value_shape, *args, out_shape=None, **kwargs) -> int:
     """Count flops for self-attention backward."""
     return sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape)
@@ -516,8 +545,10 @@ flop_registry = {
     aten.convolution_backward: conv_backward_flop,
     aten._scaled_dot_product_efficient_attention: sdpa_flop,
     aten._scaled_dot_product_flash_attention: sdpa_flop,
+    aten._scaled_dot_product_cudnn_attention: sdpa_flop,
     aten._scaled_dot_product_efficient_attention_backward: sdpa_backward_flop,
     aten._scaled_dot_product_flash_attention_backward: sdpa_backward_flop,
+    aten._scaled_dot_product_cudnn_attention_backward: sdpa_backward_flop,
     aten._flash_attention_forward: _flash_attention_forward_flop,
     aten._efficient_attention_forward: _efficient_attention_forward_flop,
     aten._flash_attention_backward: _flash_attention_backward_flop,
@@ -588,6 +619,7 @@ class FlopCounterMode(TorchDispatchMode):
             depth: int = 2,
             display: bool = True,
             custom_mapping: Optional[Dict[Any, Any]] = None):
+        super().__init__()
         self.flop_counts: Dict[str, Dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.display = display
@@ -666,7 +698,7 @@ class FlopCounterMode(TorchDispatchMode):
         # if there are any FLOPs in there that aren't already fully contained by
         # a module.
         if 'Global' in self.flop_counts and not is_global_subsumed:
-            for idx, value in enumerate(values):
+            for idx in range(len(values)):
                 values[idx][0] = " " + values[idx][0]
 
             values = process_mod('Global', 0) + values

@@ -17,7 +17,6 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
-
 from typing_extensions import Self
 
 import torch
@@ -32,12 +31,11 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 from torch.utils._pytree import tree_flatten, tree_map_only
-
 from torch.utils.weak import WeakIdKeyDictionary, weakref
+
 
 if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
-
 
 # This value is hard-coded here:
 # https://github.com/pytorch/pytorch/blob/5fba5d83f0703ff8077ab65448a998e9ad6598fd/c10/cuda/CUDACachingAllocator.cpp#L117
@@ -52,13 +50,9 @@ __all__ = ["MemTracker"]
 class _RefType(str, Enum):
     """Base Class for defining memory reference types, categorizing tensors based on their usage within a model."""
 
-    pass
-
 
 class _State(str, Enum):
     """Base Class for defining module state to capture snapshots ."""
-
-    pass
 
 
 class _MemRefType(_RefType):
@@ -440,7 +434,7 @@ class MemTracker(TorchDispatchMode):
         maybe_zero = False
         # Ensure the device entry exists in the current memory snapshot, initializing if necessary.
         dev_snap = self._curr_mem_snap.setdefault(
-            winfo.device, {reftype: 0 for reftype in self._ref_class}
+            winfo.device, dict.fromkeys(self._ref_class, 0)
         )
         dev_snap.setdefault(_TOTAL_KEY, 0)
         # Handle different types of updates based on the update type (`u_type`).
@@ -636,7 +630,7 @@ class MemTracker(TorchDispatchMode):
             ):
                 grad_hook_handle = param.register_hook(_grad_hook)
                 post_acc_grad_hook_handle = param.register_post_accumulate_grad_hook(
-                    lambda param: (_grad_hook(param.grad))
+                    lambda p: (_grad_hook(p.grad))
                 )
                 self._param_to_grad_hook_handles[param] = (
                     grad_hook_handle,

@@ -35,8 +35,8 @@
 #include <mkl.h>
 #endif
 
-namespace at {
-namespace vml {
+
+namespace at::vml {
 inline namespace CPU_CAPABILITY {
 
 using namespace vec;
@@ -167,5 +167,4 @@ IMPLEMENT_VML_MKL(log2, Log2)
 #endif
 
 } // namespace
-} // namespace vml
-} // namespace at
+} // namespace at::vml

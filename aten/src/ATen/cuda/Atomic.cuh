@@ -159,7 +159,7 @@ struct Atomic##NAME##IntegerImpl<T, 8> {                                        
 
 
 # define GPU_ATOMIC_INTEGER(NAME, OP, DTYPE)                                                                           \
-static inline __device__ void gpuAtomic##NAME(DTYPE *address, DTYPE val) {                                             \
+inline __device__ void gpuAtomic##NAME(DTYPE *address, DTYPE val) {                                             \
 Atomic##NAME##IntegerImpl<DTYPE, sizeof(DTYPE)>()(address,                                                             \
                                                       val,                                                             \
                                                       [](DTYPE a, DTYPE b) {                                           \
@@ -171,7 +171,7 @@ ATOMIC_INTEGER_IMPL(Add)
 GPU_ATOMIC_INTEGER(Add, a || b, bool)
 
 // Don't instantiate gpuAtomicAdd with the macro as it seems non-standard (see int32, int64)
-static inline __device__ void gpuAtomicAdd(uint8_t *address, uint8_t val) {
+inline __device__ void gpuAtomicAdd(uint8_t *address, uint8_t val) {
   AtomicAddIntegerImpl<uint8_t, sizeof(uint8_t)>()(address,
                                                    val,
                                                    [](uint8_t a, uint8_t b) {
@@ -179,7 +179,7 @@ static inline __device__ void gpuAtomicAdd(uint8_t *address, uint8_t val) {
                                                    });
 }
 
-static inline  __device__ void gpuAtomicAdd(int8_t *address, int8_t val) {
+inline  __device__ void gpuAtomicAdd(int8_t *address, int8_t val) {
   AtomicAddIntegerImpl<int8_t, sizeof(int8_t)>()(address,
                                                  val,
                                                  [](int8_t a, int8_t b) {
@@ -187,7 +187,7 @@ static inline  __device__ void gpuAtomicAdd(int8_t *address, int8_t val) {
                                                  });
 }
 
-static inline  __device__ void gpuAtomicAdd(int16_t *address, int16_t val) {
+inline  __device__ void gpuAtomicAdd(int16_t *address, int16_t val) {
   AtomicAddIntegerImpl<int16_t, sizeof(int16_t)>()(address,
                                                    val,
                                                    [](int16_t a, int16_t b) {
@@ -195,11 +195,11 @@ static inline  __device__ void gpuAtomicAdd(int16_t *address, int16_t val) {
                                                    });
 }
 
-static inline __device__ int32_t gpuAtomicAdd(int32_t *address, int32_t val) {
+inline __device__ int32_t gpuAtomicAdd(int32_t *address, int32_t val) {
   return atomicAdd(address, val);
 }
 
-static inline __device__ void gpuAtomicAdd(int64_t *address, int64_t val) {
+inline __device__ void gpuAtomicAdd(int64_t *address, int64_t val) {
 #if defined(USE_ROCM)
   __atomic_fetch_add(address, val, __ATOMIC_RELAXED);
 #else
@@ -208,7 +208,7 @@ static inline __device__ void gpuAtomicAdd(int64_t *address, int64_t val) {
 #endif
 }
 
-static inline  __device__ at::Half gpuAtomicAdd(at::Half *address, at::Half val) {
+inline  __device__ at::Half gpuAtomicAdd(at::Half *address, at::Half val) {
 #if defined(USE_ROCM) || ((defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
   return AtomicFPOp<at::Half>()(address, val,
                                 [](at::Half hsum, at::Half val) {
@@ -219,7 +219,7 @@ static inline  __device__ at::Half gpuAtomicAdd(at::Half *address, at::Half val)
 #endif
 }
 
-static inline __device__ at::BFloat16 gpuAtomicAdd(at::BFloat16 *address, at::BFloat16 val) {
+inline __device__ at::BFloat16 gpuAtomicAdd(at::BFloat16 *address, at::BFloat16 val) {
 #if defined(USE_ROCM) || ((defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800)))
 return AtomicFPOp<at::BFloat16>()(address, val,
                                   [](at::BFloat16 bsum, at::BFloat16 val) {
@@ -233,7 +233,7 @@ return AtomicFPOp<at::BFloat16>()(address, val,
 
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600)
 // from CUDA C Programmic Guide
-static inline __device__ double atomicAdd(double* address, double val)
+inline __device__ double atomicAdd(double* address, double val)
 #if defined(__clang__) && defined(__CUDA__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wgcc-compat"
@@ -261,20 +261,20 @@ static inline __device__ double atomicAdd(double* address, double val)
 
 #if defined(USE_ROCM) && __hcc_workweek__ < 18312 && !__HIP__
   // This needs to be defined for the host side pass
-  static inline  __device__  double atomicAdd(double *address, double val) { }
+  inline  __device__  double atomicAdd(double *address, double val) { }
 #endif
 #endif
 
-static inline __device__ double gpuAtomicAdd(double *address, double val) {
+inline __device__ double gpuAtomicAdd(double *address, double val) {
   return atomicAdd(address, val);
 }
 
-static inline __device__ float gpuAtomicAdd(float *address, float val) {
+inline __device__ float gpuAtomicAdd(float *address, float val) {
   return atomicAdd(address, val);
 }
 
 template<typename T>
-static inline __device__ void gpuAtomicAdd(c10::complex<T> *address, c10::complex<T> val) {
+inline __device__ void gpuAtomicAdd(c10::complex<T> *address, c10::complex<T> val) {
   gpuAtomicAdd(&address->real_, val.real_);
   gpuAtomicAdd(&address->imag_, val.imag_);
 }
@@ -285,31 +285,31 @@ static inline __device__ void gpuAtomicAdd(c10::complex<T> *address, c10::comple
  * directly and require non-library provided data type support. Only for these, we
  * continue to provide atomicAdd overloads.
  */
-static inline __device__ at::Half atomicAdd(at::Half *address, at::Half val) {
+inline __device__ at::Half atomicAdd(at::Half *address, at::Half val) {
   return gpuAtomicAdd(address, val);
 }
 
-static inline __device__ at::BFloat16 atomicAdd(at::BFloat16 *address, at::BFloat16 val) {
+inline __device__ at::BFloat16 atomicAdd(at::BFloat16 *address, at::BFloat16 val) {
   return gpuAtomicAdd(address, val);
 }
 
-static inline __device__ void atomicAdd(uint8_t *address, uint8_t val) {
+inline __device__ void atomicAdd(uint8_t *address, uint8_t val) {
   gpuAtomicAdd(address, val);
 }
 
-static inline  __device__ void atomicAdd(int8_t *address, int8_t val) {
+inline  __device__ void atomicAdd(int8_t *address, int8_t val) {
   gpuAtomicAdd(address, val);
 }
 
-static inline  __device__ void atomicAdd(int16_t *address, int16_t val) {
+inline  __device__ void atomicAdd(int16_t *address, int16_t val) {
   gpuAtomicAdd(address, val);
 }
 
-static inline __device__ void atomicAdd(int64_t *address, int64_t val) {
+inline __device__ void atomicAdd(int64_t *address, int64_t val) {
   gpuAtomicAdd(address, val);
 }
 
-static inline __device__ void atomicAdd(bool *address, bool val) {
+inline __device__ void atomicAdd(bool *address, bool val) {
   gpuAtomicAdd(address, val);
 }
 
@@ -321,20 +321,20 @@ static inline __device__ void atomicAdd(bool *address, bool val) {
  * therefore we need a new API 'gpuAtomicAddNoReturn'.
  */
 template<typename T>
-static inline __device__ void gpuAtomicAddNoReturn(c10::complex<T> *address, c10::complex<T> val) { gpuAtomicAdd(address, val); }
-static inline __device__ void gpuAtomicAddNoReturn(uint8_t *address, uint8_t val) { gpuAtomicAdd(address, val); }
-static inline __device__ void gpuAtomicAddNoReturn(int8_t *address, int8_t val) { gpuAtomicAdd(address, val); }
-static inline __device__ void gpuAtomicAddNoReturn(int16_t *address, int16_t val) { gpuAtomicAdd(address, val); }
-static inline __device__ void gpuAtomicAddNoReturn(int32_t *address, int32_t val) { gpuAtomicAdd(address, val); }
-static inline __device__ void gpuAtomicAddNoReturn(int64_t *address, int64_t val) { gpuAtomicAdd(address, val); }
-static inline __device__ void gpuAtomicAddNoReturn(bool *address, bool val) { gpuAtomicAdd(address, val); }
-static inline __device__ void gpuAtomicAddNoReturn(at::Half *address, at::Half val) { gpuAtomicAdd(address, val); }
-static inline __device__ void gpuAtomicAddNoReturn(at::BFloat16 *address, at::BFloat16 val) { gpuAtomicAdd(address, val); }
-static inline __device__ void gpuAtomicAddNoReturn(double *address, double val) { gpuAtomicAdd(address, val); }
+inline __device__ void gpuAtomicAddNoReturn(c10::complex<T> *address, c10::complex<T> val) { gpuAtomicAdd(address, val); }
+inline __device__ void gpuAtomicAddNoReturn(uint8_t *address, uint8_t val) { gpuAtomicAdd(address, val); }
+inline __device__ void gpuAtomicAddNoReturn(int8_t *address, int8_t val) { gpuAtomicAdd(address, val); }
+inline __device__ void gpuAtomicAddNoReturn(int16_t *address, int16_t val) { gpuAtomicAdd(address, val); }
+inline __device__ void gpuAtomicAddNoReturn(int32_t *address, int32_t val) { gpuAtomicAdd(address, val); }
+inline __device__ void gpuAtomicAddNoReturn(int64_t *address, int64_t val) { gpuAtomicAdd(address, val); }
+inline __device__ void gpuAtomicAddNoReturn(bool *address, bool val) { gpuAtomicAdd(address, val); }
+inline __device__ void gpuAtomicAddNoReturn(at::Half *address, at::Half val) { gpuAtomicAdd(address, val); }
+inline __device__ void gpuAtomicAddNoReturn(at::BFloat16 *address, at::BFloat16 val) { gpuAtomicAdd(address, val); }
+inline __device__ void gpuAtomicAddNoReturn(double *address, double val) { gpuAtomicAdd(address, val); }
 
 /* Special case fp32 atomic. */
 #if defined(USE_ROCM)
-static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) {
+inline __device__ void gpuAtomicAddNoReturn(float *address, float val) {
 #if defined(__gfx908__)
   atomicAddNoRet(address, val);
 #else
@@ -342,7 +342,7 @@ static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) {
 #endif
 }
 #else
-static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) { gpuAtomicAdd(address, val); }
+inline __device__ void gpuAtomicAddNoReturn(float *address, float val) { gpuAtomicAdd(address, val); }
 #endif
 
 // Atomic multiplication implementation.

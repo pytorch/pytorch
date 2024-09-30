@@ -2,15 +2,19 @@
 
 Any job with a specific `sync-tag` must match all other jobs with the same `sync-tag`.
 """
+
+from __future__ import annotations
+
 import argparse
 import itertools
 import json
 from collections import defaultdict
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Iterable, NamedTuple, Optional
+from typing import Any, Iterable, NamedTuple
 
 from yaml import dump, load
+
 
 # Safely load fast C Yaml loader/dumper if they are available
 try:
@@ -27,15 +31,15 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: Optional[str]
-    line: Optional[int]
-    char: Optional[int]
+    path: str | None
+    line: int | None
+    char: int | None
     code: str
     severity: LintSeverity
     name: str
-    original: Optional[str]
-    replacement: Optional[str]
-    description: Optional[str]
+    original: str | None
+    replacement: str | None
+    description: str | None
 
 
 def glob_yamls(path: Path) -> Iterable[Path]:
@@ -51,7 +55,7 @@ def is_workflow(yaml: Any) -> bool:
     return yaml.get("jobs") is not None
 
 
-def print_lint_message(path: Path, job: Dict[str, Any], sync_tag: str) -> None:
+def print_lint_message(path: Path, job: dict[str, Any], sync_tag: str) -> None:
     job_id = next(iter(job.keys()))
     with open(path) as f:
         lines = f.readlines()

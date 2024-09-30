@@ -162,7 +162,7 @@ Tensor _upsample_nearest3d_quantized_cpu(
         input.options().memory_format(input.suggest_memory_format()),
         input.q_scale(),
         input.q_zero_point(),
-        c10::nullopt);
+        std::nullopt);
 
     AT_DISPATCH_QINT_TYPES(input.scalar_type(), "upsample_nearest3d", [&] {
       auto* idata = static_cast<scalar_t*>(input.data_ptr());

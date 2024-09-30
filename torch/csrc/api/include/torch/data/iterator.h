@@ -41,7 +41,7 @@ struct IteratorImpl {
 
 template <typename Batch>
 struct ValidIterator : public IteratorImpl<Batch> {
-  using BatchProducer = std::function<optional<Batch>()>;
+  using BatchProducer = std::function<std::optional<Batch>()>;
 
   explicit ValidIterator(BatchProducer next_batch)
       : next_batch_(std::move(next_batch)) {}
@@ -94,7 +94,7 @@ struct ValidIterator : public IteratorImpl<Batch> {
   }
 
   BatchProducer next_batch_;
-  mutable optional<Batch> batch_;
+  mutable std::optional<Batch> batch_;
   mutable bool initialized_ = false;
 };
 

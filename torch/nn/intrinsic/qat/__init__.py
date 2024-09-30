@@ -1,1 +1,1 @@
-from .modules import *  # noqa: F403
+from torch.nn.intrinsic.qat.modules import *  # noqa: F403
