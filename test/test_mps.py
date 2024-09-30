@@ -306,6 +306,9 @@ def mps_ops_modifier(ops):
         'mul',
         'narrow',
         'narrow_copy',
+        'new_full',
+        'new_ones',
+        'new_zeros',
         'nn.functional.conv1d',
         'nn.functional.conv2d',
         'nn.functional.conv_transpose1d',
@@ -870,11 +873,6 @@ def mps_ops_modifier(ops):
         'tensordot': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'unravel_index': [torch.int32, torch.int64],
 
-        # new_zeros/new_ones: Cannot convert a MPS Tensor to float64 dtype as
-        # the MPS framework doesn't support float64
-        'new_zeros': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'new_ones': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'new_full': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         # returned output on CPU is float64
         'bincount': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
@@ -934,7 +932,7 @@ def mps_ops_modifier(ops):
         'multinomial': [torch.float16, torch.float32],  # random results
         'uniform': [torch.float16, torch.float32],
         'rand_like': [torch.float16, torch.float32],
-        'randint_like': [torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'randint_like': None,
         'randn_like': [torch.float16, torch.float32],
         'bernoulli': [torch.float16, torch.float32],
         'exponential': [torch.float16, torch.float32],
@@ -989,18 +987,15 @@ def mps_ops_modifier(ops):
         # Fill tensors with uninitialized data, causing mismatch with CPU.
         # They occasionally match, thus skipping them.
         # See https://github.com/pytorch/pytorch/issues/100175
-        'new_empty': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'new_empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16,
-                              torch.int32, torch.int64, torch.uint8, torch.int8],
-        'empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'new_empty': None,
+        'new_empty_strided': None,
+        'empty_strided': None,
         # CPU: empty is returning all 0's and there is a mismatch with MPS
         # allocation (MacOS 13). According to
         # https://pytorch.org/docs/2.0/generated/torch.empty.html
-        'empty': [torch.bool, torch.float16, torch.float32, torch.int16,
-                  torch.int32, torch.int64, torch.uint8, torch.int8],
-        'empty_like': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'empty_permuted': [torch.bool, torch.float16, torch.float32, torch.int16,
-                           torch.int32, torch.int64, torch.uint8, torch.int8],
+        'empty': None,
+        'empty_like': None,
+        'empty_permuted': None,
     }
 
     SKIPLIST = {
@@ -7873,27 +7868,27 @@ class TestMPS(TestCaseMPS):
 
     # Test normal
     def test_normal(self):
-        def helper(shape, mean=0.0, std=1.0):
-            mps_out = torch.normal(mean, std, shape, device='mps')
+        def helper(shape, mean=0.0, std=1.0, dtype=torch.float):
+            mps_out = torch.normal(mean, std, shape, device='mps', dtype=dtype)
 
             mean_array = np.ones(shape)
             mean_array *= mean
-            cpu_mean_tensor = torch.tensor(mean_array, device='cpu', dtype=torch.float, requires_grad=False)
+            cpu_mean_tensor = torch.tensor(mean_array, device='cpu', dtype=dtype, requires_grad=False)
             mean_tensor = cpu_mean_tensor.detach().clone().to('mps')
 
             std_array = np.ones(shape)
             std_array *= std
-            cpu_std_tensor = torch.tensor(std_array, device='cpu', dtype=torch.float, requires_grad=False)
+            cpu_std_tensor = torch.tensor(std_array, device='cpu', dtype=dtype, requires_grad=False)
             std_tensor = cpu_std_tensor.detach().clone().to('mps')
 
             # test out
-            mps_out = torch.zeros(shape, device='mps')
+            mps_out = torch.zeros(shape, device='mps', dtype=dtype)
             torch.normal(mean_tensor, std, out=mps_out)
 
-            mps_out = torch.zeros(shape, device='mps')
+            mps_out = torch.zeros(shape, device='mps', dtype=dtype)
             torch.normal(mean, std_tensor, out=mps_out)
 
-            mps_out = torch.zeros(shape, device='mps')
+            mps_out = torch.zeros(shape, device='mps', dtype=dtype)
             torch.normal(mean_tensor, std_tensor, out=mps_out)
 
             # test without out
@@ -7909,6 +7904,16 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 3, 4, 5, 6))
         helper((100, 100), 2.5, 1.2)
+
+        # Test invalid inputs
+        with self.assertRaises(TypeError):
+            helper((10, 10), 10, 11, dtype=torch.int32)
+
+        if product_version >= 14.0:
+            helper((10, 10), 2.5, 1.2, dtype=torch.bfloat16)
+        else:
+            with self.assertRaises(TypeError):
+                helper((10, 10), 2.5, 1.2, dtype=torch.bfloat16)
 
     def test_bernoulli(self):
         shape = (10, 10)
