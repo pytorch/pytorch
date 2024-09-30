@@ -16,9 +16,9 @@ from torch._inductor.compile_fx import compile_fx
 from utils.metrics import Device
 import sys
 import types
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
-from utils.common import BenchmarkConfig
+from utils.common import BenchmarkConfig, Phase
 from utils.metrics import Device
 
 import torch
@@ -212,12 +212,14 @@ def list_operators(benchmark_config: BenchmarkConfig):
     """
     # This list is used to store all the operator classes, not instances
     operators = []
-    for operator_path in _list_operator_paths():
-        operator_name = os.path.basename(operator_path)
-        module_path = f"operators.{operator_name}"
-        loaded_operators = _load_valid_operators(module_path, operator_name)
-        operators.extend(loaded_operators)
-    operators.extend(dynamically_create_native_operator_classes(benchmark_config))
+    if benchmark_config.mode == "native":
+        operators.extend(dynamically_create_native_operator_classes(benchmark_config))
+    else:
+        for operator_path in _list_operator_paths():
+            operator_name = os.path.basename(operator_path)
+            module_path = f"operators.{operator_name}"
+            loaded_operators = _load_valid_operators(module_path, operator_name)
+            operators.extend(loaded_operators)
     return operators
 
 
@@ -260,9 +262,9 @@ def dynamically_create_native_operator_classes(benchmark_config: BenchmarkConfig
                     index += 1
                 except StopIteration:
                     break
-        cls.example_inputs_list = input_list
-
-    def prepare_input_and_functions(self, input):
+        return input_list
+    
+    def prepare_input_and_functions(self, input: Any, phase: Phase):
         args, kwargs = input
         if self.benchmark_config.channels_last:
             args, kwargs = tree_map_only(

@@ -160,6 +160,8 @@ def run_benchmarks(
     skip_variants,
     profile,
     profile_folder,
+    mode,
+    channels_last,
 ):
     global input_mapping
     # Reset input mapping to avoid OOM and mismatch in different unit tests
@@ -176,6 +178,9 @@ def run_benchmarks(
         print(f"{Metrics.GPU_PEAK_MEM.value} is only supported on cuda")
         metrics.remove(Metrics.GPU_PEAK_MEM)
     phase = Phase[phase.upper()]
+    if phase == Phase.BACKWARD and mode == "native":
+        print("Backward is not supported in native mode")
+        exit(1)
     benchmark_config = BenchmarkConfig(
         device=device,
         dtype=dtype,

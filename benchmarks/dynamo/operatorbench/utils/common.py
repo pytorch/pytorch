@@ -23,7 +23,7 @@ class BenchmarkConfig:
 
 class Phase(Enum):
     FORWARD = "forward"
-    # BACKWARD = "backward"
+    BACKWARD = "backward"
     FULL = "full"
 
 

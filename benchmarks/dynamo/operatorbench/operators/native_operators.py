@@ -4,7 +4,7 @@ from contextlib import nullcontext
 
 import click
 import numpy as np
-from operator_inp_utils import OperatorInputsLoader
+from operator_inp_utils import OperatorInputsLoader, to_channels_last
 
 import torch
 from torch._dynamo.backends.cudagraphs import cudagraphs_inner
@@ -65,6 +65,7 @@ def compute_speedups(
                         from torch._inductor.utils import timed
 
                         timings[rep, m] = timed(model, example_inputs)
+    print(timings)
     return np.median(timings, axis=0)
 
 
