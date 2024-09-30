@@ -953,7 +953,7 @@ def _compile(
                     "recompilations, enable TORCH_LOGS=recompiles. If recompilations are expected, consider "
                     "increasing torch._dynamo.config.cache_size_limit to an appropriate value."
                 )
-            elif config.skip_code_recursive_on_recompile_limit_hit and justknobs_check(
+            elif justknobs_check(
                 "pytorch/compiler:skip_code_recursive_on_recompile_limit_hit"
             ):
                 raise RecompileLimitExceeded(f"{limit_type} reached")
