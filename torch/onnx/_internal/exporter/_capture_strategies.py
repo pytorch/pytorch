@@ -10,7 +10,6 @@ import pathlib
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
-from torch._export import converter as _torchscript_converter
 from torch.utils import _pytree
 
 
@@ -202,6 +201,9 @@ class JitTraceConvertStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
+        # Avoid circular import
+        from torch._export import converter as _torchscript_converter
+
         del dynamic_shapes  # Unused
 
         flattened_args, spec = _pytree.tree_flatten((args, kwargs))

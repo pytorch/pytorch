@@ -10,6 +10,21 @@ if [[ -z $ROCM_VERSION ]]; then
     exit 1;
 fi
 
+IS_UBUNTU=0
+ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
+case "$ID" in
+  ubuntu)
+    IS_UBUNTU=1
+    ;;
+  centos)
+    IS_UBUNTU=0
+    ;;
+  *)
+    echo "Unable to determine OS..."
+    exit 1
+    ;;
+esac
+
 # To make version comparison easier, create an integer representation.
 save_IFS="$IFS"
 IFS=. ROCM_VERSION_ARRAY=(${ROCM_VERSION})
@@ -57,9 +72,11 @@ MIOPEN_CMAKE_COMMON_FLAGS="
 -DMIOPEN_BUILD_DRIVER=OFF
 "
 # Pull MIOpen repo and set DMIOPEN_EMBED_DB based on ROCm version
-if [[ $ROCM_INT -ge 60200 ]] && [[ $ROCM_INT -lt 60300 ]]; then
-    echo "ROCm 6.2 MIOpen does not need any patches, do not build from source"
+if [[ $ROCM_INT -ge 60300 ]]; then
+    echo "ROCm 6.3+ MIOpen does not need any patches, do not build from source"
     exit 0
+elif [[ $ROCM_INT -ge 60200 ]] && [[ $ROCM_INT -lt 60300 ]]; then
+    MIOPEN_BRANCH="release/rocm-rel-6.2-staging"
 elif [[ $ROCM_INT -ge 60100 ]] && [[ $ROCM_INT -lt 60200 ]]; then
     echo "ROCm 6.1 MIOpen does not need any patches, do not build from source"
     exit 0
@@ -93,12 +110,21 @@ else
     exit 1
 fi
 
-yum remove -y miopen-hip
+
+if [[ ${IS_UBUNTU} == 1 ]]; then
+  apt-get remove -y miopen-hip
+else
+  yum remove -y miopen-hip
+fi
 
 git clone https://github.com/ROCm/MIOpen -b ${MIOPEN_BRANCH}
 pushd MIOpen
 # remove .git to save disk space since CI runner was running out
 rm -rf .git
+# Don't build CK to save docker build time
+if [[ $ROCM_INT -ge 60200 ]]; then
+    sed -i '/composable_kernel/d' requirements.txt
+fi
 # Don't build MLIR to save docker build time
 # since we are disabling MLIR backend for MIOpen anyway
 if [[ $ROCM_INT -ge 50400 ]] && [[ $ROCM_INT -lt 50500 ]]; then
@@ -111,10 +137,15 @@ cmake -P install_deps.cmake --minimum
 
 # clean up since CI runner was running out of disk space
 rm -rf /tmp/*
-yum clean all
-rm -rf /var/cache/yum
-rm -rf /var/lib/yum/yumdb
-rm -rf /var/lib/yum/history
+if [[ ${IS_UBUNTU} == 1 ]]; then
+  apt-get autoclean && apt-get clean
+  rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+else
+  yum clean all
+  rm -rf /var/cache/yum
+  rm -rf /var/lib/yum/yumdb
+  rm -rf /var/lib/yum/history
+fi
 
 ## Build MIOpen
 mkdir -p build
@@ -131,7 +162,11 @@ make -j $(nproc) package
 # clean up since CI runner was running out of disk space
 rm -rf /usr/local/cget
 
-yum install -y miopen-*.rpm
+if [[ ${IS_UBUNTU} == 1 ]]; then
+  sudo dpkg -i miopen-hip*.deb
+else
+  yum install -y miopen-*.rpm
+fi
 
 popd
 rm -rf MIOpen
