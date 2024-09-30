@@ -2075,7 +2075,7 @@ class DeviceCachingAllocator {
     return pp->use_count;
   }
 
-  void decPoolUseCountAndMarkPoolFree(MempoolId_t mempool_id) {
+  void decPoolUseCountAndMaybeMarkPoolFree(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     auto pp = get_private_pool(mempool_id);
     dec_use_count_and_maybe_mark_pool_freeable(mempool_id, pp);
@@ -3586,11 +3586,11 @@ class NativeCachingAllocator : public CUDAAllocator {
     return device_allocator[device]->getPoolUseCount(std::move(mempool_id));
   }
 
-  void decPoolUseCountAndMarkPoolFree(
+  void decPoolUseCountAndMaybeMarkPoolFree(
       c10::DeviceIndex device,
       MempoolId_t mempool_id) override {
     assertValidDevice(device);
-    device_allocator[device]->decPoolUseCountAndMarkPoolFree(
+    device_allocator[device]->decPoolUseCountAndMaybeMarkPoolFree(
         std::move(mempool_id));
   }
 
@@ -3876,7 +3876,7 @@ MemPool::MemPool(
 }
 
 MemPool::~MemPool() {
-  CUDACachingAllocator::decPoolUseCountAndMarkPoolFree(device_, id_);
+  CUDACachingAllocator::decPoolUseCountAndMaybeMarkPoolFree(device_, id_);
   TORCH_INTERNAL_ASSERT(use_count() == 0);
 }
 
