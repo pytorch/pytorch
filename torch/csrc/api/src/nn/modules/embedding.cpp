@@ -12,7 +12,7 @@ namespace F = torch::nn::functional;
 namespace torch::nn {
 EmbeddingImpl::EmbeddingImpl(EmbeddingOptions options_)
     : options(std::move(options_)) {
-      EmbeddingImpl::reset();
+  EmbeddingImpl::reset();
 }
 
 void EmbeddingImpl::reset() {
