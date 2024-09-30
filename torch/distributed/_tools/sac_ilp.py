@@ -8,7 +8,7 @@ from torch.distributed._tools.ilp_utils import Graph, is_submodule
 
 
 try:
-    from pulp import (  # type: ignore[import-untyped]
+    from pulp import (  # type: ignore[import-untyped,import-not-found]
         lpDot,
         LpInteger,
         LpMinimize,
@@ -130,11 +130,11 @@ def sac_milp(
             logger.warning("For module {%s}: ", graph.nodes[i]["fqn"])
             logger.warning(
                 "activation memory from memory tracker is {%d},",
-                graph.nodes[i]["sac_memory"],
+                graph.nodes[i]["act_fw_per_module"],
             )
             logger.warning(
                 "activation memory from SAC estimator is {%d}.",
-                graph.nodes[i]["act_fw_per_module"],
+                graph.nodes[i]["sac_memory"],
             )
             logger.warning("Something is wrong. Please check!")
             logger.warning("Overriding the latter with the former.")
@@ -201,7 +201,7 @@ def sac_milp(
     prob += lpSum(rct)
 
     # Solve
-    solver = PULP_CBC_CMD()
+    solver = PULP_CBC_CMD(gapRel=0.05, timeLimit=180)
     status = prob.solve(solver)
 
     # If solver fails, print status and return empty solution

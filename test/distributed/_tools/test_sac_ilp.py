@@ -28,6 +28,7 @@ def loss_fn(logits: torch.Tensor, targets: torch.Tensor):
 class TestSACILP(TestCase):
     def setUp(self):
         super().setUp()
+        self.device = torch.device(torch.cuda.current_device())
 
     def _init_model_and_args(
         self,
@@ -43,15 +44,15 @@ class TestSACILP(TestCase):
             dim=768,
             dropout_p=0.1,
         )
-        dev = torch.cuda.current_device()
-        with torch.device(dev):
+
+        with torch.device(self.device):
             model = Transformer(model_args)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
         inp = torch.randint(
-            0, model_args.vocab_size, (bsz, model_args.max_seq_len), device=dev
+            0, model_args.vocab_size, (bsz, model_args.max_seq_len), device=self.device
         )
         tgt = torch.randint(
-            0, model_args.vocab_size, (bsz, model_args.max_seq_len), device=dev
+            0, model_args.vocab_size, (bsz, model_args.max_seq_len), device=self.device
         )
         return (model, optimizer, (inp, tgt))
 
@@ -59,7 +60,9 @@ class TestSACILP(TestCase):
     def test_collect_stats_and_baseline_estimation(self):
         with FakeTensorMode():
             model, optimizer, (inp, tgt) = self._init_model_and_args()
-            mod_info = aggregate_stats(model, optimizer, (inp, tgt), loss_fn)
+            mod_info = aggregate_stats(
+                model, optimizer, (inp, tgt), loss_fn, self.device
+            )
             g = parse_module_info(mod_info)
             peak_mem, compute_time = get_peak_memory_runtime_baseline(g)
             self.assertAlmostEqual(peak_mem / 2183395840, 1, delta=0.1)
@@ -69,7 +72,9 @@ class TestSACILP(TestCase):
     def test_sac_ilp_case1(self):
         with FakeTensorMode():
             model, optimizer, (inp, tgt) = self._init_model_and_args()
-            mod_info = aggregate_stats(model, optimizer, (inp, tgt), loss_fn)
+            mod_info = aggregate_stats(
+                model, optimizer, (inp, tgt), loss_fn, self.device
+            )
             g = parse_module_info(mod_info)
             sol = sac_milp(g, memory_budget=1.5, world_size=4)
             self.assertDictEqual(
@@ -91,7 +96,9 @@ class TestSACILP(TestCase):
         """
         with FakeTensorMode():
             model, optimizer, (inp, tgt) = self._init_model_and_args()
-            mod_info = aggregate_stats(model, optimizer, (inp, tgt), loss_fn)
+            mod_info = aggregate_stats(
+                model, optimizer, (inp, tgt), loss_fn, self.device
+            )
             g = parse_module_info(mod_info)
             sol = sac_milp(g, memory_budget=5, world_size=4)
             print(sol)
@@ -107,7 +114,9 @@ class TestSACILP(TestCase):
         """
         with FakeTensorMode():
             model, optimizer, (inp, tgt) = self._init_model_and_args()
-            mod_info = aggregate_stats(model, optimizer, (inp, tgt), loss_fn)
+            mod_info = aggregate_stats(
+                model, optimizer, (inp, tgt), loss_fn, self.device
+            )
             g = parse_module_info(mod_info)
             sol = sac_milp(g, memory_budget=0.5, world_size=4)
             self.assertEqual(sol.ac_decisions, {})
