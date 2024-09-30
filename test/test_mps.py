@@ -306,6 +306,9 @@ def mps_ops_modifier(ops):
         'mul',
         'narrow',
         'narrow_copy',
+        'new_full',
+        'new_ones',
+        'new_zeros',
         'nn.functional.conv1d',
         'nn.functional.conv2d',
         'nn.functional.conv_transpose1d',
@@ -870,11 +873,6 @@ def mps_ops_modifier(ops):
         'tensordot': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'unravel_index': [torch.int32, torch.int64],
 
-        # new_zeros/new_ones: Cannot convert a MPS Tensor to float64 dtype as
-        # the MPS framework doesn't support float64
-        'new_zeros': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'new_ones': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'new_full': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         # returned output on CPU is float64
         'bincount': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
