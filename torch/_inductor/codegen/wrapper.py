@@ -2038,7 +2038,9 @@ class PythonWrapperCodegen(CodeGen):
             if isinstance(x, int):
                 return x
             val = V.graph._shape_env._maybe_evaluate_static(x)
-            return int(val)
+            if val is None:
+                return val
+            return int(val)  # type: ignore[call-overload]
         except Exception:
             return None
 
