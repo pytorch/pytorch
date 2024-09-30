@@ -1622,7 +1622,8 @@ def forward(self, x_1, output_1):
         compiled_out = torch.compile(f, dynamic=True)(x)
         self.assertEqual(compiled_out, eager_out)
 
-    @requires_gpu
+    # TODO enable this test case on XPU.
+    @requires_cuda
     @parametrize("cfg", ["normal", "cpp_wrapper", "cpp_abi"])
     def test_triton_kernel_dtype_view(self, cfg):
         # https://github.com/pytorch/pytorch/issues/136159
@@ -1667,6 +1668,76 @@ def forward(self, x_1, output_1):
 
             self.assertEqual(out_e[0], out_c[0])
             self.assertEqual(out_e[1], out_c[1])
+
+    @requires_gpu
+    @parametrize("wrapped", [False, True])
+    @parametrize("autotune", [False, True])
+    def test_constexpr_dynamic_shapes(self, wrapped, autotune):
+        # https://github.com/pytorch/pytorch/issues/136504
+        @triton.jit
+        def triton_(
+            x_ptr,
+            y_ptr,
+            NUMEL: tl.constexpr,
+            IS_ODD: tl.constexpr,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            pid = tl.program_id(0)
+            offsets = BLOCK_SIZE * pid + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < NUMEL
+
+            data = tl.load(x_ptr + offsets, mask)
+            result = data * data
+            if IS_ODD:
+                result = result + 1
+
+            tl.store(y_ptr + offsets, result, mask)
+
+        if autotune:
+            triton_ = triton.autotune(
+                [
+                    triton.Config(kwargs={"BLOCK_SIZE": 128}),
+                    triton.Config(kwargs={"BLOCK_SIZE": 256}),
+                ],
+                key=[],
+            )(triton_)
+
+        def triton_kernel_impl(x: torch.Tensor) -> torch.Tensor:
+            y = torch.empty_like(x)
+            numel = x.numel()
+
+            args = [x, y, numel, numel % 2 == 0]
+            if not autotune:
+                args.append(256)  # BLOCK_SIZE
+
+            def grid(meta):
+                return (triton.cdiv(numel, meta["BLOCK_SIZE"]),)
+
+            if wrapped:
+                capture_triton(triton_)[grid](*args)
+            else:
+                triton_[grid](*args)
+            return y
+
+        if wrapped:
+            triton_kernel = torch._library.triton_op(
+                "constexpr_test::square", triton_kernel_impl, mutates_args={}
+            )
+        else:
+            triton_kernel = triton_kernel_impl
+
+        def fn(x):
+            return triton_kernel(x)
+
+        fn_c = torch.compile(fn, dynamic=True)
+
+        x = torch.randn(512 + 5, device=GPU_TYPE)
+        res = fn_c(x)
+        self.assertEqual(x * x, res)
+
+        x2 = torch.randn(1024 + 5, device=GPU_TYPE)
+        res2 = fn_c(x2)
+        self.assertEqual(x2 * x2, res2)
 
 
 def make_mutation_test(fn):
@@ -2543,6 +2614,26 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         code = "\n".join(codes[0])
         self.assertNotIn(libname, code)
         self.assertNotIn(opname, code)
+
+    @requires_gpu
+    @patch.object(torch._dynamo.config, "cache_size_limit", 1)
+    def test_triton_dynamic_grid_no_recompile(self):
+        libname = "my_cool_namespace"
+        opname = "my_triton_operator"
+
+        @torch._library.triton_op(f"{libname}::{opname}", mutates_args={})
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+            capture_triton(add_kernel)[(n_elements,)](x, y, output, n_elements, 16)
+            return output
+
+        @torch.compile(fullgraph=True, dynamic=True)
+        def f(x):
+            return add(x, x)
+
+        f(torch.randn(8, device=GPU_TYPE))
+        f(torch.randn(16, device=GPU_TYPE))
 
     @unittest.skipIf(not has_triton_package(), "requires triton")
     def test_capture_triton_meta(self):
