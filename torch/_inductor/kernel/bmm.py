@@ -16,10 +16,9 @@ from ..utils import (
     use_triton_template,
 )
 from ..virtualized import V
-
 from .mm import _is_static_problem
-
 from .mm_common import addmm_epilogue, mm_args, mm_configs, mm_options
+
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -157,9 +156,9 @@ def tuned_bmm(mat1, mat2, *, layout=None):
             )
     static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
-        from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
+        from ..codegen.cuda.gemm_template import CUTLASS3xGemmTemplate
 
-        CUTLASSGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
 
     if len(choices) == 0:
         log.warning("No choices for GEMM, using ATen backend as fallback")

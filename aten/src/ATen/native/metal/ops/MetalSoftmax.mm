@@ -16,7 +16,7 @@ template <typename T>
 Tensor mpscnn_softmax(
     const Tensor& input,
     int64_t dim,
-    c10::optional<ScalarType> dtype) {
+    std::optional<ScalarType> dtype) {
   TORCH_CHECK(input.is_metal());
   // TODO: [T87180544] Implement softmax/log_softmax in metal shaders
   TORCH_CHECK(input.dim() == 2);
@@ -51,14 +51,14 @@ Tensor mpscnn_softmax(
 static Tensor log_softmax_int(
     const Tensor& input,
     int64_t dim,
-    c10::optional<ScalarType> dtype) {
+    std::optional<ScalarType> dtype) {
   return mpscnn_softmax<MPSCNNLogSoftMax>(input, dim, dtype);
 }
 
 static Tensor softmax_int(
     const Tensor& input,
     int64_t dim,
-    c10::optional<ScalarType> dtype) {
+    std::optional<ScalarType> dtype) {
   return mpscnn_softmax<MPSCNNSoftMax>(input, dim, dtype);
 }
 

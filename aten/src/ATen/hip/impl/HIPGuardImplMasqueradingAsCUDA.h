@@ -270,8 +270,8 @@ struct HIPGuardMasqueradingAsCUDA {
 
 struct OptionalHIPGuardMasqueradingAsCUDA {
   explicit OptionalHIPGuardMasqueradingAsCUDA() : guard_() {}
-  explicit OptionalHIPGuardMasqueradingAsCUDA(optional<Device> device_opt) : guard_(device_opt) {}
-  explicit OptionalHIPGuardMasqueradingAsCUDA(optional<DeviceIndex> device_index_opt) : guard_(device_index_opt) {}
+  explicit OptionalHIPGuardMasqueradingAsCUDA(std::optional<Device> device_opt) : guard_(device_opt) {}
+  explicit OptionalHIPGuardMasqueradingAsCUDA(std::optional<DeviceIndex> device_index_opt) : guard_(device_index_opt) {}
 
   OptionalHIPGuardMasqueradingAsCUDA(const OptionalHIPGuardMasqueradingAsCUDA&) = delete;
   OptionalHIPGuardMasqueradingAsCUDA& operator=(const OptionalHIPGuardMasqueradingAsCUDA&) = delete;
@@ -281,8 +281,8 @@ struct OptionalHIPGuardMasqueradingAsCUDA {
   void set_device(Device device) { guard_.set_device(device); }
   void reset_device(Device device) { guard_.reset_device(device); }
   void set_index(DeviceIndex device_index) { guard_.set_index(device_index); }
-  optional<Device> original_device() const { return guard_.original_device(); }
-  optional<Device> current_device() const { return guard_.current_device(); }
+  std::optional<Device> original_device() const { return guard_.original_device(); }
+  std::optional<Device> current_device() const { return guard_.current_device(); }
   void reset() { guard_.reset(); }
 
 private:
@@ -316,7 +316,7 @@ private:
 struct OptionalHIPStreamGuardMasqueradingAsCUDA {
   explicit OptionalHIPStreamGuardMasqueradingAsCUDA() : guard_() {}
   explicit OptionalHIPStreamGuardMasqueradingAsCUDA(Stream stream) : guard_(stream) {}
-  explicit OptionalHIPStreamGuardMasqueradingAsCUDA(optional<Stream> stream_opt) : guard_(stream_opt) {}
+  explicit OptionalHIPStreamGuardMasqueradingAsCUDA(std::optional<Stream> stream_opt) : guard_(stream_opt) {}
 
   OptionalHIPStreamGuardMasqueradingAsCUDA(const OptionalHIPStreamGuardMasqueradingAsCUDA&) = delete;
   OptionalHIPStreamGuardMasqueradingAsCUDA& operator=(const OptionalHIPStreamGuardMasqueradingAsCUDA&) = delete;
@@ -325,21 +325,21 @@ struct OptionalHIPStreamGuardMasqueradingAsCUDA {
 
   void reset_stream(Stream stream) { guard_.reset_stream(stream); }
 
-  optional<HIPStreamMasqueradingAsCUDA> original_stream() const {
+  std::optional<HIPStreamMasqueradingAsCUDA> original_stream() const {
     auto r = guard_.original_stream();
     if (r.has_value()) {
-      return make_optional(HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, r.value()));
+      return std::make_optional(HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, r.value()));
     } else {
-      return nullopt;
+      return std::nullopt;
     }
   }
 
-  optional<HIPStreamMasqueradingAsCUDA> current_stream() const {
+  std::optional<HIPStreamMasqueradingAsCUDA> current_stream() const {
     auto r = guard_.current_stream();
     if (r.has_value()) {
-      return make_optional(HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, r.value()));
+      return std::make_optional(HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, r.value()));
     } else {
-      return nullopt;
+      return std::nullopt;
     }
   }
 

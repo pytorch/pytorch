@@ -10,7 +10,7 @@
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native { namespace detail {
+namespace at::native::detail {
 
 struct InputMeta {
   void* data_ptr;
@@ -91,7 +91,9 @@ bool can_use_native_serial_stack_impl(Tensor& result, TensorListType tensors, in
   }
 
   // check remainder of inputs
+#ifndef STRIP_ERROR_MESSAGES
   auto const &first_tensor_shape = first_tensor.sizes();
+#endif
   for (const auto i : c10::irange(1, tensors.size())) {
     auto const &tensor = tensors[i];
     TORCH_CHECK(tensors[i].sizes() == first_tensor.sizes(),
@@ -141,4 +143,4 @@ struct CanUseNativeSerialStack<TensorListType, true> {
   }
 };
 
-}}}  // namespace at::native::detail
+} // namespace at::native::detail

@@ -21,7 +21,7 @@ from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
-    CUDAInitMode,
+    DEVICEInitMode,
     DummyProcessGroup,
     FSDPInitMode,
     FSDPTest,
@@ -37,6 +37,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
+
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -152,13 +153,13 @@ class TestShardGradScaler(TestCase):
 
 class TestShardedGradScalerParityWithDDP(FSDPTest):
     def _get_init_modes_for_test(self, cpu_offload):
-        modes = [CUDAInitMode.CUDA_AFTER, CUDAInitMode.CUDA_BEFORE]
-        # Note that CUDAInitMode.CUDA_NEVER works currently only with CPU
+        modes = [DEVICEInitMode.DEVICE_AFTER, DEVICEInitMode.DEVICE_BEFORE]
+        # Note that DEVICEInitMode.DEVICE_NEVER works currently only with CPU
         # offload as we explicitly bring the param back to CUDA device. In
         # general, it will not work since we try to all_gather p.data which is
         # on CPU but NCCL only supports GPU.
         if cpu_offload.offload_params:
-            modes.append(CUDAInitMode.CUDA_NEVER)
+            modes.append(DEVICEInitMode.DEVICE_NEVER)
 
         return modes
 
@@ -191,11 +192,11 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
             use_orig = False
             model_cls = NestedWrappedModule  # type: ignore[assignment]
             sharded_grad_scaler_kwargs = None
-        for cuda_init_mode in init_modes:
+        for device_init_mode in init_modes:
             self._test_fsdp_parity(
                 model_cls,
                 FSDPInitMode.RECURSIVE,
-                cuda_init_mode=cuda_init_mode,
+                device_init_mode=device_init_mode,
                 cpu_offload=cpu_offload,
                 sharding_strategy=sharding_strategy,
                 mixed_precision=mp,
@@ -212,7 +213,7 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
         model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             deterministic=True,
         )
         ref_model = DDP(

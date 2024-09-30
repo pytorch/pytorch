@@ -56,7 +56,7 @@ class Embedding(Module):
         :attr:`max_norm` is not ``None``. For example::
 
             n, d, m = 3, 5, 7
-            embedding = nn.Embedding(n, d, max_norm=True)
+            embedding = nn.Embedding(n, d, max_norm=1.0)
             W = torch.randn((m, d), requires_grad=True)
             idx = torch.tensor([1, 2])
             a = embedding.weight.clone() @ W.t()  # weight must be cloned for this to be differentiable

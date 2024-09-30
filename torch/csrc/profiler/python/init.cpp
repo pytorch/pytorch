@@ -441,7 +441,7 @@ void initPythonBindings(PyObject* module) {
             return py::reinterpret_borrow<py::object>(
                 torch::autograd::utils::wrap(metadata.dtype_));
           })
-      .def_readonly("dim", &TensorMetadata::dim_)
+      .def_readonly("dim", &TensorMetadata::size_dim_)
       .def_readonly("sizes", &TensorMetadata::sizes_)
       .def_readonly("strides", &TensorMetadata::strides_);
 
@@ -458,7 +458,7 @@ void initPythonBindings(PyObject* module) {
                       [&](const c10::IValue& v) {
                         out.append(torch::jit::toPyObject(v));
                       },
-                      [&](const c10::nullopt_t&) { out.append(py::none()); },
+                      [&](const std::nullopt_t&) { out.append(py::none()); },
                       [&](const auto& v) { out.append(py::cast(v)); }),
                   input);
             }

@@ -37,7 +37,7 @@ Tensor empty_strided_meta_symint(
   std::optional<bool> pin_memory_opt
 ) {
   return at::detail::empty_strided_symint_meta(
-      size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
+      size, stride, dtype_opt, layout_opt, device_opt);
 }
 
 } // namespace at::native

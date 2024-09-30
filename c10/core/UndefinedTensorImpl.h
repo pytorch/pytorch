@@ -18,11 +18,14 @@ struct C10_API UndefinedTensorImpl final : public TensorImpl {
   // function for device as well).
 #ifdef _WIN32
   static inline TensorImpl* singleton() {
+    return &getInstance();
+  }
 #else
   static constexpr inline TensorImpl* singleton() {
-#endif
     return &_singleton;
   }
+#endif
+
 #ifdef DEBUG
   bool has_storage() const override;
 #endif
@@ -35,7 +38,11 @@ struct C10_API UndefinedTensorImpl final : public TensorImpl {
 
  private:
   UndefinedTensorImpl();
+#ifdef _WIN32
+  static UndefinedTensorImpl& getInstance();
+#else
   static UndefinedTensorImpl _singleton;
+#endif
   const char* tensorimpl_type_name() const override;
 };
 

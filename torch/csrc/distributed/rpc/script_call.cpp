@@ -2,9 +2,7 @@
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 const std::string ScriptCall::BUILTIN_OP_NAMESPACE_("torch.ops.aten.");
 const std::string ScriptCall::ATEN_PREFIX_("aten::");
@@ -88,10 +86,10 @@ std::unique_ptr<ScriptCall> ScriptCall::fromIValues(
       "At least 2 IValues are required to build a ScriptCall.");
 
   // Last element in the vector is always qualifiedName for both
-  // builitin operator and TorchScript function
+  // builtin operator and TorchScript function
   // If the qualifiedName is not a builtin operator name, then treat it
   // as TorchScript function name
-  const std::string& qualifiedName = ivalues.back().toStringRef();
+  std::string qualifiedName = ivalues.back().toStringRef();
 
   if (qualifiedName.rfind(BUILTIN_OP_NAMESPACE_) == 0) {
     ivalues.pop_back();
@@ -155,6 +153,4 @@ std::shared_ptr<Operator> ScriptCall::matchOperator(
   TORCH_CHECK(false, "Cannot find matching operator for schema ", str_schema);
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

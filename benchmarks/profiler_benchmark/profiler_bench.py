@@ -3,8 +3,8 @@ import sys
 import timeit
 
 import torch
-
 from torch.utils.benchmark import Timer
+
 
 PARALLEL_TASKS_NUM = 4
 INTERNAL_ITER = None
