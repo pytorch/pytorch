@@ -1393,6 +1393,24 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_call(attention)
 
     @supported_platform
+    def test_new_empty_mask_mod(self):
+        S = 128
+        q, k, v = (torch.randn(4, 1, S, 64, device="cuda") for _ in range(3))
+
+        attn_mask = torch.ones(4, 1, S, S, dtype=torch.bool, device="cuda").tril()
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            h_ = h.new_zeros(h.shape)
+            return score + attn_mask[b, h_, q_idx, kv_idx]
+
+        def causal(b, h, q_idx, kv_idx):
+            h_ = h.new_zeros(h.shape)
+            return attn_mask[b, h_, q_idx, kv_idx]
+
+        block_mask = create_block_mask(causal, B=4, H=None, Q_LEN=S, KV_LEN=S)
+        torch.compile(flex_attention)(q, k, v, score_mod, block_mask=block_mask)
+
+    @supported_platform
     def test_GQA_causal_mask(self):
         def mask_mod(b, h, q, kv):
             return q >= kv
