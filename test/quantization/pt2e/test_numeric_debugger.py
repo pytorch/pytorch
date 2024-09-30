@@ -6,6 +6,7 @@ from collections import Counter
 from typing import Dict
 
 import torch
+from torch._environment import is_fbcode
 from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization import (
     compare_results,
@@ -25,8 +26,8 @@ from torch.testing._internal.common_quantization import TestHelperModules
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfCrossRef, TestCase
 
 
-def _extract_debug_handles(model) -> Dict[torch.fx.Node, int]:
-    debug_handle_map: Dict[torch.fx.Node, int] = {}
+def _extract_debug_handles(model) -> Dict[str, int]:
+    debug_handle_map: Dict[str, int] = {}
 
     for node in model.graph.nodes:
         if (
@@ -38,10 +39,6 @@ def _extract_debug_handles(model) -> Dict[torch.fx.Node, int]:
             ]
 
     return debug_handle_map
-
-
-def is_fbcode():
-    return not hasattr(torch.version, "git_version")
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
@@ -187,3 +184,53 @@ class TestNumericDebugger(TestCase):
         for node_summary in comparison_results.values():
             if len(node_summary.results) > 0:
                 self.assertGreaterEqual(node_summary.results[0].sqnr, 35)
+
+    def test_added_node_gets_unique_id(self) -> None:
+        m = TestHelperModules.Conv2dThenConv1d()
+        example_inputs = m.example_inputs()
+        m = capture_pre_autograd_graph(m, example_inputs)
+        assert isinstance(m, torch.fx.GraphModule)
+        generate_numeric_debug_handle(m)
+        ref_handles = _extract_debug_handles(m)
+        ref_counter = Counter(ref_handles.values())
+        for k, v in ref_counter.items():
+            self.assertEqual(
+                v,
+                1,
+                msg=f"For handle {k}, there were {v} nodes with that handle, but expected only 1",
+            )
+
+        # Now that we have unique ids, add a new node into the graph and re-generate
+        # to make sure that the new node gets a unique id.
+        last_node = next(iter(reversed(m.graph.nodes)))
+        with m.graph.inserting_before(last_node):
+            arg = last_node.args[0]
+            self.assertIsInstance(arg, (list, tuple))
+            arg = arg[0]
+            # Add a function that only requires a single tensor input.
+            n = m.graph.call_function(torch.ops.aten.relu.default, args=(arg,))
+            arg.replace_all_uses_with(n, lambda x: x != n)
+        m.recompile()
+
+        # Regenerate handles, make sure only the new relu node has a new id, and
+        # it doesn't clash with any of the existing ids.
+        generate_numeric_debug_handle(m)
+        handles_after_modification = _extract_debug_handles(m)
+        handles_counter = Counter(handles_after_modification.values())
+        for name, handle in ref_handles.items():
+            self.assertIn(name, handles_after_modification)
+            # Check that handle was unchanged.
+            self.assertEqual(handles_after_modification[name], handle)
+            # Check that total count was unchanged.
+            ref_count = ref_counter[handle]
+            after_count = handles_counter[handle]
+            self.assertEqual(
+                after_count,
+                ref_count,
+                msg=f"For handle {handle}, there were {after_count} nodes with that handle, but expected only {ref_count}",
+            )
+
+        # Check for relu specifically. Avoid hardcoding the handle id since it
+        # may change with future node ordering changes.
+        self.assertNotEqual(handles_after_modification["relu_default"], 0)
+        self.assertEqual(handles_counter[handles_after_modification["relu_default"]], 1)
