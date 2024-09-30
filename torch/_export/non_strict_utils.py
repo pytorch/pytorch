@@ -95,9 +95,8 @@ def fakify(
     n_dims = len(t.shape)
     dynamic_sizes = []
     for i in range(n_dims):
-        if (
-            i in getattr(t, "_dynamo_weak_dynamic_indices", {})
-            or i in getattr(t, "_dynamo_dynamic_indices", {})
+        if i in getattr(t, "_dynamo_weak_dynamic_indices", {}) or i in getattr(
+            t, "_dynamo_dynamic_indices", {}
         ):
             dynamic_sizes.append(DimDynamic.DYNAMIC)
         else:
