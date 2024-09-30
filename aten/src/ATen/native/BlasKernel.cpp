@@ -456,11 +456,19 @@ static C10_ALWAYS_INLINE float32x4_t f32_fma_bf16(float32x4_t a, uint16x4_t b, u
   return f32_fma(a, to_bfloat16(b), to_bfloat16(c));
 }
 
-#if defined(__clang__) || defined(__GNUC__)
-#define TARGET_ARM_BF16_ATTRIBUTE __attribute__((target("arch=armv8.2-a+bf16")))
+#if defined(__clang__) && __clang_major__ > 15
+// https://godbolt.org/z/z8P4Yncra
+#define COMPILER_SUPPORTS_BF16_TARGET 1
+#elif !defined(__clang__) && defined(__GNUC__) && __GNUC__ >= 10
+// https://gcc.gnu.org/gcc-10/changes.html
+// https://godbolt.org/z/cdGG7vn8o
+#define COMPILER_SUPPORTS_BF16_TARGET 1
 #else
-#define TARGET_ARM_BF16_ATTRIBUTE
+#define COMPILER_SUPPORTS_BF16_TARGET 0
 #endif
+
+#if COMPILER_SUPPORTS_BF16_TARGET
+#define TARGET_ARM_BF16_ATTRIBUTE __attribute__((target("arch=armv8.2-a+bf16")))
 
 TARGET_ARM_BF16_ATTRIBUTE static C10_ALWAYS_INLINE float32x4_t
 f32_dot_bf16(float32x4_t a, bfloat16x8_t b, bfloat16x8_t c) {
@@ -480,6 +488,9 @@ dot_with_fp32_arith_main_inner_loop_bfdot(
   sum[registerPairIndex] =
       f32_dot_bf16(sum[registerPairIndex], temp_vec1, temp_vec2);
 }
+#else
+#define TARGET_ARM_BF16_ATTRIBUTE
+#endif // COMPILER_SUPPORTS_BF16_TARGET
 
 template <typename T>
 static C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop_no_bfdot(
@@ -513,6 +524,7 @@ static C10_ALWAYS_INLINE void dot_with_fp32_arith_vectorized_tail_inner_loop(
 }
 
 namespace {
+#if COMPILER_SUPPORTS_BF16_TARGET
 template <int n>
 struct ForcedUnrollTargetBFloat16 {
   template <typename Func>
@@ -547,6 +559,7 @@ dot_with_fp32_arith_main_loop_bfdot(
   }
   return reduce(sum);
 }
+#endif // COMPILER_SUPPORTS_BF16_TARGET
 
 template <typename T>
 C10_ALWAYS_INLINE auto
@@ -591,11 +604,13 @@ C10_ALWAYS_INLINE float dot_with_fp32_arith_tail_after_main_loop(
   return reducedSum;
 }
 
+#if COMPILER_SUPPORTS_BF16_TARGET
 TARGET_ARM_BF16_ATTRIBUTE float
 dot_with_fp32_arith_bfdot(const BFloat16* vec1, const BFloat16* vec2, int64_t len) {
   auto reducedSum = dot_with_fp32_arith_main_loop_bfdot(vec1, vec2, len);
   return dot_with_fp32_arith_tail_after_main_loop(vec1, vec2, len, reducedSum);
 }
+#endif // COMPILER_SUPPORTS_BF16_TARGET
 
 template <typename T>
 C10_ALWAYS_INLINE float
@@ -611,9 +626,12 @@ float fp16_dot_with_fp32_arith(const float16_t* vec1, const float16_t* vec2, int
 }
 
 float bf16_dot_with_fp32_arith(const at::BFloat16* vec1, const at::BFloat16* vec2, int64_t len) {
+#if COMPILER_SUPPORTS_BF16_TARGET
   if (cpuinfo_has_arm_bf16()) {
     return dot_with_fp32_arith_bfdot(vec1, vec2, len);
-  } else {
+  } else
+#endif
+  {
     return dot_with_fp32_arith_no_bfdot(vec1, vec2, len);
   }
 }

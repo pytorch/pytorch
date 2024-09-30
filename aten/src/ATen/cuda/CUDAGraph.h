@@ -82,7 +82,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // in a capture to run on the same device, but this is a limitation of CUDAGraph,
   // not CUDA itself.  We can straightforwardly modify CUDAGraph to support multi-device
   // captures if needed.
-  int capture_dev_;
+  int capture_dev_{};
 };
 
 } // namespace cuda

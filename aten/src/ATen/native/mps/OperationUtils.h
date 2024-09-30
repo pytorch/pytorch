@@ -454,6 +454,10 @@ inline bool supportedFloatingOrComplexType(const Tensor& t) {
   return supportedFloatingOrComplexType(t.scalar_type());
 }
 
+inline void checkSupportsBFloat16() {
+  TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
+                   "MPS bfloat16 type is supported on MacOS 14.0 or newer.");
+}
 
 inline bool needsGather(const Tensor& t) {
   static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
