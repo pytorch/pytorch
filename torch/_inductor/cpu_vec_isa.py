@@ -323,22 +323,6 @@ def x86_isa_checker() -> List[str]:
     return supported_isa
 
 
-@functools.lru_cache(maxsize=None)
-def _is_arm_neoverse_v1() -> bool:
-    # reference: https://github.com/ARM-software/ComputeLibrary/blob/main/src/common/cpuinfo/CpuModel.cpp
-    try:
-        with open("/proc/cpuinfo") as _cpuinfo:
-            line = _cpuinfo.readline()
-            while line:
-                is_v1 = re.match(r"^CPU\spart(.*):\s0xd40(\n)$", line)
-                if is_v1:
-                    return True
-                line = _cpuinfo.readline()
-            return False
-    except Exception:
-        return False
-
-
 invalid_vec_isa = InvalidVecISA()
 supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON(), VecSVE()]
 
@@ -372,7 +356,7 @@ def valid_vec_isa_list() -> List[VecISA]:
     elif arch == "ppc64le":
         isa_list.append(VecVSX())
     elif arch == "aarch64":
-        if _is_arm_neoverse_v1():
+        if torch.cpu._is_arm_sve_supported():
             isa_list.append(VecSVE())
         else:
             isa_list.append(VecNEON())
