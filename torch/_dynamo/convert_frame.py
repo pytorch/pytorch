@@ -1085,7 +1085,6 @@ def _compile(
                 structured_logging_overhead_s,
                 config.suppress_errors,
                 config.specialize_float,
-                json.dumps(config.to_dict()),
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
