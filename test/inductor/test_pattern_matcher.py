@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import copy
+import itertools
 import os
 import unittest
 
@@ -29,7 +30,7 @@ from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CUDA, IS_A100
+from torch.testing._internal.inductor_utils import HAS_CUDA, IS_A100, IS_BIG_GPU
 from torch.utils import _pytree as pytree
 
 
@@ -65,6 +66,7 @@ class TestPatternMatcher(TestCase):
         additional_check(codes)
         counters.clear()
 
+    @inductor_config.patch(max_autotune_gemm=True)
     def test_mm_plus_mm(self):
         def fn(a, b, c, d):
             return torch.add(torch.mm(a, b), torch.mm(c, d))
@@ -222,6 +224,28 @@ class TestPatternMatcher(TestCase):
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(mixed_mm_choice="triton")
+    def test_mixed_mm_exhaustive_dtypes(self):
+        def fn(a, b):
+            return torch.mm(a, b.to(a.dtype))
+
+        dtypes_left = [torch.float16, torch.float32, torch.bfloat16]
+        dtypes_right = [torch.int8, torch.uint8]
+        dtype_ranges = {torch.uint8: (0, 255), torch.int8: (-128, 127)}
+        for dtype_left, dtype_right in itertools.product(dtypes_left, dtypes_right):
+            low, high = dtype_ranges[dtype_right]
+            args = (
+                torch.randn(256, 256, dtype=dtype_left, device="cuda"),
+                torch.randint(low, high, (256, 256), dtype=dtype_right, device="cuda"),
+            )
+            fallback_mixed_mm_expected = (
+                dtype_left == torch.bfloat16 and dtype_right == torch.uint8
+            )
+            self._test_mixed_impl(
+                fn, args, True, fallback_mixed_mm_expected, rtol=0.16, atol=1e-4
+            )
+
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @inductor_config.patch(mixed_mm_choice="triton")
     def test_mixed_mm_bad_cases(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -277,7 +301,14 @@ class TestPatternMatcher(TestCase):
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
     @unittest.skipIf(not IS_A100, "heuristic only run on Linux A100")
-    @inductor_config.patch(mixed_mm_choice="heuristic", autoheuristic_use="")
+    @unittest.skipIf(not IS_BIG_GPU, "tests fail on small GPU")
+    @inductor_config.patch(
+        mixed_mm_choice="heuristic",
+        autoheuristic_use="",
+        fx_graph_cache=False,
+        fx_graph_remote_cache=False,
+        shape_padding=False,
+    )
     def test_mixed_mm_heuristic_no(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -330,7 +361,14 @@ class TestPatternMatcher(TestCase):
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
     @unittest.skipIf(not IS_A100, "heuristic only run on Linux A100")
-    @inductor_config.patch(mixed_mm_choice="heuristic")
+    @unittest.skipIf(not IS_BIG_GPU, "tests fail on small GPU")
+    @inductor_config.patch(
+        mixed_mm_choice="heuristic",
+        autoheuristic_use="",
+        fx_graph_cache=False,
+        fx_graph_remote_cache=False,
+        shape_padding=False,
+    )
     def test_mixed_mm_heuristic_yes(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -711,6 +749,7 @@ class TestPatternMatcher(TestCase):
             torch.randn(2, 8, device="cuda"),
             torch.randn(2, 16, device="cuda"),
         ]
+        torch._dynamo.reset()
         counters.clear()
         expected = fn(*args)
         actual = torch.compile(fn)(*args)
@@ -1409,7 +1448,7 @@ class TestPatternMatcher(TestCase):
             (t, [64, 128, 8, 8]),
             {"dim": 1, "out": [t, t, t, t]},
         )
-        check("call_function", torch.ops.fsdp.set_, (t, t), {})
+        check("call_function", torch.ops.fsdp.copy_, (t, t), {})
         check(
             "call_function", torch.ops.aten.__rshift__.Scalar, (t, 2), {}, expect=False
         )

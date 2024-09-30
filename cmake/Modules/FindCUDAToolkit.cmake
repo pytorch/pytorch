@@ -978,6 +978,14 @@ if(CUDAToolkit_FOUND)
     _CUDAToolkit_find_and_add_import_lib(cublas_static DEPS culibos)
   endif()
 
+  if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 11.4)
+    _CUDAToolkit_find_and_add_import_lib(cuFile ALT cufile DEPS culibos)
+    _CUDAToolkit_find_and_add_import_lib(cuFile_static ALT cufile_static DEPS culibos)
+
+    _CUDAToolkit_find_and_add_import_lib(cuFile_rdma ALT cufile_rdma DEPS cuFile culibos)
+    _CUDAToolkit_find_and_add_import_lib(cuFile_rdma_static ALT cufile_rdma_static DEPS cuFile_static culibos)
+  endif()
+
   # cuFFTW depends on cuFFT
   _CUDAToolkit_find_and_add_import_lib(cufftw DEPS cufft)
   _CUDAToolkit_find_and_add_import_lib(cufftw_static DEPS cufft_static)

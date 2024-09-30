@@ -9,7 +9,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 from ..codecache import get_path, TritonFuture
-from ..runtime.runtime_utils import do_bench_gpu
+from ..runtime.benchmarking import benchmarker
 from ..utils import cache_on_self, IndentedBuffer
 from ..virtualized import V
 from .common import TensorArg
@@ -112,20 +112,6 @@ class MultiKernelState:
             # we should not generate any python code for multi-kernel during
             # the second pass of cpp-wrapper.
             return multi_kernel_name
-
-        # add subkernel src code hashes to the multi-kernel source code so changing a
-        # subkernel implementation will result in a different py file for
-        # multi-kernel. This makes cache implementation straightforward since
-        # we can decide cache file name based on multi-kernel py file name
-        # directly.
-        #
-        # Without the hash added for subkernels, the cache file may be shared by
-        # different subkernels which is incorrect.
-        subkernel_hashes = "\n".join(
-            f"# subkernel{i} code hash: {kernel.code_hash}"
-            for i, kernel in enumerate(kernels)
-        )
-        kernel_name_list = ",\n    ".join(kernel_names)
 
         buf = IndentedBuffer()
         buf.writeline(
@@ -323,7 +309,7 @@ class MultiKernelCall:
             return inner
 
         return [
-            do_bench_gpu(wrap_fn(kernel), rep=40, fast_flush=True)
+            benchmarker.benchmark_gpu(wrap_fn(kernel), rep=40)
             for kernel in self.kernels
         ]
 

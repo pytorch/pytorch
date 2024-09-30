@@ -55,7 +55,6 @@ class HalfChecker : public IRVisitor {
   bool hasBFloat16_{false};
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class HalfRewriter : public IRMutator {
   ExprPtr mutate(const LoadPtr& v) override {
     ExprPtr child = IRMutator::mutate(v);

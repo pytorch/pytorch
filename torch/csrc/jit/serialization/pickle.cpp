@@ -9,6 +9,35 @@
 
 namespace torch::jit {
 
+namespace {
+
+c10::StrongTypePtr customClassResolver(const c10::QualifiedName& qn) {
+  at::TypePtr type = nullptr;
+  if (c10::QualifiedName("__torch__").isPrefixOf(qn)) {
+    type = torch::getCustomClass(qn.qualifiedName());
+  } else {
+    // This is a regular type, fall back to the default type parser
+    torch::jit::ScriptTypeParser parser;
+    type = parser.parseType(qn.qualifiedName());
+    return c10::StrongTypePtr(nullptr, std::move(type));
+  }
+  if (type == nullptr) {
+    TORCH_CHECK(
+        false,
+        "Couldn't resolve type '{}', did you forget to add its build dependency?",
+        qn.qualifiedName());
+  }
+  // Passing nullptr is a little bit sus, but should be fine:
+  // 1. The lifetime of the class type is not tied to a specific
+  // CompilationUnit
+  //    but rather the global custom class registry.
+  // 2. We will not access the `cu_` field and immediately discard this
+  //    StrongTypePtr post-deserialization.
+  return c10::StrongTypePtr(nullptr, std::move(type));
+}
+
+} // namespace
+
 void pickle(
     std::function<void(const char* data_start, size_t data_len)> writer,
     const IValue& ivalue,
@@ -80,6 +109,16 @@ size_t VectorReader::read(uint64_t pos, void* buf, size_t n, const char* what)
       data_.data() + pos, data_.data() + pos + n, reinterpret_cast<char*>(buf));
   return n;
 }
+
+size_t StringViewReader::read(
+    uint64_t pos,
+    void* buf,
+    size_t n,
+    const char* what) const {
+  std::copy(
+      data_.data() + pos, data_.data() + pos + n, reinterpret_cast<char*>(buf));
+  return n;
+}
 #endif
 
 IValue pickle_load(const std::vector<char>& data) {
@@ -102,6 +141,26 @@ IValue pickle_load(const std::vector<char>& data) {
       "(see https://github.com/pytorch/pytorch/pull/30108)");
 #endif
 };
+
+// A specialized version of pickle_load that can load custom objects.
+c10::IValue pickle_load_obj(std::string_view data) {
+#ifndef C10_MOBILE
+  caffe2::serialize::PyTorchStreamReader reader(
+      std::make_unique<torch::jit::StringViewReader>(data));
+  return torch::jit::readArchiveAndTensors(
+      "data",
+      /*pickle_prefix=*/"",
+      /*tensor_prefix=*/"",
+      /*type_resolver=*/customClassResolver,
+      /*obj_loader=*/torch::jit::ObjLoaderFunc,
+      /*device=*/c10::nullopt,
+      reader);
+#else
+  AT_ERROR(
+      "pickle_load not supported on mobile "
+      "(see https://github.com/pytorch/pytorch/pull/30108)");
+#endif
+}
 
 IValue unpickle(
     std::function<size_t(char*, size_t)> reader,

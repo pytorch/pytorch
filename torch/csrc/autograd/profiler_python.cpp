@@ -32,9 +32,7 @@
 
 namespace py = pybind11;
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 namespace {
 enum CallType { PyCall = 0, PyModuleCall, PyCCall, PyOptimizerCall };
 static constexpr size_t CallTypeSize = 4;
@@ -97,9 +95,7 @@ PyCodeObject* getCode<CallType::PyOptimizerCall>() {
 };
 
 } // namespace
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl
 
 template <>
 struct std::hash<torch::profiler::impl::CodeLocation> {
@@ -108,9 +104,7 @@ struct std::hash<torch::profiler::impl::CodeLocation> {
   }
 };
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 namespace {
 // ============================================================================
 // == CallTypeHelper: Tools for generic programming on specializations. =======
@@ -257,7 +251,7 @@ class Callsite {
   using key_t = typename Config<C>::key_t;
 
   static_assert(
-      std::is_trivially_copyable<key_t>::value,
+      std::is_trivially_copyable_v<key_t>,
       "Key should be trivial, as it is passed by value.");
 
   template <typename U>
@@ -565,7 +559,7 @@ static PyTypeObject TraceContextType = {
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
     0,
-    /* tp_vectorcall_offset */ // NOLINT: modernize-use-nullptr
+    /* tp_vectorcall_offset */
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
     nullptr, /* tp_reserved */
@@ -686,6 +680,7 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
       PyObject* arg);
 
   void stop() override;
+  void restart() override;
   std::vector<std::shared_ptr<Result>> getEvents(
       std::function<c10::time_t(c10::approx_time_t)> time_converter,
       std::vector<python_tracer::CompressedEvent>& enters,
@@ -713,7 +708,7 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
   bool active_{false};
 
   torch::profiler::impl::RecordQueue* queue_;
-  PyInterpreterState* interpreter_;
+  PyInterpreterState* interpreter_{nullptr};
   PyCodeObject* module_call_code_;
   PyCodeObject* optimizer_hook_;
 
@@ -737,7 +732,7 @@ const std::vector<PyThreadState*> PythonTracer::interpreterThreads() const {
 
 PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     : queue_(queue),
-      interpreter_(nullptr),
+
       module_call_code_(getCode<CallType::PyModuleCall>()),
       optimizer_hook_(getCode<CallType::PyOptimizerCall>()) {
   TORCH_CHECK(queue_ != nullptr);
@@ -814,6 +809,25 @@ void PythonTracer::stop() {
     auto lock_returned = active_lock_.compare_exchange_strong(active_, false);
     active_ = false;
     SOFT_ASSERT(lock_returned, "Failed to return python tracer lock.");
+  }
+}
+
+void PythonTracer::restart() {
+  gil_and_restore_thread gil;
+  active_ = active_lock_.compare_exchange_strong(active_, true);
+  if (!active_) {
+    TORCH_WARN(
+        "There is already an active Python tracer. "
+        "Refusing to register profile functions.");
+    return;
+  }
+  int cur_thread = 0;
+  for (const auto thread_state : interpreterThreads()) {
+    if (thread_state->c_profilefunc == nullptr) {
+      auto* ctx = thread_local_results_[cur_thread].ctx_;
+      PyThreadState_Swap(thread_state);
+      PyEval_SetProfile(PythonTracer::pyProfileFn, (PyObject*)ctx);
+    }
   }
 }
 
@@ -1117,14 +1131,9 @@ std::unique_ptr<python_tracer::PythonTracerBase> getTracer(
   return std::make_unique<PythonTracer>(queue);
 }
 } // namespace
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl
 
-namespace torch {
-namespace autograd {
-namespace profiler {
-namespace python_tracer {
+namespace torch::autograd::profiler::python_tracer {
 
 void init() {
   pybind11::gil_scoped_acquire gil;
@@ -1132,7 +1141,4 @@ void init() {
   torch::profiler::impl::python_tracer::registerTracer(
       &torch::profiler::impl::getTracer);
 }
-} // namespace python_tracer
-} // namespace profiler
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd::profiler::python_tracer

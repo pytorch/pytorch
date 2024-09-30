@@ -129,6 +129,7 @@ class GuardSource(enum.Enum):
             GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
             GuardSource.LOCAL_FSDP_MODULE,
             GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
         )
 
 
@@ -642,6 +643,8 @@ class TracingContext:
         # this is only set after aot_autograd
         self.aot_graph_name = None
         self.params_flat = None
+        self.params_flat_unwrap_subclasses = None
+        self.params_unwrapped_to_flat_index = None
         # this is for extended return calling convention from backend
         # compiler to aot_autograd
         # Per output, what the compiler specified stride of the output is,

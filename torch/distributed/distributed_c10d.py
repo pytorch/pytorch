@@ -266,6 +266,7 @@ class Backend(str):
         GLOO: ProcessGroup.BackendType.GLOO,
         NCCL: ProcessGroup.BackendType.NCCL,
         UCC: ProcessGroup.BackendType.UCC,
+        MPI: ProcessGroup.BackendType.MPI,
     }
 
     def __new__(cls, name: str):
@@ -713,8 +714,6 @@ class _WorldMeta(type):
 
 class group(metaclass=_WorldMeta):
     """Group class. Placeholder."""
-
-    pass
 
 
 class GroupMember(metaclass=_WorldMeta):
@@ -1288,6 +1287,33 @@ def get_node_local_rank(fallback_rank: Optional[int] = None) -> int:
     )
 
 
+def _add_ephemeral_timeout_for_all_pgs(timeout: timedelta) -> None:
+    """
+    This API adds an ephemeral timeout extension for all PGs locally
+    on one rank. The timeout gets reset when the first collective issued
+    after API called finished.
+    NOTE: We only support to set timeout for cuda backends for now.
+    NOTE: While this feature
+    provides flexibility in specific scenarios, it introduces statefulness
+    to timeout setting. Therefore, it is advisable to use this API sparingly
+    and consider alternative approaches, such as directly setting the timeout
+    or utilizing a barrier collective (one can set any timeout to the barrier),
+    whenever feasible.
+
+    Args:
+        timeout (timedelta): The delta of timeout to extend.
+
+    Returns:
+        None.
+    """
+    for pg in _world.pg_map.keys():
+        devices = pg._device_types
+        if torch.device("cuda") in devices:
+            backend = pg._get_backend(torch.device("cuda"))
+            if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
+                backend._add_ephemeral_timeout(timeout)
+
+
 def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) -> None:
     """
     Set the timeout for the given process group when users want to use a different timeout instead of
@@ -1506,7 +1532,7 @@ def init_process_group(
             backend,
             store,
             group_name,
-            pg_options=pg_options,
+            backend_options=pg_options,
             timeout=timeout,
             device_id=device_id,
             group_desc="default_pg",
@@ -1603,7 +1629,7 @@ def _new_process_group_helper(
     backend,
     store,
     group_name,
-    pg_options=None,
+    backend_options=None,
     timeout=None,
     pg_tag=None,
     device_id=None,
@@ -1679,11 +1705,17 @@ def _new_process_group_helper(
             return GroupMember.NON_GROUP_MEMBER, None
 
     prefix_store = PrefixStore(f"{group_name}/", store)
-    base_pg_options = ProcessGroup.Options(backend=str(backend))
-    base_pg_options._timeout = timeout
+    # The backend for PG will be set later based on what's inside BackendConfig
+    # and timeout are set in each backend's option.
     pg: ProcessGroup = ProcessGroup(
-        prefix_store, group_rank, group_size, base_pg_options
+        prefix_store,
+        group_rank,
+        group_size,
     )
+    # Set the default backend when only single backend is passed in.
+    if "," not in str(backend) and ":" not in str(backend):
+        assert backend in Backend.backend_type_map, f"Unknown backend type {backend}"
+        pg._set_default_backend(Backend.backend_type_map[backend])
     if device_id:
         pg.bound_device_id = device_id
     backend_config = BackendConfig(backend)
@@ -1710,8 +1742,8 @@ def _new_process_group_helper(
                     backend_prefix_store,
                     backend_class.rank(),
                     backend_class.size(),
-                    base_pg_options,
                 )
+                pg._set_default_backend(backend_type)
         elif backend_str == Backend.GLOO:
             # TODO: remove this check after lazy initialization is supported
             # if pg_options is not None:
@@ -1723,28 +1755,30 @@ def _new_process_group_helper(
         elif backend_str == Backend.NCCL:
             if not is_nccl_available():
                 raise RuntimeError("Distributed package doesn't have NCCL built in")
-            if pg_options is not None:
+            if backend_options is not None:
                 assert isinstance(
-                    pg_options, ProcessGroupNCCL.Options
-                ), "Expected pg_options argument to be of type ProcessGroupNCCL.Options"
-                if pg_options._timeout != timeout:
+                    backend_options, ProcessGroupNCCL.Options
+                ), "Expected backend_options argument to be of type ProcessGroupNCCL.Options"
+                if backend_options._timeout != timeout:
                     warnings.warn(
-                        "pg_options._timeout was specified, "
+                        "backend_options._timeout was specified, "
                         "but timeout kwarg has a default value that will always override it. "
                     )
             else:
-                # default pg_options for NCCL
-                pg_options = ProcessGroupNCCL.Options()
-                pg_options.is_high_priority_stream = False
-            pg_options._timeout = timeout
+                # default backend_options for NCCL
+                backend_options = ProcessGroupNCCL.Options()
+                backend_options.is_high_priority_stream = False
+            backend_options._timeout = timeout
 
             if split_from:
-                pg_options.split_from = split_from
-                pg_options.split_color = _process_group_color(global_ranks_in_group)
-            pg_options.global_ranks_in_group = global_ranks_in_group
-            pg_options.group_name = group_name
+                backend_options.split_from = split_from
+                backend_options.split_color = _process_group_color(
+                    global_ranks_in_group
+                )
+            backend_options.global_ranks_in_group = global_ranks_in_group
+            backend_options.group_name = group_name
             backend_class = ProcessGroupNCCL(
-                backend_prefix_store, group_rank, group_size, pg_options
+                backend_prefix_store, group_rank, group_size, backend_options
             )
             backend_type = ProcessGroup.BackendType.NCCL
         elif backend_str == Backend.UCC and is_ucc_available():
@@ -1779,7 +1813,7 @@ def _new_process_group_helper(
                 dist_backend_opts.group_id = group_name
                 dist_backend_opts.global_ranks_in_group = global_ranks_in_group
 
-                backend_class = creator_fn(dist_backend_opts, pg_options)
+                backend_class = creator_fn(dist_backend_opts, backend_options)
 
         # Set sequence numbers for gloo and nccl backends.
         if backend_str == Backend.GLOO:
@@ -3274,7 +3308,7 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
         >>> tensor_list = [torch.zeros(2, dtype=torch.int64, device=device) for _ in range(2)]
         >>> tensor_list
         [tensor([0, 0], device='cuda:0'), tensor([0, 0], device='cuda:0')] # Rank 0
-        [tensor([0, 0], device='cuda:0'), tensor([0, 0], device='cuda:1')] # Rank 1
+        [tensor([0, 0], device='cuda:1'), tensor([0, 0], device='cuda:1')] # Rank 1
         >>> tensor = torch.arange(2, dtype=torch.int64, device=device) + 1 + 2 * rank
         >>> tensor
         tensor([1, 2], device='cuda:0') # Rank 0
@@ -3564,6 +3598,24 @@ def gather(tensor, gather_list=None, dst=0, group=None, async_op=False):
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group
 
+    .. note:: Note that all Tensors in gather_list must have the same size.
+
+    Example::
+        >>> # xdoctest: +SKIP("no rank")
+        >>> # We have 2 process groups, 2 ranks.
+        >>> tensor_size = 2
+        >>> device = torch.device(f'cuda:{rank}')
+        >>> tensor = torch.ones(tensor_size, device=device) + rank
+        >>> if dist.get_rank() == 0:
+        >>>     gather_list = [torch.zeros_like(tensor, device=device) for i in range(2)]
+        >>> else:
+        >>>     gather_list = None
+        >>> dist.gather(tensor, gather_list, dst=0)
+        >>> # Rank 0 gets gathered data.
+        >>> gather_list
+        [tensor([1., 1.], device='cuda:0'), tensor([2., 2.], device='cuda:0')] # Rank 0
+        None                                                                   # Rank 1
+
     """
     _check_single_tensor(tensor, "tensor")
 
@@ -3631,19 +3683,21 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
         >>> # Note: Process group initialization omitted on each rank.
         >>> import torch.distributed as dist
         >>> tensor_size = 2
-        >>> t_ones = torch.ones(tensor_size)
-        >>> t_fives = torch.ones(tensor_size) * 5
-        >>> output_tensor = torch.zeros(tensor_size)
+        >>> device = torch.device(f'cuda:{rank}')
+        >>> output_tensor = torch.zeros(tensor_size, device=device)
         >>> if dist.get_rank() == 0:
         >>>     # Assumes world_size of 2.
         >>>     # Only tensors, all of which must be the same size.
+        >>>     t_ones = torch.ones(tensor_size, device=device)
+        >>>     t_fives = torch.ones(tensor_size, device=device) * 5
         >>>     scatter_list = [t_ones, t_fives]
         >>> else:
         >>>     scatter_list = None
         >>> dist.scatter(output_tensor, scatter_list, src=0)
-        >>> # Rank i gets scatter_list[i]. For example, on rank 1:
+        >>> # Rank i gets scatter_list[i].
         >>> output_tensor
-        tensor([5., 5.])
+        tensor([1., 1.], device='cuda:0') # Rank 0
+        tensor([5., 5.], device='cuda:1') # Rank 1
 
     """
     _check_single_tensor(tensor, "tensor")
@@ -4414,12 +4468,15 @@ def split_group(
     global_ranks_in_my_group = [parent_group_to_global_ranks[rank] for rank in my_group]
 
     prefix_store = PrefixStore(f"{group_name}/", default_store)
-    base_pg_options = ProcessGroup.Options(backend=str(backend))
-    base_pg_options._timeout = timeout
+    # We register the backend after initializing and timeout is set in pg_options.
     pg: ProcessGroup = ProcessGroup(
-        prefix_store, group_rank, len(my_group), base_pg_options
+        prefix_store,
+        group_rank,
+        len(my_group),
     )
+    backend_type = ProcessGroup.BackendType.NCCL
     pg.bound_device_id = device_id
+    pg._set_default_backend(backend_type)
 
     pg_options._timeout = timeout
     pg_options.split_from = parent_backend
@@ -4429,7 +4486,6 @@ def split_group(
     backend_class = ProcessGroupNCCL(
         prefix_store, group_rank, len(my_group), pg_options
     )
-    backend_type = ProcessGroup.BackendType.NCCL
     backend_class._set_sequence_number_for_group()
 
     pg._register_backend(torch.device("cuda"), backend_type, backend_class)
@@ -4480,12 +4536,21 @@ def new_group(
     should be created in the same order in all processes.
 
     .. warning::
-        Using multiple process groups with the ``NCCL`` backend concurrently
-        is not safe and the user should perform explicit synchronization in
-        their application to ensure only one process group is used at a time.
-        This means collectives from one process group should have completed
-        execution on the device (not just enqueued since CUDA execution is
-        async) before collectives from another process group are enqueued.
+        Safe concurrent usage:
+        When using multiple process groups with the ``NCCL`` backend, the user
+        must ensure a globally consistent execution order of collectives across
+        ranks.
+
+        If multiple threads within a process issue collectives, explicit
+        synchronization is necessary to ensure consistent ordering.
+
+        When using async variants of torch.distributed communication APIs,
+        a work object is returned and the communication kernel is
+        enqueued on a separate CUDA stream, allowing overlap of communication
+        and computation. Once one or more async ops have been issued on one process
+        group, they must be synchronized with other cuda streams by calling `work.wait()`
+        before using another process group.
+
         See `Using multiple NCCL communicators concurrently <https://docs.nvid
         ia.com/deeplearning/nccl/user-guide/docs/usage/communicators.html#using
         -multiple-nccl-communicators-concurrently>`_ for more details.
@@ -4543,7 +4608,7 @@ def _new_group_with_tag(
     ranks=None,
     timeout=None,
     backend=None,
-    pg_options=None,
+    backend_options=None,
     pg_tag=None,
     use_local_synchronization=False,
     group_desc=None,
@@ -4618,7 +4683,7 @@ def _new_group_with_tag(
         backend,
         default_store,
         group_name,
-        pg_options=pg_options,
+        backend_options=backend_options,
         timeout=timeout,
         pg_tag=pg_tag,
         device_id=device_id,
@@ -4688,15 +4753,8 @@ def new_subgroups(
         pass in ``group_size`` correctly.
 
     .. warning::
-        Using multiple process groups with the ``NCCL`` backend concurrently
-        is not safe and the user should perform explicit synchronization in
-        their application to ensure only one process group is used at a time.
-        This means collectives from one process group should have completed
-        execution on the device (not just enqueued since CUDA execution is
-        async) before collectives from another process group are enqueued.
-        See `Using multiple NCCL communicators concurrently <https://docs.nvid
-        ia.com/deeplearning/nccl/user-guide/docs/usage/communicators.html#using
-        -multiple-nccl-communicators-concurrently>`_ for more details.
+        See warning `Safe concurrent usage` for `new_group` API for important details about
+        using multiple process groups concurrently in a safe manner.
 
     Args:
         group_size (int, optional): The size of each subgroup. If ``None``,
@@ -4799,15 +4857,8 @@ def new_subgroups_by_enumeration(
     if they are not going to be members of the group.
 
     .. warning::
-        Using multiple process groups with the ``NCCL`` backend concurrently
-        is not safe and the user should perform explicit synchronization in
-        their application to ensure only one process group is used at a time.
-        This means collectives from one process group should have completed
-        execution on the device (not just enqueued since CUDA execution is
-        async) before collectives from another process group are enqueued.
-        See `Using multiple NCCL communicators concurrently <https://docs.nvid
-        ia.com/deeplearning/nccl/user-guide/docs/usage/communicators.html#using
-        -multiple-nccl-communicators-concurrently>`_ for more details.
+        See warning `Safe concurrent usage` for `new_group` API for important details about
+        using multiple process groups concurrently in a safe manner.
 
     Args:
         ranks_per_subgroup_list (list[list[int]]): A nested list of ranks of
@@ -4908,7 +4959,7 @@ def _find_or_create_pg_by_ranks_and_tag(
                 my_ranks = rank_set
         assert my_ranks is not None, "rankset doesn't include the current node"
 
-    my_ranks.sort()
+    my_ranks = sorted(my_ranks)
 
     pg = _find_pg_by_ranks_and_tag(tag, my_ranks)
     if pg is not None:
