@@ -24061,15 +24061,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.transpose_copy",
         torch_opinfo_name="transpose_copy",
-        skips=(
-            DecorateInfo(
-                unittest.expectedFailure,
-                'TestCommon',
-                'test_out',
-                device_type='cpu',
-                dtypes=[torch.float32],
-            ),
-        ),
         supports_out=True,
     ),
     PythonRefInfo(

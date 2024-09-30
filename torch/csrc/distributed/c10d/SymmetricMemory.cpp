@@ -189,9 +189,11 @@ c10::intrusive_ptr<SymmetricMemory> get_symmetric_memory(
   return allocator->rendezvous(tensor.data_ptr());
 }
 
-TORCH_API bool has_multicast_support(c10::DeviceType device_type) {
+TORCH_API bool has_multicast_support(
+    c10::DeviceType device_type,
+    int device_idx) {
   auto allocator = get_allocator(device_type);
-  return allocator->has_multicast_support();
+  return allocator->has_multicast_support(device_idx);
 }
 } // namespace symmetric_memory
 } // namespace c10d
