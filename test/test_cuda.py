@@ -4323,7 +4323,7 @@ class TestBlockStateAbsorption(TestCase):
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestMemPool(TestCase):
     def test_mempool_id(self):
-        pool1 = torch.cuda.graph_pool_handle().id
+        pool1 = torch.cuda.graph_pool_handle()
         pool2 = torch.cuda.MemPool().id
 
         # first value of id in a user created pool is always zero
