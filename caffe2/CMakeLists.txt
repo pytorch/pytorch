@@ -1013,6 +1013,10 @@ elseif(USE_CUDA)
 endif()
 
 if(USE_XPU)
+  # if SYCL runtime and oneCCL runtime are both system installed
+  # then building flag USE_XPU=ON , USE_XCCL=ON and USE_C10D_XCCL=ON;
+  # XCCL backend will be build in libtorch_xpu;
+  # manually set `USE_XCCL=OFF` disable XCCL backend building.
   if(USE_XCCL)
     append_filelist("libtorch_xpu_distributed_extra_sources" Caffe2_XPU_SRCS)
   endif()
