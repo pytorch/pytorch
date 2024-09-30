@@ -1008,15 +1008,19 @@ class CommonDistributedDataParallelTest:
         ddp_out = ddp(ddp_x)
 
         net_loss = F.mse_loss(
-            net_out.o1 + net_out.o2["a"] + net_out.o2["b"]
-            if not skip_o1
-            else net_out.o2["a"] + net_out.o2["b"],
+            (
+                net_out.o1 + net_out.o2["a"] + net_out.o2["b"]
+                if not skip_o1
+                else net_out.o2["a"] + net_out.o2["b"]
+            ),
             torch.ones_like(net_out.o2["a"], device=self.rank),
         )
         ddp_loss = F.mse_loss(
-            ddp_out.o1 + ddp_out.o2["a"] + ddp_out.o2["b"]
-            if not skip_o1
-            else ddp_out.o2["a"] + ddp_out.o2["b"],
+            (
+                ddp_out.o1 + ddp_out.o2["a"] + ddp_out.o2["b"]
+                if not skip_o1
+                else ddp_out.o2["a"] + ddp_out.o2["b"]
+            ),
             torch.ones_like(ddp_out.o2["a"], device=self.rank),
         )
 
@@ -1803,8 +1807,6 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
 
     def test_init_process_group_optional_backend(self):
         store = dist.FileStore(self.file_name, self.world_size)
-        if store is None:
-            self.skipTest("Skipping the test because 'store' is None")
         # creates both gloo and nccl backend
         if dist.is_gloo_available() and dist.is_nccl_available():
             dist.init_process_group(
@@ -1839,8 +1841,6 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
                 excepted_backend = "custom"
 
             store = dist.FileStore(self.file_name, self.world_size)
-            if store is None:
-                self.skipTest("Skipping the test because 'store' is None")
             dist.init_process_group(
                 backend=backend,
                 rank=self.rank,
