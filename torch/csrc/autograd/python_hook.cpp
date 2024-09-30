@@ -68,7 +68,7 @@ bool _call_hooks(PyObject* dict, PyObject* args) {
   const auto len = PyList_Size(hooks);
   for (Py_ssize_t idx = 0; idx < len; ++idx) {
     // Note that this call is NoGil safe as the list is created just above and
-    // not accecible by any other thread
+    // not accessible by any other thread
     const auto hook = PyList_GetItem(hooks, idx);
 
     THPObjectPtr res(PyObject_CallObject(hook, args));
