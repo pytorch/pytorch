@@ -33,14 +33,13 @@ RawTensorMetadataBase::RawTensorMetadataBase(const at::Tensor& t)
     : data_{t.has_storage() ? t.storage().data() : nullptr},
       dtype_{t.scalar_type()},
       layout_{t.layout()},
-      size_dim_{static_cast<uint32_t>(t.sizes().size())},
-      stride_dim_{static_cast<uint32_t>(t.strides().size())} {
+      size_dim_{static_cast<uint32_t>(t.sizes().size())} {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       t.sizes().size() <= std::numeric_limits<uint32_t>::max(),
       "Cannot profile Tensors of size > uint32 max. Got dim: ",
       t.sizes().size());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      t.sizes().size() != t.strides().size(),
+      t.sizes().size() == t.strides().size(),
       "Tensor has mismatching sizes and strides. Sizes: ",
       t.sizes().size(),
       " Strides: ",
@@ -205,7 +204,7 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
         sizes.push_back(*tensor_size_strides_it++);
       }
       if (raw_metadata.layout_ == at::kStrided) {
-        for (C10_UNUSED const auto _ : c10::irange(raw_metadata.stride_dim_)) {
+        for (C10_UNUSED const auto _ : c10::irange(raw_metadata.size_dim_)) {
           if (tensor_size_strides_it.exhausted()) {
             LOG(WARNING)
                 << "Expected Tensor Strides mismatch with raw Tensor metadata. Reported shapes may be inaccurate!";

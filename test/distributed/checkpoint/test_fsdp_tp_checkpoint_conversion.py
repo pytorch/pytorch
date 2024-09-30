@@ -40,7 +40,7 @@ class TestFsdpTpCheckpointConversion(DTensorTestBase):
         fsdp_state_dict = fsdp_model.state_dict()
 
         # save fsdp_state_dict to storage
-        dist_cp.save_state_dict(
+        dist_cp.save(
             state_dict=fsdp_state_dict,
             storage_writer=dist_cp.FileSystemWriter(CHECKPOINT_DIR),
         )

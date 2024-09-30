@@ -40,7 +40,6 @@ static void flattenTupleInLoopParams(Node* n, size_t index) {
   Block* block = n->blocks().at(0);
   Node* block_node = n;
 
-  std::vector<Value*> new_node_inputs = {};
   auto new_construct_node =
       block->prependNode(block->owningGraph()->create(prim::TupleConstruct));
   for (size_t j = 0; j < tt->elements().size(); ++j) {

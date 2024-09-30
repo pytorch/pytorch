@@ -23,7 +23,9 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from inductor.test_torchinductor import copy_tests
+from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+    copy_tests,
+)
 
 
 class ConvOp(nn.Module):
