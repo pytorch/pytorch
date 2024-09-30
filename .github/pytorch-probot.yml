@@ -9,6 +9,7 @@ ciflow_push_tags:
 - ciflow/inductor-rocm
 - ciflow/inductor-perf-compare
 - ciflow/inductor-micro-benchmark
+- ciflow/inductor-micro-benchmark-cpu-x86
 - ciflow/inductor-cu124
 - ciflow/linux-aarch64
 - ciflow/mps

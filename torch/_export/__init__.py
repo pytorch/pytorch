@@ -67,8 +67,11 @@ def capture_pre_autograd_graph_warning():
     log.warning("capture_pre_autograd_graph() is deprecated and doesn't provide any function guarantee moving forward.")
     log.warning("Please switch to use torch.export.export_for_training instead.")
     if config.is_fbcode():
-        log.warning("Unless the unittest is in the blocklist, capture_pre_autograd_graph() will fallback to torch.export.export_for_training.")  # noqa: B950
+        log.warning("For unittest, capture_pre_autograd_graph() will fallback to torch.export.export_for_training.")  # noqa: B950
 
+@lru_cache
+def print_export_warning():
+    log.warning("Using torch.export.export_for_training(...,strict=True)")
 
 @compatibility(is_backward_compatible=False)
 def capture_pre_autograd_graph(
@@ -126,9 +129,6 @@ def capture_pre_autograd_graph(
         kwargs = {}
 
     if capture_pre_autograd_graph_using_training_ir():
-        @lru_cache
-        def print_export_warning():
-            log.warning("Using torch.export.export_for_training(...,strict=True)")
         print_export_warning()
         module = torch.export.export_for_training(f, args, kwargs, dynamic_shapes=dynamic_shapes, strict=True).module()
     else:
@@ -184,20 +184,20 @@ def capture_pre_autograd_graph(
                 range_constraints=range_constraints,
             )
 
-        error_message = \
-            """
-            Calling train() or eval() is not supported for exported models.
-            Alternatively, you may override these methods to do custom user behavior as follows:
+    error_message = \
+        """
+        Calling train() or eval() is not supported for exported models.
+        Alternatively, you may override these methods to do custom user behavior as follows:
 
-                def _my_train(self, mode: bool = True):
-                    ...
+            def _my_train(self, mode: bool = True):
+                ...
 
-                def _my_eval(self):
-                    ...
+            def _my_eval(self):
+                ...
 
-                model.train = types.MethodType(_my_train, model)
-                model.eval = types.MethodType(_my_eval, model)
-            """
+            model.train = types.MethodType(_my_train, model)
+            model.eval = types.MethodType(_my_eval, model)
+        """
 
     def _train(self, mode: bool = True):
         raise NotImplementedError(error_message)
@@ -214,6 +214,20 @@ def capture_pre_autograd_graph(
             module._buffers, in_place=True
         )
     return module
+
+
+# We only want to print this once to avoid flooding logs in workflows where aot_compile_warning
+# is called multiple times.
+@lru_cache
+def aot_compile_warning():
+    from torch._inductor import config
+
+    log.warning("+============================+")
+    log.warning("|     !!!   WARNING   !!!    |")
+    log.warning("+============================+")
+    log.warning(
+        "torch._export.aot_compile() is being deprecated, please switch to "
+        "directly calling torch._inductor.aoti_compile_and_package(torch.export.export()) instead.")
 
 
 def aot_compile(
@@ -265,6 +279,8 @@ def aot_compile(
     from torch.export._trace import _export_to_torch_ir
     from torch._inductor.decomposition import select_decomp_table
     from torch._inductor import config
+
+    aot_compile_warning()
 
     if config.is_predispatch:
         gm = torch.export._trace._export(f, args, kwargs, dynamic_shapes, pre_dispatch=True).module()

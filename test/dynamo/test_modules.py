@@ -1994,9 +1994,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             mod = Mod()
             opt_mod(torch.randn(5, 5), mod)
 
-        # fn compiles twice, and forward twice
-        # (since forward is inlined when fn is compiled)
-        self.assertEqual(cnts.frame_count, 4)
+        # fn compiles twice
+        self.assertEqual(cnts.frame_count, 2)
 
     @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", True)
     def test_inline_inbuilt_nn_modules(self):

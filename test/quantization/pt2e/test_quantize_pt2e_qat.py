@@ -604,6 +604,9 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
         is returned as part of the match anyway (as a placeholder).
         """
 
+        if capture_pre_autograd_graph_using_training_ir():
+            self.skipTest("Not applicable to training IR")
+
         class M(torch.nn.Module):
             def __init__(self, conv_class, bn_class):
                 super().__init__()
