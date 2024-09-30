@@ -7644,7 +7644,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(fn_opt(x, y), fn(x, y))
         self.assertEqual(cnt.frame_count, 1)
 
-
     @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
     def test_unspecialized_float_multiply_precision_f16(self):
         def fn(x, y):
