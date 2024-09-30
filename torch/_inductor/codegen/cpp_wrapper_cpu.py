@@ -15,7 +15,7 @@ import torch._ops
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 
 from .. import config, ir
-from ..utils import _align, ALIGN_BYTES, cache_on_self, sympy_product
+from ..utils import _align, ALIGN_BYTES, cache_on_self, normalize_name, sympy_product
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import IndentedBuffer
@@ -759,6 +759,26 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     f"constants_info_[{idx}].from_folded = {from_folded};"
                 )
 
+                if name in V.graph.folded_constants:
+                    constant_type_str = "FoldedConstant"
+                elif name.startswith("_tensor_constant"):
+                    constant_type_str = "TensorConstant"
+                elif any(
+                    name == normalize_name(parameter_name)
+                    for parameter_name, _ in V.graph.orig_gm.named_parameters()
+                ):
+                    constant_type_str = "Parameter"
+                elif any(
+                    name == normalize_name(buffer_name)
+                    for buffer_name, _ in V.graph.orig_gm.named_buffers()
+                ):
+                    constant_type_str = "Buffer"
+                else:
+                    constant_type_str = "Unknown"
+                self.prefix.writeline(
+                    f"constants_info_[{idx}].type = static_cast<int32_t>(torch::aot_inductor::ConstantType::{constant_type_str});"
+                )
+
                 size_str = ", ".join([str(s) for s in tensor.size()])
                 self.prefix.writeline(f"constants_info_[{idx}].shape = {{{size_str}}};")
 
@@ -1482,8 +1502,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def codegen_device(self, device):
         if config.abi_compatible:
-            self.used_cached_devices.add(device.type)
-            return f"cached_torch_device_type_{device.type}, {device.index if device.index else 0}"
+            assert device.type in DEVICE_TO_ATEN, (
+                device.type + " not found in DEVICE_TO_ATEN"
+            )
+            device_str = DEVICE_TO_ATEN[device.type][5:].lower()  # remove "at::k"
+            self.used_cached_devices.add(device_str)
+            return f"cached_torch_device_type_{device_str}, {device.index if device.index else 0}"
         else:
             return (
                 f"c10::Device({DEVICE_TO_ATEN[device.type]}, {device.index})"
@@ -2212,6 +2236,9 @@ if (custom_op_wrapper.get() == NULL) {
                     )
             elif isinstance(raw_arg, torch.dtype):
                 # dtype
+                if sys.version_info < (3, 10):
+                    # Py_NewRef is only available since Python 3.10
+                    self.include_extra_header("torch/csrc/utils/pythoncapi_compat.h")
                 self.include_extra_header("torch/csrc/DynamicTypes.h")
                 return f"Py_NewRef(torch::getTHPDtype(static_cast<c10::ScalarType>({self.codegen_dtype(raw_arg)})))"
             else:
