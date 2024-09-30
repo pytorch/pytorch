@@ -3663,63 +3663,31 @@ CPU_TEST_FAILURES = {
     "test_multiple_output_alias": fail_with_and_without_stack_allocation(is_skip=True),
     # 'AOTInductorTestABICompatibleCpuWithStackAllocation' object has no attribute 'code_check_count'
     "test_buffer_mutation_3": fail_stack_allocation(is_skip=True),
-    # FIXME: failed with Segfault while exiting the Python runtime
-    "test_constant": fail_stack_allocation(is_skip=True),
     # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
     "test_shifted_constraint_ranges": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
-    # https://github.com/pytorch/pytorch/issues/123691
-    "test_amp_fallback_random": fail_minimal_arrayref_interface(is_skip=True),
     "test_simple_dynamic": fail_minimal_arrayref_interface(),
-    # https://github.com/pytorch/pytorch/issues/123691
-    "test_zero_grid_with_unbacked_symbols": fail_minimal_arrayref_interface(
-        is_skip=True
-    ),
-    # failed on MacOS
-    "test_zero_grid_with_backed_symbols": fail_with_and_without_stack_allocation(
-        is_skip=True
-    ),
-    # https://github.com/pytorch/pytorch/issues/122990
-    "test_cond_non_tensor_predicates_dynamic_False": fail_stack_allocation(
-        is_skip=True
-    ),
-    # same issue as https://github.com/pytorch/pytorch/issues/122990
-    "test_cond_non_tensor_predicates_dynamic_True": fail_stack_allocation(is_skip=True),
     # https://github.com/pytorch/pytorch/issues/122991
     "test_runtime_checks_complex": fail_with_and_without_stack_allocation(is_skip=True),
-    "test_runtime_checks_fp8": fail_with_and_without_stack_allocation(is_skip=True),
-    "test_while_loop_simple": fail_stack_allocation(is_skip=True),
-    "test_while_loop_nested": fail_stack_allocation(is_skip=True),
-    "test_while_loop_with_outer_code": fail_stack_allocation(is_skip=True),
-    # TODO: error: cannot convert ArrayRefTensor<float> to AtenTensorHandle
-    "test_while_loop_with_outer_buffers": fail_stack_allocation(is_skip=True),
-    # TODO: use of undeclared identifier 'float8_e4m3fn' and 'half'
-    "test_fp8": fail_minimal_arrayref_interface(is_skip=True),
     "test_custom_op_add": fail_minimal_arrayref_interface(is_skip=True),
     "test_custom_op_all_inputs": fail_minimal_arrayref_interface(is_skip=True),
-    "test_custom_op_with_multiple_outputs": fail_minimal_arrayref_interface(
-        is_skip=True
-    ),
     "test_custom_op_with_reinterpret_view_inputs": fail_minimal_arrayref_interface(
         is_skip=True
     ),
-    "test_custom_op_with_concat_inputs": fail_minimal_arrayref_interface(is_skip=True),
     "test_custom_op_missing_arg_with_default_value": fail_minimal_arrayref_interface(
         is_skip=True
     ),
     "test_size_from_multi_output": fail_stack_allocation(is_skip=True),
-    "test_torchvision_transforms_functional_tensor_resize": fail_minimal_arrayref_interface(),
 }
 
 # test_failures, xfail by default, set is_skip=True to skip
 CUDA_TEST_FAILURES = {
     # TODO: AssertionError: unsupported Optional type in convert_arg_type: Generator
     "test_normal_functional": fail_abi_compatible_cuda(is_skip=True),
+    # TODO: fails on bfloat16
+    "test_runtime_checks": fail_cuda(is_skip=True),
     # no runtime checks for non_abi_compatible mode
-    "test_runtime_checks": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_runtime_checks_complex": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_runtime_checks_fp8": fail_non_abi_compatible_cuda(is_skip=True),
     "test_runtime_checks_dtype_failed": fail_non_abi_compatible_cuda(is_skip=True),
     "test_runtime_checks_shape_failed": fail_non_abi_compatible_cuda(is_skip=True),
     # quantized unsupported for GPU
@@ -3729,19 +3697,7 @@ CUDA_TEST_FAILURES = {
     # fp8 to be re-enabled for AOTI
     "test_fp8": fail_cuda(is_skip=True),
     "test_custom_op_all_inputs": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_custom_op_missing_arg_with_default_value": fail_non_abi_compatible_cuda(
-        is_skip=True
-    ),
-    "test_custom_op_with_concat_inputs": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_custom_op_with_reinterpret_view_inputs": fail_non_abi_compatible_cuda(
-        is_skip=True
-    ),
     "test_custom_op_with_multiple_outputs": fail_non_abi_compatible_cuda(is_skip=True),
-    # non-abi compatible mode aoti debug printer is not supported yet
-    "test_aoti_debug_printer_codegen": fail_non_abi_compatible_cuda(is_skip=True),
-    "test_aoti_debug_printer_user_defined_triton_kernel": fail_non_abi_compatible_cuda(
-        is_skip=True
-    ),
 }
 
 
