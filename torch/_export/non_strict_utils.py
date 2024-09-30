@@ -37,6 +37,7 @@ from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
     EqualityConstraint,
     GuardOnDataDependentSymNode,
+    RelaxedUnspecConstraint,
     ShapeEnv,
     StatelessSymbolicContext,
     ValueRanges,
@@ -94,16 +95,21 @@ def fakify(
         raise ValueError(f"Unsupported input type {type(t)}")
     n_dims = len(t.shape)
     dynamic_sizes = []
+    constraint_sizes = [None] * n_dims
     for i in range(n_dims):
-        if i in getattr(t, "_dynamo_weak_dynamic_indices", {}) or i in getattr(
-            t, "_dynamo_dynamic_indices", {}
-        ):
+        if i in getattr(t, "_dynamo_weak_dynamic_indices", {}):
             dynamic_sizes.append(DimDynamic.DYNAMIC)
+        elif i in getattr(t, "_dynamo_dynamic_indices", {}):
+            # bit annoying, but we need to replicate process in _dynamo/variables/builder.py
+            # where a RelaxedUnspecConstraint is created for Dim.DYNAMIC, so constraint violations
+            # are raised when specializing.
+            dynamic_sizes.append(DimDynamic.DYNAMIC)
+            constraint_sizes[i] = RelaxedUnspecConstraint(warn_only=False)
         else:
             dynamic_sizes.append(DimDynamic.STATIC)
     symbolic_context = StatelessSymbolicContext(
         dynamic_sizes=dynamic_sizes,
-        constraint_sizes=[None] * n_dims,
+        constraint_sizes=constraint_sizes,
     )
     t_id = id(t)
     assert mode.shape_env is not None

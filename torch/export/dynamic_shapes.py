@@ -807,11 +807,13 @@ def _process_dynamic_shapes(
     # track roots that do not directly represent input shape dimensions
     phantom_roots: Dict[str, _PhantomRoot] = {}
     derived_constraints_with_phantom_root: List[_DerivedConstraint] = []
+    # list of constraints to return
+    constraints: List[Constraint] = []
 
     def to_constraint(dim, tensor, i):
         import sympy
 
-        from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+        from torch.fx.experimental.symbolic_shapes import RelaxedUnspecConstraint, StrictMinMaxConstraint
         from torch.utils._sympy.solve import try_solve
         from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -880,6 +882,7 @@ def _process_dynamic_shapes(
                 ),
             )
         else:
+            assert isinstance(dim, _Dim)
             constraint = _Constraint(  # type: ignore[assignment]
                 id(tensor),
                 i,
@@ -943,7 +946,6 @@ def _process_dynamic_shapes(
 
     _tree_map_with_path(assoc_shape, combined_args, dynamic_shapes, tree_name="inputs")
 
-    constraints = []
     for derived_constraint_with_phantom_root in derived_constraints_with_phantom_root:
         phantom_root_name = derived_constraint_with_phantom_root.root.name  # type: ignore[union-attr]
         if phantom_root_name in symbols:
