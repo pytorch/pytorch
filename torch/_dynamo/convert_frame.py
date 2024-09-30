@@ -23,7 +23,7 @@ from types import CodeType, FrameType, FunctionType, ModuleType
 from typing import Any, Callable, Dict, List, Optional, Set, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
-
+from libfb.py.build_info import BuildInfo
 import torch
 import torch._logging
 from torch._C._dynamo.guards import GlobalStateGuard
@@ -1083,6 +1083,10 @@ def _compile(
                 remote_cache_time_saved,
                 structured_logging_overhead_s,
                 config.suppress_errors,
+                config.inline_inbuilt_nn_modules,
+                "dummy_value",
+                "dummy_value",
+                config.specialize_float,
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
