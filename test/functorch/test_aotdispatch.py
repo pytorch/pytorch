@@ -6088,37 +6088,44 @@ class TestAOTModuleSimplified(AOTTestCase):
         chromium_logger.add_listener(on_event)
 
         num_iters = 30
+        shape = (3, 4)
+        input_two_tensor_depth = 8
 
         class M(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self, p) -> None:
                 super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.p = p
 
             def forward(self, x):
-                r = self.conv(x)
-                return r
+                return self.p + x + x
 
-        m = M()
+        m = M(torch.randn(shape, requires_grad=True))
         m.train()
 
-        def inps_fn(x):
-            return (
-                TwoTensor(
-                    TwoTensor(x.clone(), x.clone()), TwoTensor(x.clone(), x.clone())
-                ),
+        def inp_recursive_two_tensor(x, dephth: int):
+            if dephth == 1:
+                return TwoTensor(x.clone(), x.clone())
+            return TwoTensor(
+                inp_recursive_two_tensor(x, dephth - 1),
+                inp_recursive_two_tensor(x, dephth - 1),
             )
+
+        def inps_fn(x):
+            return inp_recursive_two_tensor(x, input_two_tensor_depth),
 
         benchmark_inps = [
-            inps_fn(
-                torch.randn(2, 3, 5, 5, requires_grad=True).to(
-                    memory_format=torch.channels_last
-                )
-            )
+            inps_fn(torch.randn(shape, requires_grad=True))
             for _ in range(num_iters)
         ]
+        m(*benchmark_inps[0])
+        import os
 
         for i, inps in enumerate(benchmark_inps):
-            outs = torch.compile(m, backend="aot_eager", fullgraph=True)(*inps)
+            if (i == 5):
+                print(f"XXX PID:{os.getpid()}")
+                breakpoint()
+
+            outs = torch.compile(m, backend="inductor", fullgraph=True)(*inps)
             outs[0].sum().backward()
 
         def _assert_len():
@@ -6175,31 +6182,30 @@ class TestAOTModuleSimplified(AOTTestCase):
         bwd_total_durations_ns.clear()
 
         class M2(torch.nn.Module):
-            def __init__(self) -> None:
+            def __init__(self, p) -> None:
                 super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.p = p
 
-            def forward(self, x0, x1, x2, x3):
-                return self.conv(x0), self.conv(x1), self.conv(x2), self.conv(x3)
+            def forward(self, *plain_tensors):
+                return (self.p + x + x for x in plain_tensors)
 
-        m2 = M2()
-        m2.to(memory_format=torch.channels_last)
+        m2 = M2(torch.randn(shape, requires_grad=True))
         m2.train()
 
         def inps_fn2(x):
-            return (x.clone(), x.clone(), x.clone(), x.clone())
+            return (x.clone() for i in range(2 ** input_two_tensor_depth))
 
         benchmark_inps2 = [
             inps_fn2(
-                torch.randn(2, 3, 5, 5, requires_grad=True).to(
-                    memory_format=torch.channels_last
-                )
+                torch.randn(shape, requires_grad=True)
             )
             for _ in range(num_iters)
         ]
 
+        m(*benchmark_inps[0])
+
         for i, inps in enumerate(benchmark_inps2):
-            outs = torch.compile(m2, backend="aot_eager", fullgraph=True)(*inps)
+            outs = torch.compile(m2, backend="inductor", fullgraph=True)(*inps)
             outs[0].sum().backward()
 
         _assert_len()
