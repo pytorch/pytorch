@@ -193,6 +193,10 @@ torch_compile_graph_format = os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
 # Used for tests
 strict_autograd_cache = False
 
+# Fx pass used to tensorify python scalars. Part of the rollout for supporting
+# dynamic float arguments in PT2.
+tensorify_python_scalars = True
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 

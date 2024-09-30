@@ -75,6 +75,9 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
     """
     import sympy
 
+    if not torch._functorch.config.tensorify_python_scalars:
+        return None
+
     graph = gm.graph
     tracer = fx.proxy.GraphAppendingTracer(graph)
     expr_to_sym_proxy: dict[sympy.Expr, fx.Proxy] = {}
