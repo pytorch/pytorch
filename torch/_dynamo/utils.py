@@ -805,6 +805,8 @@ class CompilationMetrics:
     remote_cache_time_saved_s: Optional[float]
     structured_logging_overhead_s: Optional[float]
     config_suppress_errors: Optional[bool]
+    specialize_float: Optional[bool]
+    dynamo_config: Optional[str]
 
 
 @dataclasses.dataclass
