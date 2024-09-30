@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    skipIfRocm,
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -1353,6 +1354,7 @@ def forward(self, pred_1, x_1):
             )
         self.assertEqual(cumsum1, cumsum_exp)
 
+    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
@@ -1405,6 +1407,7 @@ def forward(self, pred_1, x_1):
         )
         self.assertEqual([r.device.type for r in result2], [device.type] * len(result2))
 
+    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
@@ -1433,6 +1436,7 @@ def forward(self, pred_1, x_1):
         expected_result = _fake_associative_scan(fct, inp, 0, reverse=reverse)
         self.assertEqual(result1, expected_result)
 
+    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("reverse", [False, True])
