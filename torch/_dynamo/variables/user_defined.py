@@ -181,7 +181,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             return super().var_getattr(tx, name)
 
-        obj = inspect.getattr_static(self.value, name, None)
+        try:
+            obj = inspect.getattr_static(self.value, name)
+        except AttributeError:
+            obj = None
 
         if isinstance(obj, staticmethod):
             func = obj.__get__(self.value)
@@ -209,13 +212,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 sys.version_info >= (3, 12) and name == "__mro__"
             ):
                 return VariableBuilder(tx, source)(obj.__get__(self.value))
-
-        if inspect.ismemberdescriptor(obj) or inspect.isdatadescriptor(obj):
-            value = getattr(self.value, name)
-            if source is not None:
-                return VariableBuilder(tx, source)(value=value)
-            else:
-                return SourcelessBuilder.create(tx=tx, value=value)
 
         if ConstantVariable.is_literal(obj):
             return ConstantVariable.create(obj)
