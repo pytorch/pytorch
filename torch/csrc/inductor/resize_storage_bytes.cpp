@@ -7,8 +7,7 @@
 #include <ATen/native/cuda/Resize.h>
 #endif
 
-namespace torch {
-namespace inductor {
+namespace torch::inductor {
 using namespace at;
 
 // NOLINTNEXTLINE(performance-unnecessary-value-param)
@@ -63,5 +62,4 @@ TORCH_LIBRARY_IMPL(inductor, Functionalize, m) {
       "resize_storage_bytes_", TORCH_FN(resize_storage_bytes__functionalize));
 }
 
-} // namespace inductor
-} // namespace torch
+} // namespace torch::inductor

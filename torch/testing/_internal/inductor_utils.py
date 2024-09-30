@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import logging
 import torch
 import re
 import unittest
@@ -10,6 +11,7 @@ import sys
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._inductor.codecache import CppCodeCache
 from torch._inductor.utils import get_gpu_shared_memory, is_big_gpu
+from torch._inductor.utils import GPU_TYPES, get_gpu_type
 from torch.utils._triton import has_triton
 from torch.testing._internal.common_utils import (
     LazyVal,
@@ -20,6 +22,8 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
 )
+
+log: logging.Logger = logging.getLogger(__name__)
 
 def test_cpu():
     try:
@@ -41,17 +45,12 @@ HAS_XPU = torch.xpu.is_available() and has_triton()
 
 HAS_GPU = HAS_CUDA or HAS_XPU
 
-GPUS = ["cuda", "xpu"]
+GPU_TYPE = get_gpu_type()
 
 HAS_MULTIGPU = any(
     getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
-    for gpu in GPUS
+    for gpu in GPU_TYPES
 )
-
-tmp_gpus = [x for x in GPUS if getattr(torch, x).is_available()]
-assert len(tmp_gpus) <= 1
-GPU_TYPE = "cuda" if len(tmp_gpus) == 0 else tmp_gpus.pop()
-del tmp_gpus
 
 def _check_has_dynamic_shape(
     self: TestCase,
@@ -76,6 +75,11 @@ def skipDeviceIf(cond, msg, *, device):
     if cond:
         def decorate_fn(fn):
             def inner(self, *args, **kwargs):
+                if not hasattr(self, "device"):
+                    warn_msg = "Expect the test class to have attribute device but not found. "
+                    if hasattr(self, "device_type"):
+                        warn_msg += "Consider using the skip device decorators in common_device_type.py"
+                    log.warning(warn_msg)
                 if self.device == device:
                     raise unittest.SkipTest(msg)
                 return fn(self, *args, **kwargs)

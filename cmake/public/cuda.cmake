@@ -248,6 +248,22 @@ else()
   message(STATUS "USE_CUSPARSELT is set to 0. Compiling without cuSPARSELt support")
 endif()
 
+if(USE_CUDSS)
+  find_package(CUDSS)
+
+  if(NOT CUDSS_FOUND)
+    message(WARNING
+      "Cannot find CUDSS library. Turning the option off")
+    set(USE_CUDSS OFF)
+  else()
+    add_library(torch::cudss INTERFACE IMPORTED)
+    target_include_directories(torch::cudss INTERFACE ${CUDSS_INCLUDE_PATH})
+    target_link_libraries(torch::cudss INTERFACE ${CUDSS_LIBRARY_PATH})
+  endif()
+else()
+  message(STATUS "USE_CUDSS is set to 0. Compiling without cuDSS support")
+endif()
+
 # cufile
 if(CAFFE2_USE_CUFILE)
   add_library(torch::cufile INTERFACE IMPORTED)

@@ -113,7 +113,8 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
     FusionMeta = collections.namedtuple("FusionMeta", ["group", "snode", "type"])
 
-    op_to_fx_node = {}
+    buf_to_fx_node = {}
+    node_to_fx_node = {}
     graph = torch.fx.Graph()
     first_node = None
 
@@ -165,10 +166,9 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
         fx_node.meta["fusion_meta"] = FusionMeta(group, snode, node_type)
 
-        if isinstance(snode, FusedSchedulerNode):
-            for x in snode.snodes:
-                op_to_fx_node[x.get_name()] = fx_node
-        op_to_fx_node[name] = fx_node
+        node_to_fx_node[name] = fx_node
+        for buf in snode.get_outputs():
+            buf_to_fx_node[buf.get_name()] = fx_node
 
         if first_node is None:
             first_node = fx_node
@@ -179,7 +179,8 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     for snode in snodes:
         name = snode.get_name()
         deps = snode.read_writes.reads
-        fx_node = op_to_fx_node[name]
+
+        fx_node = node_to_fx_node[name]
         new_args = []
         for dep in deps:
             last_update_op = buf_last_update_op.get(dep.name, None)
@@ -189,14 +190,11 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
             elif name_to_buf and name_to_buf.defining_op.get_name() == name:
                 continue
             else:
-                if dep.name in added:
-                    dep_node = added[dep.name]
-                else:
-                    with graph.inserting_before(first_node):
-                        dep_node = graph.placeholder(dep.name)
-                        op_to_fx_node[dep.name] = dep_node
-                        added[dep.name] = dep_node
-
+                with graph.inserting_before(first_node):
+                    dep_node = graph.placeholder(dep.name)
+                    buf_to_fx_node[dep.name] = dep_node
+            if dep_node == fx_node:  # to avoid cycles
+                continue
             new_args.append(dep_node)
         for output in snode.outputs_by_name.keys():
             buf_last_update_op[output] = name

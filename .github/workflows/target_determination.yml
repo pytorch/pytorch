@@ -4,10 +4,21 @@ on:
   workflow_call:
 
 jobs:
+
+  get-label-type:
+    name: get-label-type
+    uses: ./.github/workflows/_runner-determinator.yml
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
   target-determination:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
-    runs-on: linux.2xlarge
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+    needs: get-label-type
     steps:
       # [pytorch repo ref]
       # Use a pytorch/pytorch reference instead of a reference to the local

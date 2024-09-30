@@ -450,7 +450,7 @@ def forward(self, x_1):
 
     def test_pre_dispatch_functionalization(self):
         def f(x):
-            a = FunctionalTensorMode(pre_dispatch=True)
+            a = FunctionalTensorMode(pre_dispatch=True, export=True)
             with a:
                 x_unwrapped = FunctionalTensor.to_functional(x)
                 y = torch.matmul(x_unwrapped, x_unwrapped)
@@ -475,7 +475,7 @@ def forward(self, x_1):
 
     def test_pre_dispatch_functionalization_view_op(self):
         def f(x):
-            a = FunctionalTensorMode(pre_dispatch=True)
+            a = FunctionalTensorMode(pre_dispatch=True, export=True)
             with a:
                 x_unwrapped = FunctionalTensor.to_functional(x)
                 y = torch.matmul(x_unwrapped, x_unwrapped)
@@ -1358,8 +1358,8 @@ def forward(self, crop_camera_1, mask_1):
     mul_4 = sym_size_int * 3
     view_3 = torch.ops.aten.view.default(view_2, [mul_4, 3]);  view_2 = mul_4 = None
     mm = torch.ops.aten.mm.default(view_3, eye);  view_3 = eye = None
-    view_4 = torch.ops.aten.view.default(mm, [sym_size_int, 3, 3]);  mm = sym_size_int = None
-    index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_4);  crop_camera_1 = mask_1 = view_4 = index_put_ = None
+    _unsafe_view = torch.ops.aten._unsafe_view.default(mm, [sym_size_int, 3, 3]);  mm = sym_size_int = None
+    index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], _unsafe_view);  crop_camera_1 = mask_1 = _unsafe_view = index_put_ = None
     return None""")  # noqa: B950
 
     def test_unbacked_slice(self):

@@ -375,9 +375,8 @@ test_inductor_cpp_wrapper_abi_compatible() {
   mkdir -p "$TEST_REPORTS_DIR"
 
   echo "Testing Inductor cpp wrapper mode with TORCHINDUCTOR_ABI_COMPATIBLE=1"
-  # cpu stack allocation causes segfault and needs more investigation
   PYTORCH_TESTING_DEVICE_ONLY_FOR="" python test/run_test.py --include inductor/test_cpu_cpp_wrapper
-  python test/run_test.py --include inductor/test_cuda_cpp_wrapper
+  python test/run_test.py --include inductor/test_cuda_cpp_wrapper inductor/test_cpu_repro inductor/test_extension_backend
 
   TORCHINDUCTOR_CPP_WRAPPER=1 python benchmarks/dynamo/timm_models.py --device cuda --accuracy --amp \
     --training --inductor --disable-cudagraphs --only vit_base_patch16_224 \
@@ -397,12 +396,14 @@ DYNAMO_BENCHMARK_FLAGS=()
 
 pr_time_benchmarks() {
 
+  pip_install --user "fbscribelogger"
+
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
-  PYTHONPATH=$(pwd)/benchmarks/dynamo/pr_time_benchmarks source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
+  PYTHONPATH=$(pwd)/benchmarks/dynamo/pr_time_benchmarks source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
   echo "benchmark results on current PR: "
-  cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_after.txt"
-
+  cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv"
+  PYTHONPATH=$(pwd)/benchmarks/dynamo/pr_time_benchmarks python benchmarks/dynamo/pr_time_benchmarks/check_results.py "benchmarks/dynamo/pr_time_benchmarks/expected_results.csv" "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv"
 }
 
 if [[ "${TEST_CONFIG}" == *pr_time_benchmarks* ]]; then
@@ -504,6 +505,12 @@ test_perf_for_dashboard() {
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_autotune_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *aotinductor-true* ]] && [[ "$mode" == "inference" ]]; then
+        if [[ "$target" == "accuracy" ]]; then
+          # Also collect Export pass rate and display as a separate row
+          $TASKSET python "benchmarks/dynamo/$suite.py" \
+              "${target_flag[@]}" --"$mode" --"$dtype" --export --disable-cudagraphs "$@" \
+              --output "$TEST_REPORTS_DIR/${backend}_export_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+        fi
         TORCHINDUCTOR_ABI_COMPATIBLE=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --export-aot-inductor --disable-cudagraphs "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_aot_inductor_${suite}_${dtype}_${mode}_${device}_${target}.csv"
@@ -567,10 +574,10 @@ test_single_dynamo_benchmark() {
     fi
 
     if [[ "${TEST_CONFIG}" == *_avx2* ]]; then
-      TEST_CONFIG=${TEST_CONFIG::-5}
+      TEST_CONFIG=${TEST_CONFIG//_avx2/}
     fi
     if [[ "${TEST_CONFIG}" == *_avx512* ]]; then
-      TEST_CONFIG=${TEST_CONFIG::-7}
+      TEST_CONFIG=${TEST_CONFIG//_avx512/}
     fi
     python "benchmarks/dynamo/$suite.py" \
       --ci --accuracy --timing --explain \
@@ -588,6 +595,9 @@ test_single_dynamo_benchmark() {
 
 test_inductor_micro_benchmark() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  if [[ "${TEST_CONFIG}" == *cpu* ]]; then
+    test_inductor_set_cpu_affinity
+  fi
   python benchmarks/gpt_fast/benchmark.py --output "${TEST_REPORTS_DIR}/gpt_fast_benchmark.csv"
 }
 
@@ -681,7 +691,7 @@ test_inductor_torchbench_smoketest_perf() {
 }
 
 test_inductor_get_core_number() {
-  if [[ "${TEST_CONFIG}" == *aarch64 ]]; then
+  if [[ "${TEST_CONFIG}" == *aarch64* ]]; then
     echo "$(($(lscpu | grep 'Cluster(s):' | awk '{print $2}') * $(lscpu | grep 'Core(s) per cluster:' | awk '{print $4}')))"
   else
     echo "$(($(lscpu | grep 'Socket(s):' | awk '{print $2}') * $(lscpu | grep 'Core(s) per socket:' | awk '{print $4}')))"
@@ -691,12 +701,21 @@ test_inductor_get_core_number() {
 test_inductor_set_cpu_affinity(){
   #set jemalloc
   JEMALLOC_LIB="$(find /usr/lib -name libjemalloc.so.2)"
-  IOMP_LIB="$(dirname "$(which python)")/../lib/libiomp5.so"
-  export LD_PRELOAD="$JEMALLOC_LIB":"$IOMP_LIB":"$LD_PRELOAD"
+  export LD_PRELOAD="$JEMALLOC_LIB":"$LD_PRELOAD"
   export MALLOC_CONF="oversize_threshold:1,background_thread:true,metadata_thp:auto,dirty_decay_ms:-1,muzzy_decay_ms:-1"
-  export KMP_AFFINITY=granularity=fine,compact,1,0
-  export KMP_BLOCKTIME=1
+
+  if [[ "${TEST_CONFIG}" != *aarch64* ]]; then
+    # Use Intel OpenMP for x86
+    IOMP_LIB="$(dirname "$(which python)")/../lib/libiomp5.so"
+    export LD_PRELOAD="$IOMP_LIB":"$LD_PRELOAD"
+    export KMP_AFFINITY=granularity=fine,compact,1,0
+    export KMP_BLOCKTIME=1
+  fi
   cores=$(test_inductor_get_core_number)
+  # Set number of cores to 16 on Aarch64 for performance runs.
+  if [[ "${TEST_CONFIG}" == *aarch64* && $cores -gt 16 ]]; then
+    cores=16
+  fi
   export OMP_NUM_THREADS=$cores
   end_core=$((cores-1))
   export TASKSET="taskset -c 0-$end_core"
@@ -1367,14 +1386,16 @@ test_executorch() {
   assert_git_not_dirty
 }
 
-test_linux_aarch64(){
+test_linux_aarch64() {
   python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
-       test_transformers test_multiprocessing test_numpy_interop --verbose
+        test_transformers test_multiprocessing test_numpy_interop \
+        --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 
   # Dynamo tests
   python test/run_test.py --include dynamo/test_compile dynamo/test_backends dynamo/test_comptime dynamo/test_config \
        dynamo/test_functions dynamo/test_fx_passes_pre_grad dynamo/test_interop dynamo/test_model_output dynamo/test_modules \
-       dynamo/test_optimizers dynamo/test_recompile_ux dynamo/test_recompiles --verbose
+       dynamo/test_optimizers dynamo/test_recompile_ux dynamo/test_recompiles \
+       --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 
   # Inductor tests
   python test/run_test.py --include inductor/test_torchinductor inductor/test_benchmark_fusion inductor/test_codecache \
@@ -1384,7 +1405,8 @@ test_linux_aarch64(){
        inductor/test_max_autotune inductor/test_memory_planning inductor/test_metrics inductor/test_multi_kernel inductor/test_pad_mm \
        inductor/test_pattern_matcher inductor/test_perf inductor/test_profiler inductor/test_select_algorithm inductor/test_smoke \
        inductor/test_split_cat_fx_passes inductor/test_standalone_compile inductor/test_torchinductor \
-       inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes --verbose
+       inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes inductor/test_memory \
+       --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
@@ -1466,9 +1488,7 @@ elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   test_inductor_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
-    if [[ "${BUILD_ENVIRONMENT}" != linux-jammy-py3.8-gcc11-build ]]; then
-      # Temporarily skip test_inductor_aoti due to https://github.com/pytorch/pytorch/issues/130311
-      test_inductor_aoti
+    if [[ "${BUILD_ENVIRONMENT}" != linux-jammy-py3.9-gcc11-build ]]; then
       test_inductor_distributed
     fi
   fi

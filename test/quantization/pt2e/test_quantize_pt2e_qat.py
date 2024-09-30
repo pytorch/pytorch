@@ -6,6 +6,7 @@ from typing import Any, Optional, Tuple, Type
 
 import torch
 from torch._export import capture_pre_autograd_graph
+from torch._utils_internal import capture_pre_autograd_graph_using_training_ir
 from torch.ao.quantization import (
     default_fake_quant,
     FusedMovingAvgObsFakeQuantize,
@@ -257,16 +258,29 @@ class PT2EQATTestCase(QuantizationTestCase):
         else:
             relu_node = None
             getitem_node = output_fq_node.args[0]
-        bn_node = getitem_node.args[0]
-        if is_cuda:
-            if torch.version.cuda is not None:
-                expected_bn_op = torch.ops.aten.cudnn_batch_norm.default
-            elif torch.version.hip is not None:
-                expected_bn_op = torch.ops.aten.miopen_batch_norm.default
+
+        is_training_ir_flag = capture_pre_autograd_graph_using_training_ir()
+        if is_training_ir_flag:
+            # The relu node takes in the output of bn.
+            # See NOTE [training ir has no getitem for bn node].
+            bn_node = getitem_node
+            self.assertEqual(bn_node.target, torch.ops.aten.batch_norm.default)
         else:
-            expected_bn_op = torch.ops.aten._native_batch_norm_legit.default
-        self.assertEqual(getitem_node.target, operator.getitem)
-        self.assertEqual(bn_node.target, expected_bn_op)
+            # TODO: This branch is going through a deprecated branch and should be deleted soon,
+            # after capture_pre_autograd_graph fully migrate to training IR
+            # T199018392
+            self.assertEqual(getitem_node.target, operator.getitem)
+            bn_node = getitem_node.args[0]
+
+            expected_bn_op = None
+            if is_cuda:
+                if torch.version.cuda is not None:
+                    expected_bn_op = torch.ops.aten.cudnn_batch_norm.default
+                elif torch.version.hip is not None:
+                    expected_bn_op = torch.ops.aten.miopen_batch_norm.default
+            else:
+                expected_bn_op = torch.ops.aten._native_batch_norm_legit.default
+            self.assertEqual(bn_node.target, expected_bn_op)
 
         # Verify: conv / scale_factor.reshape [+ bias.reshape]
         if has_bias:
@@ -352,10 +366,14 @@ class PT2EQATTestCase(QuantizationTestCase):
         bn_running_var_add_node = sqrt_node.args[0]
         (bn_running_var_node, eps) = bn_running_var_add_node.args
         self.assertEqual(scale_factor_node.target, torch.ops.aten.div.Tensor)
-        self.assertTrue("bn_weight" in bn_weight_node.target)
+        if is_training_ir_flag:
+            self.assertTrue("bn.weight" in bn_weight_node.target)
+            self.assertTrue("bn.running_var" in bn_running_var_node.target)
+        else:
+            self.assertTrue("bn_weight" in bn_weight_node.target)
+            self.assertTrue("bn_running_var" in bn_running_var_node.target)
         self.assertEqual(sqrt_node.target, torch.ops.aten.sqrt.default)
         self.assertEqual(bn_running_var_add_node.target, torch.ops.aten.add.Tensor)
-        self.assertTrue("bn_running_var" in bn_running_var_node.target)
         self.assertEqual(eps, 1e-5)
 
         # Optionally check the converted graph
@@ -585,6 +603,9 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
         the `unrelated_getitem` node, which is not part of the conv-bn pattern but
         is returned as part of the match anyway (as a placeholder).
         """
+
+        if capture_pre_autograd_graph_using_training_ir():
+            self.skipTest("Not applicable to training IR")
 
         class M(torch.nn.Module):
             def __init__(self, conv_class, bn_class):
@@ -968,7 +989,10 @@ def _get_conv_bn_getitem_nodes(model: torch.fx.GraphModule):
     for n in model.graph.nodes:
         if _is_conv_node(n):
             conv_node = n
-        if n.target == torch.ops.aten._native_batch_norm_legit.default:
+        if n.target in (
+            torch.ops.aten._native_batch_norm_legit.default,
+            torch.ops.aten.batch_norm.default,
+        ):
             bn_node = n
         if n.target == operator.getitem:
             getitem_node = n
@@ -983,7 +1007,7 @@ class ConvBnInt32WeightQuantizer(Quantizer):
     """
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
-        conv_node, _, getitem_node = _get_conv_bn_getitem_nodes(model)
+        conv_node, bn_node, getitem_node = _get_conv_bn_getitem_nodes(model)
         act_qspec = QuantizationSpec(
             dtype=torch.uint8,
             quant_min=0,
@@ -1007,10 +1031,21 @@ class ConvBnInt32WeightQuantizer(Quantizer):
             },
             _annotated=True,
         )
-        getitem_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            output_qspec=act_qspec,
-            _annotated=True,
-        )
+        if getitem_node is not None:
+            # TODO: This branch is going through a deprecated branch and should be deleted soon,
+            # after capture_pre_autograd_graph fully migrate to training IR
+            # T199018392
+            getitem_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                output_qspec=act_qspec,
+                _annotated=True,
+            )
+        else:
+            # See NOTE [training ir has no getitem for bn node].
+            assert capture_pre_autograd_graph_using_training_ir()
+            bn_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                output_qspec=act_qspec,
+                _annotated=True,
+            )
         return model
 
     def validate(self, model: torch.fx.GraphModule):
@@ -1047,7 +1082,7 @@ class ConvBnDerivedBiasQuantizer(Quantizer):
         else:
             weight_qscheme = torch.per_tensor_affine
             weight_fq = default_fake_quant
-        conv_node, _, getitem_node = _get_conv_bn_getitem_nodes(model)
+        conv_node, bn_node, getitem_node = _get_conv_bn_getitem_nodes(model)
         act_qspec = QuantizationSpec(
             dtype=torch.uint8,
             quant_min=0,
@@ -1082,10 +1117,26 @@ class ConvBnDerivedBiasQuantizer(Quantizer):
             },
             _annotated=True,
         )
-        getitem_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            output_qspec=act_qspec,
-            _annotated=True,
-        )
+
+        if getitem_node is not None:
+            # TODO: This branch is going through a deprecated branch and should be deleted soon,
+            # after capture_pre_autograd_graph fully migrate to training IR
+            # T199018392
+            getitem_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                output_qspec=act_qspec,
+                _annotated=True,
+            )
+        else:
+            # NOTE [training ir has no getitem for bn node].
+            # getitem is None when we use the training IR. It outputs
+            # aten.batch_norm.default, which do not need any getitem node.
+            # In this case, we need to annotate on the batch norm node.
+            # geteitem node should only be None if we are using training IR.
+            assert capture_pre_autograd_graph_using_training_ir()
+            bn_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                output_qspec=act_qspec,
+                _annotated=True,
+            )
         return model
 
     def validate(self, model: torch.fx.GraphModule):

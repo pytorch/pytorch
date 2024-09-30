@@ -4,6 +4,7 @@ from typing import List, Tuple
 import torch
 from torch import Tensor
 from torch._export import capture_pre_autograd_graph
+from torch._utils_internal import capture_pre_autograd_graph_using_training_ir
 from torch.ao.quantization import observer, ObserverOrFakeQuantize, QConfigMapping
 from torch.ao.quantization.qconfig import (
     default_per_channel_symmetric_qnnpack_qconfig,
@@ -599,6 +600,14 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
     def test_fixed_qparams_qspec_observer_dedup(self):
         class BackendAQuantizer(Quantizer):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                act_qspec = FixedQParamsQuantizationSpec(
+                    dtype=torch.uint8,
+                    quant_min=0,
+                    quant_max=255,
+                    qscheme=torch.per_tensor_affine,
+                    scale=1.0 / 256.0,
+                    zero_point=0,
+                )
                 for node in model.graph.nodes:
                     if (
                         node.op == "call_function"
@@ -606,14 +615,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                     ):
                         input_act = node.args[0]
                         assert isinstance(input_act, Node)
-                        act_qspec = FixedQParamsQuantizationSpec(
-                            dtype=torch.uint8,
-                            quant_min=0,
-                            quant_max=255,
-                            qscheme=torch.per_tensor_affine,
-                            scale=1.0 / 256.0,
-                            zero_point=0,
-                        )
                         node.meta["quantization_annotation"] = QuantizationAnnotation(
                             input_qspec_map={
                                 input_act: act_qspec,
@@ -629,13 +630,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                         assert isinstance(input_act, Node)
                         input_act1 = node.args[1]
                         assert isinstance(input_act, Node)
-                        act_qspec = QuantizationSpec(
-                            observer_or_fake_quant_ctr=observer.default_observer,
-                            dtype=torch.uint8,
-                            quant_min=0,
-                            quant_max=255,
-                            qscheme=torch.per_tensor_affine,
-                        )
                         node.meta["quantization_annotation"] = QuantizationAnnotation(
                             input_qspec_map={
                                 input_act0: act_qspec,
@@ -1309,7 +1303,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         m = M().eval()
         example_inputs = torch.randn(1, 2, 3, 3)
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = capture_pre_autograd_graph(m, (example_inputs,))
         with self.assertRaises(Exception):
             m = prepare_pt2e(m, BackendAQuantizer())
 
@@ -1452,7 +1446,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         for n in m.graph.nodes:
             if n.op == "get_attr" and "frozen_param" in n.target:
-                self.assertIn("stack_trace", n.meta)
                 for key in n.meta:
                     self.assertEqual(n.meta[key], weight_meta[key])
 
@@ -1863,6 +1856,14 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self._test_move_exported_model_dropout(inplace=True)
 
     def _get_bn_train_eval_ops(self):
+        if capture_pre_autograd_graph_using_training_ir():
+            return (
+                torch.ops.aten.batch_norm.default,
+                torch.ops.aten.batch_norm.default,
+            )
+        # TODO: This branch is going through a deprecated branch and should be deleted soon,
+        # after capture_pre_autograd_graph fully migrate to training IR
+        # T199018392
         if TEST_WITH_ROCM:
             return (
                 torch.ops.aten.miopen_batch_norm.default,

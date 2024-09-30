@@ -350,6 +350,7 @@ aten::maximum
 aten::maximum.out
 aten::mean
 aten::mean.dim
+aten::mean.dtype_out
 aten::mean.out
 aten::minimum
 aten::minimum.out

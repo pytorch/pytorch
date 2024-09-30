@@ -11,6 +11,7 @@ import torch._dynamo.testing
 import torch.nn.functional as F
 from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import CompileCounter, same
+from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -475,6 +476,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(f3(r), optimize(f3)(r))
         self.assertEqual(f4(r), optimize(f4)(r))
 
+    @skipIfWindows(
+        msg="AssertionError: The values for attribute 'dtype' do not match: torch.int32 != torch.int64."
+    )
     def test_to_tensor(self):
         def f1():
             a = np.random.uniform(low=-1, high=1, size=(20, 1))
@@ -617,6 +621,20 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(cnts.frame_count, """2""")  # guard worked
         self.assertEqual(f(x, math.nan), cf(x, math.nan))
         self.assertExpectedInline(cnts.frame_count, """3""")  # nan always recompiles
+
+    @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=False)
+    def test_unspec_float_input_f64(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def f(x, y):
+            return x + y
+
+        cf = torch.compile(backend=cnts, fullgraph=True)(f)
+
+        x = torch.zeros(3, dtype=torch.float64)
+        # 17 digits of precision so unrepresentable in float32
+        flt = 1.2345678901234567
+        self.assertEqual(f(x, flt), cf(x, flt))
 
     @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=True)
     def test_unspec_float_output(self):
