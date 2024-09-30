@@ -119,7 +119,9 @@ def autotune_hints_to_configs(
                     triton_config(
                         size_hints,
                         *xyz,
-                        num_elements_per_warp=device_props.warp_size,
+                        num_elements_per_warp=device_props.warp_size
+                        if device_props.warp_size
+                        else 32,
                     )
                 )
 
