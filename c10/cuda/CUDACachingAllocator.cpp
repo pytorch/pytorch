@@ -3964,6 +3964,10 @@ int MemPool::use_count() {
   return CUDACachingAllocator::getPoolUseCount(device_, id_);
 }
 
+int MemPool::graph_pool_handle(bool is_user_created) {
+  return is_user_created ? {0, uid_++} : {uuid_++, 0};
+}
+
 // Note that active_mempool_ is a global variable here
 // and not inside MemPoolContext class, because in windows we
 // can't use __declspec(dllexport) and __declspec(thread)
