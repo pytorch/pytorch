@@ -908,14 +908,14 @@ static void reorder_meta(cutlass::TensorRef<Element, LayoutDest> dest,
 
 std::tuple<Tensor, Tensor>
 _to_sparse_semi_structured(const Tensor& dense) {
+  TORCH_CHECK(dense.dim() == 2,
+              __func__, " : Expected dense argument to be 2D tensor, got ",
+              dense.dim(), " dims");
 #if defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
   AT_ERROR(__func__, " : CUTLASS not supported");
   return std::make_tuple(Tensor{}, Tensor{});
 #elif defined(USE_ROCM)
   // Check dimensions of the dense matrix.
-  TORCH_CHECK(dense.dim() == 2,
-              __func__, " : Expected dense argument to be 2D tensor, got ",
-              dense.dim(), " dims");
 
   // Generate sparse tensor using cuSPARSELt compression
   auto sparse = torch._cslt_compress(dense);    
