@@ -40,6 +40,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TSAN,
     TestCase,
     run_tests,
+    TEST_HPU,
 )
 from torch.testing._internal.distributed.multi_threaded_pg import (
     _install_threaded_pg,
@@ -48,6 +49,7 @@ from torch.testing._internal.distributed.multi_threaded_pg import (
 )
 import operator
 
+import habana_frameworks.torch as ht
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -79,6 +81,7 @@ TEST_SKIPS = {
         86, "Test skipped at subprocess level, look at subprocess log for skip reason"
     ),
     "importerror": TestSkip(88, "Test skipped due to missing import"),
+    "no_hpu": TestSkip(88, "HPU is not available."),
 }
 
 
@@ -97,7 +100,10 @@ class DistTestCases:
     backend_feature["cuda"] = {"nccl", "gloo", "ucc"}
     backend_feature["ddp"] = {"nccl", "gloo", "ucc"}
     backend_feature["subgroup"] = {"nccl", "gloo", "ucc"}
+    backend_feature["hpu"] = {"hccl"}
     backend_feature["plugin"] = set()
+    if TEST_HPU:
+        backend_feature["hpu"] = {"hccl"}
 
 
 def skip_if_no_gpu(func):
@@ -106,10 +112,12 @@ def skip_if_no_gpu(func):
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if not torch.cuda.is_available():
-            sys.exit(TEST_SKIPS["no_cuda"].exit_code)
+        if not ht.hpu.is_available():
+            sys.exit(TEST_SKIPS["no_hpu"].exit_code)
         world_size = int(os.environ["WORLD_SIZE"])
         if torch.cuda.device_count() < world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
+        if TEST_HPU and torch.hpu.device_count < world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
 
         return func(*args, **kwargs)
@@ -172,15 +180,13 @@ def import_transformers_or_skip():
     return decorator
 
 
-def at_least_x_gpu(x):
-    return torch.cuda.is_available() and torch.cuda.device_count() >= x
-
-
 def skip_if_lt_x_gpu(x):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            if torch.cuda.is_available() and torch.cuda.device_count() >= x:
+            if ht.hpu.is_available() and ht.hpu.device_count() >= x:
+                return func(*args, **kwargs)
+            if TEST_HPU and torch.hpu.device_count() >= x:
                 return func(*args, **kwargs)
             sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
 
@@ -333,9 +339,9 @@ def requires_mpi():
     )
 
 
-def skip_if_rocm_multiprocess(func):
+def skip_if_rocm(func):
     """Skips a test for ROCm"""
-    func.skip_if_rocm_multiprocess = True
+    func.skip_if_rocm = True
 
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -382,7 +388,7 @@ if TEST_WITH_TSAN:
     # TSAN runs much slower.
     TIMEOUT_DEFAULT = 500
 else:
-    TIMEOUT_DEFAULT = int(os.getenv('DISTRIBUTED_TESTS_DEFAULT_TIMEOUT', '300'))
+    TIMEOUT_DEFAULT = int(os.getenv('DISTRIBUTED_TESTS_DEFAULT_TIMEOUT', '400'))
 TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
 
 
@@ -463,7 +469,9 @@ def init_multigpu_helper(world_size: int, backend: str):
     On a single node, all visible GPUs are evenly
     divided to subsets, each process only uses a subset.
     """
-    nGPUs = torch.cuda.device_count()
+    nGPUs = ht.hpu.device_count()
+    if TEST_HPU:
+        nGPUs = torch.hpu.device_count()
     visible_devices = range(nGPUs)
 
     # If rank is less than or equal to number of available GPU's
@@ -554,14 +562,8 @@ class MultiProcessTestCase(TestCase):
         if methodName != "runTest":
             method_name = methodName
         super().__init__(method_name)
-        try:
-            fn = getattr(self, method_name)
-            setattr(self, method_name, self.join_or_run(fn))
-        except AttributeError as e:
-            if methodName != 'runTest':
-                # we allow instantiation with no explicit method name
-                # but not an *incorrect* or missing method name
-                raise ValueError(f"no such test method in {self.__class__}: {methodName}") from e
+        fn = getattr(self, method_name)
+        setattr(self, method_name, self.join_or_run(fn))
 
     def setUp(self) -> None:
         super().setUp()
@@ -594,9 +596,6 @@ class MultiProcessTestCase(TestCase):
                 target=self.__class__._run,
                 name="process " + str(rank),
                 args=(rank, self._current_test_name(), self.file_name, child_conn),
-                kwargs={
-                    "fake_pg": getattr(self, "fake_pg", False),
-                }
             )
             process.start()
             logger.info("Started process %s with pid %s", rank, process.pid)
@@ -642,7 +641,7 @@ class MultiProcessTestCase(TestCase):
                 return
 
     @classmethod
-    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs) -> None:
+    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
@@ -854,6 +853,68 @@ class MultiProcessTestCase(TestCase):
     @property
     def is_master(self) -> bool:
         return self.rank == 0
+# Utility base class for DDP based Multi Process Test cases
+# This abstracts the PG creation and deletion, the backends are selected based
+# on device type. The tests functions can be instantiated per device type using
+# common_device_type.instantiate_device_type_tests
+# other backends can add entry in backend() function
+class DistributedTestBase(MultiProcessTestCase):
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    def backend(self, device) -> str:
+        if "cuda" in device:
+            return "nccl"
+        elif "hpu" in device :   # intel gaudi
+            return "hccl"
+        else :
+            return "gloo"
+
+    def device_handle(self, device) :
+        device_name = device.split(":")[0]
+        if hasattr(torch, device_name):
+            return getattr(torch, device_name, None)
+        else:
+            raise RuntimeError(
+                f"Device {device} library not found"
+            )
+
+    def create_pg(self, device):
+        num_visible_devices = self.device_handle(device).device_count()
+        store = torch.distributed.FileStore(self.file_name, num_visible_devices)
+        torch.distributed.init_process_group(
+            backend=self.backend(device),
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store
+        )
+        if "nccl" in self.backend(device):
+            torch.cuda.set_device(self.rank)
+        if "hccl" in self.backend(device):
+            torch.hpu
+        return torch.distributed.distributed_c10d._get_default_group()
+
+    def rank_to_device(self, device):
+        num_visible_devices = self.device_handle(device).device_count()
+        visible_device = range(num_visible_devices)
+        num_devices_per_process = 1
+        rank_to_device = {
+            i : list(visible_device[i * num_devices_per_process : (i + 1) * num_devices_per_process])
+            for i in range(num_visible_devices)
+        }
+        return rank_to_device
+
+    def destroy_pg(self) -> None:
+        torch.distributed.barrier()
+        torch.distributed.destroy_process_group()
 
 
 def run_subtests(
@@ -1007,20 +1068,10 @@ class MultiThreadedTestCase(TestCase):
 
         return types.MethodType(wrapper, self)
 
-    def __init__(self, method_name: str = "runTest", methodName: str = "runTest") -> None:
-        # methodName is the correct naming in unittest and testslide uses keyword arguments.
-        # So we need to use both to 1) not break BC and, 2) support testslide.
-        if methodName != "runTest":
-            method_name = methodName
+    def __init__(self, method_name: str = "runTest") -> None:
         super().__init__(method_name)
-        try:
-            fn = getattr(self, method_name)
-            setattr(self, method_name, self.join_or_run(fn))
-        except AttributeError as e:
-            if methodName != 'runTest':
-                # we allow instantiation with no explicit method name
-                # but not an *incorrect* or missing method name
-                raise ValueError(f"no such test method in {self.__class__}: {methodName}") from e
+        test_fn = getattr(self, method_name, None)
+        setattr(self, method_name, self.join_or_run(test_fn))
 
     def perThreadSetUp(self):
         # super().setUp()  # TestCase.setUp() calls torch.manual_seed()
@@ -1070,7 +1121,7 @@ class MultiThreadedTestCase(TestCase):
             self.threads.append(t)
 
     @classmethod
-    def _run(cls, test_name, rank, world_size, **kwargs):
+    def _run(cls, test_name, rank, world_size):
         self = cls(test_name)
         self.rank = rank
 
@@ -1238,24 +1289,15 @@ class SaveForwardInputsModel(nn.Module):
         return self.c2(self.c1(x))
 
 @contextmanager
-def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True, fake_pg=False):
+def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True):
     # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
     # Just manually implement the most important part of the dynamo behavior to reset/clear.
-    if not fake_pg:
-        torch.cuda.set_device(rank)
+    #torch.cuda.set_device(rank)
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '6789'
+    import habana_frameworks.torch.distributed.hccl
     if init_pg:
-        if fake_pg:
-            store = torch.testing._internal.distributed.fake_pg.FakeStore()
-            c10d.init_process_group(
-                backend="fake",
-                world_size=world_size,
-                rank=rank,
-                store=store,
-            )
-        else:
-            c10d.init_process_group("nccl", rank=rank, world_size=world_size)
+        c10d.init_process_group("hccl", rank=rank, world_size=world_size)
     torch._dynamo.reset()
     torch._dynamo.utils.counters.clear()
     try:
@@ -1289,9 +1331,10 @@ class DynamoDistributedSingleProcTestCase(torch._dynamo.test_case.TestCase):
             )
         )
         cls.rank = 0
-        cls.device = f"cuda:{cls.rank}"
-        cls.device_ids = None if "cuda" in cls.device else [cls.rank]
-        c10d.init_process_group("nccl", rank=cls.rank, world_size=1)
+        cls.device = f"hpu:{cls.rank}"
+        cls.device_ids = None if "hpu" in cls.device else [cls.rank]
+        import habana_frameworks.torch.distributed.hccl
+        c10d.init_process_group("hccl", rank=cls.rank, world_size=1)
 
     @classmethod
     def tearDownClass(cls):
@@ -1322,10 +1365,10 @@ class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
 
     @property
     def world_size(self) -> int:
-        return torch.cuda.device_count()
+        return ht.hpu.device_count()
 
     @classmethod
-    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs) -> None:
+    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
         # The rest is copypasta from MultiProcessTestCase._run
         self = cls(test_name)
         self.rank = rank
