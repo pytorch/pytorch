@@ -1,7 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
-from typing import Any, Callable, Dict, List, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -102,10 +102,12 @@ def zeros_and_scatter(
                 offset = offset - 1
             else:
                 for j, idx in enumerate(indices):
+                    assert isinstance(idx, torch.Tensor)  # Appease the mypy overlords
                     indices[j] = idx.unsqueeze(offset)
 
     # Broadcast the indices to match the shape of vals.
     for i, idx in enumerate(indices):
+        assert isinstance(idx, torch.Tensor)  # Appease the mypy overlords
         indices[i] = idx.expand(vals.shape)
 
     return torch.ops.aten.index_put(grad, indices, vals, accumulate=True)
@@ -127,7 +129,7 @@ def _(info, in_dims, shape, indices, indices_dims, val, rightmost_dim):
     if torch._C._functorch.maybe_current_level() is None:
         lvl = 0
     else:
-        lvl = torch._C._functorch.maybe_current_level()
+        lvl = int(torch._C._functorch.maybe_current_level())
 
     # indices_dims is used to record the dim that each index tensor is indexing.
     if len(indices_dims) == 0:
@@ -251,7 +253,9 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
         kernel_options: Dict[str, Any],
         score_mod_other_buffers: Tuple = (),
         mask_mod_other_buffers: Tuple = (),
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor, ...]]:
+    ) -> Tuple[
+        torch.Tensor, torch.Tensor, torch.Tensor, Tuple[Optional[torch.Tensor], ...]
+    ]:
         if not all(
             isinstance(buf, torch.Tensor)
             for buf in score_mod_other_buffers + mask_mod_other_buffers
@@ -855,7 +859,9 @@ def sdpa_dense_backward(
     kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple,
     mask_mod_other_buffers: Tuple,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor, ...]]:
+) -> Tuple[
+    torch.Tensor, torch.Tensor, torch.Tensor, Tuple[Optional[torch.Tensor], ...]
+]:
     # Get outputs before calling repeat interleave
     actual_grad_query = torch.empty_like(query)
     actual_grad_key = torch.empty_like(key)
@@ -996,7 +1002,9 @@ def trace_flex_attention_backward(
     kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor, ...]]:
+) -> Tuple[
+    torch.Tensor, torch.Tensor, torch.Tensor, Tuple[Optional[torch.Tensor], ...]
+]:
     """We already have the forward graph and joint graph from the forward pass, so we create a proxy attach both graphs"""
     example_out = flex_attention_backward(
         query,
@@ -1080,7 +1088,9 @@ def flex_attention_backward_proxy_torch_dispatch_mode(
     kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor]]:
+) -> Tuple[
+    torch.Tensor, torch.Tensor, torch.Tensor, Tuple[Optional[torch.Tensor], ...]
+]:
     assert mode is not None, "Mode should always be enabled for python fallback key"
     return trace_flex_attention_backward(
         mode,
@@ -1118,7 +1128,9 @@ def flex_attention_backward_functionalize(
     kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor]]:
+) -> Tuple[
+    torch.Tensor, torch.Tensor, torch.Tensor, Tuple[Optional[torch.Tensor], ...]
+]:
     """Defines the functionalization rules for the flex_attention operator.
 
     Write now we are unwrapping each tensor and then redispatching to the next,
@@ -1198,7 +1210,9 @@ def flex_attention_backward_fake_tensor_mode(
     kernel_options: Dict[str, Any],
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor, ...]]:
+) -> Tuple[
+    torch.Tensor, torch.Tensor, torch.Tensor, Tuple[Optional[torch.Tensor], ...]
+]:
     with mode:
         grad_query = torch.empty_like(query)
         grad_key = torch.empty_like(key)
