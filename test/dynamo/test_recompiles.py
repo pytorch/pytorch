@@ -338,9 +338,11 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         def f(x):
             def g(y):
                 return y + x
+
             return g
 
         counter = torch._dynamo.testing.CompileCounter()
+
         @torch.compile(backend=counter)
         def h(x, g):
             return g(x)
