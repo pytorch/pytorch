@@ -17,7 +17,9 @@ from torch.distributed._tensor import DTensor, init_device_mesh, Replicate, Shar
 from torch.distributed.checkpoint.state_dict import (
     get_model_state_dict,
     get_optimizer_state_dict,
+    set_model_state_dict,
     set_optimizer_state_dict,
+    StateDictOptions,
 )
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -335,6 +337,57 @@ class TestFullyShard2DTraining(FSDPTest):
         self.assertEqual(loss_no_cp2, loss_cp2)
 
 
+class TestFullyShard2DStateDict(DTensorTestBase):
+    @property
+    def backend(self):
+        # need to specify gloo backend for testing cpu offload
+        return "cpu:gloo,cuda:nccl"
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_fully_shard_tp_2d_set_full_state_dict(self):
+        dummy_model = SimpleModel().cuda()
+        mesh_2d = init_device_mesh(
+            "cuda",
+            (2, self.world_size // 2),
+            mesh_dim_names=("dp", "tp"),
+        )
+        tp_mesh = mesh_2d["tp"]
+        dp_mesh = mesh_2d["dp"]
+        parallelize_plan = {
+            "net1": ColwiseParallel(),
+            "net2": RowwiseParallel(),
+            "net3": ColwiseParallel(),
+        }
+        model = parallelize_module(dummy_model, tp_mesh, parallelize_plan)
+        fully_shard(model, mesh=dp_mesh)
+        optim = torch.optim.Adam(model.parameters(), lr=0.01)
+        model(model.get_input()).sum().backward()
+        optim.step()
+        # ref_msd, ref_osd are both the default sharded state dict
+        ref_msd = copy.deepcopy(get_model_state_dict(model))
+        ref_osd = copy.deepcopy(get_optimizer_state_dict(model, optimizers=optim))
+
+        options = StateDictOptions(
+            full_state_dict=True, cpu_offload=True, broadcast_from_rank0=True
+        )
+        full_msd = get_model_state_dict(model, options=options)
+        full_osd = get_optimizer_state_dict(model, optimizers=optim, options=options)
+        # load full_msd and full_osd into model and optim.
+        # this loads the slice of full tensor into each rank's local DTensor.
+        set_model_state_dict(model, full_msd, options=options)
+        set_optimizer_state_dict(
+            model, optimizers=optim, optim_state_dict=full_osd, options=options
+        )
+
+        # check after setting full state dict, the model and optim default sharded state dict
+        # are the same as the initial default sharded state dict.
+        new_msd = get_model_state_dict(model)
+        new_osd = get_optimizer_state_dict(model, optimizers=optim)
+        self.assertEqual(ref_msd, new_msd)
+        self.assertEqual(ref_osd, new_osd)
+
+
 class Test2dFSDP1ParallelIntegration(DTensorTestBase):
     def init_model(self, device_type, model_parallel_size=2):
         torch.manual_seed(0)
@@ -544,6 +597,11 @@ class TestNew2dParallelTraining(DTensorTestBase):
 # TODO: update all state dict unit tests to use distributed.checkpoint.state_dict,
 # and consolidate all the state_dict test in test.distributed.checkpoint.
 class TestNew2dParallelStateDict(DTensorTestBase):
+    @property
+    def backend(self):
+        # need to specify gloo backend for testing cpu offload
+        return "cpu:gloo,cuda:nccl"
+
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_fsdp_2d_extension(self):
