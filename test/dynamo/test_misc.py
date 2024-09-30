@@ -7638,7 +7638,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         cnt = CompileCounterWithBackend("aot_eager")
         fn_opt = torch._dynamo.optimize(cnt)(fn)
-        x = torch.tensor(9.734375, dtype=torch.bfloat16)
+        x = torch.tensor(9.734375, dtype=torch.bfloat16, requires_grad=True)
         y = 1.00048828125
 
         self.assertEqual(fn_opt(x, y), fn(x, y))
@@ -7651,7 +7651,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         cnt = CompileCounterWithBackend("aot_eager")
         fn_opt = torch._dynamo.optimize(cnt)(fn)
-        x = torch.tensor(9.734375, dtype=torch.float16)
+        x = torch.tensor(9.734375, dtype=torch.float16, requires_grad=True)
         y = 1.00048828125
 
         self.assertEqual(fn_opt(x, y), fn(x, y))
@@ -7664,7 +7664,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         cnt = CompileCounterWithBackend("aot_eager")
         fn_opt = torch._dynamo.optimize(cnt)(fn)
-        x = torch.tensor(9.734375, dtype=torch.float32)
+        x = torch.tensor(9.734375, dtype=torch.float32, requires_grad=True)
         y = 1.00048828125
 
         self.assertEqual(fn_opt(x, y), fn(x, y))
@@ -7677,7 +7677,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         cnt = CompileCounterWithBackend("aot_eager")
         fn_opt = torch._dynamo.optimize(cnt)(fn)
-        x = torch.tensor(9.734375, dtype=torch.float64)
+        x = torch.tensor(9.734375, dtype=torch.float64, requires_grad=True)
         y = 1.00048828125
 
         self.assertEqual(fn_opt(x, y), fn(x, y))
