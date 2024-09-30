@@ -106,7 +106,6 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
 
   if (pool.first != 0 || pool.second != 0) {
     // Either value being nonzero means the user supplied a pool to share.
-    // pool not being a nullptr means the user supplied a pool to share.
     // But only one should be nonzero.
     // If pool was created by another graph's capture_begin, first should be nonzero.
     // If pool was created by graph_pool_handle, second should be nonzero.
@@ -118,9 +117,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
     mempool_id_ = c10::cuda::MemPool::graph_pool_handle(false);
     TORCH_INTERNAL_ASSERT(mempool_id_.first > 0);
   }
-  // Using the pool= API in capture_begin means user is only providing a mempool id, and
-  // it is the CUDAGraph object's job to create the actual private pool in the CUDACachingAllocator
-  // and increment its ref-count.
+  // CUDAGraph shares ownership of the mempool. Hence increment the ref-count.
   c10::cuda::CUDACachingAllocator::maybeMakeNewPoolAndInc(capture_dev_, mempool_id_);
 
   // Addendum: beginAllocateStreamToPool is now called before cudaStreamBeginCapture to prevent an
