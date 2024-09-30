@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <set>
 #include <mutex>
+#include <string_view>
 
 //#if AT_CUSPARSELT_ENABLED()
 #if true
@@ -46,7 +47,10 @@ static bool isHipSparseLtSupported(int idx) {
     bool result = false;
     try {
         auto prop = at::cuda::getDeviceProperties(idx);
-        result = (supported_archs.count(prop->gcnArchName) > 0);
+        std::string_view gcnArchName(prop->gcnArchName);
+        size_t colonPos = gcnArchName.find(':');
+        std::string_view baseArch = (colonPos != std::string_view::npos) ? gcnArchName.substr(0, colonPos) : gcnArchName;
+        result = (supported_archs.count(std::string(baseArch)) > 0);
     } catch (const std::exception&) {
         // If an exception occurs, we assume it's not supported
     }
