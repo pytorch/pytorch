@@ -683,7 +683,7 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
 
 def free_symbols(val: IterateExprs) -> OrderedSet[sympy.Symbol]:
     if val is None:
-        return set()
+        return OrderedSet()
     itr = _iterate_exprs(val)
     # we need at least 1 to call union, so we hand code the identity
     try:
@@ -691,7 +691,9 @@ def free_symbols(val: IterateExprs) -> OrderedSet[sympy.Symbol]:
     except StopIteration:
         return OrderedSet()
 
-    return OrderedSet(first_expr.free_symbols.union(*(e.free_symbols for e in itr)))
+    # TODO: Apparently, returning an OrderedSet here breaks
+    # python test/distributed/_tensor/test_dtensor_compile.py TestDTensorCompile.test_dtensor_dynamic
+    return first_expr.free_symbols.union(*(e.free_symbols for e in itr))  # type: ignore[return-value]
 
 
 def has_free_symbols(val: IterateExprs) -> bool:
@@ -820,13 +822,14 @@ def compute_unbacked_bindings(
         assert shape_env is not None
         r = {}
         if isinstance(a, (tuple, list)):
-            assert isinstance(real, (tuple, list))
+            # NB: real is apparently not always a tuple/list here
+            # python test/inductor/test_torchinductor.py CpuTests.test_index_propagation_nested_indirect_indexing_cpu
             for i in range(len(a)):
                 r.update(
                     free_unbacked_symbols_with_path(
                         a[i],
                         path + (pytree.SequenceKey(i),),
-                        real=real[i] if real is not None else None,
+                        real=real[i] if real is not None else None,  # type: ignore[index]
                     )
                 )
         elif is_traceable_wrapper_subclass(a):

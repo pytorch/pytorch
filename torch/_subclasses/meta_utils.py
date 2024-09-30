@@ -17,10 +17,9 @@ from typing import (
     Tuple,
     Type,
     TYPE_CHECKING,
-    TypeGuard,
     Union,
 )
-from typing_extensions import TypeAlias
+from typing_extensions import TypeAlias, TypeGuard
 
 import torch
 from torch._C._autograd import CreationMeta
