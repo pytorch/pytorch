@@ -150,7 +150,6 @@ test_jit_hooks() {
 }
 
 torchbench_setup_macos() {
-  cd ..
   git clone --recursive https://github.com/pytorch/vision torchvision
   git clone --recursive https://github.com/pytorch/audio torchaudio
 
@@ -164,7 +163,7 @@ torchbench_setup_macos() {
   git checkout "$$(cat ../.github/ci_commit_pins/audio.txt)"
   git submodule update --init --recursive
 
-  cd ../pytorch
+  cd ..
   checkout_install_torchbench
 }
 
