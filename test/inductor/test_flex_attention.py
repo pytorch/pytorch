@@ -43,11 +43,11 @@ supported_platform = skipUnless(
 )
 
 # Use this decorator only when hitting Triton bugs on H100
-running_on_a100_or_rocm_only = skipUnless(
+running_on_a100_only = skipUnless(
     torch.cuda.is_available()
     and has_triton()
-    and (torch.cuda.get_device_capability() == (8, 0) or torch.version.hip is not None),
-    "Requires (A100 or ROCm) and Triton",
+    and torch.cuda.get_device_capability() == (8, 0),
+    "Requires A100 and Triton",
 )
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
@@ -223,6 +223,13 @@ test_Bq_Bkv = [
     (5, 1),
 ]
 
+test_block_size = [
+    128,
+    256,
+    (128, 256),
+    (256, 128),
+]
+
 
 def query_key_value_clones(
     query: torch.Tensor,
@@ -271,9 +278,6 @@ class TestFlexAttention(InductorTestCase):
         v_gold: torch.Tensor,
         v_ref: torch.Tensor,
         v: torch.Tensor,
-        bias_gold: Optional[Tuple[torch.Tensor]] = None,
-        bias_ref: Optional[Tuple[torch.Tensor]] = None,
-        bias: Optional[Tuple[torch.Tensor]] = None,
     ):
         dtype = ref_out.dtype
         with torch.no_grad():
@@ -287,7 +291,7 @@ class TestFlexAttention(InductorTestCase):
             # Checkout output
             self._check_equal(golden_out, ref_out, compiled_out, fudge_factor, "Out")
 
-            # Check q/k/v gradients
+            # Check gradients
             q_fudge_factor = 1.0 * fudge_factor
             self._check_equal(
                 q_gold.grad, q_ref.grad, q.grad, q_fudge_factor, "Grad_Query"
@@ -300,18 +304,6 @@ class TestFlexAttention(InductorTestCase):
             self._check_equal(
                 v_gold.grad, v_ref.grad, v.grad, v_fudge_factor, "Grad_Value"
             )
-
-            # Check captured bias gradients if they exist
-            if bias_gold is not None:
-                for i, (b_gold, b_ref, b) in enumerate(zip(bias_gold, bias_ref, bias)):
-                    b_fudge_factor = 1.0 * fudge_factor
-                    self._check_equal(
-                        b_gold.grad,
-                        b_ref.grad,
-                        b.grad,
-                        b_fudge_factor,
-                        f"Grad_Bias_{i}",
-                    )
 
     def run_test(
         self,
@@ -604,7 +596,7 @@ class TestFlexAttention(InductorTestCase):
     def test_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
         self.run_test(score_mod, dtype)
 
-    @running_on_a100_or_rocm_only
+    @running_on_a100_only
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_seqlen_lt_default_sparse_block_size(
@@ -618,7 +610,7 @@ class TestFlexAttention(InductorTestCase):
         )
         self.run_test_with_call(attention, dtype, B, H, 64, D, B, H, 64, D)
 
-    @running_on_a100_or_rocm_only
+    @running_on_a100_only
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_seqlen_lt_custom_sparse_block_size(
@@ -668,6 +660,19 @@ class TestFlexAttention(InductorTestCase):
             S,
             D,
         )
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    @common_utils.parametrize("BLOCK_SIZE", test_block_size)
+    def test_builtin_score_mods_different_block_size(
+        self,
+        dtype: torch.dtype,
+        score_mod: Callable,
+        BLOCK_SIZE: Union[int, Tuple[int, int]],
+    ):
+        block_mask = create_block_mask(noop_mask, B, H, S, S, BLOCK_SIZE=BLOCK_SIZE)
+        self.run_test(score_mod, dtype, block_mask=block_mask)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1507,7 +1512,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_aot_eager_gradcheck(self, score_mod):
         make_tensor = functools.partial(
             torch.randn,
-            (2, 2, 128, 4),
+            (2, 2, 11, 4),
             device="cuda",
             dtype=torch.float64,
             requires_grad=True,
@@ -1868,17 +1873,17 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_comparison_vs_sdpa_with_learnable_bias(self):
+        # 1-dimensional bias:
         B, H, S, D = 1, 1, 256, 64
         bias = torch.randn(
             2 * S, device="cuda", dtype=torch.float16, requires_grad=True
         )
-        # Define flex attention score_mod with bias
+
         bias_flex = bias.detach().clone().requires_grad_(True)
 
-        def rel_pos(score, b, h, q_idx, kv_idx):
+        def rel_pos_1d(score, b, h, q_idx, kv_idx):
             return score + bias_flex[q_idx + kv_idx]
 
-        # Define eager SDPA implicit bias
         bias_indices = torch.arange(S)[:, None] + torch.arange(S)
         bias_spda_ref = bias.detach().clone().requires_grad_(True)
         implicit_bias_spda_ref = bias_spda_ref[bias_indices]
@@ -1887,6 +1892,122 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         implicit_bias_spda_gold = bias_spda_gold[bias_indices]
 
+        self.test_learnable_bias_inner(
+            B,
+            H,
+            S,
+            D,
+            rel_pos_1d,
+            bias_flex,
+            implicit_bias_spda_ref,
+            bias_spda_ref,
+            implicit_bias_spda_gold,
+            bias_spda_gold,
+        )
+
+        # 2-dimensional bias:
+        B, H, S, D = 1, 1, 256, 64
+        bias = torch.randn(S, S, device="cuda", dtype=torch.float16, requires_grad=True)
+
+        bias_flex = bias.detach().clone().requires_grad_(True)
+
+        def rel_pos_2d(score, b, h, q_idx, kv_idx):
+            return score + bias_flex[q_idx, kv_idx]
+
+        bias_indices = torch.arange(S)[:, None] + torch.arange(S)
+        bias_spda_ref = bias.detach().clone().requires_grad_(True)
+        implicit_bias_spda_ref = bias_spda_ref
+        bias_spda_gold = (
+            bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
+        )
+        implicit_bias_spda_gold = bias_spda_gold
+
+        self.test_learnable_bias_inner(
+            B,
+            H,
+            S,
+            D,
+            rel_pos_2d,
+            bias_flex,
+            implicit_bias_spda_ref,
+            bias_spda_ref,
+            implicit_bias_spda_gold,
+            bias_spda_gold,
+        )
+
+        # 2-dimensional bias + transposed:
+        B, H, S, D = 1, 1, 256, 64
+        bias = torch.randn(S, S, device="cuda", dtype=torch.float16, requires_grad=True)
+
+        bias_flex = bias.detach().clone().requires_grad_(True)
+
+        def rel_pos_2d_transposed(score, b, h, q_idx, kv_idx):
+            return score + bias_flex[kv_idx, q_idx]
+
+        bias_spda_ref = bias.detach().clone().requires_grad_(True)
+        implicit_bias_spda_ref = bias_spda_ref.transpose(-1, -2)
+        bias_spda_gold = (
+            bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
+        )
+        implicit_bias_spda_gold = bias_spda_gold.transpose(-1, -2)
+
+        self.test_learnable_bias_inner(
+            B,
+            H,
+            S,
+            D,
+            rel_pos_2d_transposed,
+            bias_flex,
+            implicit_bias_spda_ref,
+            bias_spda_ref,
+            implicit_bias_spda_gold,
+            bias_spda_gold,
+        )
+
+        # 3-dimensional bias + transposed
+        B, H, S, D = 4, 8, 256, 64
+        bias = torch.randn(
+            H, S, S, device="cuda", dtype=torch.float16, requires_grad=True
+        )
+
+        bias_flex = bias.detach().clone().requires_grad_(True)
+
+        def rel_pos_3d_transposed(score, b, h, q_idx, kv_idx):
+            return score + bias_flex[h, kv_idx, q_idx]
+
+        bias_spda_ref = bias.detach().clone().requires_grad_(True)
+        implicit_bias_spda_ref = bias_spda_ref.transpose(-1, -2)
+        bias_spda_gold = (
+            bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
+        )
+        implicit_bias_spda_gold = bias_spda_gold.transpose(-1, -2)
+
+        self.test_learnable_bias_inner(
+            B,
+            H,
+            S,
+            D,
+            rel_pos_3d_transposed,
+            bias_flex,
+            implicit_bias_spda_ref,
+            bias_spda_ref,
+            implicit_bias_spda_gold,
+            bias_spda_gold,
+        )
+
+    def test_learnable_bias_inner(
+        self,
+        B,
+        H,
+        S,
+        D,
+        score_mod,
+        bias_flex,
+        implicit_bias_spda_ref,
+        bias_spda_ref,
+        implicit_bias_spda_gold,
+        bias_spda_gold,
+    ):
         make_tensor = functools.partial(
             torch.ones,
             (B, H, S, D),
@@ -1908,9 +2029,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             q_gold, k_gold, v_gold, attn_mask=implicit_bias_spda_gold
         )
         out_gold.sum().backward()
-        out_flex = flex_attention(q_flex, k_flex, v_flex, score_mod=rel_pos)
+        out_flex = flex_attention(q_flex, k_flex, v_flex, score_mod=score_mod)
         out_flex.sum().backward()
 
+        name = score_mod.__name__
         for ref, flex, gold in [
             (out_ref, out_flex, out_gold),
             (q_ref.grad, q_flex.grad, q_gold.grad),
@@ -1922,7 +2044,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             flex_error = rmse(flex, gold)
             self.assertTrue(
                 ref_error * 1.2 > flex_error,
-                f"Ref error: {ref_error}, Flex eager Error: {flex_error}",
+                f"{name} -> Ref error: {ref_error}, Flex eager Error: {flex_error}",
             )
 
     @supported_platform
@@ -1996,14 +2118,16 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 self.skipTest("backend=flex_decode is unsupported on ROCM, for now")
             kernel_options = {"FORCE_USE_FLEX_ATTENTION": False}
             flex_call = torch.compile(flex_attention, fullgraph=True)
+            N_CTX = 96
         elif backend == "flex_attention":
             kernel_options = {"FORCE_USE_FLEX_ATTENTION": True}
             flex_call = torch.compile(flex_attention, fullgraph=True)
+            N_CTX = 196
         else:
             kernel_options = {}
             flex_call = flex_attention
+            N_CTX = 196
 
-        N_CTX = 96
         SLIDING_WINDOW = 64
         make_tensor = functools.partial(
             torch.randn,
@@ -2069,6 +2193,39 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(flex_q_grad, q.grad, atol=3e-3, rtol=2e-3)
         torch.testing.assert_close(flex_k_grad, k.grad, atol=3e-3, rtol=2e-3)
         torch.testing.assert_close(flex_v_grad, v.grad, atol=3e-3, rtol=2e-3)
+
+    def test_cpu_error_message(self):
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, 128, 16),
+            device="cpu",
+            dtype=torch.float32,
+            requires_grad=False,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        with self.assertRaisesRegex(
+            ValueError,
+            "FlexAttention is only supported on CUDA devices. Found input tensors on cpu device.",
+        ):
+            flex_attention(query, key, value)
+
+    @supported_platform
+    def test_mixed_device_error_message(self):
+        # Create tensors on different devices
+        cpu_tensor = torch.randn(2, 2, 128, 16, device="cpu")
+        cuda_tensor = torch.randn(2, 2, 128, 16, device="cuda")
+
+        # Use different devices for query, key, and value
+        query, key, value = cpu_tensor, cuda_tensor, cpu_tensor
+
+        expected_error_message = (
+            "Expected query, key, and value to have the same device type, "
+            f"but got query.device: {query.device}, key.device: {key.device}, "
+            f"and value.device: {value.device} instead."
+        )
+
+        with self.assertRaisesRegex(ValueError, expected_error_message):
+            flex_attention(query, key, value)
 
     @supported_platform
     def test_small_q_kv_len(self):

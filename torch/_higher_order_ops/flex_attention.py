@@ -77,18 +77,34 @@ def zeros_and_scatter(
     indices: List[Tensor],
     indices_dims: List[int],
     vals: Tensor,
-    rightmost: int,
+    rightmost_dim: int,
 ) -> Tensor:
     grad = torch.zeros(shape, device=vals.device, dtype=vals.dtype)
 
+    # For multiple indexes, it's possible the indices are not ordered,
+    # so we have to transpose the tensor before the index_put.
+    # Meanwhile, it's possible the indices are not continuous, e.g,
+    # bias[b, kv_idx, q_idx] whose indices_dims are [0, 3, 2].
     if len(indices) > 1:
-        vals = vals.transpose(*indices_dims)
+        new_indices_dims = list(range(4))
+        ordered_indices_dims = sorted(indices_dims)
+        for i, idx in enumerate(ordered_indices_dims):
+            new_indices_dims[idx] = indices_dims[i]
+        vals = torch.permute(vals, new_indices_dims)
         indices = list(torch.meshgrid(indices, indexing="ij"))
 
-    for i in range(3, rightmost, -1):
-        for j, idx in enumerate(indices):
-            indices[j] = idx.unsqueeze(-1)
+    # We need to unsqueeze the indices to facilitate the broadcasting in the next step.
+    leftmost_dim = min(indices_dims)
+    if rightmost_dim - leftmost_dim + 1 == len(indices):
+        offset = -1
+        for i in range(3, leftmost_dim, -1):
+            if i in indices_dims:
+                offset = offset - 1
+            else:
+                for j, idx in enumerate(indices):
+                    indices[j] = idx.unsqueeze(offset)
 
+    # Broadcast the indices to match the shape of vals.
     for i, idx in enumerate(indices):
         indices[i] = idx.expand(vals.shape)
 
@@ -101,29 +117,33 @@ def _(
     indices: List[Tensor],
     indices_dims: List[int],
     vals: Tensor,
-    rightmost: int,
+    rightmost_dim: int,
 ) -> Tensor:
     return torch.empty(shape, device=vals.device)
 
 
 @zeros_and_scatter.register_vmap
-def _(info, in_dims, shape, indices, indices_dims, val, rightmost):
+def _(info, in_dims, shape, indices, indices_dims, val, rightmost_dim):
     if torch._C._functorch.maybe_current_level() is None:
         lvl = 0
     else:
         lvl = torch._C._functorch.maybe_current_level()
 
+    # indices_dims is used to record the dim that each index tensor is indexing.
     if len(indices_dims) == 0:
         indices_dims = [-1] * len(in_dims[1])
 
+    # Since vmap applied in the reversed order of [B, H, S, S], so indices_dims records the order
+    # of which dimension was applied firstly. E.g, bias[q_idx, kv_idx] is different from bias[kv_idx, q_idx],
+    # we should transpose the tensor before the index_put.
     for i, x in enumerate(in_dims[1]):
         if x is not None:
             indices_dims[i] = lvl
-            if rightmost == -1:
-                rightmost = lvl
+            if rightmost_dim == -1:
+                rightmost_dim = lvl
 
     out = torch.ops.mylib.zeros_and_scatter(
-        shape, indices, indices_dims, val, rightmost
+        shape, indices, indices_dims, val, rightmost_dim
     )
     return out, None
 
@@ -146,7 +166,11 @@ class ModIndex(torch.autograd.Function):
         indices = ctx.saved_tensors
         return (
             torch.ops.mylib.zeros_and_scatter(
-                ctx.input_shape, indices, [], gradOut, -1
+                ctx.input_shape,
+                indices,
+                [],
+                gradOut,
+                -1,
             ),
             None,
         )
@@ -673,8 +697,8 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         ctx._joint_graph = joint_graph
         ctx._mask_graph = block_mask[-1]
         # KV_BLOCK_SIZE and Q_BLOCK_SIZE are integers, so can't use ctx.save_for_backward
-        ctx._KV_BLOCK_SIZE = block_mask[8]
-        ctx._Q_BLOCK_SIZE = block_mask[9]
+        ctx._Q_BLOCK_SIZE = block_mask[8]
+        ctx._KV_BLOCK_SIZE = block_mask[9]
         ctx.scale = scale
         ctx.kernel_options = kernel_options
         ctx._score_mod_other_buffers_len = len(score_mod_other_buffers)
@@ -762,8 +786,8 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
                 q_indices,
                 full_q_num_blocks,
                 full_q_indices,
-                KV_BLOCK_SIZE,
                 Q_BLOCK_SIZE,
+                KV_BLOCK_SIZE,
                 mask_graph,
             ),
             scale,
@@ -947,7 +971,7 @@ def sdpa_dense_backward(
         actual_grad_value,
         tuple(
             [
-                actual_grad.copy_(grad)
+                actual_grad.copy_(grad) if grad is not None else grad
                 for actual_grad, grad in zip(
                     actual_grad_score_mod_captured, grad_score_mod_captured
                 )
