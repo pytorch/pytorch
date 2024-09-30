@@ -36,10 +36,16 @@ if HAS_GPU:
 
     if not TEST_WITH_ROCM:
         if HAS_CUDA:
-            from triton.language.extra.cuda.libdevice import (  # @manual
-                fast_dividef,
-                fast_dividef as my_fast_dividef,
-            )
+            try:
+                from triton.language.extra.libdevice import (  # @manual
+                    fast_dividef,
+                    fast_dividef as my_fast_dividef,
+                )
+            except ImportError:
+                from triton.language.extra.cuda.libdevice import (  # @manual
+                    fast_dividef,
+                    fast_dividef as my_fast_dividef,
+                )
         elif HAS_XPU:
             from triton.language.extra.intel.libdevice import (  # @manual
                 fast_dividef,
