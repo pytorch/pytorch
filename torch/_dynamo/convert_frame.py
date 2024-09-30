@@ -1085,7 +1085,7 @@ def _compile(
                 config.suppress_errors,
                 config.inline_inbuilt_nn_modules,
                 "dummy_value",
-                BuildInfo.get_build_upstream_revision_commit_epoch_time(),
+                "dummy_value",
                 config.specialize_float,
             )
             record_compilation_metrics(metrics)
