@@ -265,10 +265,10 @@ class CapabilityBasedPartitioner:
 
     def fuse_partitions(self, partitions: List[Partition], prefix: str = "fused_") -> GraphModule:
         logger.debug("Fusing partitions...")
-        # fuse_by_partitions expects partitions in List[List[Node]]: [ [node0, node1], [node2, node3] ]
+        # fuse_by_partitions expects partitions in List[Dict[Node, None]]: [ {node0 : None}, {node1 : None} ]
         return fuse_by_partitions(
             self.graph_module,
-            [list(partition.nodes) for partition in partitions],
+            [partition.nodes for partition in partitions],
             prefix=prefix,
         )
 

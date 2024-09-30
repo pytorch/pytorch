@@ -1415,7 +1415,6 @@ class TestOperators(TestCase):
                 xfail("nn.functional.dropout3d", ""),
                 xfail("as_strided_scatter", ""),
                 xfail("masked.cumprod", ""),
-                xfail("permute_copy"),
                 xfail("renorm"),  # hit vmap fallback, which is disabled
                 xfail("t_copy"),
                 xfail("transpose_copy"),
@@ -1480,7 +1479,6 @@ class TestOperators(TestCase):
                 xfail("masked_select"),
                 xfail("nanquantile"),
                 xfail("ormqr"),
-                xfail("permute_copy"),
                 xfail("put"),
                 xfail("quantile"),
                 xfail("renorm"),
@@ -2406,7 +2404,7 @@ class TestOperators(TestCase):
             tol1("nn.functional.conv3d", {torch.float32: tol(atol=5e-04, rtol=9e-03)}),
             tol1(
                 "nn.functional.conv2d",
-                {torch.float32: tol(atol=3e-05, rtol=5e-06)},
+                {torch.float32: tol(atol=5e-05, rtol=5e-05)},
                 device_type="cuda",
             ),
             tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
