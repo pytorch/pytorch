@@ -6258,10 +6258,46 @@ def scan(combine_subgraph, init, xs, dim, reverse, additional_inputs):
     specialized_dim = int(dim)
 
     with V.graph.fake_mode:
-        _, fx_init, fx_xs, _, _, fx_additional_inputs = V.graph.current_node.args
-        fake_init = [node.meta["val"] for node in fx_init]  # type: ignore[union-attr]
-        fake_xs = [node.meta["val"] for node in fx_xs]  # type: ignore[union-attr]
-        fake_additional_inputs = [node.meta["val"] for node in fx_additional_inputs]  # type: ignore[union-attr]
+        # We choose tensor box to be the single source of truth of creating fake.
+        # tensors for subgraph.
+        # It's not reliable to get fake tensor from the "val" meta of fx node.
+        # For example: the View ir node in inductor will create a new TensorBox
+        # whose size is exactly the viewed shape but in fake tensor
+        # propagation, we it's not guaranteed to be the case. Check the decomposition
+        # of view operator.
+        def fake_tensor_from_tbox(tbox):
+            tbox.realize()
+            with V.graph.fake_mode:
+                shape_env = V.graph.fake_mode.shape_env
+
+                def _find_all_symints(fake: Union[torch.SymInt, torch.Tensor]):
+                    assert isinstance(fake, (torch.Tensor, torch.SymInt))
+                    if isinstance(fake, torch.Tensor):
+                        for sz in fake.size():
+                            if isinstance(sz, torch.SymInt):
+                                all_symints.update({str(sz): sz})
+                        for st in fake.size():
+                            if isinstance(st, torch.SymInt):
+                                all_symints.update({str(st): st})
+                    elif isinstance(fake, torch.SymInt):
+                        all_symints.update({str(fake): fake})
+
+                all_symints: Dict[str, torch.SymInt] = {}
+                pytree.tree_map(
+                    lambda fake: _find_all_symints(fake.fake), shape_env.tracked_fakes  # type: ignore[union-attr]
+                )
+                fake_size = [eval(str(sz), all_symints) for sz in tbox.get_size()]
+                fake_stride = [eval(str(sz), all_symints) for sz in tbox.get_stride()]
+                return torch.empty_strided(
+                    fake_size,
+                    fake_stride,
+                    dtype=tbox.get_dtype(),
+                    device=tbox.get_device(),
+                )
+
+        fake_init, fake_xs, fake_additional_inputs = pytree.tree_map(
+            fake_tensor_from_tbox, (init, xs, additional_inputs)
+        )
         fake_xs_subgraph = [t.select(specialized_dim, 0) for t in fake_xs]
         fake_scan_length = fake_xs[0].size()[specialized_dim]
         _, fake_ys_subgraph = _extract_carry_and_out(
