@@ -206,8 +206,8 @@ def aggregate_stats(
     model: nn.Module,
     optimizer: optim.Optimizer,
     inp_and_target: Tuple[torch.Tensor, torch.Tensor],
-    loss_fn: Callable = lambda x, y: sum(x, y),
-    dev: torch.device = torch.device(torch.cuda.current_device()),
+    loss_fn: Callable,
+    dev: torch.device,
 ) -> ModuleInfo:
     """
     Collect modulewise stats for a given model, including memory, runtime, and AC tradeoff stats.
