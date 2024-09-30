@@ -232,7 +232,7 @@ fi
 
 # Do not change workspace permissions for ROCm CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
-if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* ]]; then
   # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
   WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
   cleanup_workspace() {
@@ -278,6 +278,7 @@ else
     # set only when building other architectures
     # or building non-XLA tests.
     if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
+          "$BUILD_ENVIRONMENT" != *s390x*   &&
           "$BUILD_ENVIRONMENT" != *xla* ]]; then
       if [[ "$BUILD_ENVIRONMENT" != *py3.8* ]]; then
         # Install numpy-2.0.2 for builds which are backward compatible with 1.X
@@ -340,11 +341,11 @@ else
     CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
     CUSTOM_OP_TEST="$PWD/test/custom_operator"
     python --version
-    SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+    SITE_PACKAGES="$(python -c 'import site; print(";".join([x for x in site.getsitepackages()] + [x + "/torch" for x in site.getsitepackages()]))')"
 
     mkdir -p "$CUSTOM_OP_BUILD"
     pushd "$CUSTOM_OP_BUILD"
-    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch;$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
+    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
           -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
     make VERBOSE=1
     popd
@@ -354,10 +355,10 @@ else
     JIT_HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
     JIT_HOOK_TEST="$PWD/test/jit_hooks"
     python --version
-    SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+    SITE_PACKAGES="$(python -c 'import site; print(";".join([x for x in site.getsitepackages()] + [x + "/torch" for x in site.getsitepackages()]))')"
     mkdir -p "$JIT_HOOK_BUILD"
     pushd "$JIT_HOOK_BUILD"
-    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch;$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
+    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
           -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
     make VERBOSE=1
     popd
@@ -369,7 +370,7 @@ else
     python --version
     mkdir -p "$CUSTOM_BACKEND_BUILD"
     pushd "$CUSTOM_BACKEND_BUILD"
-    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch;$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
+    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
           -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
     make VERBOSE=1
     popd
@@ -402,6 +403,6 @@ fi
 
 # snadampal: skipping it till sccache support added for aarch64
 # https://github.com/pytorch/pytorch/issues/121559
-if [[ "$BUILD_ENVIRONMENT" != *aarch64* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *aarch64* &&  "$BUILD_ENVIRONMENT" != *s390x* ]]; then
   print_sccache_stats
 fi
