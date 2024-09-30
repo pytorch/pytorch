@@ -590,7 +590,6 @@ def should_pad_bench(
             set_cached_base_mm_benchmark_time(ori_time_key, ori_time)
 
         pad_time = do_bench(pad_bench_fn)
-        print(m, k, n, key, ori_time, pad_time)
 
         return should_pad(key, ori_time, pad_time)
 

@@ -83,7 +83,7 @@ from .utils import (
     clone_preserve_strides,
     copy_misaligned_inputs,
     get_cloned_parameter_buffer_name,
-    get_incompatible_cudagraph_node,
+    get_first_incompatible_cudagraph_node,
     maybe_get_suppress_shape_guards_ctx,
     output_node,
     remove_unaligned_input_idxs,
@@ -891,7 +891,7 @@ def fx_codegen_and_compile(
                     V.graph.disable_cudagraphs_reason = disable
 
                 if cudagraphs and not V.graph.disable_cudagraphs_reason:
-                    maybe_incompat_node = get_incompatible_cudagraph_node(gm)
+                    maybe_incompat_node = get_first_incompatible_cudagraph_node(gm)
                     if maybe_incompat_node:
                         disable = f"disabling cudagraphs due to incompatible op {maybe_incompat_node.target}"
                         if stack_trace := maybe_incompat_node.meta.get(
