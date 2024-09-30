@@ -233,9 +233,7 @@ NHWC_STRIDE_ORDER = [3, 0, 2, 1]
 NHWDC_STRIDE_ORDER = [4, 0, 3, 2, 1]
 
 
-def stride_order2fill_order(
-    order: Sequence[Union[int, Integer]]
-) -> Sequence[Union[int, Integer]]:
+def stride_order2fill_order(order: Sequence[Union[int, Integer]]) -> Sequence[int]:
     """
     Convert stride order to fill order
     For channel last format,
@@ -4785,7 +4783,7 @@ class ExternKernel(InputsKernel):
                         want_contiguous=False,
                         stride_order=None,
                         allow_padding=allow_padding,
-                        exact_strides=exact_strides,
+                        exact_strides=exact_strides,  # type: ignore[arg-type]  # int|Expr vs int|Integer
                     )
                     return x
             elif isinstance(x.get_layout(), FixedLayout) and (
@@ -4855,7 +4853,7 @@ class ExternKernel(InputsKernel):
             want_contiguous=False,
             stride_order=order,
             allow_padding=allow_padding,
-            exact_strides=exact_strides,
+            exact_strides=exact_strides,  # type: ignore[arg-type]  # int|Expr vs int|Integer
         )
         if order:
             assert is_stride_order_storage_and_layout(x, order)

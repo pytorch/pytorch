@@ -67,6 +67,7 @@ from torch._inductor.codegen.rocm.compile_command import (
 )
 from torch._utils_internal import log_cache_bypass
 
+from .remote_cache import create_cache
 from .utils import _align
 
 
@@ -1327,25 +1328,13 @@ class FxGraphCache:
         """
         Attempts to load the remote cache, returns None on error.
         """
-        remote_cache = None
         cache_id = "fx-graph-v1"
-        try:
-            if config.is_fbcode():
-                from torch._inductor.fb.remote_cache import FbRemoteFxGraphCache
-
-                remote_cache = FbRemoteFxGraphCache(cache_id)
-            else:
-                from torch._inductor.remote_cache import RemoteFxGraphCache
-
-                remote_cache = RemoteFxGraphCache(cache_id)
-        except ModuleNotFoundError as e:
-            # No need for a stack trace on this error
-            remote_cache = None
-            log.warning("Unable to create a remote cache: %s", e)
-        except Exception:
-            remote_cache = None
-            log.warning("Unable to create a remote cache", exc_info=True)
-        return remote_cache
+        return create_cache(
+            cache_id,
+            config.is_fbcode(),
+            "FbRemoteFxGraphCache",
+            "RemoteFxGraphCache",
+        )
 
     @staticmethod
     def load_with_key(
@@ -1370,7 +1359,7 @@ class FxGraphCache:
             "cache_event_time": time_ns(),
         }
         if compiled_graph is not None:
-            log.debug("fx graph cache miss for key %s", key)
+            log.debug("fx graph cache hit for key %s", key)
             counters["inductor"]["fxgraph_cache_hit"] += 1
             cache_info["cache_state"] = "hit"
 
@@ -1384,7 +1373,7 @@ class FxGraphCache:
                 ) != 0:
                     cache_info["ephemeral_timeout_increase"] = ephemeral_increase
         else:
-            log.debug("fx graph cache hit for key %s", key)
+            log.debug("fx graph cache miss for key %s", key)
             counters["inductor"]["fxgraph_cache_miss"] += 1
             cache_info["cache_state"] = "miss"
 
@@ -3074,6 +3063,8 @@ def _nvcc_compiler_options() -> List[str]:
     options = [
         "-t=0",
         "-DCUTLASS_ENABLE_TENSOR_CORE_MMA=1",
+        "-DCUTLASS_ENABLE_SM90_EXTENDED_MMA_SHAPES=1",
+        "-DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED",
         "-w",
         f"-gencode=arch=compute_{arch},code=[{','.join(code)}]",
         config.cuda.compile_opt_level,
