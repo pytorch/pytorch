@@ -527,14 +527,14 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    def test_simple_mlp_fwd_fullgraph_backend_aot_eager(self):
+    def test_simple_mlp_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(), "aot_eager", fullgraph=True
         )
 
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    def test_simple_mlp_fwd_fullgraph_backend_aot_eager_decomp_partition(self):
+    def test_simple_mlp_fullgraph_backend_aot_eager_decomp_partition(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(),
             "aot_eager_decomp_partition",
@@ -543,7 +543,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    def test_simple_mlp_fwd_fullgraph_backend_inductor(self):
+    def test_simple_mlp_fullgraph_backend_inductor(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(), "inductor", fullgraph=True
         )
@@ -631,7 +631,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    def test_nested_fully_shard_backend_inductor_fwd_fullgraph_True(self):
+    def test_nested_fully_shard_backend_inductor_fullgraph_True(self):
         for fullgraph in [True]:
             with self._reinplace_all_gather_with_optional_checks(
                 fullgraph
@@ -727,7 +727,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
     @skipIfRocm
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    def test_nested_fully_shard_backend_inductor_fwd_fullgraph_False(self):
+    def test_nested_fully_shard_backend_inductor_fullgraph_False(self):
         _, triton_codes = run_and_get_code(
             lambda: self._test_traceable_fsdp(
                 *self._create_nested_fully_shard_factory_fns(fullgraph=False),
@@ -840,7 +840,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
-    def test_transformer_backend_inductor_fwd_fullgraph_True(self):
+    def test_transformer_backend_inductor_fullgraph_True(self):
         for (
             fullgraph,
             all_requires_grad,
@@ -945,7 +945,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
-    def test_transformer_backend_inductor_fwd_fullgraph_False(self):
+    def test_transformer_backend_inductor_fullgraph_False(self):
         fullgraph = False
         # TODO: fix numerical issue in activation_checkpoint=True case
         for all_requires_grad, activation_checkpoint in itertools.product(
