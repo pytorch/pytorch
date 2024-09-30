@@ -154,7 +154,7 @@ class GuardBuilderBase:
 
 @dataclasses.dataclass(frozen=True)
 class SLoc:
-    framework_loc: Union[traceback.FrameSummary, str]
+    framework_loc: Optional[Union[traceback.FrameSummary, str]]
     maybe_user_loc: Optional[str]
 
     def __str__(self):
@@ -170,7 +170,7 @@ class SLoc:
 
 
 class ShapeGuard(NamedTuple):
-    expr: sympy.Expr
+    expr: sympy.logic.boolalg.Boolean
     sloc: SLoc
 
 
