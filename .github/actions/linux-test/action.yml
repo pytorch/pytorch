@@ -172,6 +172,7 @@ runs:
         NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
         TD_DISTRIBUTED: ${{ steps.keep-going.outputs.ci-td-distributed }}
         SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+        SCCACHE_REGION: us-east-1
         SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
         SHM_SIZE: ${{ contains(inputs.build-environment, 'cuda') && '2g' || '1g' }}
         DOCKER_IMAGE: ${{ inputs.docker-image }}
@@ -227,6 +228,7 @@ runs:
           -e PR_LABELS \
           -e MAX_JOBS="$(nproc --ignore=2)" \
           -e SCCACHE_BUCKET \
+          -e SCCACHE_REGION \
           -e SCCACHE_S3_KEY_PREFIX \
           -e XLA_CUDA \
           -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
