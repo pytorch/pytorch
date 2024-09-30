@@ -777,12 +777,12 @@ def _check_dynamic_shapes(
         raise UserError(
             UserErrorType.INVALID_INPUT,
             "Specifying both `Dim.AUTO/Dim.DYNAMIC` and `Dim/DerivedDim` in `dynamic_shapes` is not "
-            "well supported at the moment, and can easily lead to constraint violation errors or obscure errors in torch.export. "
-            "Dim/DerivedDims expect all equal or related dimensions to be specified, and does not yet compose well with `Dim.AUTO`. "
-            "We suggest using `Dim.AUTO/Dim.DYNAMIC` mixed with `Dim.STATIC` for auto-dynamic + static shapes, "
-            "plus torch._check(dim >= min), torch._check(dim <= max) calls in your program to specify min/max ranges, "
-            "or `Dim`/`DerivedDim` mixed with `Dim.STATIC` if you want to assert on the exact specification of your program's "
-            "dynamic shapes behavior.",
+            "well supported at the moment, and can easily lead to constraint violation errors or obscure errors "
+            "in torch.export. Dim/DerivedDims expect all equal or related dimensions to be specified, "
+            "and do not yet compose well with `Dim.AUTO`. We suggest using `Dim.AUTO/Dim.DYNAMIC` mixed with "
+            "`Dim.STATIC` for auto-dynamic + static shapes, plus torch._check(dim >= min), torch._check(dim <= max) "
+            "calls in your program to specify min/max ranges, or `Dim`/`DerivedDim` mixed with `Dim.STATIC` "
+            "if you want to assert on the exact specification of your program's dynamic shapes behavior.",
             case_name="dynamic_shapes_validation",
         )
 
@@ -813,7 +813,7 @@ def _process_dynamic_shapes(
     def to_constraint(dim, tensor, i):
         import sympy
 
-        from torch.fx.experimental.symbolic_shapes import RelaxedUnspecConstraint, StrictMinMaxConstraint
+        from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
         from torch.utils._sympy.solve import try_solve
         from torch.utils._sympy.value_ranges import ValueRanges
 

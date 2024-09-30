@@ -104,12 +104,12 @@ def fakify(
             # where a RelaxedUnspecConstraint is created for Dim.DYNAMIC, so constraint violations
             # are raised when specializing.
             dynamic_sizes.append(DimDynamic.DYNAMIC)
-            constraint_sizes[i] = RelaxedUnspecConstraint(warn_only=False)
+            constraint_sizes[i] = RelaxedUnspecConstraint(warn_only=False)  # type: ignore[call-overload]
         else:
             dynamic_sizes.append(DimDynamic.STATIC)
     symbolic_context = StatelessSymbolicContext(
         dynamic_sizes=dynamic_sizes,
-        constraint_sizes=constraint_sizes,
+        constraint_sizes=constraint_sizes,  # type: ignore[arg-type]
     )
     t_id = id(t)
     assert mode.shape_env is not None
