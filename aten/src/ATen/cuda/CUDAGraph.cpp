@@ -289,7 +289,7 @@ void CUDAGraph::reset() {
   if (has_graph_ || has_graph_exec_) {
     // notifyCaptureDestroy may throw. How should we handle this?
     c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
-    c10::cuda::CUDACachingAllocator::decPoolUseCountAndMarkPoolFree(capture_dev_, mempool_id_);
+    c10::cuda::CUDACachingAllocator::decPoolUseCountAndMaybeMarkPoolFree(capture_dev_, mempool_id_);
   }
   if (has_graph_) {
     C10_CUDA_CHECK_WARN(cudaGraphDestroy(graph_));
