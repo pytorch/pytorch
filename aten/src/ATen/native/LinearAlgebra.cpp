@@ -3559,7 +3559,7 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
   }
 
   bool dispatched = false;
-  if (at::globalContext().userEnabledMkldnn() && at::cpu::is_avx512_supported()) {
+  if (at::globalContext().userEnabledMkldnn() && at::cpu::is_avx512_vnni_supported()) {
     try {
       mkldnn_matmul_i8i8i32(self, mat2, result);
       dispatched = true;
