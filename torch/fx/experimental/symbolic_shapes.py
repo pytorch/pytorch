@@ -5021,7 +5021,10 @@ class ShapeEnv:
                 return ""
             return f"\n   Guarded at:\n{''.join('   ' + l for l in tb.format())}"
 
-        return '\n'.join(f" - {guard.expr}{' ' + str(guard.sloc) if verbose else ''}" for guard in self.guards)
+        return "\n".join(
+            f" - {guard.expr}{' ' + str(guard.sloc) if verbose else ''}"
+            for guard in self.guards
+        )
 
     def bound_sympy(
         self, expr: sympy.Expr, size_oblivious: bool = False
