@@ -8110,6 +8110,18 @@ class CommonTemplate:
 
         self.common(f, (torch.zeros((4, 2)),))
 
+    def test_softmax_backward_data(self):
+        def fn(a, b):
+            return aten._softmax_backward_data(a, b, dim=1, input_dtype=torch.float32)
+
+        self.common(
+            fn,
+            (
+                torch.randn(10, 10),
+                torch.randn(10, 10),
+            ),
+        )
+
     def test_randn_like_empty(self):
         class Model(torch.nn.Module):
             def __init__(
@@ -12036,7 +12048,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 self.assertExpectedInline(
                     "\n".join(lines),
                     """\
-        tmp0 = tl.reshape(tl.load(block_ptr0, boundary_check=[3], padding_option='zero', eviction_policy='evict_last'), [XBLOCK, RBLOCK])
+        tmp0 = tl.reshape(tl.broadcast_to(tl.load(block_ptr0, boundary_check=[2], padding_option='zero', eviction_policy='evict_last')[:, None, :, :], [((511 + XBLOCK) // 512), ((1) * ((1) <= (((511 + XBLOCK) // 512))) + (((511 + XBLOCK) // 512)) * ((((511 + XBLOCK) // 512)) < (1))), ((512) * ((512) <= (XBLOCK)) + (XBLOCK) * ((XBLOCK) < (512))), RBLOCK]), [XBLOCK, RBLOCK])
         tmp1 = tl.load(block_ptr1, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",  # noqa: B950 line too long
                 )
 
