@@ -2,6 +2,7 @@
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/Functions.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 
 #include <chrono>
@@ -15,10 +16,10 @@ namespace at::cuda {
 static bool _cuda_graphs_debug = false;
 constexpr int kSynchronizeBusyWaitMillis = 10;
 
-std::shared_ptr<c10::cuda::MemPool> graph_pool_handle() {
+MempoolId_t graph_pool_handle() {
   // Sets just the second value, to distinguish it from MempoolId_ts created from
   // cudaStreamGetCaptureInfo id_s in capture_begin.
-  return std::make_shared<c10::cuda::MemPool>();
+  return c10::cuda::MemPool::graph_pool_handle();
 }
 
 /**
@@ -78,7 +79,7 @@ void CUDAGraph::register_generator_state(const at::Generator& generator) {
   cuda_gen->register_graph(this);
 }
 
-void CUDAGraph::capture_begin(std::shared_ptr<c10::cuda::MemPool> pool/*=nullptr*/, cudaStreamCaptureMode capture_mode) {
+void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capture_mode) {
   TORCH_CHECK(!has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "
               "To capture a new graph, create a new instance.");
@@ -103,21 +104,24 @@ void CUDAGraph::capture_begin(std::shared_ptr<c10::cuda::MemPool> pool/*=nullptr
   capture_stream_ = stream;
   capture_dev_ = c10::cuda::current_device();
 
-  if (pool) {
+  if (pool.first != 0 || pool.second != 0) {
+    // Either value being nonzero means the user supplied a pool to share.
     // pool not being a nullptr means the user supplied a pool to share.
     // But only one should be nonzero.
     // If pool was created by another graph's capture_begin, first should be nonzero.
     // If pool was created by graph_pool_handle, second should be nonzero.
-    mempool_ = std::move(pool);
-    mempool_id_ = mempool_->id();
-    TORCH_INTERNAL_ASSERT(!(mempool_id_.first && mempool_id_.second));
+    TORCH_INTERNAL_ASSERT(!(pool.first && pool.second));
+    mempool_id_ = pool;
   } else {
-    // User did not ask us to share a mempool. Create MemPool using is_user_created=false.
+    // User did not ask us to share a mempool. Create graph pool handle using is_user_created=false.
     // Sets just the first value, to distinguish it from MempoolId_ts created by graph_pool_handle().
-    mempool_ = std::make_shared<c10::cuda::MemPool>(nullptr, false);
-    mempool_id_ = mempool_->id();
+    mempool_id_ = c10::cuda::MemPool::graph_pool_handle(false);
     TORCH_INTERNAL_ASSERT(mempool_id_.first > 0);
   }
+  // Using the pool= API in capture_begin means user is only providing a mempool id, and
+  // it is the CUDAGraph object's job to create the actual private pool in the CUDACachingAllocator
+  // and increment its ref-count.
+  c10::cuda::CUDACachingAllocator::maybeMakeNewPoolAndInc(capture_dev_, mempool_id_);
 
   // Addendum: beginAllocateStreamToPool is now called before cudaStreamBeginCapture to prevent an
   // autograd thread's free() call triggering an invalid cudaEventRecord in the caching allocator
@@ -288,6 +292,7 @@ void CUDAGraph::reset() {
   if (has_graph_ || has_graph_exec_) {
     // notifyCaptureDestroy may throw. How should we handle this?
     c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
+    c10::cuda::CUDACachingAllocator::decPoolUseCountAndMarkPoolFree(capture_dev_, mempool_id_);
   }
   if (has_graph_) {
     C10_CUDA_CHECK_WARN(cudaGraphDestroy(graph_));
@@ -299,11 +304,11 @@ void CUDAGraph::reset() {
   }
 }
 
-// Returns a MemPool another graph's capture_begin can use to share the same memory pool as this graph.
-std::shared_ptr<c10::cuda::MemPool> CUDAGraph::pool() {
+// Returns an id another graph's capture_begin can use to share the same memory pool as this graph.
+MempoolId_t CUDAGraph::pool() {
 TORCH_CHECK(has_graph_exec_,
               "Called CUDAGraph::pool() without a preceding successful capture.");
-  return mempool_;
+  return mempool_id_;
 }
 
 CUDAGraph::~CUDAGraph() {
