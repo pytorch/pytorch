@@ -932,7 +932,7 @@ def mps_ops_modifier(ops):
         'multinomial': [torch.float16, torch.float32],  # random results
         'uniform': [torch.float16, torch.float32],
         'rand_like': [torch.float16, torch.float32],
-        'randint_like': [torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'randint_like': None,
         'randn_like': [torch.float16, torch.float32],
         'bernoulli': [torch.float16, torch.float32],
         'exponential': [torch.float16, torch.float32],
@@ -987,18 +987,15 @@ def mps_ops_modifier(ops):
         # Fill tensors with uninitialized data, causing mismatch with CPU.
         # They occasionally match, thus skipping them.
         # See https://github.com/pytorch/pytorch/issues/100175
-        'new_empty': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'new_empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16,
-                              torch.int32, torch.int64, torch.uint8, torch.int8],
-        'empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'new_empty': None,
+        'new_empty_strided': None,
+        'empty_strided': None,
         # CPU: empty is returning all 0's and there is a mismatch with MPS
         # allocation (MacOS 13). According to
         # https://pytorch.org/docs/2.0/generated/torch.empty.html
-        'empty': [torch.bool, torch.float16, torch.float32, torch.int16,
-                  torch.int32, torch.int64, torch.uint8, torch.int8],
-        'empty_like': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'empty_permuted': [torch.bool, torch.float16, torch.float32, torch.int16,
-                           torch.int32, torch.int64, torch.uint8, torch.int8],
+        'empty': None,
+        'empty_like': None,
+        'empty_permuted': None,
     }
 
     SKIPLIST = {
