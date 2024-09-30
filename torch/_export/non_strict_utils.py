@@ -93,12 +93,15 @@ def fakify(
     if not isinstance(t, torch.Tensor):
         raise ValueError(f"Unsupported input type {type(t)}")
     n_dims = len(t.shape)
-    dynamic_sizes = [
-        DimDynamic.DYNAMIC
-        if i in getattr(t, "_dynamo_weak_dynamic_indices", {})
-        else DimDynamic.STATIC
-        for i in range(n_dims)
-    ]
+    dynamic_sizes = []
+    for i in range(n_dims):
+        if (
+            i in getattr(t, "_dynamo_weak_dynamic_indices", {})
+            or i in getattr(t, "_dynamo_dynamic_indices", {})
+        ):
+            dynamic_sizes.append(DimDynamic.DYNAMIC)
+        else:
+            dynamic_sizes.append(DimDynamic.STATIC)
     symbolic_context = StatelessSymbolicContext(
         dynamic_sizes=dynamic_sizes,
         constraint_sizes=[None] * n_dims,

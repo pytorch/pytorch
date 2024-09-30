@@ -7757,6 +7757,81 @@ def forward(self, x, y):
             }
             _load_dynamic_shapes(spec, from_dict=True)
 
+    def test_dim_dynamic(self):
+        dynamic = Dim.DYNAMIC
+
+        # dynamic should infer equalities and relations
+        class Relations(torch.nn.Module):
+            def forward(self, u, w, x, y, z):
+                a = u[1:] + w + x  # s0 == s1 + 1 == s2 + 1
+                b = y.flatten() + z  # s2*s3 == s4
+                return a, b
+
+        inputs = (
+            torch.randn(5),
+            torch.randn(4),
+            torch.randn(4),
+            torch.randn(4, 4),
+            torch.randn(16),
+        )
+        ep = export(
+            Relations(),
+            inputs,
+            dynamic_shapes={
+                "u": (dynamic,),
+                "w": (dynamic,),
+                "x": (dynamic,),
+                "y": (dynamic, dynamic),
+                "z": (dynamic,),
+            },
+        )
+        ep.module()(
+            torch.randn(6),
+            torch.randn(5),
+            torch.randn(5),
+            torch.randn(7, 8),
+            torch.randn(56),
+        )
+
+        # dynamic should complain when force specialized
+        class Specialize(torch.nn.Module):
+            def forward(self, x):
+                torch._check(x.shape[0] == 4)
+                return x + 2
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Not all values of RelaxedUnspecConstraint.* are valid because .* was inferred to be a constant",
+        ):
+            ep = export(
+                Specialize(),
+                (torch.randn(4, 8),),
+                dynamic_shapes={
+                    "x": (dynamic, dynamic),
+                },
+            )
+
+        # dynamic should handle complex guards in the same way as auto
+        class ModConstraint(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x.view(x.shape[0] - 1, -1)
+
+        ep = export(
+            ModConstraint(),
+            (torch.randn(3, 4),),
+            dynamic_shapes={
+                "x": (dynamic, dynamic),
+            },
+        )
+        ep.module()(torch.randn(5, 8))
+        num_asserts = [
+            node.target == torch.ops.aten._assert_scalar.default
+            for node in ep.graph.nodes
+        ].count(True)
+        self.assertEqual(num_asserts, 1)
+        with self.assertRaises(RuntimeError):
+            ep.module()(torch.randn(4, 2))
+
     @testing.expectedFailureNonStrict
     @testing.expectedFailureTrainingIRToRunDecompNonStrict  # unbacked symint not tracked?
     @testing.expectedFailureSerDer  # T195866111
