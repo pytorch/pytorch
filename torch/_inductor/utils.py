@@ -771,8 +771,8 @@ def get_first_incompatible_cudagraph_node(gm):
     return None
 
 
-def has_incompatible_cudagraph_ops(gm):
-    return get_first_incompatible_cudagraph_node(gm) is not None
+def get_incompatible_cudagraph_node(gm) -> Optional[torch.fx.Node]:
+    return get_first_incompatible_cudagraph_node(gm)
 
 
 def output_node(gm: torch.fx.GraphModule):

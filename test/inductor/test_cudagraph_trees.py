@@ -1862,7 +1862,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     foo(torch.tensor([1, 0, 0], device="cuda")), torch.tensor([[0]])
                 )
 
-            FileCheck().check("skipping cudagraphs due to ['incompatible ops']").run(
+            FileCheck().check("incompatible op aten.nonzero.default").check("foo").run(
                 captured_output[0]
             )
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
