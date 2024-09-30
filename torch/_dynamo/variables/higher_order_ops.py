@@ -11,7 +11,6 @@ from typing import Dict, List, Optional, TYPE_CHECKING
 import torch._C
 import torch.fx
 import torch.nn
-import torch.onnx.operators
 from torch._dynamo.utils import get_fake_value
 from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.base import VariableTracker

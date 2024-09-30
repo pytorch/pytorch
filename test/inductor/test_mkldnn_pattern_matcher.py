@@ -2084,7 +2084,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     def test_qflatten(self):
         r"""
-        This testcase will quantize Conv2d->AdaptiveAvgPool2d->flatten pattern.
+        This testcase will quantize Conv2d->AdaptiveAvgPool2d->flatten->cat pattern.
         """
 
         class M(torch.nn.Module):
@@ -2099,8 +2099,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
 
             def forward(self, x):
-                return torch.flatten(
-                    self.adaptive_avg_pool2d(self.relu(self.conv(x))), 1
+                return torch.cat(
+                    [
+                        torch.flatten(
+                            self.adaptive_avg_pool2d(self.relu(self.conv(x))), 1
+                        )
+                    ]
                 )
 
         mod = M().eval()
