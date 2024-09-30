@@ -2090,7 +2090,6 @@ class DeviceCachingAllocator {
     // cudaFree blocks from this graph's pool when it discovers they're unused
     // (unsplit).
     auto pp = get_private_pool(mempool_id);
-    TORCH_INTERNAL_ASSERT(pp->use_count >= 1);
     dec_use_count_and_maybe_mark_pool_freeable(mempool_id, pp);
   }
 
@@ -2103,7 +2102,6 @@ class DeviceCachingAllocator {
   void decPoolUseCountAndMarkPoolFree(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     auto pp = get_private_pool(mempool_id);
-    TORCH_INTERNAL_ASSERT(pp->use_count == 1);
     dec_use_count_and_maybe_mark_pool_freeable(mempool_id, pp);
   }
 
@@ -2205,6 +2203,7 @@ class DeviceCachingAllocator {
       MempoolId_t mempool_id,
       PrivatePool* pool) {
     auto uc = --(pool->use_count);
+    TORCH_INTERNAL_ASSERT(uc >= 0);
     if (uc == 0) {
       // Allows free_cached_blocks to begin cudaFreeing this pool's memory,
       // and makes sure this pool wasn't somehow made freeable already.
@@ -3902,6 +3901,7 @@ MemPool::MemPool(
 
 MemPool::~MemPool() {
   CUDACachingAllocator::decPoolUseCountAndMarkPoolFree(device_, id_);
+  TORCH_INTERNAL_ASSERT(use_count() == 0);
 }
 
 MempoolId_t MemPool::id() {
