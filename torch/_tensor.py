@@ -43,6 +43,19 @@ def _handle_torch_function_and_wrap_type_error_to_not_implemented(f):
     return wrapped
 
 
+# NB: Wrapper subclasses that implement custom-dispatched sizes / strides cache
+# this info via non-serializable PyCapsules.
+def _clear_cached_sizes_strides(t):
+    CACHED_SIZES_STRIDES_KEYS = [
+        "_sym_sizes_capsule",
+        "_sym_sizes_capsule_len",
+        "_sym_strides_capsule",
+        "_sym_strides_capsule_len",
+    ]
+    for key in CACHED_SIZES_STRIDES_KEYS:
+        t.__dict__.pop(key, None)
+
+
 # Should not be used, this is kept only for BC of loading old serialized Tensor subclasses
 def _rebuild_from_type(func, type, args, dict):
     if type is Tensor:
@@ -203,6 +216,7 @@ class Tensor(torch._C.TensorBase):
                     if hasattr(self, slot):
                         setattr(new_tensor, slot, deepcopy(getattr(self, slot), memo))
 
+            _clear_cached_sizes_strides(self)
             new_tensor.__dict__ = deepcopy(self.__dict__, memo)
 
             memo[id(self)] = new_tensor
@@ -227,6 +241,9 @@ class Tensor(torch._C.TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__reduce_ex__, (self,), self, proto)
         func, args = self._reduce_ex_internal(proto)
+        # sizes / strides cache needs to be cleared here because it'll just be recached
+        # if cleared earlier. Note that state references the -actual- tensor dict.
+        _clear_cached_sizes_strides(self)
         return (_rebuild_from_type_v2, (func, type(self), args, state))
 
     def storage(self):
