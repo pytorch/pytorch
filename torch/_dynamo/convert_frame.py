@@ -18,6 +18,7 @@ import time
 import traceback
 import typing
 import weakref
+import json
 from pathlib import Path
 from types import CodeType, FrameType, FunctionType, ModuleType
 from typing import Any, Callable, Dict, List, Optional, Set, TypeVar, Union
@@ -1083,6 +1084,8 @@ def _compile(
                 remote_cache_time_saved,
                 structured_logging_overhead_s,
                 config.suppress_errors,
+                config.specialize_float,
+                json.dumps(config.to_dict()),
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
