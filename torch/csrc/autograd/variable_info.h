@@ -6,7 +6,7 @@ namespace torch::autograd {
 
 struct TORCH_API VariableInfo {
   explicit VariableInfo();
-  explicit VariableInfo(const Variable& var);
+  explicit VariableInfo(const Variable& var, bool use_zeros_like = false);
 
   Variable zeros(at::OptionalDeviceGuard& device_guard) const;
 
@@ -16,7 +16,7 @@ struct TORCH_API VariableInfo {
   std::vector<c10::SymInt> size;
   bool requires_grad;
   bool is_empty;
-  // needed for NJTs since they only support zeros_like()
+  // needed for e.g. NJTs since they only support zeros_like()
   std::optional<Variable> the_var;
 };
 
