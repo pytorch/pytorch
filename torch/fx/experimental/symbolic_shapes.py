@@ -360,17 +360,21 @@ def check_consistent(new, old) -> None:
 
 
 def resolve_unbacked_bindings(
-    shape_env: ShapeEnv, bindings: Optional[Dict[sympy.Symbol, pytree.KeyPath]]
+    shape_env: Optional[ShapeEnv],
+    bindings: Optional[Dict[sympy.Symbol, pytree.KeyPath]],
 ) -> Optional[Dict[sympy.Symbol, pytree.KeyPath]]:
     if bindings is None:
         return None
+    assert shape_env is not None
     return {shape_env.unbacked_renamings.get(k, k): v for k, v in bindings.items()}
 
 
 Result: TypeAlias = Union[torch.Tensor, Tuple[torch.Tensor, ...]]
 
 
-def rebind_unbacked(shape_env: ShapeEnv, n: torch.fx.Node, result: Result) -> None:
+def rebind_unbacked(
+    shape_env: Optional[ShapeEnv], n: torch.fx.Node, result: Result
+) -> None:
     """
     Suppose we are retracing a pre-existing FX graph that previously had
     fake tensor propagation (and therefore unbacked SymInts).  When we retrace,
@@ -389,6 +393,7 @@ def rebind_unbacked(shape_env: ShapeEnv, n: torch.fx.Node, result: Result) -> No
     if bindings := resolve_unbacked_bindings(
         shape_env, n.meta.get("unbacked_bindings")
     ):
+        assert shape_env is not None
         for raw_u0, path in bindings.items():
             u1 = pytree.key_get(result, path)
             # tensor_version ops get specialized after AOTAutograd, it's OK,
