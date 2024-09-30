@@ -156,12 +156,12 @@ torchbench_setup_macos() {
 
   cd torchvision
   git fetch
-  git checkout "$$(cat ../pytorch/.github/ci_commit_pins/vision.txt)"
+  git checkout "$$(cat ../.github/ci_commit_pins/vision.txt)"
   git submodule update --init --recursive
 
   cd ../torchaudio
   git fetch
-  git checkout "$$(cat ../pytorch/.github/ci_commit_pins/audio.txt)"
+  git checkout "$$(cat ../.github/ci_commit_pins/audio.txt)"
   git submodule update --init --recursive
 
   cd ../pytorch
