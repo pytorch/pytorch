@@ -1618,9 +1618,9 @@ class PythonWrapperCodegen(CodeGen):
             if arg in V.graph.sizevars.inv_precomputed_replacements:
                 arg = V.graph.sizevars.inv_precomputed_replacements[arg]
 
-            # For multiple expressions that depend on an unbacked symint, 
+            # For multiple expressions that depend on an unbacked symint,
             # we want to compute them consistently for a size hint we have chosen.
-            # So, recursively compute expressions via size hints of contained symbols. 
+            # So, recursively compute expressions via size hints of contained symbols.
             free_symbols = arg.free_symbols
             size_dict = {
                 symbol: V.graph.sizevars.size_hint(
