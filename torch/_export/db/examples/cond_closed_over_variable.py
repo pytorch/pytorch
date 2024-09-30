@@ -17,6 +17,6 @@ class CondClosedOverVariable(torch.nn.Module):
 
         return cond(pred, true_fn, false_fn, [x + 1])
 
-example_inputs = (torch.tensor(True), torch.randn(3, 2))
+example_args = (torch.tensor(True), torch.randn(3, 2))
 tags = {"torch.cond", "python.closure"}
 model = CondClosedOverVariable()

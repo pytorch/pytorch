@@ -1,8 +1,8 @@
 #pragma once
 
-#include <c10/util/Optional.h>
 #include <torch/csrc/Export.h>
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace torch::cuda {

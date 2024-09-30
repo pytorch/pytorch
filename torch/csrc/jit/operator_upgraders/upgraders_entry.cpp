@@ -122,7 +122,7 @@ std::shared_ptr<Graph> create_upgrader_graph(
     const std::string& upgrader_name,
     const std::string& upgrader_body) {
   auto cu = std::make_shared<CompilationUnit>();
-  cu->define(c10::nullopt, upgrader_body, nativeResolver(), nullptr);
+  cu->define(std::nullopt, upgrader_body, nativeResolver(), nullptr);
   Function& jitFunc = cu->get_function(upgrader_name);
   GraphFunction& graphFunction = toGraphFunction(jitFunc);
   return graphFunction.graph();

@@ -14,7 +14,7 @@ class DynamicShapeRound(torch.nn.Module):
 
 x = torch.randn(3, 2)
 dim0_x = Dim("dim0_x")
-example_inputs = (x,)
+example_args = (x,)
 tags = {"torch.dynamic-shape", "python.builtin"}
 support_level = SupportLevel.NOT_SUPPORTED_YET
 dynamic_shapes = {"x": {0: dim0_x}}

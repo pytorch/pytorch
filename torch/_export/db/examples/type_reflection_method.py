@@ -17,6 +17,6 @@ class TypeReflectionMethod(torch.nn.Module):
         return type(a).func(x)
 
 
-example_inputs = (torch.randn(3, 4),)
+example_args = (torch.randn(3, 4),)
 tags = {"python.builtin"}
 model = TypeReflectionMethod()

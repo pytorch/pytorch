@@ -16,7 +16,6 @@ from torch.distributed._shard.sharding_spec import (
     ShardingSpec,
     ShardMetadata,
 )
-
 from torch.distributed.checkpoint import (
     FileSystemReader,
     FileSystemWriter,
@@ -24,7 +23,6 @@ from torch.distributed.checkpoint import (
     save_state_dict,
 )
 from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
-
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,

@@ -33,7 +33,7 @@ class CondBranchNestedFunction(torch.nn.Module):
 
         return cond(x.shape[0] < 10, true_fn, false_fn, [x])
 
-example_inputs = (torch.randn(3),)
+example_args = (torch.randn(3),)
 tags = {
     "torch.cond",
     "torch.dynamic-shape",

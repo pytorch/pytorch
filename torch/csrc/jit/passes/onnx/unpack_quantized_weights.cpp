@@ -14,8 +14,8 @@
 #include <ATen/Functions.h>
 
 using ::c10::Dispatcher;
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 namespace onnx {
 using namespace ::c10::onnx;
 
@@ -299,10 +299,6 @@ void unpackQuantizedWeightsHelper(
 
     torch::List<int64_t> stride_int, padding_int, dilation_int,
         output_padding_int;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t groups_int;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t transpose_int;
 
     if (itr->second.isTuple()) {
       // Pre-unpacked weights. Comes from Conv/Linear weights which are
@@ -415,9 +411,9 @@ void unpackQuantizedWeightsHelper(
           }
           idx++;
         }
-        groups_int = conv_params_packed[idx].item<int64_t>();
+        auto groups_int = conv_params_packed[idx].item<int64_t>();
         idx++;
-        transpose_int = conv_params_packed[idx].item<int64_t>();
+        auto transpose_int = conv_params_packed[idx].item<int64_t>();
         idx++;
         TORCH_INTERNAL_ASSERT(
             idx == conv_params_packed.numel(),
@@ -459,11 +455,10 @@ void unpackQuantizedWeightsHelper(
           for (const auto& d : dilation_ivalue) {
             dilation_int.emplace_back(d.toTensor()[0].item<int64_t>());
           }
-          groups_int = groups_ivalue.toTensor()[0].item<int64_t>();
+          groups = groups_ivalue.toTensor()[0].item<int64_t>();
           stride = stride_int;
           padding = padding_int;
           dilation = dilation_int;
-          groups = groups_int;
 
           if (expect_output_padding) {
             auto output_padding_ivalue =
@@ -577,11 +572,11 @@ void UnpackQuantizedTensorInputs(std::shared_ptr<Graph>& graph) {
     auto input_scale =
         graph->insertInput(index + 1, input_name + "_scale")
             ->setType(TensorType::create(
-                at::kDouble, at::kCPU, 0, /*requires_grad=*/c10::nullopt));
+                at::kDouble, at::kCPU, 0, /*requires_grad=*/std::nullopt));
     auto input_zero_point =
         graph->insertInput(index + 2, input_name + "_zero_point")
             ->setType(TensorType::create(
-                at::kLong, at::kCPU, 0, /*requires_grad=*/c10::nullopt));
+                at::kLong, at::kCPU, 0, /*requires_grad=*/std::nullopt));
     std::vector<Value*> converted{input_value, input_scale, input_zero_point};
     auto input_tuple =
         graph->prependNode(graph->createTuple(converted))->output();
@@ -770,5 +765,4 @@ void insertPermutes(
   GRAPH_DUMP("After insertPermutes: ", graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -9,10 +9,11 @@ from torch.utils.data.sampler import Sampler
 
 __all__ = ["DistributedSampler"]
 
-T_co = TypeVar("T_co", covariant=True)
+
+_T_co = TypeVar("_T_co", covariant=True)
 
 
-class DistributedSampler(Sampler[T_co]):
+class DistributedSampler(Sampler[_T_co]):
     r"""Sampler that restricts data loading to a subset of the dataset.
 
     It is especially useful in conjunction with
@@ -102,7 +103,7 @@ class DistributedSampler(Sampler[T_co]):
         self.shuffle = shuffle
         self.seed = seed
 
-    def __iter__(self) -> Iterator[T_co]:
+    def __iter__(self) -> Iterator[_T_co]:
         if self.shuffle:
             # deterministically shuffle based on epoch and seed
             g = torch.Generator()

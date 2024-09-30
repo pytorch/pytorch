@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import List, Sized, TypeVar
+from typing import List, Sized, Type, TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import DataChunk, MapDataPipe
@@ -7,7 +7,8 @@ from torch.utils.data.datapipes.datapipe import DataChunk, MapDataPipe
 
 __all__ = ["BatcherMapDataPipe"]
 
-T = TypeVar("T")
+
+_T = TypeVar("_T")
 
 
 @functional_datapipe("batch")
@@ -38,10 +39,10 @@ class BatcherMapDataPipe(MapDataPipe[DataChunk]):
 
     def __init__(
         self,
-        datapipe: MapDataPipe[T],
+        datapipe: MapDataPipe[_T],
         batch_size: int,
         drop_last: bool = False,
-        wrapper_class=DataChunk,
+        wrapper_class: Type[DataChunk] = DataChunk,
     ) -> None:
         assert batch_size > 0, "Batch size is required to be larger than 0!"
         super().__init__()

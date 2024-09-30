@@ -19,6 +19,7 @@ from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils.checkpoint import checkpoint
 
+
 _SAVED_PREFIX = "_saved_"
 GRAD_FN_NEXT_FUNCTIONS = "next_functions"
 
@@ -55,7 +56,7 @@ class CheckpointWrapperTest(TestCase):
 
     def test_checkpoint_wrapper_kwarg_support(self):
         class MyModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lin = nn.Linear(10, 10)
 
@@ -86,7 +87,7 @@ class CheckpointWrapperTest(TestCase):
 
         # Test model that enforces kwarg inputs
         class ModelEnforceKwarg(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lin = nn.Linear(10, 10)
 
@@ -224,7 +225,7 @@ class CheckpointWrapperTest(TestCase):
         """
 
         class LinearWithBatchNorm(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lin = nn.Linear(10, 10)
                 self.bn = nn.BatchNorm1d(10)
@@ -234,7 +235,7 @@ class CheckpointWrapperTest(TestCase):
                 return self.bn(self.nested_linear(self.lin(x)))
 
         class MyModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.seq = nn.Sequential(
                     LinearWithBatchNorm(), LinearWithBatchNorm(), LinearWithBatchNorm()

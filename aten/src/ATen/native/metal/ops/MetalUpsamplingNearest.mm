@@ -16,7 +16,7 @@ namespace at::native::metal {
 static Tensor upsample_nearest2d_vec(
     const Tensor& input,
     at::OptionalIntArrayRef output_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
+    std::optional<ArrayRef<double>> scale_factors) {
   TORCH_CHECK(input.is_metal());
   auto osize =
       upsample::compute_output_size(input.sizes(), output_size, scale_factors);

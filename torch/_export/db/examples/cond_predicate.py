@@ -17,7 +17,7 @@ class CondPredicate(torch.nn.Module):
 
         return cond(pred, lambda x: x.cos(), lambda y: y.sin(), [x])
 
-example_inputs = (torch.randn(6, 4, 3),)
+example_args = (torch.randn(6, 4, 3),)
 tags = {
     "torch.cond",
     "torch.dynamic-shape",

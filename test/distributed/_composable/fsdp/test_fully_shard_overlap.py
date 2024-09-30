@@ -1,12 +1,12 @@
 # Owner(s): ["oncall: distributed"]
 
+import copy
 import functools
 from typing import Callable
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._tensor.experimental import implicit_replication
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -19,6 +19,20 @@ from torch.testing._internal.common_utils import get_cycles_per_ms, run_tests
 
 
 class TestFullyShardOverlap(FSDPTest):
+    """
+    NOTE: Testing stream overlap in PyTorch CI is tricky.
+
+    One approach is to use CUDA sleeps to emulate kernels in each stream;
+    however, ``torch.cuda._sleep`` requires inputs in units of cycles. The
+    ``get_cycles_per_ms`` function to convert from ms to cycles is computed
+    once and cached thereafter, which means that if there is variation later,
+    the cached value may not be accurate. This leads to flakiness in CI.
+
+    To address this, we relax the tests as simple sanity checks that the
+    overlapped times are less than a non-overlapped baseline, but we do not
+    test that the overlapped time is less than a precisely calculated time.
+    """
+
     @property
     def world_size(self) -> int:
         return min(2, torch.cuda.device_count())
@@ -32,7 +46,9 @@ class TestFullyShardOverlap(FSDPTest):
         model = nn.Sequential(
             *[LinearWithSleep(dim, compute_sleep_ms) for _ in range(num_linears)]
         )
+        ref_model = copy.deepcopy(model).cuda()
         for lin in model:
+            assert len(list(lin.parameters())) == 1, "Expects only one weight"
             fully_shard(lin, reshard_after_forward=True)
         fully_shard(model, reshard_after_forward=True)
 
@@ -60,15 +76,54 @@ class TestFullyShardOverlap(FSDPTest):
         loss = model(inp).sum()  # warmup CUDA and allocator
         loss.backward()
 
+        def ref_fwd():
+            with patch_all_gather(delayed_all_gather):
+                # Run dummy all-gathers per weight (which is one FSDP group)
+                for lin in ref_model:
+                    dummy_ag_output = torch.empty_like(lin.weight)
+                    dummy_ag_input = torch.chunk(dummy_ag_output, self.world_size)[
+                        self.rank
+                    ]
+                    dist.all_gather_into_tensor(dummy_ag_output, dummy_ag_input)
+                return ref_model(inp)
+
         def fwd():
             with patch_all_gather(delayed_all_gather):
                 model(inp)
 
+        ref_fwd_time = self._time_fn(ref_fwd)
         fwd_time = self._time_fn(fwd)
-        buffer_ms = 2  # CPU delays and copies
-        expected_fwd_time = comm_sleep_ms + num_linears * compute_sleep_ms + buffer_ms
         # Forward: only 1st all-gather is exposed
-        self.assertLessEqual(fwd_time, expected_fwd_time)
+        # NOTE: Do not enforce the expected forward time due to flakiness in CI
+        # expected_fwd_time = comm_sleep_ms + num_linears * compute_sleep_ms + buffer_ms
+        self.assertLessEqual(fwd_time, ref_fwd_time)
+
+        def ref_fwd_bwd():
+            with patch_all_gather(delayed_all_gather):
+                # Run dummy all-gathers per weight (which is one FSDP group)
+                for lin in ref_model:
+                    dummy_ag_output = torch.empty_like(lin.weight)
+                    dummy_ag_input = torch.chunk(dummy_ag_output, self.world_size)[
+                        self.rank
+                    ]
+                    dist.all_gather_into_tensor(dummy_ag_output, dummy_ag_input)
+                loss = ref_model(inp).sum()
+                # Run dummy all-gathers per weight again since we are
+                # resharding after forward
+                for lin in ref_model:
+                    dummy_ag_output = torch.empty_like(lin.weight)
+                    dummy_ag_input = torch.chunk(dummy_ag_output, self.world_size)[
+                        self.rank
+                    ]
+                    dist.all_gather_into_tensor(dummy_ag_output, dummy_ag_input)
+                loss.backward()
+                # Run dummy reduce-scatters per weight
+                for lin in ref_model:
+                    dummy_rs_input = torch.empty_like(lin.weight)
+                    dummy_rs_output = torch.chunk(dummy_rs_input, self.world_size)[
+                        self.rank
+                    ]
+                    dist.reduce_scatter_tensor(dummy_rs_output, dummy_rs_input)
 
         def fwd_bwd():
             with patch_all_gather(delayed_all_gather), patch_reduce_scatter(
@@ -77,13 +132,16 @@ class TestFullyShardOverlap(FSDPTest):
                 loss = model(inp).sum()
                 loss.backward()
 
+        ref_fwd_bwd_time = self._time_fn(ref_fwd_bwd)
         fwd_bwd_time = self._time_fn(fwd_bwd)
         # Backward: only 1st all-gather and last reduce-scatter are exposed;
         # double the backward compute since computing two gradients per layer
-        expected_bwd_time = (
-            comm_sleep_ms * 2 + num_linears * 2 * compute_sleep_ms + buffer_ms * 2
-        )
-        self.assertLessEqual(fwd_bwd_time, expected_fwd_time + expected_bwd_time)
+        # NOTE: Do not enforce the expected forward-backward time due to
+        # flakiness in CI
+        # expected_bwd_time = (
+        #     comm_sleep_ms * 2 + num_linears * 2 * compute_sleep_ms + buffer_ms * 2
+        # )
+        self.assertLessEqual(fwd_bwd_time, ref_fwd_bwd_time)
 
     @skip_if_lt_x_gpu(2)
     def test_fully_shard_post_optim_event_overlap(self):
@@ -140,7 +198,11 @@ class TestFullyShardOverlap(FSDPTest):
             num_iters * (3 * compute_sleep_ms + buffer_ms) + comm_sleep_ms
         )
         self.assertLessEqual(test_time, expected_test_time)
-        self.assertGreater(baseline_time, expected_test_time)
+        # Since `get_cycles_per_ms` uses lru cache, there may be some variance
+        # between the initially determined cycles vs. the current cycles per
+        # ms, so we relax the baseline check to just that it is greater than
+        # the test time rather than the expected test time
+        self.assertGreater(baseline_time, test_time)
 
     def _time_fn(self, fn: Callable):
         start_event = torch.cuda.Event(enable_timing=True)
