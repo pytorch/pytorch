@@ -238,13 +238,13 @@ class CUDAAllocator : public Allocator {
         " does not yet support maybeMakeNewPoolAndInc. "
         "If you need it, please file an issue describing your use case.");
   }
-  virtual void decPoolUseCountAndMarkPoolFree(
+  virtual void decPoolUseCountAndMaybeMarkPoolFree(
       c10::DeviceIndex device,
       MempoolId_t mempool_id) {
     TORCH_CHECK(
         false,
         name(),
-        " does not yet support decPoolUseCountAndMarkPoolFree. "
+        " does not yet support decPoolUseCountAndMaybeMarkPoolFree. "
         "If you need it, please file an issue describing your use case.");
   }
   // returns true if the allocated blocks are equal to expected live allocations
@@ -452,10 +452,10 @@ inline int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return get()->getPoolUseCount(device, mempool_id);
 }
 
-inline void decPoolUseCountAndMarkPoolFree(
+inline void decPoolUseCountAndMaybeMarkPoolFree(
     c10::DeviceIndex device,
     MempoolId_t mempool_id) {
-  get()->decPoolUseCountAndMarkPoolFree(device, mempool_id);
+  get()->decPoolUseCountAndMaybeMarkPoolFree(device, mempool_id);
 }
 
 // Not part of CUDA_ALLOCATOR_BACKEND_INTERFACE
