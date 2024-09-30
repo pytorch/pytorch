@@ -14,7 +14,7 @@ from functorch import make_fx
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.utils._triton import has_triton
+from torch.testing._internal.inductor_utils import HAS_GPU
 
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
@@ -522,7 +522,7 @@ class TestCollectivesWithNCCL(DistributedTestBase):
         expected = torch.cat(expected)
         self.assertEqual(y, expected)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @requires_nccl()
     @with_comms()
     def test_tracing(self):
@@ -532,7 +532,7 @@ class TestCollectivesWithNCCL(DistributedTestBase):
         compiled_allreduce = torch.compile(allreduce, fullgraph=True)
         compiled_allreduce(torch.randn(8, device=self.device), self.process_group)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_tracing_with_fakepg(self):
         exit_if_lt_x_gpu(self.world_size)
 
@@ -547,6 +547,28 @@ class TestCollectivesWithNCCL(DistributedTestBase):
             store=FakeStore(),
         )
         allreduce(torch.randn(8, device=self.device), pg=dist.group.WORLD)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_nccl()
+    @with_comms()
+    def test_tracing_with_dce_code(self):
+        if self.world_size > 2:
+            return
+
+        def func(batch, group, rank):
+            ret = ft_c.permute_tensor(batch, [1, 0], group)
+            if hasattr(ret, "wait"):
+                ret = ret.wait()
+            if rank == 0:
+                return ret
+            else:
+                return batch * 5
+
+        compiled_func = torch.compile(func)
+        ret = compiled_func(
+            torch.ones((100,), device="cuda"), self.process_group, self.rank
+        )
+        dist.barrier()
 
 
 class TestNCCLCollectivesWithWorldSize4(TestCollectivesWithNCCL):
