@@ -261,7 +261,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def symbolic_sizes_strides(
         self, ex: torch.Tensor
-    ) -> Tuple[Union[List[int], List[Expr]], Union[List[int], List[Expr]]]:
+    ) -> Tuple[Sequence[Union[int, Expr]], Sequence[Union[int, Expr]]]:
         """
         Support dynamic shapes and dynamic strides by assigning variables
         to each dimension.  We duck-shape tensors, so if two tensors
@@ -292,9 +292,9 @@ class GraphLowering(torch.fx.Interpreter):
                 source,
             )
 
-        size = [i.node.expr if isinstance(i, torch.SymInt) else i for i in size]
-        stride = [i.node.expr if isinstance(i, torch.SymInt) else i for i in stride]
-        return size, stride
+        r_size = [i.node.expr if isinstance(i, torch.SymInt) else i for i in size]
+        r_stride = [i.node.expr if isinstance(i, torch.SymInt) else i for i in stride]
+        return r_size, r_stride
 
     def static_sizes_strides(
         self, ex: torch.Tensor

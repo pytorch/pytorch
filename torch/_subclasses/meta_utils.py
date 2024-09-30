@@ -17,6 +17,7 @@ from typing import (
     Tuple,
     Type,
     TYPE_CHECKING,
+    TypeGuard,
     Union,
 )
 from typing_extensions import TypeAlias
@@ -143,7 +144,7 @@ def is_sparse_compressed(t):
     return isinstance(t, torch.Tensor) and is_sparse_compressed_layout(t.layout)
 
 
-def is_sparse_any(t):
+def is_sparse_any(t: object) -> TypeGuard[torch.Tensor]:
     return is_sparse_coo(t) or is_sparse_compressed(t)
 
 

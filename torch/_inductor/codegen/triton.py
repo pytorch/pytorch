@@ -16,6 +16,7 @@ from typing import (
     Iterable,
     List,
     Optional,
+    Sequence,
     Tuple,
     TYPE_CHECKING,
     Union,
@@ -191,9 +192,9 @@ class BlockPtrOptions:
     constant_offset: sympy.Expr
     order: List[int]
     mask_vars: OrderedSet[str]
-    broadcast_shape: List[sympy.Expr]
+    broadcast_shape: Sequence[sympy.Expr]
     broadcasting_dims: List[bool]
-    final_shape: List[sympy.Expr]
+    final_shape: Sequence[sympy.Expr]
 
     @property
     def shape(self) -> List[sympy.Expr]:
@@ -214,8 +215,8 @@ class BlockPtrOptions:
     def codegen_broadcast_and_reshape(
         self,
         value: str,
-        initial_shape: List[sympy.Expr],
-        final_shape: List[sympy.Expr],
+        initial_shape: Sequence[sympy.Expr],
+        final_shape: Sequence[sympy.Expr],
         allow_implicit: bool,
     ) -> str:
         """
@@ -442,7 +443,7 @@ class BlockPtrOptions:
 
 
 def triton_reshape(
-    value: str, old_shape: List[sympy.Expr], new_shape: List[sympy.Expr]
+    value: str, old_shape: Sequence[sympy.Expr], new_shape: Sequence[sympy.Expr]
 ):
     """Workaround https://github.com/openai/triton/issues/2836"""
     assert isinstance(old_shape, list) and isinstance(new_shape, list)
@@ -450,25 +451,25 @@ def triton_reshape(
     def shape_to_str(shape: List[sympy.Expr]) -> List[str]:
         return [str(dim) for dim in shape]
 
-    old_shape, new_shape = tuple(
+    old_shape_str, new_shape_str = tuple(
         shape_to_str(shape) for shape in (old_shape, new_shape)
     )
 
-    if old_shape == new_shape:
+    if old_shape_str == new_shape_str:
         return value
-    if [s for s in new_shape if s != "1"] != old_shape:
-        return f"tl.reshape({value}, [{', '.join(new_shape)}])"
+    if [s for s in new_shape_str if s != "1"] != old_shape_str:
+        return f"tl.reshape({value}, [{', '.join(new_shape_str)}])"
     # rewrite to [:, None] syntax, which is less buggy
     idx = 0
     expand = []
-    for size in new_shape:
-        if idx < len(old_shape) and size == old_shape[idx]:
+    for size in new_shape_str:
+        if idx < len(old_shape_str) and size == old_shape_str[idx]:
             expand.append(":")
             idx += 1
         else:
             assert size == "1"
             expand.append("None")
-    assert idx == len(old_shape)
+    assert idx == len(old_shape_str)
     return f"{value}[{', '.join(expand)}]"
 
 
