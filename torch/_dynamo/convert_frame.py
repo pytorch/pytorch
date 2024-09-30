@@ -1084,7 +1084,9 @@ def _compile(
                 remote_cache_time_saved,
                 structured_logging_overhead_s,
                 config.suppress_errors,
+                config.inline_inbuilt_nn_modules,
                 config.specialize_float,
+                json.dumps(config),
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
