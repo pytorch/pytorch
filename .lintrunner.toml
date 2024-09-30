@@ -1254,7 +1254,6 @@ exclude_patterns = [
     'torch/fx/experimental/refinement_types.py',
     'torch/fx/experimental/rewriter.py',
     'torch/fx/experimental/schema_type_annotation.py',
-    'torch/fx/experimental/symbolic_shapes.py',
     'torch/fx/experimental/unification/__init__.py',
     'torch/fx/experimental/unification/core.py',
     'torch/fx/experimental/unification/dispatch.py',
