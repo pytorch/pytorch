@@ -10,14 +10,14 @@
 
 namespace torch::autograd {
 
-VariableInfo::VariableInfo(const Variable& var)
+VariableInfo::VariableInfo(const Variable& var, bool use_zeros_like)
     : layout(var.layout()),
       device(var.device()),
       scalar_type(var.scalar_type()),
       size(var.sym_sizes().vec()),
       requires_grad(var.requires_grad()),
       is_empty(false),
-      the_var(var.is_nested() ? std::optional<Variable>(var) : std::nullopt) {}
+      the_var(use_zeros_like ? std::optional<Variable>(var) : std::nullopt) {}
 
 VariableInfo::VariableInfo() : requires_grad(false), is_empty(true) {}
 
