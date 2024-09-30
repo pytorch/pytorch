@@ -8,11 +8,21 @@ appropriate file under the `torch/ao/nn/quantized/dynamic/modules`,
 while adding an import statement here.
 """
 
-__all__ = ['Conv1d', 'Conv2d', 'Conv3d', 'ConvTranspose1d', 'ConvTranspose2d', 'ConvTranspose3d']
+from torch.ao.nn.quantized.dynamic.modules.conv import (
+    Conv1d,
+    Conv2d,
+    Conv3d,
+    ConvTranspose1d,
+    ConvTranspose2d,
+    ConvTranspose3d,
+)
 
-from torch.ao.nn.quantized.dynamic.modules.conv import Conv1d
-from torch.ao.nn.quantized.dynamic.modules.conv import Conv2d
-from torch.ao.nn.quantized.dynamic.modules.conv import Conv3d
-from torch.ao.nn.quantized.dynamic.modules.conv import ConvTranspose1d
-from torch.ao.nn.quantized.dynamic.modules.conv import ConvTranspose2d
-from torch.ao.nn.quantized.dynamic.modules.conv import ConvTranspose3d
+
+__all__ = [
+    "Conv1d",
+    "Conv2d",
+    "Conv3d",
+    "ConvTranspose1d",
+    "ConvTranspose2d",
+    "ConvTranspose3d",
+]

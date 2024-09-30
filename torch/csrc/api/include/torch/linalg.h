@@ -129,10 +129,10 @@ inline Tensor matrix_exp(const Tensor& self) {
 
 inline Tensor norm(
     const Tensor& self,
-    const optional<Scalar>& opt_ord,
+    const std::optional<Scalar>& opt_ord,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
-    optional<ScalarType> opt_dtype) {
+    std::optional<ScalarType> opt_dtype) {
   return torch::linalg_norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
@@ -141,17 +141,17 @@ inline Tensor norm(
     c10::string_view ord,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
-    optional<ScalarType> opt_dtype) {
+    std::optional<ScalarType> opt_dtype) {
   return torch::linalg_norm(self, ord, opt_dim, keepdim, opt_dtype);
 }
 
 inline Tensor& norm_out(
     Tensor& result,
     const Tensor& self,
-    const optional<Scalar>& opt_ord,
+    const std::optional<Scalar>& opt_ord,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
-    optional<ScalarType> opt_dtype) {
+    std::optional<ScalarType> opt_dtype) {
   return torch::linalg_norm_out(
       result, self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
@@ -162,7 +162,7 @@ inline Tensor& norm_out(
     c10::string_view ord,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
-    optional<ScalarType> opt_dtype) {
+    std::optional<ScalarType> opt_dtype) {
   return torch::linalg_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
 
@@ -171,7 +171,7 @@ inline Tensor vector_norm(
     Scalar ord,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
-    optional<ScalarType> opt_dtype) {
+    std::optional<ScalarType> opt_dtype) {
   return torch::linalg_vector_norm(self, ord, opt_dim, keepdim, opt_dtype);
 }
 
@@ -181,7 +181,7 @@ inline Tensor& vector_norm_out(
     Scalar ord,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
-    optional<ScalarType> opt_dtype) {
+    std::optional<ScalarType> opt_dtype) {
   return torch::linalg_vector_norm_out(
       result, self, ord, opt_dim, keepdim, opt_dtype);
 }
@@ -191,7 +191,7 @@ inline Tensor matrix_norm(
     const Scalar& ord,
     IntArrayRef dim,
     bool keepdim,
-    optional<ScalarType> dtype) {
+    std::optional<ScalarType> dtype) {
   return torch::linalg_matrix_norm(self, ord, dim, keepdim, dtype);
 }
 
@@ -200,7 +200,7 @@ inline Tensor& matrix_norm_out(
     const Scalar& ord,
     IntArrayRef dim,
     bool keepdim,
-    optional<ScalarType> dtype,
+    std::optional<ScalarType> dtype,
     Tensor& result) {
   return torch::linalg_matrix_norm_out(result, self, ord, dim, keepdim, dtype);
 }
@@ -210,7 +210,7 @@ inline Tensor matrix_norm(
     std::string ord,
     IntArrayRef dim,
     bool keepdim,
-    optional<ScalarType> dtype) {
+    std::optional<ScalarType> dtype) {
   return torch::linalg_matrix_norm(self, ord, dim, keepdim, dtype);
 }
 
@@ -219,7 +219,7 @@ inline Tensor& matrix_norm_out(
     std::string ord,
     IntArrayRef dim,
     bool keepdim,
-    optional<ScalarType> dtype,
+    std::optional<ScalarType> dtype,
     Tensor& result) {
   return torch::linalg_matrix_norm_out(result, self, ord, dim, keepdim, dtype);
 }
@@ -576,10 +576,10 @@ inline Tensor matrix_exp(const Tensor& input) {
 // C10_DEPRECATED_MESSAGE("linalg_norm is deprecated, use norm instead.")
 inline Tensor linalg_norm(
     const Tensor& self,
-    const optional<Scalar>& opt_ord,
+    const std::optional<Scalar>& opt_ord,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
-    optional<ScalarType> opt_dtype) {
+    std::optional<ScalarType> opt_dtype) {
   return detail::norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
@@ -589,7 +589,7 @@ inline Tensor linalg_norm(
     c10::string_view ord,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
-    optional<ScalarType> opt_dtype) {
+    std::optional<ScalarType> opt_dtype) {
   return detail::norm(self, ord, opt_dim, keepdim, opt_dtype);
 }
 
@@ -598,10 +598,10 @@ inline Tensor linalg_norm(
 inline Tensor& linalg_norm_out(
     Tensor& result,
     const Tensor& self,
-    const optional<Scalar>& opt_ord,
+    const std::optional<Scalar>& opt_ord,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
-    optional<ScalarType> opt_dtype) {
+    std::optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
@@ -613,7 +613,7 @@ inline Tensor& linalg_norm_out(
     c10::string_view ord,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
-    optional<ScalarType> opt_dtype) {
+    std::optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
 
@@ -654,10 +654,10 @@ inline std::tuple<Tensor&, Tensor&, Tensor&> lu_out(
 
 inline Tensor norm(
     const Tensor& self,
-    const optional<Scalar>& opt_ord,
+    const std::optional<Scalar>& opt_ord,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
-    optional<ScalarType> opt_dtype) {
+    std::optional<ScalarType> opt_dtype) {
   return detail::norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
@@ -666,17 +666,17 @@ inline Tensor norm(
     std::string ord,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
-    optional<ScalarType> opt_dtype) {
+    std::optional<ScalarType> opt_dtype) {
   return detail::norm(self, ord, opt_dim, keepdim, opt_dtype);
 }
 
 inline Tensor& norm_out(
     Tensor& result,
     const Tensor& self,
-    const optional<Scalar>& opt_ord,
+    const std::optional<Scalar>& opt_ord,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
-    optional<ScalarType> opt_dtype) {
+    std::optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
@@ -686,7 +686,7 @@ inline Tensor& norm_out(
     std::string ord,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
-    optional<ScalarType> opt_dtype) {
+    std::optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
 
@@ -696,7 +696,7 @@ inline Tensor vector_norm(
     Scalar ord,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
-    optional<ScalarType> opt_dtype) {
+    std::optional<ScalarType> opt_dtype) {
   return detail::vector_norm(self, ord, opt_dim, keepdim, opt_dtype);
 }
 
@@ -706,7 +706,7 @@ inline Tensor& vector_norm_out(
     Scalar ord,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
-    optional<ScalarType> opt_dtype) {
+    std::optional<ScalarType> opt_dtype) {
   return detail::vector_norm_out(
       result, self, ord, opt_dim, keepdim, opt_dtype);
 }
@@ -717,7 +717,7 @@ inline Tensor matrix_norm(
     const Scalar& ord,
     IntArrayRef dim,
     bool keepdim,
-    optional<ScalarType> dtype) {
+    std::optional<ScalarType> dtype) {
   return detail::matrix_norm(self, ord, dim, keepdim, dtype);
 }
 
@@ -726,7 +726,7 @@ inline Tensor& matrix_norm_out(
     const Scalar& ord,
     IntArrayRef dim,
     bool keepdim,
-    optional<ScalarType> dtype,
+    std::optional<ScalarType> dtype,
     Tensor& result) {
   return detail::matrix_norm_out(self, ord, dim, keepdim, dtype, result);
 }
@@ -736,7 +736,7 @@ inline Tensor matrix_norm(
     std::string ord,
     IntArrayRef dim,
     bool keepdim,
-    optional<ScalarType> dtype) {
+    std::optional<ScalarType> dtype) {
   return detail::matrix_norm(self, ord, dim, keepdim, dtype);
 }
 
@@ -745,7 +745,7 @@ inline Tensor& matrix_norm_out(
     std::string ord,
     IntArrayRef dim,
     bool keepdim,
-    optional<ScalarType> dtype,
+    std::optional<ScalarType> dtype,
     Tensor& result) {
   return detail::matrix_norm_out(self, ord, dim, keepdim, dtype, result);
 }

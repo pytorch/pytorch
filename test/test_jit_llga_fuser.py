@@ -68,7 +68,7 @@ class JitLlgaTestCase(JitTestCase):
         with torch.no_grad(), torch._jit_internal._disable_emit_hooks():
             if dtype == torch.bfloat16:
                 # We rely upon eager-mode AMP support for BF16
-                with torch.cpu.amp.autocast(cache_enabled=False, dtype=torch.bfloat16):
+                with torch.autocast(device_type="cpu", cache_enabled=False, dtype=torch.bfloat16):
                     traced = torch.jit.trace(m, x)
                     if isinstance(m, torch.nn.Module):
                         traced = torch.jit.freeze(traced)
@@ -486,7 +486,7 @@ class TestFusionPattern(JitLlgaTestCase):
     @dtypes(torch.float32, torch.bfloat16)
     def test_conv2d_clamp(self, dtype):
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.conv2 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
@@ -519,7 +519,7 @@ class TestFusionPattern(JitLlgaTestCase):
     @dtypes(torch.float32, torch.bfloat16)
     def test_conv2d_bn(self, dtype):
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.bn1 = nn.BatchNorm2d(32)
@@ -541,7 +541,7 @@ class TestFusionPattern(JitLlgaTestCase):
     @dtypes(torch.float32, torch.bfloat16)
     def test_conv2d_bn_relu(self, dtype):
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.bn1 = nn.BatchNorm2d(32)
@@ -645,7 +645,7 @@ class TestFusionPattern(JitLlgaTestCase):
     @dtypes(torch.float32, torch.bfloat16)
     def test_wildcard(self, dtype):
         class M(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.eltwise = nn.ReLU()
@@ -773,7 +773,7 @@ class TestEnableDisableLlgaFuser(JitTestCase):
 class TestDynamoAOT(JitTestCase):
     def test_dynamo_aot_ts_onednn(self):
         class Seq(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layers = nn.Sequential(
                     nn.Linear(10, 10),

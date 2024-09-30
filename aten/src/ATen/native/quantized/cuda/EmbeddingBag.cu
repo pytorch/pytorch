@@ -240,7 +240,7 @@ at::Tensor& embedding_bag_byte_impl(
   }
 
   const std::vector<int64_t> shape = {output_size, D};
-  at::native::resize_(output, shape, c10::nullopt);
+  at::native::resize_(output, shape, std::nullopt);
   AT_DISPATCH_INDEX_TYPES(
       indices.scalar_type(), "embedding_bag_byte_rowwise_offsets_kernel", ([&] {
         embedding_bag_nbits_rowwise_offsets_kernel<index_t, 8><<<
@@ -422,7 +422,7 @@ at::Tensor& embedding_bag_4bit_impl(
   }
 
   const std::vector<int64_t> shape = {output_size, D};
-  at::native::resize_(output, shape, c10::nullopt);
+  at::native::resize_(output, shape, std::nullopt);
   AT_DISPATCH_INDEX_TYPES(
       indices.scalar_type(), "embedding_bag_4bit_rowwise_offsets_kernel", ([&] {
         embedding_bag_nbits_rowwise_offsets_kernel<index_t, 4><<<

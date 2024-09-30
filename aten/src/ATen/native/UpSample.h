@@ -59,7 +59,7 @@ TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
 
 inline std::optional<double> get_scale_value(std::optional<c10::ArrayRef<double>> scales, int idx) {
   if (!scales) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return scales->at(idx);
 }
@@ -489,8 +489,7 @@ void inline apply_grad_input(scalar_in* buffer_ptr, scalar_out* gin, int64_t siz
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec gin_bvec = bVec::loadu(gin + d);
-    fVec gin_fvec0, gin_fvec1;
-    std::tie(gin_fvec0, gin_fvec1) = convert_to_float<scalar_out>(gin_bvec);
+    auto [gin_fvec0, gin_fvec1] = convert_to_float<scalar_out>(gin_bvec);
     gin_fvec0 += fVec::loadu(buffer_ptr + d);
     gin_fvec1 += fVec::loadu(buffer_ptr + d + fVec::size());
     fVec(0).store(buffer_ptr + d);

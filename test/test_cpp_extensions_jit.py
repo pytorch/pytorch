@@ -13,7 +13,6 @@ import warnings
 import torch
 import torch.backends.cudnn
 import torch.multiprocessing as mp
-
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN
@@ -26,6 +25,7 @@ from torch.utils.cpp_extension import (
     remove_extension_h_precompiler_headers,
     ROCM_HOME,
 )
+
 
 # define TEST_ROCM before changing TEST_CUDA
 TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
@@ -580,7 +580,7 @@ class TestCppExtensionJIT(common.TestCase):
 
         # Create a torch.nn.Module which uses the C++ module as a submodule.
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.x = torch.nn.Parameter(torch.tensor(1.0))
                 self.net = extension.Net(3, 5)

@@ -40,7 +40,7 @@ _backend_type_doc = """
 
 # Create an enum type, `BackendType`, with empty members.
 # Can't handle Function Enum API (mypy bug #9079)
-BackendType = enum.Enum(value="BackendType", names=dict())  # type: ignore[misc]
+BackendType = enum.Enum(value="BackendType", names={})  # type: ignore[misc]
 # Unable to assign a function a method (mypy bug #2427)
 BackendType.__repr__ = _backend_type_repr  # type: ignore[assignment]
 
@@ -419,7 +419,6 @@ def _tensorpipe_init_backend_handler(
                 # Notify all workers in group this rank has joined and set devices and reverse_device_map
                 # This is a synchronous operation that completes once all existing ranks are updated
                 _set_devices_and_reverse_device_map(agent)
-                pass
             except Exception:
                 api.shutdown()
                 raise

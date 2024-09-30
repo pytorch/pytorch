@@ -164,13 +164,13 @@ class TestAnnotation(expecttest.TestCase):
         a = Annotation.parse("a")
         self.assertEqual(a.alias_set, tuple("a"))
         self.assertFalse(a.is_write)
-        self.assertEqual(a.alias_set_after, tuple())
+        self.assertEqual(a.alias_set_after, ())
 
     def test_single_alias_is_write(self) -> None:
         a = Annotation.parse("a!")
         self.assertEqual(a.alias_set, tuple("a"))
         self.assertTrue(a.is_write)
-        self.assertEqual(a.alias_set_after, tuple())
+        self.assertEqual(a.alias_set_after, ())
 
     def test_single_alias_is_write_to_wildcard(self) -> None:
         a = Annotation.parse("a! -> *")

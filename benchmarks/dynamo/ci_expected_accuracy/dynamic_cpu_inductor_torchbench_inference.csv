@@ -50,6 +50,30 @@ densenet121,pass,0
 
 
 
+detectron2_fasterrcnn_r_101_c4,pass,42
+
+
+
+detectron2_fasterrcnn_r_101_dc5,pass,42
+
+
+
+detectron2_fasterrcnn_r_101_fpn,pass,46
+
+
+
+detectron2_fasterrcnn_r_50_c4,pass,42
+
+
+
+detectron2_fasterrcnn_r_50_dc5,pass,42
+
+
+
+detectron2_fasterrcnn_r_50_fpn,pass,46
+
+
+
 detectron2_fcos_r_50_fpn,pass,23
 
 
@@ -98,6 +122,10 @@ hf_Bert_large,pass,0
 
 
 
+hf_BigBird,pass,13
+
+
+
 hf_DistilBert,pass,0
 
 
@@ -110,7 +138,15 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
+hf_Longformer,pass,4
+
+
+
 hf_Reformer,pass,5
+
+
+
+hf_T5,pass,0
 
 
 
@@ -290,7 +326,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,27
+vision_maskrcnn,pass,29
 
 
 

@@ -12,6 +12,7 @@ from typing import Any
 import boto3
 import requests
 
+
 POLLING_DELAY_IN_SECOND = 5
 MAX_UPLOAD_WAIT_IN_SECOND = 600
 
@@ -33,10 +34,7 @@ def parse_args() -> Any:
         "--app-file", type=str, required=True, help="the iOS ipa app archive"
     )
     parser.add_argument(
-        "--xctest-file",
-        type=str,
-        required=True,
-        help="the XCTest suite to run",
+        "--xctest-file", type=str, required=True, help="the XCTest suite to run"
     )
     parser.add_argument(
         "--name-prefix",

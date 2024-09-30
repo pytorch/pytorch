@@ -2,9 +2,7 @@
 
 #include <ATen/Tensor.h>
 
-namespace torch {
-namespace autograd {
-namespace utils {
+namespace torch::autograd::utils {
 
 // Helper functions to enforce the "Gradient Layout Contract" described in
 // torch/csrc/autograd/functions/accumulate_grad.h.
@@ -67,7 +65,7 @@ inline at::Tensor clone_obey_contract(
                          .new_empty_strided_symint(
                              variable.sym_sizes(),
                              variable.sym_strides(),
-                             variable.options().memory_format(c10::nullopt))
+                             variable.options().memory_format(std::nullopt))
                          .copy_(new_grad));
   } else {
     // (2)
@@ -75,6 +73,4 @@ inline at::Tensor clone_obey_contract(
   }
 }
 
-} // namespace utils
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd::utils

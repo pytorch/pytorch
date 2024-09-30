@@ -1,5 +1,6 @@
 import setuptools  # type: ignore[import]
 
+
 with open("README.md", encoding="utf-8") as fh:
     long_description = fh.read()
 
