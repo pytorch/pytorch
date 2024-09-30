@@ -720,6 +720,7 @@ graph():
             )
     
     @testing.expectedFailureNonStrict  # T202837589
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # T202837589
     def test_unbacked_to_cond(self):
         class M(torch.nn.Module):
             def forward(self, a):
@@ -1030,7 +1031,10 @@ graph():
             strict=False,
         )
         check_users_for_graph(ep.graph)
-
+    
+    # Expected failures because when we run decomp, we no longer warn on operators. 
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    @testing.expectedFailureTrainingIRToRunDecomp
     def test_export_predispatch_custom_ops_warnings(self):
         @torch.library.custom_op("mylib::foo", mutates_args={})
         def foo(x: torch.Tensor) -> torch.Tensor:
@@ -4158,6 +4162,7 @@ def forward(self, x):
         )
     
     @testing.expectedFailureNonStrict  # T202838147
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # T202838147
     def test_constrain_decomp(self) -> None:
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -5026,6 +5031,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     
     @testing.expectedFailureNonStrict  # T202837720
     @testing.expectedFailureTrainingIRToRunDecompNonStrict  # T202837720
+    @testing.expectedFailureTrainingIRToRunDecomp  # T202837720
     def test_constant_output(self):
         class ModuleConstant(torch.nn.Module):
             def __init__(self) -> None:
@@ -5252,22 +5258,43 @@ graph():
         self.assertEqual(len(ep.state_dict), 0)
         self.assertEqual(len(ep.constants), 1)
 
-        self.assertExpectedInline(
-            str(ep.graph).strip(),
-            """\
+        if is_training_ir_test(self._testMethodName):
+            self.assertExpectedInline(
+                str(ep.graph).strip(),
+                """\
 graph():
     %c_lifted_tensor_0 : [num_users=1] = placeholder[target=c_lifted_tensor_0]
     %x : [num_users=2] = placeholder[target=x]
     %ones : [num_users=1] = call_function[target=torch.ops.aten.ones.default](args = ([3, 3],), kwargs = {device: cpu, pin_memory: False})
     %detach : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%ones,), kwargs = {})
-    %lift_fresh_copy : [num_users=1] = call_function[target=torch.ops.aten.lift_fresh_copy.default](args = (%c_lifted_tensor_0,), kwargs = {})
-    %detach_1 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%lift_fresh_copy,), kwargs = {})
+    %detach_1 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach,), kwargs = {})
     %detach_2 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_1,), kwargs = {})
-    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%detach, %detach_2), kwargs = {})
+    %lift_fresh_copy : [num_users=1] = call_function[target=torch.ops.aten.lift_fresh_copy.default](args = (%c_lifted_tensor_0,), kwargs = {})
+    %detach_3 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%lift_fresh_copy,), kwargs = {})
+    %detach_4 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_3,), kwargs = {})
+    %detach_5 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_4,), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%detach_2, %detach_5), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
     %mul_1 : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %x), kwargs = {})
-    return (mul_1,)""",
-        )
+    return (mul_1,)"""
+            )
+        else:
+            self.assertExpectedInline(
+                str(ep.graph).strip(),
+                """\
+    graph():
+        %c_lifted_tensor_0 : [num_users=1] = placeholder[target=c_lifted_tensor_0]
+        %x : [num_users=2] = placeholder[target=x]
+        %ones : [num_users=1] = call_function[target=torch.ops.aten.ones.default](args = ([3, 3],), kwargs = {device: cpu, pin_memory: False})
+        %detach : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%ones,), kwargs = {})
+        %lift_fresh_copy : [num_users=1] = call_function[target=torch.ops.aten.lift_fresh_copy.default](args = (%c_lifted_tensor_0,), kwargs = {})
+        %detach_1 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%lift_fresh_copy,), kwargs = {})
+        %detach_2 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_1,), kwargs = {})
+        %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%detach, %detach_2), kwargs = {})
+        %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
+        %mul_1 : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %x), kwargs = {})
+        return (mul_1,)""",
+            )
 
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
@@ -5289,6 +5316,7 @@ graph():
         self.assertEqual(ep.module()(**inputs), m(**inputs))
     
     @testing.expectedFailureNonStrict  # T202838037
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # T202838037
     def test_retrace_pre_autograd(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
@@ -6001,7 +6029,9 @@ graph():
 
         inp = (torch.randn(4, 4),)
         ep = export(CondExport(), inp, strict=False)
-        self.assertExpectedInline(
+        # TODO file task
+        if is_training_ir_test(self._testMethodName):
+            self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
 def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
@@ -6010,11 +6040,26 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
     gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [p_bar_linear_bias, p_bar_linear_weight, x]);  gt = true_graph_0 = false_graph_0 = p_bar_linear_bias = p_bar_linear_weight = x = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (p_bar_linear_bias, p_bar_linear_weight, x));  gt = true_graph_0 = false_graph_0 = p_bar_linear_bias = p_bar_linear_weight = x = None
     getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(cos, getitem);  cos = getitem = None
     return (add,)""",
         )
+        else:
+            self.assertExpectedInline(
+                ep.graph_module.code.strip(),
+                """\
+    def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
+        cos = torch.ops.aten.cos.default(x)
+        sum_1 = torch.ops.aten.sum.default(x)
+        gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
+        true_graph_0 = self.true_graph_0
+        false_graph_0 = self.false_graph_0
+        cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [p_bar_linear_bias, p_bar_linear_weight, x]);  gt = true_graph_0 = false_graph_0 = p_bar_linear_bias = p_bar_linear_weight = x = None
+        getitem = cond[0];  cond = None
+        add = torch.ops.aten.add.Tensor(cos, getitem);  cos = getitem = None
+        return (add,)""",
+            )
         schema = get_hop_schema(ep)
         self.assertExpectedInline(
             str(schema),
