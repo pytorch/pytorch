@@ -1,0 +1,7 @@
+*.bat text eol=crlf
+.circleci/config.yml linguist-generated=true
+.github/workflows/generated-*.yml linguist-generated=true
+.github/generated-* linguist-generated=true
+.github/scripts/gql_mocks.json linguist-generated=true
+third_party/LICENSES_BUNDLED.txt linguist-generated=true
+tools/build/bazel/requirements.txt linguist-generated=true
