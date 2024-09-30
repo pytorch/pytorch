@@ -270,6 +270,7 @@ class TestFlexAttention(InductorTestCase):
         golden_out: torch.Tensor,
         ref_out: torch.Tensor,
         compiled_out: torch.Tensor,
+        is_paged_attention: bool = False,
     ):
         dtype = ref_out.dtype
         with torch.no_grad():
@@ -277,6 +278,10 @@ class TestFlexAttention(InductorTestCase):
             # computation, likely due to the online softmax
             if dtype == torch.float32:
                 fudge_factor = 10.0
+                if is_paged_attention:
+                    # paged attention is less accurate since it may reorder
+                    # the blocks from block mask
+                    fudge_factor = 20.0
             else:
                 fudge_factor = 1.1
 
@@ -388,27 +393,25 @@ class TestFlexAttention(InductorTestCase):
             v,
         )
 
-    def run_paged_attention(
+    def preprocess_paged_attention(
         self,
         score_mod: Optional[Callable],
         q: Tensor,
         k: Tensor,
         v: Tensor,
+        block_mask,
         dtype: torch.dtype = torch.float16,
-        block_mask: Optional[BlockMask] = None,
-    ):
-        _, Q_H, Q_S, _ = q.shape
+        page_size: int = 128,
+    ) -> Tuple[Tensor, Tensor, BlockMask, _score_mod_signature]:
+        assert block_mask is not None, "Must provide block_mask"
+        Q_B, Q_H, Q_S, _ = q.shape
         KV_B, KV_H, KV_S, QK_D = k.shape
         _, _, _, V_D = v.shape
 
-        n_pages, page_size, max_batch_size = 32, 128, 5
+        # test with different batch size
+        max_batch_size = max(Q_B, KV_B) + 3
 
-        if block_mask is None:
-
-            def causal_mask(b, h, q, kv):
-                return q >= kv
-
-            block_mask = create_block_mask(causal_mask, max_batch_size, 1, Q_S, KV_S)
+        n_pages = (KV_S + page_size - 1) // page_size * max_batch_size
 
         # allocate cache
         MAX_CACHED_SEQ_LEN = n_pages * page_size
@@ -430,51 +433,76 @@ class TestFlexAttention(InductorTestCase):
         )
 
         # "randomly" initialize the page table
-        paged_cache = PagedAttention(
+        paged_attention = PagedAttention(
             n_pages, page_size, max_batch_size, MAX_CACHED_SEQ_LEN
         )
-        paged_cache.allocate_until_length(
-            torch.tensor([100, 200, 50, 300], device="cuda")
+        paged_attention.allocate_until_length(
+            torch.tensor([KV_S // 4, KV_S // 2, KV_S // 4, KV_S // 3], device="cuda")
         )
-        paged_cache.allocate_until_length(
-            torch.tensor([100, 512, 300, 300], device="cuda")
+        paged_attention.allocate_until_length(
+            torch.tensor([KV_S // 4, KV_S // 2, KV_S // 2, KV_S // 2], device="cuda")
         )
-        paged_cache.allocate_until_length(
-            torch.tensor([512, 512, 300, 300], device="cuda")
+        paged_attention.allocate_until_length(
+            torch.tensor([KV_S // 2, KV_S, KV_S // 2, KV_S], device="cuda")
         )
-        paged_cache.allocate_until_length(
-            torch.tensor([512, 512, 512, 300], device="cuda")
-        )
-        paged_cache.allocate_until_length(
-            torch.tensor([512, 512, 512, 512], device="cuda")
+        paged_attention.allocate_until_length(
+            torch.tensor([KV_S, KV_S, KV_S, KV_S], device="cuda")
         )
 
         # update cache with k and v
-        input_pos = torch.tensor(range(0, KV_S), device="cuda", dtype=torch.int32)
-        paged_cache.update(input_pos, k, k_cache)
-        paged_cache.update(input_pos, v, v_cache)
+        input_pos = torch.arange(KV_S, device="cuda", dtype=torch.int32)
+        batch_idx = torch.arange(KV_B, device="cuda", dtype=torch.int32)
+        paged_attention.update(batch_idx, input_pos, k, k_cache)
+        paged_attention.update(batch_idx, input_pos, v, v_cache)
 
         # convert block mask and score mod
-        new_block_mask = paged_cache.convert_logical_block_mask(
+        converted_block_mask = paged_attention.convert_logical_block_mask(
             block_mask, MAX_CACHED_SEQ_LEN
         )
-        compiled_sdpa = torch.compile(
-            create_attention(
-                paged_cache.get_score_mod(score_mod),
-                block_mask,
-                enable_gqa=(not Q_H == KV_H),
-            )
+        converted_score_mod = paged_attention.get_score_mod(score_mod)
+
+        return k_cache, v_cache, converted_block_mask, converted_score_mod
+
+    def run_paged_attention(
+        self,
+        score_mod: Optional[Callable],
+        q: Tensor,
+        k: Tensor,
+        v: Tensor,
+        dtype: torch.dtype = torch.float16,
+        block_mask: Optional[BlockMask] = None,
+    ) -> Tuple[Tensor, Tensor]:
+        Q_B, Q_H, KV_H = q.shape[0], q.shape[1], k.shape[1]
+
+        if block_mask is None:
+            block_mask = create_block_mask(noop_mask, Q_B, 1, 1, S)
+
+        (
+            k_cache,
+            v_cache,
+            converted_block_mask,
+            converted_score_mod,
+        ) = self.preprocess_paged_attention(
+            score_mod, q, k, v, block_mask, dtype, block_mask.BLOCK_SIZE[1]
         )
+
+        compiled_sdpa = torch.compile(flex_attention)
 
         # compute
         compiled_out, compiled_lse = compiled_sdpa(
-            q, k_cache, v_cache, return_lse=True, block_mask=new_block_mask
+            q,
+            k_cache,
+            v_cache,
+            return_lse=True,
+            block_mask=converted_block_mask,
+            score_mod=converted_score_mod,
+            enable_gqa=(not Q_H == KV_H),
         )
         return compiled_out, compiled_lse
 
     def run_test_with_paged_attention(
         self,
-        score_mod: Optional[Callable],
+        score_mod: Optional[Callable] = _identity,
         dtype: torch.dtype = torch.float16,
         Q_B: int = B,
         Q_H: int = H,
@@ -489,25 +517,22 @@ class TestFlexAttention(InductorTestCase):
         if TEST_WITH_ROCM and Q_H != KV_H:
             self.skipTest("enable_gqa=True is unsupported on ROCM, for now")
 
+        assert Q_H % KV_H == 0
+
         q = torch.randn(
-            (Q_B, Q_H, Q_S, QK_D), dtype=dtype, device="cuda", requires_grad=True
+            (Q_B, Q_H, Q_S, QK_D), dtype=dtype, device="cuda", requires_grad=False
         )
         k = torch.randn(
-            (KV_B, KV_H, KV_S, QK_D), dtype=dtype, device="cuda", requires_grad=True
+            (KV_B, KV_H, KV_S, QK_D), dtype=dtype, device="cuda", requires_grad=False
         )
         v = torch.randn(
-            (KV_B, KV_H, KV_S, V_D), dtype=dtype, device="cuda", requires_grad=True
+            (KV_B, KV_H, KV_S, V_D), dtype=dtype, device="cuda", requires_grad=False
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
 
         if block_mask is None:
-
-            def causal_mask(b, h, q, kv):
-                return q >= kv
-
-            # TODO: change batch size
-            block_mask = create_block_mask(causal_mask, 4, 1, Q_S, KV_S)
+            block_mask = create_block_mask(noop_mask, Q_B, 1, Q_S, KV_S)
 
         sdpa_partial = create_attention(
             score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
@@ -523,11 +548,13 @@ class TestFlexAttention(InductorTestCase):
             golden_out,
             ref_out,
             compiled_out,
+            is_paged_attention=True,
         )
         self._check_out(
             golden_lse,
             ref_lse,
             compiled_lse,
+            is_paged_attention=True,
         )
 
     def run_test_with_call(
@@ -756,6 +783,7 @@ class TestFlexAttention(InductorTestCase):
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
         self.run_test(score_mod, dtype)
+        self.run_test_with_paged_attention(score_mod, dtype)
 
     @running_on_a100_only
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -789,12 +817,14 @@ class TestFlexAttention(InductorTestCase):
         )
         self.run_test_with_call(attention, dtype, B, H, 64, D, B, H, 64, D)
 
+    # TODO
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_dynamic(self, dtype: torch.dtype, score_mod: Callable):
         self.run_dynamic_test(score_mod, dtype)
 
+    # TODO
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
@@ -809,7 +839,7 @@ class TestFlexAttention(InductorTestCase):
     def test_builtin_score_mods_different_seqlen(
         self, dtype: torch.dtype, score_mod: Callable
     ):
-        self.run_test(
+        inputs = (           
             score_mod,
             dtype,
             B,
@@ -821,6 +851,8 @@ class TestFlexAttention(InductorTestCase):
             S,
             D,
         )
+        self.run_test(*inputs)
+        self.run_test_with_paged_attention(*inputs)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
@@ -834,6 +866,7 @@ class TestFlexAttention(InductorTestCase):
     ):
         block_mask = create_block_mask(noop_mask, B, H, S, S, BLOCK_SIZE=BLOCK_SIZE)
         self.run_test(score_mod, dtype, block_mask=block_mask)
+        self.run_test_with_paged_attention(score_mod, dtype, block_mask=block_mask)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -909,7 +942,7 @@ class TestFlexAttention(InductorTestCase):
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_GQA(self, dtype: torch.dtype, score_mod: Callable):
-        self.run_test(
+        inputs = (
             score_mod,
             dtype,
             B,
@@ -921,6 +954,8 @@ class TestFlexAttention(InductorTestCase):
             S,
             D,
         )
+        self.run_test(*inputs)
+        self.run_test_with_paged_attention(*inputs)
 
     test_strides = [
         ((H * S * D, S * D, D, 1), 997),  # offset
@@ -936,6 +971,7 @@ class TestFlexAttention(InductorTestCase):
         ),  # additional buffer on multiple dim + shared dimension
     ]
 
+    # TODO: Fix error for paged attention
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize(
@@ -1009,6 +1045,12 @@ class TestFlexAttention(InductorTestCase):
             compiled_grads[2], ref_grads[2], atol=tolerance.atol, rtol=tolerance.rtol
         )
 
+        # test paged attention
+        paged_compiled_out, _ = self.run_paged_attention(score_mod, q, k, v, dtype)
+        torch.testing.assert_close(
+            ref_out, paged_compiled_out, atol=tolerance.atol, rtol=tolerance.rtol
+        )
+
     @supported_platform
     def test_doc_mask_sparse(self):
         document_id = torch.zeros(S, dtype=torch.int, device="cuda")
@@ -1021,6 +1063,7 @@ class TestFlexAttention(InductorTestCase):
             return torch.where(causal_mask & document_mask, score, -float("inf"))
 
         self.run_test(document_masking_causal, torch.float16)
+        self.run_test_with_paged_attention(document_masking_causal, torch.float16)
 
     @supported_platform
     def test_index_multiple(self):
@@ -1030,6 +1073,7 @@ class TestFlexAttention(InductorTestCase):
             return score + bias[b][q_idx]
 
         self.run_test(index_multiple, torch.float16)
+        self.run_test_with_paged_attention(index_multiple, torch.float16)
 
     @supported_platform
     def test_index_weird1(self):
@@ -1039,6 +1083,7 @@ class TestFlexAttention(InductorTestCase):
             return score + bias[0][b, h][q_idx]
 
         self.run_test(index_weird1, torch.float16)
+        self.run_test_with_paged_attention(index_weird1, torch.float16)
 
     @supported_platform
     def test_index_weird2(self):
@@ -1049,6 +1094,7 @@ class TestFlexAttention(InductorTestCase):
             return score + bias[b][h][which_bias, q_idx]
 
         self.run_test(index_weird2, torch.float16)
+        self.run_test_with_paged_attention(index_weird2, torch.float16)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
@@ -1057,6 +1103,7 @@ class TestFlexAttention(InductorTestCase):
             return torch.where(kv % 2 == 0, score, float("-inf"))
 
         self.run_test(score_mod, dtype)
+        self.run_test_with_paged_attention(score_mod, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
@@ -1071,6 +1118,7 @@ class TestFlexAttention(InductorTestCase):
             return score_mod_2(score_mod_1(score, b, h, m, n), b, h, m, n)
 
         self.run_test(composed_score_mod, dtype)
+        self.run_test_with_paged_attention(composed_score_mod, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
@@ -1081,6 +1129,7 @@ class TestFlexAttention(InductorTestCase):
             return score + head_offset[h]
 
         self.run_test(score_mod, dtype)
+        self.run_test_with_paged_attention(score_mod, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
@@ -1096,6 +1145,7 @@ class TestFlexAttention(InductorTestCase):
             return score
 
         self.run_test(all_bias, dtype)
+        self.run_test_with_paged_attention(all_bias, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1107,6 +1157,7 @@ class TestFlexAttention(InductorTestCase):
             return torch.where(seq_idx[q] == seq_idx[kv], score, float("-inf"))
 
         self.run_test(seq_mask_mod, dtype)
+        self.run_test_with_paged_attention(seq_mask_mod, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1117,6 +1168,7 @@ class TestFlexAttention(InductorTestCase):
             return score + bias[q, kv]
 
         self.run_test(bias_mod, dtype)
+        self.run_test_with_paged_attention(bias_mod, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1127,6 +1179,7 @@ class TestFlexAttention(InductorTestCase):
             return score + bias[b, q, kv]
 
         self.run_test(bias_mod, dtype)
+        self.run_test_with_paged_attention(bias_mod, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1137,6 +1190,7 @@ class TestFlexAttention(InductorTestCase):
             return score + bias[b, h, q, kv]
 
         self.run_test(bias_mod, dtype)
+        self.run_test_with_paged_attention(bias_mod, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1147,6 +1201,7 @@ class TestFlexAttention(InductorTestCase):
             return score + rel_bias[(q - kv) + S]
 
         self.run_test(bias_mod, dtype)
+        self.run_test_with_paged_attention(bias_mod, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1166,6 +1221,7 @@ class TestFlexAttention(InductorTestCase):
             )
 
         self.run_test(bias_mod, dtype)
+        self.run_test_with_paged_attention(bias_mod, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1189,6 +1245,7 @@ class TestFlexAttention(InductorTestCase):
             )
 
         self.run_test(natten_mask, dtype)
+        self.run_test_with_paged_attention(natten_mask, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1241,7 +1298,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return torch.nn.functional.silu(score)
 
         self.run_test(silu_score, dtype)
+        self.run_test_with_paged_attention(silu_score, dtype)
 
+    # TODO: fix error for paged attention
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_padded_dense_causal(self, dtype):
@@ -1258,6 +1317,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         causal_njt = create_padded_dense_wrapper(_causal)
 
         self.run_test(causal_njt, dtype)
+        self.run_test_with_paged_attention(causal_njt, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1268,6 +1328,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return qk + scale
 
         self.run_test(score_mod_scale, dtype)
+        self.run_test_with_paged_attention(score_mod_scale, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1282,8 +1343,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 return qk * scale
 
         self.run_test(score_mod_scale, dtype)
+        self.run_test_with_paged_attention(score_mod_scale, dtype)
+
         ADD = False
         self.run_test(score_mod_scale, dtype)
+        self.run_test_with_paged_attention(score_mod_scale, dtype)
 
     @supported_platform
     @expectedFailure  # If we capture a tensor then we can perform a reduction on it, and that shouldn't be allowed
@@ -1351,6 +1415,156 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out = f(query, *keys, *values)
         out2 = torch.compile(f)(query, *keys, *values)
         self.assertTrue((out - out2).abs().mean() < 1e-2)
+
+    @supported_platform
+    def test_multiple_score_mod_calls_paged_attention(self):
+        query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+        keys = [
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            for _ in range(2)
+        ]
+        values = [
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            for _ in range(2)
+        ]
+
+        def scoremod_1(qk, b, h, q, kv):
+            return qk + (q - kv)
+
+        def scoremod_2(qk, b, h, q, kv):
+            return torch.where(q >= kv, qk, -float("inf"))
+
+        def f(q, k1, k2, v1, v2):
+            q2 = flex_attention(q, k1, v1, score_mod=scoremod_1)
+            return flex_attention(q2, k2, v2, score_mod=scoremod_2)
+
+        eager_out = f(query, *keys, *values)
+
+        block_mask = create_block_mask(noop_mask, 1, 1, 1, S)
+
+        (
+            k_cache1,
+            v_cache1,
+            converted_block_mask1,
+            converted_score_mod1,
+        ) = self.preprocess_paged_attention(
+            scoremod_1, query, keys[0], values[0], block_mask, torch.float32
+        )
+        (
+            k_cache2,
+            v_cache2,
+            converted_block_mask2,
+            converted_score_mod2,
+        ) = self.preprocess_paged_attention(
+            scoremod_2, query, keys[1], values[1], block_mask, torch.float32
+        )
+
+        def paged_f(q, k1, k2, v1, v2):
+            q2 = flex_attention(
+                q,
+                k1,
+                v1,
+                score_mod=converted_score_mod1,
+                block_mask=converted_block_mask1,
+            )
+            return flex_attention(
+                q2,
+                k2,
+                v2,
+                score_mod=converted_score_mod2,
+                block_mask=converted_block_mask2,
+            )
+
+        compiled_out = torch.compile(paged_f)(
+            query, k_cache1, k_cache2, v_cache1, v_cache2
+        )
+        tolerance = Tolerances(atol=2e-1, rtol=2e-1)
+        torch.testing.assert_close(
+            eager_out, compiled_out, atol=tolerance.atol, rtol=tolerance.rtol
+        )
+
+    @supported_platform
+    def test_multiple_score_mod_calls2_paged_attention(self):
+        query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+        keys = [
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            for _ in range(3)
+        ]
+        values = [
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
+            for _ in range(3)
+        ]
+
+        def scoremod_1(qk, b, h, q, kv):
+            return qk + (q - kv)
+
+        def scoremod_2(qk, b, h, q, kv):
+            return torch.where(q >= kv, qk, -float("inf"))
+
+        attention1 = functools.partial(flex_attention, score_mod=scoremod_1)
+
+        def f(q, k1, k2, k3, v1, v2, v3):
+            q2 = attention1(q, k1, v1)
+            q3 = flex_attention(q2, k2, v2, score_mod=scoremod_2)
+            return flex_attention(q3, k3, v3, score_mod=scoremod_1)
+
+        eager_out = f(query, *keys, *values)
+
+        (
+            k_cache1,
+            v_cache1,
+            converted_block_mask1,
+            converted_score_mod1,
+        ) = self.preprocess_paged_attention(
+            scoremod_1, query, keys[0], values[0], block_mask, torch.float32
+        )
+        (
+            k_cache2,
+            v_cache2,
+            converted_block_mask2,
+            converted_score_mod2,
+        ) = self.preprocess_paged_attention(
+            scoremod_2, query, keys[1], values[1], block_mask, torch.float32
+        )
+        (
+            k_cache3,
+            v_cache3,
+            converted_block_mask3,
+            converted_score_mod3,
+        ) = self.preprocess_paged_attention(
+            scoremod_1, query, keys[2], values[2], block_mask, torch.float32
+        )
+
+        paged_attention1 = functools.partial(
+            flex_attention,
+            score_mod=converted_score_mod1,
+            block_mask=converted_block_mask1,
+        )
+
+        def paged_f(q, k1, k2, k3, v1, v2, v3):
+            q2 = paged_attention1(q, k1, v1)
+            q3 = flex_attention(
+                q2,
+                k2,
+                v2,
+                score_mod=converted_score_mod2,
+                block_mask=converted_block_mask2,
+            )
+            return flex_attention(
+                q3,
+                k3,
+                v3,
+                score_mod=converted_score_mod3,
+                block_mask=converted_block_mask3,
+            )
+
+        compiled_out = torch.compile(paged_f)(
+            query, k_cache1, k_cache2, k_cache3, v_cache1, v_cache2, v_cache3
+        )
+        tolerance = Tolerances(atol=2e-1, rtol=2e-1)
+        torch.testing.assert_close(
+            eager_out, compiled_out, atol=tolerance.atol, rtol=tolerance.rtol
+        )
 
     @supported_platform
     def test_inputs_are_realized(self):
@@ -1459,6 +1673,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         causal_njt = create_njt_wrapper(_causal, offsets, seq_idx)
 
         self.run_test(causal_njt, dtype)
+        self.run_test_with_paged_attention(causal_njt, dtype)
 
     @supported_platform
     def test_mixed_dtypes_fails(self):
@@ -1477,6 +1692,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return score * 2
 
         self.run_test(score_mod)
+        self.run_test_with_paged_attention(score_mod)
 
     @supported_platform
     @skip("TODO: Figure out why this is erroring")
@@ -1505,6 +1721,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         context = nullcontext() if qk_d > v_d else self.assertRaises(ValueError)
         with context:
             self.run_test(score_mod, dtype, B, H, S, qk_d, B, H, S, V_D=v_d)
+            self.run_test_with_paged_attention(score_mod, dtype, B, H, S, qk_d, B, H, S, V_D=v_d)
 
     @supported_platform
     def test_autograd_function_in_score_mod(self):
@@ -1551,6 +1768,16 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test_with_call(attention)
 
+    # TODO: Error
+    @supported_platform
+    def test_causal_block_paged_attention(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        block_mask = create_block_mask(mask_mod, 1, 1, S, S)
+        self.run_test_with_paged_attention(score_mod=_identity, block_mask=block_mask)
+
+    # TODO: error
     @supported_platform
     def test_GQA_causal_mask(self):
         def mask_mod(b, h, q, kv):
@@ -1572,6 +1799,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             H,
             S // 8,
             D,
+        )
+
+        self.run_test_with_paged_attention(
+            Q_H = H*4,
+            Q_S = S//8,
+            KV_H = H,
+            KV_S = S//8,
+            block_mask=block_mask,
         )
 
     @supported_platform
@@ -1852,8 +2087,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out = func(query, key, value, block_mask=block_mask)
         out.sum().backward()
 
+    # TODO: error for paged attention
     @supported_platform
-    @common_utils.parametrize("mode", ["eager", "inductor"])
+    @common_utils.parametrize("mode", ["eager", "inductor", "paged_attention"])
     @common_utils.parametrize(
         "permute_order",
         [
@@ -1884,10 +2120,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         if mode == "inductor":
             func = torch.compile(flex_attention, backend=mode, fullgraph=True)
+            out = func(query, key, value)
+        elif mode == "paged_attention":
+            out, _ = self.run_paged_attention(_identity, query, key, value)
         else:
             func = flex_attention
-
-        out = func(query, key, value)
+            out = func(query, key, value)
 
         out_stride_order = get_stride_order(out.stride())
         query_stride_order = get_stride_order(query.stride())
@@ -1898,6 +2136,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             f"Stride order mismatch: out {out_stride_order}, query {query_stride_order}",
         )
 
+    # TODO: Error for paged attention
     @supported_platform
     @common_utils.parametrize("compile", [True, False])
     def test_fully_masked_out_rows_0_check(self, compile: bool):
@@ -1944,6 +2183,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return score
 
         self.run_test(noop_mod, torch.float32, B, H, S, D, B, H, S, D, block_mask)
+        self.run_test_with_paged_attention(noop_mod, torch.float32, B, H, S, D, B, H, S, D, block_mask)
 
     @supported_platform
     def test_kernel_options_argument_is_respected(self):
@@ -2031,6 +2271,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                     f"Ref error: {ref_error}, Flex Error: {flex_error}",
                 )
 
+    # TODO: error for paged attention
     @supported_platform
     def test_causal_block_non_divisible(self):
         def mask_mod(b, h, q, kv):
@@ -2040,6 +2281,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         attention = functools.partial(flex_attention, block_mask=block_mask)
 
         self.run_test_with_call(attention, Q_S=S - 1, KV_S=S - 1)
+        self.run_test_with_paged_attention(Q_S=S - 1, KV_S=S - 1, block_mask=block_mask)
 
     @supported_platform
     def test_modular_indexing(self):
@@ -2077,6 +2319,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         m(q, k, v)
 
+    # TODO: error for paged attention
     @supported_platform
     def test_force_write_lse(self):
         make_tensor = functools.partial(
@@ -2092,7 +2335,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         flex_compile = torch.compile(flex_attention, fullgraph=True)
         out_compiled, lse_compiled = flex_compile(query, key, value, return_lse=True)
 
+        out_paged, lse_paged = self.run_paged_attention(None, query, key, value)
+
         torch.testing.assert_close(lse_eager, lse_compiled, atol=3e-3, rtol=0)
+        torch.testing.assert_close(lse_eager, lse_paged, atol=3e-3, rtol=0)
 
     @supported_platform
     @common_utils.parametrize("backend", ["flex_attention", "flex_decode", "eager"])
@@ -2239,6 +2485,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         torch.testing.assert_close(grads_eager, grads_compile)
 
+    # TODO: error for paged attention
     @supported_platform
     def test_causal_block_non_divisible_with_captured_buffer(self):
         Q_S = S - 3
@@ -2257,6 +2504,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         attention = functools.partial(flex_attention, block_mask=block_mask)
 
         self.run_test_with_call(attention, Q_S=Q_S, KV_S=KV_S)
+        self.run_test_with_paged_attention(Q_S=Q_S, KV_S=KV_S, block_mask=block_mask)
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_qkv_and_block_mask_on_the_same_device(self):

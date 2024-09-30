@@ -383,7 +383,7 @@ class TestFlexDecoding(InductorTestCase):
         # test with different batch size
         max_batch_size = max(Q_B, KV_B) + 3
 
-        n_pages = (max(Q_S, KV_S) + page_size - 1) // page_size * 4
+        n_pages = (KV_S + page_size - 1) // page_size * max_batch_size
 
         # allocate cache
         MAX_CACHED_SEQ_LEN = n_pages * page_size
@@ -486,12 +486,10 @@ class TestFlexDecoding(InductorTestCase):
         V_D: int = D,
         block_mask: Optional[BlockMask] = None,
     ):
-        assert (
-            score_mod is not None or block_mask is not None
-        ), "Must provide score_mod or block_mask"
-        assert Q_H % KV_H == 0
         if TEST_WITH_ROCM and Q_H != KV_H:
             self.skipTest("enable_gqa=True is unsupported on ROCM, for now")
+
+        assert Q_H % KV_H == 0
 
         q = torch.randn(
             (Q_B, Q_H, Q_S, QK_D),
