@@ -1086,7 +1086,7 @@ def _compile(
                 config.suppress_errors,
                 config.inline_inbuilt_nn_modules,
                 config.specialize_float,
-                json.dumps(config.shallow_copy_dict()),
+                json.dumps(config.shallow_copy_dict(), default=lambda o: list(o) if isinstance(o, set) else o),
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
