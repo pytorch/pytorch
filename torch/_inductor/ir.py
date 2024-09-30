@@ -5909,11 +5909,9 @@ class FallbackKernel(ExternKernelAlloc):
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         if unbacked_bindings := getattr(self, "unbacked_bindings", None):
-            resolved = resolve_unbacked_bindings(
+            return resolve_unbacked_bindings(
                 V.graph.sizevars.shape_env, unbacked_bindings
-            )
-            assert resolved is not None
-            return resolved.keys()  # type: ignore[return-value]
+            ).keys()
         else:
             return OrderedSet()
 
