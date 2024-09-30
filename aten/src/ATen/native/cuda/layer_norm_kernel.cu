@@ -217,7 +217,7 @@ __device__ WelfordDataLN compute_stats(
 
 
 template <typename T, typename T_ACC,
-typename std::enable_if<!std::is_same<T, double>::value, int>::type = 0>
+typename std::enable_if_t<!std::is_same_v<T, double>, int> = 0>
 __device__ __inline__ void vectorized_layer_norm_kernel_impl(
   const int N,
   T_ACC eps,
@@ -282,7 +282,7 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
 }
 
 template <typename T, typename T_ACC,
-typename std::enable_if<std::is_same<T, double>::value, int>::type = 0>
+typename std::enable_if_t<std::is_same_v<T, double>, int> = 0>
 __device__ __inline__ void vectorized_layer_norm_kernel_impl(
   const int /*N*/,
   T_ACC /*eps*/,
@@ -784,7 +784,7 @@ void LayerNormKernelImplInternal(
   bool can_vec_gamma = gamma.defined() ? can_vectorize(gamma_data, alignment) : true;
   bool can_vec_beta = beta.defined() ? can_vectorize(beta_data, alignment) : true;
 
-  if ((std::is_same<T, float>::value || std::is_same<T, at::Half>::value || std::is_same<T, at::BFloat16>::value) &&
+  if ((std::is_same_v<T, float> || std::is_same_v<T, at::Half> || std::is_same_v<T, at::BFloat16>) &&
   N <= static_cast<int64_t>(1ULL << std::numeric_limits<float>::digits) && N % num_vec_elems == 0 &&
   can_vec_X && can_vec_Y && can_vec_gamma && can_vec_beta) {
     launch_vectorized_layer_norm_kernel(static_cast<int>(N), M, eps, X_data, gamma_data, beta_data, Y_data, mean_data, rstd_data);
@@ -1190,8 +1190,8 @@ void LayerNormBackwardKernelImplInternal(
     int nshared = (num_threads() / warp_size) * sizeof(T_ACC);
 
     bool bVectorSizeMultiple = (N % vec_size == 0);
-    bool bTargetDataTypes = (std::is_same<T, float>::value || std::is_same<T, at::Half>::value ||
-      std::is_same<T, at::BFloat16>::value);
+    bool bTargetDataTypes = (std::is_same_v<T, float> || std::is_same_v<T, at::Half> ||
+      std::is_same_v<T, at::BFloat16>);
     const unsigned int alignment = sizeof(T) * vec_size;
     bool bAlignedBuffers = can_vectorize(dY_data, alignment) && can_vectorize(X_data, alignment) &&
       can_vectorize(gamma_data, alignment) && can_vectorize(dX_data, alignment);
@@ -1354,10 +1354,10 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
 
   Tensor Y = at::native::empty_like(
       *X,
-      c10::nullopt /* dtype */,
-      c10::nullopt /* layout */,
-      c10::nullopt /* device */,
-      c10::nullopt /* pin_memory */,
+      std::nullopt /* dtype */,
+      std::nullopt /* layout */,
+      std::nullopt /* device */,
+      std::nullopt /* pin_memory */,
       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto acc_type = at::toAccumulateType(input.scalar_type(), /*is_cuda=*/true);
   Tensor mean = at::empty({M}, X->options().dtype(acc_type));
@@ -1414,42 +1414,42 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
   if (grad_input_mask[0]) {
     dX = at::native::empty_like(
         *X,
-        c10::nullopt /* dtype */,
-        c10::nullopt /* layout */,
-        c10::nullopt /* device */,
-        c10::nullopt /* pin_memory */,
+        std::nullopt /* dtype */,
+        std::nullopt /* layout */,
+        std::nullopt /* device */,
+        std::nullopt /* pin_memory */,
         LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[1]) {
     dgamma = M > 0 ? at::native::empty_like(
                          *gamma,
-                         c10::nullopt /* dtype */,
-                         c10::nullopt /* layout */,
-                         c10::nullopt /* device */,
-                         c10::nullopt /* pin_memory */,
+                         std::nullopt /* dtype */,
+                         std::nullopt /* layout */,
+                         std::nullopt /* device */,
+                         std::nullopt /* pin_memory */,
                          LEGACY_CONTIGUOUS_MEMORY_FORMAT)
                    : at::native::zeros_like(
                          *gamma,
-                         c10::nullopt /* dtype */,
-                         c10::nullopt /* layout */,
-                         c10::nullopt /* device */,
-                         c10::nullopt /* pin_memory */,
+                         std::nullopt /* dtype */,
+                         std::nullopt /* layout */,
+                         std::nullopt /* device */,
+                         std::nullopt /* pin_memory */,
                          LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[2]) {
     dbeta = M > 0 ? at::native::empty_like(
                         *beta,
-                        c10::nullopt /* dtype */,
-                        c10::nullopt /* layout */,
-                        c10::nullopt /* device */,
-                        c10::nullopt /* pin_memory */,
+                        std::nullopt /* dtype */,
+                        std::nullopt /* layout */,
+                        std::nullopt /* device */,
+                        std::nullopt /* pin_memory */,
                         LEGACY_CONTIGUOUS_MEMORY_FORMAT)
                   : at::native::zeros_like(
                         *beta,
-                        c10::nullopt /* dtype */,
-                        c10::nullopt /* layout */,
-                        c10::nullopt /* device */,
-                        c10::nullopt /* pin_memory */,
+                        std::nullopt /* dtype */,
+                        std::nullopt /* layout */,
+                        std::nullopt /* device */,
+                        std::nullopt /* pin_memory */,
                         LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (M > 0 && N > 0) {

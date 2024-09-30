@@ -405,7 +405,7 @@ class ChunkDataset final
   }
 
   /// size is not used for chunk dataset.
-  optional<size_t> size() const override {
+  std::optional<size_t> size() const override {
     return torch::nullopt;
   }
 

@@ -1,19 +1,19 @@
+from __future__ import annotations
+
 import json
 import os
 from collections import defaultdict
-from typing import Any, cast, Dict, List, Set
+from typing import Any, cast, Dict
 from warnings import warn
 
 from tools.stats.import_test_stats import (
     ADDITIONAL_CI_FILES_FOLDER,
     TEST_CLASS_RATINGS_FILE,
 )
-
 from tools.testing.target_determination.heuristics.interface import (
     HeuristicInterface,
     TestPrioritizations,
 )
-
 from tools.testing.target_determination.heuristics.utils import (
     normalize_ratings,
     query_changed_files,
@@ -28,10 +28,10 @@ class HistoricalClassFailurCorrelation(HeuristicInterface):
     when the files edited by current PR were modified.
     """
 
-    def __init__(self, **kwargs: Any):
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
-    def get_prediction_confidence(self, tests: List[str]) -> TestPrioritizations:
+    def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:
         ratings = _get_ratings_for_tests(set(tests))
         test_ratings = {
             TestRun(k): v for (k, v) in ratings.items() if TestRun(k).test_file in tests
@@ -39,7 +39,7 @@ class HistoricalClassFailurCorrelation(HeuristicInterface):
         return TestPrioritizations(tests, normalize_ratings(test_ratings, 0.25))
 
 
-def _get_historical_test_class_correlations() -> Dict[str, Dict[str, float]]:
+def _get_historical_test_class_correlations() -> dict[str, dict[str, float]]:
     path = REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / TEST_CLASS_RATINGS_FILE
     if not os.path.exists(path):
         print(f"could not find path {path}")
@@ -50,8 +50,8 @@ def _get_historical_test_class_correlations() -> Dict[str, Dict[str, float]]:
 
 
 def _get_ratings_for_tests(
-    tests_to_run: Set[str],
-) -> Dict[str, float]:
+    tests_to_run: set[str],
+) -> dict[str, float]:
     # Get the files edited
     try:
         changed_files = query_changed_files()
@@ -65,7 +65,7 @@ def _get_ratings_for_tests(
 
     # Find the tests failures that are correlated with the edited files.
     # Filter the list to only include tests we want to run.
-    ratings: Dict[str, float] = defaultdict(float)
+    ratings: dict[str, float] = defaultdict(float)
     for file in changed_files:
         for qualified_test_class, score in test_class_correlations.get(
             file, {}
@@ -79,8 +79,8 @@ def _get_ratings_for_tests(
 
 
 def _rank_correlated_tests(
-    tests_to_run: List[str],
-) -> List[str]:
+    tests_to_run: list[str],
+) -> list[str]:
     # Find the tests failures that are correlated with the edited files.
     # Filter the list to only include tests we want to run.
     tests_to_run = set(tests_to_run)

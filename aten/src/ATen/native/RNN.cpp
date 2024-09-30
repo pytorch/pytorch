@@ -15,6 +15,9 @@
 #include <torch/custom_class.h>
 #include <torch/library.h>
 #include <ATen/Config.h>
+#if AT_MKLDNN_ENABLED()
+#include <ATen/native/mkldnn/Utils.h>
+#endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -97,7 +100,10 @@ bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
   };
   return input.options().backend() == at::Backend::CPU &&
       is_cpu_backend(params) && is_cpu_backend(hx) &&
-      (input.scalar_type() == kFloat || input.scalar_type() == kBFloat16) &&
+      (input.scalar_type() == kFloat ||
+       (input.scalar_type() == kBFloat16 && mkldnn_bf16_device_check()) ||
+       (input.scalar_type() == kHalf && !at::GradMode::is_enabled() &&
+        mkldnn_fp16_device_check())) &&
       input.numel() != 0;
 #endif
   return false;
@@ -209,7 +215,7 @@ struct CellParams : public CellParamsBase {
     TORCH_INTERNAL_ASSERT(false, "Not yet implemented");
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
-      CellParamsSerializationType state) {
+      const CellParamsSerializationType& state) {
     TORCH_INTERNAL_ASSERT(false, "Not yet implemented");
   }
 };
@@ -289,9 +295,9 @@ struct QuantizedCellParams : public CellParamsBase {
                                                zero_point_hh.toLong()};
     return CellParamsSerializationType(
         "quantized",
-        std::move(tensors_to_serialize),
-        std::move(doubles_to_serialize),
-        std::move(longs_to_serialize),
+        tensors_to_serialize,
+        doubles_to_serialize,
+        longs_to_serialize,
         {});
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
@@ -355,10 +361,10 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params(
       /*packed_hh=*/std::move(packed_hh),
       /*col_offsets_ih=*/std::move(col_offsets_ih),
       /*col_offsets_hh=*/std::move(col_offsets_hh),
-      /*scale_ih=*/std::move(scale_ih),
-      /*scale_hh=*/std::move(scale_hh),
-      /*zero_point_ih=*/std::move(zero_point_ih),
-      /*zero_point_hh=*/std::move(zero_point_hh));
+      /*scale_ih=*/scale_ih,
+      /*scale_hh=*/scale_hh,
+      /*zero_point_ih=*/zero_point_ih,
+      /*zero_point_hh=*/zero_point_hh);
 }
 
 // QuantizedCellParams vs. QuantizedCellParamsDynamic
@@ -431,10 +437,10 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
     // reduce_range parameter is serialized along with the int field values.
     return CellParamsSerializationType(
         "quantized_dynamic",
-        std::move(tensors_to_serialize),
+        tensors_to_serialize,
         {},
         {reduce_range_},
-        std::move(packed_params_to_serialize));
+        packed_params_to_serialize);
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
       CellParamsSerializationType state) {
@@ -507,7 +513,7 @@ struct QuantizedCellParamsFP16 : public CellParamsBase {
         packed_params_to_serialize{packed_ih, packed_hh};
 
     return CellParamsSerializationType(
-        "quantized_fp16", {}, {}, {}, std::move(packed_params_to_serialize));
+        "quantized_fp16", {}, {}, {}, packed_params_to_serialize);
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
       CellParamsSerializationType state) {
@@ -667,13 +673,13 @@ tpair_of<Tensor> hidden_slice(const tpair_of<Tensor>& t, int64_t start, int64_t 
 // It's a struct only because functional programming in C++ is a pain, and it's easier
 // to pass around "vtable pointers" than actual function pointers.
 
-void check_rnn_cell_forward_input(const Tensor& input, c10::SymInt input_size) {
+void check_rnn_cell_forward_input(const Tensor& input, const c10::SymInt& input_size) {
   TORCH_CHECK(
     input.sym_size(1) == input_size,
     "input has inconsistent input_size: got ", input.sym_size(1), " expected ", input_size);
 }
 
-void check_rnn_cell_forward_hidden(const Tensor& input, const Tensor& hx, c10::SymInt hidden_size, c10::SymInt hidden_label) {
+void check_rnn_cell_forward_hidden(const Tensor& input, const Tensor& hx, const c10::SymInt& hidden_size, const c10::SymInt& hidden_label) {
   TORCH_CHECK(
     input.sym_size(0) == hx.sym_size(0),
     "Input batch size ", input.sym_size(0), " doesn't match hidden", hidden_label, " batch size ", hx.sym_size(0));
@@ -1433,15 +1439,11 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
 #ifdef USE_MPS
-  if (_input.is_mps() && (mps::is_macos_13_or_newer() || num_layers == 1)) {
+  if (_input.is_mps()) {
     std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> output = at::_lstm_mps(_input, hx, _params, has_biases,
             num_layers, dropout_p, train, bidirectional, batch_first);
     std::tuple<Tensor, Tensor, Tensor> return_values = std::make_tuple(std::get<0>(output), std::get<1>(output), std::get<2>(output));
     return return_values;
-  } else if (_input.is_mps()) {
-    TORCH_WARN_ONCE("Native multi-layer LSTM support in MPS available only on MacOS 13 onwards.",
-                    " Falling back to LSTMCell iteration.",
-                    " This may have performance implications.");
   }
 #endif
   // if cells are of different size, that means projections are used
@@ -1711,23 +1713,9 @@ static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input(
           result_dtype == at::kHalf,
       "dtype is not supported");
 
-  std::tuple<Tensor, Tensor, Tensor> results;
-  if (result_dtype == at::kChar || result_dtype == at::kQInt8) {
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (use_dynamic) {
-      results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
-          input, params, hx[0], hx[1], num_layers,
-          dropout_p, train, bidirectional);
-    } else {
-      results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
-          input, params, hx[0], hx[1], num_layers,
-          dropout_p, train, bidirectional);
-    }
-  } else {
-    results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
+  auto results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
         input, params, hx[0], hx[1], num_layers,
         dropout_p, train, bidirectional);
-  }
 
   if (batch_first) {
     std::get<0>(results) = std::get<0>(results).transpose(0, 1);
@@ -1759,8 +1747,8 @@ static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input_legacy(
 static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
     const Tensor& data,
     const Tensor& batch_sizes,
-    c10::List<at::Tensor> hx_,
-    c10::List<c10::intrusive_ptr<CellParamsBase>> _params_,
+    const c10::List<at::Tensor>& hx_,
+    const c10::List<c10::intrusive_ptr<CellParamsBase>>& _params_,
     bool has_biases,
     int64_t num_layers,
     double dropout_p,
@@ -1777,26 +1765,10 @@ static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   TORCH_CHECK(hx[0].size(2) == hx[1].size(2), "quantized LSTM with projections is not supported");
 
-  auto result_dtype = dtype.has_value() ? dtype.value() : at::kChar;
-
   PackedSequence input { data, batch_sizes };
-  std::tuple<PackedSequence, Tensor, Tensor> results;
-  if (result_dtype == at::kChar || result_dtype == at::kQInt8) {
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (use_dynamic) {
-      results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
-          input, params, hx[0], hx[1], num_layers,
-          dropout_p, train, bidirectional);
-    } else {
-      results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
-          input, params, hx[0], hx[1], num_layers,
-          dropout_p, train, bidirectional);
-    }
-  } else {
-    results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
+  auto results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
         input, params, hx[0], hx[1], num_layers,
         dropout_p, train, bidirectional);
-  }
   auto & packed_output = std::get<0>(results);
   return std::make_tuple(std::move(packed_output.data),
                          std::move(std::get<1>(results)),
