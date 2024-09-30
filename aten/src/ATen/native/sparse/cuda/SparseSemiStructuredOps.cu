@@ -926,9 +926,8 @@ _to_sparse_semi_structured(const Tensor& dense) {
   auto metadata = sparse.indices();
   
   return std::make_tuple(compressed_data, metadata);
-#endif
 
-  // Determine PyTorch datatype for the metadata matrix.
+#else  // Determine PyTorch datatype for the metadata matrix.
   auto meta_dtype= at::kChar;
   auto ksparse = 0;
   auto dense_elems_per_meta_elem = 0;
@@ -1052,6 +1051,7 @@ _to_sparse_semi_structured(const Tensor& dense) {
 
   return std::make_tuple(sparse_cpu.to(dense.device()),
                          meta_reordered_cpu.to(dense.device()));
+#endif
 #endif
 }
 
