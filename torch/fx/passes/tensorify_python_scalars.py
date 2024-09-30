@@ -5,8 +5,9 @@ from typing import Union
 
 import torch
 import torch.fx as fx
-from torch._prims_common import elementwise_dtypes, ELEMENTWISE_TYPE_PROMOTION_KIND
+from torch._prims_common import get_computation_dtype
 from torch.fx._utils import lazy_format_graph_code
+from torch._inductor.fx_utils import FakeTensorUpdater
 from torch.fx.experimental.symbolic_shapes import ShapeEnv  # noqa: TCH001
 from torch.fx.graph_module import GraphModule  # noqa: TCH001
 
@@ -182,10 +183,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
             if node.op == "call_function" and node.target is torch.ops.aten.mul.Tensor:
                 args = []
                 transform = False
-                compute_dtype, result_dtype = elementwise_dtypes(
-                    node.meta["val"],
-                    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-                )
+                compute_dtype = get_computation_dtype(node.meta["val"])
 
                 for a in node.args:
                     if isinstance(a, fx.Node) and isinstance(
@@ -198,7 +196,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                             transform = False
                             break
 
-                        if "val" not in a.meta or a.meta["val"].dtype != compute_dtype:
+                        if 'val' not in a.meta or a.meta["val"].dtype != compute_dtype:
                             res = graph.call_function(
                                 torch.ops.prims.convert_element_type.default,
                                 (
@@ -219,7 +217,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                         tuple(args),
                     )
 
-                    if compute_dtype != result_dtype:
+                    if compute_dtype != node.meta["val"].dtype:
                         res2 = graph.call_function(
                             torch.ops.prims.convert_element_type.default,
                             (
@@ -235,6 +233,9 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
     for proxy in reversed(expr_to_sym_proxy.values()):
         if len(proxy.node.users) == 0 and proxy.node.op != "placeholder":
             graph.erase_node(proxy.node)
+
+    # fake_tensor_updater = FakeTensorUpdater(graph)
+    # fake_tensor_updater.incremental_update()
 
     graph_code_log.debug(
         "%s", lazy_format_graph_code("tensorify_python_scalars", gm, colored=True)
