@@ -206,7 +206,11 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                                     compute_dtype,
                                 ),
                             )
-                            res.meta = node.meta
+                            res.meta[
+                                "val"
+                            ] = torch.ops.prims.convert_element_type.default(
+                                a.meta["val"], compute_dtype
+                            )
                             a = res
 
                         args.append(a)
