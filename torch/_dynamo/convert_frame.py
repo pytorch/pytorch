@@ -1080,7 +1080,7 @@ def _compile(
                 structured_logging_overhead_s,
                 config.suppress_errors,
                 config.inline_inbuilt_nn_modules,
-                FbWhoAmI::getDataCenterPrefix(),
+                "dummy_value",
                 BuildInfo.get_build_upstream_revision_commit_epoch_time(),
                 config.specialize_float,
             )
