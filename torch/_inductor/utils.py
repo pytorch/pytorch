@@ -728,7 +728,9 @@ def any_is_symbolic(*args: Any) -> bool:
     return any(is_symbolic(a) for a in args)
 
 
-def get_first_incompatible_cudagraph_node(gm: torch.fx.GraphModule) -> Optional[torch.fx.Node]:
+def get_first_incompatible_cudagraph_node(
+    gm: torch.fx.GraphModule,
+) -> Optional[torch.fx.Node]:
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
     forbidden_set = {
