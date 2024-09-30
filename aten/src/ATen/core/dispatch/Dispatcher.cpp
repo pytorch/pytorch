@@ -17,8 +17,22 @@ TORCH_SDT_DEFINE_SEMAPHORE(operator_end)
 #endif
 
 bool show_dispatch_trace() {
-    static char const* temp = getenv("TORCH_SHOW_DISPATCH_TRACE");
-    return temp != nullptr;
+  static auto envar = std::getenv("TORCH_SHOW_DISPATCH_TRACE");
+
+  if (envar) {
+    if (strcmp(envar, "0") == 0) {
+      return false;
+    }
+    if (strcmp(envar, "1") == 0) {
+      return true;
+    }
+    TORCH_WARN(
+        "ignoring invalid value for TORCH_SHOW_DISPATCH_TRACE: ",
+        envar,
+        " valid values are 0 or 1.");
+  }
+
+  return false;
 }
 
 static thread_local int64_t dispatch_trace_nesting_value_;
