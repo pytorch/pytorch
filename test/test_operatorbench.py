@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import os
+import subprocess
 import sys
 import unittest
 
@@ -10,7 +11,6 @@ except ImportError:
     if __name__ == "__main__":
         sys.exit(0)
     raise unittest.SkipTest("requires triton")  # noqa: B904
-
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 operatorbench_dir = os.path.join(current_dir, "..", "benchmarks", "dynamo")
@@ -26,6 +26,16 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+
+
+def check_and_install_liger_kernel():
+    try:
+        import liger_kernel  # noqa: F401
+    except ImportError:
+        print("liger-kernel not found. Installing...")
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "liger-kernel", "--no-deps"]
+        )
 
 
 @instantiate_parametrized_tests
@@ -67,4 +77,5 @@ class OperatorBenchTestCase(TestCase):
 
 if __name__ == "__main__":
     if HAS_GPU:
+        check_and_install_liger_kernel()
         run_tests(needs="filelock")
