@@ -3,10 +3,7 @@ import sys
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
-
-
-def is_fbcode() -> bool:
-    return not hasattr(torch.version, "git_version")
+from torch._environment import is_fbcode
 
 
 def _get_tristate_env(name: str) -> Optional[bool]:
@@ -1151,7 +1148,7 @@ class rocm:
     use_preselected_instances: bool = False
 
 
-# Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental)
+# Backend to use for CPU codegen either "cpp" or "halide" (experimental)
 cpu_backend = "cpp"
 
 # Backend to use for CUDA codegen either "triton" or "halide" (experimental)

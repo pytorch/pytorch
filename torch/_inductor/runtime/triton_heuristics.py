@@ -57,8 +57,6 @@ if triton is not None:
     from triton.runtime.autotuner import OutOfResources
     from triton.runtime.jit import KernelInterface
 
-    from . import triton_helpers
-
     try:
         from triton.compiler.compiler import ASTSource
     except ImportError:
@@ -69,14 +67,11 @@ if triton is not None:
     except ImportError:
         GPUTarget = None
 else:
-    from types import ModuleType
-
     Config = object
     KernelInterface = object
     OutOfResources = object
     ASTSource = None
     GPUTarget = None
-    triton_helpers = ModuleType("triton_helpers")
 
 try:
     autograd_profiler = torch.autograd.profiler
@@ -124,7 +119,9 @@ def autotune_hints_to_configs(
                     triton_config(
                         size_hints,
                         *xyz,
-                        num_elements_per_warp=device_props.warp_size,
+                        num_elements_per_warp=device_props.warp_size
+                        if device_props.warp_size
+                        else 32,
                     )
                 )
 
@@ -378,11 +375,6 @@ class CachingAutotuner(KernelInterface):
         # device type will be "hip" rather than "cuda" here
         compile_meta["device_type"] = self.device_props.type
         compile_meta["cc"] = self.device_props.cc
-
-        if self.device_props.type == "cpu":
-            triton_helpers.set_driver_to_cpu()
-        else:
-            triton_helpers.set_driver_to_gpu()
 
         if ASTSource:
             compile_args = (
@@ -685,9 +677,6 @@ class CachingAutotuner(KernelInterface):
             from torch._inductor.utils import do_bench_using_profiling
 
             return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
-
-        if self.device_props.type == "cpu":
-            return benchmarker.benchmark_cpu(kernel_call)
 
         return benchmarker.benchmark_gpu(kernel_call, rep=40)
 
