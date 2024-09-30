@@ -697,8 +697,8 @@ def flex_attention(
         q_indices,
         full_q_num_blocks,
         full_q_indices,
-        SPARSE_KV_BLOCK_SIZE,
         SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE,
         mask_graph,
     ) = block_mask
     placeholder_inps = [
@@ -1636,8 +1636,8 @@ def flex_attention_backward(*args, **kwargs):
         q_indices,
         full_q_num_blocks,
         full_q_indices,
-        SPARSE_KV_BLOCK_SIZE,
         SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE,
         mask_graph,
     ) = block_mask
 
