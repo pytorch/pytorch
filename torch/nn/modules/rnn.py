@@ -482,27 +482,31 @@ class RNN(RNNBase):
     .. code-block:: python
 
         # Efficient implementation equivalent to the following with bidirectional=False
-        def forward(x, h_0=None):
-            if batch_first:
-                x = x.transpose(0, 1)
-            seq_len, batch_size, _ = x.size()
-            if h_0 is None:
-                h_0 = torch.zeros(num_layers, batch_size, hidden_size)
-            h_t_minus_1 = h_0
-            h_t = h_0
-            output = []
+        def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tuple[Tensor, Tensor]:
+            if self.batch_first:
+                input = input.transpose(0, 1)
+            seq_len, batch_size, _ = input.size()
+            if hx is None:
+                hx = torch.zeros(self.num_layers, batch_size, self.hidden_size)
+
+            h = [hx]
+
             for t in range(seq_len):
-                for layer in range(num_layers):
-                    h_t[layer] = torch.tanh(
-                        x[t] @ weight_ih[layer].T
-                        + bias_ih[layer]
-                        + h_t_minus_1[layer] @ weight_hh[layer].T
-                        + bias_hh[layer]
-                    )
-                output.append(h_t[-1])
-                h_t_minus_1 = h_t
-            output = torch.stack(output)
-            if batch_first:
+                next_h = []
+                for layer in range(self.num_layers):
+            	    next_h.append(torch.tanh(
+            		    (input[t] if layer == 0 else next_h[layer - 1]) @ getattr(self, f"weight_ih_l{layer}").T
+            		    + getattr(self, f"bias_ih_l{layer}")
+            		    + h[-1][layer] @ getattr(self, f"weight_hh_l{layer}").T
+            		    + getattr(self, f"bias_hh_l{layer}")
+            	    ))
+                h.append(torch.stack(next_h))
+
+            h = torch.stack(h[1:])
+            output = h[:, -1]
+            h_t = h[-1]
+
+            if self.batch_first:
                 output = output.transpose(0, 1)
             return output, h_t
 
