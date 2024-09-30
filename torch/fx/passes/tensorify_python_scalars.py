@@ -198,7 +198,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                             transform = False
                             break
 
-                        if a.meta["val"].dtype != compute_dtype:
+                        if "val" not in a.meta or a.meta["val"].dtype != compute_dtype:
                             res = graph.call_function(
                                 torch.ops.prims.convert_element_type.default,
                                 (
@@ -206,11 +206,7 @@ def tensorify_python_scalars(gm: GraphModule, shape_env: ShapeEnv) -> None:
                                     compute_dtype,
                                 ),
                             )
-                            res.meta[
-                                "val"
-                            ] = torch.ops.prims.convert_element_type.default(
-                                a.meta["val"], compute_dtype
-                            )
+                            res.meta = node.meta
                             a = res
 
                         args.append(a)
