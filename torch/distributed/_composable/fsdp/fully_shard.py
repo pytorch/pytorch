@@ -1,12 +1,12 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
-from typing import Any, cast, Iterable, List, NoReturn, Optional, Union
+from typing import Any, cast, Dict, Iterable, List, NoReturn, Optional, Type, Union
 
 import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
-from torch.distributed._tensor import DeviceMesh
+from torch.distributed.tensor import DeviceMesh
 from torch.distributed.utils import _get_root_modules
 
 from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
@@ -21,6 +21,9 @@ from ._fsdp_init import (
 )
 from ._fsdp_param_group import FSDPParamGroup
 from ._fsdp_state import _get_module_fsdp_state, FSDPState
+
+
+cls_to_fsdp_cls: Dict[Type, Type] = {}
 
 
 # The decorator adds a state object to `module` that can be accessed via
@@ -144,8 +147,11 @@ def fully_shard(
     # Place FSDP leftmost for highest priority in the method resolution order
     for module in modules:
         cls = module.__class__
-        dct = {"__deepcopy__": unimplemented_deepcopy}
-        new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
+        new_cls = cls_to_fsdp_cls.get(cls, None)
+        if not new_cls:
+            dct = {"__deepcopy__": unimplemented_deepcopy}
+            new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
+            cls_to_fsdp_cls[cls] = new_cls
         module.__class__ = new_cls
     return arg_module
 
@@ -351,6 +357,25 @@ class FSDPModule:
             mul_factor = 1.0 / float(factor)
             reduce_op = torch.distributed._make_nccl_premul_sum(mul_factor)
             fsdp_param_group.reduce_scatter_reduce_op = reduce_op
+
+    def _set_unshard_async_op(self, async_op: bool):
+        """
+        Sets whether to use ``async_op=True`` or ``False`` for the pre-forward
+        and pre-backward unshard op. This defaults to ``False`` but can be set
+        to ``True`` with this method.
+
+        Setting this to ``True`` allows the all-gather allocations to happen in
+        the default stream, avoiding inter-stream memory fragmentation.
+        However, you must use explicit prefetching (e.g. via :meth:`unshard`)
+        in forward to still get overlap, and the pre-all-gather ops like dtype
+        casting and copy-in will not overlap with compute.
+        """
+        self_module = cast(nn.Module, self)
+        for module in self_module.modules():
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                if fsdp_param_group := state._fsdp_param_group:
+                    fsdp_param_group.unshard_async_op = async_op
 
     def _get_fsdp_state(self) -> FSDPState:
         if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:

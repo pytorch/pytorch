@@ -1,6 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import List, Optional, Tuple, Union
+from typing import cast, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -219,7 +219,7 @@ def _single_tensor_asgd(
         step_t = state_steps[i]
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-        if not torch.compiler.is_compiling() and capturable:
+        if not torch._utils.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
             assert (
                 param.device.type
@@ -292,7 +292,7 @@ def _multi_tensor_asgd(
     assert not differentiable, "_foreach ops don't support autograd"
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch.compiler.is_compiling() and capturable:
+    if not torch._utils.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
@@ -303,19 +303,26 @@ def _multi_tensor_asgd(
         ), f"If capturable=True, params, mus, etas, and state_steps must be on supported devices: {capturable_supported_devices}."
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, axs, mus, etas, state_steps]
+        [params, grads, axs, mus, etas, state_steps]  # type: ignore[list-item]
     )
     for (device, _), (
         (
-            grouped_params,
-            grouped_grads,
-            grouped_axs,
-            grouped_mus,
-            grouped_etas,
-            grouped_state_steps,
+            grouped_params_,
+            grouped_grads_,
+            grouped_axs_,
+            grouped_mus_,
+            grouped_etas_,
+            grouped_state_steps_,
         ),
         _,
     ) in grouped_tensors.items():
+        grouped_params = cast(List[Tensor], grouped_params_)
+        grouped_grads = cast(List[Tensor], grouped_grads_)
+        grouped_axs = cast(List[Tensor], grouped_axs_)
+        grouped_mus = cast(List[Tensor], grouped_mus_)
+        grouped_etas = cast(List[Tensor], grouped_etas_)
+        grouped_state_steps = cast(List[Tensor], grouped_state_steps_)
+
         if has_complex:
             _view_as_real(grouped_params, grouped_grads, grouped_axs)
 
@@ -326,7 +333,7 @@ def _multi_tensor_asgd(
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if not torch.compiler.is_compiling() and grouped_state_steps[0].is_cpu:
+        if not torch._utils.is_compiling() and grouped_state_steps[0].is_cpu:
             torch._foreach_add_(
                 grouped_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
             )

@@ -1,6 +1,8 @@
 import functools
 from typing import Any, Callable, Dict, List, Tuple
 
+import torch
+
 
 Feedback = float
 Choice = str
@@ -219,10 +221,14 @@ def pow2_op(data: Any, dim: str, exponent: int) -> bool:
     return data[dim] == 2**exponent
 
 
-def mixed_mm_operations() -> List[AHOperation]:
+def mm_operations() -> List[AHOperation]:
     mult_dims_ops = get_mult_dims_ops()
     arith_intensity_op = AHOperation("arith_intensity", get_arith_intensity)
-    return mult_dims_ops + [arith_intensity_op] + between_ops()
+    return mult_dims_ops + [arith_intensity_op]
+
+
+def mixed_mm_operations() -> List[AHOperation]:
+    return mm_operations() + between_ops()
 
 
 def is_multiple(data: Any, dim: str, mult: int) -> bool:
@@ -324,3 +330,10 @@ def get_is_contig_ops() -> List[AHOperation]:
 def context_add_strides(context: AHContext, name: str, stride: Tuple[int, ...]) -> None:
     for i, s in enumerate(stride):
         context.add_feature(f"{name}_stride_{i}", s)
+
+
+def context_add_using_tf32(context: AHContext, dtype: torch.dtype) -> None:
+    using_tf32 = "not_float_32"
+    if dtype == torch.float32:
+        using_tf32 = torch.backends.cuda.matmul.allow_tf32
+    context.add_feature("using_tf32", using_tf32, is_categorical=True)

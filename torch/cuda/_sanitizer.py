@@ -77,8 +77,6 @@ class Access:
 class SynchronizationError(Exception):
     """Base class for errors detected by CUDA Sanitizer."""
 
-    pass
-
 
 class UnsynchronizedAccessError(SynchronizationError):
     """Stores information about two unsynchronized accesses to one data pointer."""
