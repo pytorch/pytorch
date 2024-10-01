@@ -3,6 +3,7 @@ import abc
 import copy
 import logging
 import operator
+import types
 from collections import defaultdict
 from contextlib import contextmanager
 from copy import deepcopy
@@ -1589,13 +1590,65 @@ def _swap_module_helper(
     return gm
 
 
+def custom_forward(self, *args, **kwargs):
+    signature = self.module_call_graph[0].signature
+
+    reordered_kwargs = reorder_kwargs(kwargs, signature.in_spec)
+
+    flat_args, in_spec = pytree.tree_flatten(
+        (args, reordered_kwargs)
+    )
+    if is_fx_tracing():
+        return_val = torch.fx.Interpreter(self, graph=self.graph).run(
+            *flat_args, enable_io_processing=False
+        )
+        # For scalar return value, fx.Graph wraps in a tuple
+        if isinstance(return_val, tuple) and len(return_val) == 1:
+            return return_val[0]
+        return return_val
+
+    if in_spec != signature.in_spec:
+        raise RuntimeError(
+            "Input treespec does not match with exported module's: \n"
+            f"Input treespec: {in_spec}. ",
+            f"Exported module treespec: {signature.in_spec}",
+        )
+
+    if torch.compiler.is_dynamo_compiling() and not self.run_with_interpreter:
+        flat_out = type(self).forward(self, *args, **kwargs)
+    else:
+        flat_out = torch.fx.Interpreter(self, graph=self.graph).run(
+            *flat_args, enable_io_processing=False
+        )
+
+    return pytree.tree_unflatten(flat_out, signature.out_spec)
+
+
 def _swap_modules(
-    ep: ExportedProgram, modules_to_swap: Dict[str, torch.nn.Module]
+    ep: ExportedProgram,
+    modules_to_swap: Dict[str, torch.nn.Module],
+    *,
+    check_input_constraints: bool = True,
+    run_with_interpreter: bool = True,
 ) -> torch.fx.GraphModule:
     module_call_graph = {
         entry.fqn: entry.signature for entry in ep.module_call_graph if entry.signature
     }
-    gm = ep.module()
+
+    from ._unlift import _unlift_exported_program_lifted_states
+
+    gm = _unlift_exported_program_lifted_states(ep, check_input_constraints)
     gm.graph.eliminate_dead_code()
+
+    # Unset the pytree codegen because we will take care of it with our own
+    # custom forward function
+    gm.graph._codegen = torch.fx.graph.CodeGen()
+
+    gm.module_call_graph = ep.module_call_graph
+    gm.run_with_interpreter = run_with_interpreter  # type: ignore[assignment]
+    gm.forward = types.MethodType(custom_forward, gm)
+
     assert isinstance(gm, torch.fx.GraphModule)
-    return _swap_module_helper(gm, modules_to_swap, module_call_graph)
+    gm = _swap_module_helper(gm, modules_to_swap, module_call_graph)
+
+    return gm
