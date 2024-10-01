@@ -37,10 +37,10 @@ dtype_mapping = {
 def maybe_record_function(name: str, benchmark_config: BenchmarkConfig, sample_idx: int = None, repeat_idx: int = None):
     if benchmark_config.enable_nvtx:
         if sample_idx is not None:
-            return profile_range(name, True)
+            return profile_range(name)
         elif repeat_idx is not None and repeat_idx == benchmark_config.repeat - 1:
             # only record the last repeat
-            return profile_range(name, True)
+            return profile_range(name)
         else:
             return nullcontext()
     elif benchmark_config.profile:

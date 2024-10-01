@@ -12,7 +12,7 @@ from utils.common import (
     maybe_record_function,
     Phase,
 )
-from utils.metrics import get_execution_time, MetricResult, Metrics
+from utils.metrics import get_execution_time, MetricResult, Metrics, do_profile_warmup, do_profile_bench
 
 import torch
 
@@ -86,17 +86,19 @@ def benchmark_operator(operator: BaseOperator, benchmark_config: BenchmarkConfig
                 phase_fn = operator.full
             metric_result.input.append(input)
             execution_time = []
+            def fn():
+                return phase_fn(input)
+            if benchmark_config.enable_nvtx:
+                do_profile_warmup(fn, warmup=25, fast_flush=True)
             # DO NOT CHANGE THE NAME OF THE RECORD FUNCTION. It is used in ncu_analyzer.
             with maybe_record_function(f"{operator.full_name}___sample_{i}", benchmark_config, sample_idx=i):
                 for repeat_idx in range(repeat):
-
-                    def fn():
-                        return phase_fn(input)
-
                     with maybe_record_function(
                         f"repeat_{repeat_idx}", benchmark_config, repeat_idx=repeat_idx
                     ):
-                        if Metrics.EXECUTION_TIME in metrics:
+                        if benchmark_config.enable_nvtx:
+                            do_profile_bench(fn, grad_to_none=None)
+                        elif Metrics.EXECUTION_TIME in metrics:
                             execution_time.append(
                                 get_execution_time(
                                     fn,
