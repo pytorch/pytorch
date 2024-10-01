@@ -229,7 +229,7 @@ void set_num_threads(int nthreads) {
     }
   }
 #else
-  caffe2::PThreadPool* const pool = caffe2::pthreadpool();
+  caffe2::PThreadPool* const pool = caffe2::pthreadpool(nthreads);
   TORCH_INTERNAL_ASSERT(pool, "Invalid thread pool!");
   pool->set_thread_count(nthreads);
 #endif // C10_MOBILE
