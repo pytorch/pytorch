@@ -21,6 +21,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_sparse_broadcast_to_native.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
 #include <ATen/ops/_sparse_sum_native.h>
 #include <ATen/ops/add_native.h>
@@ -397,18 +398,18 @@ SparseTensor& add_out_sparse_cuda(const SparseTensor& t, const SparseTensor& src
   // deal with empty sparse tensors
   if (src._nnz() == 0) {
     if (is_same_size) {
-      return copy_sparse_to_sparse_(r, t);
+      return copy_sparse_to_sparse_(r_, t);
     } else {
       const SparseTensor& broadcasted_t = sparse_broadcast_to(t, res_shape);
-      return copy_sparse_to_sparse_(r, broadcasted_t);
+      return copy_sparse_to_sparse_(r_, broadcasted_t);
     }
   }
   if (t._nnz() == 0) {
     if (is_same_size) {
-      return mul_out_sparse_scalar(r, src, value);
+      return mul_out_sparse_scalar(r_, src, value);
     } else {
       const SparseTensor& broadcasted_src = sparse_broadcast_to(src, res_shape);
-      return mul_out_sparse_scalar(r, broadcasted_src, value);
+      return mul_out_sparse_scalar(r_, broadcasted_src, value);
     }
   }
 
@@ -422,7 +423,7 @@ SparseTensor& add_out_sparse_cuda(const SparseTensor& t, const SparseTensor& src
   // This trade-off is preferable for the common use-case of gradient accumulation.
   SparseTensor broadcasted_t;
   SparseTensor broadcasted_src;
-  if (is_same_sizes) {
+  if (is_same_size) {
     broadcasted_t = t;
     broadcasted_src = src;
   } else {
