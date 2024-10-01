@@ -215,10 +215,10 @@ jobs:
         with:
           submodules: false
           fetch-depth: 1
-      - name: Setup Python 3.8
+      - name: Setup Python 3.9
         uses: actions/setup-python@v4
         with:
-          python-version: '3.8'
+          python-version: '3.9'
           architecture: x64
           cache: pip
       - name: Install dependencies
