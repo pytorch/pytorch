@@ -717,7 +717,7 @@ def optimize(*args, **kwargs):
             # is more complicated, we will add it in the future when needed.
             assert set(ca_kwargs_override.keys()) == {
                 "fullgraph"
-            }, f"Only `fullgraph` config override is supported for now, but got {ca_kwargs_override.keys()}"
+            }, f"Only `fullgraph` kwarg override is supported for now, but got {ca_kwargs_override.keys()}"
             kwargs["nopython"] = ca_kwargs_override["fullgraph"]
         return optimize(*args, **kwargs)
 
