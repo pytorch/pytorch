@@ -1255,7 +1255,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def generate_extern_kernel_alloc(self, extern_kernel, args):
         if config.abi_compatible:
-            if hasattr(extern_kernel, "outputs"):
+            if getattr(extern_kernel, "outputs", None):
                 # ir.ExternKernelAlloc may have outputs if it returns a tuple
                 self.generate_c_shim_fallback_kernel(extern_kernel, args)
             else:

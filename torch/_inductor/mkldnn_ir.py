@@ -1829,7 +1829,6 @@ class MkldnnRnnLayer(ExternKernelAlloc):
             None,
             op_overload=torch.ops.aten.mkldnn_rnn_layer.default,
         )
-        self.outputs: List[MultiOutput] = []
 
     @classmethod
     def create(
