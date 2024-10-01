@@ -3,6 +3,7 @@ import functools
 from typing import Dict, Set, Tuple
 
 import torch
+from torch import Tensor
 from torch._dynamo.utils import counters
 from torch._ops import OpOverload, OpOverloadPacket
 
@@ -10,6 +11,124 @@ from ..pattern_matcher import fwd_only, register_replacement
 
 
 aten = torch.ops.aten
+
+def norm_pattern(x, weight, bias, eps):
+    return torch.ops.aten.native_layer_norm(x, [x.shape[-1]], weight, bias, eps)
+
+from torch._decomp.decompositions import *
+
+from typing import Any, List, Optional, Tuple
+
+# Copied and modified from decompositions.py
+def native_layer_norm_backward(
+    grad_out: Tensor,
+    output: Tensor,
+    normalized_shape: List[int],
+    mean: Tensor,
+    rstd: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    output_mask: List[bool],
+) -> Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
+    import torch._prims_common as utils
+    def _unsqueeze_to_dim(x: Tensor, dim: int) -> Tensor:
+        for _ in range(dim - x.dim()):
+            x = x.unsqueeze(-1)
+        return x
+
+    def prod(x: List[int]):
+        r = 1
+        for i in x:
+            r *= i
+        return r
+    def _maybe_cast(x: Optional[Tensor], dtype) -> Optional[Tensor]:
+        if x is not None:
+            return x.to(dtype)
+        return x
+
+    input_shape = output.shape
+    input_ndim = output.dim()
+    computation_dtype = utils.get_computation_dtype(output.dtype)
+    grad_out_cast, output_cast, weight_cast, bias_cast = (
+        x.to(computation_dtype).contiguous() if x is not None else x
+        for x in (grad_out, output, weight, bias)
+    )
+    assert grad_out_cast is not None
+
+    axis = input_ndim - len(normalized_shape)
+    inner_dims = input_shape[axis:]
+    outer_dims = input_shape[:axis]
+    inner_dim_indices: List[int] = []
+    outer_dim_indices: List[int] = []
+    for i in range(input_ndim):
+        if i >= axis:
+            inner_dim_indices.append(i)
+        else:
+            outer_dim_indices.append(i)
+
+    N = prod(inner_dims)  # type: ignore[arg-type]
+    M = prod(outer_dims)  # type: ignore[arg-type]
+    if M <= 0 or N <= 0:
+        return (
+            output.new_zeros(input_shape) if output_mask[0] else None,
+            output.new_zeros(input_shape[axis:]) if output_mask[1] else None,
+            output.new_zeros(input_shape[axis:]) if output_mask[2] else None,
+        )
+    mean = _unsqueeze_to_dim(mean, output_cast.dim())  # type: ignore[union-attr]
+    rstd = _unsqueeze_to_dim(rstd, output_cast.dim())  # type: ignore[union-attr]
+    x_hat = (output_cast - bias_cast) / weight_cast
+    if weight_cast is not None:
+        grad_x_hat = grad_out_cast * weight_cast
+    else:
+        grad_x_hat = grad_out_cast
+    a = grad_x_hat * N
+    b = torch.sum(grad_x_hat, inner_dim_indices, True)
+    c1 = torch.mul(grad_x_hat, x_hat)
+    c2 = torch.sum(c1, inner_dim_indices, True)
+    c3 = torch.mul(x_hat, c2)
+
+    inner = a - b - c3
+    d_input: Optional[Tensor] = None
+    d_weight: Optional[Tensor] = None
+    d_bias: Optional[Tensor] = None
+    if output_mask[0]:
+        # breakpoint()
+        d_input = (rstd / N) * inner
+
+    if output_mask[1] and weight_cast is not None:
+        if len(outer_dim_indices) > 0:
+            d_weight = torch.sum(grad_out_cast * x_hat, outer_dim_indices, False)
+        else:
+            d_weight = grad_out_cast * x_hat
+
+    if output_mask[2] and bias_cast is not None:
+        if len(outer_dim_indices) > 0:
+            d_bias = torch.sum(grad_out_cast, outer_dim_indices, False)
+        else:
+            d_bias = grad_out_cast.clone()
+
+    return (
+        _maybe_cast(d_input, output.dtype),
+        _maybe_cast(d_weight, output.dtype),
+        _maybe_cast(d_bias, output.dtype),
+    )
+
+class CustomLayerNorm(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, weight, bias, eps):
+        out, mean, rstd = torch.ops.aten.native_layer_norm(x, [x.shape[-1]], weight, bias, eps)
+        ctx.save_for_backward(out, mean, rstd, weight, bias)
+        return out
+    
+    @staticmethod
+    def backward(ctx, grad_out):
+        out, mean, rstd, weight, bias = ctx.saved_tensors
+        return *native_layer_norm_backward(grad_out, out, [out.shape[-1]], mean, rstd, weight, bias, [True, True, True]), None
+
+def norm_replacement(x, weight, bias, eps):
+    return CustomLayerNorm.apply(x, weight, bias, eps), None, None
+
+from torch._inductor.pattern_matcher import PatternMatcherPass, register_replacement, joint_fwd_bwd, fwd_only
 
 
 @functools.lru_cache(None)
@@ -66,6 +185,26 @@ def _misc_patterns_init():
         fwd_only,
         [post_grad_patterns, joint_graph_patterns],
         scalar_workaround={"slice_shape": 42},
+    )
+    my_patterns = PatternMatcherPass()
+    def improves_partition(match):
+        num_output_users = set(match.output_node().users) - set(match.nodes)
+        num_input_users = set(match.kwargs['x'].users) - set(match.nodes)
+        print("trying!")
+        if len(num_output_users) > len(num_input_users):
+            print("replacing input-dependent norm_backward with output-dependent!")
+            print(num_input_users, num_output_users)
+            return True
+        return False
+
+    register_replacement(
+        norm_pattern,
+        norm_replacement,
+        [torch.empty(4, 4, device='cuda', requires_grad=True), torch.randn(4, device='cuda', requires_grad=True), torch.randn(4, device='cuda', requires_grad=True)],
+        joint_fwd_bwd,
+        [joint_graph_patterns],
+        extra_check=improves_partition,
+        scalar_workaround={'eps': 42}
     )
 
 
