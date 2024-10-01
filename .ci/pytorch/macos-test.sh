@@ -155,13 +155,13 @@ torchbench_setup_macos() {
 
   pushd torchvision
   git fetch
-  git checkout "$$(cat ../.github/ci_commit_pins/vision.txt)"
+  git checkout "$(cat ../.github/ci_commit_pins/vision.txt)"
   git submodule update --init --recursive
   popd
 
   pushd torchaudio
   git fetch
-  git checkout "$$(cat ../.github/ci_commit_pins/audio.txt)"
+  git checkout "$(cat ../.github/ci_commit_pins/audio.txt)"
   git submodule update --init --recursive
   popd
 
@@ -173,6 +173,7 @@ test_torchbench_perf() {
   echo $(pwd)
   ls -a
   echo "ls complete"
+  ls .github
   print_cmake_info
 
   echo "Launching torchbench setup"
