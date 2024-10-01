@@ -187,6 +187,7 @@ def debug_insert_nops(
         local_scope=locals(),
         global_scope=globals(),
         f_code=frame.f_code,
+        torch_function_mode_stack=[],
     )
 
     return GuardedCode(code, CheckFunctionManager(graph).check_fn, CompileId(0, 0))
