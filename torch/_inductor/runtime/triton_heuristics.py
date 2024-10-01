@@ -661,37 +661,36 @@ class CachingAutotuner(KernelInterface):
             )
             return float("inf")
 
-        cpu_copies = self.copy_args_to_cpu_if_needed(*args, **kwargs)
-
         device_interface = self.get_device_interface()
         stream = device_interface.get_raw_stream(device_interface.current_device())
 
+        cpu_copies = self.copy_args_to_cpu_if_needed(*args, **kwargs)
+
         def kernel_call():
-            # cloned_args, cloned_kwargs = self.clone_args(on_cpu_args, *args, **kwargs)
-            # launcher(
-            #     *cloned_args,
-            #     **cloned_kwargs,
-            #     grid=grid,
-            #     stream=stream,
-            # )
-            new_args, new_kwargs = self.prepare_args(cpu_copies, *args, **kwargs)
+            new_args, new_kwargs = self.maybe_clone_args(cpu_copies, *args, **kwargs)
             launcher(
                 *new_args,
                 **new_kwargs,
                 grid=grid,
                 stream=stream,
             )
+            self.restore_args_from_cpu(cpu_copies)
 
         if with_profiler:
             from torch._inductor.utils import do_bench_using_profiling
 
             return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
 
-        result = benchmarker.benchmark_gpu(kernel_call, rep=40)
-        self.restore_copied_args(cpu_copies)
-        return result
+        return benchmarker.benchmark_gpu(kernel_call, rep=40)
 
     def copy_args_to_cpu_if_needed(self, *args, **kwargs):
+        """
+        To support benchmarking in the presence of mutated args, we need to avoid
+        autotuning contanminating them. We try to pass cloned args to the kernel.
+        If those clones would increase the peak memory usage, however, we instead
+        copy to cpu and restore them after each iteratrion. Figure out the args
+        to be copied and do the copying.
+        """
         copies = {}
         budget = torch.cuda.max_memory_allocated() - torch.cuda.memory_allocated()
 
@@ -701,7 +700,7 @@ class CachingAutotuner(KernelInterface):
                 assert isinstance(arg, torch.Tensor)
                 assert not arg.is_cpu
                 size = arg.numel() * arg.element_size()
-                if torch.is_floating_point(arg) and size > budget:
+                if size > budget:
                     cpu_arg = torch.empty_strided(
                         arg.size(),
                         arg.stride(),
@@ -722,57 +721,30 @@ class CachingAutotuner(KernelInterface):
 
         return copies
 
-    def restore_copied_args(self, cpu_copies):
-        for _, pair in cpu_copies.items():
+    def restore_args_from_cpu(self, cpu_copies):
+        for pair in cpu_copies.values():
             arg, cpu_arg = pair
             arg.copy_(cpu_arg, non_blocking=True)
 
-    def prepare_args(self, cpu_copies, *args, **kwargs):
+    def maybe_clone_args(self, cpu_copies, *args, **kwargs):
+        """
+        Prepare args for benchmarking by cloning mutated args, except for
+        the set copied to cpu. Pass non-mutated args directly.
+        """
         from ..compile_fx import clone_preserve_strides
 
         def prepare_arg(name, arg):
-            if name in cpu_copies:
-                assert torch.is_floating_point(arg)
-                arg.uniform_(0, 1)
+            if name in cpu_copies or name not in self.mutated_arg_names:
                 return arg
-            elif name in self.mutated_arg_names:
-                return clone_preserve_strides(arg)
             else:
-                return arg
+                return clone_preserve_strides(arg)
 
         new_args = [
             prepare_arg(self.fn.arg_names[i], arg) for i, arg in enumerate(args)
         ]
-        new_kwargs = {
-            name: prepare_arg(name, arg) for name, arg in kwargs.items()
-        }
+        new_kwargs = {name: prepare_arg(name, arg) for name, arg in kwargs.items()}
 
         return new_args, new_kwargs
-
-    def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
-        from ..compile_fx import clone_preserve_strides
-
-        # [Note: clone mutated buffers]
-        # clone inplace buffers to avoid autotune contaminating them if
-        # the kernel does in-place stores. avoid cloning other buffers because
-        # it leads to increase memory use
-        cloned_args = []
-        for i, arg in enumerate(args):
-            if self.fn.arg_names[i] in self.mutated_arg_names:
-                assert isinstance(arg, torch.Tensor)
-                cloned_args.append(clone_preserve_strides(arg))
-            else:
-                cloned_args.append(arg)
-
-        cloned_kwargs: Dict[str, Any] = {}
-        for name, arg in kwargs.items():
-            if name in self.mutated_arg_names:
-                assert isinstance(arg, torch.Tensor)
-                cloned_kwargs[name] = clone_preserve_strides(arg)
-            else:
-                cloned_kwargs[name] = arg
-
-        return cloned_args, cloned_kwargs
 
     def benchmark_all_configs(self, *args, **kwargs):
         with dynamo_timed("CachingAutotuner.benchmark_all_configs"):
