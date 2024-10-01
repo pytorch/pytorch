@@ -8,7 +8,7 @@ networkx==2.8.7
 # Use numba-0.49.1 or older on Intel Macs, but 0.56.0 on M1 machines, as older numba is not available
 numba==0.56.0; platform_machine == "arm64"
 numba<=0.49.1; platform_machine != "arm64"
-opt-einsum>=3.3
+opt-einsum>=3.4
 psutil==5.9.1
 nvidia-ml-py==11.525.84
 packaging==23.1

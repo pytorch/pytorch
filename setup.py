@@ -1148,6 +1148,7 @@ def main():
         "networkx",
         "jinja2",
         "fsspec",
+        "opt-einsum>=3.4",
     ]
 
     if BUILD_PYTHON_ONLY:
@@ -1204,7 +1205,6 @@ def main():
 
     extras_require = {
         "optree": ["optree>=0.12.0"],
-        "opt-einsum": ["opt-einsum>=3.3"],
     }
 
     # Read in README.md for our long_description
