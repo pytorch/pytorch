@@ -1800,13 +1800,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
         else:
             return final_tmp_name
 
-    def codegen_device_copy(self, src, dst, non_blocking: bool):
+    def codegen_device_copy(self, src, dst):
         if config.abi_compatible:
             self.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_(expensive_copy_to_tensor_if_needed({dst}), {src}, {non_blocking}));"
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_tensor_copy_(expensive_copy_to_tensor_if_needed({src}), {dst}));"
             )
         else:
-            self.writeline(f"{dst}.copy_({src}, {non_blocking});")
+            self.writeline(f"{dst}.copy_({src});")
 
     def codegen_multi_output(self, name, value):
         # in the abi_compatible mode, outputs are retrieved by passing

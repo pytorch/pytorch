@@ -687,16 +687,16 @@ def _view_dtype(x: TensorBox, dtype: torch.dtype):
     return to_dtype_bitcast(x, dtype)
 
 
-def to_device(x: TensorBox, device: torch.device, *, copy=False, non_blocking=False):
+def to_device(x: TensorBox, device: torch.device, *, copy=False):
     device = decode_device(device)
     if x.get_device() == device:
         return clone(x) if copy else x
-    return TensorBox.create(ir.DeviceCopy.create(x, device, non_blocking))
+    return TensorBox.create(ir.DeviceCopy.create(x, device))
 
 
 @register_lowering(prims.device_put, type_promotion_kind=None)
-def _device_put(x: TensorBox, device: torch.device, non_blocking=False):
-    return to_device(x, device, copy=True, non_blocking=non_blocking)
+def _device_put(x: TensorBox, device: torch.device):
+    return to_device(x, device, copy=True)
 
 
 def register_pointwise(
@@ -2676,6 +2676,7 @@ def _local_scalar_dense(data):
     unbacked_bindings = resolve_unbacked_bindings(
         V.graph.sizevars.shape_env, V.graph.current_node.meta["unbacked_bindings"]
     )
+    assert unbacked_bindings is not None
     assert len(unbacked_bindings) == 1, unbacked_bindings
     # NB: Have to be very careful here.  V.graph.current_node.meta["val"]
     # seemingly also contains a symbol which you want to do binding for,

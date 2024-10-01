@@ -12350,16 +12350,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
                 print(p.key_averages().table(max_name_column_width=200))
 
-        def test_non_blocking_copy_codegen(self):
-            # Checks non_blocking arg is present in codegen
-            # (see https://github.com/pytorch/pytorch/issues/136260)
-            def fn(x):
-                return x.to(device=self.device, non_blocking=True)
-
-            inp = torch.randn(3, 4)
-            _, (code,) = run_and_get_code(torch.compile(fn), inp)
-            FileCheck().check("copy_").check_same("True").run(code)
-
     class RNNTest(TestCase):
         device_type = GPU_TYPE
 

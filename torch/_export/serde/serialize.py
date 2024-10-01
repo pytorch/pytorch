@@ -127,7 +127,6 @@ ST_DELIMITER = ";"
 _TORCH_TO_SERIALIZE_DTYPE = {
     torch.uint8: ScalarType.BYTE,
     torch.int8: ScalarType.CHAR,
-    torch.uint16: ScalarType.UINT16,
     torch.int16: ScalarType.SHORT,
     torch.int32: ScalarType.INT,
     torch.int64: ScalarType.LONG,

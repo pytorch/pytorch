@@ -2,12 +2,11 @@
 # flake8: noqa: B950
 
 import functools
-import random
 import string
 import unittest
 from collections import namedtuple
 from contextlib import contextmanager, nullcontext
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, Optional, Tuple, Union
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 
@@ -20,7 +19,6 @@ from torch.nn.attention.flex_attention import (
     _create_empty_block_mask,
     _DEFAULT_SPARSE_BLOCK_SIZE,
     _identity,
-    _mask_mod_signature,
     _score_mod_signature,
     and_masks,
     BlockMask,
@@ -2599,78 +2597,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         )
 
         torch.testing.assert_close(causal_mask_out, sdpa_mask_out, atol=5e-3, rtol=0.0)
-
-    @supported_platform
-    def test_compiled_block_mask(self):
-        def _offsets_to_doc_ids_tensor(offsets):
-            device = offsets.device
-            counts = offsets[1:] - offsets[:-1]
-            return torch.repeat_interleave(
-                torch.arange(len(counts), device=device, dtype=torch.int32), counts
-            )
-
-        def length_to_offsets(
-            lengths: List[int], device: Union[str, torch.device]
-        ) -> Tensor:
-            offsets = [0]
-            offsets.extend(lengths)
-            offsets = torch.tensor(offsets, device=device, dtype=torch.int32)
-            offsets = torch.cumsum(offsets, dim=-1)
-            return offsets
-
-        def generate_doc_mask_mod(offsets: Tensor) -> _mask_mod_signature:
-            document_id = _offsets_to_doc_ids_tensor(offsets)
-
-            def doc_mask_mod(b, h, q_idx, kv_idx):
-                same_doc = document_id[q_idx] == document_id[kv_idx]
-                return same_doc
-
-            return doc_mask_mod
-
-        random.seed(0)
-
-        def generate_random_lengths(total_length, num_documents):
-            lengths = [1] * num_documents
-            remaining_length = total_length - num_documents
-            for _ in range(remaining_length):
-                index = random.randint(0, num_documents - 1)
-                lengths[index] += 1
-            return lengths
-
-        device = "cuda"
-        max_seq_len, doc_count = 128, 4
-        B, H, SEQ_LEN, HEAD_DIM = 1, 1, max_seq_len, 8
-
-        lengths = generate_random_lengths(max_seq_len, doc_count)
-        offsets = length_to_offsets(lengths, device)
-
-        def make_tensor():
-            return torch.ones(B, H, SEQ_LEN, HEAD_DIM, device=device)
-
-        query, key = make_tensor(), make_tensor()
-        document_causal_mask = generate_doc_mask_mod(offsets)
-        block_mask_compiled = create_block_mask(
-            document_causal_mask,
-            1,
-            1,
-            SEQ_LEN,
-            SEQ_LEN,
-            device=query.device,
-            _compile=True,
-        )
-        block_mask = create_block_mask(
-            document_causal_mask,
-            1,
-            1,
-            SEQ_LEN,
-            SEQ_LEN,
-            device=query.device,
-            _compile=True,
-        )
-        self.assertEqual(block_mask_compiled.kv_indices, block_mask.kv_indices)
-        self.assertEqual(
-            block_mask_compiled.full_kv_indices, block_mask.full_kv_indices
-        )
 
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
