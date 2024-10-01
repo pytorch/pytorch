@@ -240,7 +240,11 @@ def init_backend_registration():
     from .wrapper import PythonWrapperCodegen
 
     if get_scheduling_for_device("cpu") is None:
-        cpu_backends = {"cpp": CppScheduling, "halide": HalideScheduling}
+        cpu_backends = {
+            "cpp": CppScheduling,
+            "halide": HalideScheduling,
+            "triton": TritonScheduling,
+        }
         register_backend_for_device(
             "cpu",
             lambda *args, **kwargs: cpu_backends[config.cpu_backend](*args, **kwargs),
@@ -302,6 +306,7 @@ def get_device_op_overrides(device: str):
     assert isinstance(device, str)
 
     if not device_op_overrides_dict.keys():
+        from . import cpu_device_op_overrides  # noqa: F401
         from .cuda import device_op_overrides  # noqa: F401
         from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
@@ -896,6 +901,11 @@ class OpOverrides:
             ops.ne(ops.signbit(r), ops.signbit(b)),
         )
         return ops.where(cond, ops.add(r, b), r)
+
+    @staticmethod
+    def fma(x, y, z):
+        # for backends that don't override this (halide)
+        return ops.add(ops.mul(x, y), z)
 
     @staticmethod
     def trunc_to_int(a, dtype):
@@ -2156,7 +2166,7 @@ class KernelTemplate:
                         end = min(len(lines), self.lineno + 2)
                         for i in range(start, end):
                             if i == self.lineno - 1:
-                                error_info += f"{i+1}: --> {lines[i]}\n"
+                                error_info += f"{i + 1}: --> {lines[i]}\n"
                                 if hasattr(self.original_error, "column"):
                                     error_info += (
                                         "     "
@@ -2164,7 +2174,7 @@ class KernelTemplate:
                                         + "^\n"
                                     )
                             else:
-                                error_info += f"{i+1}:     {lines[i]}\n"
+                                error_info += f"{i + 1}:     {lines[i]}\n"
                     return error_info
 
             try:
