@@ -1162,7 +1162,9 @@ class LinearUnary(ExternKernelAlloc):
             constant_args,
             None,
             op_overload=torch.ops.mkldnn._linear_pointwise.default,
-            cpp_kernel_name="aoti_torch_cpu__linear_pointwise",
+            cpp_kernel_name="aoti_torch_cpu__linear_pointwise"
+            if config.abi_compatible
+            else None,
         )
         self.cpp_kernel_key = "linear_pointwise"
         self.cpp_op_schema = """
@@ -1247,7 +1249,9 @@ class LinearBinary(ExternKernelAlloc):
             constant_args,
             None,
             op_overload=torch.ops.mkldnn._linear_pointwise.binary,
-            cpp_kernel_name="aoti_torch_cpu__linear_pointwise_binary",
+            cpp_kernel_name="aoti_torch_cpu__linear_pointwise_binary"
+            if config.abi_compatible
+            else None,
         )
         self.cpp_op_schema = """
             at::Tensor(
