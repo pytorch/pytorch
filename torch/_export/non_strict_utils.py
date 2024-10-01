@@ -292,9 +292,9 @@ def produce_guards_and_solve_constraints(
     if not _is_torch_jit_trace:
         msg = dim_constraints.prettify_results(
             original_signature,
-            dynamic_shapes,
+            dynamic_shapes,  # type: ignore[arg-type]
             constraint_violation_error,
-            forced_specializations,
+            forced_specializations,  # type: ignore[arg-type]
         )
     else:
         # FIXME(ycao): This is a hack to get around missing signature from ScriptMethod
