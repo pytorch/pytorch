@@ -7,18 +7,14 @@ from ctypes import byref, c_int, c_size_t, c_void_p
 from typing import Any, Callable, Iterable, List, Optional, Union
 
 import torch
-from torch._inductor.autotune_process import (
-    BenchmarkRequest,
-    GPUDeviceBenchmarkMixin,
-    TensorMeta,
-)
+from torch._inductor.autotune_process import GPUDeviceBenchmarkRequest, TensorMeta
 from torch._inductor.codecache import DLLWrapper, ROCmCodeCache
 
 
 log = logging.getLogger(__name__)
 
 
-class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
+class ROCmBenchmarkRequest(GPUDeviceBenchmarkRequest):
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put CUDA Tensors in here!
 
