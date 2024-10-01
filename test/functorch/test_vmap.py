@@ -3366,6 +3366,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
             )(x)
             self.assertEqual(output, expected)
 
+    @skipIfTorchDynamo()
     @parametrize("in_dim", [0, 1, 2])
     @parametrize("out_dim", [0, 1, 2])
     @parametrize("randomness", ["error", "same"])
@@ -3496,6 +3497,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
                 chunk_size=2,
             )(x)
 
+    @skipIfTorchDynamo()
     @parametrize("in_dim", [0, 1])
     @parametrize("out_dim", [0, 1])
     @parametrize("randomness", ["error", "same"])

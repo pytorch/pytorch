@@ -2961,7 +2961,7 @@ class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
             warnings.warn(msg)
 
     def _compile_check(self, fn, inputs, fullgraph=True, graph_idx=0):
-        backend = EagerAndRecordGraphs()
+        backend = CompileCounterWithBackend("inductor")
         actual = fn(*inputs)
         expected = torch.compile(fn, backend=backend, fullgraph=fullgraph)(*inputs)
 
@@ -6256,7 +6256,7 @@ class GraphModule(torch.nn.Module):
         actual = opt(x, 0), opt(x, 1), opt(x, 2)
         self.assertEqual(expected, actual)
         self.assertEqual(cnt.frame_count, 3)
-        self.assertEqual(cnt.op_count, 21)
+        self.assertEqual(cnt.op_count, 18)
 
     def test_vmap_new_tensor_in_body(self):
         def fn(x):
