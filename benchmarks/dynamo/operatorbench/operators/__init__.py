@@ -1,22 +1,9 @@
 import importlib
 import os
 import pathlib
-from typing import List
-import types
-import sys
-import torch
-
-from utils.common import BenchmarkConfig
-from .operator_inp_utils import OperatorInputsLoader, to_channels_last
-from typing import Optional
-from torch.utils._pytree import tree_map_only
-from torch._inductor.utils import gen_gm_and_inputs
-from torch._dynamo.backends.cudagraphs import cudagraphs_inner
-from torch._inductor.compile_fx import compile_fx
-from utils.metrics import Device
 import sys
 import types
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
 from utils.common import BenchmarkConfig, Phase
 from utils.metrics import Device
@@ -26,6 +13,8 @@ from torch._dynamo.backends.cudagraphs import cudagraphs_inner
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.utils import gen_gm_and_inputs
 from torch.utils._pytree import tree_map_only
+
+from .operator_inp_utils import OperatorInputsLoader, to_channels_last
 
 
 class OperatorNotFoundError(RuntimeError):
@@ -230,8 +219,11 @@ def dynamically_create_native_operator_classes(benchmark_config: BenchmarkConfig
     timm_loader = OperatorInputsLoader.get_timm_loader()
     huggingface_loader = OperatorInputsLoader.get_huggingface_loader()
     torchbench_loader = OperatorInputsLoader.get_torchbench_loader()
-    all_ops = list(timm_loader.get_all_ops()) + list(huggingface_loader.get_all_ops()) + \
-        list(torchbench_loader.get_all_ops())
+    all_ops = (
+        list(timm_loader.get_all_ops())
+        + list(huggingface_loader.get_all_ops())
+        + list(torchbench_loader.get_all_ops())
+    )
     # remove duplicate operators
     all_ops = list(set(all_ops))
 
@@ -242,14 +234,29 @@ def dynamically_create_native_operator_classes(benchmark_config: BenchmarkConfig
         op_eval = cls.op_eval
         inps_gens = []
         if str(op_eval) in timm_loader.operator_db:
-            inps_gens.append(timm_loader.get_inputs_for_operator(
-                op_eval, dtype=benchmark_config.dtype, device=benchmark_config.device.value))
+            inps_gens.append(
+                timm_loader.get_inputs_for_operator(
+                    op_eval,
+                    dtype=benchmark_config.dtype,
+                    device=benchmark_config.device.value,
+                )
+            )
         if str(op_eval) in huggingface_loader.operator_db:
-            inps_gens.append(huggingface_loader.get_inputs_for_operator(
-                op_eval, dtype=benchmark_config.dtype, device=benchmark_config.device.value))
+            inps_gens.append(
+                huggingface_loader.get_inputs_for_operator(
+                    op_eval,
+                    dtype=benchmark_config.dtype,
+                    device=benchmark_config.device.value,
+                )
+            )
         if str(op_eval) in torchbench_loader.operator_db:
-            inps_gens.append(torchbench_loader.get_inputs_for_operator(
-                op_eval, dtype=benchmark_config.dtype, device=benchmark_config.device.value))
+            inps_gens.append(
+                torchbench_loader.get_inputs_for_operator(
+                    op_eval,
+                    dtype=benchmark_config.dtype,
+                    device=benchmark_config.device.value,
+                )
+            )
         input_list = []
         num_samples = min(benchmark_config.max_samples, 1000000)
         index = 0
@@ -263,13 +270,11 @@ def dynamically_create_native_operator_classes(benchmark_config: BenchmarkConfig
                 except StopIteration:
                     break
         return input_list
-    
+
     def prepare_input_and_functions(self, input: Any, phase: Phase):
         args, kwargs = input
         if self.benchmark_config.channels_last:
-            args, kwargs = tree_map_only(
-                torch.Tensor, to_channels_last, (args, kwargs)
-            )
+            args, kwargs = tree_map_only(torch.Tensor, to_channels_last, (args, kwargs))
 
         gm, gm_args = gen_gm_and_inputs(self.op_eval, args, kwargs)
         torch.jit._builtins._register_builtin(
@@ -303,13 +308,13 @@ def dynamically_create_native_operator_classes(benchmark_config: BenchmarkConfig
     for op_eval in all_ops:
         class_name = f"native_{str(op_eval).replace('.', '_')}"
         # create a new module for each operator
-        op_name_module = types.ModuleType(f'operators.{class_name}')
-        sys.modules[f'operators.{class_name}'] = op_name_module
+        op_name_module = types.ModuleType(f"operators.{class_name}")
+        sys.modules[f"operators.{class_name}"] = op_name_module
         # create a new module for each varient to help with code organization and printing
-        eager_module = types.ModuleType(f'operators.{class_name}.Eager')
-        sys.modules[f'operators.{class_name}.Eager'] = eager_module
-        inductor_module = types.ModuleType(f'operators.{class_name}.Inductor')
-        sys.modules[f'operators.{class_name}.Inductor'] = inductor_module
+        eager_module = types.ModuleType(f"operators.{class_name}.Eager")
+        sys.modules[f"operators.{class_name}.Eager"] = eager_module
+        inductor_module = types.ModuleType(f"operators.{class_name}.Inductor")
+        sys.modules[f"operators.{class_name}.Inductor"] = inductor_module
         # the new class for operator, and it is the parent class for all its variants
         new_op_class = type(class_name, (BaseOperator,), {})
         # need the loaders to generate inputs for the same operator
@@ -325,7 +330,9 @@ def dynamically_create_native_operator_classes(benchmark_config: BenchmarkConfig
         new_eager_op_class.full_name = f"{new_eager_op_class.name}.Eager"
         new_eager_op_class.prepare_input_and_functions = prepare_input_and_functions
         eager_module.Operator = new_eager_op_class
-        new_inductor_op_class = type(f"{class_name}.Inductor.Operator", (new_op_class,), {})
+        new_inductor_op_class = type(
+            f"{class_name}.Inductor.Operator", (new_op_class,), {}
+        )
         new_inductor_op_class.variant = "Inductor"
         new_inductor_op_class.full_name = f"{new_inductor_op_class.name}.Inductor"
         new_inductor_op_class.prepare_input_and_functions = prepare_input_and_functions

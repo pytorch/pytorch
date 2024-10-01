@@ -4757,9 +4757,9 @@ def log_operator_inputs(model, example_inputs, model_iter_fn, name, args):
 
     print(f"Running {name}")
     try:
-        from .microbenchmarks.operator_inp_utils import OperatorInputsMode
+        from operatorbench.operators.operator_inp_utils import OperatorInputsMode
     except ImportError:
-        from microbenchmarks.operator_inp_utils import OperatorInputsMode
+        from .operatorbench.operators.operator_inp_utils import OperatorInputsMode
 
     operator_mode = OperatorInputsMode()
     fake_tensor_mode = FakeTensorMode()

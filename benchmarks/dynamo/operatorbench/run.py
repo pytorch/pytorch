@@ -7,6 +7,7 @@ import operators
 from operators import BaseOperator
 from utils.common import BenchmarkConfig, Device, dtype_mapping, Phase
 from utils.metrics import get_execution_time, MetricResult, Metrics
+
 import torch
 
 
@@ -110,7 +111,7 @@ def benchmark_operator(operator: BaseOperator, benchmark_config: BenchmarkConfig
 
 @click.command()
 @click.option("--op", help="operator overload to benchmark. split by ','.")
-@click.option("--mode", help="[native, custom] ", default='custom')
+@click.option("--mode", help="[native, custom] ", default="custom")
 @click.option(
     "--dtype",
     help="dtype to benchmark. [bfloat16, float16, float32]",
