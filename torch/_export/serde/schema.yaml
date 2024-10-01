@@ -338,6 +338,7 @@ ScalarType:
     COMPLEXDOUBLE: 11
     BOOL: 12
     BFLOAT16: 13
+    UINT16: 28
 SchemaVersion:
   kind: struct
   fields:

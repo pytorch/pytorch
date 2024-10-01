@@ -20,6 +20,7 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
+from torch.fx.experimental.symbolic_shapes import guard_scalar
 
 
 log = logging.getLogger("torch._dynamo")
@@ -885,9 +886,6 @@ class TritonHOPifier:
         from triton import JITFunction
         from triton.runtime.autotuner import autotune, Autotuner, Config
 
-        from torch._dynamo.variables.constant import ConstantVariable
-        from torch._dynamo.variables.tensor import SymNodeVariable
-
         if "num_ctas" in kwargs:
             self.raise_unsupported(
                 "Passing num_ctas directly to the Triton kernel is not supported. "
@@ -964,17 +962,19 @@ class TritonHOPifier:
 
         for idx, arg_name in enumerate(variable.kernel.arg_names):
             if idx in constexprs:
-                if arg_name in combined_args_raw and isinstance(
-                    combined_args_raw[arg_name], SymNodeVariable
-                ):
+                if arg_name in combined_args_raw:
+                    # [Note: Specialize tl.constexpr args in user-defined triton kernels]
                     # This arg is marked as tl.constexpr. That means that triton will recompile every time
                     # this value changes.
                     # https://github.com/pytorch/pytorch/issues/136504
                     # One option is to correctly pass the symints in so that the symbolic expressions are defined
                     # when the triton code is being executed.
                     # But since triton will have to recompile either way, we instead just specialize on the value.
-                    combined_args_raw[arg_name] = ConstantVariable.create(
-                        combined_args_raw[arg_name].evaluate_expr()
+                    #
+                    # Depending on the type of `variable` we might expect different types for the symbolic args:
+                    # either SymNodeVariables (for TritonKernelVariables) or SymInts (TracingTritonKernelWrapper)
+                    combined_args_raw[arg_name] = variable.specialize_symbolic(
+                        combined_args_raw[arg_name]
                     )
 
         return self.call_HOP(variable, grids, combined_args_raw, tx)
@@ -1059,3 +1059,11 @@ class TraceableTritonKernelWrapper:
         else:
             assert self.kernel is not None
             return self.kernel[self.grid](*args, **kwargs)
+
+    def specialize_symbolic(self, arg: Any) -> Any:
+        import torch
+
+        # See [Note: Specialize tl.constexpr args in user-defined triton kernels]
+        if isinstance(arg, (torch.SymInt, torch.SymBool, torch.SymFloat)):
+            return guard_scalar(arg)
+        return arg
