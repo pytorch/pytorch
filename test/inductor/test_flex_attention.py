@@ -982,7 +982,6 @@ class TestFlexAttention(InductorTestCase):
         ),  # additional buffer on multiple dim + shared dimension
     ]
 
-    # TODO: Fix error for paged attention
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize(
@@ -1055,7 +1054,8 @@ class TestFlexAttention(InductorTestCase):
             compiled_grads[2], ref_grads[2], atol=tolerance.atol, rtol=tolerance.rtol
         )
 
-        # test paged attention
+        # test paged attention which does not support backward
+        q.requires_grad, k.requires_grad, v.requires_grad = False, False, False
         paged_compiled_out, _ = self.run_paged_attention(score_mod, q, k, v, dtype)
         torch.testing.assert_close(
             ref_out, paged_compiled_out, atol=tolerance.atol, rtol=tolerance.rtol
@@ -1725,12 +1725,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("head_dims", [(D, D // 2), (D // 2, D)])
     def test_non_equal_head_dims(self, dtype, score_mod, head_dims):
         qk_d, v_d = head_dims
-        context = nullcontext() if qk_d > v_d else self.assertRaises(ValueError)
-        with context:
-            self.run_test(score_mod, dtype, B, H, S, qk_d, B, H, S, V_D=v_d)
-            self.run_test_with_paged_attention(
-                score_mod, dtype, B, H, S, qk_d, B, H, S, V_D=v_d
-            )
+        self.run_test(score_mod, dtype, B, H, S, qk_d, B, H, S, V_D=v_d)
+        self.run_test_with_paged_attention(
+            score_mod, dtype, B, H, S, qk_d, B, H, S, V_D=v_d
+        )
 
     @supported_platform
     def test_autograd_function_in_score_mod(self):
@@ -2112,7 +2110,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out = func(query, key, value, block_mask=block_mask)
         out.sum().backward()
 
-    # TODO: triton error for paged attention
     @supported_platform
     @common_utils.parametrize("mode", ["eager", "inductor", "paged_attention"])
     @common_utils.parametrize(
@@ -2135,7 +2132,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             shape,
             device="cuda",
             dtype=dtype,
-            requires_grad=True,
+            requires_grad=False if mode == "paged_attention" else True,
         )
 
         # Create and permute tensors
@@ -2345,7 +2342,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         m(q, k, v)
 
-    # TODO: error for paged attention
     @supported_platform
     def test_force_write_lse(self):
         dtype = torch.float32
@@ -2362,10 +2358,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         flex_compile = torch.compile(flex_attention, fullgraph=True)
         out_compiled, lse_compiled = flex_compile(query, key, value, return_lse=True)
 
-        # out_paged, lse_paged = self.run_paged_attention(q=query, k=key, v=value, dtype=dtype)
+        out_paged, lse_paged = self.run_paged_attention(
+            score_mod=_identity, q=query, k=key, v=value, dtype=dtype
+        )
 
-        # torch.testing.assert_close(lse_eager, lse_compiled, atol=3e-3, rtol=0)
-        # torch.testing.assert_close(lse_eager, lse_paged, atol=3e-3, rtol=0)
+        torch.testing.assert_close(lse_eager, lse_compiled, atol=3e-3, rtol=0)
+        torch.testing.assert_close(lse_eager, lse_paged, atol=3e-3, rtol=0)
 
     @supported_platform
     @common_utils.parametrize("backend", ["flex_attention", "flex_decode", "eager"])
@@ -3532,10 +3530,6 @@ class TestPagedAttention(InductorTestCase):
             # Checkout output
             self._check_equal(golden_out, ref_out, paged_out, fudge_factor, "Out")
 
-    @supported_platform
-    def test_flex_attention_gqa(self):
-        # flex_attention(q, k, v, block_mask=causal_mask, enable_gqa=True) works with paged cache
-        return
 
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)

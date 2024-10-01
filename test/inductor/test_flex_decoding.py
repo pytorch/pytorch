@@ -890,12 +890,10 @@ class TestFlexDecoding(InductorTestCase):
     @common_utils.parametrize("head_dims", [(D, D // 2), (D // 2, D)])
     def test_non_equal_head_dims(self, dtype, score_mod, head_dims):
         qk_d, v_d = head_dims
-        context = nullcontext() if qk_d > v_d else self.assertRaises(ValueError)
-        with context:
-            self.run_test(score_mod, dtype, B, Hq, 1, qk_d, B, Hkv, S, V_D=v_d)
-            self.run_test_with_paged_attention(
-                score_mod, dtype, B, Hq, 1, qk_d, B, Hkv, S, V_D=v_d
-            )
+        self.run_test(score_mod, dtype, B, Hq, 1, qk_d, B, Hkv, S, V_D=v_d)
+        self.run_test_with_paged_attention(
+            score_mod, dtype, B, Hq, 1, qk_d, B, Hkv, S, V_D=v_d
+        )
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
