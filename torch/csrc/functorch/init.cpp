@@ -143,7 +143,7 @@ static Tensor _movedim(const Tensor& self, int64_t src, int64_t dst) {
 Tensor _remove_batch_dim(
     const Tensor& self,
     int64_t level,
-    c10::SymInt batch_size,
+    const c10::SymInt& batch_size,
     int64_t out_dim) {
   TORCH_CHECK(
       out_dim == 0 || !self.key_set().has(DispatchKey::BatchedNestedTensor),

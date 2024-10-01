@@ -35,6 +35,7 @@ from ..utils import (
     product,
     proxy_args_kwargs,
     unwrap_if_wrapper,
+    unwrap_sym_or_const,
 )
 from .base import VariableTracker
 from .ctx_manager import (
@@ -299,16 +300,9 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             return TorchFunctionDisableVariable.create(tx)
         elif self.value is torch._functorch.vmap.vmap_increment_nesting:
             assert len(args) == 2
-
-            def unwrap_arg(arg):
-                if isinstance(arg, variables.SymNodeVariable):
-                    return arg.sym_num
-                else:
-                    return arg.as_python_constant()
-
             return VmapIncrementNestingCtxManagerVariable.create(
                 tx,
-                [unwrap_arg(x) for x in args],
+                [unwrap_sym_or_const(x) for x in args],
             )
         elif self.value is torch._functorch.eager_transforms.jvp_increment_nesting:
             assert len(args) == 0
