@@ -23,8 +23,8 @@ from torch._export.utils import (
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.export import Constraint, Dim, export, FlatArgsAdapter, unflatten
+from torch.export._swap import _swap_modules
 from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
-from torch.export.unflatten import _swap_modules
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
