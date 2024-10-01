@@ -1269,7 +1269,6 @@ exclude_patterns = [
     'torch/fx/experimental/unification/utils.py',
     'torch/fx/experimental/unification/variable.py',
     'torch/fx/experimental/unify_refinements.py',
-    'torch/fx/experimental/validator.py',
     'torch/fx/graph.py',
     'torch/fx/graph_module.py',
     'torch/fx/interpreter.py',
