@@ -968,7 +968,7 @@ class PagedAttention:
 
         new_kv_num_blocks = block_mask.kv_num_blocks.clone()
 
-        new_kv_indices = torch.empty(
+        new_kv_indices = torch.zeros(
             (B, H, ROWS, MAX_CACHED_BLOCKS_IN_COL), dtype=torch.int32, device=device
         )
         new_kv_indices[:, :, :, :MAX_BLOCKS_IN_COL] = (
@@ -983,7 +983,7 @@ class PagedAttention:
         if block_mask.full_kv_num_blocks is not None:
             assert block_mask.full_kv_indices is not None
             new_full_kv_num_blocks = block_mask.full_kv_num_blocks.clone()
-            new_full_kv_indices = torch.empty(
+            new_full_kv_indices = torch.zeros(
                 (B, H, ROWS, MAX_CACHED_BLOCKS_IN_COL), dtype=torch.int32, device=device
             )
             new_full_kv_indices[:, :, :, :MAX_BLOCKS_IN_COL] = (
@@ -1316,3 +1316,6 @@ def flex_attention(
                         return out, lse * math.log(2)
                     else:
                         return out
+
+
+# TODO: when update, add a RuntimeError if the block mask batch size is not the same as the query batch size
