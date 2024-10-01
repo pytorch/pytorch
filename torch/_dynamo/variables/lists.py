@@ -25,6 +25,7 @@ from ..utils import (
     namedtuple_fields,
     odict_values,
     set_example_value,
+    unwrap_sym_or_const,
 )
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
@@ -88,12 +89,7 @@ class BaseListVariable(VariableTracker):
         return self.python_type()(self._as_proxy())
 
     def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
-        from .tensor import SymNodeVariable
-
-        if isinstance(arg, SymNodeVariable):
-            index = arg.sym_num
-        else:
-            index = arg.as_python_constant()
+        index = unwrap_sym_or_const(arg)
 
         if isinstance(index, slice):
             # Set source to None because slicing a list gives a new local
@@ -690,12 +686,8 @@ class SizeVariable(TupleVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def get_item_dyn(self, tx: "InstructionTranslator", arg: VariableTracker):
-        from .tensor import SymNodeVariable
+        index = unwrap_sym_or_const(arg)
 
-        if isinstance(arg, SymNodeVariable):
-            index = arg.sym_num
-        else:
-            index = arg.as_python_constant()
         if isinstance(index, slice):
             return SizeVariable(self.items[index])
         else:

@@ -1373,12 +1373,11 @@ def is_safe_constant(v):
 
 
 def unwrap_sym_or_const(arg):
-    from .variables import ConstantVariable, SymNodeVariable
+    from .variables import SymNodeVariable
 
     if isinstance(arg, SymNodeVariable):
         return arg.sym_num
     else:
-        assert isinstance(arg, ConstantVariable)
         return arg.as_python_constant()
 
 
