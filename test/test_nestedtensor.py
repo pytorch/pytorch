@@ -7018,6 +7018,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertIsNone(nt.grad)
         self.assertIsNone(nt._values.grad_fn)
 
+    @onlyCUDA
     @dtypes(torch.float64, torch.float32, torch.half)
     @parametrize(
         "contiguity",
@@ -7063,16 +7064,16 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertEqual(nt._lengths, nt2._lengths)
 
         # test device conversion
-        other_device = "cuda:0" if device == "cpu" else "cpu"
+        other_device = torch.device("cpu")
         nt3 = nt.to(device=other_device)
-        self.assertEqual(nt3.device, torch.device(other_device))
+        self.assertEqual(nt3.device, other_device)
         self.assertEqual(nt.is_contiguous(), nt3.is_contiguous())
         self.assertEqual(nt._values.is_contiguous(), nt3._values.is_contiguous())
         self.assertEqual(nt.shape, nt3.shape)
         # expect device change for offsets / lengths
-        self.assertEqual(nt3._offsets.device, torch.device(other_device))
+        self.assertEqual(nt3._offsets.device, other_device)
         if nt._lengths is not None:
-            self.assertEqual(nt3._lengths.device, torch.device(other_device))
+            self.assertEqual(nt3._lengths.device, other_device)
 
     @dtypes(torch.float64, torch.float32, torch.half)
     def test_jagged_padded_dense_conversion_kernels(self, device, dtype):
