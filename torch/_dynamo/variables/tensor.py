@@ -510,8 +510,23 @@ class TensorVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        from .builder import SourcelessBuilder, VariableBuilder
+        from .torch_function import can_dispatch_torch_function, dispatch_torch_function
+
         if self.is_strict_mode(tx) and name in self._strict_mode_banned_ops():
             unimplemented(f"Illegal method invocation {name} in strict mode")
+
+        if can_dispatch_torch_function(tx, tuple([self] + list(args)), kwargs):
+            if self.source:
+                func_var = VariableBuilder(
+                    tx, AttrSource(AttrSource(self.source, "__class__"), name)
+                )(inspect.getattr_static(torch.Tensor, name))
+            else:
+                func_var = SourcelessBuilder.create(tx, getattr(torch.Tensor, name))
+
+            return dispatch_torch_function(
+                tx, func_var, tuple([self] + list(args)), kwargs
+            )
 
         """
         Dispatch to a method-specific handler defined below.  If the
