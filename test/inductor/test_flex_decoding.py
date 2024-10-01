@@ -1555,5 +1555,3 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     run_tests()
-
-# TODO: add tests for deallocate 1 specific batch index, re-allocate it, and then call flex attention + paged attention.

@@ -920,11 +920,27 @@ class PagedAttention:
             raise RuntimeError("val must not require gradient")
 
         B, H, S, D = val.shape
-        # TODO: Change to runtime error
-        assert B <= batch_idx.shape[0]
-        assert H == cache.shape[1]
-        assert S == input_pos.shape[0]
-        assert D == cache.shape[3]
+        if B != batch_idx.shape[0]:
+            raise RuntimeError(
+                f"Expect val and batch_idx have the same batch size "
+                f"but got B={B} and B={batch_idx.shape[0]}."
+            )
+        if H != cache.shape[1]:
+            raise RuntimeError(
+                f"Expect val and cache has the same number of heads "
+                f"but got H={H} and H={cache.shape[1]}."
+            )
+        if S != input_pos.shape[0]:
+            raise RuntimeError(
+                f"Expect val and input_pos has the same length "
+                f"but got S={S} and S={input_pos.shape[0]}."
+            )
+        if D != cache.shape[3]:
+            raise RuntimeError(
+                f"Expect val and cache has the same hidden dim "
+                f"but got D={D} and D={cache.shape[3]}."
+            )
+
         device = val.device
 
         if not val.is_contiguous():
@@ -1043,14 +1059,6 @@ class PagedAttention:
 
         return new_score_mod
 
-    def get_num_pages_to_allocate(self, target_seq_len: Tensor) -> Tensor:
-        (B,) = target_seq_len.shape
-        num_tokens_to_allocate = torch.maximum(
-            target_seq_len - self.allocated_seq_len[:B],
-            torch.zeros(B, dtype=torch.int64, device=target_seq_len.device),
-        )
-        return _cdiv(num_tokens_to_allocate, self.page_size)  # [B]
-
     def allocate_single_seq(self, batch_idx: Tensor, num_pages_to_allocate: Tensor):
         # batch_idx: [1], num_pages_to_allocate: [1]
         if num_pages_to_allocate == 0:
@@ -1080,6 +1088,14 @@ class PagedAttention:
             start_page_idx, end_page_idx, device=num_pages_to_allocate.device
         )
         self.allocated_seq_len[batch_idx] += num_pages_to_allocate * self.page_size
+
+    def get_num_pages_to_allocate(self, target_seq_len: Tensor) -> Tensor:
+        (B,) = target_seq_len.shape
+        num_tokens_to_allocate = torch.maximum(
+            target_seq_len - self.allocated_seq_len[:B],
+            torch.zeros(B, dtype=torch.int64, device=target_seq_len.device),
+        )
+        return _cdiv(num_tokens_to_allocate, self.page_size)  # [B]
 
     def allocate(self, num_pages_to_allocate: Tensor):
         # num_pages_to_allocate: [B]
@@ -1239,6 +1255,20 @@ def flex_attention(
                 f"Expect number of query heads to be a multiple of kv heads for GQA "
                 f"but got Hq={Hq} and Hkv={Hkv}."
             )
+    if query.size(0) != key.size(0):
+        if block_mask is None:
+            raise ValueError(
+                f"Expect query and key/value to have the same batch size, "
+                f"or non-none block_mask for paged attention, "
+                f"but got block_mask=None, Bq={query.size(0)}, and Bkv={key.size(0)}."
+            )
+
+        if block_mask.kv_num_blocks.size(0) != query.size(0):
+            raise ValueError(
+                f"Expect query and key/value to have the same batch size, "
+                f"or block_mask and query to have the same batch size for paged attention, "
+                f"but got Bq={query.size(0)}, Bkv={key.size(0)}, B_block_mask={block_mask.kv_num_blocks.size(0)}."
+            )
 
     if score_mod is None:
         score_mod = _identity
@@ -1311,6 +1341,3 @@ def flex_attention(
                         return out, lse * math.log(2)
                     else:
                         return out
-
-
-# TODO: when update, add a RuntimeError if the block mask batch size is not the same as the query batch size

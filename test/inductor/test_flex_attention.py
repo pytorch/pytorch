@@ -367,12 +367,12 @@ class TestFlexAttention(InductorTestCase):
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
         sdpa_partial = create_attention(
-            score_mod, block_mask, enable_gqa=(not Q_H == KV_H), return_lse=True
+            score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
         )
         compiled_sdpa = torch.compile(sdpa_partial)
-        golden_out, golden_lse = sdpa_partial(q_gold, k_gold, v_gold)
-        ref_out, ref_lse = sdpa_partial(q_ref, k_ref, v_ref)
-        compiled_out, compiled_lse = compiled_sdpa(q, k, v)
+        golden_out = sdpa_partial(q_gold, k_gold, v_gold)
+        ref_out = sdpa_partial(q_ref, k_ref, v_ref)
+        compiled_out = compiled_sdpa(q, k, v)
 
         backward_grad = torch.randn((Q_B, Q_H, Q_S, V_D), dtype=dtype, device="cuda")
 
