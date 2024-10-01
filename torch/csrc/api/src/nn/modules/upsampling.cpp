@@ -4,7 +4,8 @@
 
 namespace F = torch::nn::functional;
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 UpsampleImpl::UpsampleImpl(
     const UpsampleOptions& options_) // NOLINT(modernize-pass-by-value)
@@ -46,4 +47,5 @@ Tensor UpsampleImpl::forward(const Tensor& input) {
       false);
 }
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

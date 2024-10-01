@@ -7638,7 +7638,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         cnt = CompileCounterWithBackend("aot_eager")
         fn_opt = torch._dynamo.optimize(cnt)(fn)
-        x = torch.tensor(9.734375, dtype=torch.bfloat16)
+        x = torch.tensor(9.734375, dtype=torch.bfloat16, requires_grad=True)
         y = 1.00048828125
 
         self.assertEqual(fn_opt(x, y), fn(x, y))
@@ -7651,7 +7651,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         cnt = CompileCounterWithBackend("aot_eager")
         fn_opt = torch._dynamo.optimize(cnt)(fn)
-        x = torch.tensor(9.734375, dtype=torch.float16)
+        x = torch.tensor(9.734375, dtype=torch.float16, requires_grad=True)
         y = 1.00048828125
 
         self.assertEqual(fn_opt(x, y), fn(x, y))
@@ -7664,7 +7664,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         cnt = CompileCounterWithBackend("aot_eager")
         fn_opt = torch._dynamo.optimize(cnt)(fn)
-        x = torch.tensor(9.734375, dtype=torch.float32)
+        x = torch.tensor(9.734375, dtype=torch.float32, requires_grad=True)
         y = 1.00048828125
 
         self.assertEqual(fn_opt(x, y), fn(x, y))
@@ -7677,7 +7677,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         cnt = CompileCounterWithBackend("aot_eager")
         fn_opt = torch._dynamo.optimize(cnt)(fn)
-        x = torch.tensor(9.734375, dtype=torch.float64)
+        x = torch.tensor(9.734375, dtype=torch.float64, requires_grad=True)
         y = 1.00048828125
 
         self.assertEqual(fn_opt(x, y), fn(x, y))
@@ -9985,9 +9985,6 @@ ShapeEnv not equal: field values don't match:
   > Right: {}
 ==> source_to_symbol: values don't match.
   >  Left: {x.size()[0]: x.size()[0], x.size()[1]: x.size()[1], x.storage_offset(): x.storage_offset(), x.stride()[0]: x.stride()[0], x.stride()[1]: x.stride()[1]}
-  > Right: {}
-==> source_to_var: values don't match.
-  >  Left: {x.size()[0]: s0, x.size()[1]: s1}
   > Right: {}
 ==> val_to_var: values don't match.
   >  Left: {0: 0, 1: 1, 2: s1, 3: s0}

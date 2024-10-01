@@ -294,7 +294,7 @@ Quantization (torch/ao)
 Windows
 ~~~~~~~
 
--  (emeritus) Guoliang Hua (`nbcsm <https://github.com/nbcsm>`__)
+-  Guoliang Hua (`nbcsm <https://github.com/nbcsm>`__)
 -  (emeritus) Teng Gao (`gaoteng-git <https://github.com/gaoteng-git>`__)
 -  (emeritus) Peter Johnson (`peterjc123 <https://github.com/peterjc123>`__)
 

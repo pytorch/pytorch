@@ -104,15 +104,13 @@ static c10::Device c10_device(int32_t device_type, int32_t device_index) {
 
 const int AOTI_TORCH_MAX_NUMEL_TO_PRINT = 64;
 
-#define AOTI_TORCH_DEVICE_TYPE_IMPL(device_str, device_type) \
-  int32_t aoti_torch_device_type_##device_str() {            \
-    return (int32_t)c10::DeviceType::device_type;            \
-  }
+int32_t aoti_torch_device_type_cpu() {
+  return (int32_t)c10::DeviceType::CPU;
+}
 
-AOTI_TORCH_DEVICE_TYPE_IMPL(cpu, CPU)
-AOTI_TORCH_DEVICE_TYPE_IMPL(cuda, CUDA)
-AOTI_TORCH_DEVICE_TYPE_IMPL(privateuse1, PrivateUse1)
-#undef AOTI_TORCH_DEVICE_TYPE_IMPL
+int32_t aoti_torch_device_type_cuda() {
+  return (int32_t)c10::DeviceType::CUDA;
+}
 
 #define AOTI_TORCH_DTYPE_IMPL(dtype, stype) \
   int32_t aoti_torch_dtype_##dtype() {      \

@@ -623,10 +623,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return CallTorchbindHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "wrap_with_set_grad_enabled":
             return WrapWithSetGradEnabledHigherOrderVariable(value, source, **kwargs)
-        elif (
-            value.__name__ == "auto_functionalized"
-            or value.__name__ == "auto_functionalized_v2"
-        ):
+        elif value.__name__ == "auto_functionalized":
             return AutoFunctionalizeHigherOrderVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")

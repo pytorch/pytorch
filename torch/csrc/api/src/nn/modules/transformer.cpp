@@ -8,7 +8,8 @@
 
 namespace F = torch::nn::functional;
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 // ========================TransformerEncoderLayerImpl=========================
 TransformerEncoderLayerImpl::TransformerEncoderLayerImpl(
@@ -485,4 +486,5 @@ Tensor TransformerImpl::generate_square_subsequent_mask(int64_t sz) {
   }
 }
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch
