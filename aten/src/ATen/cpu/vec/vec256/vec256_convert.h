@@ -314,6 +314,23 @@ struct VecConvert<float, 1, BFloat16, 1> {
     return result;
   }
 };
+
+template <>
+struct VecConvert<BFloat16, 1, float, 2> {
+  static inline VectorizedN<BFloat16, 1> apply(
+      const VectorizedN<float, 2>& src) {
+    VectorizedN<BFloat16, 1> result;
+    uint32x4x2_t u32x4x2_0 = vld1q_u32_x2(reinterpret_cast<const uint32_t*>(&src[0]));
+    uint32x4x2_t u32x4x2_1 = vld1q_u32_x2(reinterpret_cast<const uint32_t*>(&src[1]));
+    uint16x4_t u16x4_0 = vmovn_u32(vshrq_n_u32(u32x4x2_0.val[0], 16));
+    uint16x4_t u16x4_1 = vmovn_u32(vshrq_n_u32(u32x4x2_0.val[1], 16));
+    uint16x4_t u16x4_2 = vmovn_u32(vshrq_n_u32(u32x4x2_1.val[0], 16));
+    uint16x4_t u16x4_3 = vmovn_u32(vshrq_n_u32(u32x4x2_1.val[1], 16));
+    uint16x8x2_t u16x8x2 = {vcombine_u16(u16x4_0, u16x4_1), vcombine_u16(u16x4_2, u16x4_3)};
+    vst1q_u16_x2(reinterpret_cast<uint16_t*>(result[0].operator BFloat16*()), u16x8x2);
+    return result;
+  }
+};
 #endif
 
 template <typename src_t>
