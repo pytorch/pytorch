@@ -298,7 +298,7 @@ class TestUploadStats(unittest.TestCase):
                 expected_number_of_requests,
             )
 
-    def test_remove_nan_inf(self) -> None:
+    def test_remove_nan_inf(self, _mocked_resource: Any) -> None:
         checks = [
             (float("inf"), '"inf"', "Infinity"),
             (float("nan"), '"nan"', "NaN"),
