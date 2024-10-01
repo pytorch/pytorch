@@ -299,9 +299,16 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             return TorchFunctionDisableVariable.create(tx)
         elif self.value is torch._functorch.vmap.vmap_increment_nesting:
             assert len(args) == 2
+
+            def unwrap_arg(arg):
+                if isinstance(arg, variables.SymNodeVariable):
+                    return arg.sym_num
+                else:
+                    return arg.as_python_constant()
+
             return VmapIncrementNestingCtxManagerVariable.create(
                 tx,
-                [guard_if_dyn(x) for x in args],
+                [unwrap_arg(x) for x in args],
             )
         elif self.value is torch._functorch.eager_transforms.jvp_increment_nesting:
             assert len(args) == 0

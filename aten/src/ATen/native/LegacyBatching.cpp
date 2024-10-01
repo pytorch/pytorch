@@ -103,12 +103,12 @@ static Tensor maybe_movedim(const Tensor& self, int64_t src, int64_t dst) {
 // correspond to the inner vmap level so we need to create one for the user.
 //
 // `out_dim` controls where we should put the batch dimension in the output tensor.
-Tensor _remove_batch_dim(const Tensor& self, int64_t level, int64_t batch_size, int64_t out_dim) {
+Tensor _remove_batch_dim(const Tensor& self, int64_t level, c10::SymInt batch_size, int64_t out_dim) {
   if (!has_level(self, level)) {
     auto self_sizes = self.sizes();
-    VmapDimVector expanded_sizes(self_sizes.begin(), self_sizes.end());
+    VmapSymDimVector expanded_sizes(self_sizes.begin(), self_sizes.end());
     expanded_sizes.insert(expanded_sizes.begin() + out_dim, batch_size);
-    return self.expand(expanded_sizes);
+    return self.expand_symint(expanded_sizes);
   }
 
   // Must be batched if has_level(self, /*any_level*/)
