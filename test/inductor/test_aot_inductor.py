@@ -3682,6 +3682,12 @@ CPU_TEST_FAILURES = {
     "test_torchvision_transforms_functional_tensor_resize": fail_minimal_arrayref_interface(),
 }
 
+if IS_MACOS:
+    CPU_TEST_FAILURES[
+        "test_cond_non_tensor_predicates_dynamic_True"
+    ] = fail_stack_allocation()
+
+
 # test_failures, xfail by default, set is_skip=True to skip
 CUDA_TEST_FAILURES = {
     # TODO: AssertionError: unsupported Optional type in convert_arg_type: Generator
