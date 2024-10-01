@@ -24,11 +24,25 @@ from .mm_common import mm_args, mm_grid, scaled_mm_configs
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
+scaling_epilouge = r"""
+@triton.jit
+def scale_accumulator(acc, A_inverse_scale, B_inverse_scale, rm, rn, M, N, SCALING_ROWWISE):
+    if SCALING_ROWWISE:
+        inv_a_scale_row = tl.load(A_inverse_scale + rm, mask=rm < M)
+        inv_b_scale_row = tl.load(B_inverse_scale + rn, mask=rn < N)
+        inv_scale_row = inv_a_scale_row[:, None] * inv_b_scale_row[None, :]
+        acc *= inv_scale_row
+    else:
+        # for tensor-wise scaling, the scales are scalars
+        inv_a_scale = tl.load(A_inverse_scale)
+        inv_b_scale = tl.load(B_inverse_scale)
+        inv_scale = inv_a_scale * inv_b_scale
+        acc *= inv_scale
+    return acc
+"""
 
-scaled_mm_template = TritonTemplate(
-    name="scaled_mm",
-    grid=mm_grid,
-    source=r"""
+
+mm_base = r"""
 {{def_kernel("A", "B", "A_inverse_scale", "B_inverse_scale")}}
     M = {{size("A", 0)}}
     N = {{size("B", 1)}}
@@ -78,18 +92,7 @@ scaled_mm_template = TritonTemplate(
         A += BLOCK_K * stride_ak
         B += BLOCK_K * stride_bk
 
-    if SCALING_ROWWISE:
-        inv_a_scale_row = tl.load(A_inverse_scale + rm, mask=rm < M)
-        inv_b_scale_row = tl.load(B_inverse_scale + rn, mask=rn < N)
-        inv_scale_row = inv_a_scale_row[:, None] * inv_b_scale_row[None, :]
-        acc *= inv_scale_row
-    else:
-        # for tensor-wise scaling, the scales are scalars
-        inv_a_scale = tl.load(A_inverse_scale)
-        inv_b_scale = tl.load(B_inverse_scale)
-        inv_scale = inv_a_scale * inv_b_scale
-        acc *= inv_scale
-
+    acc = scale_accumulator(acc, A_inverse_scale, B_inverse_scale, rm, rn, M, N, SCALING_ROWWISE)
     # rematerialize rm and rn to save registers
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
@@ -100,17 +103,20 @@ scaled_mm_template = TritonTemplate(
 
     # inductor generates a suffix
     {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
-""",
+"""
+
+
+scaled_mm_template = TritonTemplate(
+    name="scaled_mm",
+    grid=mm_grid,
+    source=mm_base + scaling_epilouge,
 )
 
 
 # Inductor does not allow optional tensor input arguments currently (pass None as an
 # input node to template choices), but since for _scaled_mm there is only one such arg
 # (bias), work around by having a second template when bias is provided.
-scaled_mm_bias_template = TritonTemplate(
-    name="scaled_mm_bias",
-    grid=mm_grid,
-    source=r"""
+mm_bias_base = r"""
 {{def_kernel("A", "B", "A_inverse_scale", "B_inverse_scale", "bias_ptr")}}
     M = {{size("A", 0)}}
     N = {{size("B", 1)}}
@@ -160,17 +166,7 @@ scaled_mm_bias_template = TritonTemplate(
         A += BLOCK_K * stride_ak
         B += BLOCK_K * stride_bk
 
-    if SCALING_ROWWISE:
-        inv_a_scale_row = tl.load(A_inverse_scale + rm, mask=rm < M)
-        inv_b_scale_row = tl.load(B_inverse_scale + rn, mask=rn < N)
-        inv_scale_row = inv_a_scale_row[:, None] * inv_b_scale_row[None, :]
-        acc *= inv_scale_row
-    else:
-        # for tensor-wise scaling, the scales are scalars
-        inv_a_scale = tl.load(A_inverse_scale)
-        inv_b_scale = tl.load(B_inverse_scale)
-        inv_scale = inv_a_scale * inv_b_scale
-        acc *= inv_scale
+    acc = scale_accumulator(acc, A_inverse_scale, B_inverse_scale, rm, rn, M, N, SCALING_ROWWISE)
 
     # rematerialize rm and rn to save registers
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -186,7 +182,12 @@ scaled_mm_bias_template = TritonTemplate(
 
     # inductor generates a suffix
     {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
-""",
+"""
+
+scaled_mm_bias_template = TritonTemplate(
+    name="scaled_mm_bias",
+    grid=mm_grid,
+    source=mm_bias_base + scaling_epilouge,
 )
 
 
