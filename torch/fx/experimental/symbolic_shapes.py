@@ -252,6 +252,8 @@ def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
     if isinstance(expr, torch.SymBool):
         return expr.node.guard_size_oblivious("", 0)
     else:
+        if not isinstance(expr, bool):
+            breakpoint()
         assert isinstance(expr, bool), expr
         return expr
 
