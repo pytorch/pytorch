@@ -3970,18 +3970,45 @@ def constant_pad_nd(
     pad: List[int],
     value: NumberType = 0,
 ) -> Tensor:
+    torch._check(
+        len(pad) % 2 == 0,
+        lambda: f"Length of pad must be even but instead it equals {len(pad)}",
+    )
+
+    input_sizes = input.shape
+    l_inp = len(input_sizes)
+
+    l_pad = len(pad) // 2
+    l_diff = l_inp - l_pad
+
+    torch._check(
+        l_inp >= l_pad,
+        lambda: "Length of pad should be no more than twice the number of "
+        f"dimensions of the input. Pad length is {len(pad)} while the input has "
+        f"{l_inp} dimensions.",
+    )
+
     # Avoid importing sympy at a module level
     from torch.fx.experimental.symbolic_shapes import statically_known_true
 
-    if builtins.all(statically_known_true(p < 0) for p in pad):
-        import torch._refs as refs
+    if builtins.all(statically_known_true(p <= 0) for p in pad):
+        for i in range(l_diff, l_inp):
+            pad_idx = 2 * (l_inp - i - 1)
+            new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1]
+            torch._check(
+                new_dim >= 0,
+                lambda: f"The input size {input_sizes[l_diff + i]}, plus negative padding "
+                f"{pad[pad_idx]} and {pad[pad_idx + 1]} resulted in a negative output size, "
+                f"which is invalid. Check dimension {l_diff + i} of your input.",
+            )
 
-        return refs.constant_pad_nd(input, pad, value)
+        c_input = input
+        for i in range(l_diff, l_inp):
+            pad_idx = 2 * (l_inp - i - 1)
+            new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1]
+            c_input = c_input.narrow(i, -pad[pad_idx], new_dim)
 
-    torch._check(
-        len(pad) % 2 == 0,
-        lambda: "constant_pad_nd requires an even number of padding",
-    )
+        return c_input.clone()
 
     dim = len(pad) // 2
     inp_shape = input.shape[-dim:]
