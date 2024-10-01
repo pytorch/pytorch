@@ -105,7 +105,7 @@ class BlockPatternMatcher():
         return numels
 
     @classmethod
-    def match_mod_div_block_expr(cls, index: sympy.Expr, index_var: sympy.Symbol, numel: sympy.Expr, num_dims: int) -> Tuple[List[sympy.Expr], List[sympy.Expr]]:
+    def match_mod_div_block_expr(cls, index: sympy.Expr, index_var: sympy.Symbol, numel: sympy.Expr, num_dims: int) -> Tuple[List[sympy.Expr], List[sympy.Expr], List[sympy.Expr]]:
         """
         Matches modular indexing expressions, converting them to implied block dimensions and strides.
         See triton.py for more information.
@@ -114,11 +114,11 @@ class BlockPatternMatcher():
         # Pattern match to find the strides and offset.
         wild = functools.partial(sympy.Wild, exclude=[index_var])
         dims: List[sympy.Expr] = [
-            wild(f"dim_mod{idx}") for idx in range(num_dims)
-        ]
+                wild(f"dim_mod{idx}") for idx in range(num_dims)
+                ]
         strides: List[sympy.Expr] = [
-            wild(f"stride_mod{idx}") for idx in range(num_dims)
-        ]
+                wild(f"stride_mod{idx}") for idx in range(num_dims)
+                ]
 
 
         # The first dimension's index is computed by division.
@@ -135,7 +135,7 @@ class BlockPatternMatcher():
         # Pattern match.
         match = index.match(match_expr)
         if match is None:
-            return None, None
+            return None, None, None
 
         # Provide default values for unmatched dims and strides.
         for dim in dims[1:]:
@@ -170,7 +170,7 @@ class BlockPatternMatcher():
             return None
         dims[0] = numel / slice_numels[0]
 
-        return dims, strides
+        return dims, strides, block_index_exprs
 
 
 @dataclasses.dataclass
@@ -1979,7 +1979,7 @@ class SIMDScheduling(BaseScheduling):
                         )
 
                         # Attempt to pattern match the index expr.
-                        dims, strides = BlockPatternMatcher.match_mod_div_block_expr(index, var, numel, num_dims)
+                        dims = BlockPatternMatcher.match_mod_div_block_expr(index, var, numel, num_dims)[0]
                         if dims is None:
                             # Failed matches default to the full range.
                             dims = [numel]

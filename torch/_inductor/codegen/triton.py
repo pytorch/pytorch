@@ -1535,7 +1535,7 @@ class TritonKernel(SIMDKernel):
                 )
 
                 index_var = range_tree.symbol()
-                dims, strides = BlockPatternMatcher.match_mod_div_block_expr(index, index_var, range_tree.numel, num_dims)
+                dims, strides, block_index_exprs = BlockPatternMatcher.match_mod_div_block_expr(index, index_var, range_tree.numel, num_dims)
                 slice_numels = BlockPatternMatcher.get_slice_numels(dims)
 
                 # Check for applicable iteration range sizes.
