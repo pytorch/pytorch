@@ -26,7 +26,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
   retry conda create -qyn testenv python="$DESIRED_PYTHON"
   source activate testenv >/dev/null
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
-
+  python_path="/opt/python/cp\$python_nodot-cp\${python_nodot}"
   if [[ $DESIRED_PYTHON =~ ([0-9].[0-9]+)t ]]; then
     python_digits="\$(echo $DESIRED_PYTHON | tr -cd [:digit:])"
     python_path="/opt/python/cp\${python_digits}-cp\${python_digits}t"
