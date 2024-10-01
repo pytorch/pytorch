@@ -1442,5 +1442,6 @@ def _swap_modules(
         entry.fqn: entry.signature for entry in ep.module_call_graph if entry.signature
     }
     gm = ep.module()
+    gm.graph.eliminate_dead_code()
     assert isinstance(gm, torch.fx.GraphModule)
     return _swap_module_helper(gm, modules_to_swap, module_call_graph)
