@@ -872,6 +872,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             return ConstantVariable.create(None)
 
+        @register(torch._C.TensorBase.dim)
+        def handle_dim(self, tx: "InstructionTranslator", *args, **kwargs):
+            return args[0].call_method(tx, "dim", args[1:], kwargs)
+
+        @register(torch._C.TensorBase.size)
+        def handle_size(self, tx: "InstructionTranslator", *args, **kwargs):
+            return args[0].call_method(tx, "size", args[1:], kwargs)
+
         return handlers
 
     def call_function(
