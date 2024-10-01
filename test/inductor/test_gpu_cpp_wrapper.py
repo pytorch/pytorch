@@ -66,12 +66,6 @@ test_failures_gpu_wrapper = {
     "test_randint_xpu_dynamic_shapes": test_torchinductor.TestFailure(
         ("gpu_wrapper",), is_skip=False
     ),
-    "test_unspec_inputs_xpu": test_torchinductor.TestFailure(
-        ("gpu_wrapper",), is_skip=False
-    ),
-    "test_unspec_inputs_xpu_dynamic_shapes": test_torchinductor.TestFailure(
-        ("gpu_wrapper",), is_skip=False
-    ),
     # ATen ops: bernoulli1 not implemented on XPU.
     "test_bernoulli1_xpu_dynamic_shapes": test_torchinductor.TestFailure(
         ("gpu_wrapper",), is_skip=False
