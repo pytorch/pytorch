@@ -28,7 +28,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
 
   python_path="/opt/python/cp\$python_nodot-cp\${python_nodot}"
-  if [[ "$python_nodot" == "313t" ]]; then
+  if [[ "\$python_nodot" == "313t" ]]; then
     python_path="/opt/python/cp313-cp\${python_nodot}"
   fi
   export PATH="\${python_path}/bin:\$PATH"
