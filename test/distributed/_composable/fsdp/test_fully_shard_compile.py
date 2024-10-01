@@ -472,7 +472,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         torch._dynamo.compiled_autograd.reset()
         with torch._dynamo.config.patch(
             compiled_autograd=True,
-            compiled_autograd_fullgraph=True,
+            compiled_autograd_config_override={
+                "fullgraph": True,
+            },
             inline_inbuilt_nn_modules=True,
             skip_fsdp_hooks=False,
         ), torch._functorch.config.patch(

@@ -2445,11 +2445,23 @@ def compile(
     else:
         backend = _TorchCompileWrapper(backend, mode, options, dynamic)
 
+    def rebuild_ctx(**extra_kwargs):
+        return torch.compile(
+            model=None,
+            fullgraph=extra_kwargs.get("fullgraph", fullgraph),
+            dynamic=extra_kwargs.get("dynamic", dynamic),
+            backend=extra_kwargs.get("backend", backend),
+            mode=extra_kwargs.get("mode", mode),
+            options=extra_kwargs.get("options", options),
+            disable=extra_kwargs.get("disable", disable),
+        )
+
     return torch._dynamo.optimize(
         backend=backend,
         nopython=fullgraph,
         dynamic=dynamic,
         disable=disable,
+        rebuild_ctx=rebuild_ctx,
     )(model)  # type: ignore[return-value]
 
 

@@ -466,13 +466,8 @@ fake_tensor_cache_crosscheck_enabled = (
 # Note: AOT Autograd will still trace joint graphs.
 compiled_autograd = False
 
-# Determines the `fullgraph` config value for Compiled Autograd Dynamo tracing:
-# - If True, force `fullgraph=True`.
-# - If False, force `fullgraph=False`.
-# - If None, uses forward Dynamo `fullgraph` config value.
-#
-# This config only takes effect if `compiled_autograd=True`.
-compiled_autograd_fullgraph: Union[bool, None] = None
+# Overrides torch.compile() config for Compiled Autograd:
+compiled_autograd_config_override: Dict[str, Any] = {}
 
 # Enables use of collectives *during* compilation to synchronize behavior
 # across ranks.  Today, this is used solely to modify automatic_dynamic_shapes
