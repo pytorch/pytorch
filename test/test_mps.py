@@ -142,7 +142,7 @@ def mps_ops_grad_modifier(ops):
         'fmod': [torch.float16],
 
         # round not working properly for float16
-        'round': [torch.float16, torch.bfloat16],
+        'round': [torch.float16],
 
         # atomic operation in backward pass
         '_unsafe_masked_index': [torch.float16],
@@ -844,7 +844,7 @@ def mps_ops_modifier(ops):
         'nn.functional.conv2d': [torch.int64],
         'nn.functional.conv3d': [torch.int64],
         'nn.functional.conv_transpose1d': [torch.int64],
-        'nn.functional.conv_transpose2d': [torch.int64],
+        'nn.functional.conv_transpose2d': [torch.int64, torch.bfloat16],
 
         # Unsupported dtypes
         'dot': [torch.int64],
@@ -876,15 +876,21 @@ def mps_ops_modifier(ops):
         # returned output on CPU is float64
         'bincount': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
-        # trunc_tensor not working properly for float16
-        'divtrunc_rounding': [torch.float16],
-        'fmod': [torch.float16],
+        # trunc_tensor not working properly for float16 and bfloat16
+        'divtrunc_rounding': [torch.float16, torch.bfloat16],
+        'fmod': [torch.float16, torch.bfloat16],
 
-        # round not working properly for float16
-        'round': [torch.float16],
+        # round not working properly for float16 and bfloat16
+        'round': [torch.float16, torch.bfloat16],
+
+        # bfloat16 have weird issues with rounding
+        'divfloor_rounding': [torch.bfloat16],
+        'floor_divide': [torch.bfloat16],
+        'remainder': [torch.bfloat16],
 
         # atomic operations not supported
-        '_unsafe_masked_index_put_accumulate': [torch.bool, torch.int8, torch.uint8, torch.float16, torch.int16, torch.int64],
+        '_unsafe_masked_index_put_accumulate': [torch.bool, torch.int8, torch.uint8, torch.float16, torch.int16, torch.int64,
+                                                torch.bfloat16],
     }
 
     if product_version < 14.0:
@@ -925,7 +931,7 @@ def mps_ops_modifier(ops):
     UNDEFINED_XFAILLIST = {
         # Top 60 operators
         # topk fails with duplicate indices
-        'topk': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'topk': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8, torch.bfloat16],
 
         # Failures due to random output that they generate using
         # Philox engine causing mismatch with CPU results
@@ -945,7 +951,7 @@ def mps_ops_modifier(ops):
         'nn.functional.dropout2d': [torch.float16, torch.float32, torch.bfloat16],
         'nn.functional.dropout3d': [torch.float16, torch.float32, torch.bfloat16],
         # See https://github.com/pytorch/pytorch/issues/111479
-        'nn.functional.multi_head_attention_forward': [torch.float32, torch.float16],
+        'nn.functional.multi_head_attention_forward': [torch.float32, torch.float16, torch.bfloat16],
 
         # duplicate indices are used in the testcase - undefined behaviour
         'index_put': None,
@@ -957,10 +963,7 @@ def mps_ops_modifier(ops):
         # CPU Errors:
         'addr': [torch.bool, torch.int16, torch.int32,
                  torch.int64, torch.uint8, torch.int8],  # "addmv_impl_cpu" not implemented for 'Half'
-        'as_stridedpartial_views': [torch.bool, torch.float16, torch.float32, torch.int16,
-                                    torch.int32, torch.int64, torch.uint8, torch.int8],  # cpu result off, showing random values
-        'as_strided_partial_views': [torch.bool, torch.float16, torch.float32, torch.int16,
-                                     torch.int32, torch.int64, torch.uint8, torch.int8],  # cpu result off, showing random values
+        'as_stridedpartial_views': None,  # cpu result off, showing random values
 
         # random results
         # mps vs cpu:
@@ -971,7 +974,7 @@ def mps_ops_modifier(ops):
         # Mismatched elements: 56 / 96 (58.3%)
         # Greatest absolute difference: 17.892311096191406 at index (1, 0, 2) (up to 1e-05 allowed)
         # Greatest relative difference: inf at index (1, 0, 0) (up to 1.3e-06 allowed)
-        'nn.functional.scaled_dot_product_attention': [torch.float32, torch.float16],
+        'nn.functional.scaled_dot_product_attention': [torch.float32, torch.float16, torch.bfloat16],
 
         # float output for float16 input on MPS
         'logit': [torch.float16, torch.bfloat16],
@@ -12015,7 +12018,8 @@ class TestNoRegression(TestCase):
             self.assertEqual(x2.device.type, "mps")
 
 
-MPS_DTYPES = [t for t in get_all_dtypes() if t not in [torch.double, torch.cdouble]]
+MPS_UNSUPPORTED_TYPES = [torch.double, torch.cdouble] + ([torch.bfloat16] if product_version < 14.0 else [])
+MPS_DTYPES = [t for t in get_all_dtypes() if t not in MPS_UNSUPPORTED_TYPES]
 
 MPS_GRAD_DTYPES = [torch.float32, torch.float16]
 
@@ -12027,6 +12031,10 @@ class TestConsistency(TestCaseMPS):
     # by doing `EXPECTTEST_ACCEPT=1 python test_mps.py TestConsistencyCPU`
     # You most likely do NOT want to modify this manually
 
+    BF16_LOW_PRECISION_LIST = {
+        'nn.functional.linear',
+        'nn.functional.gaussian_nll_loss',
+    }
     FP16_LOW_PRECISION_LIST = {
         'add', 'sub', 'div', 'addcdiv',
         '__rdiv__', '__rmul__',
@@ -12090,12 +12098,15 @@ class TestConsistency(TestCaseMPS):
         if op.name in self.FP16_LOW_PRECISION_LIST and dtype in [torch.float16, torch.bfloat16]:
             return (1e-2, 1e-2) if dtype == torch.float16 else (5e-2, 5e-2)
 
+        if op.name in self.BF16_LOW_PRECISION_LIST and dtype == torch.bfloat16:
+            return (5e-2, 5e-2)
+
         if op.name in ['nn.functional.conv_transpose1d',
                        'nn.functional.conv_transpose2d',
                        'nn.functional.conv_transpose3d',
                        '__rmatmul__', 'addbmm', 'addmv',
-                       'baddbmm', 'cov', 'matmul', 'mv'] and dtype == torch.float16:
-            return (5e-2, 5e-2)
+                       'baddbmm', 'cov', 'matmul', 'mv'] and dtype in [torch.float16, torch.bfloat16]:
+            return (5e-2, 5e-2) if dtype == torch.float16 else (5e-2, 1e-1)
         if op.name == "masked.mean":
             return (7e-4, 2e-3)
         if op.name == "native_layer_norm":
