@@ -324,10 +324,10 @@ def trace_flex_attention(
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
-    example_vals = [
-        torch.zeros((), dtype=query.dtype, requires_grad=query.requires_grad)
-    ] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
-    mask_example_vals = [torch.zeros((), dtype=torch.int) for _ in range(4)]
+    example_vals = [query.new_zeros((), requires_grad=query.requires_grad)] + [
+        query.new_zeros((), dtype=torch.int) for _ in range(4)
+    ]
+    mask_example_vals = [query.new_zeros((), dtype=torch.int) for _ in range(4)]
     mask_mod = block_mask[-1]
     with TransformGetItemToIndex():
         score_graph = reenter_make_fx(score_mod)(
