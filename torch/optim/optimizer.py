@@ -233,7 +233,8 @@ def _get_capturable_supported_devices(supports_xla: bool = True) -> List[str]:
 
 # Common doc strings among optimizers
 _params_doc = r"""params (iterable): iterable of parameters or named_parameters to optimize 
-            or iterable of dicts defining parameter groups"""
+            or iterable of dicts defining parameter groups. When using named_parameters, 
+            all parameters in all groups should be named"""
 
 _foreach_doc = r"""foreach (bool, optional): whether foreach implementation of optimizer
             is used. If unspecified by the user (so foreach is None), we will try to use
@@ -660,9 +661,6 @@ class Optimizer:
         the optimizer will zip the param_group ``params`` (int IDs) and the
         optimizer ``param_groups`` (actual ``nn.Parameter`` s) in order to
         match state WITHOUT additional verification.
-        Parameter names (if exist) will be ignored when loading from a
-        state_dict. To use names a custom ``register_load_state_dict_pre_hook``
-        should be implemented.
 
         A returned state dict might look something like:
 
@@ -840,9 +838,14 @@ class Optimizer:
     @torch._disable_dynamo
     def load_state_dict(self, state_dict: StateDict) -> None:
         r"""Load the optimizer state.
-        The names of the parameters (if exist in :meth:`state_dict`) will be ignored.
-        To use the parameters names (when the optimized parameters are different from the loaded state dict)
-        a custom ``register_load_state_dict_pre_hook`` should be implemented to adapt the dict according to the change.
+        The names of the parameters (if they exist in :meth:`state_dict`) will not affect the loading process.
+        To use the parameters names for custom cases (such as when the parameters in the loaded state dict
+         differ from those initialized in the optimizer),
+        a custom ``register_load_state_dict_pre_hook`` should be implemented to adapt the loaded dict
+         accordingly.
+         If ``param_names`` exist in loaded state dict ``param_groups`` they will be saved or will override
+         the current names, if present, in the optimizer state. If they do not exist in loaded state dict,
+         the optimizer ``param_names`` will remain unchanged.
 
         Args:
             state_dict (dict): optimizer state. Should be an object returned
@@ -918,6 +921,8 @@ class Optimizer:
             group: Dict[str, Any], new_group: Dict[str, Any]
         ) -> Dict[str, Any]:
             new_group["params"] = group["params"]
+            if 'param_names' in group and 'param_names' not in new_group:
+                new_group["param_names"] = group["param_names"]
             return new_group
 
         param_groups = [update_group(g, ng) for g, ng in zip(groups, saved_groups)]
@@ -1028,25 +1033,21 @@ class Optimizer:
             param_group["params"] = list(params)
 
         extracted_param_tensors = []
-        param_group['param_names'] = []
+        extracted_param_names = []
         for param in param_group["params"]:
             if isinstance(param, tuple):
                 param_name = param[0]
-                param_group['param_names'].append(param_name)
+                extracted_param_names.append(param_name)
                 extracted_param_tensors.append(param[1])
             else:
                 extracted_param_tensors.append(param)
-                if len(param_group['param_names']) > 0:
-                    param_group['param_names'] = []
-                    extracted_param_tensors = []
-                    warnings.warn(
-                        "not all parameters in optimizer's parameter group are named_parameters. name is missing."
-                        "names will be ignored for this parameter group"
-                    )
-                    break
+
         param_group["params"] = extracted_param_tensors
-        if len(param_group['param_names']) == 0:
-            param_group.pop('param_names')
+        if len(extracted_param_names) != 0:
+            if len(extracted_param_names) == len(extracted_param_tensors):
+                param_group['param_names'] = extracted_param_names
+            else:
+                raise ValueError("all optimizer params should be with/without names. Some param names are missing")
 
         for param in param_group["params"]:
             if not isinstance(param, torch.Tensor):
@@ -1079,6 +1080,10 @@ class Optimizer:
         param_set: Set[torch.Tensor] = set()
         for group in self.param_groups:
             param_set.update(set(group["params"]))
+            if ('param_names' in param_group) != ('param_names' in group):
+                current_group_txt = 'with names' if 'param_names' in param_group else 'without names'
+                raise ValueError("all optimizer param groups should be with/without names. "
+                                 f'cannot add param group {current_group_txt} to the optimizer')
 
         if not param_set.isdisjoint(set(param_group["params"])):
             raise ValueError("some parameters appear in more than one parameter group")
