@@ -375,6 +375,11 @@ static inline PyObject* PyObject_CallNoArgs(PyObject *func)
 {
     return PyObject_CallFunctionObjArgs(func, NULL);
 }
+
+static inline PyObject* PyObject_CallMethodNoArgs(PyObject *obj, PyObject *name)
+{
+    return PyObject_CallMethodObjArgs(obj, name, NULL);
+}
 #endif
 
 
