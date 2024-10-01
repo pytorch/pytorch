@@ -127,6 +127,24 @@ def get_mutating_model(
     return m, inputs, outputs
 
 
+class ForcedGetAttrMod(torch.nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.linear = torch.nn.Linear(1, 1)
+        self.__dict__["forced_linear"] = torch.nn.Linear(1, 1).to(device=device)
+        self.counter = 0
+
+    def forward(self, x):
+        self.counter += 1
+        return x * self.linear(x) * self.forced_linear.weight
+
+
+def get_forced_getattr_module(device):
+    mod = ForcedGetAttrMod(device).to(device=device)
+    x = torch.randn(1, 1, device=device)
+    return mod, x, mod(x)
+
+
 class ToyInnerModel(nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -627,6 +645,35 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             first_graph_break = list(counters["graph_break"].keys())[0]  # noqa: RUF015
             self.assertTrue("setattr" not in first_graph_break)
 
+    @config.patch(inline_inbuilt_nn_modules=False)
+    @config.patch(enable_compiler_collectives=True)
+    @skip_if_lt_x_gpu(1)
+    def test_fsdp_unspecialized_forced_getattr_no_inline(self):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            # Test with basic FSDP wrapping (outer wrap around whole model)
+            from torch._dynamo.utils import counters
+
+            counters.clear()
+            m, inputs, correct_outputs = get_forced_getattr_module(f"cuda:{self.rank}")
+            fsdp_m = FSDP(m, use_orig_params=True)
+            fsdp_m = torch.compile(fsdp_m, backend="eager", fullgraph=False)
+            outputs = fsdp_m(inputs)
+            self.assertTrue(same(correct_outputs, outputs))
+
+    @config.patch(enable_compiler_collectives=True)
+    @skip_if_lt_x_gpu(1)
+    def test_fsdp_unspecialized_forced_getattr_inline(self):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            # Test with basic FSDP wrapping (outer wrap around whole model)
+            from torch._dynamo.utils import counters
+
+            counters.clear()
+            m, inputs, correct_outputs = get_forced_getattr_module(f"cuda:{self.rank}")
+            fsdp_m = FSDP(m, use_orig_params=True)
+            fsdp_m = torch.compile(fsdp_m, backend="eager", fullgraph=False)
+            outputs = fsdp_m(inputs)
+            self.assertTrue(same(correct_outputs, outputs))
+
     @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
@@ -914,9 +961,6 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             torch._dynamo.utils.clear_compilation_metrics()
 
-            # TODO: This should be possible to do inside the function, but
-            device = f"cuda:{self.rank}"
-
             @torch.compile()
             def f(x, y):
                 zx = x.shape
@@ -933,6 +977,84 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                     torch.randn(data, device=self.rank),
                     torch.randn(data, device=self.rank),
                 )
+
+            metrics = torch._dynamo.utils.get_compilation_metrics()
+            res = [None] * self.world_size
+            torch.distributed.all_gather_object(res, len(metrics))
+            for r in res[1:]:
+                self.assertEqual(res[0], r)
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @config.patch(enable_compiler_collectives=True)
+    def test_compiler_collectives_missing_source(self):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            torch._dynamo.utils.clear_compilation_metrics()
+
+            @torch.compile()
+            def f(rank, xs):
+                return xs[rank].sum()
+
+            xs = []
+            for _ in range(self.world_size):
+                xs.append(torch.randn(10, device=self.rank))
+
+            f(self.rank, xs)
+
+            metrics = torch._dynamo.utils.get_compilation_metrics()
+            res = [None] * self.world_size
+            torch.distributed.all_gather_object(res, len(metrics))
+            for r in res[1:]:
+                self.assertEqual(res[0], r)
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @config.patch(enable_compiler_collectives=True)
+    def test_compiler_collectives_scalar_missing_source(self):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            torch._dynamo.utils.clear_compilation_metrics()
+
+            @torch.compile()
+            def f(rank, xs):
+                return torch.tensor(xs[rank], device=self.rank)
+
+            xs = []
+            for i in range(self.world_size):
+                xs.append(10 + i)
+
+            f(self.rank, xs)
+
+            metrics = torch._dynamo.utils.get_compilation_metrics()
+            res = [None] * self.world_size
+            torch.distributed.all_gather_object(res, len(metrics))
+            for r in res[1:]:
+                self.assertEqual(res[0], r)
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @config.patch(enable_compiler_collectives=True)
+    def test_compiler_collectives_type_mismatch(self):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            torch._dynamo.utils.clear_compilation_metrics()
+
+            @torch.compile()
+            def f(x):
+                if isinstance(x, int):
+                    return torch.tensor(x, device=self.rank)
+                else:
+                    return x.sum()
+
+            if self.rank == 0:
+                x = torch.randn(10, device=self.rank)
+            else:
+                x = 12
+            f(x)
+
+            # This deadlocks, I guess we don't support this
+            """
+            if self.rank == 0:
+                x = torch.randn(12, device=self.rank)
+            else:
+                x = 10
+            f(x)
+            """
 
             metrics = torch._dynamo.utils.get_compilation_metrics()
             res = [None] * self.world_size

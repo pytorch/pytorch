@@ -49,7 +49,7 @@ class ConvAdd2d(nnq.Conv2d):
             dtype=dtype,
         )
 
-    def forward(self, input, extra_input):
+    def forward(self, input, extra_input):  # type: ignore[override]
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:
@@ -117,7 +117,7 @@ class ConvAddReLU2d(nnq.Conv2d):
             dtype=dtype,
         )
 
-    def forward(self, input, extra_input):
+    def forward(self, input, extra_input):  # type: ignore[override]
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:

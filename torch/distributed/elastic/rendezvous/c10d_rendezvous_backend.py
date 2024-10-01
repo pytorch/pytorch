@@ -28,6 +28,9 @@ from .utils import _matches_machine_hostname, parse_rendezvous_endpoint
 
 logger = logging.getLogger(__name__)
 
+# default port for the TCP store
+DEFAULT_PORT = 29400
+
 
 class C10dRendezvousBackend(RendezvousBackend):
     """Represents a C10d-backed rendezvous backend.
@@ -132,7 +135,7 @@ class C10dRendezvousBackend(RendezvousBackend):
 
 
 def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
-    host, port = parse_rendezvous_endpoint(params.endpoint, default_port=29400)
+    host, port = parse_rendezvous_endpoint(params.endpoint, default_port=DEFAULT_PORT)
 
     cfg_is_host = params.get_as_bool("is_host")
     # If the user has explicitly specified whether our process should host the

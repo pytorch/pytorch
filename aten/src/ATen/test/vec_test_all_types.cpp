@@ -71,6 +71,8 @@ namespace {
     template <typename T>
     class VecConvertTests : public ::testing::Test {};
     template <typename T>
+    class VecConvertTestsReducedFloat : public ::testing::Test {};
+    template <typename T>
     class VecMaskTests : public ::testing::Test {};
     using RealFloatTestedTypes = ::testing::Types<vfloat, vdouble>;
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
@@ -121,6 +123,7 @@ namespace {
     TYPED_TEST_SUITE(FunctionalTests, RealFloatIntTestedTypes);
     TYPED_TEST_SUITE(FunctionalTestsReducedFloat, ReducedFloatTestedTypes);
     TYPED_TEST_SUITE(VecConvertTests, RealFloatIntTestedTypes);
+    TYPED_TEST_SUITE(VecConvertTestsReducedFloat, ReducedFloatTestedTypes);
     TYPED_TEST_SUITE(VecMaskTests, RealFloatIntTestedTypes);
     TYPED_TEST(Memory, UnAlignedLoadStore) {
         using vec = TypeParam;
@@ -992,6 +995,9 @@ namespace {
         blend_init(a, b);
         test_blendv<vec, VT, 0, vec::size()>(expected_val, a, b, mask);
     }
+// NOTE: In this test, blend<mask> is not required to implement SVE Vectorized::set.
+// so, this test is disabled for SVE.
+#if !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(BitwiseFloatsAdditional2, Blend) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -1005,6 +1011,7 @@ namespace {
         constexpr int64_t power_sets = 1LL << (vec::size());
         test_blend<vec, VT, power_sets - 1>(expected_val, a, b);
     }
+#endif
     template<typename vec, typename VT>
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     void test_set(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], int64_t count){
@@ -1606,6 +1613,7 @@ namespace {
       ASSERT_TRUE(vec_pinf.has_inf_nan()) << "Test failed for positive Infinity\n";
       ASSERT_TRUE(vec_ninf.has_inf_nan()) << "Test failed for negative Infinity\n";
     }
+#if !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(VecConvertTests, Convert) {
       using vec = TypeParam;
       using src_t = ValueType<TypeParam>;
@@ -1658,6 +1666,49 @@ namespace {
       TEST_CONVERT_TO(double);
     #undef TEST_CONVERT_TO
     }
+    TYPED_TEST(VecConvertTestsReducedFloat, ConvertReduced) {
+      using vec = TypeParam;
+      using src_t = UholdType<TypeParam>;
+      constexpr auto N = vec::size();
+    #define TEST_CONVERT_TO(dst_t)                                     \
+      do {                                                             \
+        CACHE_ALIGN src_t x[N];                                        \
+        CACHE_ALIGN dst_t y[N];                                        \
+        CACHE_ALIGN dst_t ref[N];                                      \
+        auto seed = TestSeed();                                        \
+        auto low = std::is_signed_v<dst_t> ? src_t(-100.0) : src_t(0); \
+        ValueGen<src_t> generator(low, src_t(100), seed);              \
+        for (const auto i : c10::irange(N)) {                          \
+          x[i] =  generator.get();                                     \
+        }                                                              \
+        for (const auto i : c10::irange(N)) {                          \
+          ref[i] = static_cast<dst_t>(x[i]);                           \
+        }                                                              \
+        auto x_vec = vec::loadu(x);                                    \
+        auto y_vec = at::vec::convert<dst_t>(x_vec);                   \
+        constexpr int num_dst_elements =                               \
+            std::min(N, at::vec::Vectorized<dst_t>::size());           \
+        y_vec.store(y, num_dst_elements);                              \
+        for (const auto i : c10::irange(num_dst_elements)) {           \
+          ASSERT_EQ(y[i], ref[i])                                      \
+              << "Failure Details:\nTest Seed to reproduce: " << seed  \
+              << " x[" << i << "]=" << x[i] << " dst_t=" #dst_t;       \
+        }                                                              \
+        constexpr int dst_n = N / num_dst_elements;                    \
+        auto y_vec_n = at::vec::convert<dst_t, dst_n, src_t, 1>(       \
+            at::vec::VectorizedN<src_t, 1>(x_vec));                    \
+        y_vec_n.store(y, N);                                           \
+        for (const auto i : c10::irange(N)) {                          \
+          ASSERT_EQ(y[i], ref[i])                                      \
+              << "Failure Details:\nTest Seed to reproduce: " << seed  \
+              << " x[" << i << "]=" << x[i] << " dst_t=" #dst_t;       \
+        }                                                              \
+      } while (0)
+      TEST_CONVERT_TO(int8_t);
+      TEST_CONVERT_TO(uint8_t);
+    #undef TEST_CONVERT_TO
+    }
+#endif
     TYPED_TEST(VecMaskTests, MaskedLoad) {
       using vec = TypeParam;
       using src_t = ValueType<TypeParam>;
@@ -1716,6 +1767,7 @@ namespace {
     #undef TEST_MASK_LOAD
     #undef TEST_MASK_LOAD_N
     }
+#if !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(VecMaskTests, MaskedCheck) {
       using VT = ValueType<TypeParam>;
       using vec = TypeParam;
@@ -1739,6 +1791,8 @@ namespace {
 
     #undef TEST_MASK_CHECK_N
     }
+#endif
+#if !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(VecMaskTests, ToFrom) {
       using vec = TypeParam;
       using VT = ValueType<TypeParam>;
@@ -1764,6 +1818,8 @@ namespace {
             << "Failure Details:\nTest Seed to reproduce: " << seed;
       }
     }
+#endif
+#if !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(VecMaskTests, Cast) {
       using vec = TypeParam;
       using src_t = ValueType<TypeParam>;
@@ -1808,6 +1864,7 @@ namespace {
     #undef TEST_MASK_CAST
     #undef TEST_MASK_CAST_N
     }
+#endif
 #else
 #error GTEST does not have TYPED_TEST
 #endif

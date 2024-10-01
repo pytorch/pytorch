@@ -38,18 +38,31 @@ void ExtraState::invalidate(CacheEntry* cache_entry) {
   this->cache_entry_list.erase(cache_entry->_owner_loc);
 }
 
+static bool is_extra_state_unset(ExtraState* extra_state) {
+  return extra_state == nullptr || extra_state == SKIP_CODE ||
+      extra_state == SKIP_CODE_RECURSIVE;
+}
+
 CacheEntry* extract_cache_entry(ExtraState* extra_state) {
-  if (extra_state == nullptr || extra_state == SKIP_CODE) {
+  if (is_extra_state_unset(extra_state)) {
     return nullptr;
   }
   return extra_state->get_first_entry();
 }
 
 FrameState* extract_frame_state(ExtraState* extra_state) {
-  if (extra_state == nullptr || extra_state == SKIP_CODE) {
+  if (is_extra_state_unset(extra_state)) {
     return nullptr;
   }
   return (FrameState*)extra_state->frame_state.ptr();
+}
+
+bool extra_state_cache_limit_hit(ExtraState* extra_state) {
+  return extra_state->cache_limit_hit;
+}
+
+void set_extra_state_cache_limit_hit(ExtraState* extra_state, bool value) {
+  extra_state->cache_limit_hit = value;
 }
 
 ExtraState* get_extra_state(PyCodeObject* code) {
@@ -60,16 +73,14 @@ ExtraState* get_extra_state(PyCodeObject* code) {
 
 void destroy_extra_state(void* obj) {
   ExtraState* extra = (ExtraState*)obj;
-  if (extra != nullptr && extra != SKIP_CODE) {
+  if (!is_extra_state_unset(extra)) {
     delete extra;
   }
 }
 
 void set_extra_state(PyCodeObject* code, ExtraState* extra_state) {
   ExtraState* old_extra_state = get_extra_state(code);
-  CHECK(
-      old_extra_state == nullptr || old_extra_state == SKIP_CODE ||
-      old_extra_state != extra_state);
+  CHECK(is_extra_state_unset(extra_state) || old_extra_state != extra_state);
   _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
 }
 
@@ -80,6 +91,8 @@ ExtraState* init_and_set_extra_state(PyCodeObject* code) {
   ExtraState* extra_state = new ExtraState();
   NULL_CHECK(extra_state);
   set_extra_state(code, extra_state);
+  // freed by destroy_extra_state (since we need to pass these objects to C)
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   return extra_state;
 }
 
@@ -96,10 +109,12 @@ bool backend_match(PyObject* saved_backend, PyObject* backend) {
   return true;
 }
 
-PyObject* lookup(
+void lookup(
     ExtraState* extra_state,
     PyObject* f_locals,
-    PyObject* backend) {
+    PyObject* backend,
+    PyObject** maybe_cached_code,
+    const char** trace_annotation) {
   size_t index = 0;
   CacheEntry* found = nullptr;
   py::handle locals(f_locals);
@@ -132,7 +147,8 @@ PyObject* lookup(
         // this function is called from C, so we cannot repropagate
         // the exception
         e.restore();
-        return nullptr;
+        *maybe_cached_code = nullptr;
+        return;
       }
     }
     if (valid) {
@@ -143,9 +159,11 @@ PyObject* lookup(
   }
   if (found) {
     extra_state->move_to_front(found);
-    return found->code.ptr();
+    *maybe_cached_code = found->code.ptr();
+    *trace_annotation = found->trace_annotation.c_str();
+    return;
   }
-  return py::none().ptr();
+  *maybe_cached_code = py::none().ptr();
 }
 
 CacheEntry* create_cache_entry(
@@ -173,7 +191,7 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
   py::list result;
-  if (extra && extra != SKIP_CODE) {
+  if (!is_extra_state_unset(extra)) {
     for (CacheEntry& e : extra->cache_entry_list) {
       result.append(py::cast(e, py::return_value_policy::reference));
     }

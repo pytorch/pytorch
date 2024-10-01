@@ -5,7 +5,9 @@ from typing import (
     Callable,
     Dict,
     Generic,
+    List,
     Literal,
+    NamedTuple,
     Optional,
     Tuple,
     TypeVar,
@@ -19,6 +21,7 @@ import sympy
 import torch
 import torch.utils._pytree as pytree
 
+from ..utils._ordered_set import OrderedSet
 from .utils import IndentedBuffer, reduction_num_outputs, sympy_index_symbol, sympy_str
 
 
@@ -955,6 +958,13 @@ def _typecheck_AddParenHandler(h: AddParenHandler[T]) -> OpsHandler[T]:
     return h
 
 
+class OpCountResult(NamedTuple):
+    num_ops: int
+    used_ops: OrderedSet[str]
+    read_buffers: List[str]
+    nontrivial_read_count: int
+
+
 class OpCounterCSE:
     """Shim to count how many ops are used"""
 
@@ -963,25 +973,67 @@ class OpCounterCSE:
         self.parent_handler = inner
         self.op_count = 0
         self.var_names = {}
+        self._used_ops: OrderedSet[str] = OrderedSet()
+        self._read_names: List[str] = []
+        self._nontrivial_read_count = 0
 
     def __getattr__(self, name):
         def inner(*args, **kwargs):
-            val = getattr(self.parent_handler, name)(*args, **kwargs)
-            if name == "indirect_indexing":
-                return val
+            return pytree.tree_map(
+                self._update_count, getattr(self.parent_handler, name)(*args, **kwargs)
+            )
 
-            def count(val):
-                if val not in self.var_names:
-                    varname = f"tmp{self.op_count}"
-                    self.op_count += 1
-                    self.var_names[val] = varname
-                    return varname
-                else:
-                    return self.var_names[val]
-
-            return pytree.tree_map(count, val)
-
+        self._used_ops.add(name)
         return inner
+
+    def _update_count(self, val):
+        varname = self.var_names.get(val)
+        if not varname:
+            varname = f"tmp{self.op_count}"
+            self.op_count += 1
+            self.var_names[val] = varname
+        return varname
+
+    def indirect_indexing(self, *args, **kwargs):
+        self._used_ops.add("indirect_indexing")
+        return self.parent_handler.indirect_indexing(*args, **kwargs)
+
+    def load(self, name: str, index: sympy.Expr) -> str:
+        val = self.parent_handler.load(name, index)
+        if val not in self.var_names:
+            self._used_ops.add("load")
+            self._read_names.append(name)
+            if not isinstance(index, (sympy.Integer, int)):
+                self._nontrivial_read_count += 1
+        return self._update_count(val)
+
+    def load_seed(self, name: str, offset: T):
+        val = self.parent_handler.load_seed(name, offset)
+        if val not in self.var_names:
+            self._used_ops.add("load_seed")
+            self._read_names.append(name)
+        return self._update_count(val)
+
+    def bucketize(
+        self,
+        values,
+        offsets_name: str,
+        offsets_size: sympy.Expr,
+        indexing_dtype: torch.dtype,
+        right: bool,
+    ):
+        val = self.parent_handler.bucketize(
+            values, offsets_name, offsets_size, indexing_dtype, right
+        )
+        if val not in self.var_names:
+            self._used_ops.add("bucketize")
+            self._read_names.append(offsets_name)
+        return self._update_count(val)
+
+    def getvalue(self):
+        return OpCountResult(
+            self.op_count, self._used_ops, self._read_names, self._nontrivial_read_count
+        )
 
 
 def _typecheck_OpCounterCSE(h: OpCounterCSE) -> OpsHandler[str]:
