@@ -22,7 +22,7 @@ from .operator_schemas import check_for_mutable_operation
 import torch.fx.traceback as fx_traceback
 
 __all__ = ['TracerBase', 'GraphAppendingTracer', 'TraceError',
-           'Proxy', 'Attribute', 'ParameterProxy', 'Scope',
+           'Proxy', 'MetaProxy', 'Attribute', 'ParameterProxy', 'Scope',
            'ScopeContextManager']
 
 
@@ -528,6 +528,17 @@ class Proxy:
             return tracer.create_proxy('call_function', orig_method, args, kwargs,
                                        name=tracer.graph._target_to_str(orig_method.__name__))
 
+
+@compatibility(is_backward_compatible=False)
+class MetaProxy(Proxy):
+    @classmethod
+    def __torch_function__(cls, orig_method, types, args=None, kwargs=None):
+        args = args if args else ()
+        kwargs = kwargs if kwargs else ()
+
+        proxy = super().__torch_function__(orig_method, types, args, kwargs)
+        proxy.node.meta["val"] = orig_method(*[a.node.meta["val"] if isinstance(a, Proxy) else a for a in args])
+        return MetaProxy(proxy.node, proxy.tracer)
 
 @compatibility(is_backward_compatible=True)
 class Attribute(Proxy):
