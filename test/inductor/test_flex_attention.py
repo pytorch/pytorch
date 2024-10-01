@@ -6,7 +6,7 @@ import string
 import unittest
 from collections import namedtuple
 from contextlib import contextmanager, nullcontext
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional, Tuple, Union
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 
@@ -43,11 +43,11 @@ supported_platform = skipUnless(
 )
 
 # Use this decorator only when hitting Triton bugs on H100
-running_on_a100_or_rocm_only = skipUnless(
+running_on_a100_only = skipUnless(
     torch.cuda.is_available()
     and has_triton()
-    and (torch.cuda.get_device_capability() == (8, 0) or torch.version.hip is not None),
-    "Requires (A100 or ROCm) and Triton",
+    and torch.cuda.get_device_capability() == (8, 0),
+    "Requires A100 and Triton",
 )
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
@@ -221,6 +221,13 @@ test_Bq_Bkv = [
     (3, 1),
     (4, 1),
     (5, 1),
+]
+
+test_block_size = [
+    128,
+    256,
+    (128, 256),
+    (256, 128),
 ]
 
 
@@ -589,7 +596,7 @@ class TestFlexAttention(InductorTestCase):
     def test_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
         self.run_test(score_mod, dtype)
 
-    @running_on_a100_or_rocm_only
+    @running_on_a100_only
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_seqlen_lt_default_sparse_block_size(
@@ -603,7 +610,7 @@ class TestFlexAttention(InductorTestCase):
         )
         self.run_test_with_call(attention, dtype, B, H, 64, D, B, H, 64, D)
 
-    @running_on_a100_or_rocm_only
+    @running_on_a100_only
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_seqlen_lt_custom_sparse_block_size(
@@ -653,6 +660,19 @@ class TestFlexAttention(InductorTestCase):
             S,
             D,
         )
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    @common_utils.parametrize("BLOCK_SIZE", test_block_size)
+    def test_builtin_score_mods_different_block_size(
+        self,
+        dtype: torch.dtype,
+        score_mod: Callable,
+        BLOCK_SIZE: Union[int, Tuple[int, int]],
+    ):
+        block_mask = create_block_mask(noop_mask, B, H, S, S, BLOCK_SIZE=BLOCK_SIZE)
+        self.run_test(score_mod, dtype, block_mask=block_mask)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1921,14 +1941,16 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 self.skipTest("backend=flex_decode is unsupported on ROCM, for now")
             kernel_options = {"FORCE_USE_FLEX_ATTENTION": False}
             flex_call = torch.compile(flex_attention, fullgraph=True)
+            N_CTX = 96
         elif backend == "flex_attention":
             kernel_options = {"FORCE_USE_FLEX_ATTENTION": True}
             flex_call = torch.compile(flex_attention, fullgraph=True)
+            N_CTX = 196
         else:
             kernel_options = {}
             flex_call = flex_attention
+            N_CTX = 196
 
-        N_CTX = 96
         SLIDING_WINDOW = 64
         make_tensor = functools.partial(
             torch.randn,
@@ -2239,6 +2261,24 @@ class TestBlockMask(InductorTestCase):
         self.assertEqual(block_mask.sparsity(), 29.1015625)
         self.assertTrue(block_mask.sparsity() < block_mask[0].sparsity())
         self.assertTrue(block_mask[0].sparsity() > block_mask[1].sparsity())
+
+    @supported_platform
+    @common_utils.parametrize("BLOCK_SIZE", [32, 64, 128, 256, (32, 64), (64, 32)])
+    def test_block_size_changes(self, BLOCK_SIZE: Union[int, Tuple[int, int]]):
+        B, H, Q_LEN, KV_LEN = 4, 2, 2048, 2048
+
+        if isinstance(BLOCK_SIZE, int):
+            Q_BLOCK_SIZE = BLOCK_SIZE
+            KV_BLOCK_SIZE = BLOCK_SIZE
+        else:
+            Q_BLOCK_SIZE, KV_BLOCK_SIZE = BLOCK_SIZE
+
+        block_mask = create_block_mask(
+            noop_mask, B, H, Q_LEN, KV_LEN, BLOCK_SIZE=BLOCK_SIZE
+        )
+
+        self.assertEqual(block_mask.BLOCK_SIZE, (Q_BLOCK_SIZE, KV_BLOCK_SIZE))
+        self.assertEqual(block_mask.shape, (B, H, Q_LEN, KV_LEN))
 
     @supported_platform
     def test_getitem(self):
