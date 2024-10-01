@@ -358,11 +358,15 @@ def sample_inputs_to(op_info, device, dtype, requires_grad, op_kwargs=None, **kw
         )
         for other_dtype in other_dtypes:
             sample_name = f"{contiguity} {njt.dim()}D: {dtype} -> {other_dtype}"
-            yield SampleInput(njt.clone().detach(), kwargs={"dtype": dtype}, name=sample_name)
+            yield SampleInput(
+                njt.clone().detach(), kwargs={"dtype": dtype}, name=sample_name
+            )
 
         other_device = "cuda" if device == "cpu" else "cpu"
         sample_name = f"{contiguity} {njt.dim()}D: {device} -> {other_device}"
-        yield SampleInput(njt.clone().detach(), kwargs={"device": other_device}, name=sample_name)
+        yield SampleInput(
+            njt.clone().detach(), kwargs={"device": other_device}, name=sample_name
+        )
 
 
 def sample_inputs_masked_select(
