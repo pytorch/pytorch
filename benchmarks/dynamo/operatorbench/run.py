@@ -1,3 +1,4 @@
+import sys
 import warnings
 from collections import defaultdict
 from contextlib import nullcontext
@@ -181,7 +182,7 @@ def run_benchmarks(
     phase = Phase[phase.upper()]
     if phase == Phase.BACKWARD and mode == "native":
         print("Backward is not supported in native mode")
-        exit(1)
+        sys.exit(1)
     benchmark_config = BenchmarkConfig(
         device=device,
         dtype=dtype,
