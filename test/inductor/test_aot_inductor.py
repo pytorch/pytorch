@@ -3703,65 +3703,24 @@ CUDA_TEST_FAILURES = {
 
 
 if not IS_FBCODE:
-    # The following tests look like they pass in both pytest and unittest (xml
-    # and terminal output say pass), but the process will segfault.  This only
-    # happens in OSS CI and is fine internally.
+    # These only fail in OSS CI and are fine internally.
     CPU_TEST_FAILURES.update(
         {
-            "test_duplicated_params": fail_stack_allocation(is_skip=True),
-            "test_embedding_bag": fail_stack_allocation(is_skip=True),
-            "test_fqn": fail_stack_allocation(is_skip=True),
-            "test_no_args": fail_stack_allocation(is_skip=True),
-            "test_output_misaligned": fail_stack_allocation(is_skip=True),
-            "test_pytree_inputs": fail_stack_allocation(is_skip=True),
-            "test_seq": fail_stack_allocation(is_skip=True),
-            "test_simple_split": fail_stack_allocation(is_skip=True),
-            "test_addmm": fail_minimal_arrayref_interface(is_skip=True),
-            "test_aliased_buffer_reuse": fail_minimal_arrayref_interface(is_skip=True),
-            "test_buffer_reuse": fail_minimal_arrayref_interface(is_skip=True),
-            "test_constant_folding": fail_minimal_arrayref_interface(is_skip=True),
-            "test_convolution": fail_minimal_arrayref_interface(is_skip=True),
-            "test_empty_graph": fail_minimal_arrayref_interface(is_skip=True),
-            "test_large_weight": fail_minimal_arrayref_interface(is_skip=True),
-            "test_large_mmaped_weights": fail_minimal_arrayref_interface(is_skip=True),
-            "test_normal_functional": fail_minimal_arrayref_interface(is_skip=True),
-            "test_misc_1": fail_minimal_arrayref_interface(is_skip=True),
-            "test_missing_output": fail_minimal_arrayref_interface(is_skip=True),
-            "test_model_modified_weights": fail_minimal_arrayref_interface(
-                is_skip=True
-            ),
-            "test_output_path_1": fail_minimal_arrayref_interface(is_skip=True),
-            "test_quantized_linear": fail_minimal_arrayref_interface(is_skip=True),
-            "test_quanatized_int8_linear": fail_minimal_arrayref_interface(
-                is_skip=True
-            ),
-            "test_repeat_interleave": fail_minimal_arrayref_interface(is_skip=True),
-            "test_return_constant": fail_minimal_arrayref_interface(is_skip=True),
-            "test_reuse_kernel": fail_minimal_arrayref_interface(is_skip=True),
-            "test_simple": fail_minimal_arrayref_interface(is_skip=True),
-            "test_small_constant": fail_minimal_arrayref_interface(is_skip=True),
-            "test_with_no_triton_profiler": fail_minimal_arrayref_interface(
-                is_skip=True
-            ),
-            "test_with_offset": fail_minimal_arrayref_interface(is_skip=True),
-            "test_with_profiler": fail_minimal_arrayref_interface(is_skip=True),
-            "test_zero_size_weight": fail_minimal_arrayref_interface(is_skip=True),
-            "test_aoti_debug_printer_codegen": fail_with_and_without_stack_allocation(
-                is_skip=True
-            ),
+            # TODO: tensor-likes are not close
+            "test_model_modified_weights": fail_minimal_arrayref_interface(),
+            # TODO: Booleans mismatch: False is not True
+            "test_aoti_debug_printer_codegen": fail_with_and_without_stack_allocation(),
+            # TODO: segfaults mid-run
             "test_view_outputs": fail_minimal_arrayref_interface(is_skip=True),
-            "test_aoti_debug_printer_cpp_kernel": fail_with_and_without_stack_allocation(
-                is_skip=True
-            ),
+            # TODO: Booleans mismatch: False is not True
+            "test_aoti_debug_printer_cpp_kernel": fail_with_and_without_stack_allocation(),
         }
     ),
     # The following test passes internally but fails in OSS CI. To be investigated.
     CUDA_TEST_FAILURES.update(
         {
-            "test_aoti_debug_printer_codegen": fail_cuda(is_skip=True),
-            "test_aoti_debug_printer_user_defined_triton_kernel": fail_cuda(
-                is_skip=True
-            ),
+            "test_aoti_debug_printer_codegen": fail_cuda(),
+            "test_aoti_debug_printer_user_defined_triton_kernel": fail_cuda(),
         }
     )
 
@@ -3849,9 +3808,6 @@ copy_tests(
     "non_abi_compatible_cpu",
     # test_failures, xfail by default, set is_skip=True to skip
     {
-        "test_duplicate_constant_folding": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
         # no runtime checks for non_abi_compatible mode
         "test_runtime_checks": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
         "test_runtime_checks_dtype_failed": TestFailure(
@@ -3860,28 +3816,13 @@ copy_tests(
         "test_runtime_checks_shape_failed": TestFailure(
             ("non_abi_compatible_cpu",), is_skip=True
         ),
-        "test_custom_op_add": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
-        "test_aoti_debug_printer_codegen": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_all_inputs": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_missing_arg_with_default_value": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_custom_op_with_concat_inputs": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
+        "test_custom_op_add": TestFailure(("non_abi_compatible_cpu",)),
+        "test_aoti_debug_printer_codegen": TestFailure(("non_abi_compatible_cpu",)),
+        "test_custom_op_all_inputs": TestFailure(("non_abi_compatible_cpu",)),
         "test_custom_op_with_multiple_outputs": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
+            ("non_abi_compatible_cpu",)
         ),
-        "test_custom_op_with_reinterpret_view_inputs": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
-        "test_aoti_debug_printer_cpp_kernel": TestFailure(
-            ("non_abi_compatible_cpu",), is_skip=True
-        ),
+        "test_aoti_debug_printer_cpp_kernel": TestFailure(("non_abi_compatible_cpu",)),
     },
 )
 
