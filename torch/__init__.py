@@ -478,6 +478,12 @@ class SymInt:
     def __add__(self, other) -> "SymInt":
         raise TypeError("type stub not overridden")
 
+    def __radd__(self, other) -> "SymInt":
+        raise TypeError("type stub not overridden")
+
+    def __rmul__(self, other) -> "SymInt":
+        raise TypeError("type stub not overridden")
+
     def __mod__(self, other: "IntLikeType") -> "SymInt":
         raise TypeError("type stub not overridden")
 
