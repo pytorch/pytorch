@@ -493,7 +493,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
 
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
-                result = x.call_function(self, [], {})  # type: ignore[arg-type]
+                result = x.call_function(self, [], {})  # type: ignore[arg-type, assignment]
                 if isinstance(result, ConstantVariable) and isinstance(
                     result.value, (bool, int)
                 ):
@@ -650,7 +650,7 @@ def break_graph_if_unsupported(*, push):
                 assert b.with_context is not None
                 assert isinstance(b.with_context, (ContextWrappingVariable))
                 b.with_context.reconstruct_type(cg)
-                cg.extend_output(b.resume_fn().try_except(cg.code_options, cleanup))
+                cg.extend_output(b.resume_fn().try_finally(cg.code_options, cleanup))
             self.output.add_output_instructions(cg.get_instructions())
             del cg
 
@@ -3198,7 +3198,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def run_ctx_mgr(self):
         return TracingContext.current_frame(self.parent.frame_summary())
 
-    def STORE_DEREF(self, inst):
+    def STORE_DEREF(self, inst):  # type: ignore[override]
         if inst.argval in self.closure_cells:
             cell = self.closure_cells[inst.argval]
             val = self.pop()

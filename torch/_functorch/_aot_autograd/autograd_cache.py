@@ -11,7 +11,7 @@ import pickle
 import shutil
 import time
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.utils import counters, get_chromium_event_logger
@@ -27,6 +27,7 @@ from torch._inductor.codecache import (
     write_atomic,
 )
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
 
 from .runtime_wrappers import (
@@ -38,7 +39,7 @@ from .runtime_wrappers import (
     RuntimeWrapper,
     SubclassMeta,
 )
-from .schemas import AOTConfig, ViewAndMutationMeta  # noqa: F401
+from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noqa: F401
 
 
 if TYPE_CHECKING:
@@ -252,6 +253,9 @@ def autograd_cache_key(
 class FXGraphCacheLoadable:
     fx_graph_cache_key: str
 
+    def is_backward(self):
+        return False
+
     def load(self, example_inputs, fx_config: Dict[str, BoxedBool]) -> CompiledFxGraph:
         # [Note: AOTAutogradCache and FXGraphCache Guard interactions]
         # As mentioned, AOTAutograd takes in the symint inputs from dynamo's list of arguments.
@@ -261,15 +265,35 @@ class FXGraphCacheLoadable:
         # (This does not mean that the tensor values passed in are the same: only that their symints are).
         # That is, AOTAutograd and Inductor never create new guards based on symints with different sources
         # than those passed to it by inductor.
-        result = FxGraphCache._lookup_graph(
-            self.fx_graph_cache_key, example_inputs, local=True, remote_cache=None
+
+        # TODO: We don't cache debug lines for now, but we should for improved debugging
+        remote_cache = None
+        if should_use_remote_fx_graph_cache():
+            remote_cache = FxGraphCache.get_remote_cache()
+
+        result, cache_info = FxGraphCache.load_with_key(
+            self.fx_graph_cache_key,
+            [],
+            example_inputs,
+            local=True,
+            remote_cache=remote_cache,
+            is_backward=self.is_backward(),
         )
         if result is None:
             log.info("FXGraphCache cache miss for key %s", self.fx_graph_cache_key)
-            counters["inductor"]["fxgraph_cache_miss"] += 1
             raise FXGraphCacheMiss
+
+        # No need to log chromium event because AOTAutograd will log that immediately for us
+        torch._logging.trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "fx_graph_cache_hash",
+                "encoding": "json",
+            },
+            payload_fn=lambda: json.dumps(cache_info),
+        )
+
         FxGraphCache.post_compile(result, example_inputs, fx_config["cudagraphs"])
-        counters["inductor"]["fxgraph_cache_hit"] += 1
         result._boxed_call = True
         return result
 
@@ -279,6 +303,9 @@ class CompiledForward(FXGraphCacheLoadable):
     """
     Cacheable entry for a forward function
     """
+
+    def is_backward(self):
+        return False
 
 
 @dataclass
@@ -290,6 +317,9 @@ class CompiledBackward(FXGraphCacheLoadable):
     # Used by AOTDispatchAutograd.post_compile
     backward_state_indices: List[int]
     num_symints_saved_for_bw_: int
+
+    def is_backward(self):
+        return True
 
 
 @dataclass
@@ -312,6 +342,12 @@ class AOTAutogradCacheEntry:
 
     # Used by RuntimeWrapepr
     indices_of_inps_to_detach: List[int]
+
+    # Time taken to trace/compile the forward
+    # forward_time_taken includes AOTAutograd tracing time + inductor compilation time
+    # backward_time_taken is essentially just the time inductor took to compile
+    forward_time_taken_ns: int
+    backward_time_taken_ns: int
 
     # Turn cache entry into the original callable
     def wrap_post_compile(
@@ -459,6 +495,7 @@ class AOTAutogradCache:
         """
         gm = mod.gm if isinstance(mod, torch._dynamo.utils.GmWrapper) else mod
         compiled_fn = None
+        cache_info: Dict[str, Any] = {}
         cache_key = None
         debug_lines: List[str] = []
         cache_event_time = time.time_ns()
@@ -473,6 +510,15 @@ class AOTAutogradCache:
                 counters["aot_autograd"]["autograd_cache_hit"] += 1
                 cache_state = "hit"
                 cache_event_time = time.time_ns()
+                forward_time_saved = entry.forward_time_taken_ns // 1e6
+                backward_time_saved = entry.backward_time_taken_ns // 1e6
+                cache_info.update(
+                    {
+                        "forward_time_saved_ms": forward_time_saved,
+                        "backward_time_saved_ms": backward_time_saved,
+                        "time_saved_ms": forward_time_saved + backward_time_saved,
+                    }
+                )
             if compiled_fn is None:
                 log.info("AOTAutograd cache miss for key %s", cache_key)
                 counters["aot_autograd"]["autograd_cache_miss"] += 1
@@ -495,16 +541,19 @@ class AOTAutogradCache:
                 raise e
         if compiled_fn is None:
             # Set the cache key so we can save a cache result later
-            aot_config.cache_key = cache_key
+            if cache_key is not None:
+                aot_config.cache_info = AOTAutogradCacheInfo(cache_key, time.time_ns())
             compiled_fn = dispatch_and_compile()
-        cache_args = {
-            "key": cache_key,
-            "cache_state": cache_state,
-            "components": debug_lines,
-        }
+        cache_info.update(
+            {
+                "key": cache_key,
+                "cache_state": cache_state,
+                "components": debug_lines,
+            }
+        )
         chromium_log = get_chromium_event_logger()
         chromium_log.log_instant_event(
-            f"autograd_cache_{cache_state}", cache_event_time, metadata=cache_args
+            f"autograd_cache_{cache_state}", cache_event_time, metadata=cache_info
         )
         torch._logging.trace_structured(
             "artifact",
@@ -512,7 +561,7 @@ class AOTAutogradCache:
                 "name": "aotautograd_cache_hash",
                 "encoding": "json",
             },
-            payload_fn=lambda: json.dumps(cache_args),
+            payload_fn=lambda: json.dumps(cache_info),
         )
         return compiled_fn
 
