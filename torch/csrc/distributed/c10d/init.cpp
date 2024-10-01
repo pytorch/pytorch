@@ -1593,7 +1593,16 @@ Arguments:
     prefix (str): The prefix string that is prepended to each key before being inserted into the store.
     store (torch.distributed.store): A store object that forms the underlying key-value store.
       )")
-      .def(py::init<const std::string&, c10::intrusive_ptr<::c10d::Store>>())
+      .def(
+          py::init([](const std::string& prefix,
+                      c10::intrusive_ptr<::c10d::Store> store) {
+            if (!store) {
+              throw py::value_error("store argument cannot be None");
+            }
+            return new ::c10d::PrefixStore(prefix, store);
+          }),
+          py::arg("prefix"),
+          py::arg("store"))
       .def_property_readonly(
           "underlying_store",
           &::c10d::PrefixStore::getUnderlyingStore,
