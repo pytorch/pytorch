@@ -176,6 +176,25 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
+    def test_dtensor_dynamic(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # test passing in DTensor as inputs/outputs and run some tensor computation
+        def fn(x):
+            return (
+                torch.mul(x, x)
+                .redistribute(device_mesh=x.device_mesh, placements=[Replicate()])
+                .to_local()[0]
+            )
+
+        x = DTensor.from_local(torch.rand(4, 4), mesh, [Shard(0)], run_check=False)
+        torch._dynamo.mark_dynamic(x, 0)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
     def test_dtensor_attribute_access_on_intermediate(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -298,6 +317,70 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
         self.assertEqual(cnt.frame_count, 2)
+
+    def test_dynamo_dtensor_from_local_dynamic_shapes(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # Case 1: all dims dynamic
+        def fn(x):
+            dt = DTensor.from_local(
+                x,
+                mesh,
+                [Replicate()],
+                run_check=False,
+                shape=x.shape,
+                stride=x.stride(),
+            )
+            return dt.to_local() + 2
+
+        inp = torch.randn(4, 6, requires_grad=True)
+        ref = fn(inp)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        res = torch.compile(fn, backend=cnt, fullgraph=True, dynamic=True)(inp)
+        res.sum().backward()
+
+        self.assertEqual(res, ref)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Case 2: only sizes are dynamic, strides are static
+        def fn(x):
+            dt = DTensor.from_local(
+                x, mesh, [Replicate()], run_check=False, shape=x.shape, stride=(1,)
+            )
+            return dt.to_local() + 2
+
+        inp = torch.randn(4, requires_grad=True)
+        torch._dynamo.mark_dynamic(inp, 0)
+        ref = fn(inp)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        res = torch.compile(fn, backend=cnt, fullgraph=True)(inp)
+        res.sum().backward()
+
+        self.assertEqual(res, ref)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Case 3: both sizes and strides have a mix of dynamic and static dims
+        def fn(x):
+            dt = DTensor.from_local(
+                x,
+                mesh,
+                [Replicate()],
+                run_check=False,
+                shape=(x.shape[0], x.shape[1], 2),
+                stride=(x.stride()[0], 2, 1),
+            )
+            return dt.to_local() + 2
+
+        inp = torch.randn(4, 6, 2, requires_grad=True)
+        torch._dynamo.mark_dynamic(inp, 0)
+        torch._dynamo.mark_dynamic(inp, 1)
+        ref = fn(inp)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        res = torch.compile(fn, backend=cnt, fullgraph=True)(inp)
+        res.sum().backward()
+
+        self.assertEqual(res, ref)
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_dynamo_dtensor_recompile(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))

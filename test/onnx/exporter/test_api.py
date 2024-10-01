@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 
 import torch
-from torch.onnx._internal.exporter import testing as onnx_testing
+from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.testing._internal import common_utils
 
 
@@ -147,6 +147,63 @@ class TestExportAPIDynamo(common_utils.TestCase):
                 },
             },
         )
+
+    def test_auto_convert_all_axes_to_dynamic_shapes_with_dynamo_export(self):
+        os.environ["TORCH_ONNX_USE_EXPERIMENTAL_LOGIC"] = "1"
+        assert os.environ.get("TORCH_ONNX_USE_EXPERIMENTAL_LOGIC") == "1"
+
+        class Nested(torch.nn.Module):
+            def forward(self, x):
+                (a0, a1), (b0, b1), (c0, c1, c2) = x
+                return a0 + a1 + b0 + b1 + c0 + c1 + c2
+
+        inputs = (
+            (1, 2),
+            (
+                torch.randn(4, 4),
+                torch.randn(4, 4),
+            ),
+            (
+                torch.randn(4, 4),
+                torch.randn(4, 4),
+                torch.randn(4, 4),
+            ),
+        )
+
+        onnx_program = torch.onnx.dynamo_export(
+            Nested(),
+            inputs,
+            export_options=torch.onnx.ExportOptions(dynamic_shapes=True),
+        )
+        assert onnx_program is not None
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_refine_dynamic_shapes_with_onnx_export(self):
+        # NOTE: From test/export/test_export.py
+
+        # refine lower, upper bound
+        class TestRefineDynamicShapeModel(torch.nn.Module):
+            def forward(self, x, y):
+                if x.shape[0] >= 6 and y.shape[0] <= 16:
+                    return x * 2.0, y + 1
+
+        inps = (torch.randn(16), torch.randn(12))
+        dynamic_shapes = {
+            "x": (torch.export.Dim("dx"),),
+            "y": (torch.export.Dim("dy"),),
+        }
+        self.assert_export(
+            TestRefineDynamicShapeModel(), inps, dynamic_shapes=dynamic_shapes
+        )
+
+    def test_zero_output_aten_node(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                torch.ops.aten._assert_async.msg(torch.tensor(True), "assertion failed")
+                return x + x
+
+        input = torch.randn(2)
+        self.assert_export(Model(), (input))
 
 
 if __name__ == "__main__":

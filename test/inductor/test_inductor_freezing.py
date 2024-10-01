@@ -23,7 +23,11 @@ from torch.testing._internal.common_utils import skipIfRocm
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
-from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
+from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+    check_model,
+    check_model_cuda,
+    copy_tests,
+)
 from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_ROCM
 
 

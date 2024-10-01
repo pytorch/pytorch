@@ -2378,8 +2378,9 @@ def compile(
           There are other circumstances where CUDA graphs are not applicable; use TORCH_LOG=perf_hints
           to debug.
 
-        - "max-autotune" is a mode that leverages Triton based matrix multiplications and convolutions
-          It enables CUDA graphs by default.
+        - "max-autotune" is a mode that leverages Triton or template based matrix multiplications
+          on supported devices and Triton based convolutions on GPU.
+          It enables CUDA graphs by default on GPU.
 
         - "max-autotune-no-cudagraphs" is a mode similar to "max-autotune" but without CUDA graphs
 
@@ -2663,3 +2664,17 @@ def _is_device_backend_autoload_enabled() -> builtins.bool:
 
 if _is_device_backend_autoload_enabled():
     _import_device_backends()
+
+
+def _as_tensor_fullprec(t):
+    """
+    Like torch.as_tensor, but when given Python data types it will keep
+    them in full precision.  Used for calling convention for Dynamo.
+    """
+    ty = type(t)
+    if ty is builtins.float:
+        return torch.as_tensor(t, dtype=torch.float64)
+    elif ty is builtins.int:
+        return torch.as_tensor(t, dtype=torch.int64)
+    else:
+        return torch.as_tensor(t)

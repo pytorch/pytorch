@@ -600,6 +600,14 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
     def test_fixed_qparams_qspec_observer_dedup(self):
         class BackendAQuantizer(Quantizer):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                act_qspec = FixedQParamsQuantizationSpec(
+                    dtype=torch.uint8,
+                    quant_min=0,
+                    quant_max=255,
+                    qscheme=torch.per_tensor_affine,
+                    scale=1.0 / 256.0,
+                    zero_point=0,
+                )
                 for node in model.graph.nodes:
                     if (
                         node.op == "call_function"
@@ -607,14 +615,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                     ):
                         input_act = node.args[0]
                         assert isinstance(input_act, Node)
-                        act_qspec = FixedQParamsQuantizationSpec(
-                            dtype=torch.uint8,
-                            quant_min=0,
-                            quant_max=255,
-                            qscheme=torch.per_tensor_affine,
-                            scale=1.0 / 256.0,
-                            zero_point=0,
-                        )
                         node.meta["quantization_annotation"] = QuantizationAnnotation(
                             input_qspec_map={
                                 input_act: act_qspec,
@@ -630,13 +630,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                         assert isinstance(input_act, Node)
                         input_act1 = node.args[1]
                         assert isinstance(input_act, Node)
-                        act_qspec = QuantizationSpec(
-                            observer_or_fake_quant_ctr=observer.default_observer,
-                            dtype=torch.uint8,
-                            quant_min=0,
-                            quant_max=255,
-                            qscheme=torch.per_tensor_affine,
-                        )
                         node.meta["quantization_annotation"] = QuantizationAnnotation(
                             input_qspec_map={
                                 input_act0: act_qspec,
@@ -1453,7 +1446,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         for n in m.graph.nodes:
             if n.op == "get_attr" and "frozen_param" in n.target:
-                self.assertIn("stack_trace", n.meta)
                 for key in n.meta:
                     self.assertEqual(n.meta[key], weight_meta[key])
 

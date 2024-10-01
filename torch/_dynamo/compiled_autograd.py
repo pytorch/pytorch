@@ -237,14 +237,14 @@ class AutogradCompilerInstance:
         assert isinstance(input, torch.Tensor)
         assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]  # type: ignore[index]
-        proxies = self.proxy_call_hook(
+        proxy = self.proxy_call_hook(
             hook,
             input,
             hook_type="post_acc_grad_hook",
         )
         with disable_proxy_modes_tracing():
             input = [maybe_clone(input)]
-            self.bind_tensors_to_proxies(input, proxies)
+            self.bind_tensors_to_proxies(input, [proxy])
         return input
 
     # Note: [Compiled autograd and cudagraphs]
@@ -337,7 +337,8 @@ class AutogradCompilerInstance:
                 for i in runtime_inputs_to_move:
                     inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
-                return compiled_fn(inputs, sizes, scalars, hooks)
+                with disable():
+                    return compiled_fn(inputs, sizes, scalars, hooks)
             finally:
                 in_compiled_autograd_region = False
 

@@ -33,6 +33,7 @@ from torch.fx.experimental.symbolic_shapes import (
     StatelessSymbolicContext,
     statically_known_true,
 )
+from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1067,6 +1068,33 @@ class f(torch.nn.Module):
             self.assertEqual(x.size(), y.size())
             self.assertEqual(x.stride(), y.stride())
             self.assertEqual(x.storage_offset(), y.storage_offset())
+
+    def test_tensor_factory_with_symint(self):
+        args = list(range(0, 3))
+        expected = torch.tensor(args)
+
+        shape_env = ShapeEnv()
+        sym_args = [create_symint(shape_env, i) for i in args]
+
+        # test tensor factories
+        for dt in all_types_and(torch.half, torch.bfloat16):
+            res = torch.tensor(sym_args, dtype=dt)
+            self.assertEqual(res, expected, exact_dtype=False)
+
+        # test legacy tensor factories
+        legacy_ctors = [
+            torch.Tensor,
+            torch.LongTensor,
+            torch.DoubleTensor,
+            torch.FloatTensor,
+            torch.IntTensor,
+            torch.ShortTensor,
+            torch.HalfTensor,
+            torch.ByteTensor,
+        ]
+        for Tensor in legacy_ctors:
+            res = Tensor(sym_args)
+            self.assertEqual(res, expected, exact_dtype=False)
 
 
 @skipIfTorchDynamo(
