@@ -255,6 +255,10 @@ class FSDPParam:
             raise AssertionError(
                 f"Expects the parameter to already be moved to device {device} but got {param.device}"
             )
+        if not param.is_contiguous():
+            raise NotImplementedError(
+                f"FSDP does not support non-contiguous parameters yet: {param.shape=} {param.stride()=}"
+            )
         # TODO: Replace the sharded DTensor parameter construction logic with
         # `distribute_tensor` after https://github.com/pytorch/pytorch/issues/116101
         # TODO: Simplify the following sharded parameter padding logic after
@@ -334,6 +338,7 @@ class FSDPParam:
                 ),
             )
             param_data = param
+        assert param_data.is_contiguous(), f"{param_data.shape=} {param_data.stride()=}"
         self._orig_size = param_data.size()
         self._contiguous_orig_stride = make_contiguous_strides_for(self._orig_size)
         shard_rank = self.mesh_info.shard_mesh_rank
