@@ -17,7 +17,6 @@ from torch.utils._python_dispatch import TorchDispatchMode
 
 
 F = TypeVar("F", bound=Callable[..., Any])
-G = TypeVar("G", bound=Callable[..., Any])
 
 
 # Query `hasattr` only once.
