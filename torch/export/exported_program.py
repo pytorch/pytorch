@@ -272,7 +272,7 @@ def _override_decomp_aten_to_variants():
 def _split_decomp_table_to_cia_and_python_decomp(
     decomp_table: Dict[torch._ops.OperatorBase, Callable]
 ) -> Tuple[Dict[torch._ops.OperatorBase, Callable], ...]:
-    from torch._decomp import _collect_all_valid_cia_ops
+    from torch._decomp import _collect_all_valid_cia_ops, _is_preservable_cia_op
 
     all_preservable_cia_ops = set(_collect_all_valid_cia_ops())
     cia_ops_to_callable = {}
@@ -296,12 +296,16 @@ def _split_decomp_table_to_cia_and_python_decomp(
         # In both cases, we want to remove this CIA op from the decomp_table as it is special
         # handled.
         if op in all_preservable_cia_ops:
-            # TODO this is annpying case where aten.item has
-            # prim decomposition which later calls into aten.item
-            # and recurses infinitely. (https://github.com/pytorch/pytorch/issues/136050)
             cia_ops_to_callable[op] = decomp_table[op]
             all_preservable_cia_ops.remove(op)
             del decomp_table[op]
+        # If it is a custom op, we want to still preserve or do whatever
+        # with it if it is a functional CIA. The reason we don't remove
+        # from CIA list is because we don't query custom ops.
+        elif _is_preservable_cia_op(op):
+            op_name = op.name()
+            assert not op_name.startswith("aten"), "This should be a custom op"
+            cia_ops_to_callable[op] = decomp_table[op]
 
     # If we reached here, it means user intentionally deleted these CIA ops from
     # decomp table.
@@ -1053,6 +1057,7 @@ class ExportedProgram:
         """
         from torch._decomp import (
             _decomp_table_to_post_autograd_aten,
+            _is_preservable_cia_op,
             core_aten_decompositions,
         )
         from torch._inductor import config
@@ -1079,6 +1084,10 @@ class ExportedProgram:
         for op in _preserve_ops:
             if op in _decomp_table:
                 del _decomp_table[op]
+            # This is needed when the op they want to preserve is a
+            # CIA op.
+            elif _is_preservable_cia_op(op):
+                _decomp_table[op] = _special_op_to_preserve_cia
 
         # Note [Seperating decomp_table into CIA decomps and non-CIA decomps]
         # At this point, we have a decomp_table that contains decomp behaviour for
