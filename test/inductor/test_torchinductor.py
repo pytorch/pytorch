@@ -8110,6 +8110,18 @@ class CommonTemplate:
 
         self.common(f, (torch.zeros((4, 2)),))
 
+    def test_softmax_backward_data(self):
+        def fn(a, b):
+            return aten._softmax_backward_data(a, b, dim=1, input_dtype=torch.float32)
+
+        self.common(
+            fn,
+            (
+                torch.randn(10, 10),
+                torch.randn(10, 10),
+            ),
+        )
+
     def test_randn_like_empty(self):
         class Model(torch.nn.Module):
             def __init__(
@@ -12337,6 +12349,16 @@ if HAS_GPU and not TEST_WITH_ASAN:
                         f(in1, in2, a, b, scale_a, scale_b)
 
                 print(p.key_averages().table(max_name_column_width=200))
+
+        def test_non_blocking_copy_codegen(self):
+            # Checks non_blocking arg is present in codegen
+            # (see https://github.com/pytorch/pytorch/issues/136260)
+            def fn(x):
+                return x.to(device=self.device, non_blocking=True)
+
+            inp = torch.randn(3, 4)
+            _, (code,) = run_and_get_code(torch.compile(fn), inp)
+            FileCheck().check("copy_").check_same("True").run(code)
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
