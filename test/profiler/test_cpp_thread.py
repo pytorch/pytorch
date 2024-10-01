@@ -5,11 +5,8 @@ from unittest import skipIf
 
 import torch
 import torch.utils.cpp_extension
+from torch._environment import is_fbcode
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
-
-
-def is_fbcode():
-    return not hasattr(torch.version, "git_version")
 
 
 if is_fbcode():
