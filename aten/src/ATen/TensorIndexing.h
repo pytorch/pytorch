@@ -255,7 +255,9 @@ inline Tensor applySelect(
     // the other hand, indexing wraping is valid for all negative int64_t
     // values, as x[INT64_MIN] is the same as x[INT64_MAX]
     TORCH_CHECK_INDEX(
-        size.sym_gt(-1 - index).sym_and(size.sym_gt(index)).expect_true(__FILE__, __LINE__),
+        size.sym_gt(-1 - index)
+            .sym_and(size.sym_gt(index))
+            .expect_true(__FILE__, __LINE__),
         "index ",
         index,
         " is out of bounds for dimension ",
