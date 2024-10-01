@@ -50,6 +50,7 @@ from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, S
 from torch.nn.utils.rnn import PackedSequence
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    largeTensorTest,
     ops,
     tol,
     toleranceOverride,
@@ -6244,6 +6245,7 @@ class TestAOTModuleSimplified(AOTTestCase):
 
     @skipIfTorchDynamo()
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @largeTensorTest("5GB", device="cuda")
     def test_non_aot_bw_compile_int32_64_shapes(self):
         class MyFunc(torch.autograd.Function):
             @staticmethod
@@ -6262,7 +6264,7 @@ class TestAOTModuleSimplified(AOTTestCase):
 
         f_compiled = torch.compile(f, fullgraph=True, dynamic=True)
 
-        # int32 indices
+        # int32 indices enough
         ref_x = torch.randn(
             6, 5, device="cuda", dtype=torch.float16, requires_grad=True
         )
@@ -6286,7 +6288,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         self.assertTrue(torch.allclose(ref_x.grad, x.grad))
         self.assertTrue(torch.allclose(ref_y.grad, y.grad))
 
-        # int64 indices
+        # int64 indices needed
         ref_x2 = torch.randn(
             1, 47001, device="cuda", dtype=torch.float16, requires_grad=True
         )
