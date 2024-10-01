@@ -1012,7 +1012,7 @@ class ScanTests(TestCase):
     @requires_gpu
     @parametrize("device", [GPU_TYPE])
     @parametrize("dynamic", [True, False])
-    def test_compare_scan_chunked_ce_with_no_scan(self, device, dynamic):
+    def test_scan_compare_chunked_ce_with_no_scan(self, device, dynamic):
         for trunk_size, B, T in zip([10, 20], [10, 100], [20, 40]):
             self._compare_result(
                 model1=torch.compile(ScanModels.ChunkedCE(trunk_size), dynamic=dynamic),
