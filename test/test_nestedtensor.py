@@ -3682,9 +3682,9 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         else:
             raise ValueError("invalid contiguity specified for test_serialization()")
 
-        # Access shape / stride to ensure cache doesn't break serialization.
+        # Access sizes / strides to ensure cache doesn't break serialization.
         # See https://github.com/pytorch/pytorch/issues/129366
-        nt.shape
+        nt.size()
         nt.stride()
 
         with tempfile.TemporaryFile() as f:

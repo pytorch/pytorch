@@ -230,7 +230,7 @@ class NestedTensor(torch.Tensor):
 
         # Cached PyCapsules for sizes / strides are not serializable.
         # See Note [Tensor Subclass custom size/stride caching strategy]
-        torch._tensor._clear_cached_sizes_strides(self)
+        self._clear_non_serializable_cached_data()
         # SymNodes are not serializable
         assert "_size" in state and "_strides" in state
         state = dict(state)
