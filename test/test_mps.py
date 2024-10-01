@@ -9326,7 +9326,8 @@ class TestLinalgMPS(TestCaseMPS):
             # Test different types of rcond tensor
             for rcond_type in MPS_DTYPES:
                 # TODO: Figure out why it's not supported for complex
-                if rcond_type.is_complex:
+                # Skip test for bfloat16 as numpy does not support the type
+                if rcond_type.is_complex or rcond_type == torch.bfloat16:
                     continue
                 rconds.append(torch.rand(A.shape[:-2], dtype=torch.float32, device=device).to(rcond_type))
             # Test broadcasting of rcond
