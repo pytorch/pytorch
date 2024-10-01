@@ -1590,7 +1590,7 @@ def _swap_module_helper(
     return gm
 
 
-def custom_forward(self, *args, **kwargs):
+def _custom_forward(self, *args, **kwargs):
     signature = self.module_call_graph[0].signature
 
     reordered_kwargs = reorder_kwargs(kwargs, signature.in_spec)
@@ -1646,7 +1646,7 @@ def _swap_modules(
 
     gm.module_call_graph = ep.module_call_graph
     gm.run_with_interpreter = run_with_interpreter  # type: ignore[assignment]
-    gm.forward = types.MethodType(custom_forward, gm)
+    gm.forward = types.MethodType(_custom_forward, gm)
 
     assert isinstance(gm, torch.fx.GraphModule)
     gm = _swap_module_helper(gm, modules_to_swap, module_call_graph)
