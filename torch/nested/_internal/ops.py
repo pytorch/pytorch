@@ -527,13 +527,18 @@ def linear_backward_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     grad_output = new_kwargs.pop("grad_output")
     weight = new_kwargs.pop("weight")
+    output_mask = new_kwargs.pop("output_mask")
 
+    ds, dw, db = None, None, None
     check_ragged_dim_same(func, inp, "self", grad_output, "grad_output")
-    ds = NestedTensor(
-        torch.matmul(grad_output._values, weight), **extract_kwargs(grad_output)
-    )
-    dw = torch.matmul(grad_output._values.transpose(-2, -1), inp._values)
-    db = None  # NYI: gradient for bias, need to reduce over ragged dim
+    if output_mask[0]:
+        ds = NestedTensor(
+            torch.matmul(grad_output._values, weight), **extract_kwargs(grad_output)
+        )
+    if output_mask[1]:
+        dw = torch.matmul(grad_output._values.transpose(-2, -1), inp._values)
+    if output_mask[2]:
+        db = grad_output._values.sum(0)
     return (ds, dw, db)
 
 
@@ -1303,7 +1308,10 @@ def view_default(func, *args, **kwargs):
 
     inner_size = [get_inner_size(i) for i in range(len(size) - 1)]
 
-    return NestedTensor(func(inp._values, inner_size), **extract_kwargs(inp))
+    # Preserve inference-mode-ness of input.
+    # TODO: Do this for all other views!
+    with torch.inference_mode(inp.is_inference()):
+        return NestedTensor(func(inp._values, inner_size), **extract_kwargs(inp))
 
 
 @register_jagged_func(
