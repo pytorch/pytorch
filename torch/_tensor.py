@@ -78,7 +78,11 @@ def _rebuild_from_type_v2(func, new_type, args, state):
 # torch/_C/__init__.pyi.in to add a type annotation for your method;
 # otherwise, it will not show up in autocomplete.
 class Tensor(torch._C.TensorBase):
-    def _clear_non_serializable_cached_data(self):
+    def _clear_non_serializable_data(self):
+        if has_torch_function_unary(self):
+            return handle_torch_function(
+                Tensor._clear_non_serializable_data, (self,), self
+            )
         # NB: Wrapper subclasses that implement custom-dispatched sizes / strides cache
         # this info via non-serializable PyCapsules.
         CACHED_SIZES_STRIDES_KEYS = [
@@ -216,7 +220,7 @@ class Tensor(torch._C.TensorBase):
                         setattr(new_tensor, slot, deepcopy(getattr(self, slot), memo))
 
             # don't try to deepcopy non-serializable cached data
-            self._clear_non_serializable_cached_data()
+            self._clear_non_serializable_data()
             new_tensor.__dict__ = deepcopy(self.__dict__, memo)
 
             memo[id(self)] = new_tensor
@@ -243,7 +247,7 @@ class Tensor(torch._C.TensorBase):
         func, args = self._reduce_ex_internal(proto)
         # sizes / strides cache needs to be cleared here because it'll just be re-cached
         # if cleared earlier. Note that state references the -actual- tensor dict.
-        self._clear_non_serializable_cached_data()
+        self._clear_non_serializable_data()
         return (_rebuild_from_type_v2, (func, type(self), args, state))
 
     def storage(self):
