@@ -47,6 +47,7 @@ import torch.utils._pytree as pytree
 from torch import SymBool, SymInt, Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._logging import trace_structured
 from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
     FakeTensor,
@@ -2046,11 +2047,27 @@ class _MakefxTracer:
             stack.enter_context(_set_make_fx_tracer(self))
 
             assert self.fx_tracer is not None
-            t = dispatch_trace(
-                wrap_key(func, args, self.fx_tracer, self.pre_dispatch),
-                tracer=self.fx_tracer,
-                concrete_args=tuple(phs),
-            )
+            try:
+                t = dispatch_trace(
+                    wrap_key(func, args, self.fx_tracer, self.pre_dispatch),
+                    tracer=self.fx_tracer,
+                    concrete_args=tuple(phs),
+                )
+            except Exception:
+                trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "make_fx_fail_partial",
+                        "encoding": "string",
+                    },
+                    payload_fn=lambda: self.fx_tracer.graph.python_code(  # type: ignore[union-attr]
+                        root_module="self",
+                        verbose=True,
+                        include_stride=True,
+                        include_device=True,
+                    ).src,
+                )
+                raise
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way
         if self.tracing_mode == "symbolic":

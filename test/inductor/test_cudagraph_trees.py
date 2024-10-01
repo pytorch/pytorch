@@ -1823,7 +1823,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             # NOTE: this test is named after incompatible ops, but is not skipping due to incompatible ops.
             # This should get fixed.
             FileCheck().check(
-                "skipping cudagraphs due to cpu device (_local_scalar_dense)"
+                " to incompatible op aten._local_scalar_dense.default"
             ).run(captured_output[0])
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
