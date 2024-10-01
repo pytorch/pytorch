@@ -870,8 +870,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // "default" one (usually on device 0) could be created when we go down the
   // line of event destroy.
   ~Future() override {
-    c10::OptionalDeviceGuard deviceGuard(currentDevice_);
-    events_.clear();
+    while (!events_.empty()) {
+      c10::OptionalDeviceGuard deviceGuard(events_.back().device());
+      events_.pop_back();
+    }
   }
 
   struct TORCH_API FutureError final : public std::exception {
