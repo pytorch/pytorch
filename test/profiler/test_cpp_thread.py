@@ -7,6 +7,7 @@ from unittest import skipIf
 
 import torch
 import torch.utils.cpp_extension
+from torch._environment import is_fbcode
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 
 
@@ -21,12 +22,8 @@ def remove_build_path():
             shutil.rmtree(default_build_root)
 
 
-def is_fbcode():
-    return not hasattr(torch.version, "git_version")
-
-
 if is_fbcode():
-    import caffe2.test.profiler_test_cpp_thread_lib as cpp
+    import caffe2.test.profiler_test_cpp_thread_lib as cpp  # @manual=//caffe2/test:profiler_test_cpp_thread_lib
 else:
     # cpp extensions use relative paths. Those paths are relative to
     # this file, so we'll change the working directory temporarily

@@ -400,9 +400,13 @@ def broadcast_symbolic_shapes(a, b):
     for x, y in itertools.zip_longest(
         reversed(a), reversed(b), fillvalue=sympy.Integer(1)
     ):
-        if y == 1:
+        if V.graph.sizevars.shape_env.evaluate_expr(
+            sympy.Eq(y, 1), size_oblivious=True
+        ):
             output.append(x)
-        elif x == 1:
+        elif V.graph.sizevars.shape_env.evaluate_expr(
+            sympy.Eq(x, 1), size_oblivious=True
+        ):
             output.append(y)
         else:
             V.graph.sizevars.guard_equals(x, y)
@@ -683,16 +687,16 @@ def _view_dtype(x: TensorBox, dtype: torch.dtype):
     return to_dtype_bitcast(x, dtype)
 
 
-def to_device(x: TensorBox, device: torch.device, *, copy=False):
+def to_device(x: TensorBox, device: torch.device, *, copy=False, non_blocking=False):
     device = decode_device(device)
     if x.get_device() == device:
         return clone(x) if copy else x
-    return TensorBox.create(ir.DeviceCopy.create(x, device))
+    return TensorBox.create(ir.DeviceCopy.create(x, device, non_blocking))
 
 
 @register_lowering(prims.device_put, type_promotion_kind=None)
-def _device_put(x: TensorBox, device: torch.device):
-    return to_device(x, device, copy=True)
+def _device_put(x: TensorBox, device: torch.device, non_blocking=False):
+    return to_device(x, device, copy=True, non_blocking=non_blocking)
 
 
 def register_pointwise(
@@ -819,7 +823,25 @@ def broadcast_tensors(*inputs):
     for x in inputs:
         sizes = x.get_size()
         if len(sizes) != len(target) or any(
-            ((a == 1 and b != 1) or (a != 1 and b == 1)) for a, b in zip(sizes, target)
+            (
+                (
+                    V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(a, 1), size_oblivious=True
+                    )
+                    and not V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(b, 1), size_oblivious=True
+                    )
+                )
+                or (
+                    not V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(a, 1), size_oblivious=True
+                    )
+                    and V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(b, 1), size_oblivious=True
+                    )
+                )
+            )
+            for a, b in zip(sizes, target)
         ):
             x = expand(x, target)
         outputs.append(x)
@@ -2215,8 +2237,6 @@ make_fallback(aten._cdist_forward)  # p=2 should be feasible
 make_fallback(aten._cdist_backward)
 
 # 2) Medium
-make_fallback(aten.max_unpool2d)
-make_fallback(aten.max_unpool3d)
 make_fallback(aten._trilinear)
 
 
@@ -6102,13 +6122,17 @@ def set__source_tensor(self, source_tensor):
     return TensorBox.create(ir.SetSourceTensorKernel(self, source_tensor))
 
 
-if hasattr(torch.ops.fsdp, "set_"):
+if hasattr(torch.ops.fsdp, "copy_"):
 
-    @register_lowering(torch.ops.fsdp.set_.default)
-    def fsdp_set_(self, source_tensor):
-        self.realize()
-        source_tensor.realize()
-        ir.SetSourceTensorKernel(self, source_tensor)
+    @register_lowering(torch.ops.fsdp.copy_.default)
+    def fsdp_copy_(dst, src):
+        if dst is src:
+            # dst.copy_(dst) can happen from the reinplacing pass
+            return dst
+        src = to_device(src, dst.get_device())
+        src = to_dtype(src, dst.get_dtype())
+        src = expand(src, dst.get_size())
+        return mutate_to(dst, src)
 
 
 @register_lowering(torch.ops.aten.resize)
@@ -6253,7 +6277,7 @@ def _sink_tokens(tokens):
     return None
 
 
-@register_lowering(torch.ops.higher_order.with_effects)
+@register_lowering(torch.ops.higher_order.with_effects, type_promotion_kind=None)
 def with_effects(token, op, *args, **kwargs):
     result = ir.EffectfulKernel.create(op, *args, **kwargs)
 

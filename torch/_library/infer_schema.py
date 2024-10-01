@@ -268,4 +268,4 @@ def tuple_to_list(tuple_type: typing.Type[typing.Tuple]) -> typing.Type[typing.L
     elif len(type_args) == 2 and type_args[1] is Ellipsis:  # type: ignore[valid-type]
         return typing.List[type_args[0]]  # type: ignore[valid-type]
     else:
-        return typing.List[typing.Union[tuple(type_args)]]  # type: ignore[misc]
+        return typing.List[typing.Union[tuple(type_args)]]  # type: ignore[misc, return-value]

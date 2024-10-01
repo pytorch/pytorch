@@ -14,6 +14,7 @@ from .ctx_manager import (
     GradModeVariable,
     InferenceModeVariable,
     JvpIncrementNestingCtxManagerVariable,
+    SDPAKernelVariable,
     SetFwdGradEnabledContextManager,
     StreamContextVariable,
     StreamVariable,

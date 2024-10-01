@@ -326,7 +326,7 @@ class OutputGraph:
         ] = collections.defaultdict(list)
         # Stores the full fqn of a param or buffer to the relevant source.
         self.param_name_to_source: Optional[Dict[str, Source]] = {}
-        self.side_effects = SideEffects()
+        self.side_effects = SideEffects(self)
         # Cached variable trackers. This makes symbolic analysis of LOAD_GLOBAL
         # and LOAD_ATTR for same python objects free.
         self.variable_tracker_cache = VariableTrackerCache()
@@ -1834,6 +1834,14 @@ class SubgraphTracer(fx.Tracer):
         # Dicts maintain the order of args for the HigherOrderOperator call.
         self.lifted_freevars = {}
         self.prev_inst = None
+        # True if this tracer is currently tracing into torch.utils.checkpoint
+        # as part of speculate_subgraph.
+        self.under_activation_checkpoint = False
+        # True if we want to allow side-effects (doesn't throw error on their existence)
+        # during this tracer's tracing of torch.utils.checkpoint (via speculate_subgraph).
+        # Only safe if we know for sure that *NOT* replaying these side-effects during
+        # backward recomputation of the checkpoint region doesn't affect its correctness.
+        self.allow_side_effects_under_checkpoint = False
 
         self._cur_code = None
         self._orig_gm_meta = None
