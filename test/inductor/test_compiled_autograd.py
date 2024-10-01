@@ -1439,129 +1439,148 @@ main()
                 f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
             )
 
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_trace_auto_functionalized_v2(self):
+        self.trace_auto_functionalized_base()
+
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=False)
     def test_trace_auto_functionalized(self):
-        torch.library.define(
-            "testlib::foo",
-            "(Tensor(a!) x) -> (Tensor)",
-            tags=torch.Tag.pt2_compliant_tag,
-        )
-        torch.library.define(
-            "testlib::foo_mutated",
-            "(Tensor(a!) x) -> (Tensor)",
-            tags=torch.Tag.pt2_compliant_tag,
-        )
+        self.trace_auto_functionalized_base()
 
-        @torch.library.impl("testlib::foo", "cpu")
-        def foo(x):
-            x.add_(5)
-            return x
-
-        @torch.library.impl("testlib::foo", "Meta")
-        def foo_meta(x):
-            return x
-
-        @torch.library.impl("testlib::foo_mutated", "CompositeImplicitAutograd")
-        def foo_mutated(x):
-            return torch.ops.testlib.foo(x)
-
-        def _get_custom_policy(must_recompute_list=None):
-            def _custom_policy(ctx, func, *args, **kwargs):
-                if must_recompute_list is not None and func in must_recompute_list:
-                    return torch.utils.checkpoint.CheckpointPolicy.MUST_RECOMPUTE
-                else:
-                    return torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
-
-            return _custom_policy
-
-        def context_fn():
-            must_recompute_list = [
-                torch.ops.higher_order.auto_functionalized,
-            ]
-            return torch.utils.checkpoint.create_selective_checkpoint_contexts(
-                _get_custom_policy(
-                    must_recompute_list=must_recompute_list,
-                ),
+    def trace_auto_functionalized_base(self):
+        with torch.library._scoped_library("testlib", "FRAGMENT") as lib:
+            torch.library.define(
+                "testlib::foo",
+                "(Tensor(a!) x) -> (Tensor)",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+            torch.library.define(
+                "testlib::foo_mutated",
+                "(Tensor(a!) x) -> (Tensor)",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
             )
 
-        def g(x):
-            x = torch.matmul(x, x)
-            torch.ops.testlib.foo_mutated(x)
-            return torch.matmul(x, x)
+            @torch.library.impl("testlib::foo", "cpu", lib=lib)
+            def foo(x):
+                x.add_(5)
+                return x
 
-        def g_cp(x):
-            return torch.utils.checkpoint.checkpoint(
-                g, x, use_reentrant=False, context_fn=context_fn
+            @torch.library.impl("testlib::foo", "Meta", lib=lib)
+            def foo_meta(x):
+                return x
+
+            @torch.library.impl(
+                "testlib::foo_mutated", "CompositeImplicitAutograd", lib=lib
             )
+            def foo_mutated(x):
+                return torch.ops.testlib.foo(x)
 
-        def f():
-            inps = (torch.randn(4, 4, requires_grad=True),)
-            output = torch.compile(g_cp, backend="aot_eager", fullgraph=True)(*inps)
-            output.sum().backward()
-            return output, inps[0].grad
+            def _get_custom_policy(must_recompute_list=None):
+                def _custom_policy(ctx, func, *args, **kwargs):
+                    if must_recompute_list is not None and func in must_recompute_list:
+                        return torch.utils.checkpoint.CheckpointPolicy.MUST_RECOMPUTE
+                    else:
+                        return torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
 
-        """
-        Walkthrough of what happens with `auto_functionalized`:
-        1. `auto_functionalized` op is inserted into the graph during AOTAutograd functionalization.
-           We force the op to be recomputed (by using SAC), so it appears in the backward graph.
-        2. The AOT backward graph looks like:
-        ```
-        ===== Backward graph 0 =====
-        def forward(self, primals_1: "f32[4, 4][4, 1]cpu", tangents_1: "f32[4, 4][4, 1]cpu"):
-            ...
-            X = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = mm)
-            ...
-            return (add_1,)
-        ```
-        3. The Compiled Autograd graph looks like:
-        ```
-        ===== Compiled autograd graph =====
-        def forward(self, inputs, sizes, scalars, hooks):
-            ...
-            X = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = aot0_mm)
-            ...
-            return []
-        ```
-        4. The Dynamo graph captured by Compiled Autograd looks like:
-        ```
-        ===== __compiled_fn_3 =====
-        def forward(self, L_inputs_ : list):
-            ...
-            X = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = aot0_mm)
-            ...
-            return (new_grad,)
-        ```
-        5. The Compiled Autograd's AOT "forward-only" graph looks like:
-        ```
-        ===== Forward graph 1 =====
-        def forward(self, arg0_1: "f32[][]cpu", arg1_1: "f32[4, 4][4, 1]cpu"):
-            ...
-            X = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = mm)
-            ...
-            return (clone_1,)
-        ```
-        6. The `auto_functionalized` op should then be lowered using the normal lowering path in Inductor.
-        """
+                return _custom_policy
 
-        compiler_fn = make_compiler_fn(fullgraph=True, backend="aot_eager")
-
-        def make_compiler_fn_with_op_check():
-            def _compiler_fn(gm):
-                # Checks that `auto_functionalized` op exists in Compiled Autograd's Dynamo graph.
-                self.assertTrue(
-                    any(
-                        node.target is torch.ops.higher_order.auto_functionalized
-                        for node in gm.graph.nodes
+            def context_fn():
+                must_recompute_list = [
+                    torch.ops.higher_order.auto_functionalized,
+                ]
+                return torch.utils.checkpoint.create_selective_checkpoint_contexts(
+                    _get_custom_policy(
+                        must_recompute_list=must_recompute_list,
                     ),
-                    f"`torch.ops.higher_order.auto_functionalized` op not found in {gm.graph}",
                 )
-                return compiler_fn(gm)
 
-            return _compiler_fn
+            def g(x):
+                x = torch.matmul(x, x)
+                torch.ops.testlib.foo_mutated(x)
+                return torch.matmul(x, x)
 
-        compiler_fn_with_op_check = make_compiler_fn_with_op_check()
-        self.check_output_and_recompiles(
-            f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
-        )
+            def g_cp(x):
+                return torch.utils.checkpoint.checkpoint(
+                    g, x, use_reentrant=False, context_fn=context_fn
+                )
+
+            def f():
+                inps = (torch.randn(4, 4, requires_grad=True),)
+                output = torch.compile(g_cp, backend="aot_eager", fullgraph=True)(*inps)
+                output.sum().backward()
+                return output, inps[0].grad
+
+            """
+            Walkthrough of what happens with `auto_functionalized`:
+            1. `auto_functionalized` op is inserted into the graph during AOTAutograd functionalization.
+            We force the op to be recomputed (by using SAC), so it appears in the backward graph.
+            2. The AOT backward graph looks like:
+            ```
+            ===== Backward graph 0 =====
+            def forward(self, primals_1: "f32[4, 4][4, 1]cpu", tangents_1: "f32[4, 4][4, 1]cpu"):
+                ...
+                X = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = mm)
+                ...
+                return (add_1,)
+            ```
+            3. The Compiled Autograd graph looks like:
+            ```
+            ===== Compiled autograd graph =====
+            def forward(self, inputs, sizes, scalars, hooks):
+                ...
+                X = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = aot0_mm)
+                ...
+                return []
+            ```
+            4. The Dynamo graph captured by Compiled Autograd looks like:
+            ```
+            ===== __compiled_fn_3 =====
+            def forward(self, L_inputs_ : list):
+                ...
+                X = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = aot0_mm)
+                ...
+                return (new_grad,)
+            ```
+            5. The Compiled Autograd's AOT "forward-only" graph looks like:
+            ```
+            ===== Forward graph 1 =====
+            def forward(self, arg0_1: "f32[][]cpu", arg1_1: "f32[4, 4][4, 1]cpu"):
+                ...
+                X = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = mm)
+                ...
+                return (clone_1,)
+            ```
+            6. The `auto_functionalized` op should then be lowered using the normal lowering path in Inductor.
+            """
+
+            compiler_fn = make_compiler_fn(fullgraph=True, backend="aot_eager")
+
+            def make_compiler_fn_with_op_check():
+                def _compiler_fn(gm):
+                    auto_functionalize_func = (
+                        torch.ops.higher_order.auto_functionalized
+                        if not torch._inductor.config.enable_auto_functionalized_v2
+                        else torch.ops.higher_order.auto_functionalized_v2
+                    )
+
+                    # Checks that `auto_functionalized` op exists in Compiled Autograd's Dynamo graph.
+                    self.assertTrue(
+                        any(
+                            node.target is auto_functionalize_func
+                            for node in gm.graph.nodes
+                        ),
+                        f"{auto_functionalize_func} op not found in {gm.graph}",
+                    )
+                    return compiler_fn(gm)
+
+                return _compiler_fn
+
+            compiler_fn_with_op_check = make_compiler_fn_with_op_check()
+            self.check_output_and_recompiles(
+                f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
+            )
 
     def test_non_traceable_autograd_cpp_node(self):
         cpp_source = """
