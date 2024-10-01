@@ -25,7 +25,7 @@ from types import CodeType, FrameType, FunctionType, ModuleType
 from typing import Any, Callable, Dict, List, Optional, Set, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
-
+from typing import types
 import torch
 import torch._logging
 from torch._C._dynamo.guards import GlobalStateGuard
