@@ -31,3 +31,4 @@ optree==0.12.1
 # NB: test_hparams_* from test_tensorboard is failing with protobuf 5.26.0 in
 # which the stringify metadata is wrong when escaping double quote
 protobuf==3.20.2
+parameterized==0.8.1

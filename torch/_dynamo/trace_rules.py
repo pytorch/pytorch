@@ -178,8 +178,9 @@ manual_torch_name_rule_map = {
     "torch.nn.Parameter": TorchInGraphFunctionVariable,
     "torch.nn.Buffer": TorchInGraphFunctionVariable,
     "torch._nested_tensor_from_mask": SkipFunctionVariable,
-    "torch._nested_from_padded": SkipFunctionVariable,
+    "torch.nested._internal.nested_tensor.nested_from_padded": TorchInGraphFunctionVariable,
     "torch.nested.nested_tensor_from_jagged": UserFunctionVariable,
+    "torch.nested.nested_tensor_from_padded": UserFunctionVariable,
     # symbol operators implemented in Python
     "torch.sym_not": TorchInGraphFunctionVariable,
     "torch.sym_float": TorchInGraphFunctionVariable,
@@ -608,6 +609,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_graph_executor_optimize",
         "torch._C._get_linalg_preferred_backend",
         "torch._C._get_math_sdp_enabled",
+        "torch._C._get_math_sdp_allow_fp16_bf16_reduction",
         "torch._C._get_max_operator_version",
         "torch._C._get_mem_efficient_sdp_enabled",
         "torch._C._get_mkldnn_enabled",
@@ -1143,6 +1145,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._set_qengine",
         "torch._C._set_sdp_use_flash",
         "torch._C._set_sdp_use_math",
+        "torch._C._set_math_sdp_allow_fp16_bf16_reduction",
         "torch._C._set_sdp_use_mem_efficient",
         "torch._C._set_should_use_format_with_string_table",
         "torch._C._set_storage_access_error_msg",
@@ -1525,6 +1528,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._neg_view_copy",
         "torch._neg_view",
         "torch._nested_from_padded_and_nested_example",
+        "torch._nested_from_padded_tensor",
         "torch._nested_tensor_from_mask_left_aligned",
         "torch._nested_tensor_from_tensor_list",
         "torch._nested_tensor_softmax_with_shape",
@@ -2395,11 +2399,13 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.backends.cuda.can_use_cudnn_attention",
         "torch.backends.cuda.enable_flash_sdp",
         "torch.backends.cuda.enable_math_sdp",
+        "torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp",
         "torch.backends.cuda.enable_mem_efficient_sdp",
         "torch.backends.cuda.flash_sdp_enabled",
         "torch.backends.cuda.is_built",
         "torch.backends.cuda.is_flash_attention_available",
         "torch.backends.cuda.math_sdp_enabled",
+        "torch.backends.cuda.fp16_bf16_reduction_math_sdp_allowed",
         "torch.backends.cuda.mem_efficient_sdp_enabled",
         "torch.backends.cuda.cudnn_sdp_enabled",
         "torch.backends.cuda.enable_cudnn_sdp",
@@ -2997,11 +3003,16 @@ def _builtin_function_ids() -> Dict[int, str]:
     rv.update(
         {
             id(cast): "typing.cast",
-            id(functools.reduce): "functools.reduce",
             id(copy.deepcopy): "copy.deepcopy",
         }
     )
     return rv
+
+
+@FunctionIdSet
+def _polyfilled_function_ids() -> Set[int]:
+    # See also @torch._dynamo.decorators.substitute_in_graph(...), which adds items in _polyfilled_function_ids
+    return set()
 
 
 @FunctionIdSet
@@ -3077,6 +3088,11 @@ def is_builtin_callable(obj) -> bool:
 
 def is_builtin_constant(obj) -> bool:
     return id(obj) in _builtin_constant_ids
+
+
+def is_polyfilled_callable(obj) -> bool:
+    # See also @torch._dynamo.decorators.substitute_in_graph(...), which adds items in _polyfilled_function_ids
+    return id(obj) in _polyfilled_function_ids
 
 
 def is_numpy(obj) -> bool:
@@ -3256,6 +3272,7 @@ MOD_INLINELIST = [
     "torch.testing",
     "torch.utils._content_store",
     "torch.utils._contextlib",
+    "torch.utils._device",
     "torch.utils._foreach_utils",
     "torch.utils._python_dispatch",
     "torch.utils._pytree",
@@ -3530,6 +3547,8 @@ def lookup_callable(obj):
         return SkipFunctionVariable
     if is_callable_allowed(obj):
         return TorchInGraphFunctionVariable
+    if is_polyfilled_callable(obj):
+        return PolyfilledFunctionVariable
     if is_builtin_callable(obj):
         return BuiltinVariable
     return None
@@ -3590,7 +3609,9 @@ def lookup_inner(
             if reasons is not None:
                 reasons.add("func name is patched_init")
             return SkipFunctionVariable
-        elif name == "__torch_function__":
+        elif name == "__torch_function__" or (
+            obj and obj.__name__ == "__torch_function__"
+        ):
             if reasons is not None:
                 reasons.add("func name is __torch_function__")
             return UserFunctionVariable

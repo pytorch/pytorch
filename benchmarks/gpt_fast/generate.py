@@ -264,7 +264,7 @@ def run_llama2_7b_bf16(device: str = "cuda"):
         LLaMAWeightOnlyInt8QuantHandler,
         94,
         1253,
-        162,
+        133,
     )
     token_per_sec, memory_bandwidth, compilation_time = run_experiment(
         model, device=device
@@ -314,7 +314,7 @@ def run_llama2_7b_int8(device: str = "cuda"):
         LLaMAWeightOnlyInt8QuantHandler,
         144,
         957,
-        172,
+        136,
     )
     token_per_sec, memory_bandwidth, compilation_time = run_experiment(
         model, device=device
@@ -365,7 +365,7 @@ def run_mixtral_8x7b_int8(device: str = "cuda"):
         MixtralMoEWeightOnlyInt8QuantHandler,
         175,
         1130,
-        162,
+        133,
     )
     token_per_sec, memory_bandwidth, compilation_time = run_experiment(
         model, device=device

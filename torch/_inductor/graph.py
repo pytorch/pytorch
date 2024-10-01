@@ -45,6 +45,7 @@ from torch.fx.experimental.symbolic_shapes import (
     resolve_unbacked_bindings,
     RuntimeAssert,
     ShapeEnv,
+    SympyBoolean,
     SymTypes,
 )
 from torch.fx.graph import Graph
@@ -63,7 +64,7 @@ from .codegen.common import (
     init_backend_registration,
 )
 from .exc import (
-    CppWrapperCodeGenError,
+    CppWrapperCodegenError,
     LoweringException,
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
@@ -97,6 +98,7 @@ from .utils import (
     get_cloned_parameter_buffer_name,
     get_sympy_Expr_dtype,
     maybe_get_suppress_shape_guards_ctx,
+    normalize_name,
     should_assume_input_aligned,
 )
 from .virtualized import NullHandler, V
@@ -104,7 +106,7 @@ from .virtualized import NullHandler, V
 
 if TYPE_CHECKING:
     from torch._higher_order_ops.effects import _EffectType
-    from .codegen.wrapper import WrapperCodeGen
+    from .codegen.wrapper import PythonWrapperCodegen
 
 from torch._inductor.codecache import output_code_log
 
@@ -351,7 +353,7 @@ class GraphLowering(torch.fx.Interpreter):
         shape_env.freeze_runtime_asserts()
         # We're going to mutate ras_by_symbol as we finish generating them
         self.ras_by_symbol: Dict[
-            sympy.Symbol, List[RuntimeAssert]
+            Optional[sympy.Symbol], List[RuntimeAssert]
         ] = shape_env.deferred_runtime_asserts.copy()
         self.bound_unbacked_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
         self.sizevars = SizeVarAllocator(shape_env)
@@ -388,7 +390,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.never_reuse_buffers: OrderedSet[str] = OrderedSet()
         self.inplaced_to_remove: OrderedSet[str] = OrderedSet()
         self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
-        self.wrapper_code: WrapperCodeGen = None  # type: ignore[assignment]
+        self.wrapper_code: PythonWrapperCodegen = None  # type: ignore[assignment]
         # See `ProxyExecutor Design Note` in ir.py for more details
         self.extern_kernel_nodes: List[ir.ExternKernelNode] = []
 
@@ -854,7 +856,6 @@ class GraphLowering(torch.fx.Interpreter):
     def allocate_non_dup_const_name(
         self, name: Optional[str], data: Union[Tensor]
     ) -> str:
-        orig_name = name
         if not config.aot_inductor.use_runtime_constant_folding:
             for constant_name, value in self.constants.items():
                 if (
@@ -871,13 +872,13 @@ class GraphLowering(torch.fx.Interpreter):
 
         if name is None:
             name = f"constant{len(self.constants)}"
-        assert name is not None
+        orig_name = name
         if name[0].isdigit():
             name = f"constant_{name}"
         name = self.qualify_name(name)
         # We may generate a var name for each constant in the codegen.
         # Let's only keep sane characters.
-        prefix = re.sub(r"[^a-zA-Z0-9_]", "_", name)
+        prefix = normalize_name(name)
         name = prefix
         cnt = 0
         while name in self.constants:
@@ -1238,9 +1239,29 @@ class GraphLowering(torch.fx.Interpreter):
         If fx_node mutates any of new_args/new_kwargs, and they are different from
         old_args/old_kwargs, then we need to update the original tensor.
         """
-        assert isinstance(fx_node.target, torch._ops.OpOverload)
         assert len(old_args) == len(new_args)
         assert len(old_kwargs) == len(new_kwargs)
+
+        if fx_node.target is torch.ops.higher_order.triton_kernel_wrapper_mutation:
+            kwargs = fx_node.kwargs["kwargs"]
+            assert isinstance(kwargs, dict)
+            mutated = torch._higher_order_ops.triton_kernel_wrap.get_mutated_tensors(
+                old_kwargs["kernel_idx"],
+                old_kwargs["constant_args_idx"],
+                {
+                    k: v.meta["val"] if isinstance(v, torch.fx.Node) else v
+                    for k, v in kwargs.items()
+                },
+            )
+            for name in mutated:
+                old_arg = old_kwargs["kwargs"][name]
+                new_arg = new_kwargs["kwargs"][name]
+                if old_arg is new_args:
+                    continue
+                self.call_function(torch.ops.aten.copy_.default, (old_arg, new_arg), {})
+            return
+
+        assert isinstance(fx_node.target, torch._ops.OpOverload)
 
         def maybe_propagate(
             schema_arg: torch._C.Argument, old_arg: ir.IRNode, new_arg: ir.IRNode
@@ -1303,6 +1324,25 @@ class GraphLowering(torch.fx.Interpreter):
                 # if they do, and if the target is mutable, then we need to
                 # write the new values back into the original inputs.
                 self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
+            elif (
+                n.op == "call_function"
+                and n.target is torch.ops.higher_order.triton_kernel_wrapper_mutation
+                and config.triton_kernel_default_layout_constraint != "flexible_layout"
+            ):
+                debug("user_defined_triton_kernel_layout_constraints")
+                if (
+                    config.triton_kernel_default_layout_constraint
+                    == "needs_fixed_stride_order"
+                ):
+                    old_args = args  # type: ignore[possibly-undefined]
+                    old_kwargs = kwargs  # type: ignore[possibly-undefined]
+                    args, kwargs = torch._inductor.lowering.constrain_to_fx_strides(n, *args, **kwargs)  # type: ignore[index]
+                    result = self.call_function(n.target, args, kwargs)  # type: ignore[arg-type]
+                    self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
+                else:
+                    raise RuntimeError(
+                        f"Unknown triton_kernel_default_layout_constraint: {config.triton_kernel_default_layout_constraint}"
+                    )
             elif is_magic_method(n.target):
                 # TODO: this is sus, it probably should be handled in the
                 # lowerings themselves similarly to sym_size/sym-stride
@@ -1556,7 +1596,7 @@ class GraphLowering(torch.fx.Interpreter):
             # This is all doable, it just hasn't been done yet.
             shape_env = V.graph.sizevars.shape_env
 
-            def make_assert(expr: Expr, msg: str) -> None:
+            def make_assert(expr: SympyBoolean, msg: str) -> None:
                 assert_op = ir.AssertScalar(expr, msg)
                 self.register_buffer(assert_op, set_name=True)
                 self.register_operation(assert_op)
@@ -1595,6 +1635,7 @@ class GraphLowering(torch.fx.Interpreter):
             unbacked_bindings = resolve_unbacked_bindings(
                 V.graph.sizevars.shape_env, n.meta.get("unbacked_bindings", {})
             )
+            assert unbacked_bindings is not None
             # When we do lowering, it is possible we reallocate unbacked SymInts.
             # So we need to line up the unbacked SymInts when performing the test
             # here
@@ -1623,10 +1664,10 @@ class GraphLowering(torch.fx.Interpreter):
 
     def validate_can_generate_cpp_wrapper(self) -> None:
         if config.disable_cpp_codegen:
-            raise CppWrapperCodeGenError("C++ codegen is disabled")
+            raise CppWrapperCodegenError("C++ codegen is disabled")
 
         if sys.platform not in ["linux", "darwin", "win32"]:
-            raise CppWrapperCodeGenError(f"Unsupported platform {sys.platform}")
+            raise CppWrapperCodegenError(f"Unsupported platform {sys.platform}")
 
         for value in self.graph_inputs.values():
             dtype = None
@@ -1638,7 +1679,7 @@ class GraphLowering(torch.fx.Interpreter):
                 dtype = may_get_constant_buffer_dtype(value)
 
             if not supported_dtype_of_cpp_wrapper(dtype, self.device_type):
-                raise CppWrapperCodeGenError(f"Unsupported input dtype {dtype}")
+                raise CppWrapperCodegenError(f"Unsupported input dtype {dtype}")
 
     def init_wrapper_code(self) -> None:
         device_types = self.device_types.copy()
@@ -1681,11 +1722,7 @@ class GraphLowering(torch.fx.Interpreter):
         if any(device in self.device_types for device in ["cuda", "xpu"]):
             # first pass
             self.cpp_wrapper = False
-            # Although triton.store_cubin was OrderedSet in compile_fx, the backward pass didn't pick
-            # that up. In theory it should work by only setting triton.store_cubin to True here,
-            # but that will cause a problem when use_runtime_constant_folding is OrderedSet.
-            with config.patch({"triton.store_cubin": True}):
-                compiled = self.compile_to_module().call
+            compiled = self.compile_to_module().call
 
             if not config.triton.autotune_at_compile_time:
 

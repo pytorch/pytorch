@@ -233,9 +233,7 @@ NHWC_STRIDE_ORDER = [3, 0, 2, 1]
 NHWDC_STRIDE_ORDER = [4, 0, 3, 2, 1]
 
 
-def stride_order2fill_order(
-    order: Sequence[Union[int, Integer]]
-) -> Sequence[Union[int, Integer]]:
+def stride_order2fill_order(order: Sequence[Union[int, Integer]]) -> Sequence[int]:
     """
     Convert stride order to fill order
     For channel last format,
@@ -2271,7 +2269,9 @@ class ExpandView(BaseView):
             if new_size[i] == -1:
                 assert old_size[i] is not None
                 new_size[i] = old_size[i]
-            elif old_size[i] is None or old_size[i] == 1:
+            elif old_size[i] is None or V.graph.sizevars.shape_env.evaluate_expr(
+                sympy.Eq(old_size[i], 1), size_oblivious=True
+            ):
                 pass
             else:
                 # Sanity check: Expect broadcast compatibility
@@ -2294,7 +2294,13 @@ class ExpandView(BaseView):
             assert skip >= 0
             new_stride = [sympy.Integer(0)] * skip
             for stride, size in zip(old_layout.stride, old_layout.size):
-                new_stride.append(stride if size != 1 else sympy.Integer(0))
+                new_stride.append(
+                    stride
+                    if not V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(size, 1), size_oblivious=True
+                    )
+                    else sympy.Integer(0)
+                )
             new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
@@ -4785,7 +4791,7 @@ class ExternKernel(InputsKernel):
                         want_contiguous=False,
                         stride_order=None,
                         allow_padding=allow_padding,
-                        exact_strides=exact_strides,
+                        exact_strides=exact_strides,  # type: ignore[arg-type]  # int|Expr vs int|Integer
                     )
                     return x
             elif isinstance(x.get_layout(), FixedLayout) and (
@@ -4855,7 +4861,7 @@ class ExternKernel(InputsKernel):
             want_contiguous=False,
             stride_order=order,
             allow_padding=allow_padding,
-            exact_strides=exact_strides,
+            exact_strides=exact_strides,  # type: ignore[arg-type]  # int|Expr vs int|Integer
         )
         if order:
             assert is_stride_order_storage_and_layout(x, order)
@@ -5903,9 +5909,11 @@ class FallbackKernel(ExternKernelAlloc):
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         if unbacked_bindings := getattr(self, "unbacked_bindings", None):
-            return resolve_unbacked_bindings(
+            resolved = resolve_unbacked_bindings(
                 V.graph.sizevars.shape_env, unbacked_bindings
-            ).keys()
+            )
+            assert resolved is not None
+            return resolved.keys()  # type: ignore[return-value]
         else:
             return OrderedSet()
 
