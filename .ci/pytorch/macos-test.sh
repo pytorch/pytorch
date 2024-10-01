@@ -153,17 +153,18 @@ torchbench_setup_macos() {
   git clone --recursive https://github.com/pytorch/vision torchvision
   git clone --recursive https://github.com/pytorch/audio torchaudio
 
-  cd torchvision
+  pushd torchvision
   git fetch
   git checkout "$$(cat ../.github/ci_commit_pins/vision.txt)"
   git submodule update --init --recursive
+  popd
 
-  cd ../torchaudio
+  pushd torchaudio
   git fetch
   git checkout "$$(cat ../.github/ci_commit_pins/audio.txt)"
   git submodule update --init --recursive
+  popd
 
-  cd ..
   checkout_install_torchbench
 }
 
@@ -171,9 +172,7 @@ torchbench_setup_macos() {
 test_torchbench_perf() {
   echo $(pwd)
   ls -a
-  cd ..
-  ls -a
-  cd pytorch
+  echo "ls complete"
   print_cmake_info
 
   echo "Launching torchbench setup"
