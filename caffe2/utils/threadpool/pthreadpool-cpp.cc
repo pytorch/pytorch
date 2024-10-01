@@ -82,9 +82,12 @@ void PThreadPool::run(
       0u);
 }
 
-PThreadPool* pthreadpool(size_t thread_count) {
+// Forward declaration
+size_t getDefaultNumThreads();
+
+PThreadPool* pthreadpool() {
   static auto threadpool =
-    std::make_unique<PThreadPool>(thread_count);
+    std::make_unique<PThreadPool>(getDefaultNumThreads());
 #if !(defined(WIN32))
   static std::once_flag flag;
   std::call_once(flag, []() {
@@ -100,13 +103,6 @@ PThreadPool* pthreadpool(size_t thread_count) {
     }
   }
   return threadpool.get();
-}
-
-// Forward declaration
-size_t getDefaultNumThreads();
-
-PThreadPool* pthreadpool() {
-  return pthreadpool(getDefaultNumThreads());
 }
 
 pthreadpool_t pthreadpool_() {
