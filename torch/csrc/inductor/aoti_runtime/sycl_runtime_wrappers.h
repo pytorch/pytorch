@@ -1,4 +1,5 @@
 // NOLINT
+#ifdef USE_XPU
 #pragma once
 
 #include <level_zero/ze_api.h>
@@ -170,3 +171,4 @@ static void launchKernel(
   };
   auto event = stream.submit(cgf);
 }
+#endif
