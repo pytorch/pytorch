@@ -856,6 +856,22 @@ def argsort(seq) -> List[int]:
     return list(reversed(sorted(a_r, key=getter, reverse=True)))  # noqa: C413
 
 
+def argsort_symint(seq: List[Union[int, torch.SymInt]]) -> List[int]:
+    stuff = [(idx, val) for idx, val in enumerate(seq)]
+
+    def cmp(a, b):
+        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+        if guard_size_oblivious(a[1] < b[1]):
+            return -1
+        if guard_size_oblivious(a[1] > b[1]):
+            return 1
+        return 0
+
+    stuff_sorted = sorted(stuff, key=functools.cmp_to_key(cmp))
+    return [idx for idx, _ in stuff_sorted]
+
+
 @functools.lru_cache(8)
 def get_dtype_size(dtype):
     return torch.empty((), dtype=dtype).element_size()
