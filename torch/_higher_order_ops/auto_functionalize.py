@@ -681,7 +681,9 @@ def auto_functionalized_v2_fake(
     **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     with mode:
-        result = auto_functionalized_v2_dense(_mutable_op, **kwargs)
+        result = auto_functionalized_v2_dense(
+            _mutable_op, _only_clone_these_bases=None, **kwargs
+        )
         return result
 
 
