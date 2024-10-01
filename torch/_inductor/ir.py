@@ -2972,7 +2972,7 @@ class Layout(IRNode):
         # check if it is in ascending order
         for i in range(len(order) - 1):
             expr = stride_ordered[i] > stride_ordered[i + 1]
-            if isinstance(expr, sympy.Expr):
+            if not isinstance(expr, bool):
                 expr = V.graph._shape_env.evaluate_expr(
                     stride_ordered[i] > stride_ordered[i + 1], size_oblivious=True
                 )
