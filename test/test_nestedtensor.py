@@ -4231,6 +4231,26 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         self.assertEqual(res_dense, res_nt.values())
 
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_record_stream(self, device, dtype):
+        nt = random_nt_from_dims(
+            [100, None, 100],
+            device=device,
+            dtype=dtype,
+            layout=torch.jagged,
+        )
+
+        expected = nt + 1
+
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.default_stream(device))
+        with torch.cuda.stream(s):
+            nt.add_(1.0)
+            nt.record_stream(s)
+
+        self.assertEqual(nt, expected)
+
     @dtypes(torch.float32)
     @parametrize(
         "func",
