@@ -878,7 +878,7 @@ def mps_ops_modifier(ops):
 
         # trunc_tensor not working properly for float16 and bfloat16
         'divtrunc_rounding': [torch.float16, torch.bfloat16],
-        'fmod': [torch.float16, torch.bfloat16],
+        'fmod': [torch.float16],
 
         # round not working properly for float16 and bfloat16
         'round': [torch.float16, torch.bfloat16],
