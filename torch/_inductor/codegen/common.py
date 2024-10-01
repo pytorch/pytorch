@@ -232,6 +232,7 @@ def get_wrapper_codegen_for_device(device: str, cpp_wrapper: bool = False):
 def init_backend_registration():
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
+    from .cpp_wrapper_cpu_array_ref import CppWrapperCpuArrayRef
     from .cpp_wrapper_gpu import CppWrapperGpu
     from .cuda_combined_scheduling import CUDACombinedScheduling
     from .halide import HalideScheduling
@@ -244,7 +245,7 @@ def init_backend_registration():
             "cpu",
             lambda *args, **kwargs: cpu_backends[config.cpu_backend](*args, **kwargs),
             PythonWrapperCodegen,
-            CppWrapperCpu,
+            CppWrapperCpuArrayRef if config.allow_stack_allocation else CppWrapperCpu,
         )
 
     if get_scheduling_for_device("cuda") is None:
@@ -895,6 +896,11 @@ class OpOverrides:
             ops.ne(ops.signbit(r), ops.signbit(b)),
         )
         return ops.where(cond, ops.add(r, b), r)
+
+    @staticmethod
+    def fma(x, y, z):
+        # for backends that don't override this (halide)
+        return ops.add(ops.mul(x, y), z)
 
     @staticmethod
     def trunc_to_int(a, dtype):
@@ -2155,7 +2161,7 @@ class KernelTemplate:
                         end = min(len(lines), self.lineno + 2)
                         for i in range(start, end):
                             if i == self.lineno - 1:
-                                error_info += f"{i+1}: --> {lines[i]}\n"
+                                error_info += f"{i + 1}: --> {lines[i]}\n"
                                 if hasattr(self.original_error, "column"):
                                     error_info += (
                                         "     "
@@ -2163,7 +2169,7 @@ class KernelTemplate:
                                         + "^\n"
                                     )
                             else:
-                                error_info += f"{i+1}:     {lines[i]}\n"
+                                error_info += f"{i + 1}:     {lines[i]}\n"
                     return error_info
 
             try:

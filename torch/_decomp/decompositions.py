@@ -3973,7 +3973,7 @@ def constant_pad_nd(
     # Avoid importing sympy at a module level
     from torch.fx.experimental.symbolic_shapes import statically_known_true
 
-    if builtins.all(statically_known_true(p <= 0) for p in pad):
+    if builtins.all(statically_known_true(p < 0) for p in pad):
         import torch._refs as refs
 
         return refs.constant_pad_nd(input, pad, value)
