@@ -586,7 +586,9 @@ def auto_functionalized_fake(
     **kwargs: Any,
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     with mode:
-        result = auto_functionalized_dense(_mutable_op, **kwargs)
+        result = auto_functionalized_dense(
+            _mutable_op, _only_clone_these_tensors=None, **kwargs
+        )
         return result
 
 
