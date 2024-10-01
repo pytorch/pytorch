@@ -17,27 +17,15 @@ def has_triton_package() -> bool:
 
 @functools.lru_cache(None)
 def has_triton() -> bool:
-    if not has_triton_package():
-        return False
-
     from torch._dynamo.device_interface import get_interface_for_device
 
     def cuda_extra_check(device_interface):
         return device_interface.Worker.get_device_properties().major >= 7
 
-    def cpu_extra_check(device_interface):
-        import triton.backends
-
-        return "cpu" in triton.backends.backends
-
     def _return_true(device_interface):
         return True
 
-    triton_supported_devices = {
-        "cuda": cuda_extra_check,
-        "xpu": _return_true,
-        "cpu": cpu_extra_check,
-    }
+    triton_supported_devices = {"cuda": cuda_extra_check, "xpu": _return_true}
 
     def is_device_compatible_with_triton():
         for device, extra_check in triton_supported_devices.items():
@@ -46,7 +34,7 @@ def has_triton() -> bool:
                 return True
         return False
 
-    return is_device_compatible_with_triton()
+    return is_device_compatible_with_triton() and has_triton_package()
 
 
 @functools.lru_cache(None)

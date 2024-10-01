@@ -1542,6 +1542,41 @@ class AOTInductorTestsTemplate:
                 result_cuda = optimized(*example_inputs)
             self.assertTrue(same(result_cpu, result_cuda.cpu()))
 
+    @requires_multigpu()
+    def test_on_cuda_device1(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        try:
+            torch.cuda.get_device_properties(1)
+        except AssertionError:
+            raise unittest.SkipTest("CUDA device 1 is not available") from None
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(10, 16)
+                self.relu = torch.nn.ReLU()
+                self.fc2 = torch.nn.Linear(16, 1)
+                self.sigmoid = torch.nn.Sigmoid()
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = self.relu(x)
+                x = self.fc2(x)
+                x = self.sigmoid(x)
+                return x
+
+        device = "cuda:1"
+        model = Model().to(device)
+        example_inputs = (torch.randn(8, 10, device=device),)
+        expected = model(*example_inputs)
+
+        so_path = AOTIRunnerUtil.compile(model, example_inputs)
+        optimized = AOTIRunnerUtil.load(device, so_path)
+        actual = optimized(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
     def test_pytree_inputs(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
