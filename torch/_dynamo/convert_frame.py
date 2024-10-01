@@ -1059,7 +1059,12 @@ def _compile(
             structured_logging_overhead_s = (
                 torch._logging.get_structured_logging_overhead()
             )
-
+            module_dict = {}
+            for name in dir(config):
+                if not name.startswith("_") and not isinstance(getattr(config, name), (types.FunctionType, type)):
+                    value = getattr(config, name)
+                    module_dict[name] = value
+            json_string = json.dumps(module_dict)
             metrics = CompilationMetrics(
                 str(compile_id),
                 frame_key,
@@ -1093,7 +1098,7 @@ def _compile(
                 config.suppress_errors,
                 config.inline_inbuilt_nn_modules,
                 config.specialize_float,
-                json.dumps(config.shallow_copy_dict(), default=lambda o: list(o) if isinstance(o, set) else o),
+                json_string,
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
