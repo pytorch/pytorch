@@ -86,15 +86,15 @@ def benchmark_operator(operator: BaseOperator, benchmark_config: BenchmarkConfig
                 phase_fn = operator.full
             metric_result.input.append(input)
             execution_time = []
-
-            with maybe_record_function(f"sample_{i}", benchmark_config.profile):
+            # DO NOT CHANGE THE NAME OF THE RECORD FUNCTION. It is used in ncu_analyzer.
+            with maybe_record_function(f"{operator.full_name}___sample_{i}", benchmark_config, sample_idx=i):
                 for repeat_idx in range(repeat):
 
                     def fn():
                         return phase_fn(input)
 
                     with maybe_record_function(
-                        f"repeat_{repeat_idx}", benchmark_config.profile
+                        f"repeat_{repeat_idx}", benchmark_config, repeat_idx=repeat_idx
                     ):
                         if Metrics.EXECUTION_TIME in metrics:
                             execution_time.append(
@@ -147,6 +147,7 @@ def benchmark_operator(operator: BaseOperator, benchmark_config: BenchmarkConfig
     help="set profile folder",
     default="./log",
 )
+@click.option("--enable-nvtx", help="enable nvtx", is_flag=True, default=False)
 def run_benchmarks(
     op,
     dtype,
@@ -158,6 +159,7 @@ def run_benchmarks(
     skip_variants,
     profile,
     profile_folder,
+    enable_nvtx,
 ):
     global input_mapping
     # Reset input mapping to avoid OOM and mismatch in different unit tests
@@ -183,6 +185,7 @@ def run_benchmarks(
         metrics=metrics,
         profile=profile,
         profile_folder=profile_folder,
+        enable_nvtx=enable_nvtx,
     )
 
     # This is a list of classes, not instances

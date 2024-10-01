@@ -2,7 +2,8 @@ from enum import Enum
 from typing import Any, List, Tuple
 
 from triton.testing import do_bench
-
+import nvtx
+from contextlib import contextmanager
 
 class MetricResult:
     def __init__(self) -> None:
@@ -42,6 +43,13 @@ class Device(Enum):
     CPU = "cpu"
     CUDA = "cuda"
 
+@contextmanager
+def profile_range(range_name):
+    nvtx.range_push(range_name)
+    try:
+        yield
+    finally:
+        nvtx.range_pop()
 
 def get_execution_time(fn, grad_to_none=None, device=None, **kwargs):
     """
@@ -52,3 +60,4 @@ def get_execution_time(fn, grad_to_none=None, device=None, **kwargs):
         return do_bench(fn, grad_to_none=grad_to_none, **kwargs)
     else:
         raise ValueError(f"Device {device} is not supported")
+
