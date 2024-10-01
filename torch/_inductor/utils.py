@@ -869,15 +869,19 @@ def argsort_symint(seq: List[Union[int, torch.SymInt]]) -> List[int]:
             return -1
         if guard_size_oblivious(a_val > b_val):
             return 1
-        # preseve original order for equal strides
+        # If strides are the same, prefer the original order.
+        # (this matches argsort's algorithm).
+        # For strides = [2048, 2048, 16, 1], this is
+        # [3, 2, 1, 0].
         if a[0] < b[0]:
-            return -1
-        if a[0] > b[0]:
             return 1
+        if a[0] > b[0]:
+            return -1
         return 0
 
     stuff_sorted = sorted(stuff, key=functools.cmp_to_key(cmp))
-    return [idx for idx, _ in stuff_sorted]
+    result = [idx for idx, _ in stuff_sorted]
+    return result
 
 
 @functools.lru_cache(8)
