@@ -24,10 +24,11 @@ from typing import (
     Tuple,
     TYPE_CHECKING,
     TypeVar,
+    Union,
 )
 
 from torch.utils import _pytree as pytree
-from torch.utils._traceback import CapturedTraceback
+from torch.utils._traceback import CapturedTraceback, format_frame
 from torch.utils.weak import WeakTensorKeyDictionary
 
 
@@ -151,9 +152,26 @@ class GuardBuilderBase:
     pass
 
 
+@dataclasses.dataclass(frozen=True)
+class SLoc:
+    framework_loc: Optional[Union[traceback.FrameSummary, str]]
+    maybe_user_loc: Optional[str]
+
+    def __str__(self):
+        floc = (
+            self.framework_loc
+            if isinstance(self.framework_loc, str)
+            else format_frame(self.framework_loc)
+        )
+        if self.maybe_user_loc is not None:
+            return f"{self.maybe_user_loc} ({floc})"
+        else:
+            return f"({floc})"
+
+
 class ShapeGuard(NamedTuple):
-    expr: sympy.Expr
-    stack: CapturedTraceback
+    expr: sympy.logic.boolalg.Boolean
+    sloc: SLoc
 
 
 @dataclasses.dataclass
