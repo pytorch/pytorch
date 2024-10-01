@@ -857,14 +857,22 @@ def argsort(seq) -> List[int]:
 
 
 def argsort_symint(seq: List[Union[int, torch.SymInt]]) -> List[int]:
-    stuff = [(idx, val) for idx, val in enumerate(seq)]
+    stuff = list(enumerate(seq))
 
     def cmp(a, b):
         from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 
-        if guard_size_oblivious(a[1] < b[1]):
+        a_val = a[1]
+        b_val = b[1]
+
+        if guard_size_oblivious(a_val < b_val):
             return -1
-        if guard_size_oblivious(a[1] > b[1]):
+        if guard_size_oblivious(a_val > b_val):
+            return 1
+        # preseve original order for equal strides
+        if a[0] < b[0]:
+            return -1
+        if a[0] > b[0]:
             return 1
         return 0
 
