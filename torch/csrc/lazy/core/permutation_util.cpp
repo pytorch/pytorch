@@ -11,7 +11,7 @@ std::vector<int64_t> InversePermutation(
   TORCH_CHECK(IsPermutation(input_permutation));
   std::vector<int64_t> output_permutation(input_permutation.size(), -1);
   for (const auto i : c10::irange(input_permutation.size())) {
-    output_permutation.at(input_permutation.at(i)) = i;
+    output_permutation.at(input_permutation.at(i)) = static_cast<int64_t>(i);
   }
   return output_permutation;
 }

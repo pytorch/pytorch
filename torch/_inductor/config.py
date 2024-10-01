@@ -3,10 +3,7 @@ import sys
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
-
-
-def is_fbcode() -> bool:
-    return not hasattr(torch.version, "git_version")
+from torch._environment import is_fbcode
 
 
 def _get_tristate_env(name: str) -> Optional[bool]:
@@ -927,7 +924,9 @@ class triton:
     # Note: This is orthogonal to descriptive_names - this is deciding whether
     # our triton kernel names should all be `triton_` (to maximize caching) or
     # whether they should be unique.
-    unique_kernel_names = os.environ.get("TORCHINDUCTOR_UNIQUE_KERNEL_NAMES") == "1"
+    unique_kernel_names = (
+        os.environ.get("TORCHINDUCTOR_UNIQUE_KERNEL_NAMES", "1") == "1"
+    )
 
     # should we put op names in kernel names
     # False: No special names (just triton__1, triton__2, etc.)
