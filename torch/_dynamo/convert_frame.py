@@ -1058,7 +1058,10 @@ def _compile(
             structured_logging_overhead_s = (
                 torch._logging.get_structured_logging_overhead()
             )
-
+            keys_to_remove = ["traceable_tensor_subclasses", "reorderable_logging_functions","skipfiles_inline_module_allowlist","allowed_functions_module_string_ignorelist","_save_config_ignore"]
+            config_dict = config.shallow_copy_dict()
+            for key in keys_to_remove:
+                del config_dict[key]
             metrics = CompilationMetrics(
                 str(compile_id),
                 frame_key,
@@ -1092,6 +1095,7 @@ def _compile(
                 config.suppress_errors,
                 config.inline_inbuilt_nn_modules,
                 config.specialize_float,
+                str(json.dumps(config_dict)),
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
