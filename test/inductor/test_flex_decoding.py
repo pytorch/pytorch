@@ -3,7 +3,6 @@
 
 import functools
 from collections import namedtuple
-from contextlib import nullcontext
 from typing import Callable, Optional, Tuple, Union
 from unittest import expectedFailure, skipUnless
 from unittest.mock import patch
@@ -885,8 +884,6 @@ class TestFlexDecoding(InductorTestCase):
         self.run_test(bias_mod, dtype)
         self.run_test_with_paged_attention(bias_mod, dtype)
 
-    # TODO this config segfaults with Triton without:
-    # https://github.com/triton-lang/triton/pull/4540
     @supported_platform
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("dtype", test_dtypes)
