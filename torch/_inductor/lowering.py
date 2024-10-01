@@ -400,9 +400,13 @@ def broadcast_symbolic_shapes(a, b):
     for x, y in itertools.zip_longest(
         reversed(a), reversed(b), fillvalue=sympy.Integer(1)
     ):
-        if y == 1:
+        if V.graph.sizevars.shape_env.evaluate_expr(
+            sympy.Eq(y, 1), size_oblivious=True
+        ):
             output.append(x)
-        elif x == 1:
+        elif V.graph.sizevars.shape_env.evaluate_expr(
+            sympy.Eq(x, 1), size_oblivious=True
+        ):
             output.append(y)
         else:
             V.graph.sizevars.guard_equals(x, y)
@@ -683,16 +687,16 @@ def _view_dtype(x: TensorBox, dtype: torch.dtype):
     return to_dtype_bitcast(x, dtype)
 
 
-def to_device(x: TensorBox, device: torch.device, *, copy=False):
+def to_device(x: TensorBox, device: torch.device, *, copy=False, non_blocking=False):
     device = decode_device(device)
     if x.get_device() == device:
         return clone(x) if copy else x
-    return TensorBox.create(ir.DeviceCopy.create(x, device))
+    return TensorBox.create(ir.DeviceCopy.create(x, device, non_blocking))
 
 
 @register_lowering(prims.device_put, type_promotion_kind=None)
-def _device_put(x: TensorBox, device: torch.device):
-    return to_device(x, device, copy=True)
+def _device_put(x: TensorBox, device: torch.device, non_blocking=False):
+    return to_device(x, device, copy=True, non_blocking=non_blocking)
 
 
 def register_pointwise(
@@ -819,7 +823,25 @@ def broadcast_tensors(*inputs):
     for x in inputs:
         sizes = x.get_size()
         if len(sizes) != len(target) or any(
-            ((a == 1 and b != 1) or (a != 1 and b == 1)) for a, b in zip(sizes, target)
+            (
+                (
+                    V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(a, 1), size_oblivious=True
+                    )
+                    and not V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(b, 1), size_oblivious=True
+                    )
+                )
+                or (
+                    not V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(a, 1), size_oblivious=True
+                    )
+                    and V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(b, 1), size_oblivious=True
+                    )
+                )
+            )
+            for a, b in zip(sizes, target)
         ):
             x = expand(x, target)
         outputs.append(x)
