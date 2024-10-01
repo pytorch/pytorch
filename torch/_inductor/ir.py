@@ -2971,8 +2971,8 @@ class Layout(IRNode):
             stride_ordered[order[i]] = stride[i]
         # check if it is in ascending order
         for i in range(len(order) - 1):
-            cond = torch._inductor.sizevars.evaluate_expr(
-                V.graph._shape_env, stride_ordered[i] > stride_ordered[i + 1]
+            cond = V.graph._shape_env.evaluate_expr(
+                stride_ordered[i] > stride_ordered[i + 1], size_oblivious=True
             )
             if cond:
                 return False
