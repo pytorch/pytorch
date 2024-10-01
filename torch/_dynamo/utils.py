@@ -807,6 +807,7 @@ class CompilationMetrics:
     config_suppress_errors: Optional[bool]
     config_inline_inbuilt_nn_modules: Optional[bool]
     specialize_float: Optional[bool]
+    dynamo_config: Optional[str]
 
 
 @dataclasses.dataclass
