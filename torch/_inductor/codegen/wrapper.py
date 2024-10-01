@@ -894,7 +894,7 @@ class PythonWrapperCodegen(CodeGen):
             phase = V.graph.get_training_phase()
             if config.annotate_training:
                 self.prefix.writeline(
-                    f"training_annotation = nvtx.device_range_start('{phase}')"
+                    f"training_annotation = nvtx._device_range_start('{phase}')"
                 )
             if V.graph.graph_inputs:
                 lhs = ", ".join(V.graph.graph_input_names)
@@ -1184,7 +1184,7 @@ class PythonWrapperCodegen(CodeGen):
 
             if config.annotate_training:
                 self.wrapper_call.writeline(
-                    "nvtx.device_range_end(training_annotation)"
+                    "nvtx._device_range_end(training_annotation)"
                 )
             self.generate_return(output_refs)
 

@@ -1,7 +1,7 @@
 # Owner(s): ["module: inductor"]
 import torch
 import torch._inductor.config as inductor_config
-from torch._inductor.test_case import TestCase, run_tests
+from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.triton_utils import requires_cuda
 
@@ -32,9 +32,9 @@ class InductorAnnotationTestCase(TestCase):
 
         self.assertTrue("from torch.cuda import nvtx" in code)
         self.assertEqual(
-            code.count("training_annotation = nvtx.device_range_start('inference')"), 1
+            code.count("training_annotation = nvtx._device_range_start('inference')"), 1
         )
-        self.assertEqual(code.count("nvtx.device_range_end(training_annotation)"), 1)
+        self.assertEqual(code.count("nvtx._device_range_end(training_annotation)"), 1)
 
 
 if __name__ == "__main__":
