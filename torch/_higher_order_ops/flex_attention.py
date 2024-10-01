@@ -330,7 +330,7 @@ def trace_flex_attention(
         mask_mod_other_buffers,
     )
     example_vals = [
-        query.new_zeros((), dtype=query.dtype, requires_grad=query.requires_grad)
+        query.new_zeros((), requires_grad=query.requires_grad)
     ] + [query.new_zeros((), dtype=torch.int) for _ in range(4)]
     mask_example_vals = [query.new_zeros((), dtype=torch.int) for _ in range(4)]
     mask_mod = block_mask[-1]
@@ -562,7 +562,9 @@ def create_fw_bw_graph(
             example_grad: Tensor,
             *other_buffers: Tuple[Tensor, ...],
         ) -> Tuple[Tensor, ...]:
-            def fw_with_masks(*args):
+            def fw_with_masks(
+                *args: Tuple[Tensor, ...]
+            ) -> Tuple[Tuple[Tensor], Tuple[bool]]:
                 fw_out = score_mod(*args)
                 out_requires_grad = fw_out.requires_grad
                 return ((fw_out,), (out_requires_grad,))
