@@ -1217,6 +1217,9 @@ def use_ck_template(layout, m, n, k):
         log.warning("Please pip install Composable Kernel package")
         return False
 
+    if config.is_fbcode():
+        config.rocm.ck_dir = ck_package_dirname
+
     if not config.rocm.ck_dir:
         log.warning("Please set TORCHINDUCTOR_CK_DIR env variable")
         return False
