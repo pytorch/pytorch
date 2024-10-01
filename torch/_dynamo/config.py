@@ -9,10 +9,7 @@ from os.path import abspath, dirname
 from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
 
 import torch
-
-
-def is_fbcode():
-    return not hasattr(torch.version, "git_version")
+from torch._environment import is_fbcode
 
 
 # to configure logging for dynamo, aot, and inductor
@@ -34,7 +31,7 @@ verify_correctness = False
 # need this many ops to create an FX graph
 minimum_call_count = 1
 
-# turn on/off DCE pass
+# turn on/off DCE pass (deprecated: always true)
 dead_code_elimination = True
 
 # disable (for a function) when cache reaches this size
@@ -50,6 +47,12 @@ accumulated_cache_size_limit = 256
 
 # [@compile_ignored: runtime_behaviour] skip tracing recursively if cache limit is hit
 skip_code_recursive_on_cache_limit_hit = True
+
+# raise a hard error if cache limit is hit.  If you are on a model where you
+# know you've sized the cache correctly, this can help detect problems when
+# you regress guards/specialization.  This works best when cache_size_limit = 1.
+# [@compile_ignored: runtime_behaviour]
+fail_on_cache_limit_hit = False
 
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
