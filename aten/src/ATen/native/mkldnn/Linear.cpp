@@ -19,6 +19,7 @@
 #include <ATen/ops/mkldnn_linear_native.h>
 #endif
 
+#include <ATen/native/mkldnn/Linear.h>
 #if !AT_MKLDNN_ENABLED()
 
 namespace at {
