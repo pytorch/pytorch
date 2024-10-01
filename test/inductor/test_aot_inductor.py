@@ -1011,7 +1011,7 @@ class AOTInductorTestsTemplate:
             self.check_model(Model(self.device), example_inputs)
 
     @skipIfNoFBGEMM
-    def test_quanatized_int8_linear(self):
+    def test_quantized_int8_linear(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
                 super().__init__()
@@ -3683,9 +3683,12 @@ CPU_TEST_FAILURES = {
 }
 
 if IS_MACOS:
-    CPU_TEST_FAILURES[
-        "test_cond_non_tensor_predicates_dynamic_True"
-    ] = fail_stack_allocation()
+    CPU_TEST_FAILURES.update(
+        {
+            "test_cond_non_tensor_predicates_dynamic_True": fail_stack_allocation(),
+            "test_custom_op_with_concat_inputs": fail_minimal_arrayref_interface(),
+        }
+    )
 
 
 # test_failures, xfail by default, set is_skip=True to skip
@@ -3699,7 +3702,7 @@ CUDA_TEST_FAILURES = {
     "test_runtime_checks_shape_failed": fail_non_abi_compatible_cuda(is_skip=True),
     # quantized unsupported for GPU
     "test_quantized_linear": fail_cuda(is_skip=True),
-    "test_quanatized_int8_linear": fail_cuda(is_skip=True),
+    "test_quantized_int8_linear": fail_cuda(is_skip=True),
     "test_custom_op_add": fail_non_abi_compatible_cuda(is_skip=True),
     # fp8 to be re-enabled for AOTI
     "test_fp8": fail_cuda(is_skip=True),
