@@ -1725,7 +1725,7 @@ class PatternMatcherPass:
                     ):
                         continue
                     if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
-                        log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
+                        log.warning("%s%s %s", node, node.args, m)
                     if is_match(m) and entry.extra_check(m):
                         count += 1
                         entry.apply(m, graph, node)  # type: ignore[arg-type]
@@ -1871,17 +1871,11 @@ def joint_fwd_bwd(fn: Callable[..., Any], args: Sequence[Any]) -> torch.fx.Graph
 
     remove_noop_ops(gm.graph)
 
-    from .fx_passes.joint_graph import pointless_view
+    from .fx_passes.joint_graph import canonicalization_patterns
 
-    matcher_pass = PatternMatcherPass()
-
-    pattern = CallFunction(
-        torch.ops.aten.view.default, KeywordArg("arg"), KeywordArg("size")
-    )
-    GraphPatternEntry(
-        pattern=pattern, handler=pointless_view, extra_check=_return_true
-    ).register(matcher_pass.patterns)
-    matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
+    canonicalization_patterns.apply(gm.graph)  # type: ignore[arg-type]
+    # from .._functorch.compile_utils import fx_graph_cse
+    # gm.graph = fx_graph_cse(gm.graph)
 
     # remove in/out specs
     gm.graph._codegen = torch.fx.graph.CodeGen()

@@ -1789,6 +1789,8 @@ def min_cut_rematerialization_partition(
         cse_graph = fx_graph_cse(fx_g)
         joint_module.graph = cse_graph
     joint_graph = joint_module.graph
+    joint_module.recompile()
+    # joint_module.print_readable()
 
     graph_has_recomputable_ops = has_recomputable_ops(joint_module)
     graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)

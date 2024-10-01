@@ -200,7 +200,7 @@ def _misc_patterns_init():
     register_replacement(
         norm_pattern,
         norm_replacement,
-        [torch.empty(4, 4, device='cuda', requires_grad=True), torch.randn(4, device='cuda', requires_grad=True), torch.randn(4, device='cuda', requires_grad=True)],
+        [torch.empty(4, 4, device='cuda', requires_grad=True, dtype=torch.float16), torch.randn(4, device='cuda', requires_grad=True), torch.randn(4, device='cuda', requires_grad=True)],
         joint_fwd_bwd,
         [joint_graph_patterns],
         extra_check=improves_partition,
