@@ -6485,14 +6485,14 @@ def lerp(start, end, weight):
 
 
 @register_meta(aten.addcmul)
-def addcmul(input, tensor1, tensor2, *, value):
+def addcmul(input, tensor1, tensor2, *, value=1):
     return elementwise_meta(
         input, tensor1, tensor2, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
 
 
 @register_meta(aten.addcdiv)
-def addcdiv(input, tensor1, tensor2, *, value):
+def addcdiv(input, tensor1, tensor2, *, value=1):
     torch._check(
         not (
             utils.is_integer_dtype(tensor1.dtype)
