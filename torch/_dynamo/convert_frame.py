@@ -1,6 +1,6 @@
 # mypy: allow-untyped-decorators
 from __future__ import annotations
-
+import inspect
 import collections
 import contextlib
 import cProfile
@@ -764,7 +764,6 @@ def _compile(
         # They are not tested during runtime.
 
         def count_args(code: CodeType) -> int:
-            import inspect
 
             return (
                 code.co_argcount
