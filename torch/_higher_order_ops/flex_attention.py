@@ -324,10 +324,10 @@ def trace_flex_attention(
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
-    example_vals = [
-        torch.zeros((), dtype=query.dtype, requires_grad=query.requires_grad)
-    ] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
-    mask_example_vals = [torch.zeros((), dtype=torch.int) for _ in range(4)]
+    example_vals = [query.new_zeros((), requires_grad=query.requires_grad)] + [
+        query.new_zeros((), dtype=torch.int) for _ in range(4)
+    ]
+    mask_example_vals = [query.new_zeros((), dtype=torch.int) for _ in range(4)]
     mask_mod = block_mask[-1]
     with TransformGetItemToIndex():
         score_graph = reenter_make_fx(score_mod)(
@@ -589,8 +589,8 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         ctx._joint_graph = joint_graph
         ctx._mask_graph = block_mask[-1]
         # KV_BLOCK_SIZE and Q_BLOCK_SIZE are integers, so can't use ctx.save_for_backward
-        ctx._KV_BLOCK_SIZE = block_mask[8]
-        ctx._Q_BLOCK_SIZE = block_mask[9]
+        ctx._Q_BLOCK_SIZE = block_mask[8]
+        ctx._KV_BLOCK_SIZE = block_mask[9]
         ctx.scale = scale
         ctx.kernel_options = kernel_options
         ctx._score_mod_other_buffers_len = len(score_mod_other_buffers)
@@ -672,8 +672,8 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
                 q_indices,
                 full_q_num_blocks,
                 full_q_indices,
-                KV_BLOCK_SIZE,
                 Q_BLOCK_SIZE,
+                KV_BLOCK_SIZE,
                 mask_graph,
             ),
             scale,
