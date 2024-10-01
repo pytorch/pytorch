@@ -408,7 +408,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and hasattr(
                 self.value, "__exit__"
             )  # TODO(voz): These can invoke user code!
-            and self.is_standard_new(self.value)
+            and self.is_standard_new()
             and SideEffects.cls_supports_mutation_side_effects(self.value)
             and self.source
             and not is_forbidden_context_manager(self.value)
@@ -450,7 +450,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             assert all(x is not None for x in items)
             return variables.NamedTupleVariable(items, self.value)
-        elif is_frozen_dataclass(self.value) and self.is_standard_new(self.value):
+        elif is_frozen_dataclass(self.value) and self.is_standard_new():
             from .builder import SourcelessBuilder
 
             fields = dataclasses.fields(self.value)
@@ -485,7 +485,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             var.call_method(tx, "__init__", args, kwargs)
             return var
         elif (
-            self.is_standard_new(self.value)
+            self.is_standard_new()
             and SideEffects.cls_supports_mutation_side_effects(self.value)
             and self.source
         ):
@@ -554,7 +554,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             random_object = random.Random(seed)
             return RandomVariable(random_object)
         elif (
-            not self.is_standard_new(self.value)
+            not self.is_standard_new()
             and SideEffects.cls_supports_mutation_side_effects(self.value)
             and self.source
         ):
@@ -568,21 +568,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         return super().call_function(tx, args, kwargs)
 
-    def is_standard_new(self, klass):
+    def is_standard_new(self):
         """Check for __new__ being overridden"""
-        new_fn = inspect.getattr_static(klass, "__new__", None)
+        new_fn = inspect.getattr_static(self.value, "__new__", None)
         if isinstance(new_fn, staticmethod):
             new_fn = new_fn.__func__
-
-        if new_fn in (object.__new__, Generic.__new__):
-            # If not a metaclass, then it's a standard new
-            if type(klass) is type:
-                return True
-
-            # If its a metclass, check the metaclass
-            return self.is_standard_new(type(klass))
-
-        return False
+        return new_fn in (object.__new__, Generic.__new__)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if self.source:
