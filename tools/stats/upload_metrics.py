@@ -6,7 +6,6 @@ import os
 import time
 import uuid
 from datetime import timezone
-from decimal import Decimal
 from typing import Any
 from warnings import warn
 
@@ -152,9 +151,6 @@ def emit_metric(
         if used_reserved_keys:
             raise ValueError(f"Metrics dict contains reserved keys: [{', '.join(key)}]")
 
-    # boto3 doesn't support uploading float values to DynamoDB, so convert them all to decimals.
-    metrics = _convert_float_values_to_decimals(metrics)
-
     if EMIT_METRICS:
         try:
             upload_to_s3(
@@ -169,19 +165,3 @@ def emit_metric(
             return
     else:
         print(f"Not emitting metrics for {metric_name}. Boto wasn't imported.")
-
-
-def _convert_float_values_to_decimals(data: dict[str, Any]) -> dict[str, Any]:
-    # Attempt to recurse
-    def _helper(o: Any) -> Any:
-        if isinstance(o, float):
-            return Decimal(str(o))
-        if isinstance(o, list):
-            return [_helper(v) for v in o]
-        if isinstance(o, dict):
-            return {_helper(k): _helper(v) for k, v in o.items()}
-        if isinstance(o, tuple):
-            return tuple(_helper(v) for v in o)
-        return o
-
-    return {k: _helper(v) for k, v in data.items()}
