@@ -90,15 +90,6 @@ def _fake_associative_scan(combine_fn, xs, dim, reverse=False):
     inp_leaves, spec = pytree.tree_flatten(xs)
     result_flat = []
     num_leaves = len(inp_leaves)
-    # inp_leaves = [torch.flip(x, [dim]) for x in inp_leaves]
-    # from torch._higher_order_ops.associative_scan import generic_associative_scan, wrap_combine_fn_flat
-    
-    # combine_fn = functools.partial(
-    #     wrap_combine_fn_flat, combine_fn=combine_fn, spec=spec, num_leaves=len(inp_leaves)
-    # )
-    # res = generic_associative_scan(combine_fn, inp_leaves, dim)
-    # return res
-    
     op = reversed if reverse else lambda x: x
 
     for ind in op(range(inp_leaves[0].size(dim))):
@@ -151,9 +142,6 @@ def get_scan_combine_fn(name, associative=True):
         A_i, Bu_i = x
         A_j, Bu_j = y
         return A_j * A_i, A_j * Bu_i + Bu_j
-        # return 5 * A_j * A_i, 5 * A_j * Bu_i + Bu_j
-        # return A_i * A_j, Bu_i * Bu_j
-        # return A_i + Bu_j, A_j + Bu_i
 
     def tuple_fct(x, y):
         return (x[0] + y[0], x[1] * y[1])
@@ -1647,37 +1635,9 @@ def forward(self, pred_1, x_1):
         projected_inputs = torch.randn(
             timesteps, state_dim, requires_grad=autograd, device=device
         )
-        # projected_inputs = torch.tile(torch.unsqueeze(torch.arange(1, 2, requires_grad=autograd, device=device, dtype=torch.float32), 0), (timesteps, 1))
         A = torch.randn(state_dim, requires_grad=autograd, device=device)
         elements = (A.repeat((timesteps, 1)), projected_inputs)
-        # A = torch.tile(torch.unsqueeze(torch.arange(1, 2, requires_grad=autograd, device=device, dtype=torch.float32), 0), (timesteps, 1))
-        # elements = (A, projected_inputs)
         
-        # Other frameworks
-        # elements_np = tuple([x.cpu().detach().numpy() for x in elements])
-        
-        # import tensorflow as tf
-        # import tensorflow_probability as tfp
-        
-        # elements_tf = tuple([tf.convert_to_tensor(x) for x in elements_np])
-        # with tf.GradientTape() as g:
-        #     g.watch(elements_tf)
-        #     ret = tfp.math.scan_associative(get_scan_combine_fn("s5_operator", True), elements_tf)
-        
-        # grads_tf = g.gradient(ret, elements_tf)
-        
-        # JAX
-        # import jax.numpy as jnp
-        # from jax import grad, value_and_grad
-        # from jax import lax
-        # elements_jax = tuple([jnp.array(x) for x in elements_np])
-        
-        # def fun(el):
-        #     return lax.associative_scan(s5_operator, el, axis=0)
-        # # resul_jax = lax.associative_scan(s5_operator, elements_jax, axis=0)
-        # vg = value_and_grad(fun)
-        # ret = vg(elements_jax)
-
         result = associative_scan(
             get_scan_combine_fn("s5_operator", True),
             elements,
@@ -1706,14 +1666,6 @@ def forward(self, pred_1, x_1):
             grads = torch.autograd.grad(
                 result_flatten, (*elements_flatten,), grad_out
             )
-            # # print([torch.sum(g) for g in grads])
-            # print(grads)
-            # print('-'*50)
-            # # print([torch.sum(g) for g in expected_grads])
-            # print(expected_grads)
-            # print('-'*50)
-            # print(grads_tf)
-            # print('-'*50)
             self.assertEqual(grads, expected_grads)
 
     @requires_cuda
