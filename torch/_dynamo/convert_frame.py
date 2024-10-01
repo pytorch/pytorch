@@ -1,6 +1,6 @@
 # mypy: allow-untyped-decorators
 from __future__ import annotations
-
+import inspect
 import collections
 import contextlib
 import cProfile
@@ -19,12 +19,12 @@ import traceback
 import typing
 import warnings
 import weakref
+import json
 from pathlib import Path
 from types import CodeType, FrameType, FunctionType, ModuleType
 from typing import Any, Callable, Dict, List, Optional, Set, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
-
 import torch
 import torch._logging
 from torch._C._dynamo.guards import GlobalStateGuard
@@ -764,7 +764,6 @@ def _compile(
         # They are not tested during runtime.
 
         def count_args(code: CodeType) -> int:
-            import inspect
 
             return (
                 code.co_argcount
@@ -1058,7 +1057,12 @@ def _compile(
             structured_logging_overhead_s = (
                 torch._logging.get_structured_logging_overhead()
             )
-
+            module_dict = {}
+            for name in dir(config):
+                if not name.startswith("_") and not (type(getattr(config, name)) == type(inspect.isfunction()) or type(getattr(config, name)) == type(inspect.isclass())):
+                    value = getattr(config, name)
+                    module_dict[name] = value
+            json_string = json.dumps(module_dict)
             metrics = CompilationMetrics(
                 str(compile_id),
                 frame_key,
@@ -1090,6 +1094,9 @@ def _compile(
                 remote_cache_time_saved,
                 structured_logging_overhead_s,
                 config.suppress_errors,
+                config.inline_inbuilt_nn_modules,
+                config.specialize_float,
+                json_string,
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
