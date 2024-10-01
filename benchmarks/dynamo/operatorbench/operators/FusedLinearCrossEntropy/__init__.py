@@ -23,8 +23,8 @@ class FusedLinearCrossEntropyOperator(BaseOperator):
     # The variant placeholder. No need to set in the base operator class
     variant = None
 
-    def __init__(self, benchmark_config: BenchmarkConfig):
-        super().__init__(benchmark_config)
+    def __init__(self, benchmark_config: BenchmarkConfig, is_baseline: bool = False):
+        super().__init__(benchmark_config, is_baseline)
         self.forward_output = None
 
     @classmethod
