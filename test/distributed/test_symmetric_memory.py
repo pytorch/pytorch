@@ -50,7 +50,7 @@ def requires_cuda_p2p_access():
 def requires_multicast_support():
     has_multicast_support = (
         torch.cuda.is_available()
-        and _SymmetricMemory.has_multicast_support(DeviceType.CUDA)
+        and _SymmetricMemory.has_multicast_support(DeviceType.CUDA, 0)
     )
     return skip_but_pass_in_sandcastle_if(
         not has_multicast_support,
@@ -501,6 +501,30 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         res = torch.ops.symm_mem.multimem_one_shot_all_reduce(x, "sum", group_name)
         self.assertTrue(res.eq(self.world_size).all().item())
         dist.destroy_process_group()
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    def test_stream_write_value(self):
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        t = _SymmetricMemory.empty_strided_p2p(
+            size=(64,),
+            stride=(1,),
+            dtype=torch.float32,
+            device=self.device,
+            group_name=group_name,
+        ).fill_(self.rank + 42)
+        symm_mem = _SymmetricMemory.rendezvous(t)
+
+        tensor = torch.zeros(4, dtype=torch.uint32, device=self.device)
+        expect = torch.tril(torch.ones(4, 4, device=self.device)).to(torch.uint32)
+
+        for i in range(4):
+            symm_mem.stream_write_value32(
+                int(tensor.data_ptr()) + i * tensor.element_size(), 1
+            )
+            torch.testing.assert_close(tensor, expect[i])
 
 
 if __name__ == "__main__":
