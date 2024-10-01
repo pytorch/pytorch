@@ -10,7 +10,8 @@
 
 namespace F = torch::nn::functional;
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 void IdentityImpl::reset() {}
 
@@ -170,4 +171,5 @@ Tensor BilinearImpl::forward(const Tensor& input1, const Tensor& input2) {
   return F::bilinear(input1, input2, weight, bias);
 }
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

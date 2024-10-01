@@ -2,7 +2,8 @@
 
 namespace F = torch::nn::functional;
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 PixelShuffleImpl::PixelShuffleImpl(const PixelShuffleOptions& options_)
     : options(options_) {}
@@ -32,4 +33,5 @@ Tensor PixelUnshuffleImpl::forward(const Tensor& input) {
   return F::detail::pixel_unshuffle(input, options.downscale_factor());
 }
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

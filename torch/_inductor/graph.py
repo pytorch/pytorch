@@ -45,7 +45,6 @@ from torch.fx.experimental.symbolic_shapes import (
     resolve_unbacked_bindings,
     RuntimeAssert,
     ShapeEnv,
-    SympyBoolean,
     SymTypes,
 )
 from torch.fx.graph import Graph
@@ -98,7 +97,6 @@ from .utils import (
     get_cloned_parameter_buffer_name,
     get_sympy_Expr_dtype,
     maybe_get_suppress_shape_guards_ctx,
-    normalize_name,
     should_assume_input_aligned,
 )
 from .virtualized import NullHandler, V
@@ -353,7 +351,7 @@ class GraphLowering(torch.fx.Interpreter):
         shape_env.freeze_runtime_asserts()
         # We're going to mutate ras_by_symbol as we finish generating them
         self.ras_by_symbol: Dict[
-            Optional[sympy.Symbol], List[RuntimeAssert]
+            sympy.Symbol, List[RuntimeAssert]
         ] = shape_env.deferred_runtime_asserts.copy()
         self.bound_unbacked_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
         self.sizevars = SizeVarAllocator(shape_env)
@@ -878,7 +876,7 @@ class GraphLowering(torch.fx.Interpreter):
         name = self.qualify_name(name)
         # We may generate a var name for each constant in the codegen.
         # Let's only keep sane characters.
-        prefix = normalize_name(name)
+        prefix = re.sub(r"[^a-zA-Z0-9_]", "_", name)
         name = prefix
         cnt = 0
         while name in self.constants:
@@ -1596,7 +1594,7 @@ class GraphLowering(torch.fx.Interpreter):
             # This is all doable, it just hasn't been done yet.
             shape_env = V.graph.sizevars.shape_env
 
-            def make_assert(expr: SympyBoolean, msg: str) -> None:
+            def make_assert(expr: Expr, msg: str) -> None:
                 assert_op = ir.AssertScalar(expr, msg)
                 self.register_buffer(assert_op, set_name=True)
                 self.register_operation(assert_op)
@@ -1635,7 +1633,6 @@ class GraphLowering(torch.fx.Interpreter):
             unbacked_bindings = resolve_unbacked_bindings(
                 V.graph.sizevars.shape_env, n.meta.get("unbacked_bindings", {})
             )
-            assert unbacked_bindings is not None
             # When we do lowering, it is possible we reallocate unbacked SymInts.
             # So we need to line up the unbacked SymInts when performing the test
             # here

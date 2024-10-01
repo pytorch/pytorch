@@ -11,7 +11,8 @@
 #include <utility>
 #include <vector>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 void BatchNorm1dImpl::_check_input_dim(const Tensor& input) {
   TORCH_CHECK(
@@ -35,4 +36,5 @@ template class BatchNormImplBase<1, BatchNorm1dImpl>;
 template class BatchNormImplBase<2, BatchNorm2dImpl>;
 template class BatchNormImplBase<3, BatchNorm3dImpl>;
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

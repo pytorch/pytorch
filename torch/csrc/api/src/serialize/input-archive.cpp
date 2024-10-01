@@ -13,7 +13,8 @@
 #include <string>
 #include <utility>
 
-namespace torch::serialize {
+namespace torch {
+namespace serialize {
 
 InputArchive::InputArchive()
     : module_("Module", std::make_shared<jit::CompilationUnit>()) {}
@@ -128,7 +129,8 @@ void InputArchive::load_from(
     const char* data_;
     size_t size_;
   };
-  module_ = torch::jit::load(std::make_unique<OurAdapter>(data, size), device);
+  module_ = torch::jit::load(
+      std::make_unique<OurAdapter>(data, size), std::move(device));
 }
 
 void InputArchive::load_from(
@@ -152,13 +154,11 @@ void InputArchive::load_from(
     }
 
    private:
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const std::function<size_t(uint64_t, void*, size_t)>& read_func_;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const std::function<size_t(void)>& size_func_;
   };
   module_ = torch::jit::load(
-      std::make_unique<OurAdapter>(read_func, size_func), device);
+      std::make_unique<OurAdapter>(read_func, size_func), std::move(device));
 }
 
 std::vector<std::string> InputArchive::keys() {
@@ -173,4 +173,5 @@ std::vector<std::string> InputArchive::keys() {
   return all_keys;
 }
 
-} // namespace torch::serialize
+} // namespace serialize
+} // namespace torch

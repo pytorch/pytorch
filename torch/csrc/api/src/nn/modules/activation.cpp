@@ -2,16 +2,15 @@
 #include <torch/nn/init.h>
 #include <torch/nn/modules/activation.h>
 
-#include <utility>
-
 namespace F = torch::nn::functional;
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 ELUImpl::ELUImpl(const ELUOptions& options_) : options(options_) {}
 
 Tensor ELUImpl::forward(Tensor input) {
-  return F::detail::elu(std::move(input), options.alpha(), options.inplace());
+  return F::detail::elu(input, options.alpha(), options.inplace());
 }
 
 void ELUImpl::reset() {}
@@ -29,7 +28,7 @@ void ELUImpl::pretty_print(std::ostream& stream) const {
 SELUImpl::SELUImpl(const SELUOptions& options_) : options(options_) {}
 
 Tensor SELUImpl::forward(Tensor input) {
-  return F::detail::selu(std::move(input), options.inplace());
+  return F::detail::selu(input, options.inplace());
 }
 
 void SELUImpl::reset() {}
@@ -68,10 +67,7 @@ HardtanhImpl::HardtanhImpl(const HardtanhOptions& options_)
 
 Tensor HardtanhImpl::forward(Tensor input) {
   return F::detail::hardtanh(
-      std::move(input),
-      options.min_val(),
-      options.max_val(),
-      options.inplace());
+      input, options.min_val(), options.max_val(), options.inplace());
 }
 
 void HardtanhImpl::reset() {
@@ -97,7 +93,7 @@ LeakyReLUImpl::LeakyReLUImpl(const LeakyReLUOptions& options_)
 
 Tensor LeakyReLUImpl::forward(Tensor input) {
   return F::detail::leaky_relu(
-      std::move(input), options.negative_slope(), options.inplace());
+      input, options.negative_slope(), options.inplace());
 }
 
 void LeakyReLUImpl::reset() {}
@@ -207,7 +203,7 @@ void PReLUImpl::pretty_print(std::ostream& stream) const {
 ReLUImpl::ReLUImpl(const ReLUOptions& options_) : options(options_) {}
 
 Tensor ReLUImpl::forward(Tensor input) {
-  return F::detail::relu(std::move(input), options.inplace());
+  return F::detail::relu(input, options.inplace());
 }
 
 void ReLUImpl::reset() {}
@@ -225,7 +221,7 @@ void ReLUImpl::pretty_print(std::ostream& stream) const {
 ReLU6Impl::ReLU6Impl(const ReLU6Options& options_) : options(options_) {}
 
 Tensor ReLU6Impl::forward(Tensor input) {
-  return F::detail::relu6(std::move(input), options.inplace());
+  return F::detail::relu6(input, options.inplace());
 }
 
 void ReLU6Impl::reset() {}
@@ -244,7 +240,7 @@ RReLUImpl::RReLUImpl(const RReLUOptions& options_) : options(options_) {}
 
 Tensor RReLUImpl::forward(Tensor input) {
   return F::detail::rrelu(
-      std::move(input),
+      input,
       options.lower(),
       options.upper(),
       is_training(),
@@ -267,7 +263,7 @@ void RReLUImpl::pretty_print(std::ostream& stream) const {
 CELUImpl::CELUImpl(const CELUOptions& options_) : options(options_) {}
 
 Tensor CELUImpl::forward(Tensor input) {
-  return F::detail::celu(std::move(input), options.alpha(), options.inplace());
+  return F::detail::celu(input, options.alpha(), options.inplace());
 }
 
 void CELUImpl::reset() {}
@@ -418,10 +414,7 @@ ThresholdImpl::ThresholdImpl(const ThresholdOptions& options_)
 
 Tensor ThresholdImpl::forward(Tensor input) {
   return F::detail::threshold(
-      std::move(input),
-      options.threshold(),
-      options.value(),
-      options.inplace());
+      input, options.threshold(), options.value(), options.inplace());
 }
 
 void ThresholdImpl::reset() {}
@@ -568,4 +561,5 @@ void MultiheadAttentionImpl::_reset_parameters() {
   }
 }
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

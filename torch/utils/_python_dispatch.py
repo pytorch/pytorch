@@ -314,17 +314,6 @@ class TensorWithFlatten(Protocol):
     def stride(self, dim: int) -> int:
         ...
 
-    @overload
-    def size(self, dim: None = None) -> Tuple[int, ...]:
-        ...
-
-    @overload
-    def size(self, dim: int) -> int:
-        ...
-
-    def storage_offset(self) -> int:
-        ...
-
     def dim(self) -> int:
         ...
 

@@ -6,7 +6,8 @@
 #include <memory>
 #include <string>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 std::shared_ptr<CompilationUnit> compile(const std::string& source) {
   auto module = std::make_shared<CompilationUnit>();
@@ -14,4 +15,5 @@ std::shared_ptr<CompilationUnit> compile(const std::string& source) {
   return module;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

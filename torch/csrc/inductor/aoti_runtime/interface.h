@@ -87,14 +87,6 @@ AOTIRuntimeError AOTInductorModelContainerGetConstantFromFolded(
     size_t idx,
     bool* from_folded);
 
-// Retrieves the inductor constant type.
-// idx is the index of the internal's constants.
-// Need idx < num_constants from AOTInductorModelContainerGetNumConstants
-AOTIRuntimeError AOTInductorModelContainerGetConstantType(
-    AOTInductorModelContainerHandle container_handle,
-    size_t idx,
-    int32_t* type);
-
 // Retrieves a constant's dtype.
 // idx is the index of the internal's constants.
 // Need idx < num_constants from AOTInductorModelContainerGetNumConstants
