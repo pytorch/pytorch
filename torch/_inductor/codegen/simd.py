@@ -51,6 +51,7 @@ from ..utils import (
     get_dtype_size,
     IndentedBuffer,
     Placeholder,
+    sympy_dot,
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
@@ -72,6 +73,104 @@ pexpr = PythonPrinter().doprint
 
 def prefix_is_reduction(prefix: str) -> bool:
     return prefix[0] == "r"
+
+class BlockPatternMatcher():
+    """
+    Matches block indexing expressions.
+    """
+    @staticmethod
+    def get_subexpr_involving_symbol(expr: sympy.Expr, symbol: sympy.Symbol) -> sympy.Expr:
+        """
+        Given a sympy expression, return the subexpression comprised only of terms
+        involving the specified symbol.
+
+        For example, if `expr` is `x * 5 + x ** 2 + y * 2 + 5`, and `symbol` is `x`,
+        this returns `x * 5 + x ** 2`.
+        """
+        return sympy.Integer(0) + sum(
+            term for term in sympy.Add.make_args(expr)
+            if symbol in term.free_symbols
+        )
+
+    @staticmethod
+    def get_slice_numels(dims: List[Any]) -> List[Any]:
+        """
+        Compute the cumulative size of each dimension's slice.
+        This proceeds from the last dim up to the second.
+        """
+        numels = [sympy.Integer(1)]
+        for dim in dims[:0:-1]:
+            numel = dim * numels[0]
+            numels.insert(0, numel)
+        return numels
+
+    @classmethod
+    def match_mod_div_block_expr(cls, index: sympy.Expr, index_var: sympy.Symbol, numel: sympy.Expr, num_dims: int) -> Tuple[List[sympy.Expr], List[sympy.Expr]]:
+        """
+        Matches modular indexing expressions, converting them to implied block dimensions and strides.
+        See triton.py for more information.
+        """
+
+        # Pattern match to find the strides and offset.
+        wild = functools.partial(sympy.Wild, exclude=[index_var])
+        dims: List[sympy.Expr] = [
+            wild(f"dim_mod{idx}") for idx in range(num_dims)
+        ]
+        strides: List[sympy.Expr] = [
+            wild(f"stride_mod{idx}") for idx in range(num_dims)
+        ]
+
+
+        # The first dimension's index is computed by division.
+        # The remaining are computed by modulo.
+        slice_numels = cls.get_slice_numels(dims[:num_dims])
+        block_index_exprs = [FloorDiv(index_var, slice_numels[0])] + [
+            ModularIndexing(index_var, numel, dim)
+            for dim, numel in zip(dims[1:], slice_numels[1:])
+        ]
+
+        # Calculate a linear index from block indices.
+        match_expr = sympy_dot(strides, block_index_exprs)
+
+        # Pattern match.
+        match = index.match(match_expr)
+        if match is None:
+            return None, None
+
+        # Provide default values for unmatched dims and strides.
+        for dim in dims[1:]:
+            if dim not in match:
+                match[dim] = sympy.Integer(1)
+        for stride in strides[1:]:
+            if stride not in match:
+                match[stride] = sympy.Integer(0)
+
+        sizevars = V.graph.sizevars
+
+        def get_match(expr: sympy.Expr) -> sympy.Expr:
+            return sizevars.lookup_precomputed_size(match[expr])
+
+        # Replace wildcards with matched expressions.
+        dims = [dims[0]] + [get_match(dim) for dim in dims[1:]]
+        strides = [get_match(stride) for stride in strides]
+        slice_numels = cls.get_slice_numels(dims)
+        block_index_exprs = [
+            sympy_subs(expr, match) for expr in block_index_exprs
+        ]
+
+        # The leading dimension is not directly matched in our expression.
+        # We solve for it by dividing the range tree numel by the product of
+        # all other dimensions. We quit if they are not known to be divisible.
+        assert (
+            dims[0] not in match
+        ), "Expected not to match the leading dimension!"
+        if not sizevars.statically_known_multiple_of(
+            numel, slice_numels[0]
+        ):
+            return None
+        dims[0] = numel / slice_numels[0]
+
+        return dims, strides
 
 
 @dataclasses.dataclass
@@ -1838,20 +1937,63 @@ class SIMDScheduling(BaseScheduling):
 
         # Optionally, prefer tiling into as many dimensions as possible.
         if config.triton.prefer_nd_tiling:
-            # Get candidate tilings from the node ranges.
-            node_range_groups = [
-                node.get_ranges()
-                for node in node_schedule
-                if isinstance(node, scheduler.SchedulerNode)
-            ]
+
+            tiling_groups = []
+            for node in node_schedule:
+                if not isinstance(node, scheduler.SchedulerNode):
+                    continue
+
+                ranges_and_read_writes = zip(
+                    node.get_ranges(),
+                    [
+                        node.pointwise_read_writes(),
+                        node.reduction_read_writes(),
+                    ]
+                )
+
+                # If we have modular indexing expressions, try to subdivide ranges into
+                # their parameters.
+                node_ranges = node.get_ranges()
+                tiling_groups = [node_ranges]
+                for dep in node.read_writes.reads_and_writes():
+                    # Check if the variable ranges coincide with the node ranges.
+                    # This lets us partition the variables into pointwise and reduction
+                    # splits.
+                    var_ranges = tuple(dep.ranges.values())
+                    if (
+                        len(var_ranges) != len(node_ranges)
+                        or var_ranges != tuple(itertools.chain.from_iterable(node_ranges))
+                    ):
+                        continue
+
+                    # Pattern match the subexpression pertaining to each index variable.
+                    divided_tiling_group = []
+                    for var, numel in dep.ranges.items():
+                        index = BlockPatternMatcher.get_subexpr_involving_symbol(dep.index, var)
+
+                        # Heuristic to bound the maximum dimensionality of the block.
+                        num_dims = max(
+                            2,
+                            index.count(FloorDiv) + index.count(ModularIndexing),
+                            sum(len(range_) for range_ in node_ranges)
+                        )
+
+                        # Attempt to pattern match the index expr.
+                        dims, strides = BlockPatternMatcher.match_mod_div_block_expr(index, var, numel, num_dims)
+                        if dims is None:
+                            # Failed matches default to the full range.
+                            dims = [numel]
+                        divided_tiling_group.append(dims)
+
+                    tiling_groups.append(divided_tiling_group)
 
             new_tilings: OrderedSet[
                 Dict[str, sympy.Expr]
             ] = OrderedSet()
-            for range_group in node_range_groups:
+            for tiling_group in tiling_groups:
                 # Concatenate pointwise and reduction tilings.
                 tiling = []
-                for node_range in range_group:
+                for node_range in tiling_group:
                     num_leading_dims = max(0, len(node_range) - config.triton.max_tiles)
                     first_trailing_dim = num_leading_dims + 1
                     collapsed_leading_dim = sympy_product(
