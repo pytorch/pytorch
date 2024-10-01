@@ -396,10 +396,14 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
         input, other = node.args
         return (
             input.meta["val"].shape == other.meta["val"].shape  # type: ignore[union-attr]
+            # input and other can be scalars, where they have no attribute 'meta'
             if hasattr(input, "meta")
             and hasattr(other, "meta")
-            and "val" in input.meta  # type: ignore[union-attr]
-            and "val" in other.meta  # type: ignore[union-attr]
+            and is_node_meta_valid(input)  # type: ignore[arg-type, union-attr]
+            and is_node_meta_valid(other)  # type: ignore[arg-type, union-attr]
+            # torch.SymInt or torch.SymFloat object has no attribute 'shape'
+            and isinstance(input.meta["val"], torch.Tensor)  # type: ignore[union-attr]
+            and isinstance(other.meta["val"], torch.Tensor)  # type: ignore[union-attr]
             else False
         )
 
