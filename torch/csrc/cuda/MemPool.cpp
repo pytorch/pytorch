@@ -19,7 +19,6 @@ void THCPMemPool_init(PyObject* module) {
             return std::make_shared<::c10::cuda::MemPool>(
                 allocator, is_user_created);
           }))
-      .def(py::init<c10::cuda::CUDACachingAllocator::CUDAAllocator*, bool>())
       .def_property_readonly("id", &::c10::cuda::MemPool::id)
       .def_property_readonly("allocator", &::c10::cuda::MemPool::allocator)
       .def("use_count", &::c10::cuda::MemPool::use_count);
