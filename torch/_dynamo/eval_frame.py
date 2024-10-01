@@ -711,8 +711,14 @@ def is_inductor_supported():
 
 def optimize(*args, **kwargs):
     def rebuild_ctx():
-        if "fullgraph" in config.compiled_autograd_config_override:
-            kwargs["nopython"] = config.compiled_autograd_config_override["fullgraph"]
+        ca_config_override = config.compiled_autograd_config_override
+        if ca_config_override:
+            # NOTE: The process of translating other `torch.compile` kwargs to `torch._dynamo.optimize` kwargs
+            # is more complicated, we will add it in the future when needed.
+            assert set(ca_config_override.keys()) == {
+                "fullgraph"
+            }, f"Only `fullgraph` config override is supported for now, but got {ca_config_override.keys()}"
+            kwargs["nopython"] = ca_config_override["fullgraph"]
         return optimize(*args, **kwargs)
 
     return _optimize(rebuild_ctx, *args, **kwargs)
