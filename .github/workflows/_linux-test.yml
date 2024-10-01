@@ -225,10 +225,7 @@ jobs:
           TD_DISTRIBUTED: ${{ steps.keep-going.outputs.ci-td-distributed }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           SCCACHE_REGION: us-east-1
-          SCCACHE_IDLE_TIMEOUT: 2500
-          SCCACHE_IGNORE_SERVER_IO_ERROR: 1
           SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
-          SCCACHE_ALLOW_CORE_DUMPS: 1
           SHM_SIZE: ${{ contains(inputs.build-environment, 'cuda') && '2g' || '1g' }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
@@ -287,10 +284,7 @@ jobs:
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             -e SCCACHE_REGION \
-            -e SCCACHE_IDLE_TIMEOUT \
-            -e SCCACHE_IGNORE_SERVER_IO_ERROR \
             -e SCCACHE_S3_KEY_PREFIX \
-            -e SCCACHE_ALLOW_CORE_DUMPS \
             -e XLA_CUDA \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e PYTORCH_TEST_CUDA_MEM_LEAK_CHECK \
