@@ -158,9 +158,9 @@ def emit_metric(
     if EMIT_METRICS:
         try:
             upload_to_s3(
-                bucket_name="ossci-metrics",
-                key=f"metrics/{reserved_metrics['dynamo_key']}",
-                docs={**reserved_metrics, "info": metrics},
+                bucket_name="ossci-raw-job-status",
+                key=f"ossci_uploaded_metrics/{reserved_metrics['dynamo_key']}",
+                docs=[{**reserved_metrics, "info": metrics}],
             )
         except Exception as e:
             # We don't want to fail the job if we can't upload the metric.
