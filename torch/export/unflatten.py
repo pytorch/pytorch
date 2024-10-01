@@ -1595,9 +1595,7 @@ def _custom_forward(self, *args, **kwargs):
 
     reordered_kwargs = reorder_kwargs(kwargs, signature.in_spec)
 
-    flat_args, in_spec = pytree.tree_flatten(
-        (args, reordered_kwargs)
-    )
+    flat_args, in_spec = pytree.tree_flatten((args, reordered_kwargs))
     if is_fx_tracing():
         return_val = torch.fx.Interpreter(self, graph=self.graph).run(
             *flat_args, enable_io_processing=False
