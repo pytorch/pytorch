@@ -1059,7 +1059,7 @@ def _compile(
             )
             module_dict = {}
             for name in dir(config):
-                if not name.startswith("_") and not isinstance(getattr(config, name), (inspect.isfunction, inspect.isclass)):
+                if not name.startswith("_") and not (type(getattr(config, name)) == type(inspect.isfunction()) or type(getattr(config, name)) == type(inspect.isclass())):
                     value = getattr(config, name)
                     module_dict[name] = value
             json_string = json.dumps(module_dict)
