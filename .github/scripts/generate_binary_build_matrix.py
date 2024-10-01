@@ -375,7 +375,7 @@ def generate_wheels_matrix(
             # TODO: Enable python 3.13t on xpu and cpu-s390x
             if (
                 gpu_arch_type == "xpu" or gpu_arch_type == "cpu-s390x"
-              ) and python_version == "3.13t":
+            ) and python_version == "3.13t":
                 continue
 
             if use_split_build and (
