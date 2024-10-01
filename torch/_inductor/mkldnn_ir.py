@@ -1180,8 +1180,6 @@ class LinearUnary(ExternKernelAlloc):
         if config.abi_compatible:
             wrapper.include_extra_header(
                 "torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h"
-                if config.abi_compatible
-                else "ATen/native/mkldnn/Linear.h"
             )
             super().codegen(wrapper)
         else:
@@ -1266,8 +1264,6 @@ class LinearBinary(ExternKernelAlloc):
         if config.abi_compatible:
             wrapper.include_extra_header(
                 "torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h"
-                if config.abi_compatible
-                else "ATen/native/mkldnn/Linear.h"
             )
             super().codegen(wrapper)
         else:
