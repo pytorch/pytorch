@@ -2,11 +2,12 @@
 # flake8: noqa: B950
 
 import functools
+import random
 import string
 import unittest
 from collections import namedtuple
 from contextlib import contextmanager, nullcontext
-from typing import Callable, Optional, Tuple
+from typing import Callable, List, Optional, Tuple, Union
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 
@@ -19,6 +20,7 @@ from torch.nn.attention.flex_attention import (
     _create_empty_block_mask,
     _DEFAULT_SPARSE_BLOCK_SIZE,
     _identity,
+    _mask_mod_signature,
     _score_mod_signature,
     and_masks,
     BlockMask,
@@ -30,14 +32,13 @@ from torch.nn.attention.flex_attention import (
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MULTIGPU
-from torch.testing._internal.common_utils import skipIfRocm, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import TEST_WITH_ROCM
 from torch.utils._triton import has_triton
 
 
 # Skip tests if Triton is not available
 supported_platform = skipUnless(
     torch.cuda.is_available()
-    and torch.version.hip is None
     and has_triton()
     and torch.cuda.get_device_capability() >= (8, 0),
     "Requires CUDA and Triton",
@@ -46,7 +47,6 @@ supported_platform = skipUnless(
 # Use this decorator only when hitting Triton bugs on H100
 running_on_a100_only = skipUnless(
     torch.cuda.is_available()
-    and torch.version.hip is None
     and has_triton()
     and torch.cuda.get_device_capability() == (8, 0),
     "Requires A100 and Triton",
@@ -225,6 +225,13 @@ test_Bq_Bkv = [
     (5, 1),
 ]
 
+test_block_size = [
+    128,
+    256,
+    (128, 256),
+    (256, 128),
+]
+
 
 def query_key_value_clones(
     query: torch.Tensor,
@@ -308,12 +315,20 @@ class TestFlexAttention(InductorTestCase):
         Q_H: int = H,
         Q_S: int = S,
         Q_D: int = D,
-        KV_B: int = B,
-        KV_H: int = H,
-        KV_S: int = S,
-        V_D: int = D,
+        KV_B: Optional[int] = None,
+        KV_H: Optional[int] = None,
+        KV_S: Optional[int] = None,
+        V_D: Optional[int] = None,
         block_mask: Optional[BlockMask] = None,
     ):
+        if KV_B is None:
+            KV_B = Q_B
+        if KV_H is None:
+            KV_H = Q_H
+        if KV_S is None:
+            KV_S = Q_S
+        if V_D is None:
+            V_D = Q_D
         if TEST_WITH_ROCM and Q_H != KV_H:
             self.skipTest("enable_gqa=True is unsupported on ROCM, for now")
         q = torch.randn(
@@ -619,6 +634,11 @@ class TestFlexAttention(InductorTestCase):
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_dynamic(self, dtype: torch.dtype, score_mod: Callable):
+        if score_mod.__name__ == "_alibi_bias":
+            # TODO
+            self.skipTest(
+                "Alibi bias broken with dynamic shapes since we don't support capturing dynamic shapes"
+            )
         self.run_dynamic_test(score_mod, dtype)
 
     @supported_platform
@@ -647,6 +667,19 @@ class TestFlexAttention(InductorTestCase):
             S,
             D,
         )
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    @common_utils.parametrize("BLOCK_SIZE", test_block_size)
+    def test_builtin_score_mods_different_block_size(
+        self,
+        dtype: torch.dtype,
+        score_mod: Callable,
+        BLOCK_SIZE: Union[int, Tuple[int, int]],
+    ):
+        block_mask = create_block_mask(noop_mask, B, H, S, S, BLOCK_SIZE=BLOCK_SIZE)
+        self.run_test(score_mod, dtype, block_mask=block_mask)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1364,7 +1397,24 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test_with_call(attention)
 
-    @skipIfRocm
+    @supported_platform
+    def test_new_empty_mask_mod(self):
+        S = 128
+        q, k, v = (torch.randn(4, 1, S, 64, device="cuda") for _ in range(3))
+
+        attn_mask = torch.ones(4, 1, S, S, dtype=torch.bool, device="cuda").tril()
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            h_ = h.new_zeros(h.shape)
+            return score + attn_mask[b, h_, q_idx, kv_idx]
+
+        def causal(b, h, q_idx, kv_idx):
+            h_ = h.new_zeros(h.shape)
+            return attn_mask[b, h_, q_idx, kv_idx]
+
+        block_mask = create_block_mask(causal, B=4, H=None, Q_LEN=S, KV_LEN=S)
+        torch.compile(flex_attention)(q, k, v, score_mod, block_mask=block_mask)
+
     @supported_platform
     def test_GQA_causal_mask(self):
         def mask_mod(b, h, q, kv):
@@ -1486,7 +1536,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_aot_eager_gradcheck(self, score_mod):
         make_tensor = functools.partial(
             torch.randn,
-            (2, 2, 128, 4),
+            (2, 2, 11, 4),
             device="cuda",
             dtype=torch.float64,
             requires_grad=True,
@@ -1856,6 +1906,42 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_call(attention, Q_S=S - 1, KV_S=S - 1)
 
     @supported_platform
+    def test_modular_indexing(self):
+        B, H, N, D = 100, 12, 128, 64
+        dtype = torch.bfloat16
+        device = torch.device("cuda")
+
+        class Attention(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bias = torch.randn(B, N, N, H, device=device, dtype=dtype)
+
+            def forward(
+                self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+            ) -> torch.Tensor:
+                score_mod = generate_score_mod(self.bias)
+                o = flex_attention(q, k, v, score_mod=score_mod)
+                return o
+
+        def generate_score_mod(bias):
+            bias = (2 * bias).view(B, H, N, N).contiguous()
+
+            def score_mod(score, batch, head, q_idx, k_idx):
+                attn_bias = bias[batch, head, q_idx, k_idx]
+                return score + attn_bias
+
+            return score_mod
+
+        m = Attention().cuda().eval().to(dtype)
+        m = torch.compile(m, mode="default", fullgraph=False)
+
+        q = torch.randn(B, H, N, D, device=device, dtype=dtype)
+        k = torch.randn(B, H, N, D, device=device, dtype=dtype)
+        v = torch.randn(B, H, N, D, device=device, dtype=dtype)
+
+        m(q, k, v)
+
+    @supported_platform
     def test_force_write_lse(self):
         make_tensor = functools.partial(
             torch.randn,
@@ -1876,16 +1962,20 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("backend", ["flex_attention", "flex_decode", "eager"])
     def test_lse_masked_output(self, backend):
         if backend == "flex_decode":
+            if TEST_WITH_ROCM:
+                self.skipTest("backend=flex_decode is unsupported on ROCM, for now")
             kernel_options = {"FORCE_USE_FLEX_ATTENTION": False}
             flex_call = torch.compile(flex_attention, fullgraph=True)
+            N_CTX = 96
         elif backend == "flex_attention":
             kernel_options = {"FORCE_USE_FLEX_ATTENTION": True}
             flex_call = torch.compile(flex_attention, fullgraph=True)
+            N_CTX = 196
         else:
             kernel_options = {}
             flex_call = flex_attention
+            N_CTX = 196
 
-        N_CTX = 96
         SLIDING_WINDOW = 64
         make_tensor = functools.partial(
             torch.randn,
@@ -1951,6 +2041,39 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(flex_q_grad, q.grad, atol=3e-3, rtol=2e-3)
         torch.testing.assert_close(flex_k_grad, k.grad, atol=3e-3, rtol=2e-3)
         torch.testing.assert_close(flex_v_grad, v.grad, atol=3e-3, rtol=2e-3)
+
+    def test_cpu_error_message(self):
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, 128, 16),
+            device="cpu",
+            dtype=torch.float32,
+            requires_grad=False,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        with self.assertRaisesRegex(
+            ValueError,
+            "FlexAttention is only supported on CUDA devices. Found input tensors on cpu device.",
+        ):
+            flex_attention(query, key, value)
+
+    @supported_platform
+    def test_mixed_device_error_message(self):
+        # Create tensors on different devices
+        cpu_tensor = torch.randn(2, 2, 128, 16, device="cpu")
+        cuda_tensor = torch.randn(2, 2, 128, 16, device="cuda")
+
+        # Use different devices for query, key, and value
+        query, key, value = cpu_tensor, cuda_tensor, cpu_tensor
+
+        expected_error_message = (
+            "Expected query, key, and value to have the same device type, "
+            f"but got query.device: {query.device}, key.device: {key.device}, "
+            f"and value.device: {value.device} instead."
+        )
+
+        with self.assertRaisesRegex(ValueError, expected_error_message):
+            flex_attention(query, key, value)
 
     @supported_platform
     def test_small_q_kv_len(self):
@@ -2163,6 +2286,24 @@ class TestBlockMask(InductorTestCase):
         self.assertEqual(block_mask.sparsity(), 29.1015625)
         self.assertTrue(block_mask.sparsity() < block_mask[0].sparsity())
         self.assertTrue(block_mask[0].sparsity() > block_mask[1].sparsity())
+
+    @supported_platform
+    @common_utils.parametrize("BLOCK_SIZE", [32, 64, 128, 256, (32, 64), (64, 32)])
+    def test_block_size_changes(self, BLOCK_SIZE: Union[int, Tuple[int, int]]):
+        B, H, Q_LEN, KV_LEN = 4, 2, 2048, 2048
+
+        if isinstance(BLOCK_SIZE, int):
+            Q_BLOCK_SIZE = BLOCK_SIZE
+            KV_BLOCK_SIZE = BLOCK_SIZE
+        else:
+            Q_BLOCK_SIZE, KV_BLOCK_SIZE = BLOCK_SIZE
+
+        block_mask = create_block_mask(
+            noop_mask, B, H, Q_LEN, KV_LEN, BLOCK_SIZE=BLOCK_SIZE
+        )
+
+        self.assertEqual(block_mask.BLOCK_SIZE, (Q_BLOCK_SIZE, KV_BLOCK_SIZE))
+        self.assertEqual(block_mask.shape, (B, H, Q_LEN, KV_LEN))
 
     @supported_platform
     def test_getitem(self):
@@ -2481,6 +2622,91 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         )
 
         torch.testing.assert_close(causal_mask_out, sdpa_mask_out, atol=5e-3, rtol=0.0)
+
+    @supported_platform
+    def test_doc_mask_clamped_repro(self):
+        def _offsets_to_doc_ids_tensor(offsets):
+            device = offsets.device
+            counts = offsets[1:] - offsets[:-1]
+            return torch.repeat_interleave(
+                torch.arange(len(counts), device=device, dtype=torch.int32), counts
+            )
+
+        def length_to_offsets(
+            lengths: List[int], device: Union[str, torch.device]
+        ) -> Tensor:
+            offsets = [0]
+            offsets.extend(lengths)
+            offsets = torch.tensor(offsets, device=device, dtype=torch.int32)
+            offsets = torch.cumsum(offsets, dim=-1)
+            return offsets
+
+        def generate_doc_mask_mod(offsets: Tensor) -> _mask_mod_signature:
+            document_id = _offsets_to_doc_ids_tensor(offsets)
+
+            def doc_mask_mod(b, h, q_idx, kv_idx):
+                same_doc = document_id[q_idx] == document_id[kv_idx]
+                return same_doc
+
+            return doc_mask_mod
+
+        random.seed(0)
+
+        def generate_random_lengths(total_length, num_documents):
+            lengths = [1] * num_documents
+            remaining_length = total_length - num_documents
+            for _ in range(remaining_length):
+                index = random.randint(0, num_documents - 1)
+                lengths[index] += 1
+            return lengths
+
+        device = "cuda"
+        max_seq_len, doc_count = 128, 4
+        B, H, SEQ_LEN, HEAD_DIM = 1, 1, max_seq_len, 8
+
+        lengths = generate_random_lengths(max_seq_len, doc_count)
+        offsets = length_to_offsets(lengths, device)
+
+        document_causal_mask = generate_doc_mask_mod(offsets)
+        block_mask_compiled = create_block_mask(
+            document_causal_mask,
+            1,
+            1,
+            SEQ_LEN,
+            SEQ_LEN,
+            device=device,
+            _compile=True,
+        )
+        block_mask = create_block_mask(
+            document_causal_mask,
+            1,
+            1,
+            SEQ_LEN,
+            SEQ_LEN,
+            device=device,
+            _compile=True,
+        )
+        self.assertEqual(block_mask_compiled.kv_indices, block_mask.kv_indices)
+        self.assertEqual(
+            block_mask_compiled.full_kv_indices, block_mask.full_kv_indices
+        )
+        for i in range(5):
+            lengths = generate_random_lengths(1024 + i, 5)
+            offsets = length_to_offsets(lengths, "cuda")
+            doc_ids = _offsets_to_doc_ids_tensor(offsets)
+            total_seq_len = 1024 + i
+
+            def doc_mask_mod(b, h, q_idx, kv_idx):
+                return (
+                    doc_ids[q_idx.clamp(0, doc_ids.shape[0] - 1)]
+                    == doc_ids[kv_idx.clamp(0, doc_ids.shape[0] - 1)]
+                )
+
+            q, k, v = (
+                torch.randn(1, 12, 1024 + i, 64, device=device) for _ in range(3)
+            )
+            block_mask = create_block_mask(doc_mask_mod, None, None, 1024 + i, 1024 + i)
+            torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
 
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)

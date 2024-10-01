@@ -4038,6 +4038,10 @@ class CommonTemplate:
             # Greatest relative difference: 0.06512477175897748 at index (0, 4, 11, 9) (up to 0.001 allowed)
             atol=6e-5,
             rtol=0.001,
+            # Make sure we compute also with fp16 in the reference. Otherwise,
+            # the reference will compute with fp32 and cast back to fp16, which
+            # causes numeric differences beyond tolerance.
+            reference_in_float=False if torch.version.hip else True,
         )
 
     def test_convolution2(self):
@@ -4068,6 +4072,10 @@ class CommonTemplate:
             (torch.randn([2, 5, 16, 16]),),
             atol=6e-5,
             rtol=0.001,
+            # Make sure we compute also with fp16 in the reference. Otherwise,
+            # the reference will compute with fp32 and cast back to fp16, which
+            # causes numeric differences beyond tolerance.
+            reference_in_float=False if torch.version.hip else True,
         )
 
     @skip_if_gpu_halide
@@ -4249,7 +4257,6 @@ class CommonTemplate:
             check_lowp=False,
         )
 
-        # lowering to max_pool2d case
         self.common(
             fn,
             (torch.randn(2, 4, 3, 3),),
@@ -4274,6 +4281,24 @@ class CommonTemplate:
             check_lowp=False,
         )
         assertGeneratedKernelCountEqual(self, 0)
+
+    @skip_if_gpu_halide  # slow
+    def test_adaptive_max_pool2d3(self):
+        # test when adaptive_max_pool2d fallbacks to max_pool2d
+        def fn(x):
+            return aten.adaptive_max_pool2d(x, (2, 2))
+
+        # Big kernel (12 / 2 * 12 / 2 > 25)
+        self.common(
+            fn,
+            (torch.randn(2, 4, 12, 12),),
+        )
+
+        # Small kernel
+        self.common(
+            fn,
+            (torch.randn(2, 4, 4, 4),),
+        )
 
     def test_fractional_max_pool2d1(self):
         def fn(x, samples):
@@ -8102,6 +8127,18 @@ class CommonTemplate:
 
         self.common(f, (torch.zeros((4, 2)),))
 
+    def test_softmax_backward_data(self):
+        def fn(a, b):
+            return aten._softmax_backward_data(a, b, dim=1, input_dtype=torch.float32)
+
+        self.common(
+            fn,
+            (
+                torch.randn(10, 10),
+                torch.randn(10, 10),
+            ),
+        )
+
     def test_randn_like_empty(self):
         class Model(torch.nn.Module):
             def __init__(
@@ -9506,6 +9543,7 @@ class CommonTemplate:
         self.assertEqual(x[0], -1)
         self.assertEqual(cnts.frame_count, frame_count + 1)
 
+    @config.patch({"triton.autotune_at_compile_time": False})
     @config.patch(profiler_mark_wrapper_call=True)
     def test_profiler_mark_wrapper_call(self):
         from torch.profiler import profile
@@ -12027,7 +12065,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 self.assertExpectedInline(
                     "\n".join(lines),
                     """\
-        tmp0 = tl.reshape(tl.load(block_ptr0, boundary_check=[3], padding_option='zero', eviction_policy='evict_last'), [XBLOCK, RBLOCK])
+        tmp0 = tl.reshape(tl.broadcast_to(tl.load(block_ptr0, boundary_check=[2], padding_option='zero', eviction_policy='evict_last')[:, None, :, :], [((511 + XBLOCK) // 512), ((1) * ((1) <= (((511 + XBLOCK) // 512))) + (((511 + XBLOCK) // 512)) * ((((511 + XBLOCK) // 512)) < (1))), ((512) * ((512) <= (XBLOCK)) + (XBLOCK) * ((XBLOCK) < (512))), RBLOCK]), [XBLOCK, RBLOCK])
         tmp1 = tl.load(block_ptr1, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",  # noqa: B950 line too long
                 )
 
@@ -12328,6 +12366,16 @@ if HAS_GPU and not TEST_WITH_ASAN:
                         f(in1, in2, a, b, scale_a, scale_b)
 
                 print(p.key_averages().table(max_name_column_width=200))
+
+        def test_non_blocking_copy_codegen(self):
+            # Checks non_blocking arg is present in codegen
+            # (see https://github.com/pytorch/pytorch/issues/136260)
+            def fn(x):
+                return x.to(device=self.device, non_blocking=True)
+
+            inp = torch.randn(3, 4)
+            _, (code,) = run_and_get_code(torch.compile(fn), inp)
+            FileCheck().check("copy_").check_same("True").run(code)
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE

@@ -193,6 +193,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             else:
                 return SourcelessBuilder.create(tx, func)
         elif isinstance(obj, classmethod):
+            if isinstance(obj.__func__, property):
+                return variables.UserFunctionVariable(obj.__func__.fget).call_function(
+                    tx, [self], {}
+                )
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif isinstance(obj, types.ClassMethodDescriptorType):
             # e.g.: inspect.getattr_static(dict, "fromkeys")
@@ -1000,7 +1004,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
             if isinstance(result, variables.DeletedVariable):
-                raise_observed_exception(AttributeError, tx, self)
+                raise_observed_exception(AttributeError, tx)
             return result
 
         if name == "__dict__":
@@ -1180,7 +1184,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return SourcelessBuilder.create(tx, subobj)
 
         # Earlier we were returning GetAttrVariable but its incorrect. In absence of attr, Python raises AttributeError.
-        raise_observed_exception(AttributeError, tx, self)
+        raise_observed_exception(AttributeError, tx)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if self._check_for_getattribute():

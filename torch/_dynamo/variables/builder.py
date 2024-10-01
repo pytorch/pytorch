@@ -69,7 +69,6 @@ from ..source import (
     FloatTensorSource,
     GetItemSource,
     GradSource,
-    is_cell_contents,
     is_constant_source,
     is_from_defaults,
     is_from_optimizer_source,
@@ -640,7 +639,9 @@ class VariableBuilder:
                     source=self.source,
                 )
             else:
-                result = ConstDictVariable(result, type(value), source=self.source)
+                result = ConstDictVariable(
+                    result, user_cls=type(value), source=self.source
+                )
 
             return self.set_source_and_track_mutable(value, result)
         elif isinstance(value, torch.nn.Module):
@@ -826,7 +827,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.ID_MATCH)
             stream_proxy = self.tx.output.create_proxy(
                 "call_function",
-                torch.cuda.Stream,
+                type(value),
                 (),
                 {
                     "stream_id": value.stream_id,
@@ -1431,7 +1432,6 @@ class VariableBuilder:
                 or self.source.guard_source().is_specialized_nn_module()
                 or self.source.guard_source().is_unspecialized_builtin_nn_module()
                 or is_from_defaults(self.source)
-                or is_cell_contents(self.source)
                 # TODO: Delete this condition when rollout is done.  NB: this
                 # condition never evaluates True in open source
                 or (
