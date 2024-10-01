@@ -376,7 +376,7 @@ test_inductor_cpp_wrapper_abi_compatible() {
 
   echo "Testing Inductor cpp wrapper mode with TORCHINDUCTOR_ABI_COMPATIBLE=1"
   PYTORCH_TESTING_DEVICE_ONLY_FOR="" python test/run_test.py --include inductor/test_cpu_cpp_wrapper
-  python test/run_test.py --include inductor/test_cuda_cpp_wrapper inductor/test_cpu_repro
+  python test/run_test.py --include inductor/test_cuda_cpp_wrapper inductor/test_cpu_repro inductor/test_extension_backend
 
   TORCHINDUCTOR_CPP_WRAPPER=1 python benchmarks/dynamo/timm_models.py --device cuda --accuracy --amp \
     --training --inductor --disable-cudagraphs --only vit_base_patch16_224 \
@@ -403,7 +403,7 @@ pr_time_benchmarks() {
   PYTHONPATH=$(pwd)/benchmarks/dynamo/pr_time_benchmarks source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
   echo "benchmark results on current PR: "
   cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv"
-
+  PYTHONPATH=$(pwd)/benchmarks/dynamo/pr_time_benchmarks python benchmarks/dynamo/pr_time_benchmarks/check_results.py "benchmarks/dynamo/pr_time_benchmarks/expected_results.csv" "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv"
 }
 
 if [[ "${TEST_CONFIG}" == *pr_time_benchmarks* ]]; then
@@ -603,6 +603,11 @@ test_inductor_micro_benchmark() {
 
 test_inductor_halide() {
   python test/run_test.py --include inductor/test_halide.py --verbose
+  assert_git_not_dirty
+}
+
+test_inductor_triton_cpu() {
+  python test/run_test.py --include inductor/test_triton_cpu_backend.py --verbose
   assert_git_not_dirty
 }
 
@@ -1439,6 +1444,8 @@ elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
   test_inductor_halide
+elif [[ "${TEST_CONFIG}" == *inductor-triton-cpu* ]]; then
+  test_inductor_triton_cpu
 elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
   test_inductor_micro_benchmark
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
