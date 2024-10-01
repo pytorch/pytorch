@@ -31,6 +31,7 @@ from torch.distributed.tensor import distribute_module, DTensor, Replicate, Shar
 from torch.distributed.tensor.parallel.style import ParallelStyle
 
 
+# TODO: expose a single API
 __all__ = ["context_parallel"]
 
 aten = torch.ops.aten
