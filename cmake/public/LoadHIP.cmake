@@ -48,6 +48,10 @@ message("Building PyTorch for GPU arch: ${PYTORCH_ROCM_ARCH}")
 # https://cmake.org/cmake/help/latest/command/find_package.html#search-modes
 set(CMAKE_MODULE_PATH ${ROCM_PATH}/lib/cmake/hip ${CMAKE_MODULE_PATH})
 
+# Add ROCM_PATH to CMAKE_PREFIX_PATH, needed because the find_package
+# call to individual ROCM components uses the Config mode search
+list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
+
 macro(find_package_and_print_version PACKAGE_NAME)
   find_package("${PACKAGE_NAME}" ${ARGN})
   message("${PACKAGE_NAME} VERSION: ${${PACKAGE_NAME}_VERSION}")
@@ -142,31 +146,8 @@ if(HIP_FOUND)
 
   message("\n***** Library versions from cmake find_package *****\n")
 
-  set(CMAKE_HIP_CLANG_FLAGS_DEBUG ${CMAKE_CXX_FLAGS_DEBUG})
-  set(CMAKE_HIP_CLANG_FLAGS_RELEASE ${CMAKE_CXX_FLAGS_RELEASE})
-  ### Remove setting of Flags when FindHIP.CMake PR #558 is accepted.###
-
-  set(hip_DIR ${ROCM_PATH}/lib/cmake/hip)
-  set(hsa-runtime64_DIR ${ROCM_PATH}/lib/cmake/hsa-runtime64)
-  set(AMDDeviceLibs_DIR ${ROCM_PATH}/lib/cmake/AMDDeviceLibs)
-  set(amd_comgr_DIR ${ROCM_PATH}/lib/cmake/amd_comgr)
-  set(rocrand_DIR ${ROCM_PATH}/lib/cmake/rocrand)
-  set(hiprand_DIR ${ROCM_PATH}/lib/cmake/hiprand)
-  set(rocblas_DIR ${ROCM_PATH}/lib/cmake/rocblas)
-  set(hipblas_DIR ${ROCM_PATH}/lib/cmake/hipblas)
-  set(hipblaslt_DIR ${ROCM_PATH}/lib/cmake/hipblaslt)
-  set(miopen_DIR ${ROCM_PATH}/lib/cmake/miopen)
-  set(rocfft_DIR ${ROCM_PATH}/lib/cmake/rocfft)
-  set(hipfft_DIR ${ROCM_PATH}/lib/cmake/hipfft)
-  set(hipsparse_DIR ${ROCM_PATH}/lib/cmake/hipsparse)
-  set(rccl_DIR ${ROCM_PATH}/lib/cmake/rccl)
-  set(rocprim_DIR ${ROCM_PATH}/lib/cmake/rocprim)
-  set(hipcub_DIR ${ROCM_PATH}/lib/cmake/hipcub)
-  set(rocthrust_DIR ${ROCM_PATH}/lib/cmake/rocthrust)
-  set(hipsolver_DIR ${ROCM_PATH}/lib/cmake/hipsolver)
-  set(hiprtc_DIR ${ROCM_PATH}/lib/cmake/hiprtc)
-
-
+  # Find ROCM components using Config mode
+  # These components will be searced for recursively in ${ROCM_PATH}
   find_package_and_print_version(hip REQUIRED)
   find_package_and_print_version(hsa-runtime64 REQUIRED)
   find_package_and_print_version(amd_comgr REQUIRED)
