@@ -4275,23 +4275,10 @@ def adaptive_max_pool2d(x, output_size):
         return empty(o_size, dtype=x.get_dtype(), device=x.get_device()), empty(
             o_size, dtype=torch.int64, device=x.get_device()
         )
+
     if h_in % h_out == 0 and w_in % w_out == 0:
-        kernel_size = [h_in // h_out, w_in // w_out]
-        if should_fallback_max_pool2d_with_indices(kernel_size, dilation=[1, 1]):
-            return max_pool2d_with_indices(x, kernel_size)  # type: ignore[name-defined]   # noqa: F821
-        else:
-            v, offsets = _low_memory_max_pool2d_with_offsets(
-                x,
-                kernel_size,
-                stride=kernel_size,
-                padding=[0, 0],
-                dilation=[1, 1],
-                ceil_mode=False,
-            )
-            indices = _low_memory_max_pool2d_offsets_to_indices(
-                offsets, kernel_size[1], w_in, kernel_size, padding=[0, 0]
-            )
-            return v, indices
+        # This is handled by a decomposition
+        raise ValueError
 
     h_kernel_max = ceildiv((h_in + h_out - 1), h_out)
     w_kernel_max = ceildiv((w_in + w_out - 1), w_out)
