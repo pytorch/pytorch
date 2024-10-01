@@ -7286,19 +7286,11 @@ def forward(self, x, y):
                 return torch.ops.testlib.foo_mutated.default(y)
 
         decomp_table = core_op_decompositions()
+        del decomp_table[torch.ops.testlib.foo_functional.default]
 
-        if IS_FBCODE:
-            ep = torch.export.export(M(), (torch.randn(4, 4),)).run_decompositions(
-                decomp_table,
-                _preserve_ops=(
-                    torch.ops.testlib.foo_functional.default,
-                    torch.ops.testlib.foo_mutated.default,
-                ),
-            )
-        else:
-            ep = torch.export.export(M(), (torch.randn(4, 4),)).run_decompositions(
-                decomp_table,
-            )
+        ep = torch.export.export(M(), (torch.randn(4, 4),)).run_decompositions(
+            decomp_table,
+        )
 
         self.assertExpectedInline(
             str(ep.graph_module.code).strip(),

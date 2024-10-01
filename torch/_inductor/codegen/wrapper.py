@@ -1117,8 +1117,8 @@ class PythonWrapperCodegen(CodeGen):
                     f"reinterpret_tensor({data.get_name()}, {size}, {stride}, {offset})"
                 )
 
-    def codegen_device_copy(self, src, dst, non_blocking: bool):
-        self.writeline(f"{dst}.copy_({src}, {non_blocking})")
+    def codegen_device_copy(self, src, dst):
+        self.writeline(f"{dst}.copy_({src})")
 
     def codegen_multi_output(self, name, value):
         self.writeline(f"{self.declare}{name} = {value}{self.ending}")
@@ -1617,20 +1617,12 @@ class PythonWrapperCodegen(CodeGen):
                 arg = arg.inner_expr
             if arg in V.graph.sizevars.inv_precomputed_replacements:
                 arg = V.graph.sizevars.inv_precomputed_replacements[arg]
-
-            # For multiple expressions that depend on an unbacked symint,
-            # we want to compute them consistently for a size hint we have chosen.
-            # So, recursively compute expressions via size hints of contained symbols.
-            free_symbols = arg.free_symbols
-            size_dict = {
-                symbol: V.graph.sizevars.size_hint(
-                    symbol,
+            return str(
+                V.graph.sizevars.size_hint(
+                    arg,
                     fallback=config.unbacked_symint_fallback,
                 )
-                for symbol in free_symbols
-            }
-            return str(arg.subs(size_dict))
-
+            )
         elif isinstance(arg, (str, int, float, bool)):
             return str(arg)
         elif isinstance(arg, list):
@@ -2044,7 +2036,9 @@ class PythonWrapperCodegen(CodeGen):
             if isinstance(x, int):
                 return x
             val = V.graph._shape_env._maybe_evaluate_static(x)
-            return int(val)
+            if val is None:
+                return val
+            return int(val)  # type: ignore[call-overload]
         except Exception:
             return None
 

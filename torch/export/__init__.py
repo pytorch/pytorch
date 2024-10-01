@@ -50,7 +50,7 @@ __all__ = [
     "ExportedProgram",
     "ModuleCallEntry",
     "ModuleCallSignature",
-    "core_aten_decompositions",
+    "core_op_decompositions",
     "dims",
     "export",
     "export_for_training",

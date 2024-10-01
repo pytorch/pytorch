@@ -695,13 +695,6 @@ class MinCutPartitioningTests(TestCase):
         inp = (T(10, grad=True), T(10, grad=True))
         self.assertExpectedInline(count_numel_train(f, *inp), """70""")
 
-    def test_partitioning_relu(self):
-        def f(x):
-            return torch.relu(x)
-
-        inp = (T(16, grad=True),)
-        self.assertExpectedInline(count_numel_train(f, *inp), """72""")
-
     def test_partitioning_with_view(self):
         class Foo(torch.autograd.Function):
             @staticmethod

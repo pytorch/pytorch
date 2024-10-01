@@ -35,7 +35,6 @@ from typing import (
     Protocol,
     Sequence,
     Set,
-    Tuple,
     TypeVar,
     Union,
     ValuesView,
@@ -1305,7 +1304,7 @@ class DebugDirManager:
         torch._dynamo.config.debug_dir_root = self.prev_debug_name
 
 
-def run_and_get_code(fn, *args, **kwargs) -> Tuple[Any, List[str]]:
+def run_and_get_code(fn, *args, **kwargs):
     from .graph import GraphLowering
 
     source_codes: List[str] = []

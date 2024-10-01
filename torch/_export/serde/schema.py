@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (7, 4)
+SCHEMA_VERSION = (7, 3)
 TREESPEC_VERSION = 1
 
 
@@ -27,7 +27,6 @@ class ScalarType(IntEnum):
     COMPLEXDOUBLE = 11
     BOOL = 12
     BFLOAT16 = 13
-    UINT16 = 28
 
 
 class Layout(IntEnum):
