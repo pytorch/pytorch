@@ -37,7 +37,7 @@ class Operator(FusedLinearCrossEntropyOperator):
     variant = "Baseline"
 
     def __init__(self, benchmark_config: BenchmarkConfig):
-        super().__init__(benchmark_config)
+        super().__init__(benchmark_config, is_baseline=True)
         self.operator = TorchLMHeadCE(H=H, V=V, dtype=self.benchmark_config.dtype).to(
             self.benchmark_config.device.value
         )

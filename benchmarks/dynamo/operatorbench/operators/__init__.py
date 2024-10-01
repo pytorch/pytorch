@@ -33,26 +33,25 @@ class BaseOperator:
         benchmark_config (BenchmarkConfig): Configuration for the benchmark.
         full_name (str): The full name of the operator (name.variant). It is only valid for variants.
             It can be either assigned in the operator file or generated from name and variant.
-        example_inputs_list (list): List of example inputs for the operator.
     """
 
     name = None
     variant = None
     benchmark_config = None
     full_name = None
-    # example_inputs_list = []
-    # example_input_used_config = None
 
-    def __init__(self, benchmark_config: BenchmarkConfig):
+    def __init__(self, benchmark_config: BenchmarkConfig, is_baseline: bool = False):
         """
         Initialize the BaseOperator.
 
         Args:
             benchmark_config (BenchmarkConfig): Configuration for the benchmark.
+            is_baseline (bool): Whether the operator is a baseline variant.
         """
         self.benchmark_config = benchmark_config
         if self.full_name is None:
             self.full_name = f"{self.name}.{self.variant}"
+        self.is_baseline = is_baseline
 
     @classmethod
     def get_inputs(

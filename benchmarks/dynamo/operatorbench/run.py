@@ -24,13 +24,14 @@ input_mapping = {}
 
 
 # Create operator instances from desired operator names
+# Return a dict of {operator_name: [variant_instances]}
 def create_operator_instances(
     operator_names: list[str],
     name_to_variant_list: dict[str, list[BaseOperator]],
     benchmark_config: BenchmarkConfig,
     skip_variants: list[str],
-) -> list[BaseOperator]:
-    operator_instances = []
+) -> dict[str, list[BaseOperator]]:
+    operator_instances = defaultdict(list)
     for operator_name in operator_names:
         variant_classes = name_to_variant_list.get(operator_name, [])
         if not variant_classes:
@@ -39,7 +40,7 @@ def create_operator_instances(
         for VariantClass in variant_classes:
             if VariantClass.variant in skip_variants:
                 continue
-            operator_instances.append(VariantClass(benchmark_config))
+            operator_instances[operator_name].append(VariantClass(benchmark_config))
     return operator_instances
 
 
@@ -205,9 +206,12 @@ def run_benchmarks(
     operator_instances = create_operator_instances(
         desired_op_names, name_to_variant_list, benchmark_config, skip_variants
     )
-    for Operator in operator_instances:
-        metric_result = benchmark_operator(Operator, benchmark_config)
-        operator_metric_results[f"{Operator.name}.{Operator.variant}"] = metric_result
+    for operator_name, variants in operator_instances.items():
+        for variant in variants:
+            metric_result = benchmark_operator(variant, benchmark_config)
+            operator_metric_results[
+                f"{operator_name}.{variant.variant}"
+            ] = metric_result
 
     for metric_result in operator_metric_results.values():
         print(metric_result)
