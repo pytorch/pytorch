@@ -84,6 +84,7 @@ if torch.version.hip:
 
 
 def _is_large_block_for_cpu(m, n, k):
+    # Thresholds are experimentally determined to reduce Triton CPU compile times
     if m > 256 or n > 256 or k > 256:
         return True
     return m * n * k > 2**17
@@ -96,7 +97,7 @@ def conv_configs(m, n, k, *, device_type, **kwargs):
             n,
             k,
             configs=platform_configs,
-            scale=2,
+            scale=0.5,
             exclude=_is_large_block_for_cpu,
         )
     return filtered_configs(m, n, k, configs=platform_configs)

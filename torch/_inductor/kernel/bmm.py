@@ -29,7 +29,7 @@ def bmm_grid(b, m, n, meta):
 
 
 def _is_large_block_for_cpu(m, n, k):
-    # Thresholds are experimentally determined
+    # Thresholds are experimentally determined to reduce Triton CPU compile times
     if m > 128 or n > 128 or k > 128:
         return True
     return m * n > 2**12
@@ -37,7 +37,7 @@ def _is_large_block_for_cpu(m, n, k):
 
 def bmm_configs(m, n, k, *, device_type):
     if device_type == "cpu":
-        return mm_configs(m, n, k, scale=2, exclude=_is_large_block_for_cpu)
+        return mm_configs(m, n, k, scale=0.5, exclude=_is_large_block_for_cpu)
     return mm_configs(m, n, k)
 
 

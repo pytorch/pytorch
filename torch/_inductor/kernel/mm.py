@@ -142,6 +142,7 @@ def _is_int8_mat(mat):
 
 
 def _is_large_block_for_cpu(m, n, k):
+    # Thresholds are experimentally determined to reduce Triton CPU compile times
     return m * n > 2**13
 
 
@@ -177,7 +178,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
     if is_nonzero and use_triton_template(layout):
         if ir.get_device_type(mat1) == "cpu":
-            configs = mm_configs(m, n, k, scale=2, exclude=_is_large_block_for_cpu)
+            configs = mm_configs(m, n, k, scale=0.5, exclude=_is_large_block_for_cpu)
         else:
             configs = mm_configs(m, n, k)
         for config in configs:
