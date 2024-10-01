@@ -135,6 +135,11 @@ jobs:
         run: echo "GPU_FLAG=--gpus all -e NVIDIA_DRIVER_CAPABILITIES=all" >> "${GITHUB_ENV}"
         if: ${{ contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu') && steps.check_arc_runner.outputs.IN_CONTAINER_RUNNER == 'true' }}
 
+      - name: Setup SCCACHE_SERVER_PORT environment for docker run when on container
+        id: setup-sscache-port-flag
+        run: echo "SCCACHE_SERVER_PORT_DOCKER_FLAG=-e SCCACHE_SERVER_PORT=$((RUNNER_UID + 4226))" >> "${GITHUB_ENV}"
+        if: ${{ contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu') && steps.check_arc_runner.outputs.IN_CONTAINER_RUNNER == 'true' }}
+
       - name: Lock NVIDIA A100 40GB Frequency
         run: |
           sudo nvidia-smi -pm 1
@@ -251,6 +256,7 @@ jobs:
           # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
             ${GPU_FLAG:-} \
+            ${SCCACHE_SERVER_PORT_DOCKER_FLAG:-} \
             -e BUILD_ENVIRONMENT \
             -e PR_NUMBER \
             -e GITHUB_ACTIONS \
