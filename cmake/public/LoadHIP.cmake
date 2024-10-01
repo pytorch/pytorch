@@ -44,6 +44,8 @@ endif()
 message("Building PyTorch for GPU arch: ${PYTORCH_ROCM_ARCH}")
 
 # Add HIP to the CMAKE Module Path
+# needed because the find_package call to this module uses the Module mode search
+# https://cmake.org/cmake/help/latest/command/find_package.html#search-modes
 set(CMAKE_MODULE_PATH ${ROCM_PATH}/lib/cmake/hip ${CMAKE_MODULE_PATH})
 
 macro(find_package_and_print_version PACKAGE_NAME)
@@ -52,7 +54,9 @@ macro(find_package_and_print_version PACKAGE_NAME)
 endmacro()
 
 # Find the HIP Package
-find_package_and_print_version(HIP 1.0)
+# MODULE argument is added for clarity that CMake is searching
+# for FindHIP.cmake in Module mode
+find_package_and_print_version(HIP 1.0 MODULE)
 
 if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
