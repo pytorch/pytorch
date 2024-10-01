@@ -484,6 +484,22 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(expected, actual)
 
+    def test_flex_attention(self):
+        import torch
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        torch.set_default_device("cuda")
+
+        flex_attention = torch.compile(flex_attention, dynamic=False)
+
+        prefix_lengths = torch.arange(8)
+
+        def prefix_lm(b, h, q, kv):
+            return prefix_lengths[b] >= kv
+
+        # This runs in fullgraph already
+        mask = create_block_mask(prefix_lm, 8, None, 512, 512, _compile=True)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
