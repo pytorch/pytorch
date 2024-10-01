@@ -1,4 +1,5 @@
 import dataclasses
+from contextlib import nullcontext
 from enum import Enum
 from typing import List
 
@@ -30,3 +31,7 @@ dtype_mapping = {
     "float16": torch.float16,
     "float32": torch.float32,
 }
+
+
+def maybe_record_function(name, profile_enabled):
+    return torch.profiler.record_function(name) if profile_enabled else nullcontext()

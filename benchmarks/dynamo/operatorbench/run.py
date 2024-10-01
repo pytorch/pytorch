@@ -5,7 +5,13 @@ from contextlib import nullcontext
 import click
 import operators
 from operators import BaseOperator
-from utils.common import BenchmarkConfig, Device, dtype_mapping, Phase
+from utils.common import (
+    BenchmarkConfig,
+    Device,
+    dtype_mapping,
+    maybe_record_function,
+    Phase,
+)
 from utils.metrics import get_execution_time, MetricResult, Metrics
 
 import torch
@@ -79,24 +85,16 @@ def benchmark_operator(operator: BaseOperator, benchmark_config: BenchmarkConfig
                 phase_fn = operator.full
             metric_result.input.append(input)
             execution_time = []
-            record_sample_context = (
-                torch.profiler.record_function(f"sample_{i}")
-                if benchmark_config.profile
-                else nullcontext()
-            )
 
-            with record_sample_context:
+            with maybe_record_function(f"sample_{i}", benchmark_config.profile):
                 for repeat_idx in range(repeat):
 
                     def fn():
                         return phase_fn(input)
 
-                    record_repeat_context = (
-                        torch.profiler.record_function(f"repeat_{repeat_idx}")
-                        if benchmark_config.profile
-                        else nullcontext()
-                    )
-                    with record_repeat_context:
+                    with maybe_record_function(
+                        f"repeat_{repeat_idx}", benchmark_config.profile
+                    ):
                         if Metrics.EXECUTION_TIME in metrics:
                             execution_time.append(
                                 get_execution_time(
