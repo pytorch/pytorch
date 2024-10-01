@@ -165,14 +165,14 @@ def _trig2(score, b, h, m, n):
 
 test_score_mods = [
     _identity,
-    # _times_two,
-    # _squared,
-    # _causal,
-    # _inverse_causal,
-    # _rel_bias,
-    # _rel_causal,
-    # _generate_alibi_bias(8),
-    # _generate_windowed(1000),
+    _times_two,
+    _squared,
+    _causal,
+    _inverse_causal,
+    _rel_bias,
+    _rel_causal,
+    _generate_alibi_bias(8),
+    _generate_windowed(1000),
 ]
 
 captured_buffers_map = {
@@ -186,8 +186,8 @@ D = 64
 
 test_Hq_Hkv = [
     (16, 1),
-    # (8, 2),
-    # (16, 16),
+    (8, 2),
+    (16, 16),
 ]
 
 test_Bq_Bkv = [

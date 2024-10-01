@@ -3531,7 +3531,6 @@ class TestPagedAttention(InductorTestCase):
             self._check_equal(golden_out, ref_out, paged_out, fudge_factor, "Out")
 
 
-
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
 common_utils.instantiate_parametrized_tests(TestBlockMask)
 common_utils.instantiate_parametrized_tests(TestPagedAttention)
