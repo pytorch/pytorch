@@ -622,6 +622,7 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.special_xlog1py,
             aten.split.Tensor,
             aten.split_with_sizes_copy,
+            aten.squeeze_copy,
             aten.squeeze.default,
             aten.squeeze.dim,
             aten.std,
