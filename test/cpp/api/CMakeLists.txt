@@ -44,7 +44,6 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/operations.cpp
   ${TORCH_API_TEST_DIR}/nested_int.cpp
 )
-include(CheckCXXCompilerFlag)
 if(USE_CUDA OR USE_ROCM)
   list(APPEND TORCH_API_TEST_SOURCES ${TORCH_API_TEST_DIR}/parallel.cpp)
 endif()
@@ -66,13 +65,10 @@ if(NOT MSVC)
   target_compile_options_if_supported(test_api "-Wno-maybe-uninitialized")
   # gcc gives nonsensical warnings about variadic.h
   target_compile_options_if_supported(test_api "-Wno-unused-but-set-parameter")
-  
+
   # Add -Wno-error=nonnull for GCC 12+
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12)
-    check_cxx_compiler_flag("-Wno-error=nonnull" HAS_WNO_ERROR_NONNULL)
-    if(HAS_WNO_ERROR_NONNULL)
-      target_compile_options(test_api PRIVATE "-Wno-error=nonnull")
-    endif()
+    target_compile_options_if_supported(test_api "-Wno-error=nonnull")
   endif()
 endif()
 
