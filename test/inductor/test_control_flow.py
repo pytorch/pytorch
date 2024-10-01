@@ -803,6 +803,33 @@ class AssociativeScanTests(TestCase):
 
 
 class ScanModels:
+    class SimpleScan(torch.nn.Module):
+        def __init__(self, reverse, dim):
+            super().__init__()
+            self.reverse = reverse
+            self.dim = dim
+
+        def forward(self, _input, weight, bias):
+            def combine_fn(carry, x):
+                from torch.utils import _pytree as pytree
+
+                new_carry = {
+                    "param": carry["param"] @ x + carry["bias"],
+                    "bias": carry["bias"].sin(),
+                }
+                return new_carry, (
+                    pytree.tree_map(lambda x: x.clone(), new_carry),
+                    {"dummy": x.sin()},
+                )
+
+            return scan(
+                combine_fn,
+                {"param": weight, "bias": bias},
+                _input,
+                reverse=self.reverse,
+                dim=self.dim,
+            )
+
     class SimpleWithPytreeInOuts(torch.nn.Module):
         def __init__(self, reverse, dim):
             super().__init__()

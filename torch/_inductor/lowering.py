@@ -6239,7 +6239,7 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
 
 
 # This is a spcialized version of select because we're certain that the idx is valid
-@register_lowering(torch.ops._scan.unsafe_select, type_promotion_kind=None)
+@register_lowering(torch.ops._scan_helper.unsafe_select, type_promotion_kind=None)
 def _(dst, dim, idx):
     return squeeze(slice_(dst, dim, idx, idx + 1, step=1, clamp=False), dim)
 
@@ -6339,7 +6339,7 @@ def scan(combine_subgraph, init, xs, dim, reverse, additional_inputs):
             scan_idx = idx if not reverse else xs[0].size()[specialized_dim] - idx - 1
             sub_xs = []
             for x in xs:
-                sub_xs.append(torch.ops._scan.unsafe_select(x, dim, scan_idx))
+                sub_xs.append(torch.ops._scan_helper.unsafe_select(x, dim, scan_idx))
 
             new_carry, ys = _extract_carry_and_out(
                 combine_subgraph.graph_module(
@@ -6348,7 +6348,7 @@ def scan(combine_subgraph, init, xs, dim, reverse, additional_inputs):
                 num_init_leaves,
             )
             for y, y_out in zip(ys, ys_outs):
-                y_out_slice = torch.ops._scan.unsafe_select(y_out, 0, scan_idx)
+                y_out_slice = torch.ops._scan_helper.unsafe_select(y_out, 0, scan_idx)
                 y_out_slice.copy_(y)
             return *new_carry, *xs, *additional_inputs, *ys_outs
 
