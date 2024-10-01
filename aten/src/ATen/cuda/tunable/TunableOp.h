@@ -278,7 +278,7 @@ class TunableOp {
 };
 
 struct OpParams {
-  OpParams() {}
+  OpParams() = default;
   virtual ~OpParams() = default;
   virtual std::string Signature() const = 0;
 };

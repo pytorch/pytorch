@@ -66,6 +66,7 @@ class TestPatternMatcher(TestCase):
         additional_check(codes)
         counters.clear()
 
+    @inductor_config.patch(max_autotune_gemm=True)
     def test_mm_plus_mm(self):
         def fn(a, b, c, d):
             return torch.add(torch.mm(a, b), torch.mm(c, d))
@@ -1447,7 +1448,7 @@ class TestPatternMatcher(TestCase):
             (t, [64, 128, 8, 8]),
             {"dim": 1, "out": [t, t, t, t]},
         )
-        check("call_function", torch.ops.fsdp.set_, (t, t), {})
+        check("call_function", torch.ops.fsdp.copy_, (t, t), {})
         check(
             "call_function", torch.ops.aten.__rshift__.Scalar, (t, 2), {}, expect=False
         )

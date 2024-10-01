@@ -32,8 +32,8 @@ from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 
 
 if HAS_CUDA:
-    import triton
-    import triton.language as tl
+    import triton  # @manual
+    import triton.language as tl  # @manual
 
     from torch.testing._internal.triton_utils import add_kernel
 
@@ -694,6 +694,13 @@ class MinCutPartitioningTests(TestCase):
 
         inp = (T(10, grad=True), T(10, grad=True))
         self.assertExpectedInline(count_numel_train(f, *inp), """70""")
+
+    def test_partitioning_relu(self):
+        def f(x):
+            return torch.relu(x)
+
+        inp = (T(16, grad=True),)
+        self.assertExpectedInline(count_numel_train(f, *inp), """72""")
 
     def test_partitioning_with_view(self):
         class Foo(torch.autograd.Function):

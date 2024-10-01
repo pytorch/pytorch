@@ -521,7 +521,7 @@ ACCURACY_FAILS: Dict[str, Callable[[nn.Module, Any], bool]] = {
 def repro_minifier_query(options, mod, load_args):
     mod, args = repro_common(options, mod, load_args)
     fail_fn = functools.partial(
-        ACCURACY_FAILS[options.accuracy], check_str=options.check_str
+        ACCURACY_FAILS[options.accuracy], check_str=options.check_str  # type: ignore[call-arg]
     )
     if fail_fn(mod, args):
         sys.exit(1)

@@ -212,6 +212,7 @@ class UnflattenedModule(torch.nn.Module):
         export_graph = deepcopy(export_module.graph)
         self.graph_signature = deepcopy(export_module.graph_signature)
         self.graph = torch.fx.Graph()
+        self.graph.owning_module = self
         self.module_call_graph = deepcopy(export_module.module_call_graph)
         self.flat_args_adapter = flat_args_adapter
         # Flag to indicate whether args have been adapted.
@@ -1441,5 +1442,6 @@ def _swap_modules(
         entry.fqn: entry.signature for entry in ep.module_call_graph if entry.signature
     }
     gm = ep.module()
+    gm.graph.eliminate_dead_code()
     assert isinstance(gm, torch.fx.GraphModule)
     return _swap_module_helper(gm, modules_to_swap, module_call_graph)

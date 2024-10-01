@@ -233,9 +233,7 @@ NHWC_STRIDE_ORDER = [3, 0, 2, 1]
 NHWDC_STRIDE_ORDER = [4, 0, 3, 2, 1]
 
 
-def stride_order2fill_order(
-    order: Sequence[Union[int, Integer]]
-) -> Sequence[Union[int, Integer]]:
+def stride_order2fill_order(order: Sequence[Union[int, Integer]]) -> Sequence[int]:
     """
     Convert stride order to fill order
     For channel last format,
@@ -2271,7 +2269,9 @@ class ExpandView(BaseView):
             if new_size[i] == -1:
                 assert old_size[i] is not None
                 new_size[i] = old_size[i]
-            elif old_size[i] is None or old_size[i] == 1:
+            elif old_size[i] is None or V.graph.sizevars.shape_env.evaluate_expr(
+                sympy.Eq(old_size[i], 1), size_oblivious=True
+            ):
                 pass
             else:
                 # Sanity check: Expect broadcast compatibility
@@ -2294,7 +2294,13 @@ class ExpandView(BaseView):
             assert skip >= 0
             new_stride = [sympy.Integer(0)] * skip
             for stride, size in zip(old_layout.stride, old_layout.size):
-                new_stride.append(stride if size != 1 else sympy.Integer(0))
+                new_stride.append(
+                    stride
+                    if not V.graph.sizevars.shape_env.evaluate_expr(
+                        sympy.Eq(size, 1), size_oblivious=True
+                    )
+                    else sympy.Integer(0)
+                )
             new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
@@ -4785,7 +4791,7 @@ class ExternKernel(InputsKernel):
                         want_contiguous=False,
                         stride_order=None,
                         allow_padding=allow_padding,
-                        exact_strides=exact_strides,
+                        exact_strides=exact_strides,  # type: ignore[arg-type]  # int|Expr vs int|Integer
                     )
                     return x
             elif isinstance(x.get_layout(), FixedLayout) and (
@@ -4855,7 +4861,7 @@ class ExternKernel(InputsKernel):
             want_contiguous=False,
             stride_order=order,
             allow_padding=allow_padding,
-            exact_strides=exact_strides,
+            exact_strides=exact_strides,  # type: ignore[arg-type]  # int|Expr vs int|Integer
         )
         if order:
             assert is_stride_order_storage_and_layout(x, order)
@@ -5351,7 +5357,7 @@ class InplaceCopyFallback(ExternKernel):
 
     def codegen(self, wrapper):
         (dst, src, non_blocking) = self.codegen_args()
-        wrapper.codegen_device_copy(src, dst)
+        wrapper.codegen_device_copy(src, dst, non_blocking)
 
     def should_allocate(self):
         return False
@@ -5586,7 +5592,7 @@ class IndexPutFallback(ExternKernel):
 
 class DeviceCopy(ExternKernelOut):
     @classmethod
-    def create(cls, x, device):
+    def create(cls, x, device, non_blocking):
         if (
             not x.is_extern()
             and all(r in V.graph.constants for r in x.get_read_names())
@@ -5598,6 +5604,7 @@ class DeviceCopy(ExternKernelOut):
         V.graph.add_device_info(x.get_device())
 
         developer_warning("DeviceCopy in input program")
+        constant_args = (non_blocking,)
         return DeviceCopy(
             FlexibleLayout(
                 device=device,
@@ -5605,15 +5612,18 @@ class DeviceCopy(ExternKernelOut):
                 size=x.get_size(),
             ),
             [cls.realize_input(x)],
+            constant_args,
         )
 
     def codegen(self, wrapper):
         args = self.codegen_args()
-        assert len(args) == 1
+        assert len(args) == 2
         if self.output_view:
-            wrapper.codegen_device_copy(args[0], self.output_view.codegen_reference())
+            wrapper.codegen_device_copy(
+                args[0], self.output_view.codegen_reference(), args[1]
+            )
         else:
-            wrapper.codegen_device_copy(args[0], self.codegen_reference())
+            wrapper.codegen_device_copy(args[0], self.codegen_reference(), args[1])
 
 
 class DynamicScalar(ExternKernel):

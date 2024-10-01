@@ -1,7 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
-from typing import Any, Callable, Dict, Tuple, Union
+from typing import Any, Callable, Dict, Sequence, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -23,6 +23,53 @@ from torch.fx.graph_module import GraphModule
 from torch.overrides import TorchFunctionMode
 
 
+# Duplicate of _inductor/kernel/flex_attention.py to avoid circular import
+def _construct_strides(
+    sizes: Sequence[int],
+    fill_order: Sequence[int],
+) -> Sequence[int]:
+    """From a list of sizes and a fill order, construct the strides of the permuted tensor."""
+    # Initialize strides
+    assert len(sizes) == len(
+        fill_order
+    ), "Length of sizes must match the length of the fill order"
+    strides = [0] * len(sizes)
+
+    # Start with stride 1 for the innermost dimension
+    current_stride = 1
+
+    # Iterate through the fill order populating strides
+    for dim in fill_order:
+        strides[dim] = current_stride
+        current_stride *= sizes[dim]
+
+    return strides
+
+
+def _permute_strides(out: torch.Tensor, query_strides: Tuple[int, ...]) -> torch.Tensor:
+    """
+    Create a new tensor with the same data and shape as the input,
+    but with strides permuted based on the input tensor's stride order.
+
+    Args:
+        out (torch.Tensor): The output tensor of attention.
+        query_strides (List[int]): The stride order of the input query tensor
+
+    Returns:
+        torch.Tensor: A new tensor with same shape and data as the input,
+        but with strides permuted based on the query tensor's stride order.
+    """
+    from torch._inductor.ir import get_stride_order, stride_order2fill_order
+
+    stride_order = get_stride_order(query_strides)
+    fill_order = stride_order2fill_order(stride_order)
+    assert out.storage_offset() == 0, "Only support storage_offset == 0"
+    out_strides = _construct_strides(out.shape, fill_order)
+    new_out = out.new_empty(out.shape).as_strided(out.shape, out_strides)
+    new_out.copy_(out)
+    return new_out
+
+
 class TransformGetItemToIndex(TorchFunctionMode):
     # This is needed since we want to support calling
     # A[q_idx], where q_idx is a scalar tensor in score_mod.
@@ -30,7 +77,7 @@ class TransformGetItemToIndex(TorchFunctionMode):
     # scalar and create a view. We do not want that behavior in this case, so we
     # use this torchfunctionmode to override that behavior for score_mod
     # wherever we're running it.
-    def __torch_function__(self, func, types, args, kwargs=None):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
         if func == torch.Tensor.__getitem__:
             index_args = pytree.tree_leaves(args[1])
             if all(isinstance(x, torch.Tensor) for x in index_args):
@@ -40,7 +87,7 @@ class TransformGetItemToIndex(TorchFunctionMode):
 
 class FlexAttentionHOP(HigherOrderOperator):
     def __init__(self) -> None:
-        super().__init__("flex_attention")
+        super().__init__("flex_attention", cacheable=True)
 
     def __call__(
         self,
@@ -244,7 +291,7 @@ def sdpa_dense(
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
-    out = out.contiguous()
+    out = _permute_strides(out, query.stride())
     return out, lse
 
 
@@ -432,7 +479,9 @@ def flex_attention_fake_tensor_mode(
             batch_size, num_heads, seq_len_q, dtype=torch.float32
         )
         out_shape = (batch_size, num_heads, seq_len_q, v_head_dim)
-        return query.new_empty(out_shape), logsumexp
+        out = query.new_empty(out_shape)
+        out = _permute_strides(out, query.stride())
+        return out, logsumexp
 
 
 # ---------------------------- Autograd Implementation ----------------------------
@@ -540,8 +589,8 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         ctx._joint_graph = joint_graph
         ctx._mask_graph = block_mask[-1]
         # KV_BLOCK_SIZE and Q_BLOCK_SIZE are integers, so can't use ctx.save_for_backward
-        ctx._KV_BLOCK_SIZE = block_mask[8]
-        ctx._Q_BLOCK_SIZE = block_mask[9]
+        ctx._Q_BLOCK_SIZE = block_mask[8]
+        ctx._KV_BLOCK_SIZE = block_mask[9]
         ctx.scale = scale
         ctx.kernel_options = kernel_options
         ctx._score_mod_other_buffers_len = len(score_mod_other_buffers)
@@ -623,8 +672,8 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
                 q_indices,
                 full_q_num_blocks,
                 full_q_indices,
-                KV_BLOCK_SIZE,
                 Q_BLOCK_SIZE,
+                KV_BLOCK_SIZE,
                 mask_graph,
             ),
             scale,

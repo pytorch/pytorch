@@ -272,7 +272,7 @@ class EphemeralSource(Source):
     def name(self):
         return f"<ephemeral{': ' + self.desc if self.desc is not None else ''}>"
 
-    def make_guard(self):
+    def make_guard(self, fn):
         raise NotImplementedError
 
     def is_ephemeral(self):
@@ -619,7 +619,7 @@ class TorchFunctionModeStackSource(Source):
     ind: int
 
     def name(self):
-        return ""
+        return f"___get_torch_function_mode_stack_at({self._get_index()})"
 
     def _get_index(self):
         from .variables.torch_function import TorchFunctionModeStackVariable
