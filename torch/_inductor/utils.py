@@ -46,6 +46,7 @@ from unittest import mock
 import sympy
 
 import torch
+from torch.utils._pytree import tree_map_only
 
 
 GPU_TYPES = ["cuda", "xpu"]
@@ -359,16 +360,15 @@ def is_pointwise_use(
 
 def gen_gm_and_inputs(target, args, kwargs):
     g = torch.fx.Graph()
-    g_args = []
-    a_args = []
-    for n, arg in enumerate(args):
-        if isinstance(arg, torch.Tensor):
-            g_args.append(g.placeholder(f"arg{n}"))
-            a_args.append(arg)
-        else:
-            g_args.append(arg)
-    assert all(not isinstance(x, torch.Tensor) for x in kwargs.values())
-    node = g.call_function(target, tuple(g_args), kwargs)
+    graph_args = []
+
+    def add_tensor_arg(arg):
+        graph_args.append(arg)
+        return g.placeholder(f"arg{len(graph_args)}")
+
+    node = g.call_function(
+        target, *tree_map_only(torch.Tensor, add_tensor_arg, (args, kwargs))
+    )
     if (
         len(target._schema.returns) == 1
         and str(target._schema.returns[0].type) == "Tensor"
@@ -377,7 +377,7 @@ def gen_gm_and_inputs(target, args, kwargs):
     g.output(node)
 
     gm = torch.fx.GraphModule({}, g)
-    return gm, a_args
+    return gm, graph_args
 
 
 def synchronize(device: str = "cuda"):
