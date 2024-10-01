@@ -579,7 +579,7 @@ void TensorPipeAgent::pipeRead(
           // FIXME This does some unpickling, which could be a bit expensive:
           // perhaps it would be best to perform it inside the worker threads?
           c10::intrusive_ptr<Message> rpcMessage = tensorpipeDeserialize(
-              std::move(tpDescriptor), std::move(*tpBuffers));
+              tpDescriptor, std::move(*tpBuffers));
 
           fn(error, std::move(rpcMessage), std::move(streams));
         });
