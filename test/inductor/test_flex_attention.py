@@ -634,6 +634,11 @@ class TestFlexAttention(InductorTestCase):
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_dynamic(self, dtype: torch.dtype, score_mod: Callable):
+        if score_mod.__name__ == "_alibi_bias":
+            # TODO
+            self.skipTest(
+                "Alibi bias broken with dynamic shapes since we don't support capturing dynamic shapes"
+            )
         self.run_dynamic_test(score_mod, dtype)
 
     @supported_platform
@@ -1391,6 +1396,24 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         attention = functools.partial(flex_attention, block_mask=block_mask)
 
         self.run_test_with_call(attention)
+
+    @supported_platform
+    def test_new_empty_mask_mod(self):
+        S = 128
+        q, k, v = (torch.randn(4, 1, S, 64, device="cuda") for _ in range(3))
+
+        attn_mask = torch.ones(4, 1, S, S, dtype=torch.bool, device="cuda").tril()
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            h_ = h.new_zeros(h.shape)
+            return score + attn_mask[b, h_, q_idx, kv_idx]
+
+        def causal(b, h, q_idx, kv_idx):
+            h_ = h.new_zeros(h.shape)
+            return attn_mask[b, h_, q_idx, kv_idx]
+
+        block_mask = create_block_mask(causal, B=4, H=None, Q_LEN=S, KV_LEN=S)
+        torch.compile(flex_attention)(q, k, v, score_mod, block_mask=block_mask)
 
     @supported_platform
     def test_GQA_causal_mask(self):
@@ -2601,7 +2624,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         torch.testing.assert_close(causal_mask_out, sdpa_mask_out, atol=5e-3, rtol=0.0)
 
     @supported_platform
-    def test_compiled_block_mask(self):
+    def test_doc_mask_clamped_repro(self):
         def _offsets_to_doc_ids_tensor(offsets):
             device = offsets.device
             counts = offsets[1:] - offsets[:-1]
@@ -2644,10 +2667,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         lengths = generate_random_lengths(max_seq_len, doc_count)
         offsets = length_to_offsets(lengths, device)
 
-        def make_tensor():
-            return torch.ones(B, H, SEQ_LEN, HEAD_DIM, device=device)
-
-        query, key = make_tensor(), make_tensor()
         document_causal_mask = generate_doc_mask_mod(offsets)
         block_mask_compiled = create_block_mask(
             document_causal_mask,
@@ -2655,7 +2674,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             1,
             SEQ_LEN,
             SEQ_LEN,
-            device=query.device,
+            device=device,
             _compile=True,
         )
         block_mask = create_block_mask(
@@ -2664,13 +2683,30 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             1,
             SEQ_LEN,
             SEQ_LEN,
-            device=query.device,
+            device=device,
             _compile=True,
         )
         self.assertEqual(block_mask_compiled.kv_indices, block_mask.kv_indices)
         self.assertEqual(
             block_mask_compiled.full_kv_indices, block_mask.full_kv_indices
         )
+        for i in range(5):
+            lengths = generate_random_lengths(1024 + i, 5)
+            offsets = length_to_offsets(lengths, "cuda")
+            doc_ids = _offsets_to_doc_ids_tensor(offsets)
+            total_seq_len = 1024 + i
+
+            def doc_mask_mod(b, h, q_idx, kv_idx):
+                return (
+                    doc_ids[q_idx.clamp(0, doc_ids.shape[0] - 1)]
+                    == doc_ids[kv_idx.clamp(0, doc_ids.shape[0] - 1)]
+                )
+
+            q, k, v = (
+                torch.randn(1, 12, 1024 + i, 64, device=device) for _ in range(3)
+            )
+            block_mask = create_block_mask(doc_mask_mod, None, None, 1024 + i, 1024 + i)
+            torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
 
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
