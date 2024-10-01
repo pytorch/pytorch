@@ -376,7 +376,7 @@ test_inductor_cpp_wrapper_abi_compatible() {
 
   echo "Testing Inductor cpp wrapper mode with TORCHINDUCTOR_ABI_COMPATIBLE=1"
   PYTORCH_TESTING_DEVICE_ONLY_FOR="" python test/run_test.py --include inductor/test_cpu_cpp_wrapper
-  python test/run_test.py --include inductor/test_cuda_cpp_wrapper inductor/test_cpu_repro
+  python test/run_test.py --include inductor/test_cuda_cpp_wrapper inductor/test_cpu_repro inductor/test_extension_backend
 
   TORCHINDUCTOR_CPP_WRAPPER=1 python benchmarks/dynamo/timm_models.py --device cuda --accuracy --amp \
     --training --inductor --disable-cudagraphs --only vit_base_patch16_224 \
@@ -403,7 +403,7 @@ pr_time_benchmarks() {
   PYTHONPATH=$(pwd)/benchmarks/dynamo/pr_time_benchmarks source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
   echo "benchmark results on current PR: "
   cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv"
-
+  PYTHONPATH=$(pwd)/benchmarks/dynamo/pr_time_benchmarks python benchmarks/dynamo/pr_time_benchmarks/check_results.py "benchmarks/dynamo/pr_time_benchmarks/expected_results.csv" "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv"
 }
 
 if [[ "${TEST_CONFIG}" == *pr_time_benchmarks* ]]; then
@@ -712,6 +712,10 @@ test_inductor_set_cpu_affinity(){
     export KMP_BLOCKTIME=1
   fi
   cores=$(test_inductor_get_core_number)
+  # Set number of cores to 16 on Aarch64 for performance runs.
+  if [[ "${TEST_CONFIG}" == *aarch64* && $cores -gt 16 ]]; then
+    cores=16
+  fi
   export OMP_NUM_THREADS=$cores
   end_core=$((cores-1))
   export TASKSET="taskset -c 0-$end_core"

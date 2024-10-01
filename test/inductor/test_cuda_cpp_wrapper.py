@@ -118,6 +118,7 @@ def make_test_case(
 
 
 if RUN_CUDA:
+    config.abi_compatible = True
 
     class BaseTest(NamedTuple):
         name: str
