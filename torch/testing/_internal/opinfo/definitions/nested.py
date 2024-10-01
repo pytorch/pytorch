@@ -45,7 +45,16 @@ def random_nt_from_dims(
 
 
 # Helper function for generating a comprehensive set of NJT sample inputs.
-def _sample_njts(device, dtype, requires_grad=False, dims=None):
+def _sample_njts(
+    device,
+    dtype,
+    requires_grad=False,
+    dims=None,
+    # include non-contiguous NJTs?
+    include_noncontig_transposed=False,
+    # include non-contiguous with holes NJTs?
+    include_noncontig_with_holes=False,
+):
     if dims is None:
         dims = [2, 3, 4]
     if not isinstance(dims, (list, tuple)):
@@ -69,7 +78,21 @@ def _sample_njts(device, dtype, requires_grad=False, dims=None):
         offsets = nt.offsets().clone().detach()
         yield torch.nested.nested_tensor_from_jagged(values, offsets)
 
-    # TODO: add non-contiguous NJTs
+        # non-contiguous transposed NJT (not possible for 2D)
+        if include_noncontig_transposed and dim > 2:
+            yield nt.transpose(-2, -1)
+
+        # non-contiguous with holes NJT
+        if include_noncontig_with_holes:
+            values = nt.values().clone().detach()
+            offsets = nt.offsets().clone().detach()
+            # subtract 1 to cause holes
+            lengths = (offsets.diff() - 1).clone().detach()
+            yield torch.nested.nested_tensor_from_jagged(
+                values=values,
+                offsets=offsets,
+                lengths=lengths,
+            )
 
 
 # Computes an unbind-based reference for a given OpInfo on a given SampleInput.
@@ -321,16 +344,24 @@ def sample_inputs_to(op_info, device, dtype, requires_grad, op_kwargs=None, **kw
         dtype=dtype,
         requires_grad=requires_grad,
         dims=[2, 3, 4],
+        include_noncontig_transposed=True,
+        include_noncontig_with_holes=True,
     ):
+        contiguity = "contig"
+        if not njt._values.is_contiguous():
+            contiguity = "noncontig_transposed"
+        if njt._lengths is not None:
+            contiguity = "noncontig_with_holes"
+
         other_dtypes = (
             d for d in (torch.float32, torch.half, torch.double) if d is not dtype
         )
         for other_dtype in other_dtypes:
-            sample_name = f"{njt.dim()}D: {dtype} -> {other_dtype}"
+            sample_name = f"{contiguity} {njt.dim()}D: {dtype} -> {other_dtype}"
             yield SampleInput(njt.clone().detach(), kwargs={"dtype": dtype}, name=sample_name)
 
         other_device = "cuda" if device == "cpu" else "cpu"
-        sample_name = f"{njt.dim()}D: {device} -> {other_device}"
+        sample_name = f"{contiguity} {njt.dim()}D: {device} -> {other_device}"
         yield SampleInput(njt.clone().detach(), kwargs={"device": other_device}, name=sample_name)
 
 
