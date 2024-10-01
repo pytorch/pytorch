@@ -97,6 +97,7 @@ from .utils import (
     get_cloned_parameter_buffer_name,
     get_sympy_Expr_dtype,
     maybe_get_suppress_shape_guards_ctx,
+    normalize_name,
     should_assume_input_aligned,
 )
 from .virtualized import NullHandler, V
@@ -876,7 +877,7 @@ class GraphLowering(torch.fx.Interpreter):
         name = self.qualify_name(name)
         # We may generate a var name for each constant in the codegen.
         # Let's only keep sane characters.
-        prefix = re.sub(r"[^a-zA-Z0-9_]", "_", name)
+        prefix = normalize_name(name)
         name = prefix
         cnt = 0
         while name in self.constants:
