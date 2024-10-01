@@ -33,7 +33,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     _assert_module_states,
-    CUDAInitMode,
+    DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
     FSDPTestMultiThread,
@@ -117,7 +117,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
         nested_wrapped_module = NestedWrappedModule.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_NEVER,
+            DEVICEInitMode.DEVICE_NEVER,
             fsdp_kwargs={"device_id": dev_id},
         )
         _check_device_matches(nested_wrapped_module, dev_id)
@@ -126,7 +126,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
         nested_wrapped_module = NestedWrappedModule.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             fsdp_kwargs={"device_id": dev_id},
         )
         _check_device_matches(nested_wrapped_module, dev_id)
@@ -139,7 +139,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
             nested_wrapped_module = NestedWrappedModule.init(
                 self.process_group,
                 FSDPInitMode.RECURSIVE,
-                CUDAInitMode.CUDA_BEFORE,
+                DEVICEInitMode.DEVICE_BEFORE,
                 fsdp_kwargs={"device_id": torch.device("cuda")},
             )
         _check_device_matches(
@@ -555,7 +555,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
             nested_wrapped_module = NestedWrappedModule.init(
                 self.process_group,
                 FSDPInitMode.RECURSIVE,
-                CUDAInitMode.CUDA_NEVER,
+                DEVICEInitMode.DEVICE_NEVER,
             )
             fsdp_model = FSDP(nested_wrapped_module, self.process_group)
         devices = {p.device for p in fsdp_model.parameters()}
@@ -581,7 +581,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
             return NestedWrappedModule.init(
                 self.process_group,
                 FSDPInitMode.NO_FSDP,
-                CUDAInitMode.CUDA_NEVER,
+                DEVICEInitMode.DEVICE_NEVER,
             )
 
         with self.assertRaisesRegex(
@@ -688,7 +688,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             fsdp_kwargs,
         )
         for fsdp_module in FSDP.fsdp_modules(fsdp_model):
@@ -753,7 +753,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
                 self.process_group,
                 FSDPInitMode.RECURSIVE,
                 # Move wrapped modules to CUDA before wrapping with FSDP
-                cuda_init_mode=CUDAInitMode.CUDA_BEFORE,
+                device_init_mode=DEVICEInitMode.DEVICE_BEFORE,
                 # Should raise error since rank 1 is given `device_id=0` when
                 # the model is on cuda:1
                 fsdp_kwargs={"device_id": 0},
@@ -949,7 +949,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         model = NestedWrappedModule.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             {},
         )
         attr_name = attr_name_and_values[0]
