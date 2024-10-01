@@ -206,19 +206,18 @@ def tensorify_python_scalars(
                             transform = False
                             break
 
-                        if "val" not in a.meta:
-                            if a.meta["val"].dtype != compute_dtype:
-                                res = graph.call_function(
-                                    torch.ops.prims.convert_element_type.default,
-                                    (
-                                        a,
-                                        compute_dtype,
-                                    ),
-                                )
-                                res.meta["val"] = torch.ops.prims.convert_element_type.default(
-                                    a.meta["val"], compute_dtype
-                                )
-                                a = re
+                        if a.meta["val"].dtype != compute_dtype:
+                            res = graph.call_function(
+                                torch.ops.prims.convert_element_type.default,
+                                (
+                                    a,
+                                    compute_dtype,
+                                ),
+                            )
+                            res.meta["val"] = torch.ops.prims.convert_element_type.default(
+                                a.meta["val"], compute_dtype
+                            )
+                            a = res
 
                         args.append(a)
                     else:
