@@ -191,29 +191,92 @@ struct CppNode : public Node {
   void compiled_args(CompiledNodeArgs& args) override {
     static_assert(
         std::is_same_v<std::remove_cv_t<decltype(T::is_traceable)>, bool>);
-    // although neither of the 2 methods below have uniqueness guarantees
-    // it is unlikely for them to collide at the same time
-    args.collect(static_cast<uint64_t>(typeid(T).hash_code()));
-    args.collect(std::string(typeid(T).name()));
-    // but the symint wont be passed to the op
-    args.collect(output_info_);
-    args.collect(input_info_);
+    if (T::is_traceable) {
+      std::cout << "compiled_args: 1" << std::endl;
+      // although neither of the 2 methods below have uniqueness guarantees
+      // it is unlikely for them to collide at the same time
+      args.collect(static_cast<uint64_t>(typeid(T).hash_code()));
+      args.collect(std::string(typeid(T).name()));
 
-    // TODO: pass some things by copy
-    std::function<variable_list(variable_list)> lambda =
-        [&](variable_list&& inputs) { return apply(std::move(inputs)); };
-    args.collect(this, std::move(lambda), is_variable_input_, input_info_);
+      args.collect(ctx_.saved_data);
+      TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
+      TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
+      args.collect(
+          ctx_.saved_variables_, true); // always unpacked as output in eager
+      TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
+      args.collect(ctx_.materialize_grads_);
+      args.collect(ctx_.has_freed_buffers_);
+      args.collect(is_variable_input_);
+      args.collect(input_info_);
+      args.collect(output_info_);
+    } else if (args.opaque_cpp_node()) {
+      std::cout << "compiled_args: 2" << std::endl;
+      args.collect(static_cast<uint64_t>(typeid(T).hash_code()));
+      args.collect(std::string(typeid(T).name()));
+      // but the symint wont be passed to the op
+      // TODO: do we lose the lineage of the dynamic shape?
+      TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
+      TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
+      TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
+      args.collect(ctx_.materialize_grads_);
+      args.collect(ctx_.has_freed_buffers_);
+      args.collect(is_variable_input_);
+      args.collect(output_info_);
+      args.collect(input_info_);
+
+      std::cout << "compiled_args on lambda" << std::endl;
+      std::function<variable_list(variable_list)> lambda =
+          [&](variable_list&& inputs) { return apply(std::move(inputs)); };
+      args.collect(this, std::move(lambda), is_variable_input_, input_info_);
+    } else {
+      std::cout << "compiled_args: 3" << std::endl;
+      throw std::runtime_error(
+          "Attempting to trace a potentially unsafe C++ autograd function: " +
+          name() +
+          ". It may be possible to trace it safely, please refer to the instructions in: https://docs.google.com/document/d/11VucFBEewzqgkABIjebZIzMvrXr3BtcY1aGKpX61pJY/.");
+    }
   }
 
   variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) override {
-    saved.before(output_info_);
-    saved.before(input_info_);
-    auto grads = saved.lift(variable_list(inputs));
-    saved.after(output_info_);
-    saved.after(input_info_);
-    return grads;
+    if (T::is_traceable) {
+      std::cout << "apply_with_saved: 1" << std::endl;
+      saved.before(ctx_.saved_data);
+      TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
+      TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
+      saved.before(ctx_.saved_variables_);
+      TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
+      saved.before(ctx_.materialize_grads_);
+      saved.before(ctx_.has_freed_buffers_);
+      saved.before(input_info_);
+      saved.before(output_info_);
+      std::cout << "applying bwd" << std::endl;
+      auto results = apply(variable_list(inputs));
+      saved.after(ctx_.saved_data);
+      TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
+      TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
+      saved.after(ctx_.saved_variables_);
+      TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
+      saved.after(ctx_.materialize_grads_);
+      saved.after(ctx_.has_freed_buffers_);
+      saved.after(input_info_);
+      saved.after(output_info_);
+      return results;
+    } else if (saved.opaque_cpp_node()) {
+      std::cout << "apply_with_saved: 2" << std::endl;
+      saved.before(output_info_);
+      saved.before(input_info_);
+      auto grads = saved.lift(variable_list(inputs));
+      saved.after(output_info_);
+      saved.after(input_info_);
+      return grads;
+    } else {
+      // unreachable
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Non-traceable C++ autograd function should have thrown during compiled_args");
+    }
   }
 };
 
