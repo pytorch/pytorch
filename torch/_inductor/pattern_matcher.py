@@ -614,7 +614,7 @@ class _TargetArgsExpr(_TargetExpr):
             return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
 
         if not self._match_users(node, ctx):
-            return FailedMatch("multiple_users {}", self)
+            return FailedMatch("multiple_users node={}, graph_users={}, pattern_users={}", node, node.users, self.users)
 
         _args = node.args
         _kwargs = node.kwargs
@@ -1317,6 +1317,7 @@ def register_replacement(
                         log_trace_failure(search_fn, e)
                         return False
 
+
                 specific_pattern = fx_to_pattern(
                     specific_graph,
                     argnames=argnames,
@@ -1367,6 +1368,8 @@ def register_replacement(
         else:
             pattern = search_fn_pattern
 
+        # if "rsqrt" in repr(pattern):
+        #     breakpoint()
         pattern_repr = PatternPrettyPrinter.run(pattern)
         assert pattern_repr not in _seen_patterns
         _seen_patterns.add(pattern_repr)
@@ -1724,6 +1727,8 @@ class PatternMatcherPass:
                         and len(set(map(get_mutation_region_id_partial, m.nodes))) != 1  # type: ignore[possibly-undefined]
                     ):
                         continue
+                    if "rsqrt" in repr(entry):
+                        breakpoint()
                     if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
                         log.warning("%s%s %s", node, node.args, m)
                     if is_match(m) and entry.extra_check(m):
@@ -1799,6 +1804,7 @@ def fx_to_pattern(
                 # Handle a burned in tensor size which are now [Ignored(), Ignored(), ...]
                 args = [process_arg(a) for a in args]
                 kwargs = {k: process_arg(a) for k, a in kwargs.items()}
+            # breakpoint()
             return CallFunction(target, *args, **kwargs)
 
         def run_node(self, n: torch.fx.Node) -> Any:
@@ -1874,8 +1880,11 @@ def joint_fwd_bwd(fn: Callable[..., Any], args: Sequence[Any]) -> torch.fx.Graph
     from .fx_passes.joint_graph import canonicalization_patterns
 
     canonicalization_patterns.apply(gm.graph)  # type: ignore[arg-type]
-    # from .._functorch.compile_utils import fx_graph_cse
-    # gm.graph = fx_graph_cse(gm.graph)
+    from .._functorch.compile_utils import fx_graph_cse
+    gm.graph = fx_graph_cse(gm.graph)
+    gm.recompile()
+    # print(gm.graph)
+    # print(gm.print_readable(colored=True))
 
     # remove in/out specs
     gm.graph._codegen = torch.fx.graph.CodeGen()

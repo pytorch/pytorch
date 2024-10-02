@@ -13,7 +13,8 @@ from ..pattern_matcher import fwd_only, register_replacement
 aten = torch.ops.aten
 
 def norm_pattern(x, weight, bias, eps):
-    return torch.ops.aten.native_layer_norm(x, [x.shape[-1]], weight, bias, eps)
+    nx, bias, rstd = torch.ops.aten.native_layer_norm(x, [x.shape[-1]], weight, bias, eps)
+    return nx, bias, rstd
 
 from torch._decomp.decompositions import *
 
@@ -117,6 +118,7 @@ class CustomLayerNorm(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, weight, bias, eps):
         out, mean, rstd = torch.ops.aten.native_layer_norm(x, [x.shape[-1]], weight, bias, eps)
+        out = out.to(x.dtype)
         ctx.save_for_backward(out, mean, rstd, weight, bias)
         return out
     
@@ -197,15 +199,16 @@ def _misc_patterns_init():
             return True
         return False
 
-    register_replacement(
-        norm_pattern,
-        norm_replacement,
-        [torch.empty(4, 4, device='cuda', requires_grad=True, dtype=torch.float16), torch.randn(4, device='cuda', requires_grad=True), torch.randn(4, device='cuda', requires_grad=True)],
-        joint_fwd_bwd,
-        [joint_graph_patterns],
-        extra_check=improves_partition,
-        scalar_workaround={'eps': 42}
-    )
+    with torch.amp.autocast('cuda'):
+        register_replacement(
+            norm_pattern,
+            norm_replacement,
+            [torch.empty(4, 4, device='cuda', requires_grad=True, dtype=torch.float16), torch.randn(4, device='cuda', requires_grad=True, dtype=torch.float32), torch.randn(4, device='cuda', requires_grad=True, dtype=torch.float32)],
+            joint_fwd_bwd,
+            [joint_graph_patterns],
+            extra_check=improves_partition,
+            scalar_workaround={'eps': 42}
+        )
 
 
 class NumpyCompatNormalization:

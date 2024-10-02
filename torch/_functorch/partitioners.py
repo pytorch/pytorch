@@ -963,7 +963,7 @@ def solve_min_cut(
         # Complete guess about current value
         mem_sz = int(mem_sz * (1.1 ** max(min(node.dist_from_bw, 100), 1)))
         if is_materialized(node):
-            return mem_sz
+            return mem_sz * 2
         else:
             return mem_sz * 2
 
@@ -1785,12 +1785,11 @@ def min_cut_rematerialization_partition(
     fx_g = joint_module.graph
 
     #  add the CSE pass
-    if config.cse:
-        cse_graph = fx_graph_cse(fx_g)
-        joint_module.graph = cse_graph
+    # if config.cse:
     joint_graph = joint_module.graph
     joint_module.recompile()
-    # joint_module.print_readable()
+    # joint_module.print_readable(colored=True)
+    # print(joint_graph)
 
     graph_has_recomputable_ops = has_recomputable_ops(joint_module)
     graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)

@@ -144,7 +144,13 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
                     # any futures duplicates should replace with n, not duplicate_n_prev
                     overwrite_due_to_mutation = True
 
-            new_node = new_graph.node_copy(n, lambda x: env[x])
+            try:
+                new_node = new_graph.node_copy(n, lambda x: env[x])
+            except Exception as e:
+                print(new_graph)
+                print(fx_g)
+                print(n, n.args, env)
+                raise e
             env[n] = new_node
             if overwrite_due_to_mutation or not hash_val_in_hash_env:
                 hash_env[hash_val] = new_node

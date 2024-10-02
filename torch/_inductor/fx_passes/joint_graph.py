@@ -450,6 +450,9 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
 
     remove_noop_ops(graph.graph)
 
+    from ..._functorch.compile_utils import fx_graph_cse
+    graph.graph = fx_graph_cse(graph.graph)
+
     if config.joint_graph_constant_folding:
         with GraphTransformObserver(
             graph, "constant_fold_uniform_value", config.trace.log_url_for_graph_xform
@@ -460,6 +463,11 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         for patterns in joint_graph_pattern_passes:
             count += patterns.apply(graph.graph)  # type: ignore[arg-type]
 
+        remove_noop_ops(graph.graph)
+
+    stable_topological_sort(graph.graph)
+    # graph.graph = fx_graph_cse(graph.graph)
+    # graph.print_readable(colored=True)
     if not config.fallback_random:
         count += replace_random_passes(graph)
 
