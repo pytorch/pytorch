@@ -15,9 +15,10 @@
 #include <ATen/native/nested/NestedTensorUtils.h>
 
 #include <tuple>
+#include <utility>
 
-namespace at {
-namespace native {
+
+namespace at::native {
 namespace {
 
 int64_t num_bytes(IntArrayRef sizes) {
@@ -26,7 +27,7 @@ int64_t num_bytes(IntArrayRef sizes) {
   // but carry 0 memory.
   int64_t result = 1;
   int64_t stride = 1;
-  for (int ii = sizes.size() - 1; ii >= 0; --ii) {
+  for (int64_t ii = static_cast<int64_t>(sizes.size()) - 1; ii >= 0; --ii) {
     result += (sizes[ii] - 1) * stride;
     // TODO: accept strides as input when we support them instead of
     // assuming contiguous.
@@ -48,7 +49,7 @@ Tensor pad_tensor_to_shape(
       " doesn't match length ",
       goal_shape.size(),
       " of goal shape.");
-  for (int64_t i = tup.size() - 1; i >= 0; i--) {
+  for (int64_t i = static_cast<int64_t>(tup.size()) - 1; i >= 0; i--) {
     padd.push_back(0);
     padd.push_back(goal_shape[i] - tup[i]);
   }
@@ -645,7 +646,7 @@ Tensor squeeze_dim_nested(const Tensor& self, IntArrayRef dims) {
   "supported at the moment, if you need this feature, please open an issue on github",
   "describing your use case.");
   const auto new_ndim = ndim - mask.count();
-  auto column_indices = sizemat.new_empty(new_ndim - 1);
+  auto column_indices = sizemat.new_empty(static_cast<int64_t>(new_ndim) - 1);
   int64_t* column_indices_ptr = column_indices.data_ptr<int64_t>();
   for (const auto d : c10::irange(1, ndim)) {
     if (!mask.test(d)) {
@@ -705,9 +706,9 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
     const std::vector<IntArrayRef>& strides,
     const IntArrayRef& proposed_shape,
     const c10::TensorOptions& op) {
-  int64_t ntensors = sizes.size(),
-      ndims_underlying = sizes[0].size(),
-      ndims_underlying_reshaped = proposed_shape.size() - 1;
+  int64_t ntensors = static_cast<int64_t>(sizes.size());
+  int64_t ndims_underlying = static_cast<int64_t>(sizes[0].size());
+  int64_t ndims_underlying_reshaped = static_cast<int64_t>(proposed_shape.size() - 1);
   bool viewable = true;
   Tensor sizemat_reshaped = at::empty({ntensors, ndims_underlying_reshaped}, op),
       stridemat_reshaped = at::empty({ntensors, ndims_underlying_reshaped}, op);
@@ -975,7 +976,7 @@ Tensor reshape_as_nested(const Tensor& self, const Tensor& other) {
 
 Tensor& normal_nested_(Tensor& self, double mean, double std, std::optional<Generator> gen) {
   const auto& self_buf = get_nested_tensor_impl(self)->get_buffer();
-  self_buf.normal_(mean, std, gen);
+  self_buf.normal_(mean, std, std::move(gen));
   return self;
 }
 
@@ -1089,5 +1090,4 @@ Tensor cat_nested(const ITensorListRef& tensors, int64_t dim) {
   return cat_nested_impl(materialized, at::legacy_cat_wrap_dim(dim, materialized));
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

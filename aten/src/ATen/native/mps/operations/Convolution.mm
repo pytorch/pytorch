@@ -116,7 +116,7 @@ static void fill_conv_desc(MPSGraphConvolution2DOpDescriptor* descriptor_,
   descriptor_.groups = groups;
 }
 
-static Tensor _mps_convolution_impl(const Tensor& input_t,
+static Tensor _mps_convolution_impl(const Tensor& input_t_,
                                     const Tensor& weight_t,
                                     const std::optional<Tensor>& bias_opt,
                                     IntArrayRef padding,
@@ -125,6 +125,11 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
                                     int64_t groups,
                                     std::optional<IntArrayRef> input_shape) {
   const bool is_macOS_13_2_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS);
+  const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  Tensor input_t = input_t_;
+  if (!is_macOS_15_0_or_newer) {
+    input_t = input_t.contiguous();
+  }
 
   TORCH_CHECK(((input_t.dim() < 5) || is_macOS_13_2_or_newer),
               "Conv3D is only supported on MPS for MacOS_13_2 or newer");
@@ -154,8 +159,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
                 std::nullopt,
                 kMPS,
                 std::nullopt,
-                std::nullopt);
-
+                is_macOS_15_0_or_newer ? memory_format : MemoryFormat::Contiguous);
   if (output_t.numel() == 0) {
     return output_t;
   }
@@ -224,12 +228,22 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
     }
 
     MPSShape* inputShape = mps::getMPSShape(input_t, memory_format);
+    MPSShape* outputShape = mps::getMPSShape(output_t, memory_format);
+    MPSNDArray* inputNDArray = nil;
+    MPSNDArray* outputNDArray = nil;
+
+    if (input_t.is_contiguous(memory_format) && output_t.is_contiguous(memory_format) && is_macOS_15_0_or_newer) {
+      inputNDArray = getMPSNDArray(input_t, inputShape);
+      outputNDArray = getMPSNDArray(*output, outputShape);
+    }
+
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSShape* weightShape = mps::getMPSShape(weight_t);
       bool isDepthwiseConv = ((groups > 1 && (weightShape[1].intValue == 1)) && inputShape.count >= 4 &&
                               weightShape.count >= 4 && !is_channels_last);
 
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(input_t), inputShape);
+      MPSGraphTensor* inputTensor =
+          mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(input_t.scalar_type()), inputShape);
       MPSGraphTensor* weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight_t);
       MPSGraphTensor* outputTensor;
       if (is3DConv) {
@@ -294,7 +308,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
         biasTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(bias_opt.value()));
       }
 
-      if (is_channels_last) {
+      if (is_channels_last && !is_macOS_15_0_or_newer) {
         outputTensor = mps::convertNHWCtoNCHW(mpsGraph, outputTensor);
       }
 
@@ -307,7 +321,8 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
       newCachedGraph->outputTensor_ = outputTensor;
     });
 
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t, inputShape);
+    auto inputPlaceholder = inputNDArray ? Placeholder(cachedGraph->inputTensor_, inputNDArray)
+                                         : Placeholder(cachedGraph->inputTensor_, input_t, inputShape);
     auto weightsPlaceholder = Placeholder(cachedGraph->weightTensor_, weight_t);
     auto biasPlaceholder = Placeholder();
     // Reshape the bias to be broadcastable with output of conv2d or conv3d
@@ -315,10 +330,15 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
       if (is3DConv) {
         biasPlaceholder = Placeholder(cachedGraph->biasTensor_, (bias_opt.value()).view({1, bias_shape[0], 1, 1, 1}));
       } else {
-        biasPlaceholder = Placeholder(cachedGraph->biasTensor_, (bias_opt.value()).view({1, bias_shape[0], 1, 1}));
+        if (is_channels_last && is_macOS_15_0_or_newer) {
+          biasPlaceholder = Placeholder(cachedGraph->biasTensor_, (bias_opt.value()).view({1, 1, 1, bias_shape[0]}));
+        } else {
+          biasPlaceholder = Placeholder(cachedGraph->biasTensor_, (bias_opt.value()).view({1, bias_shape[0], 1, 1}));
+        }
       }
     }
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, *output);
+    auto outputPlaceholder = outputNDArray ? Placeholder(cachedGraph->outputTensor_, outputNDArray)
+                                           : Placeholder(cachedGraph->outputTensor_, *output);
 
     NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
         [[[NSMutableDictionary alloc] initWithCapacity:3] autorelease];

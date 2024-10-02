@@ -124,8 +124,6 @@ class EmptyMatchError(Exception):
     ``allow_empty=False``, and is not matched with any module during packaging.
     """
 
-    pass
-
 
 class PackagingError(Exception):
     """This exception is raised when there is an issue with exporting a package.

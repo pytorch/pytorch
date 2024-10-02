@@ -113,7 +113,8 @@ class TestSerialization(TestCase):
             torch.save(qmodule(input_tensor), expected_file)
 
         input_tensor = torch.load(input_file)
-        qmodule.load_state_dict(torch.load(state_dict_file))
+        # weights_only = False as sometimes get ScriptObject here
+        qmodule.load_state_dict(torch.load(state_dict_file, weights_only=False))
         qmodule_scripted = torch.jit.load(scripted_module_file)
         qmodule_traced = torch.jit.load(traced_module_file)
         expected = torch.load(expected_file)
@@ -266,7 +267,7 @@ class TestSerialization(TestCase):
         # load input tensor
         input_tensor = torch.load(input_file)
         expected_output_tensor = torch.load(expected_file)
-        expected_get_attrs = torch.load(get_attr_targets_file)
+        expected_get_attrs = torch.load(get_attr_targets_file, weights_only=False)
 
         # load model from package and verify output and get_attr targets match
         imp = torch.package.PackageImporter(package_file)

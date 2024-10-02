@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import functools
+import operator
 import os
 import unittest.mock as mock
 from unittest.mock import patch
@@ -8,6 +9,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.exc import IncorrectUsage
+from torch._dynamo.utils import counters
 
 
 def my_custom_function(x):
@@ -244,6 +246,60 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         opt_fn(torch.randn(4))
         self.assertEqual(cnts.frame_count, 2)
+
+    def test_substitute_in_graph(self):
+        counters.clear()
+
+        # NB: Choose another C function for test when we support operator.indexOf
+        #     out of the box
+        cnts = torch._dynamo.testing.CompileCounter()
+        fn = operator.indexOf
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        out = fn([1, 2, 3, 4, 5], 3)
+        opt_out = opt_fn([1, 2, 3, 4, 5], 3)
+        self.assertEqual(out, opt_out)
+        self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(len(counters["graph_break"]), 1)
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        with self.assertRaisesRegex(TypeError, "Signature mismatch"):
+
+            @torch._dynamo.substitute_in_graph(operator.indexOf)
+            def _(sequence, x):
+                for i, item in enumerate(sequence):
+                    if item is x or item == x:
+                        return i
+                raise ValueError("sequence.index(x): x not in sequence")
+
+        @torch._dynamo.substitute_in_graph(operator.indexOf)
+        def polyfill(a, b):
+            for i, item in enumerate(a):
+                if item is b or item == b:
+                    return i
+            raise ValueError("sequence.index(x): x not in sequence")
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        fn = operator.indexOf
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        out = fn([1, 2, 3, 4, 5], 3)
+        opt_out = opt_fn([1, 2, 3, 4, 5], 3)
+        self.assertEqual(out, opt_out)
+        self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        fn = polyfill
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        out = fn([1, 2, 3, 4, 5], 3)
+        opt_out = opt_fn([1, 2, 3, 4, 5], 3)
+        self.assertEqual(out, opt_out)
+        self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(len(counters["graph_break"]), 0)
 
     @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_nested_disable_decorator(self):
@@ -540,6 +596,33 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         x = torch.tensor(1)
 
         self.assertEqual(fn(x, y), torch.compile(fn)(x, y))
+
+    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+    def test_mark_static_nn_module(self):
+        @torch._dynamo.mark_static
+        class Mock(torch.nn.Module):
+            def __init__(self, c):
+                super().__init__()
+                self.c = c
+
+            def forward(self, x):
+                return x * self.c
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        mod1 = Mock(10)
+        mod2 = Mock(20)
+        mod3 = Mock(30)
+        opt_mod1 = torch.compile(mod1, backend=cnts, fullgraph=True)
+        opt_mod2 = torch.compile(mod2, backend=cnts, fullgraph=True)
+        opt_mod3 = torch.compile(mod3, backend=cnts, fullgraph=True)
+
+        x = torch.randn(4, 4)
+        opt_mod1(x)
+        opt_mod2(x)
+        opt_mod3(x)
+
+        # Must be 3 compilations. If not marked static there would be 2, because self.c would be converted to symints.
+        self.assertEqual(cnts.frame_count, 3)
 
 
 if __name__ == "__main__":
