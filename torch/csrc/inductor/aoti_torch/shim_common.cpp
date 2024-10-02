@@ -66,7 +66,7 @@ namespace fs = std::experimental::filesystem;
 // std::experimental::filesystem
 namespace {
 std::string get_current_path() {
-#if __has_include("filesystem") && !defined(__LINUX__)
+#if __has_include("filesystem") && !defined(__linux__)
   return fs::current_path().string();
 #else
   char currentPath[PATH_MAX];
@@ -79,7 +79,7 @@ std::string get_current_path() {
 }
 
 bool file_exists(std::string& path) {
-#if __has_include("filesystem") && !defined(__LINUX__)
+#if __has_include("filesystem") && !defined(__linux__)
   return fs::exists(path);
 #else
   struct stat rc;
@@ -88,7 +88,7 @@ bool file_exists(std::string& path) {
 }
 
 bool create_directories(const std::string& path) {
-#if __has_include("filesystem") && !defined(__LINUX__)
+#if __has_include("filesystem") && !defined(__linux__)
   return fs::create_directories(path);
 #else
   if (mkdir(path.c_str(), 0777) == -1) {
