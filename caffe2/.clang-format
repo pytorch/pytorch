@@ -87,6 +87,7 @@ Standard:        c++17
 StatementMacros:
   - PyObject_HEAD
   - PyObject_VAR_HEAD
+  - PyException_HEAD
 TabWidth:        8
 UseTab:          Never
 ...
