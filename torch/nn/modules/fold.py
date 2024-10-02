@@ -42,10 +42,10 @@ class Fold(Module):
     * :attr:`padding` controls the amount of implicit zero-paddings on both
       sides for :attr:`padding` number of points for each dimension before
       reshaping.
-
+""" """
     * :attr:`dilation` controls the spacing between the kernel points; also known as the \u00e0 trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
-
+""" r"""
     Args:
         output_size (int or tuple): the shape of the spatial dimensions of the
                                     output (i.e., ``output.sizes()[2:]``)
@@ -194,10 +194,10 @@ class Unfold(Module):
     * :attr:`padding` controls the amount of implicit zero-paddings on both
       sides for :attr:`padding` number of points for each dimension before
       reshaping.
-
+""" """
     * :attr:`dilation` controls the spacing between the kernel points; also known as the \u00e0 trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
-
+""" r"""
     Args:
         kernel_size (int or tuple): the size of the sliding blocks
         dilation (int or tuple, optional): a parameter that controls the

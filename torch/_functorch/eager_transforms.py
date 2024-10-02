@@ -1781,7 +1781,7 @@ def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
             duals = tree_unflatten(flat_duals, primals_argspec)
             output = func(*duals)
             tangents = tree_map_only(
-                torch.Tensor, lambda t: fwAD.unpack_dual(t)[1], output
+                torch.Tensor, lambda dual: safe_unpack_dual(dual, False)[1], output
             )
 
         return tangents

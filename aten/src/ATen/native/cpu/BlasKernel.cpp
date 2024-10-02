@@ -341,8 +341,8 @@ void gemm_notrans_(
     at::Half* c,
     int64_t ldc) {
   // c += alpha * (a @ b)
-  if (n == 1 && beta == 0.0) {
-    at::native::blas_impl::fp16_gemv_notrans(m, k, alpha, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(b), 1, beta, reinterpret_cast<float16_t*>(c), 1);
+  if (n == 1 && beta == 0.0 && alpha == 1.0) {
+    at::native::blas_impl::fp16_gemv_notrans(m, k, 1.0, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(b), 1, 0.0, reinterpret_cast<float16_t*>(c), 1);
     return;
   }
   for (const auto i : c10::irange(m)) {
@@ -388,8 +388,8 @@ void gemm_transa_(
     float beta,
     at::Half *c, int64_t ldc) {
   // c = alpha * (a.T @ b) + beta * c
-  if (n == 1 && beta == 0.0) {
-    at::native::blas_impl::fp16_gemv_trans(k, m, alpha, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(b), 1, beta, reinterpret_cast<float16_t*>(c), 1);
+  if (n == 1 && beta == 0.0 && alpha == 1.0) {
+    at::native::blas_impl::fp16_gemv_trans(k, m, 1.0, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(b), 1, 0.0, reinterpret_cast<float16_t*>(c), 1);
     return;
   }
   parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {
