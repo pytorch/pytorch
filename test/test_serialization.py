@@ -4144,7 +4144,8 @@ class TestSerialization(TestCase, SerializationMixin):
                 self.assertEqual(sd_loaded2['weight'], sd_loaded['weight'])
             self.assertTrue(torch.serialization.get_default_mmap_options() == MAP_PRIVATE)
 
-    @parametrize('dtype', (torch.float8_e5m2, torch.float8_e4m3fn, torch.complex32, torch.uint16, torch.uint32, torch.uint64))
+    @parametrize('dtype',
+                 (torch.float8_e5m2, torch.float8_e4m3fn, torch.complex32, torch.uint16, torch.uint32, torch.uint64))
     @parametrize('weights_only', (True, False))
     def test_serialization_dtype(self, dtype, weights_only):
         """ Tests that newer dtypes can be serialized using `_rebuild_tensor_v3` """
