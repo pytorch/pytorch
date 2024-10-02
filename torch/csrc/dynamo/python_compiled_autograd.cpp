@@ -85,6 +85,9 @@ static void check(bool result) {
     check(nullptr);
 }
 
+// snapshot of automatic custom opification of CppNodes
+static bool opaque_cpp_node;
+
 // snapshot of python verbose logging toggle
 static PyObject* python_verbose_logger = nullptr;
 struct VerboseLogger {
@@ -359,12 +362,29 @@ static PyObject* set_verbose_logger(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
+static PyObject* set_opaque_cpp_node(PyObject* dummy, PyObject* args) {
+  HANDLE_TH_ERRORS;
+  PyObject* enable = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &enable)) {
+    Py_RETURN_FALSE;
+  }
+
+  if (enable == Py_True) {
+    opaque_cpp_node = true;
+  } else {
+    opaque_cpp_node = false;
+  }
+  Py_RETURN_TRUE;
+  END_HANDLE_TH_ERRORS;
+}
+
 // NOLINTNEXTLINE(*array*)
 static PyMethodDef _methods[] = {
     {"set_autograd_compiler", set_autograd_compiler, METH_VARARGS, nullptr},
     {"clear_cache", clear_cache, METH_NOARGS, nullptr},
     {"is_cache_empty", is_cache_empty, METH_NOARGS, nullptr},
     {"set_verbose_logger", set_verbose_logger, METH_VARARGS, nullptr},
+    {"set_opaque_cpp_node", set_opaque_cpp_node, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {
@@ -523,7 +543,7 @@ CacheNode* _compiled_autograd_impl(
     THPObjectPtr* graph_arg_hooks) {
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
-  AutogradCompilerCall compiler_call;
+  AutogradCompilerCall compiler_call(opaque_cpp_node);
 
   for (const auto i : c10::irange(output_edges.size())) {
     compiler_call.node_calls

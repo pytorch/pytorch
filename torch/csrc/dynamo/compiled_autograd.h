@@ -225,9 +225,11 @@ struct LiftedIValueArgs {
 };
 
 struct AutogradCompilerCall {
-  AutogradCompilerCall()
+  AutogradCompilerCall() = delete;
+  AutogradCompilerCall(bool opaque_cpp_node)
       : tensor_args(active_node_call_idx),
-        lifted_ivalue_args(active_node_call_idx) {}
+        lifted_ivalue_args(active_node_call_idx),
+        opaque_cpp_node(opaque_cpp_node) {}
   void add_size_input(const c10::SymInt& s) {
     all_size_inputs.emplace_back(
         default_dyn_type, s.guard_int(__FILE__, __LINE__));
@@ -252,9 +254,12 @@ struct AutogradCompilerCall {
   std::vector<c10::SafePyObject> hooks;
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type = SizeInput::STATIC;
+
   // NodeCall id of each size, only when verbose logging is enabled
   std::vector<uint32_t> size_input_origins;
   std::optional<size_t> active_node_call_idx;
+
+  const bool opaque_cpp_node;
 };
 
 class CompiledNodeArgs {

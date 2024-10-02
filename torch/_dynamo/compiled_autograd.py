@@ -48,8 +48,12 @@ def cpp_verbose_log_fn(msg: str) -> None:
     verbose_log.debug(msg)
 
 
-def snapshot_cudagraph_enabled():
+def snapshot_cudagraph_enabled() -> bool:
     return torch._inductor.config.triton.cudagraphs
+
+
+def snapshot_compiled_autograd_opaque_cpp_node() -> bool:
+    return torch._dynamo.config.compiled_autograd_opaque_cpp_node
 
 
 def maybe_clone(x):
@@ -532,6 +536,8 @@ def enable(compiler_fn):
     )
     if snapshot_verbose_logging_enabled():
         torch._C._dynamo.compiled_autograd.set_verbose_logger(cpp_verbose_log_fn)
+    if snapshot_compiled_autograd_opaque_cpp_node():
+        torch._C._dynamo.compiled_autograd.set_opaque_cpp_node(True)
     global compiled_autograd_enabled
     compiled_autograd_enabled = True
     try:
