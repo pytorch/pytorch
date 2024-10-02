@@ -532,9 +532,8 @@ void gatherTorchFunctions(std::vector<PyMethodDef>& torch_functions) {
 }
 
 static PyTypeObject THPVariableFunctions = {
-    PyVarObject_HEAD_INIT(
-        nullptr,
-        0) "torch._C._VariableFunctionsClass", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._VariableFunctionsClass", /* tp_name */
     0, /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
