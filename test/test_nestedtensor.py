@@ -7685,7 +7685,7 @@ COMPILE_FORWARD_FAILURES = {
     # to(device) allocates a new nested int in compile only.
     # AssertionError: The values for attribute 'shape' do not match:
     # torch.Size([7, j2]) != torch.Size([7, j1]).
-    "to",
+    ("to", "cuda"),
 }
 
 COMPILE_BACKWARD_FAILURES = {
@@ -7702,7 +7702,12 @@ COMPARE_TENSOR_COMPONENT_EQUALITY = {
 def withXFails(failure_list):
     return decorateIf(
         unittest.expectedFailure,
-        lambda params: params["op"].full_name in failure_list,
+        lambda params: (
+            params["op"].full_name in failure_list
+            or
+            # allow for e.g. (op_name, "cuda") to skip on CUDA only
+            (params["op"].full_name, params["device"].split(":")[0]) in failure_list
+        ),
     )
 
 
