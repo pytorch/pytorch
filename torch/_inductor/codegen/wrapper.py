@@ -662,14 +662,20 @@ class PythonWrapperCodegen(CodeGen):
             line = f"assert not {name}.isinf().any().item()"
             self.prefix.writeline(line)
 
-    def write_prefix(self) -> None:
-        assert self.launcher_fn_name is not None
+    def write_async_compile_wait(self) -> None:
         self.prefix.splice(
-            f"""
+            """
 
             async_compile.wait(globals())
             del async_compile
+            """
+        )
 
+    def write_prefix(self) -> None:
+        assert self.launcher_fn_name is not None
+        self.write_async_compile_wait()
+        self.prefix.splice(
+            f"""
             def {self.launcher_fn_name}(args):
             """
         )
