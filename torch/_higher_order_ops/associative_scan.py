@@ -4,7 +4,6 @@ import itertools
 from typing import Callable, List
 
 import torch
-import torch._higher_order_ops
 import torch._prims_common as utils
 import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
