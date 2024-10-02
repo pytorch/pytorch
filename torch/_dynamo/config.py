@@ -31,7 +31,7 @@ verify_correctness = False
 # need this many ops to create an FX graph
 minimum_call_count = 1
 
-# turn on/off DCE pass
+# turn on/off DCE pass (deprecated: always true)
 dead_code_elimination = True
 
 # disable (for a function) when cache reaches this size
@@ -468,6 +468,14 @@ fake_tensor_cache_crosscheck_enabled = (
 # Enables the Compiled Autograd engine to trace .backward() calls made under torch.compile().
 # Note: AOT Autograd will still trace joint graphs.
 compiled_autograd = False
+
+# Overrides torch.compile() kwargs for Compiled Autograd:
+compiled_autograd_kwargs_override: Dict[str, Any] = {}
+
+# Compiled Autograd will attempt to automatically wrap C++ autograd functions found in the autograd graph,
+# and make them opaque to the compiler. This does not work when the C++ backward implementation involves
+# other dispatcher subsystems e.g. custom subclasses, autocast, vmap.
+compiled_autograd_opaque_cpp_node = False
 
 # Enables use of collectives *during* compilation to synchronize behavior
 # across ranks.  Today, this is used solely to modify automatic_dynamic_shapes
