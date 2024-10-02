@@ -10,10 +10,10 @@ from torch._subclasses import fake_tensor  # noqa: TCH001
 from torch.fx._utils import lazy_format_graph_code
 from torch.fx.experimental.symbolic_shapes import ShapeEnv  # noqa: TCH001
 from torch.fx.graph_module import GraphModule  # noqa: TCH001
-from torch.fx.proxy import MetaProxy
 
 # TODO: refactor
 from torch.fx.passes.runtime_assert import _get_sym_val
+from torch.fx.proxy import MetaProxy
 from torch.utils._sympy.reference import TensorReferenceAnalysis
 
 
@@ -214,7 +214,9 @@ def tensorify_python_scalars(
                                     compute_dtype,
                                 ),
                             )
-                            res.meta["val"] = torch.ops.prims.convert_element_type.default(
+                            res.meta[
+                                "val"
+                            ] = torch.ops.prims.convert_element_type.default(
                                 a.meta["val"], compute_dtype
                             )
                             a = res
