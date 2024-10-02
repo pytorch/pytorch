@@ -210,23 +210,31 @@ if RUN_CUDA:
         BaseTest("test_fft_real_input_real_output"),
         BaseTest("test_dtypeview"),
         BaseTest("test_dtypeview_fusion"),
+        # skip if not enough SMs
+        BaseTest(
+            "test_addmm",
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
+        # skip if not enough SMs
+        BaseTest(
+            "test_linear_relu",
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
     ]:
         make_test_case(item.name, item.device, item.tests)
 
     from torch._inductor.utils import is_big_gpu
 
     if is_big_gpu(0):
-        for item in [
-            BaseTest(
-                "test_addmm",
-                tests=test_select_algorithm.TestSelectAlgorithm(),
-            ),
-            BaseTest(
-                "test_linear_relu",
-                tests=test_select_algorithm.TestSelectAlgorithm(),
-            ),
-        ]:
-            make_test_case(item.name, item.device, item.tests)
+        skip_list = ["test_addmm", "test_linear_relu"]
+        # need to skip instead of omit, otherwise fbcode ci can be flaky
+        for test_name in skip_list:
+            test_failures_cuda_wrapper[
+                f"{test_name}_cuda"
+            ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=True)
+            test_failures_cuda_wrapper[
+                f"{test_name}_cuda_dynamic_shapes"
+            ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=True)
 
     test_torchinductor.copy_tests(
         CudaWrapperTemplate, TestCudaWrapper, "cuda_wrapper", test_failures_cuda_wrapper
