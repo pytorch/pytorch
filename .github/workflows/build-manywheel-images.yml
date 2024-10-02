@@ -176,6 +176,7 @@ jobs:
       - name: Build Docker Image
         if: env.WITH_PUSH_ROCM == 'true'
         run: |
+          export WITH_PUSH=true
           .ci/docker/manywheel/build.sh manylinux-builder:rocm${{matrix.rocm_version}}
   build-docker-cpu:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
