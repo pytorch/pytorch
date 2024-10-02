@@ -2605,6 +2605,8 @@ class TestGuardsExpressions(TestCase):
 
         from torch._dynamo.source import ConstantSource
         shape_env = ShapeEnv()
+
+        # These guards exactly match the dynamic log from Ads model
         s1325 = shape_env.create_unspecified_symint_and_symbol(
             0,
             source=ConstantSource("s1325"),
