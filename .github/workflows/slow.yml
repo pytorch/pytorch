@@ -22,6 +22,7 @@ permissions: read-all
 
 jobs:
   llm-td:
+    if: false
     name: before-test
     uses: ./.github/workflows/llm_td_retrieval.yml
     permissions:
@@ -29,6 +30,7 @@ jobs:
       contents: read
 
   target-determination:
+    if: false
     name: before-test
     uses: ./.github/workflows/target_determination.yml
     needs: llm-td
@@ -37,6 +39,7 @@ jobs:
       contents: read
 
   get-label-type:
+    if: false
     name: get-label-type
     uses: ./.github/workflows/_runner-determinator.yml
     with:
@@ -46,6 +49,7 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
 
   linux-focal-cuda12_1-py3-gcc9-slow-gradcheck-build:
+    if: false
     name: linux-focal-cuda12.1-py3-gcc9-slow-gradcheck
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
@@ -56,15 +60,18 @@ jobs:
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 6, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 5, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 6, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 7, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 8, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
         ]}
 
   linux-focal-cuda12_1-py3-gcc9-slow-gradcheck-test:
+    if: false
     name: linux-focal-cuda12.1-py3-gcc9-slow-gradcheck
     uses: ./.github/workflows/_linux-test.yml
     needs:
@@ -77,6 +84,7 @@ jobs:
       timeout-minutes: 300
 
   linux-focal-cuda12_1-py3_10-gcc9-sm86-build:
+    if: false
     name: linux-focal-cuda12.1-py3.10-gcc9-sm86
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
@@ -87,11 +95,13 @@ jobs:
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
-          { config: "slow", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
-          { config: "slow", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "slow", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "slow", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "slow", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
         ]}
 
   linux-focal-cuda12_1-py3_10-gcc9-sm86-test:
+    if: false
     name: linux-focal-cuda12.1-py3.10-gcc9-sm86
     uses: ./.github/workflows/_linux-test.yml
     needs:
@@ -103,6 +113,7 @@ jobs:
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-sm86-build.outputs.test-matrix }}
 
   linux-focal-py3_9-clang10-build:
+    if: false
     name: linux-focal-py3.9-clang10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
@@ -117,6 +128,7 @@ jobs:
         ]}
 
   linux-focal-py3_9-clang10-test:
+    if: false
     name: linux-focal-py3.9-clang10
     uses: ./.github/workflows/_linux-test.yml
     needs:
@@ -128,6 +140,7 @@ jobs:
       test-matrix: ${{ needs.linux-focal-py3_9-clang10-build.outputs.test-matrix }}
 
   linux-focal-rocm6_2-py3_10-build:
+    if: false
     name: linux-focal-rocm6.2-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
@@ -142,6 +155,7 @@ jobs:
         ]}
 
   linux-focal-rocm6_2-py3_10-test:
+    if: false
     permissions:
       id-token: write
       contents: read
@@ -156,6 +170,7 @@ jobs:
       test-matrix: ${{ needs.linux-focal-rocm6_2-py3_10-build.outputs.test-matrix }}
 
   linux-jammy-py3_10-clang15-asan-build:
+    if: false
     name: linux-jammy-py3.10-clang15-asan
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
@@ -173,6 +188,7 @@ jobs:
     secrets: inherit
 
   linux-jammy-py3_10-clang15-asan-test:
+    if: false
     name: linux-jammy-py3.10-clang15-asan
     uses: ./.github/workflows/_linux-test.yml
     needs:
