@@ -142,7 +142,17 @@ def _is_int8_mat(mat):
 
 
 def _is_large_block_for_cpu(m, n, k):
+    # Thresholds are experimentally determined to reduce Triton CPU compile times
     return m * n > 2**13
+
+
+def mm_config_kwargs(device):
+    if device == "cpu":
+        return {
+            "scale": 0.5,
+            "exclude": _is_large_block_for_cpu,
+        }
+    return {}
 
 
 def bias_addmm(inp, mat1, mat2, *, out=None, alpha=1, beta=1):
@@ -176,11 +186,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     )
     static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
     if is_nonzero and use_triton_template(layout):
-        if ir.get_device_type(mat1) == "cpu":
-            configs = mm_configs(m, n, k, scale=2, exclude=_is_large_block_for_cpu)
-        else:
-            configs = mm_configs(m, n, k)
-        for config in configs:
+        for config in mm_configs(m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
@@ -211,7 +217,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
         if use_aten_gemm_kernels():
             always_included.append("extern_mm")
         num_choices_before_extra_configs = len(choices)
-        for config in extra_mm_configs(m, n, k):
+        for config in extra_mm_configs(
+            m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
+        ):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
@@ -306,7 +314,9 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
     if is_nonzero and use_triton_template(layout, enable_int32=True):
-        for config in int8_mm_configs(m, n, k):
+        for config in int8_mm_configs(
+            m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
+        ):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
@@ -385,7 +395,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         )
 
     if is_nonzero and use_triton_template(layout):
-        for config in mm_configs(m, n, k):
+        for config in mm_configs(m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(inp_expanded, mat1, mat2),
@@ -719,7 +729,13 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
             choices.append(fallback)
 
         has_int8_tensor = _is_int8_mat(mat1) or _is_int8_mat(mat2)
-        for config in mixed_mm_configs(m, n, k, has_int8_tensor=has_int8_tensor):
+        for config in mixed_mm_configs(
+            m,
+            n,
+            k,
+            has_int8_tensor=has_int8_tensor,
+            **mm_config_kwargs(ir.get_device_type(mat1)),
+        ):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
@@ -776,7 +792,9 @@ def tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype, *, layout=None):
         mat1, mat2, mat3, layout=layout, out_dtype=out_dtype
     )
     choices: List[Dict[Any, Any]] = []
-    for config in int8_mm_configs(m, n, k):
+    for config in int8_mm_configs(
+        m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
+    ):
         mm_template.maybe_append_choice(
             choices,
             input_nodes=(mat1, mat2, mat3),
