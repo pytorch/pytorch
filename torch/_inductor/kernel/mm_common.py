@@ -33,7 +33,12 @@ def filtered_configs(
     scale=1,
     exclude=lambda m, n, k: False,
 ):
-    """Heuristic to shrink configs when they are bigger than the input size"""
+    """
+    Heuristic to shrink configs when they are bigger than the input size
+
+    :param scale: scale factor applied to the config values
+    :param exclude: whether a given config should be excluded
+    """
 
     min_block_size = 16
     # block_k=16 seems to be causing issues
@@ -66,9 +71,9 @@ def filtered_configs(
     used = set()
     for block_m, block_n, block_k, num_stages, num_warps in configs:
         # shrink configs for small sizes
-        block_m = max(min(block_m // scale, m), min_block_size)
-        block_n = max(min(block_n // scale, n), min_block_size)
-        block_k = max(min(block_k // scale, k), min_block_size_k)
+        block_m = max(min(int(block_m * scale), m), min_block_size)
+        block_n = max(min(int(block_n * scale), n), min_block_size)
+        block_k = max(min(int(block_k * scale), k), min_block_size_k)
 
         if exclude(block_m, block_n, block_k):
             continue

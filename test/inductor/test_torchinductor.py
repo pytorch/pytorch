@@ -8170,6 +8170,7 @@ class CommonTemplate:
 
         self.common(f, (torch.zeros((4, 2)),))
 
+    @xfail_if_triton_cpu  # libdevice.fma
     def test_softmax_backward_data(self):
         def fn(a, b):
             return aten._softmax_backward_data(a, b, dim=1, input_dtype=torch.float32)
