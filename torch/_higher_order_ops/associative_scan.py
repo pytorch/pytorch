@@ -236,8 +236,6 @@ def associative_scan(
         result_flat = generic_associative_scan(combine_fn, leaves, dim)
     else:
         result_flat = associative_scan_op(combine_fn, leaves, dim)
-        
-    # result_flat = generic_associative_scan(combine_fn, leaves, dim)
 
     if reverse:
         result_flat = [torch.flip(elem, [dim]) for elem in result_flat]
@@ -499,7 +497,7 @@ class ScanAutogradOp(torch.autograd.Function):
             https://justintchiu.com/blog/pscan_diff/
 
         """
-        dim = ctx._dim
+        dim = int(ctx._dim)
         scan_length = ctx._scan_length
         num_xs = ctx._num_xs
         gradient_mask = ctx._gradient_mask
@@ -529,7 +527,7 @@ class ScanAutogradOp(torch.autograd.Function):
             return g_list
         
         with torch._C._AutoDispatchBelowAutograd():
-            # Compute the gradients of the loss output with respect to x and h
+            # Mask the gradients for the variables that do not require gradients for partial gradient support
             flat_grads = [fg for fg, m in zip(flat_grads, gradient_mask) if m]
             
             # Function to compute the gradients with respect 
@@ -572,14 +570,15 @@ class ScanAutogradOp(torch.autograd.Function):
                 fg = torch.concat([torch.flip(fg, [dim]), ones], dim)
                 
                 # Create the matrix consisting of 
-                gradient_mat = [cumprod_and_prepad(aten.slice(fg, dim, n + 0, n + 1, 1), aten.slice(g_h, dim + 1, n, -1, 1), scan_length) for n in range(0, scan_length, 1)]
+                gradient_mat = [cumprod_and_prepad(aten.slice(fg, dim, n, n + 1, 1), aten.slice(g_h, dim + 1, n, -1, 1), scan_length) for n in range(0, scan_length, 1)]
                 grads = torch.flip(torch.sum(torch.stack(gradient_mat, 0) * torch.sum(g_x, 0), 0), [dim])
                 return grads
             
+            # Compute the gradients in parallel for all elements of xs
             compute_grad_xs_mapped = torch.vmap(compute_grad_xs, 0, 0)
             grads = [torch.squeeze(el, 0) for el in torch.split(compute_grad_xs_mapped(torch.stack(flat_grads, 0), torch.stack(grads_xs, 0), torch.stack(grads_hs, 0)), 1, 0)]
-            
-            # Expand the gradients with Nons for partial gradient support
+
+            # Expand the gradients with Nones for partial gradient support
             grads = expand_grads_with_None(grads, gradient_mask)
             
             return *[None] * 4, *grads
