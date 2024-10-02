@@ -24,7 +24,7 @@ from .mm_common import mm_args, mm_grid, scaled_mm_configs
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
-scaling_epilouge = r"""
+scaling_epilogue = r"""
 @triton.jit
 def scale_accumulator(acc, A_inverse_scale, B_inverse_scale, rm, rn, M, N, SCALING_ROWWISE):
     if SCALING_ROWWISE:
@@ -109,7 +109,7 @@ mm_base = r"""
 scaled_mm_template = TritonTemplate(
     name="scaled_mm",
     grid=mm_grid,
-    source=mm_base + scaling_epilouge,
+    source=mm_base + scaling_epilogue,
 )
 
 
@@ -187,7 +187,7 @@ mm_bias_base = r"""
 scaled_mm_bias_template = TritonTemplate(
     name="scaled_mm_bias",
     grid=mm_grid,
-    source=mm_bias_base + scaling_epilouge,
+    source=mm_bias_base + scaling_epilogue,
 )
 
 
