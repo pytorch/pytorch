@@ -137,6 +137,18 @@ f32 = torch.float32
 i64 = torch.int64
 i32 = torch.int32
 
+test_dtypes = (
+    torch.float32,
+    torch.float64,
+    torch.float16,
+    torch.bfloat16,
+    torch.uint8,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+)
+
 
 def _large_cumprod_input(shape, dim, dtype, device):
     # Construct a cumprod input which guaruntees not to overflow or underflow
@@ -9198,32 +9210,32 @@ class CommonTemplate:
         self.common(fn0, [torch.rand(10, 3, 10), torch.rand(3, 10, 10)])
         self.common(fn1, [torch.rand(3, 10, 10), torch.rand(3, 10, 10)])
 
-    @skip_if_gpu_halide  # https://github.com/halide/Halide/issues/8318
-    def test_unspec_inputs(self):
+    @parametrize(
+        "dtype",
+        test_dtypes,
+    )
+    def test_unspec_inputs(self, dtype):
         if self.device == "cpu":
             raise unittest.SkipTest("Testing mixed devices")
+
+        if (
+            is_halide_backend(self.device)
+            and getattr(self.device, "type", self.device) == "cuda"
+        ):
+            # https://github.com/halide/Halide/issues/8318
+            raise unittest.SkipTest("halide not supported")
 
         def fn(x, y):
             return x + y, x * y, x / y
 
         opt = torch._dynamo.optimize("inductor")(fn)
-        dtypes = [
-            torch.float16,
-            torch.bfloat16,
-            torch.float32,
-            torch.float64,
-            torch.int32,
-            torch.int64,
-        ]
-
-        for d in dtypes:
-            inputs = (
-                rand_strided((2, 3), (3, 1), dtype=torch.float32, device=GPU_TYPE),
-                rand_strided((), (), dtype=d, device="cpu"),
-            )
-            self.assertTrue(same(opt(*inputs), fn(*inputs)))
-            inputs = (inputs[1], inputs[0])
-            self.assertTrue(same(opt(*inputs), fn(*inputs)))
+        inputs = (
+            rand_strided((2, 3), (3, 1), dtype=torch.float32, device=GPU_TYPE),
+            rand_strided((), (), dtype=dtype, device="cpu"),
+        )
+        self.assertTrue(same(opt(*inputs), fn(*inputs)))
+        inputs = (inputs[1], inputs[0])
+        self.assertTrue(same(opt(*inputs), fn(*inputs)))
 
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_list_clearing(self):
@@ -10979,7 +10991,11 @@ class CommonTemplate:
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     # We only support dtypeview for abi_conpatible aoti
     @torch._inductor.config.patch(abi_compatible=True)
-    def test_dtypeview(self):
+    @parametrize(
+        "dtype_x, dtype_y",
+        list(itertools.product(test_dtypes, test_dtypes)),
+    )
+    def test_dtypeview(self, dtype_x, dtype_y):
         if TEST_WITH_ASAN:
             return
 
@@ -10990,39 +11006,21 @@ class CommonTemplate:
             x2 = x2.view(x_dtype) + 1
             return x @ y, x2 @ x
 
-        test_dtypes = [
-            torch.float32,
-            torch.float64,
-            torch.float16,
-            torch.bfloat16,
-            torch.uint8,
-            torch.int8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-        ]
-        for test_dtype_x in test_dtypes:
-            for test_dtype_y in test_dtypes:
-                # @ operation needs arguments to be the same dtype
-                for view_dtype in test_dtypes:
-                    try:
-                        # print(f"({test_dtype_x}, {test_dtype_y}, {view_dtype})")
-                        x = rand_strided(
-                            (2, 2), (2, 1), device=self.device, dtype=test_dtype_x
-                        )
-                        y = rand_strided(
-                            (2, 2), (2, 1), device=self.device, dtype=test_dtype_y
-                        )
-                        x2 = x.clone()
-                        fn(x, y, view_dtype, x2)
-                    except Exception as e:
-                        continue
-                    self.common(
-                        fn,
-                        (x, y, view_dtype, x2),
-                        reference_in_float=False,
-                        check_lowp=False,
-                    )
+        # @ operation needs arguments to be the same dtype
+        for view_dtype in test_dtypes:
+            try:
+                x = rand_strided((2, 2), (2, 1), device=self.device, dtype=dtype_x)
+                y = rand_strided((2, 2), (2, 1), device=self.device, dtype=dtype_y)
+                x2 = x.clone()
+                fn(x, y, view_dtype, x2)
+            except Exception as e:
+                continue
+            self.common(
+                fn,
+                (x, y, view_dtype, x2),
+                reference_in_float=False,
+                check_lowp=False,
+            )
 
     @torch._inductor.config.patch(abi_compatible=True)
     def test_dtypeview_fusion(self):
