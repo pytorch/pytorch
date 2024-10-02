@@ -661,6 +661,9 @@ class TestCuda(TestCase):
             device_index=stream.device_index,
             device_type=stream.device_type,
         )
+        self.assertIsInstance(cuda_stream, torch.Stream)
+        self.assertTrue(issubclass(type(cuda_stream), torch.Stream))
+        self.assertTrue(torch.Stream in type(cuda_stream).mro())
         self.assertEqual(stream.stream_id, cuda_stream.stream_id)
         self.assertNotEqual(stream.stream_id, torch.cuda.current_stream().stream_id)
 
@@ -683,6 +686,10 @@ class TestCuda(TestCase):
         self.assertNotEqual(event1.event_id, event2.event_id)
         self.assertEqual(c_cuda.cpu(), a + b)
         self.assertTrue(event1.elapsed_time(event2) > 0)
+        cuda_event = torch.cuda.Event()
+        self.assertIsInstance(cuda_event, torch.Event)
+        self.assertTrue(issubclass(type(cuda_event), torch.Event))
+        self.assertTrue(torch.Event in type(cuda_event).mro())
 
     def test_record_stream(self):
         cycles_per_ms = get_cycles_per_ms()
