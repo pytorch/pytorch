@@ -1677,6 +1677,8 @@ def forward(self, x_1, output_1):
             self.assertEqual(out_e[0], out_c[0])
             self.assertEqual(out_e[1], out_c[1])
 
+    # TODO enable this test case on XPU.
+    @requires_cuda
     def test_i64_input(self):
         # The i64 "seed" input needs to be marked as "i64", not "i32".
         @triton.jit
