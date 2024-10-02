@@ -91,7 +91,7 @@ def freeze(
     if tracing_context := torch._guards.TracingContext.try_get():
         fw_metadata = tracing_context.fw_metadata
         assert tracing_context.params_flat_unwrap_subclasses is not None
-        params_flat = [r() for r in tracing_context.params_flat_unwrap_subclasses]
+        params_flat = tracing_context.params_flat_unwrap_subclasses
         assert fw_metadata is not None and params_flat is not None
 
         preserved_arg_indices = replace_params_with_constants(
