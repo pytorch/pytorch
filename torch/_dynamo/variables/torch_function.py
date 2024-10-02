@@ -483,7 +483,14 @@ def call_torch_function(
 
 
 def build_torch_function_fn(tx: "InstructionTranslator", value, source):
+    from types import FunctionType
+
     from .builder import SourcelessBuilder, VariableBuilder
+
+    func = value.__torch_function__.__func__
+
+    if not isinstance(func, FunctionType):
+        unimplemented("Builtin/C++ torch function implementations NYI")
 
     if source:
         return VariableBuilder(
