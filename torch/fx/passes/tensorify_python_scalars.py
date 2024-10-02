@@ -16,9 +16,6 @@ from torch.fx.passes.runtime_assert import _get_sym_val
 from torch.fx.proxy import MetaProxy
 from torch.utils._sympy.reference import TensorReferenceAnalysis
 
-
-__all__ = ["tensorify_python_scalars"]
-
 log = logging.getLogger(__name__)
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 
