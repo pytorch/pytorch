@@ -3,10 +3,7 @@ import sys
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
-
-
-def is_fbcode() -> bool:
-    return not hasattr(torch.version, "git_version")
+from torch._environment import is_fbcode
 
 
 def _get_tristate_env(name: str) -> Optional[bool]:
@@ -227,6 +224,7 @@ use_mixed_mm = True
 # https://pytorch.org/docs/stable/notes/numerical_accuracy.html#batched-computations-or-slice-computations
 fx_passes_numeric_check: Dict[str, Any] = {
     "pre_grad": False,
+    "post_grad": False,
     "precision": 1e-4,
     "num_iterations": 1,
     "requires_optimizer": True,
@@ -1109,6 +1107,10 @@ class cuda:
     cutlass_op_denylist_regex: Optional[str] = "pingpong"
 
 
+if is_fbcode() and torch.version.hip:
+    from triton.fb import build_paths
+
+
 class rocm:
     # Offload arch list for device code compilation, e.g. ["gfx941", "gfx942"].
     # If empty, the `native` arch is used
@@ -1137,7 +1139,9 @@ class rocm:
     print_kernel_resource_usage = False
 
     # Path to ROCm installation, if None, use env variable ROCM_HOME
-    rocm_home: Optional[str] = None
+    rocm_home: Optional[str] = (
+        build_paths.rocm() if is_fbcode() and torch.version.hip else None
+    )
 
     # Path to Composable Kernel library.
     # Install with `pip install git+https://github.com/rocm/composable_kernel@develop`.
@@ -1151,7 +1155,7 @@ class rocm:
     use_preselected_instances: bool = False
 
 
-# Backend to use for CPU codegen either "cpp" or "halide" (experimental)
+# Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental)
 cpu_backend = "cpp"
 
 # Backend to use for CUDA codegen either "triton" or "halide" (experimental)

@@ -19,6 +19,7 @@
 #include <ATen/ops/mkldnn_linear_native.h>
 #endif
 
+#include <ATen/native/mkldnn/Linear.h>
 #if !AT_MKLDNN_ENABLED()
 
 namespace at {
@@ -180,12 +181,12 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
 }
 
-static Tensor mkldnn_linear_pointwise(
+Tensor mkldnn_linear_pointwise(
     const Tensor& input_t,
     const Tensor& weight_t,
     const std::optional<Tensor>& bias_opt,
     c10::string_view attr,
-    torch::List<std::optional<at::Scalar>> scalars,
+    c10::List<std::optional<at::Scalar>> scalars,
     std::optional<c10::string_view> algorithm) {
   auto input = input_t.contiguous();
   auto input_size = input.sizes();
@@ -254,7 +255,7 @@ static Tensor mkldnn_linear_pointwise(
   return output;
 }
 
-static Tensor mkldnn_linear_pointwise_binary(
+Tensor mkldnn_linear_pointwise_binary(
     const Tensor& input_t,
     const Tensor& other_t,
     const Tensor& weight_t,

@@ -6,6 +6,7 @@ from collections import Counter
 from typing import Dict
 
 import torch
+from torch._environment import is_fbcode
 from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization import (
     compare_results,
@@ -38,10 +39,6 @@ def _extract_debug_handles(model) -> Dict[str, int]:
             ]
 
     return debug_handle_map
-
-
-def is_fbcode():
-    return not hasattr(torch.version, "git_version")
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
