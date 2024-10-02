@@ -651,14 +651,6 @@ def reorder_for_peak_memory(
         },
     )
 
-    signpost_event(
-        category="inductor",
-        name="memory",
-        parameters={
-            "orm": {elem.method: elem.peak_memory for elem in peak_memory_diff_methods},
-        },
-    )
-
     # get the optimal one
     best_result = min(peak_memory_diff_methods, key=lambda x: x.peak_memory)
 
