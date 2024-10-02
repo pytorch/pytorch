@@ -184,7 +184,7 @@ class CachingAutotuner(KernelInterface):
         self,
         fn,
         triton_meta,  # passed directly to triton
-        configs,
+        configs: List[Config],
         save_cache_hook: Optional[Callable],
         mutated_arg_names: List[str],  # see [Note: clone mutated buffers]
         heuristic_type,
