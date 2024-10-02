@@ -59,7 +59,8 @@ namespace fs = std::experimental::filesystem;
 #include <limits.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <unistd.h>#endif
+#include <unistd.h>
+#endif
 
 // HACK for failed builds in ARVR, where it cannot find these symbols within
 // std::experimental::filesystem
