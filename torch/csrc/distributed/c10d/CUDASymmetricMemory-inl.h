@@ -12,7 +12,7 @@ constexpr size_t max_num_threads_per_block = 1024;
 constexpr size_t max_num_blocks = 8;
 
 template <typename T>
-size_t get_alignment(T ptr_or_size) {
+__inline__ size_t get_alignment(T ptr_or_size) {
   auto val = reinterpret_cast<uintptr_t>(ptr_or_size);
   if (val % 16 == 0) {
     return 16;
@@ -28,7 +28,7 @@ size_t get_alignment(T ptr_or_size) {
 }
 
 template <>
-size_t get_alignment<size_t>(size_t size) {
+__inline__ size_t get_alignment<size_t>(size_t size) {
   return get_alignment(reinterpret_cast<void*>(size));
 }
 
