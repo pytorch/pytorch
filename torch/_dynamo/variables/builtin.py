@@ -211,6 +211,7 @@ class BuiltinVariable(VariableTracker):
             operator.imatmul,
             operator.ifloordiv,
             operator.itruediv,
+            operator.getitem,
             operator.imod,
             operator.iadd,
             operator.isub,
@@ -856,6 +857,19 @@ class BuiltinVariable(VariableTracker):
 
         if kwargs and not self.tensor_args(*args, *kwargs.values()):
             return
+
+        # insert handling for torch function here
+        from .builder import SourcelessBuilder
+        from .torch_function import (
+            BUILTIN_TO_TENSOR_FN_MAP,
+            can_dispatch_torch_function,
+            dispatch_torch_function,
+        )
+
+        if can_dispatch_torch_function(tx, args, kwargs):
+            # Use sourceless builder, we built the map ourselves
+            fn_var = SourcelessBuilder.create(tx, BUILTIN_TO_TENSOR_FN_MAP[self.fn])
+            return dispatch_torch_function(tx, fn_var, args, kwargs)
 
         fn = self.fn
         try:
