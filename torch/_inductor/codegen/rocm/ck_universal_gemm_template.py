@@ -314,7 +314,7 @@ class CKGemmTemplate(CKTemplate):
 * Template instance {op}
 *
 * {torch.__version__=}
-* {torch.version.git_version=}
+* torch.version.git_version={getattr(torch.version, 'git_version', 'None')}
 */
 """
         epilogue = None
