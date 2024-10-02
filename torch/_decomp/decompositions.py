@@ -306,7 +306,7 @@ def _prelu_kernel_backward(
 
 
 @register_decomposition(aten.rrelu_with_noise)
-@aten.rrelu_with_noise.default.py_impl(DispatchKey.AutogradCUDA)
+@aten.rrelu_with_noise.default.py_impl(DispatchKey.Autograd)
 @out_wrapper()
 @pw_cast_for_opmath
 def rrelu_with_noise(
@@ -330,7 +330,7 @@ def rrelu_with_noise(
 
 
 @register_decomposition(aten.rrelu_with_noise_)
-@aten.rrelu_with_noise_.default.py_impl(DispatchKey.AutogradCUDA)
+@aten.rrelu_with_noise_.default.py_impl(DispatchKey.Autograd)
 @pw_cast_for_opmath
 def rrelu_with_noise_(
     self: Tensor,
@@ -2150,7 +2150,7 @@ def _to_copy(
         if dtype is not None and device.type == "cpu":
             x_tensor = torch._prims.convert_element_type(x_tensor, dtype)
             dtype_converted = True
-        x_tensor = torch._prims.device_put(x_tensor, device)
+        x_tensor = torch._prims.device_put(x_tensor, device, non_blocking)
 
     if dtype is not None and not dtype_converted:
         x_tensor = torch._prims.convert_element_type(x_tensor, dtype)
