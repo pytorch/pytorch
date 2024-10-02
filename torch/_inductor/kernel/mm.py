@@ -39,6 +39,7 @@ from ..utils import (
     use_triton_template,
 )
 from .mm_common import (
+    _is_static_problem,
     addmm_epilogue,
     extra_mm_configs,
     int8_mm_configs,
@@ -170,7 +171,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     choices = (
         [aten_mm.bind((mat1, mat2), aten_layout)] if use_aten_gemm_kernels() else []
     )
-    static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
+    static_shape, is_nonzero = _is_static_problem(layout)
     if is_nonzero and use_triton_template(layout):
         for config in mm_configs(m, n, k):
             mm_template.maybe_append_choice(
@@ -254,35 +255,12 @@ def tuned_mm(mat1, mat2, *, layout=None):
         return aten_mm.bind((mat1, mat2), aten_layout).output_node()
 
 
-def _is_static_problem(inputs_tensors, layout):
-    # checks whether all input tensors and the output layout
-    # have a static shape by attempting to convert the dimensions
-    # to int
-    static_shape = True
-    static_size = PythonWrapperCodegen.statically_known_list_of_ints_or_none(
-        layout.size
-    )
-    if static_size is None:
-        nonzero = True
-        for s in layout.size:
-            sz = PythonWrapperCodegen.statically_known_int_or_none(s)
-            if sz is not None and sz == 0:
-                nonzero = False
-                break
-        return False, nonzero
-    numel = 1
-    for dim in static_size:
-        numel *= dim
-    nonzero = numel > 0
-    return static_shape, nonzero
-
-
 @register_lowering(aten._int_mm, type_promotion_kind=None)
 def tuned_int_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1, mat2, layout=layout, out_dtype=torch.int32
     )
-    static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
+    static_shape, is_nonzero = _is_static_problem(layout)
     use_cutlass = static_shape and is_nonzero and use_cutlass_template(layout, m, n, k)
 
     choices = (
@@ -325,7 +303,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
-    static_shape, is_nonzero = _is_static_problem([inp, mat1, mat2], layout)
+    static_shape, is_nonzero = _is_static_problem(layout)
     if (not is_nonzero) or (not use_max_autotune()):
         # Use a FlexibleLayout if we are not autotuning.
         # This allows padding strides for the output.
@@ -672,7 +650,7 @@ def get_size_hints_strides(mat1, mat2):
 
 def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None)
-    static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
+    static_shape, is_nonzero = _is_static_problem(layout)
 
     fallback = aten_fallback_mixed_mm.bind((mat1, mat2), layout)
 
