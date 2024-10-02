@@ -31,6 +31,7 @@ elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
     python_digits="\$(echo $DESIRED_PYTHON | tr -cd [:digit:])"
     python_path="/opt/python/cp\$python_digits-cp\${python_digits}t"
   fi
+  export PATH="\${python_path}/bin:\$PATH"
 fi
 
 EXTRA_CONDA_FLAGS=""
