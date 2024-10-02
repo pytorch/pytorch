@@ -1506,7 +1506,7 @@ def init_process_group(
             -1,
             [],
             backend,
-            None,
+            Store(),  # Placeholder value since store cannot be None
             group_name,
             timeout=timeout,
             group_desc="default_pg",
