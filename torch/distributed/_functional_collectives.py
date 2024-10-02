@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
-from functools import partial
 import sys
 import warnings
+from functools import partial
 from typing import cast, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
@@ -215,7 +215,9 @@ def all_gather_tensor(
         # torch.cat access the data so we already need to wait here, first do wait
         # and then chunk + cat avoid us going through ACT dispatching logic again
         if isinstance(res, AsyncCollectiveTensor):
-            res.register_callback(partial(callback, gather_dim=gather_dim, group_size=group_size))
+            res.register_callback(
+                partial(callback, gather_dim=gather_dim, group_size=group_size)
+            )
         else:
             res = callback(res, gather_dim=gather_dim, group_size=group_size)
     return res
@@ -249,7 +251,9 @@ def all_gather_tensor_autograd(
         # torch.cat access the data so we already need to wait here, first do wait
         # and then chunk + cat avoid us going through ACT dispatching logic again
         if isinstance(res, AsyncCollectiveTensor):
-            res.register_callback(partial(callback, gather_dim=gather_dim, group_size=group_size))
+            res.register_callback(
+                partial(callback, gather_dim=gather_dim, group_size=group_size)
+            )
         else:
             res = callback(res, gather_dim=gather_dim, group_size=group_size)
     return res
