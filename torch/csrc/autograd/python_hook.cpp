@@ -62,10 +62,13 @@ bool _call_hooks(PyObject* dict, PyObject* args) {
   // So, we use `PyDict_Values` which returns a new reference to the values
   // i.e. we hold the reference to the hooks till we have iterated over them.
   // Reference: https://github.com/pytorch/pytorch/issues/58354
+
   auto hooks = THPObjectPtr{PyDict_Values(dict)};
   bool is_modified = false;
   const auto len = PyList_Size(hooks);
   for (Py_ssize_t idx = 0; idx < len; ++idx) {
+    // Note that this call is NoGil safe as the list is created just above and
+    // not accessible by any other thread
     const auto hook = PyList_GetItem(hooks, idx);
 
     THPObjectPtr res(PyObject_CallObject(hook, args));

@@ -224,6 +224,7 @@ use_mixed_mm = True
 # https://pytorch.org/docs/stable/notes/numerical_accuracy.html#batched-computations-or-slice-computations
 fx_passes_numeric_check: Dict[str, Any] = {
     "pre_grad": False,
+    "post_grad": False,
     "precision": 1e-4,
     "num_iterations": 1,
     "requires_optimizer": True,
@@ -1148,7 +1149,7 @@ class rocm:
     use_preselected_instances: bool = False
 
 
-# Backend to use for CPU codegen either "cpp" or "halide" (experimental)
+# Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental)
 cpu_backend = "cpp"
 
 # Backend to use for CUDA codegen either "triton" or "halide" (experimental)
