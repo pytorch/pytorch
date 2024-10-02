@@ -8,6 +8,7 @@ import random
 import re
 import sys
 import types
+import warnings
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch._C
@@ -661,6 +662,11 @@ class AutogradFunctionVariable(VariableTracker):
         VariableTracker.visit(visit, (args, kwargs))
 
         if requires_grad and torch.is_grad_enabled():
+            if config.capture_autograd_function:
+                warnings.warn(
+                    "The config.capture_autograd_function flag is deprecated, it's now always true."
+                )
+
             from torch._functorch.autograd_function import (
                 autograd_function_forward_rewritten,
             )
