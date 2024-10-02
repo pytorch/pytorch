@@ -142,7 +142,8 @@ class DebugPrinterManager:
             )
             self.debug_printer_level = IntermediateValueDebuggingLevel.OFF
 
-        # Note: if the kernel type is an extern kernel, we do a special handling to get the list of args_to_print_or_save
+        # Note: if the kernel type is an extern kernel (or cpp kernel), we do a special handling to
+        # get the list of args_to_print_or_save
         # TODO: Find a more reliable way to detect kernel args types to print for extern kernel calls
         if kernel_type == "extern":
             args_to_print_or_save_extern = []
@@ -150,6 +151,14 @@ class DebugPrinterManager:
                 if arg.startswith(("buf", "arg")):
                     args_to_print_or_save_extern.append(arg)
             self.args_to_print_or_save = args_to_print_or_save_extern
+        elif kernel_type == "cpp":
+            args_to_print_or_save_cpp = []
+            for arg in args_to_print_or_save:
+                if arg.startswith(("buf", "arg")):
+                    args_to_print_or_save_cpp.append(
+                        f"convert_arrayref_tensor_to_tensor({arg})"
+                    )
+            self.args_to_print_or_save = args_to_print_or_save_cpp
         else:
             self.args_to_print_or_save = args_to_print_or_save
         self.kernel_name = kernel_name
@@ -231,7 +240,7 @@ class DebugPrinterManager:
                 # check if filtered kernel name list is provided
                 if (
                     len(self.filtered_kernel_names_to_print) > 0
-                    and kernel_name not in self.filtered_kernel_names_to_print
+                    and kernel_name.lower() not in self.filtered_kernel_names_to_print
                 ):
                     continue
 
