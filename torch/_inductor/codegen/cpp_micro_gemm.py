@@ -516,7 +516,7 @@ class CppMicroGemmAMX(CppMicroGemm):
     // It's possible that N may not be equal to Nr, but might be a multiple of it.
     // In that case, Kc (which is K in the microkernel) would be smaller (than the case in which N == Nr).
     const int64_t num_elements_per_b_tile = 512;
-    const int64_t buf_size_per_nr_block = ((K + {{block_k // 2}} - 1) / {{block_k // 2}}) * num_elements_per_b_tile;
+    const int64_t buf_size_per_nr_block = ((K + {{block_k}} - 1) / {{block_k}}) * num_elements_per_b_tile * 2;
     const int64_t buf_size = buf_size_per_nr_block * (N / {{block_n}});
 
     alignas(4096) {{input_t}} bf16_weights_buf[buf_size];
@@ -543,13 +543,13 @@ class CppMicroGemmAMX(CppMicroGemm):
     };
     auto load_weights = [&](int n) {
         // Load weights & cache them in L1D.
-        const int64_t init_index =  n * buf_size_per_nr_block;
+        const int64_t init_idx =  n * buf_size_per_nr_block;
         {{kernel.unroll_pragma(4)}}
         for (int k = 0; k < last_k_offset; k += {{block_k}}) {
             {{kernel.unroll_pragma(2)}}
             for (int tile_col = 0; tile_col <= 1; tile_col++) {
                 load_B_in_buf(const_cast<{{input2_t}}*>(B) + k * ldb + tile_col * {{16 * vnni_size}},
-                              ((k + {{block_k // 2}} - 1) / {{block_k // 2}} + tile_col) * num_elements_per_b_tile + init_index);
+                              (k / {{block_k // 2}} + tile_col) * num_elements_per_b_tile + init_idx);
             }
         }
     };
@@ -662,7 +662,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
     auto compute = [&](int k) {
 {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
     // base index for dequantized weights
-    const int64_t base_idx_of_weights = ((k + {{block_k // 2}} - 1) / {{block_k // 2}}) * 512;
+    const int64_t base_idx_of_weights = (k / {{block_k // 2}}) * 512;
 {%- endif %}
 {%- set tile_offset_a = num_rows // 16 * num_columns %}
 {%- set tile_offset_b = tile_offset_a + num_rows // 16 %}
