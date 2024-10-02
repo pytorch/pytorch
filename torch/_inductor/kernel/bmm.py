@@ -16,7 +16,13 @@ from ..utils import (
     use_triton_template,
 )
 from ..virtualized import V
-from .mm_common import addmm_epilogue, mm_args, mm_configs, mm_options, _is_static_problem
+from .mm_common import (
+    _is_static_problem,
+    addmm_epilogue,
+    mm_args,
+    mm_configs,
+    mm_options,
+)
 
 
 log = logging.getLogger(__name__)
