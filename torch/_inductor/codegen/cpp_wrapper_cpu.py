@@ -15,7 +15,7 @@ import torch._ops
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 
 from .. import config, ir
-from ..utils import _align, ALIGN_BYTES, cache_on_self, sympy_product
+from ..utils import _align, ALIGN_BYTES, cache_on_self, normalize_name, sympy_product
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import IndentedBuffer
@@ -757,6 +757,26 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 from_folded = "true" if name in V.graph.folded_constants else "false"
                 self.prefix.writeline(
                     f"constants_info_[{idx}].from_folded = {from_folded};"
+                )
+
+                if name in V.graph.folded_constants:
+                    constant_type_str = "FoldedConstant"
+                elif name.startswith("_tensor_constant"):
+                    constant_type_str = "TensorConstant"
+                elif any(
+                    name == normalize_name(parameter_name)
+                    for parameter_name, _ in V.graph.orig_gm.named_parameters()
+                ):
+                    constant_type_str = "Parameter"
+                elif any(
+                    name == normalize_name(buffer_name)
+                    for buffer_name, _ in V.graph.orig_gm.named_buffers()
+                ):
+                    constant_type_str = "Buffer"
+                else:
+                    constant_type_str = "Unknown"
+                self.prefix.writeline(
+                    f"constants_info_[{idx}].type = static_cast<int32_t>(torch::aot_inductor::ConstantType::{constant_type_str});"
                 )
 
                 size_str = ", ".join([str(s) for s in tensor.size()])
@@ -1780,13 +1800,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
         else:
             return final_tmp_name
 
-    def codegen_device_copy(self, src, dst):
+    def codegen_device_copy(self, src, dst, non_blocking: bool):
         if config.abi_compatible:
             self.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_tensor_copy_(expensive_copy_to_tensor_if_needed({src}), {dst}));"
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_(expensive_copy_to_tensor_if_needed({dst}), {src}, {non_blocking}));"
             )
         else:
-            self.writeline(f"{dst}.copy_({src});")
+            self.writeline(f"{dst}.copy_({src}, {non_blocking});")
 
     def codegen_multi_output(self, name, value):
         # in the abi_compatible mode, outputs are retrieved by passing
@@ -2162,6 +2182,17 @@ if (custom_op_wrapper.get() == NULL) {
 
         self.custom_op_wrapper_loaded = True
 
+    def generate_float_value(self, val):
+        assert isinstance(val, float)
+        if val == float("inf"):
+            return "std::numeric_limits<float>::infinity()"
+        elif val == float("-inf"):
+            return "-std::numeric_limits<float>::infinity()"
+        elif val == float("nan"):
+            return "std::numeric_limits<float>::quiet_NaN()"
+        else:
+            return f"{val}"
+
     def generate_py_arg(self, py_args_var, idx, raw_arg, arg_type):
         def generate_py_arg_inner(lines, raw_arg, arg_type):
             if raw_arg is None:
@@ -2191,7 +2222,7 @@ if (custom_op_wrapper.get() == NULL) {
                 )
                 return f"PyLong_FromLongLong({self.expr_printer(expr)})"
             elif isinstance(arg_type, torch.FloatType):
-                return f"PyFloat_FromDouble({raw_arg})"
+                return f"PyFloat_FromDouble({self.generate_float_value(raw_arg)})"
             elif isinstance(arg_type, torch.BoolType):
                 return f"PyBool_FromLong({1 if raw_arg else 0})"
             elif isinstance(arg_type, torch.StringType):
@@ -2202,7 +2233,7 @@ if (custom_op_wrapper.get() == NULL) {
                 if isinstance(raw_arg, int):
                     return f"PyLong_FromLongLong({raw_arg})"
                 elif isinstance(raw_arg, float):
-                    return f"PyFloat_FromDouble({raw_arg})"
+                    return f"PyFloat_FromDouble({self.generate_float_value(raw_arg)})"
                 elif isinstance(raw_arg, bool):
                     return f"PyBool_FromLong({1 if raw_arg else 0})"
                 elif isinstance(raw_arg, complex):
@@ -2421,11 +2452,8 @@ if (py_{buf_name}.get() == NULL) {{
             return self.codegen_device(val)
         elif isinstance(val, torch.dtype):
             return self.codegen_dtype(val)
-        elif isinstance(val, float) and val in [float("inf"), float("-inf")]:
-            if val == float("inf"):
-                return "std::numeric_limits<float>::infinity()"
-            else:
-                return "-std::numeric_limits<float>::infinity()"
+        elif isinstance(val, float):
+            return self.generate_float_value(val)
         elif isinstance(val, (list, tuple)):
             # FIXME: This happens because type_ is not always properly set to torch.ListType
             return f"{{{', '.join(self.val_to_arg_str(x, None) for x in val)}}}"

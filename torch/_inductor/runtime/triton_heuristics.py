@@ -57,6 +57,8 @@ if triton is not None:
     from triton.runtime.autotuner import OutOfResources
     from triton.runtime.jit import KernelInterface
 
+    from . import triton_helpers
+
     try:
         from triton.compiler.compiler import ASTSource
     except ImportError:
@@ -67,11 +69,14 @@ if triton is not None:
     except ImportError:
         GPUTarget = None
 else:
+    from types import ModuleType
+
     Config = object
     KernelInterface = object
     OutOfResources = object
     ASTSource = None
     GPUTarget = None
+    triton_helpers = ModuleType("triton_helpers")
 
 try:
     autograd_profiler = torch.autograd.profiler
@@ -101,6 +106,10 @@ def autotune_hints_to_configs(
     """
     xyz_options: Tuple[Tuple[int, Optional[int], Optional[int]], ...]
     configs = []
+    warp_size = device_props.warp_size
+    # CPU target has no concept of "warp"
+    if warp_size is None:
+        warp_size = 32
 
     for hint in hints:
         if hint == AutotuneHint.ONE_ELEMENT_PER_THREAD:
@@ -266,6 +275,11 @@ class CachingAutotuner(KernelInterface):
             seen_configs = set(self.configs)
 
             device_prop = self.device_props
+            warp_size = device_prop.warp_size
+            # CPU target has no concept of "warp"
+            if warp_size is None:
+                warp_size = 32
+
             if (
                 self.inductor_meta.get("dynamic_scale_rblock", True)
                 and self.heuristic_type == HeuristicType.REDUCTION
@@ -311,7 +325,7 @@ class CachingAutotuner(KernelInterface):
                     ):
                         continue
 
-                    nreg_per_warp = nreg * device_prop.warp_size
+                    nreg_per_warp = nreg * warp_size
                     nreg_per_block = nreg_per_warp * triton_config.num_warps
 
                     # Previously we set max_blocks_per_sm to 'max_threads_per_multi_processo / (32 * num_warps)'
@@ -375,6 +389,11 @@ class CachingAutotuner(KernelInterface):
         # device type will be "hip" rather than "cuda" here
         compile_meta["device_type"] = self.device_props.type
         compile_meta["cc"] = self.device_props.cc
+
+        if self.device_props.type == "cpu":
+            triton_helpers.set_driver_to_cpu()
+        else:
+            triton_helpers.set_driver_to_gpu()
 
         if ASTSource:
             compile_args = (
@@ -678,6 +697,9 @@ class CachingAutotuner(KernelInterface):
 
             return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
 
+        if self.device_props.type == "cpu":
+            return benchmarker.benchmark_cpu(kernel_call)
+
         return benchmarker.benchmark_gpu(kernel_call, rep=40)
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
@@ -742,8 +764,6 @@ class CachingAutotuner(KernelInterface):
             self.save_cache_hook(self.launchers[0].config, self.autotune_time_taken_ns)
 
     def save_gpu_kernel(self, grid, stream, launcher):
-        if self.cuda_kernel_saved:
-            return
         if callable(grid):
             grid_x, grid_y, grid_z = grid(launcher.config.kwargs)
         else:
@@ -835,7 +855,9 @@ class CachingAutotuner(KernelInterface):
             )
         return config2launcher.get(best_config)
 
-    def run(self, *args, grid, stream, **kwargs):  # type:ignore[override]
+    def run(
+        self, *args, grid, stream, benchmark_run=False, **kwargs
+    ):  # type:ignore[override]
         if len(self.launchers) != 1:
             if len(self.launchers) == 0:
                 start_time = time.time_ns()
@@ -854,7 +876,7 @@ class CachingAutotuner(KernelInterface):
             ]
 
         (launcher,) = self.launchers
-        if launcher.store_cubin:
+        if launcher.store_cubin and (not benchmark_run or not self.cuda_kernel_saved):
             self.save_gpu_kernel(grid, stream, launcher)
 
         if os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_PARAMS", 0) == "1":
