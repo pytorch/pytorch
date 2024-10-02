@@ -1,8 +1,6 @@
 #include <torch/csrc/distributed/autograd/functions/sendrpc_backward.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 torch::autograd::variable_list SendRpcBackward::apply(
     torch::autograd::variable_list&& inputs) {
@@ -27,6 +25,4 @@ const torch::autograd::variable_list& SendRpcBackward::getGrads() const {
   return grads_;
 }
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd
