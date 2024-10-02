@@ -250,6 +250,10 @@ class PrefixStoreTest(TestCase):
                 prefix_store = dist.PrefixStore("prefix", store)
                 self.assertEqual(prefix_store.underlying_store, store)
 
+        # We do not allow passing in None as the underlying store, this would cause a segfault if used
+        with self.assertRaises(ValueError):
+            dist.PrefixStore("prefix", None)
+
 
 class PrefixFileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
