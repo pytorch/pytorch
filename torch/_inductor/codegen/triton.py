@@ -1705,12 +1705,9 @@ class TritonKernel(SIMDKernel):
                 index_str, OrderedSet(), "None", expand_str, has_rindex, index
             )
 
-        if need_dense and not have_dense:
-            expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
-            index_str = f"tl.broadcast_to({index_str}, {expand_str})"
-            mask_vars = dense_mask_vars
-        elif not have_loop_vars and copy_shape:
-            index_str = f"tl.broadcast_to({index_str}, {copy_shape}.shape)"
+        if (need_dense and not have_dense) or (have_loop_vars and copy_shape):
+            broadcast_str = expand_str if not copy_shape else f"{copy_shape}.shape"
+            index_str = f"tl.broadcast_to({index_str}, {broadcast_str})"
             mask_vars = dense_mask_vars
 
         if override_mask:
@@ -3023,6 +3020,9 @@ class TritonKernel(SIMDKernel):
         for tree in self.range_trees:
             if self._has_constant_mask(tree):
                 mask_vars.discard(f"{tree.prefix}mask")
+
+        # can be added as an override_mask
+        mask_vars.discard("None")
 
     def iteration_ranges_codegen_header(self, entry, code):
         x = entry.prefix

@@ -1061,6 +1061,23 @@ class TestPrologueFusion(TestCase):
         FileCheck().check("del buf0  # reuse").run(code[0])
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=5)
 
+    @config.patch(shape_padding=True)
+    @config.patch(force_shape_pad=True)
+    @parametrize("sizes", ((250, 245, 128), (250, 256, 128), (256, 128, 62)))
+    def test_prologue_masked_load(self, sizes):
+        M, K, N = sizes
+
+        def foo(x, y):
+            return x @ y
+
+        # cat will turn into masked load
+        x = torch.rand([250, 245], device="cuda")
+        y = torch.rand([245, 128], device="cuda")
+
+        out, code = run_and_get_code(torch.compile(foo), x, y)
+        self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu

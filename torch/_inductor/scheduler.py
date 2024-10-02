@@ -1321,34 +1321,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
         return buf.getrawvalue().rstrip()
 
-    def get_fused_template_prologue_groups(
-        self,
-    ) -> Optional[Dict[str, List[BaseSchedulerNode]]]:
-        """
-        Returns a Mapping from Template input buffer to a fused group of prologue nodes for that buffer
-
-        """
-        if not self.is_template():
-            return None
-
-        template_index = next(i for i, n in enumerate(self.snodes) if n.is_template())
-        template_node = self.snodes[template_index]
-        prologue_nodes = self.snodes[:template_index]
-
-        buf_name_to_prologue_group = {}
-        template_reads = template_node.used_buffer_names()
-        prologue_group = []
-        for prologue in prologue_nodes:
-            names = prologue.get_buffer_names()
-            prologue_group.append(prologue)
-            if prologue.get_buffer_names() & template_reads:
-                assert len(names) == 1
-                buf_name_to_prologue_group[next(iter(names))] = prologue_group
-                kernel.final_prologue_buffers.append(next(iter(names)))
-                prologue_group = []
-
-        return buf_name_to_prologue_group
-
 
 class ForeachKernelSchedulerNode(FusedSchedulerNode):
     """
@@ -3032,6 +3004,10 @@ class Scheduler:
                 why("prologue fusion turned off")
                 return False
 
+            if node1.is_reduction() or node1.is_template():
+                why("prologue fusion only supported for pointwise nodes")
+                return False
+
             template = node2.get_template_node_or_throw()
             if not isinstance(template, ir.TritonTemplateBuffer):
                 why("prologue fusion only supported for TritonTemplates")
@@ -3884,7 +3860,8 @@ class BaseScheduling:
 def debug_triton_code(node: Union[SchedulerNode, FusedSchedulerNode]) -> List[str]:
     lines = []
     multi_template = node.get_template_node()
-    assert multi_template is None or isinstance(multi_template, ir.MultiTemplateBuffer)
+    if multi_template is None or isinstance(multi_template, ir.MultiTemplateBuffer):
+        lines.append(f"{node.get_name()} template buffer bad repr")
     if multi_template and multi_template.make_kernel_render is None:
         lines.append(f"{node.get_name()} Unfinalized multi template buffer")
     else:

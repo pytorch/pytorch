@@ -542,9 +542,17 @@ class TritonTemplateKernel(TritonKernel):
             )
             contiguous_index = self.rename_indexing(contiguous_index)
             self.body.writeline("xindex = " + texpr(contiguous_index))
-            self.range_trees[0].lookup(sympy.Integer(1), sympy_product(lengths)).set_name(
-                "xindex"
-            )
+            self.range_trees[0].lookup(
+                sympy.Integer(1), sympy_product(lengths)
+            ).set_name("xindex")
+
+            # Note - ["None" override_mask]
+            # MM Templates work by taking out of bounds index values and wrapping them around to 0
+            # so that no mask is required on the load: offs_a_m = `rm % M`
+            # We should to override the mask to be "None" instead of inheriting the mask that would
+            # have been loaded otherwise.
+            # We are using "None" for clarity in output code, but
+            # we could alternatively emit `xmask = tl.full([xindex.shape], True, tl.int1)`
             self.template_mask = mask if mask is not None else "None"
             self.template_out = "xindex"
             self.template_indices = indices
