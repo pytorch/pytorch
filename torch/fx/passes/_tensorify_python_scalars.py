@@ -61,7 +61,7 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 
 
 @torch.fx._compatibility.compatibility(is_backward_compatible=False)
-def _tensorify_python_scalars(
+def tensorify_python_scalars(
     gm: GraphModule, shape_env: ShapeEnv, fake_mode: fake_tensor.FakeTensorMode
 ) -> None:
     """
