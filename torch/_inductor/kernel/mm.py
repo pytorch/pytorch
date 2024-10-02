@@ -127,7 +127,6 @@ mm_template = TritonTemplate(
 """,
 )
 
-
 aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
 
 aten_addmm = ExternKernelChoice(

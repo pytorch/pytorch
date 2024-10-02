@@ -516,11 +516,13 @@ class BaseSchedulerNode:
             include_reads=True, include_writes=True
         )
 
+    @cache_on_self
     def get_read_buffer_sizes(self) -> int:
         return self.get_read_write_buffers_sizes_impl(
             include_reads=True, include_writes=False
         )
 
+    @cache_on_self
     def get_write_buffer_sizes(self) -> int:
         return self.get_read_write_buffers_sizes_impl(
             include_reads=False, include_writes=True
@@ -3067,7 +3069,9 @@ class Scheduler:
                 return False
 
         if node1.is_template() and (
-            node2.has_aliasing_or_mutation() or node2.is_reduction()
+            node2.has_aliasing_or_mutation()
+            or node2.is_reduction()
+            or not config.epilogue_fusion
         ):
             why("template epilogue not satisfied")
             return False
@@ -3860,8 +3864,7 @@ class BaseScheduling:
 def debug_triton_code(node: Union[SchedulerNode, FusedSchedulerNode]) -> List[str]:
     lines = []
     multi_template = node.get_template_node()
-    if multi_template is None or isinstance(multi_template, ir.MultiTemplateBuffer):
-        lines.append(f"{node.get_name()} template buffer bad repr")
+    assert multi_template is None or isinstance(multi_template, ir.MultiTemplateBuffer)
     if multi_template and multi_template.make_kernel_render is None:
         lines.append(f"{node.get_name()} Unfinalized multi template buffer")
     else:

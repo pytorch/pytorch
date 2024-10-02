@@ -123,8 +123,13 @@ class SubgraphInfo:
     loads: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
     stores: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
     ops_handler: Optional[V.WrapperHandler] = None  # type: ignore[name-defined]
+
+    # only copied over if not None
     range_trees: Optional[List["IterationRangesRoot"]] = None
     numels = None  # type: ignore[var-annotated]
+
+    def __post_init__(self):
+        self.only_copy_if_non_none_fields = ("range_trees", "numels")
 
     def to_dict(self):
         return {
@@ -207,8 +212,9 @@ class TritonTemplateKernel(TritonKernel):
         }
         assert body_name in self.subgraph_bodies, body_name
 
-        for key, value in self.subgraph_bodies[body_name].to_dict().items():
-            if key in ("range_trees", "numels") and value is None:
+        subgraph = self.subgraph_bodies[body_name]
+        for key, value in subgraph.to_dict().items():
+            if value is None and key in subgraph.only_copy_if_non_none_fields:
                 continue
             setattr(self, key, value)
 
@@ -503,13 +509,14 @@ class TritonTemplateKernel(TritonKernel):
             indent_width (int): The number of spaces to use for indentation.
         """
 
-        load_code = None
         self._input_names_with_prologue_fusion.add(input_name)
         input_node = self.named_input_nodes[input_name]
         groups = (sympy_product(input_node.get_size()), sympy.Integer(1))
         range_trees = self.construct_range_trees(
             pid_cache=None, inside_reduction=False, numels=groups, no_x_dim=False
         )
+        load_code = None
+
         with self.create_subgraph_body(f"<LOAD_INPUT_{input_name}>"):
             assert isinstance(indices, (list, tuple))
             assert isinstance(output_name, str)
@@ -719,7 +726,7 @@ class TritonTemplateKernel(TritonKernel):
         index = " + ".join(
             f"{texpr(self.rename_indexing(s))} * {i}" for s, i in zip(stride, indices)
         )
-        return f"tl.load({name} + ({index}))"
+        return f"tl.load({name} + ({index}), {mask}, other=0.0)"
 
     def template_env(self):
         """
@@ -1594,12 +1601,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         precompile_fn = precompile(choices)
 
-        any_triton_choices = any(isinstance(c, TritonTemplateCaller) for c in choices)
-        if (
-            any_triton_choices
-            and return_multi_template
-            and (config.max_autotune or config.max_autotune_gemm)
-        ):
+        if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
 
             def get_timings():
                 timings = do_autotuning(precompile_fn)

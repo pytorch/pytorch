@@ -1071,6 +1071,8 @@ class TestPrologueFusion(TestCase):
             return x @ y
 
         # cat will turn into masked load
+        # TODO - we should not attempt fusion if it turns an aligned load
+        # into an unaligned load
         x = torch.rand([250, 245], device="cuda")
         y = torch.rand([245, 128], device="cuda")
 
