@@ -183,7 +183,7 @@ class CachingAutotuner(KernelInterface):
     def __init__(
         self,
         fn,
-        triton_meta,  # passed directly to triton
+        triton_meta: Dict[str, Any],  # passed directly to triton
         configs: List[Config],
         save_cache_hook: Optional[Callable],
         mutated_arg_names: List[str],  # see [Note: clone mutated buffers]
