@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 import warnings
+from itertools import chain
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
@@ -215,7 +216,13 @@ def _register_attrs_to_new_gm(
             attr_kind=_AttrKind.PARAMETER,
         )
 
-    for name, value in constants.items():
+    # Technically this doesn't account for the aliased multiple constants but
+    # it is ok because we have a seperate pass later in the stack that populates
+    # the final gm.
+    for name in chain(
+        graph_signature.lifted_custom_objs, graph_signature.lifted_tensor_constants
+    ):
+        value = constants[name]
         _assign_attr(
             value,
             new_gm,
@@ -296,13 +303,14 @@ def _create_stateful_graph_module(
 
     # Constants are not preserved well when we create a new GraphModule unlike param/buffers
     for const_name, value in ep.constants.items():
-        if isinstance(value, torch.Tensor):
-            _assign_attr(
-                value,
-                stateful_gm,
-                const_name,
-                attr_kind=_AttrKind.CONSTANT,
-            )
+        if not torch.fx.graph_module._has_attr(stateful_gm, const_name):
+            if isinstance(value, torch.Tensor):
+                _assign_attr(
+                    value,
+                    stateful_gm,
+                    const_name,
+                    attr_kind=_AttrKind.CONSTANT,
+                )
 
     # Fix up non-persistent buffers. torch.fx does not distinguish between
     # persistent and non-persistent buffers, so we must restore that distinction
