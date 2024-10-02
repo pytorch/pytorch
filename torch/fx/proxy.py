@@ -534,6 +534,10 @@ class MetaProxy(Proxy):
     """
     A Proxy subclass that propagates metadata (meta['val']) during graph tracing.
     """
+
+    def __repr__(self) -> str:
+        return f'MetaProxy({self.node.name})'
+
     @classmethod
     def __torch_function__(cls, orig_method, types, args=None, kwargs=None):
         args = args if args else ()
