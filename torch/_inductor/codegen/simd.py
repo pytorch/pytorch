@@ -1016,26 +1016,26 @@ class SIMDScheduling(BaseScheduling):
                     )
                     return False
                 else:
-                    prologue, _, _ = node2.get_prologue_template_epilogue(
-                        node2.get_nodes()
-                    )
                     # prologue fusion input sizes differ from output group
                     # fuse so long as this node matches the group of existing prologue nodes
-                    # we would have already restricted prologue from fusing if it had multiple
-                    # uses
-                    for pro_node in prologue:
-                        if pro_node.used_buffer_names() & node1.get_buffer_names():
-                            _, (pro_numel, pro_rnumel) = pro_node.Group
-                            if not (numel1 == pro_numel and rnumel1 == pro_rnumel):
-                                why(
-                                    "numel/rnumel mismatch prologue mismatch (%s, %s), (%s, %s)",
-                                    numel1,
-                                    pro_numel,
-                                    rnumel1,
-                                    pro_rnumel,
-                                )
-                                return False
-                    return True
+                    for node in node2.get_nodes():
+                        # dont need to check epilogue nodes for prologue fusion, break after template
+                        if node.is_template():
+                            break
+                        # we would have already restricted prologue from fusing if it had multiple
+                        # uses, so it must be fusing into this node
+                        if not node.used_buffer_names() & node1.get_buffer_names():
+                            continue
+                        _, (pro_numel, pro_rnumel) = node.group
+                        if not (numel1 == pro_numel and rnumel1 == pro_rnumel):
+                            why(
+                                "numel/rnumel mismatch prologue mismatch (%s, %s), (%s, %s)",
+                                numel1,
+                                pro_numel,
+                                rnumel1,
+                                pro_rnumel,
+                            )
+                            return False
 
             for n, node_name in zip((node1, node2), ("node1", "node2")):
                 if n.is_template():
