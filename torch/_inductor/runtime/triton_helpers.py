@@ -228,14 +228,14 @@ def any(a, dim):
 def bucketize_binary_search(
     values: tl.tensor,
     boundaries_ptr: tl.tensor,
-    BOUNDARIES_SIZE: tl.constexpr,
-    BOUNDARIES_UNDERLYING_NUMEL: tl.constexpr,
-    BOUNDARIES_STRIDE: tl.constexpr,
+    BOUNDARIES_SIZE: int,
+    BOUNDARIES_UNDERLYING_NUMEL: int,
+    BOUNDARIES_STRIDE: int,
     boundary_indices: tl.tensor,
     indexing_dtype: tl.dtype,
-    right: tl.constexpr,
+    right: "bool",  # triton can't handle the unquoted bool annotation
     sorter_ptr: tl.tensor,
-    SORTER_STRIDE: tl.constexpr,
+    SORTER_STRIDE: int,
     sorter_indices: tl.tensor,
     BLOCK_SHAPE,
 ):
