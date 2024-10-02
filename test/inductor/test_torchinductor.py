@@ -12466,6 +12466,20 @@ if HAS_GPU and not TEST_WITH_ASAN:
             _, (code,) = run_and_get_code(torch.compile(fn), inp)
             FileCheck().check("copy_").check_same("True").run(code)
 
+        @config.patch(inplace_buffers=True)
+        def test_layer_norm_should_not_inplace(self):
+            # https://github.com/pytorch/pytorch/issues/120217
+            D = 16
+
+            def fn(x):
+                return nn.LayerNorm([D], dtype=torch.float16)(x)
+
+            inps = [torch.rand(D, dtype=torch.float16)]
+            fn_opt = torch.compile(fn)
+            code = run_and_get_triton_code(fn_opt, *inps)
+            self.assertTrue("in_out_ptr" not in code)
+            self.assertEqual(fn_opt(*inps), fn(*inps))
+
     class RNNTest(TestCase):
         device_type = GPU_TYPE
 
