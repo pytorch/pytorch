@@ -1117,8 +1117,8 @@ def hipify(
     if not os.path.exists(output_directory):
         shutil.copytree(project_directory, output_directory)
 
-    includes = map(_to_unix_path, includes)
-    ignores = map(_to_unix_path, ignores)
+    includes = list(map(_to_unix_path, includes))
+    ignores = list(map(_to_unix_path, ignores))
 
     all_files = list(matched_files_iter(output_directory, includes=includes,
                                         ignores=ignores, extensions=extensions,
