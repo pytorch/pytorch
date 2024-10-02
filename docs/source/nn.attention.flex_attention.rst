@@ -24,3 +24,10 @@ BlockMask
 .. autoclass:: BlockMask
     :members:
     :undoc-members:
+
+PagedAttention
+---------
+
+.. autoclass:: BlockMask
+    :members:
+    :undoc-members:
