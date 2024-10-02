@@ -187,7 +187,7 @@ class CachingAutotuner(KernelInterface):
         configs: List[Config],
         save_cache_hook: Optional[Callable],
         mutated_arg_names: List[str],  # see [Note: clone mutated buffers]
-        heuristic_type,
+        heuristic_type: HeuristicType,
         size_hints=None,
         inductor_meta=None,  # metadata not relevant to triton
         custom_kernel=False,  # whether the kernel is inductor-generated or custom
