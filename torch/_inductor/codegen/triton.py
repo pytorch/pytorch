@@ -17,6 +17,7 @@ from typing import (
     Iterable,
     List,
     Optional,
+    Sequence,
     Tuple,
     TYPE_CHECKING,
     Union,
@@ -1948,7 +1949,7 @@ class TritonKernel(SIMDKernel):
 
         return result
 
-    def reduction_resize(self, value):
+    def reduction_resize(self, value) -> str:
         ndims = self.triton_tensor_ndim()
         if ndims == 1:
             return f"triton_helpers.promote_to_tensor({value})"
@@ -1974,10 +1975,10 @@ class TritonKernel(SIMDKernel):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[CSEVariable, Tuple[CSEVariable, ...]],
+        value,  # value: Union[CSEVariable, Tuple[CSEVariable, ...]],
     ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
         assert self.inside_reduction
-        masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
+        masks = [f"{tree.prefix}mask" for tree in self.range_trees]
 
         # rindex = r0_index * r1_numel * ... * rn_numel + ... + rn_index
         rprefixes = [
@@ -2030,14 +2031,18 @@ class TritonKernel(SIMDKernel):
         dim: int = self.triton_tensor_ndim() - self.num_reduction_dims
         root_op: str
 
-        def _final_reduction(buffer, value: str, result_type: Optional[str]) -> str:
+        def _final_reduction(
+            buffer,
+            value: str,
+            result_type: Optional[str],
+        ) -> str:
             """
             Helper to generate a reduction call, e.g. tl.sum.
             """
             use_helper = reduction_type in {"any", "max", "min", "prod"}
             module = "triton_helpers" if use_helper else "tl"
 
-            value = self.reduction_collapse_dims(buffer, value)
+            value = str(self.reduction_collapse_dims(buffer, value))
             if reduction_type in {"max", "min"}:
                 value = self.reduction_resize(
                     f"{module}.{reduction_type}2({value}, {dim})"
@@ -2053,7 +2058,9 @@ class TritonKernel(SIMDKernel):
             return value
 
         def final_reduction_new_var(
-            buffer, value: str, result_type: Optional[str]
+            buffer,
+            value: str,
+            result_type: Optional[str],
         ) -> CSEVariable:
             """
             Generate a reduction and assign it to a new variable.
@@ -2062,7 +2069,10 @@ class TritonKernel(SIMDKernel):
             return self.cse.generate(buffer, value)
 
         def final_reduction_define(
-            buffer, result_var: CSEVariable, value: str, result_type: Optional[str]
+            buffer,
+            result_var: str,
+            value: str,
+            result_type: Optional[str],
         ) -> None:
             """
             Generate a reduction and assign it to an existing variable.
@@ -2098,9 +2108,10 @@ class TritonKernel(SIMDKernel):
             default = ir.Reduction.default_value(reduction_type, src_dtype)
             default = self._map_tuple_or_scalar(constant_repr, default)
 
-            def _mask_value(value, default):
+            def _mask_value(value, default) -> CSEVariable:
                 return self.cse.generate(self.compute, where_cond(value, default))
 
+            masked_value: Union[CSEVariable, Sequence[CSEVariable]] = []
             if isinstance(value, tuple):
                 masked_value = [_mask_value(v, d) for v, d in zip(value, default)]
             else:
@@ -2123,6 +2134,7 @@ class TritonKernel(SIMDKernel):
                 # taking two reductions doesn't increase memory usage.
                 result_var = self.welford_reduce_fallback(dtype, value)
             elif reduction_type == "welford_combine":
+                assert isinstance(masked_value, tuple)
                 mean, m2, weight = masked_value
                 welford = f"triton_helpers.welford({mean}, {m2}, {weight}, {dim})"
                 mean, m2, weight = (self.cse.newvar() for _ in range(3))
@@ -2133,7 +2145,9 @@ class TritonKernel(SIMDKernel):
                     for var_name in (mean, m2, weight)
                 )
             else:
-                result_var = final_reduction_new_var(self.compute, masked_value, None)
+                result_var = final_reduction_new_var(
+                    self.compute, str(masked_value), None
+                )
         else:
             accumulator = f"_{result_var}"
             default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
@@ -2234,10 +2248,12 @@ class TritonKernel(SIMDKernel):
                     accumulator = f"{accumulator}.to(tl.int8)"
                     result_type = triton_compute_type(dtype)
                     final_reduction_define(
-                        self.suffix, result_var, accumulator, result_type
+                        self.suffix, str(result_var), accumulator, result_type
                     )
                 else:
-                    final_reduction_define(self.suffix, result_var, accumulator, None)
+                    final_reduction_define(
+                        self.suffix, str(result_var), accumulator, None
+                    )
 
         self.cse.reduction_cache[cache_key] = result_var
 
@@ -2250,7 +2266,12 @@ class TritonKernel(SIMDKernel):
 
         return result_var
 
-    def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable):
+    def store_reduction(
+        self,
+        name: str,
+        index: sympy.Expr,
+        value: Union[CSEVariable, Tuple[CSEVariable, ...]],
+    ):
         assert self.inside_reduction
         self.inside_reduction = False
         indexing = self.indexing(index, block_ptr=True)
@@ -3106,12 +3127,15 @@ class TritonKernel(SIMDKernel):
         # mask.
         return V.graph.sizevars.statically_known_multiple_of(tree.numel, max_block)
 
-    def filter_masks(self, mask_vars):
-        for tree in self.range_trees:
-            if self._has_constant_mask(tree):
-                mask_vars.discard(f"{tree.prefix}mask")
+    def filter_masks(self, mask_vars: Iterable[str]) -> List[str]:
+        discard_set = set(
+            f"{tree.prefix}mask"
+            for tree in self.range_trees
+            if self._has_constant_mask(tree)
+        )
+        return [var for var in mask_vars if var not in discard_set]
 
-    def iteration_ranges_codegen_header(self, entry, code):
+    def iteration_ranges_codegen_header(self, entry: IterationRangesRoot, code):
         x = entry.prefix
         if entry.is_loop:
             code.writeline(f"{entry.name} = {x}offset + {x}base")

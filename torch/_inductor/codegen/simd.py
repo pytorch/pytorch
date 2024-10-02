@@ -74,12 +74,16 @@ pexpr = PythonPrinter().doprint
 def prefix_is_reduction(prefix: str) -> bool:
     return prefix[0] == "r"
 
-class BlockPatternMatcher():
+
+class BlockPatternMatcher:
     """
     Matches block indexing expressions.
     """
+
     @staticmethod
-    def get_subexpr_involving_symbol(expr: sympy.Expr, symbol: sympy.Symbol) -> sympy.Expr:
+    def get_subexpr_involving_symbol(
+        expr: sympy.Expr, symbol: sympy.Symbol
+    ) -> sympy.Expr:
         """
         Given a sympy expression, return the subexpression comprised only of terms
         involving the specified symbol.
@@ -88,8 +92,7 @@ class BlockPatternMatcher():
         this returns `x * 5 + x ** 2`.
         """
         return sympy.Integer(0) + sum(
-            term for term in sympy.Add.make_args(expr)
-            if symbol in term.free_symbols
+            term for term in sympy.Add.make_args(expr) if symbol in term.free_symbols
         )
 
     @staticmethod
@@ -105,7 +108,13 @@ class BlockPatternMatcher():
         return numels
 
     @classmethod
-    def match_mod_div_block_expr(cls, index: sympy.Expr, index_var: sympy.Symbol, numel: sympy.Expr, num_dims: int) -> Tuple[List[sympy.Expr], List[sympy.Expr], List[sympy.Expr]]:
+    def match_mod_div_block_expr(
+        cls,
+        index: sympy.Expr,
+        index_var: sympy.Symbol,
+        numel: sympy.Expr,
+        num_dims: int,
+    ) -> Tuple[List[sympy.Expr], List[sympy.Expr], List[sympy.Expr]]:
         """
         Matches modular indexing expressions, converting them to implied block dimensions and strides.
         See triton.py for more information.
@@ -113,13 +122,10 @@ class BlockPatternMatcher():
 
         # Pattern match to find the strides and offset.
         wild = functools.partial(sympy.Wild, exclude=[index_var])
-        dims: List[sympy.Expr] = [
-                wild(f"dim_mod{idx}") for idx in range(num_dims)
-                ]
+        dims: List[sympy.Expr] = [wild(f"dim_mod{idx}") for idx in range(num_dims)]
         strides: List[sympy.Expr] = [
-                wild(f"stride_mod{idx}") for idx in range(num_dims)
-                ]
-
+            wild(f"stride_mod{idx}") for idx in range(num_dims)
+        ]
 
         # The first dimension's index is computed by division.
         # The remaining are computed by modulo.
@@ -154,19 +160,13 @@ class BlockPatternMatcher():
         dims = [dims[0]] + [get_match(dim) for dim in dims[1:]]
         strides = [get_match(stride) for stride in strides]
         slice_numels = cls.get_slice_numels(dims)
-        block_index_exprs = [
-            sympy_subs(expr, match) for expr in block_index_exprs
-        ]
+        block_index_exprs = [sympy_subs(expr, match) for expr in block_index_exprs]
 
         # The leading dimension is not directly matched in our expression.
         # We solve for it by dividing the range tree numel by the product of
         # all other dimensions. We quit if they are not known to be divisible.
-        assert (
-            dims[0] not in match
-        ), "Expected not to match the leading dimension!"
-        if not sizevars.statically_known_multiple_of(
-            numel, slice_numels[0]
-        ):
+        assert dims[0] not in match, "Expected not to match the leading dimension!"
+        if not sizevars.statically_known_multiple_of(numel, slice_numels[0]):
             return None
         dims[0] = numel / slice_numels[0]
 
@@ -442,7 +442,9 @@ class SIMDKernel(Kernel):
         super().__init__()
         self.body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
-        self.numels = {prefix: V.graph.sizevars.simplify(val) for prefix, val in groups.items()}
+        self.numels = {
+            prefix: V.graph.sizevars.simplify(val) for prefix, val in groups.items()
+        }
         self.mutations: OrderedSet[str] = (
             mutations if mutations is not None else OrderedSet()
         )
@@ -480,13 +482,14 @@ class SIMDKernel(Kernel):
 
     @property
     def total_reduction_numel(self):
-        return sympy_product([val for key, val in self.numels.items() if key.startswith("r")])
+        return sympy_product(
+            [val for key, val in self.numels.items() if key.startswith("r")]
+        )
 
     def want_no_x_dim(self):
         return False
 
     def initialize_range_tree(self, pid_cache):
-
         prefixes = ["z", "y", "x", "r0_", "r1_"]
         active_prefixes = [prefix for prefix in prefixes if prefix in self.numels]
 
@@ -1069,7 +1072,7 @@ class SIMDKernel(Kernel):
 
 
 class SIMDScheduling(BaseScheduling):
-    kernel_type = SIMDKernel  # override in subclass
+    kernel_type: type = SIMDKernel  # override in subclass
     int32_type = "torch.int32"
     int64_type = "torch.int64"
 
@@ -1172,7 +1175,7 @@ class SIMDScheduling(BaseScheduling):
                     config.triton.tiling_prevents_reduction_fusion
                     and not node1.is_template()
                 ):
-                    #FIXME support multiple reduction dims
+                    # FIXME support multiple reduction dims
                     is_reduction_tiling_valid = self.select_tiling(
                         node1.get_nodes(), numel1
                     ) in (
@@ -1451,16 +1454,16 @@ class SIMDScheduling(BaseScheduling):
         return reduction_hint_val, mutations, index_dtype
 
     def codegen_node_schedule(
-            self, node_schedule, buf_accesses, numel, reduction_numel
-            ):
+        self, node_schedule, buf_accesses, numel, reduction_numel
+    ):
         from torch._inductor.codegen.triton_split_scan import TritonSplitScanKernel
 
         tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
         (
-                reduction_hint_val,
-                mutations,
-                index_dtype,
-                ) = self.get_kernel_args(node_schedule, numel, reduction_numel)
+            reduction_hint_val,
+            mutations,
+            index_dtype,
+        ) = self.get_kernel_args(node_schedule, numel, reduction_numel)
 
         is_split_scan = any(
             isinstance(node, BaseSchedulerNode) and node.is_split_scan()
@@ -1830,7 +1833,7 @@ class SIMDScheduling(BaseScheduling):
             )
         )
         tiled_groups = itertools.product(pointwise_tilings, reduction_tilings)
-        #TODO use cls.create_tiling to make a dict
+        # TODO use cls.create_tiling to make a dict
 
         tilings: List[CandidateTiling] = []
         for tiling in tiled_groups:
@@ -1859,16 +1862,23 @@ class SIMDScheduling(BaseScheduling):
         return tuple(tilings)
 
     @classmethod
-    def create_tiling(cls, pw_tiling: Iterable[sympy.Expr], reduction_tiling: Iterable[sympy.Expr]) -> Dict[str, sympy.Expr]:
+    def create_tiling(
+        cls, pw_tiling: Iterable[sympy.Expr], reduction_tiling: Iterable[sympy.Expr]
+    ) -> Dict[str, sympy.Expr]:
         """
         Create a tiling dict from pointwise and reduction splits.
         """
-        pw_prefixes = ["z", "y", "x"][-len(pw_tiling):]
-        reduction_prefixes = ["r0_", "r1_"][:len(reduction_tiling)]
-        return dict(list(zip(pw_prefixes, pw_tiling)) + list(zip(reduction_prefixes, reduction_tiling)))
+        pw_prefixes = ["z", "y", "x"][-len(pw_tiling) :]
+        reduction_prefixes = ["r0_", "r1_"][: len(reduction_tiling)]
+        return dict(
+            list(zip(pw_prefixes, pw_tiling))
+            + list(zip(reduction_prefixes, reduction_tiling))
+        )
 
     @classmethod
-    def select_tiling(cls, node_schedule, numel, reduction_numel=sympy.Integer(1)) -> Dict[str, sympy.Expr]:
+    def select_tiling(
+        cls, node_schedule, numel, reduction_numel=sympy.Integer(1)
+    ) -> Dict[str, sympy.Expr]:
         """
         Heuristics to decide how to tile kernels.
         Currently, we tile based on stride-1 dimensions.
@@ -1937,7 +1947,6 @@ class SIMDScheduling(BaseScheduling):
 
         # Optionally, prefer tiling into as many dimensions as possible.
         if config.triton.prefer_nd_tiling:
-
             tiling_groups = []
             for node in node_schedule:
                 if not isinstance(node, scheduler.SchedulerNode):
@@ -1948,7 +1957,7 @@ class SIMDScheduling(BaseScheduling):
                     [
                         node.pointwise_read_writes(),
                         node.reduction_read_writes(),
-                    ]
+                    ],
                 )
 
                 # If we have modular indexing expressions, try to subdivide ranges into
@@ -1960,26 +1969,29 @@ class SIMDScheduling(BaseScheduling):
                     # This lets us partition the variables into pointwise and reduction
                     # splits.
                     var_ranges = tuple(dep.ranges.values())
-                    if (
-                        len(var_ranges) != len(node_ranges)
-                        or var_ranges != tuple(itertools.chain.from_iterable(node_ranges))
+                    if len(var_ranges) != len(node_ranges) or var_ranges != tuple(
+                        itertools.chain.from_iterable(node_ranges)
                     ):
                         continue
 
                     # Pattern match the subexpression pertaining to each index variable.
                     divided_tiling_group = []
                     for var, numel in dep.ranges.items():
-                        index = BlockPatternMatcher.get_subexpr_involving_symbol(dep.index, var)
+                        index = BlockPatternMatcher.get_subexpr_involving_symbol(
+                            dep.index, var
+                        )
 
                         # Heuristic to bound the maximum dimensionality of the block.
                         num_dims = max(
                             2,
                             index.count(FloorDiv) + index.count(ModularIndexing),
-                            sum(len(range_) for range_ in node_ranges)
+                            sum(len(range_) for range_ in node_ranges),
                         )
 
                         # Attempt to pattern match the index expr.
-                        dims = BlockPatternMatcher.match_mod_div_block_expr(index, var, numel, num_dims)[0]
+                        dims = BlockPatternMatcher.match_mod_div_block_expr(
+                            index, var, numel, num_dims
+                        )[0]
                         if dims is None:
                             # Failed matches default to the full range.
                             dims = [numel]
@@ -1987,9 +1999,7 @@ class SIMDScheduling(BaseScheduling):
 
                     tiling_groups.append(divided_tiling_group)
 
-            new_tilings: OrderedSet[
-                Dict[str, sympy.Expr]
-            ] = OrderedSet()
+            new_tilings: OrderedSet[Dict[str, sympy.Expr]] = OrderedSet()
             for tiling_group in tiling_groups:
                 # Concatenate pointwise and reduction tilings.
                 tiling = []
@@ -1999,14 +2009,19 @@ class SIMDScheduling(BaseScheduling):
                     collapsed_leading_dim = sympy_product(
                         node_range[:first_trailing_dim]
                     )
-                    tiling.append((collapsed_leading_dim,) + tuple(
-                        node_range[first_trailing_dim:]
-                    ))
+                    tiling.append(
+                        (collapsed_leading_dim,)
+                        + tuple(node_range[first_trailing_dim:])
+                    )
                 new_tilings.add(tuple(tiling))
 
             # Rank tilings by the number of dimensions. E.g., prefer 2D to 1D.
             # Since this is a stable sort, ties are broken by schedule order.
-            ranked_new_tilings = sorted([cls.create_tiling(tiling[0], tiling[1]) for tiling in new_tilings], key=len, reverse=True)
+            ranked_new_tilings = sorted(
+                [cls.create_tiling(tiling[0], tiling[1]) for tiling in new_tilings],
+                key=len,
+                reverse=True,
+            )
             ranked_tilings = ranked_new_tilings + ranked_tilings
 
         for tiled_groups in ranked_tilings:
