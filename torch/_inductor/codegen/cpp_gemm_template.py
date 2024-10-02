@@ -440,6 +440,11 @@ class CppPackedGemmTemplate(CppTemplate):
             dtype_B = self.input_nodes[1].get_dtype()
             num_byte_A = get_num_byte(dtype_A)
             num_byte_B = get_num_byte(dtype_B)
+            if dtype_A is torch.bfloat16 and dtype_B is torch.int8 and Kr != 1:
+                # We will cache dequantized weights (BF16) in L1D for AMX micro-kernel.
+                # In this case, the choice of the micro-kernel being used can't be decoupled from
+                # the cache blocking
+                num_byte_B *= 2
 
             # NOTE [CPP GEMM Cache Blocking Algorithm]
             # Our overall strategy is to
@@ -451,9 +456,7 @@ class CppPackedGemmTemplate(CppTemplate):
 
             # Step 1: Decide Kc assuming B block is L1-reside.
             size_cache_B = Kr * Kt_blocks * Nr * num_byte_B
-            if dtype_A is torch.bfloat16 and dtype_B is torch.int8:
-                # We will cache dequantized weights (BF16) in L1D
-                size_cache_B *= 2
+
             Kc_blocks = Kt_blocks
             if size_cache_B > L1:
                 Kc_blocks = math.floor(L1 / (Kr * Nr * num_byte_B))
