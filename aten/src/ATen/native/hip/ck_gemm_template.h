@@ -170,6 +170,8 @@ void gemm_impl(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
   int StrideB = ldb;
   int StrideC = ldc;
 
+  int KBatch = 1;
+
   float falpha = alpha;
   float fbeta = beta;
 
@@ -268,6 +270,7 @@ void gemm_impl(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
      StrideA,
      std::array<ck::index_t, 0>{},
      StrideC,
+     KBatch,
      a_element_op,
      b_element_op,
      c_element_op);
