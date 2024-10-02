@@ -93,7 +93,8 @@ bool create_directories(const std::string& path) {
 #else
   if (mkdir(path.c_str(), 0777) == -1) {
     throw std::runtime_error("Failed to create directory");
-  } 
+  }
+  return true;
 #endif
 }
 } // namespace
