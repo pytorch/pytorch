@@ -226,6 +226,8 @@ jobs:
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           SCCACHE_REGION: us-east-1
           SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
+          SCCACHE_ERROR_LOG: /tmp/sccache_log.txt
+          SCCACHE_LOG: debug
           SHM_SIZE: ${{ contains(inputs.build-environment, 'cuda') && '2g' || '1g' }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
@@ -285,6 +287,8 @@ jobs:
             -e SCCACHE_BUCKET \
             -e SCCACHE_REGION \
             -e SCCACHE_S3_KEY_PREFIX \
+            -e SCCACHE_ERROR_LOG \
+            -e SCCACHE_LOG \
             -e XLA_CUDA \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e PYTORCH_TEST_CUDA_MEM_LEAK_CHECK \
@@ -310,6 +314,12 @@ jobs:
           grep download.pytorch.org /etc/hosts | docker exec -i "${container_name}" sudo bash -c "/bin/cat >> /etc/hosts"
           echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
           docker exec -t "${container_name}" sh -c "pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
+          echo "* * * * * * * * * * * * * * * * * * * SSCACHE DEBUG LOGS: * * * * * * * * * * * * * * * * * *"
+          docker exec -t "${container_name}" sh -c "cat /tmp/sccache_log.txt"
+          echo "* * * * * * * * * * * * * * * * * * * END SSCACHE DEBUG LOGS * * * * * * * * * * * * * * * *"
+          echo "* * * * * * * * * * * * * * * * * * * SSCACHE trying to start daemon: * * * * * * * * * * * *"
+          docker exec -t "${container_name}" sh -c "sccache --start-server"
+          echo "* * * * * * * * * * * * * * * * * * * END SSCACHE trying to start daemon * * * * * * * * * *"
 
       - name: Upload pytest cache if tests failed
         uses: ./.github/actions/pytest-cache-upload
