@@ -29,6 +29,7 @@ from ._memory_viz import memory as _memory, segments as _segments
 __all__ = [
     "caching_allocator_alloc",
     "caching_allocator_delete",
+    "caching_allocator_enable",
     "set_per_process_memory_fraction",
     "empty_cache",
     "memory_stats",
@@ -146,6 +147,12 @@ def caching_allocator_delete(mem_ptr):
         management.
     """
     torch._C._cuda_cudaCachingAllocator_raw_delete(mem_ptr)
+
+
+def caching_allocator_enable(value: bool = True) -> None:
+    r"""Enable or disable the CUDA memory allocator. On by default."""
+    if is_initialized():
+        torch._C._cuda_cudaCachingAllocator_enable(value)
 
 
 def set_per_process_memory_fraction(
