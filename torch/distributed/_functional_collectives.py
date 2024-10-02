@@ -177,7 +177,9 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     return _maybe_wrap_tensor(tensor)
 
 
-def callback(x, group_size, gather_dim):
+def _all_gather_tensor_callback(
+    x: torch.Tensor, group_size: int, gather_dim: int
+) -> torch.Tensor:
     return torch.cat(torch.chunk(x, group_size, dim=0), dim=gather_dim)
 
 
@@ -216,10 +218,16 @@ def all_gather_tensor(
         # and then chunk + cat avoid us going through ACT dispatching logic again
         if isinstance(res, AsyncCollectiveTensor):
             res.register_callback(
-                partial(callback, gather_dim=gather_dim, group_size=group_size)
+                partial(
+                    _all_gather_tensor_callback,
+                    gather_dim=gather_dim,
+                    group_size=group_size,
+                )
             )
         else:
-            res = callback(res, gather_dim=gather_dim, group_size=group_size)
+            res = _all_gather_tensor_callback(
+                res, gather_dim=gather_dim, group_size=group_size
+            )
     return res
 
 
@@ -252,10 +260,16 @@ def all_gather_tensor_autograd(
         # and then chunk + cat avoid us going through ACT dispatching logic again
         if isinstance(res, AsyncCollectiveTensor):
             res.register_callback(
-                partial(callback, gather_dim=gather_dim, group_size=group_size)
+                partial(
+                    _all_gather_tensor_callback,
+                    gather_dim=gather_dim,
+                    group_size=group_size,
+                )
             )
         else:
-            res = callback(res, gather_dim=gather_dim, group_size=group_size)
+            res = _all_gather_tensor_callback(
+                res, gather_dim=gather_dim, group_size=group_size
+            )
     return res
 
 
