@@ -152,7 +152,6 @@ class TritonTemplateKernel(TritonKernel):
         *,
         index_dtype,
     ) -> None:
-        # breakpoint()
         super().__init__(
             sympy_product(output_node.get_size()),
             sympy.Integer(1),
@@ -181,7 +180,7 @@ class TritonTemplateKernel(TritonKernel):
 
         self.subgraph_bodies: Dict[str, SubgraphInfo] = {}
 
-        self._inputs_with_prologue_fusion: OrderedSet[str] = OrderedSet()
+        self._input_names_with_prologue_fusion: OrderedSet[str] = OrderedSet()
         self.final_prologue_buffers: List[str] = []
 
         # The following attributes are all used for triton kernel codegen.
@@ -241,10 +240,14 @@ class TritonTemplateKernel(TritonKernel):
             yield
 
     @property
-    def inputs_with_prologue_fusion(self):
+    def input_bufs_with_prologue_fusion(self) -> OrderedSet[str]:
+        """
+        What input buffers are loaded with the api that allows prologue fusion to occur
+        """
+        # translate input names -> input buffers
         bufs = OrderedSet([inp.get_name() for inp in self.named_input_nodes.values()])
         for name, buf in self.named_input_nodes.items():
-            if name not in self._inputs_with_prologue_fusion:
+            if name not in self._input_names_with_prologue_fusion:
                 bufs.discard(buf.get_name())
 
         return bufs
@@ -501,7 +504,7 @@ class TritonTemplateKernel(TritonKernel):
         """
 
         load_code = None
-        self._inputs_with_prologue_fusion.add(input_name)
+        self._input_names_with_prologue_fusion.add(input_name)
         input_node = self.named_input_nodes[input_name]
         groups = (sympy_product(input_node.get_size()), sympy.Integer(1))
         range_trees = self.construct_range_trees(
@@ -994,7 +997,7 @@ class TritonTemplate(KernelTemplate):
                 "acc_type": str(kwargs.get("ACC_TYPE", None)),
             },
             mutated_inputs=mutated_inputs,
-            allowed_prologue_inps=kernel.inputs_with_prologue_fusion.copy(),
+            allowed_prologue_inps=kernel.input_bufs_with_prologue_fusion.copy(),
         )
 
 
