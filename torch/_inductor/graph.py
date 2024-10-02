@@ -654,6 +654,9 @@ class GraphLowering(torch.fx.Interpreter):
             parent=self,
             gm=gm,
             example_inputs=example_inputs,
+            # TODO(anijain2305) - Why do I need this? -
+            # test_while_loop_simple_control_flow_device_cpu_dynamic_True
+            shape_env=self._shape_env,
             cpp_wrapper=self.cpp_wrapper,
             aot_mode=self.aot_mode,
             extern_node_serializer=self.extern_node_serializer,
