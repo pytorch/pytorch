@@ -32,6 +32,24 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_mkldnn_rnn_layer(
     AtenTensorHandle* ret2,
     AtenTensorHandle* ret3);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__linear_pointwise(
+    AtenTensorHandle X,
+    AtenTensorHandle W,
+    AtenTensorHandle* B,
+    const char* attr,
+    const double** scalars,
+    int64_t scalars_len_,
+    const char** algorithm,
+    AtenTensorHandle* ret0);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__linear_pointwise_binary(
+    AtenTensorHandle X,
+    AtenTensorHandle other,
+    AtenTensorHandle W,
+    AtenTensorHandle* B,
+    const char* attr,
+    AtenTensorHandle* ret0);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

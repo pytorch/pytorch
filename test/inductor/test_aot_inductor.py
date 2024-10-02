@@ -3649,12 +3649,8 @@ CPU_TEST_FAILURES = {
     "test_dynamic_scalar": fail_minimal_arrayref_interface(is_skip=True),
     # https://github.com/pytorch/pytorch/issues/122980
     "test_fft_c2c": fail_stack_allocation(is_skip=True),
-    # TODO: test_freezing_abi_compatible_cpu fails,
-    #   AssertionError: None, i.e. optional output is not supported
-    "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
-    # TODO: test_linear_freezing_abi_compatible_cpu fails,
-    #   AssertionError: None, i.e. optional output is not supported
-    "test_linear_freezing": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_freezing": fail_stack_allocation(is_skip=True),
+    "test_linear_freezing": fail_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_missing_cubin": fail_with_and_without_stack_allocation(is_skip=True),
     # minimal arrayref interface only works with CPU; test crashes.
