@@ -122,6 +122,7 @@ mm_template = TritonTemplate(
 """,
 )
 
+
 # prevent duplication registration of extern functions
 @functools.lru_cache(None)
 def lazy_register_extern_choice(fn):
