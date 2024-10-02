@@ -137,17 +137,18 @@ f32 = torch.float32
 i64 = torch.int64
 i32 = torch.int32
 
-test_dtypes = (
+test_dtypes = [
     torch.float32,
     torch.float64,
     torch.float16,
-    torch.bfloat16,
     torch.uint8,
     torch.int8,
     torch.int16,
     torch.int32,
     torch.int64,
-)
+]
+if SM80OrLater:
+    test_dtypes.append(torch.bfloat16)
 
 
 def _large_cumprod_input(shape, dim, dtype, device):

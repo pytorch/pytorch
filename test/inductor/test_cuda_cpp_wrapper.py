@@ -73,6 +73,7 @@ def make_test_case(
     slow=False,
     func_inputs=None,
     code_string_count=None,
+    check_code=True,
 ):
     test_name = f"{name}_{device}" if device else name
     if code_string_count is None:
@@ -95,13 +96,14 @@ def make_test_case(
                 _, code = test_torchinductor.run_and_get_cpp_code(
                     func, *func_inputs if func_inputs else []
                 )
-                self.assertEqual("CppWrapperCodeCache" in code, True)
-                self.assertTrue(
-                    all(
-                        code.count(string) == code_string_count[string]
-                        for string in code_string_count
+                if check_code:
+                    self.assertEqual("CppWrapperCodeCache" in code, True)
+                    self.assertTrue(
+                        all(
+                            code.count(string) == code_string_count[string]
+                            for string in code_string_count
+                        )
                     )
-                )
         finally:
             tests.tearDown()
             tests.tearDownClass()
@@ -125,6 +127,7 @@ if RUN_CUDA:
         name: str
         device: str = "cuda"
         tests: InductorTestCase = test_torchinductor.GPUTests()
+        check_code: bool = True
 
     # Maintain two separate test lists for cuda and cpp for now
     for item in [
@@ -213,7 +216,11 @@ if RUN_CUDA:
         BaseTest("test_fft_real_input"),
         BaseTest("test_fft_real_input_real_output"),
         *[
-            BaseTest(f"test_dtypeview_{str(dtype_x)[6:]}_{str(dtype_y)[6:]}")
+            # some dtypes may raise exception and be skipped in test_dtypeview, so set check_code to False here
+            BaseTest(
+                f"test_dtypeview_{str(dtype_x)[6:]}_{str(dtype_y)[6:]}",
+                check_code=False,
+            )
             for dtype_x, dtype_y in itertools.product(
                 test_torchinductor.test_dtypes, test_torchinductor.test_dtypes
             )
@@ -230,7 +237,7 @@ if RUN_CUDA:
             tests=test_select_algorithm.TestSelectAlgorithm(),
         ),
     ]:
-        make_test_case(item.name, item.device, item.tests)
+        make_test_case(item.name, item.device, item.tests, check_code=item.check_code)
 
     from torch._inductor.utils import is_big_gpu
 
