@@ -271,6 +271,8 @@ def _get_attr(model: torch.nn.Module, attr_name: str):
 
 
 def _get_attr_via_attr_list(model: torch.nn.Module, attr_list: List[str]):
+    if len(attr_list) == 0:
+        return model
     *prefix, field = attr_list
     t = model
     for item in prefix:
