@@ -941,7 +941,7 @@ class TestFlexAttention(InductorTestCase):
         def mask_mod(b, h, q, kv):
             return q >= kv
 
-        block_mask = create_block_mask(mask_mod, 1, 1, S, S)
+        block_mask = create_block_mask(mask_mod, Bq, 1, S, S)
         attention = functools.partial(
             flex_attention, block_mask=block_mask, enable_gqa=(not Hq == Hkv)
         )
@@ -3146,10 +3146,8 @@ class TestPagedAttention(InductorTestCase):
             self.assertTrue(False, msg)
 
     def allocate_page_cache(self, n_pages: int, page_size: int):
-        n_heads, head_dim, max_batch_size, max_seq_len = 4, 8, 3, 128
-        paged_cache = PagedAttention(
-            n_pages, page_size, head_dim, max_batch_size, max_seq_len, n_heads
-        )
+        max_batch_size, max_seq_len = 3, 128
+        paged_cache = PagedAttention(n_pages, page_size, max_batch_size, max_seq_len)
         return paged_cache
 
     def cdiv(self, x, y):
@@ -3163,15 +3161,19 @@ class TestPagedAttention(InductorTestCase):
         n_pages, page_size = 12, 4
         paged_cache = self.allocate_page_cache(n_pages, page_size)
 
-        batch_reserve(paged_cache, torch.tensor([8, 48, 16]))
+        batch_reserve(paged_cache, torch.tensor([8, 24, 16]))
 
         with self.assertRaisesRegex(
             AssertionError, "requested 2 pages but there are only 0 empty pages"
         ):
-            paged_cache.reserve(torch.tensor([0]), torch.tensor([16]))
+            paged_cache.reserve(
+                torch.tensor([0], device="cuda"), torch.tensor([16], device="cuda")
+            )
 
-        paged_cache.erase(torch.tensor([1]))
-        paged_cache.reserve(torch.tensor([0]), torch.tensor([16]))
+        paged_cache.erase(torch.tensor([1], device="cuda"))
+        paged_cache.reserve(
+            torch.tensor([0], device="cuda"), torch.tensor([16], device="cuda")
+        )
 
     @supported_platform
     def test_allocate(self):
@@ -3182,20 +3184,16 @@ class TestPagedAttention(InductorTestCase):
         batch_reserve(paged_cache, target_seq_len)
 
         expected_allocated_pages = self.cdiv(target_seq_len, page_size).sum()
-        self.assertEqual(
-            paged_cache.allocated_seq_len, self.roundup(target_seq_len, page_size)
-        )
+        self.assertEqual(paged_cache.capacity, self.roundup(target_seq_len, page_size))
         self.assertEqual(
             len(paged_cache.empty_pages), n_pages - expected_allocated_pages
         )
 
         # deallocate batch 1
-        paged_cache.erase(torch.tensor([1]))
+        paged_cache.erase(torch.tensor([1], device="cuda"))
         target_seq_len = torch.tensor([3, 0, 8])
         expected_allocated_pages = self.cdiv(target_seq_len, page_size).sum()
-        self.assertEqual(
-            paged_cache.allocated_seq_len, self.roundup(target_seq_len, page_size)
-        )
+        self.assertEqual(paged_cache.capacity, self.roundup(target_seq_len, page_size))
         self.assertEqual(
             len(paged_cache.empty_pages), n_pages - expected_allocated_pages
         )
@@ -3204,16 +3202,14 @@ class TestPagedAttention(InductorTestCase):
         target_seq_len = torch.tensor([7, 2, 10])
         batch_reserve(paged_cache, target_seq_len)
         expected_allocated_pages = self.cdiv(target_seq_len, page_size).sum()
-        self.assertEqual(
-            paged_cache.allocated_seq_len, self.roundup(target_seq_len, page_size)
-        )
+        self.assertEqual(paged_cache.capacity, self.roundup(target_seq_len, page_size))
         self.assertEqual(
             len(paged_cache.empty_pages), n_pages - expected_allocated_pages
         )
 
         # deallocate all batches
         paged_cache.erase(torch.tensor([0, 1, 2]))
-        self.assertEqual(paged_cache.allocated_seq_len, torch.tensor([0, 0, 0]))
+        self.assertEqual(paged_cache.capacity, torch.tensor([0, 0, 0]))
         self.assertEqual(len(paged_cache.empty_pages), n_pages)
 
     @supported_platform
@@ -3231,7 +3227,7 @@ class TestPagedAttention(InductorTestCase):
             device="cuda",
         )
         self.assertEqual(
-            paged_cache.allocated_seq_len,
+            paged_cache.capacity,
             torch.tensor([512, 512], device="cuda"),
         )
         self.assertEqual(paged_cache.page_table, expected_page_table)
@@ -3317,7 +3313,7 @@ class TestPagedAttention(InductorTestCase):
             device="cuda",
         )
         self.assertEqual(
-            paged_cache.allocated_seq_len,
+            paged_cache.capacity,
             torch.tensor([512, 512], device="cuda"),
         )
         self.assertEqual(paged_cache.page_table, expected_page_table)
@@ -3446,7 +3442,7 @@ class TestPagedAttention(InductorTestCase):
             head_dim,
             device="cuda",
             dtype=torch.float16,
-            requires_grad=True,
+            requires_grad=False,
         )
         k = torch.randn(
             max_batch_size,
@@ -3455,7 +3451,7 @@ class TestPagedAttention(InductorTestCase):
             head_dim,
             device="cuda",
             dtype=torch.float16,
-            requires_grad=True,
+            requires_grad=False,
         )
         v = torch.randn(
             max_batch_size,
@@ -3464,7 +3460,7 @@ class TestPagedAttention(InductorTestCase):
             head_dim,
             device="cuda",
             dtype=torch.float16,
-            requires_grad=True,
+            requires_grad=False,
         )
 
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)

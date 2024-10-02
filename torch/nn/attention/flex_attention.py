@@ -933,7 +933,7 @@ class PagedAttention:
         )
 
         assert len(self.empty_pages) >= num_pages_to_allocate, (
-            f"requested {num_pages_to_allocate} pages "
+            f"requested {num_pages_to_allocate.item()} pages "
             f"but there are only {len(self.empty_pages)} empty pages"
         )
 
@@ -954,8 +954,10 @@ class PagedAttention:
         ] = allocated_pages
 
         # update metadata
-        self.physical_to_logical[batch_idx][allocated_pages] = torch.arange(
-            start_page_idx, end_page_idx, device=num_pages_to_allocate.device
+        self.physical_to_logical[batch_idx, allocated_pages] = torch.arange(
+            start_page_idx.item(),
+            end_page_idx.item(),
+            device=num_pages_to_allocate.device,
         )
         self.capacity[batch_idx] += num_pages_to_allocate * self.page_size
 
@@ -974,7 +976,7 @@ class PagedAttention:
         # clean metadata
         self.capacity[batch_idx] = 0
         self.empty_pages += allocated_pages.tolist()
-        self.physical_to_logical[batch_idx][allocated_pages] = -1
+        self.physical_to_logical[batch_idx][:, allocated_pages] = -1
         self.page_table[batch_idx] = -1
 
     def assign(self, batch_idx: Tensor, input_pos: Tensor, val: Tensor, cache: Tensor):
