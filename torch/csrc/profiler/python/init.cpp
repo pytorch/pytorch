@@ -12,7 +12,8 @@
 #include <torch/csrc/utils/pybind.h>
 
 struct THPCapturedTraceback {
-  PyObject_HEAD std::shared_ptr<torch::CapturedTraceback> data;
+  PyObject_HEAD
+  std::shared_ptr<torch::CapturedTraceback> data;
 };
 
 static int THPCapturedTraceback_traverse(
@@ -136,7 +137,8 @@ namespace torch::profiler {
 
 namespace {
 struct RecordFunctionFast {
-  PyObject_HEAD PyObject* name;
+  PyObject_HEAD
+  PyObject* name;
   PyObject* input_values;
   PyObject* keyword_values;
   std::unique_ptr<at::RecordFunction> guard;
