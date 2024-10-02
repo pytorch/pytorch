@@ -390,11 +390,15 @@ class CppWrapperGpu(CppWrapperCpu):
                 grid_extra_kwargs,
             )
 
+        if device_index is None:
+            current_device = V.graph.scheduler.get_current_device_or_throw()
+            device_index = current_device.index
         stream = (
             "stream"
             if V.graph.aot_mode
             else self.write_get_raw_stream(device_index, V.graph)
         )
+
         if triton:
             device_index, call_args = self.prepare_triton_kernel_call(
                 device_index, call_args
