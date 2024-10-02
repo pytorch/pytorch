@@ -126,7 +126,7 @@ def emit_metric(
     calling_function = calling_frame_info.function
 
     try:
-        reserved_metrics = {
+        default_metrics = {
             "metric_name": metric_name,
             "calling_file": calling_file,
             "calling_module": calling_module,
@@ -141,22 +141,16 @@ def emit_metric(
         return
 
     # Prefix key with metric name and timestamp to derisk chance of a uuid1 name collision
-    reserved_metrics[
+    default_metrics[
         "dynamo_key"
     ] = f"{metric_name}_{int(time.time())}_{uuid.uuid1().hex}"
-
-    # Ensure the metrics dict doesn't contain any reserved keys
-    for key in reserved_metrics.keys():
-        used_reserved_keys = [k for k in metrics.keys() if k == key]
-        if used_reserved_keys:
-            raise ValueError(f"Metrics dict contains reserved keys: [{', '.join(key)}]")
 
     if EMIT_METRICS:
         try:
             upload_to_s3(
                 bucket_name="ossci-raw-job-status",
-                key=f"ossci_uploaded_metrics/{reserved_metrics['dynamo_key']}",
-                docs=[{**reserved_metrics, "info": metrics}],
+                key=f"ossci_uploaded_metrics/{default_metrics['dynamo_key']}",
+                docs=[{**default_metrics, "info": metrics}],
             )
         except Exception as e:
             # We don't want to fail the job if we can't upload the metric.

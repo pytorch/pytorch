@@ -222,12 +222,6 @@ class TestUploadStats(unittest.TestCase):
             f"Metrics should not include optional item 'pr_number' when it's envvar is set to '{default_val}'",
         )
 
-    def test_blocks_emission_if_reserved_keyword_used(self, mock_resource: Any) -> None:
-        metric = {"repo": "awesome/repo"}
-
-        with self.assertRaises(ValueError):
-            emit_metric("metric_name", metric)
-
     def test_no_metrics_emitted_if_required_env_var_not_set(
         self, mock_resource: Any
     ) -> None:
