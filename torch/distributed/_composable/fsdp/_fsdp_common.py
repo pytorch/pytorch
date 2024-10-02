@@ -6,12 +6,18 @@ from enum import auto, Enum
 from typing import Any, cast, List, Optional
 
 import torch
-import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable.contract import _get_registry
 from torch.distributed.tensor import DeviceMesh, DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
+
+
+if not torch._running_with_deploy():
+    import torch._dynamo.compiled_autograd as ca
+else:
+    ca = object()  # type: ignore[assignment]
+    ca.compiled_autograd_enabled = False
 
 
 @dataclass
