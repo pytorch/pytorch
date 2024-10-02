@@ -3688,6 +3688,7 @@ if IS_MACOS:
             "test_cond_non_tensor_predicates_dynamic_True": fail_stack_allocation(),
             "test_custom_op_with_concat_inputs": fail_minimal_arrayref_interface(),
             "test_custom_op_with_multiple_outputs": fail_minimal_arrayref_interface(),
+            "test_while_loop_nested": fail_minimal_arrayref_interface(),
         }
     )
 
