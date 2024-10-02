@@ -72,6 +72,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.allow_stack_allocation: Optional[bool] = None
         self.stack_allocated_buffers: Dict[BufferName, ir.Buffer] = {}
 
+    @staticmethod
+    def create(is_subgraph, subgraph_name, parent_wrapper):
+        # TODO(anijain2305) - Need to make changes in this wrapper for subgraphs
+        if is_subgraph:
+            raise NotImplementedError("codegen not implemented for subgraphs")
+        return CppWrapperCpuArrayRef()
+
     def memory_plan(self):
         from .memory_planning import MemoryPlanner
 

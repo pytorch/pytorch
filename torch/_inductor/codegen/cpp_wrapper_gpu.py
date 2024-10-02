@@ -171,6 +171,13 @@ class CppWrapperGpu(CppWrapperCpu):
         super().__init__()
         self.grid_id = count()
 
+    @staticmethod
+    def create(is_subgraph, subgraph_name, parent_wrapper):
+        # TODO(anijain2305) - Need to make changes in this wrapper for subgraphs
+        if is_subgraph:
+            raise NotImplementedError("codegen not implemented for subgraphs")
+        return CppWrapperGpu()
+
     def write_header(self):
         if V.graph.is_const_graph:
             # We do not write header for constant graph, it will be written by main module.

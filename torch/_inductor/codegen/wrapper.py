@@ -606,13 +606,17 @@ class PythonWrapperCodegen(CodeGen):
             """
         )
 
-    @cache_on_self
-    def write_triton_header_once(self) -> None:
+    def triton_header_str(self) -> str:
         import_str = f"""
             import triton
             import triton.language as tl
             from {triton_heuristics.__name__} import grid, split_scan_grid, grid_combo_kernels, start_graph, end_graph
             """
+        return import_str
+
+    @cache_on_self
+    def write_triton_header_once(self) -> None:
+        import_str = self.triton_header_str()
         self.imports.splice(import_str, strip=True)
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.splice(import_str)
@@ -748,6 +752,7 @@ class PythonWrapperCodegen(CodeGen):
             self.kernel_autotune_calls.writeline(
                 V.graph.device_ops.set_device(device_idx)
             )
+            self.write_get_raw_stream_header_once()
             self.kernel_autotune_calls.writeline(
                 f"stream{device_idx} = get_raw_stream({device_idx})"
             )
@@ -1987,6 +1992,10 @@ class PythonWrapperCodegen(CodeGen):
             self.writeline(f"{self.comment} subgraph: {subgraph.name}")
             self.codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
 
+            # TODO - Need to set the cpp_wrapper manually here. Is there a better way?
+            parent_graph = V.graph
+            subgraph.graph.cpp_wrapper = parent_graph.cpp_wrapper
+
             if subgraph.graph.name not in self.already_codegened_subgraphs:
                 # If its codegened, the parent wrapper already has subgraph fn by name subgraph.graph.name
                 with V.set_graph_handler(subgraph.graph):
@@ -2161,8 +2170,15 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
 
     @cache_on_self
     def write_triton_header_once(self) -> None:
+        import_str = self.triton_header_str()
+        if config.triton.autotune_at_compile_time:
+            self.kernel_autotune_calls.splice(import_str)
         self.parent_wrapper.write_triton_header_once()
 
     @cache_on_self
     def write_get_raw_stream_header_once(self) -> None:
+        if config.triton.autotune_at_compile_time:
+            self.kernel_autotune_calls.writeline(
+                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
+            )
         self.parent_wrapper.write_get_raw_stream_header_once()
