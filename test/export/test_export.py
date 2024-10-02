@@ -32,7 +32,7 @@ from torch._export.utils import (
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._inductor.compile_fx import split_const_gm
 from torch._subclasses import FakeTensorMode
-from torch.export import core_op_decompositions, Dim, export, unflatten
+from torch.export import default_decompositions, Dim, export, unflatten
 from torch.export._trace import (
     _export,
     _export_to_torch_ir,
@@ -1544,7 +1544,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     return (add,)""",
         )
 
-        decomp_table = core_op_decompositions()
+        decomp_table = default_decompositions()
         del decomp_table[torch.ops.aten.conv2d.default]
         del decomp_table[torch.ops.aten.conv1d.default]
 
@@ -1566,7 +1566,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     return (add,)""",
         )
 
-        decomp_table = core_op_decompositions()
+        decomp_table = default_decompositions()
         del decomp_table[torch.ops.aten.conv2d.default]
 
         ep_has_convd = ep_has_convd.run_decompositions(decomp_table=decomp_table)
@@ -1630,7 +1630,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
     return (add,)""",
         )
 
-        decomp_table = core_op_decompositions()
+        decomp_table = default_decompositions()
         del decomp_table[torch.ops.aten.conv2d.default]
         del decomp_table[torch.ops.aten.conv1d.default]
 
@@ -1652,7 +1652,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
     return (add,)""",
         )
 
-        decomp_table = core_op_decompositions()
+        decomp_table = default_decompositions()
         del decomp_table[torch.ops.aten.conv2d.default]
         ep_has_convd = ep_has_convd.run_decompositions(decomp_table=decomp_table)
 
@@ -1692,7 +1692,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
 
         ep = export(Foo(), (torch.ones(3, 3),))
 
-        decomp_table = core_op_decompositions()
+        decomp_table = default_decompositions()
         del decomp_table[torch.ops.aten.sum.default]
         ep_preserve_sum = ep.run_decompositions(decomp_table)
 
@@ -4803,7 +4803,7 @@ def forward(self, b_a_buffer, x):
         inp = (torch.randn(5, 10),)
         m = M()
 
-        decomp_table = core_op_decompositions()
+        decomp_table = default_decompositions()
 
         def _custom_decomp_for_linear(x, weight, bias):
             return x + bias.sum()
@@ -4856,7 +4856,7 @@ def forward(self, p_lin_weight, p_lin_bias, x):
         def custom_decomp_callable(x, weight, bias):
             return x + bias
 
-        decomp_table = core_op_decompositions()
+        decomp_table = default_decompositions()
         decomp_table[torch.ops.aten.linear.default] = custom_decomp_callable
         core_aten_ep = ep.run_decompositions(decomp_table)
         self.assertExpectedInline(
@@ -7285,7 +7285,7 @@ def forward(self, x, y):
                 y = torch.ops.testlib.foo_functional.default(x)
                 return torch.ops.testlib.foo_mutated.default(y)
 
-        decomp_table = core_op_decompositions()
+        decomp_table = default_decompositions()
         del decomp_table[torch.ops.testlib.foo_functional.default]
 
         ep = torch.export.export(M(), (torch.randn(4, 4),)).run_decompositions(
@@ -7324,7 +7324,7 @@ def forward(self, x):
             },
         )
 
-        table = core_op_decompositions()
+        table = default_decompositions()
         del table[torch.ops.aten.linear.default]
         ep = ep.run_decompositions(table)
 
@@ -8390,7 +8390,7 @@ class TestExportCustomClass(TorchTestCase):
             ep.graph_module.code
         )
 
-        decomp_table = core_op_decompositions()
+        decomp_table = default_decompositions()
         del decomp_table[torch.ops.aten.elu.default]
 
         ep = ep.run_decompositions(
@@ -8417,7 +8417,7 @@ class TestExportCustomClass(TorchTestCase):
             "torch.ops.aten.upsample_bilinear2d.vec", 1, exactly=True
         ).run(ep.graph_module.code)
 
-        decomp_table = core_op_decompositions()
+        decomp_table = default_decompositions()
         del decomp_table[torch.ops.aten.upsample_bilinear2d.vec]
         ep = ep.run_decompositions(
             decomp_table=decomp_table,

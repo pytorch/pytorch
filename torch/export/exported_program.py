@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     # imported in user code.
 
     import sympy
+    from torch._ops import OperatorBase
 
     from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -81,7 +82,7 @@ __all__ = [
     "ExportedProgram",
     "ModuleCallEntry",
     "ModuleCallSignature",
-    "core_op_decompositions",
+    "default_decompositions",
 ]
 
 
@@ -327,6 +328,7 @@ def _materialize_cpp_cia_ops() -> Set["OperatorBase"]:
             op_overload_name = split_list[1]
 
         _ = getattr(getattr(getattr(torch.ops, namespace), op_name), op_overload_name)
+    return
 
 
 @functools.lru_cache(maxsize=1)
@@ -441,7 +443,7 @@ def _split_decomp_table_to_cia_and_python_decomp(
     return cia_ops_to_callable, decomp_table
 
 
-def core_op_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
+def default_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
     """
     This is the default decomposition table which contains decomposition of
     all ATEN + custom operators to core aten opset. Use this API together with
@@ -1199,7 +1201,7 @@ class ExportedProgram:
         """
 
         _decomp_table = (
-            core_op_decompositions() if decomp_table is None else dict(decomp_table)
+            default_decompositions() if decomp_table is None else dict(decomp_table)
         )
 
         # By the time we get here, user might have registered more custom ops
@@ -1217,10 +1219,9 @@ class ExportedProgram:
         # If the user specified decomp is None, we want to add the additional CIA ops
         # into decomp table.
         if decomp_table is None:
-            _decomp_table = {
-                **core_op_decompositions(),
-                **{op: _get_decomp_for_cia(op) for op in additional_custom_cia_ops},
-            }
+            _decomp_table.update(
+                {op: _get_decomp_for_cia(op) for op in additional_custom_cia_ops}
+            )
         else:
             _decomp_table = dict(decomp_table)
 
