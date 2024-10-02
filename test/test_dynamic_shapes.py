@@ -2600,6 +2600,53 @@ class TestGuardsExpressions(TestCase):
         self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
         self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
 
+    def test_guards_ads_repro(self):
+        # TORCH_LOGS="+dynamic" pytest -rA test/test_dynamic_shapes.py::TestGuardsExpressions::test_guards_ads_repro
+
+        from torch._dynamo.source import ConstantSource
+        shape_env = ShapeEnv()
+        s1325 = shape_env.create_unspecified_symint_and_symbol(
+            0,
+            source=ConstantSource("s1325"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+        )
+        s1326 = shape_env.create_unspecified_symint_and_symbol(
+            16,
+            source=ConstantSource("s1326"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+        )
+        with shape_env.suppress_guards():
+            guard_int(sym_int(s1325 >= 0))
+            guard_int(sym_int(s1326 >= 0))
+
+            guard_int(sym_int(s1325 == 0))
+            guard_int(sym_int(s1325*s1326 == 0))
+        guard_int(sym_int(s1325 != -1))
+        guard_int(sym_int(s1326 != -1))
+
+        shape_env.evaluate_expr(sympy.Eq(s1325*s1326, 0), hint=True, size_oblivious=True, forcing_spec=False)
+
+        # Throws error:
+        # ```
+        #   File "/data/users/willfeng/pytorch/test/test_dynamic_shapes.py", line 2625, in test_guards_ads_repro
+        #     shape_env.evaluate_expr(sympy.Eq(s1325*s1326, 0), hint=True, size_oblivious=True, forcing_spec=False)
+        #   File "/data/users/willfeng/pytorch/torch/fx/experimental/recording.py", line 262, in wrapper
+        #     return retlog(fn(*args, **kwargs))
+        #                   ^^^^^^^^^^^^^^^^^^^
+        #   File "/data/users/willfeng/pytorch/torch/fx/experimental/symbolic_shapes.py", line 6020, in evaluate_expr
+        #     return self._evaluate_expr(
+        #            ^^^^^^^^^^^^^^^^^^^^
+        #   File "/data/users/willfeng/pytorch/torch/fx/experimental/symbolic_shapes.py", line 6213, in _evaluate_expr
+        #     self._maybe_guard_rel(g)
+        #   File "/data/users/willfeng/pytorch/torch/fx/experimental/symbolic_shapes.py", line 5792, in _maybe_guard_rel
+        #     self._refine_ranges(expr)
+        #   File "/data/users/willfeng/pytorch/torch/fx/experimental/symbolic_shapes.py", line 6413, in _refine_ranges
+        #     self._update_var_to_range(symbol, ValueRanges(lower, upper))
+        #   File "/data/users/willfeng/pytorch/torch/fx/experimental/symbolic_shapes.py", line 5560, in _update_var_to_range
+        #     assert v in r, f"{v} not in {r}"
+        #            ^^^^^^
+        # AssertionError: 16 not in VR[0, 0]
+        # ```
 
 if __name__ == "__main__":
     run_tests()
