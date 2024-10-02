@@ -1319,12 +1319,14 @@ class CudaReproTests(TestCase):
         self.assertEqual(expect, actual)
 
         # Expect the code iterates in contiguous order, and is not tiled
-        kernel_code = "\n".join(code[0].split("\n")[60:74])
+        lines = code[0].split("\n")
+        start = lines.index("@triton.jit")
+        kernel_code = "\n".join(lines[start : start + 14])
         self.assertExpectedInline(
             kernel_code,
             """\
 @triton.jit
-def triton_(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK : tl.constexpr):
+def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK : tl.constexpr):
     xnumel = 4000
     xoffset = tl.program_id(0) * XBLOCK
     xindex = xoffset + tl.arange(0, XBLOCK)[:]

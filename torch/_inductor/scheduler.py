@@ -48,6 +48,7 @@ from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
 from .loop_body import LoopBody
+from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
 from .runtime.runtime_utils import green_text, red_text
 from .sizevars import SimplifyIndexing
 from .utils import (
@@ -77,6 +78,9 @@ class SchedulerBuffer:
     node: ir.Buffer
     defining_op: BaseSchedulerNode
     users: List[NodeUser] = dataclasses.field(default_factory=list)
+    mpi_buffer: MemoryPlanningInfoForBuffer = dataclasses.field(
+        default_factory=MemoryPlanningInfoForBuffer
+    )
 
     def __hash__(self) -> int:
         return hash(self.node.name)
@@ -167,6 +171,7 @@ class BaseSchedulerNode:
     # .min_order = .max_order = X if this node is X-th node in `self.scheduler.nodes`.
     min_order: int
     max_order: int
+    mpi_node: MemoryPlanningInfoForNode
 
     def __init__(self, scheduler: Scheduler) -> None:
         self.scheduler: Scheduler = scheduler
@@ -1804,6 +1809,16 @@ class Scheduler:
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
         self.nodes = self.fuse_nodes(self.nodes)
+        if config.reorder_for_peak_memory:
+            from .memory import reorder_for_peak_memory
+
+            self.nodes = reorder_for_peak_memory(
+                self.nodes,
+                self.name_to_buf,
+                self.name_to_fused_node,
+                set(V.graph.graph_inputs.keys()),
+                set(V.graph.get_output_names()),
+            )
         self.merge_loops()
         self.finalize_multi_template_buffers()
         if config.reorder_for_compute_comm_overlap:
@@ -2657,6 +2672,8 @@ class Scheduler:
 
         buffer_names_grouping = collections.defaultdict(list)
         for node in nodes:
+            if self.unfusable_node(node):
+                continue
             for buf in node.used_buffer_names():
                 buffer_names_grouping[buf].append(node)
         for node_grouping in buffer_names_grouping.values():
@@ -2857,9 +2874,7 @@ class Scheduler:
             return False
 
         # Pick the largest buffer to guide the loop reordering
-        numel, lhs_dep, rhs_dep = sorted(candidates, reverse=True, key=lambda x: x[0])[
-            0
-        ]
+        numel, lhs_dep, rhs_dep = max(candidates, key=lambda x: x[0])
 
         if lhs_dep.num_vars != rhs_dep.num_vars:
             # this can happen due to we don't merge loops.
@@ -2881,6 +2896,15 @@ class Scheduler:
             )
 
         return self.score_fusion_memory(node1, node2) > 0
+
+    def unfusable_node(self, node: BaseSchedulerNode) -> bool:
+        """
+        Is this node unfusable under any conditions.
+        """
+        return (
+            isinstance(node, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
+            and not node.is_template()
+        )
 
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
         """
@@ -3449,11 +3473,10 @@ class Scheduler:
                         self.current_device.type
                     ):
                         V.graph.wrapper_code.codegen_device_guard_exit()
+                    self.current_device = device
                     if device_need_guard(device.type):
                         assert device.index is not None, "device should have an index"
                         V.graph.wrapper_code.codegen_device_guard_enter(device.index)
-
-                    self.current_device = device
 
             self.buffer_names_to_free.update(node.last_usage)
 
