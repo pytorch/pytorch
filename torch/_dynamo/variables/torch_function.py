@@ -4,6 +4,7 @@ import collections
 import contextlib
 import functools
 import inspect
+import operator
 from typing import Deque, Dict, List, TYPE_CHECKING
 
 import torch._C
@@ -11,6 +12,7 @@ import torch.utils._pytree as pytree
 from torch._guards import Source
 from torch.overrides import (
     _get_overloaded_args,
+    BaseTorchFunctionMode,
     get_default_nowrap_functions,
     TorchFunctionMode,
 )
@@ -62,6 +64,98 @@ if TYPE_CHECKING:
 
 # To enable subclass behavior, add your tensor subclass type to traceable_tensor_subclasses in dynamo/config.py
 
+bin_ops = [
+    operator.pow,
+    operator.mul,
+    operator.matmul,
+    operator.floordiv,
+    operator.truediv,
+    operator.mod,
+    operator.add,
+    operator.lt,
+    operator.gt,
+    operator.ge,
+    operator.le,
+    operator.ne,
+    operator.eq,
+    operator.sub,
+    operator.ipow,
+    operator.imul,
+    operator.imatmul,
+    operator.ifloordiv,
+    operator.itruediv,
+    operator.imod,
+    operator.iadd,
+    operator.isub,
+]
+
+bin_int_ops = [
+    operator.and_,
+    operator.or_,
+    operator.xor,
+    operator.iand,
+    operator.ixor,
+    operator.ior,
+]
+
+un_int_ops = [operator.invert]
+
+tensor_and_int_ops = [
+    operator.lshift,
+    operator.rshift,
+    operator.ilshift,
+    operator.irshift,
+    operator.getitem,
+]
+
+un_ops = [
+    operator.abs,
+    operator.pos,
+    operator.neg,
+    operator.not_,  # Note: this has a local scalar dense call
+    operator.length_hint,
+]
+
+BUILTIN_TO_TENSOR_FN_MAP = {}
+
+
+def populate_builtin_to_tensor_fn_map():
+    global BUILTIN_TO_TENSOR_FN_MAP
+
+    most_recent_func = None
+
+    class GetMethodMode(BaseTorchFunctionMode):
+        """
+        Mode to extract the correct methods from torch function invocations
+        (Used to get the correct torch.Tensor methods from builtins)
+        """
+
+        def __torch_function__(self, func, types, args=(), kwargs=None):
+            kwargs = kwargs or {}
+            nonlocal most_recent_func
+            most_recent_func = func
+            return func(*args, **kwargs)
+
+    inp0 = torch.ones(1)
+    inp1 = torch.ones(1)
+    inp0_int = torch.ones(1, dtype=torch.int32)
+    inp1_int = torch.ones(1, dtype=torch.int32)
+    with GetMethodMode():
+        setups_and_oplists = [
+            (lambda o: o(inp0), un_ops),
+            (lambda o: o(inp0_int), un_int_ops),
+            (lambda o: o(inp0, inp1), bin_ops),
+            (lambda o: o(inp0_int, inp1_int), bin_int_ops),
+            (lambda o: o(inp0_int, 0), tensor_and_int_ops),
+        ]
+        for setup_fn, op_list in setups_and_oplists:
+            for op in op_list:
+                setup_fn(op)
+                assert most_recent_func is not None
+                BUILTIN_TO_TENSOR_FN_MAP[op] = most_recent_func
+
+
+populate_builtin_to_tensor_fn_map()
 
 banned_attrs = [
     fn.__self__.__name__
