@@ -4,7 +4,6 @@ import logging
 from typing import Any, Callable, cast, Dict, List, NamedTuple, Optional, Set, Tuple
 
 import torch
-import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.device_mesh import _get_device_handle
@@ -23,6 +22,13 @@ from ._fsdp_collectives import (
 )
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo, TrainingState
 from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
+
+
+if not torch._running_with_deploy():
+    import torch._dynamo.compiled_autograd as ca
+else:
+    ca = object()  # type: ignore[assignment]
+    ca.compiled_autograd_enabled = False
 
 
 logger = logging.getLogger("torch.distributed._composable.fsdp")
