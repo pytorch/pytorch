@@ -28,6 +28,7 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
+    _temp_remove_metadata_torch_function_mode,
     _temp_remove_pre_dispatch_torch_function_mode,
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -129,6 +130,10 @@ def cond(pred, true_fn, false_fn, operands):
     if torch.compiler.is_dynamo_compiling():
         return cond_op(pred, true_fn, false_fn, operands)
 
+    from torch._dynamo.backends.debugging import (
+        make_eager_backend_with_torch_function_mode,
+    )
+
     if isinstance(pred, (bool, int, float)):
         log.warning(
             "Pred is a Python constant. When used with torch.cond, it executes only one of the branches."
@@ -169,12 +174,15 @@ def cond(pred, true_fn, false_fn, operands):
     def _cond_op_wrapper(*args, **kwargs):
         return cond_op(*args, **kwargs)
 
-    with _set_compilation_env():
-        with torch._dynamo.utils.disable_cache_limit():
-            with _temp_remove_pre_dispatch_torch_function_mode():
-                return torch.compile(_cond_op_wrapper, backend="eager", fullgraph=True)(
-                    pred, true_fn, false_fn, operands
-                )
+    with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit(), _temp_remove_pre_dispatch_torch_function_mode():
+        with _temp_remove_metadata_torch_function_mode() as metadata_mode:
+            if metadata_mode:
+                backend = make_eager_backend_with_torch_function_mode(metadata_mode)
+            else:
+                backend = "eager"
+            return torch.compile(_cond_op_wrapper, backend=backend, fullgraph=True)(
+                pred, true_fn, false_fn, operands
+            )
 
 
 def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
