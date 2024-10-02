@@ -13,6 +13,7 @@ from torch.fx.graph_module import GraphModule  # noqa: TCH001
 
 # TODO: refactor
 from torch.fx.passes.runtime_assert import _get_sym_val
+from torch.fx.proxy import MetaProxy
 from torch.utils._sympy.reference import TensorReferenceAnalysis
 
 
@@ -83,8 +84,8 @@ def tensorify_python_scalars(
 
     graph = gm.graph
     tracer = fx.proxy.GraphAppendingTracer(graph)
-    expr_to_sym_proxy: dict[sympy.Expr, fx.Proxy] = {}
-    expr_to_tensor_proxy: dict[sympy.Expr, fx.Proxy] = {}
+    expr_to_sym_proxy: dict[sympy.Expr, MetaProxy] = {}
+    expr_to_tensor_proxy: dict[sympy.Expr, MetaProxy] = {}
 
     first_non_placeholder = None
     placeholders = set()
@@ -97,7 +98,7 @@ def tensorify_python_scalars(
 
     Analysis = TensorReferenceAnalysis
 
-    def _sympy_interp(expr: sympy.Expr) -> fx.Proxy:
+    def _sympy_interp(expr: sympy.Expr) -> MetaProxy:
         # sympy_interp() with hash consing, and special handling for
         # generating constants correctly
         from sympy import Integer, Number, Symbol
@@ -113,10 +114,10 @@ def tensorify_python_scalars(
                 torch.ops.aten.scalar_tensor.default,
                 (expr_to_sym_proxy[expr].node,),
             )
-            node.meta["val"] = fake_mode.from_tensor(
-                torch.tensor(expr_to_sym_proxy[expr].node)
+            node.meta["val"] = torch.ops.aten.scalar_tensor.default(
+                expr_to_sym_proxy[expr].node.meta["val"]
             )
-            expr_to_tensor_proxy[expr] = fx.Proxy(
+            expr_to_tensor_proxy[expr] = MetaProxy(
                 node,
                 tracer=tracer,
             )
@@ -138,8 +139,8 @@ def tensorify_python_scalars(
             node = graph.call_function(
                 torch.ops.aten.scalar_tensor.default, (c,), {"dtype": dtype}
             )
-            node.meta["val"] = fake_mode.from_tensor(torch.tensor(c, dtype=dtype))
-            expr_to_tensor_proxy[expr] = fx.Proxy(
+            node.meta["val"] = torch.ops.aten.scalar_tensor.default(c, dtype=dtype)
+            expr_to_tensor_proxy[expr] = MetaProxy(
                 node,
                 tracer=tracer,
             )
@@ -179,14 +180,14 @@ def tensorify_python_scalars(
 
                         assert isinstance(node.args[0], fx.Node), node.args[0]
 
-                        expr_to_tensor_proxy[s] = fx.Proxy(node.args[0], tracer=tracer)
-                        expr_to_sym_proxy[s] = fx.Proxy(node, tracer=tracer)
+                        expr_to_tensor_proxy[s] = MetaProxy(node.args[0], tracer=tracer)
+                        expr_to_sym_proxy[s] = MetaProxy(node, tracer=tracer)
 
             elif (sym_expr := _get_sym_val(node)) is not None:
                 if sym_expr not in expr_to_sym_proxy and not isinstance(
                     sym_expr, (sympy.Number, sympy.logic.boolalg.BooleanAtom)
                 ):
-                    expr_to_sym_proxy[sym_expr] = fx.Proxy(node, tracer=tracer)
+                    expr_to_sym_proxy[sym_expr] = MetaProxy(node, tracer=tracer)
 
             # Look for functions to convert
             if node.op == "call_function" and node.target is torch.ops.aten.mul.Tensor:
@@ -205,20 +206,24 @@ def tensorify_python_scalars(
                             transform = False
                             break
 
-                    if a.meta["val"].dtype != compute_dtype:
-                        res = graph.call_function(
-                            torch.ops.prims.convert_element_type.default,
-                            (
-                                a,
-                                compute_dtype,
-                            ),
-                        )
-                        res.meta["val"] = torch.ops.prims.convert_element_type.default(
-                            a.meta["val"], compute_dtype
-                        )
-                        a = res
+                        if a.meta["val"].dtype != compute_dtype:
+                            res = graph.call_function(
+                                torch.ops.prims.convert_element_type.default,
+                                (
+                                    a,
+                                    compute_dtype,
+                                ),
+                            )
+                            res.meta[
+                                "val"
+                            ] = torch.ops.prims.convert_element_type.default(
+                                a.meta["val"], compute_dtype
+                            )
+                            a = res
 
-                    args.append(a)
+                        args.append(a)
+                    else:
+                        args.append(a)
 
                 if transform:
                     replacement_node = graph.call_function(
