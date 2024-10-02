@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Union
+from typing import List, Union
 
 import torch
 import torch.fx as fx
@@ -16,6 +16,8 @@ from torch.fx.passes.runtime_assert import _get_sym_val
 from torch.fx.proxy import MetaProxy
 from torch.utils._sympy.reference import TensorReferenceAnalysis
 
+
+__all__: List[str] = []
 
 log = logging.getLogger(__name__)
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
