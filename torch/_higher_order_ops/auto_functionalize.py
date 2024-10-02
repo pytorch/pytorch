@@ -75,14 +75,23 @@ def write_view_information_to_args(
 
         if tensor is None:
             kwargs[f"{prefix}_base_index"] = None
-        elif get_base(tensor) is None:
-            # if the tensor is the base (not view), for simplicity we do not serialize view meta.
-            kwargs[f"{prefix}_base_index"] = base_index
         else:
-            kwargs[f"{prefix}_base_index"] = base_index
-            kwargs[f"{prefix}_size"] = tensor.size()
-            kwargs[f"{prefix}_stride"] = tensor.stride()
-            kwargs[f"{prefix}_storage_offset"] = tensor.storage_offset()
+            base = get_base(tensor)
+            if (
+                base
+                is None
+                # or base.size() == tensor.size()
+                # and base.stride() == tensor.stride()
+                # and base.storage_offset() == tensor.storage_offset()
+            ):
+                # if the tensor is the base (not view), for simplicity we do not serialize view meta.
+                kwargs[f"{prefix}_base_index"] = base_index
+            else:
+                base
+                kwargs[f"{prefix}_base_index"] = base_index
+                kwargs[f"{prefix}_size"] = tensor.size()
+                kwargs[f"{prefix}_stride"] = tensor.stride()
+                kwargs[f"{prefix}_storage_offset"] = tensor.storage_offset()
 
     for arg_name, arg_type in zip(mutable_arg_names, mutable_arg_types):
         arg = kwargs[arg_name]
@@ -566,9 +575,11 @@ def auto_functionalized_dense(
             new_kwargs[name] = (
                 [clone_preserve_strides(x) for x in kwargs[name]]
                 if kwargs[name] is not None and isinstance(kwargs[name], list)
-                else clone_preserve_strides(kwargs[name])
-                if kwargs[name] is not None
-                else None
+                else (
+                    clone_preserve_strides(kwargs[name])
+                    if kwargs[name] is not None
+                    else None
+                )
             )
         result.append(new_kwargs[name])
     out = _mutable_op(**new_kwargs)

@@ -965,6 +965,106 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             # to clone not-inplaced args.
             f(x[1])
 
+    # foo takes two views on the same input, function does not have return.
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_alias(self, _dynamic=False):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!) x, Tensor(b!) y) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x, y):
+                x.sin_()
+                y.sin_()
+
+            def f(x):
+                a = torch.ops.aten.alias.default(x)
+                b = torch.ops.aten.alias.default(x)
+                torch.ops.mylib.foo(a, b)
+                return (a, b, x)
+
+            orig_args = [torch.randn(2)]
+            [aot_eager_args, result1, graph_aot] = self.run_aot_eager(
+                f, orig_args, _dynamic
+            )
+            [inductor_args, result2, graph_inductor] = self.run_inductor(
+                f, orig_args, _dynamic
+            )
+            eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+            result3 = f(*eager_args)
+
+            self.assertEqual(inductor_args, eager_args)
+            self.assertEqual(inductor_args, aot_eager_args)
+
+            self.assertEqual(result3, result1)
+            self.assertEqual(result3, result2)
+
+            if torch._dynamo.config.assume_static_by_default:
+                if _dynamic:
+                    self.assertExpectedInline(
+                        graph_aot,
+                        """\
+def forward(self, arg0_1: "Sym(s0)", arg1_1: "f32[s0][1]cpu"):
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, \
+_x_base_index = 0, _y_base_index = 0, _all_bases = [arg1_1])
+        getitem_1: "f32[s0][1]cpu" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+        copy_: "f32[s0][1]cpu" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = copy_ = None
+        alias_2: "f32[s0][1]cpu" = torch.ops.aten.alias.default(getitem_1)
+        alias_3: "f32[s0][1]cpu" = torch.ops.aten.alias.default(getitem_1);  getitem_1 = None
+        return (alias_2, alias_3)""",  # noqa: B950
+                        ignore_comments=True,
+                        ignore_empty_lines=True,
+                    )
+                else:
+                    self.assertExpectedInline(
+                        graph_aot,
+                        """\
+def forward(self, arg0_1: "f32[2][1]cpu"):
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, \
+_x_base_index = 0, _y_base_index = 0, _all_bases = [arg0_1])
+        getitem_1: "f32[2][1]cpu" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+        copy_: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = copy_ = None
+        alias_2: "f32[2][1]cpu" = torch.ops.aten.alias.default(getitem_1)
+        alias_3: "f32[2][1]cpu" = torch.ops.aten.alias.default(getitem_1);  getitem_1 = None
+        return (alias_2, alias_3)""",  # noqa: B950
+                        ignore_comments=True,
+                        ignore_empty_lines=True,
+                    )
+
+            # 2. Run with inductor backend
+            if torch._dynamo.config.assume_static_by_default:
+                if _dynamic:
+                    self.assertExpectedInline(
+                        graph_inductor,
+                        """\
+def forward(self, arg0_1: "Sym(s0)", arg1_1: "f32[s0][1]cpu"):
+        foo_default = torch.ops.mylib.foo.default(arg1_1, arg1_1);  foo_default = None
+        copy_: "f32[s0][1]cpu" = torch.ops.aten.copy_.default(arg1_1, arg1_1);  copy_ = None
+        return (arg1_1, arg1_1)""",  # noqa: B950
+                        ignore_comments=True,
+                        ignore_empty_lines=True,
+                    )
+                else:
+                    self.assertExpectedInline(
+                        graph_inductor,
+                        """\
+def forward(self, arg0_1: "f32[2][1]cpu"):
+        foo_default = torch.ops.mylib.foo.default(arg0_1, arg0_1);  foo_default = None
+        copy_: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg0_1, arg0_1);  copy_ = None
+        return (arg0_1, arg0_1)""",  # noqa: B950
+                        ignore_comments=True,
+                        ignore_empty_lines=True,
+                    )
+
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_alias_dynamic(self):
+        self.test_alias(_dynamic=True)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
