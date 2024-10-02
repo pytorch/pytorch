@@ -117,7 +117,7 @@ class C10_API DataPtr {
   // We used to need this for the implementation of the hack detailed
   // in Note [Masquerading as CUDA], but that hack has been removed.
   C10_DEPRECATED_MESSAGE(
-      "unsafe_set_device is deprecated. You should never need to call this function.");
+      "unsafe_set_device is deprecated. You should never need to call this function.")
   void unsafe_set_device(Device device) {
     device_ = device;
   }
