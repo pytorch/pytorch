@@ -3,6 +3,7 @@
 #include <ATen/cuda/CUDASparse.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/native/utils/ParamsHash.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Functions.h>
 #include <c10/core/ScalarType.h>
@@ -103,29 +104,98 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
     return compressed_tensor;
 }
 
-std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
+using plan_and_attrs = std::tuple<
+    cusparseLtMatmulPlan_t, // plan
+    cusparseLtMatmulAlgSelection_t, // alg_sel
+    int, // n
+    int // m
+    >;
+
+struct CLSTPlanParams {
+  at::ScalarType compressed_A_scalar_type;
+  int64_t compressed_A_numel;
+  int64_t k;
+  int64_t n;
+  bool dense_B_is_contiguous;
+  bool has_bias_opt;
+  int tensor_alpha_mode;
+  bool has_out_dtype_opt;
+  bool transpose_result;
+};
+
+void setCLSTPlanParams(
+    CLSTPlanParams& params,
     const Tensor& compressed_A,
     const Tensor& dense_B,
     const std::optional<Tensor>& bias_opt,
-    const std::optional<Tensor>& alpha_opt,
+    int tensor_alpha_mode,
     const std::optional<c10::ScalarType> out_dtype_opt,
-    bool transpose_result,
-    int alg_id,
-    bool search_alg_id
+    bool transpose_result) {
+  memset(&params, 0, sizeof(CLSTPlanParams));
+  params.compressed_A_scalar_type = compressed_A.scalar_type();
+  params.compressed_A_numel = compressed_A.numel();
+  params.k = dense_B.size(0);
+  params.n = dense_B.size(1);
+  params.dense_B_is_contiguous = dense_B.is_contiguous();
+  params.has_bias_opt = bias_opt.has_value();
+  params.tensor_alpha_mode = tensor_alpha_mode;
+  params.has_out_dtype_opt = out_dtype_opt.has_value();
+  params.transpose_result = transpose_result;
+}
+
+struct CSLTPlanCacheKeyWrapper : ParamsWrapper<CLSTPlanParams> {
+  CSLTPlanCacheKeyWrapper(
+        const Tensor& compressed_A,
+        const Tensor& dense_B,
+        const std::optional<Tensor>& bias_opt,
+        int tensor_alpha_mode,
+        const std::optional<c10::ScalarType> out_dtype_opt,
+        bool transpose_result) {
+    setCLSTPlanParams(
+        this->pod,
+        compressed_A,
+        dense_B,
+        bias_opt,
+        tensor_alpha_mode,
+        out_dtype_opt,
+        transpose_result);
+  }
+};
+
+template <typename T, typename KeyType>
+struct CSLTPlanCache {
+  std::unordered_map<KeyType, T, ParamsWrapperHash<KeyType>> engine_cache;
+
+  T* find(const KeyType& key) {
+    auto it = engine_cache.find(key);
+    if (it == engine_cache.end()) {
+      return nullptr;
+    }
+    return &(it->second);
+  }
+
+  void update(const KeyType& key, T& results) {
+    engine_cache.erase(key);
+    engine_cache.emplace(key, std::move(results));
+  }
+};
+
+thread_local CSLTPlanCache<plan_and_attrs, CSLTPlanCacheKeyWrapper> cslt_plan_cache;
+
+auto build_plan_and_attrs(
+    const Tensor& compressed_A,
+    const Tensor& dense_B,
+    const std::optional<Tensor>& bias_opt,
+    int tensor_alpha_mode,
+    const std::optional<c10::ScalarType> out_dtype_opt,
+    bool transpose_result
 )
 {
-  if (!handle_initialized){
-      TORCH_CUDASPARSE_CHECK(cusparseLtInit(&handle));
-      handle_initialized = true;
-  }
   // cupsarselt constructs
   cusparseLtMatmulDescriptor_t matmul;
   cusparseLtMatmulPlan_t plan;
   cusparseLtMatmulAlgSelection_t alg_sel;
 
-  int tensor_alpha_mode = 0;
-  float alpha = 1.0;
-  float beta = 0.0;
   cudaDataType input_type;
   cudaDataType output_type;
   cudaDataType C_type;
@@ -196,11 +266,10 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         TORCH_CHECK(false, "Unsupported dtype for cuSPARSELt compressed matrix multiplication.");
         break;
   }
-  ScalarType out_dtype = dense_B.scalar_type();
   // special check for mixed dtype support for 8 bit dtypes
   // cslt 0.5.2+: int8 int8 -> {fp16, bf16, int32} support
   if (out_dtype_opt.has_value()) {
-    out_dtype = out_dtype_opt.value();
+    ScalarType out_dtype = out_dtype_opt.value();
     if (input_type == CUDA_R_8I)
     {
         switch (out_dtype)
@@ -284,11 +353,6 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
       input_type,
       CUSPARSE_ORDER_ROW));
 
-  // create result tensor
-  auto res_tensor_options = c10::TensorOptions().dtype(out_dtype).device(dense_B.device());
-  at::Tensor res = (transpose_result) ? at::empty({n, m}, res_tensor_options)
-                                      : at::empty({m, n}, res_tensor_options);
-
   cusparseLtMatDescriptor_t res_descriptor;
   TORCH_CUDASPARSE_CHECK(cusparseLtDenseDescriptorInit(
       &handle,
@@ -339,6 +403,37 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSetAttribute(
       &handle, &alg_sel, CUSPARSELT_MATMUL_ALG_CONFIG_ID, &alg_id, sizeof(alg_id)));
 
+  // set tensor_alpha_mode
+  if (tensor_alpha_mode == 1) {
+    TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
+            &handle, &matmul, CUSPARSELT_MATMUL_ALPHA_VECTOR_SCALING, &tensor_alpha_mode, sizeof(tensor_alpha_mode)));
+  }
+
+  TORCH_CUDASPARSE_CHECK(
+      cusparseLtMatmulPlanInit(&handle, &plan, &matmul, &alg_sel));
+  
+  return std::make_tuple(plan, alg_sel, n, m);
+}
+
+std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
+    const Tensor& compressed_A,
+    const Tensor& dense_B,
+    const std::optional<Tensor>& bias_opt,
+    const std::optional<Tensor>& alpha_opt,
+    const std::optional<c10::ScalarType> out_dtype_opt,
+    bool transpose_result,
+    int alg_id,
+    bool search_alg_id
+)
+{
+  if (!handle_initialized){
+      TORCH_CUDASPARSE_CHECK(cusparseLtInit(&handle));
+      handle_initialized = true;
+  }
+  int tensor_alpha_mode = 0;
+  float alpha = 1.0;
+  float beta = 0.0;
+
   // set tensor_alpha_mode and alpha pointer for matmul
   const auto alpha_tensor = alpha_opt.has_value() ? *alpha_opt: Tensor{};
   auto alpha_ptr = &alpha;
@@ -348,14 +443,43 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
     }
     else {
         tensor_alpha_mode = 1;
-        TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
-            &handle, &matmul, CUSPARSELT_MATMUL_ALPHA_VECTOR_SCALING, &tensor_alpha_mode, sizeof(tensor_alpha_mode)));
         alpha_ptr = static_cast<float*>(alpha_tensor.data_ptr());
     }
   }
+  
+  auto key = CSLTPlanCacheKeyWrapper(
+    compressed_A,
+    dense_B,
+    bias_opt,
+    tensor_alpha_mode,
+    out_dtype_opt,
+    transpose_result);
 
-  TORCH_CUDASPARSE_CHECK(
-      cusparseLtMatmulPlanInit(&handle, &plan, &matmul, &alg_sel));
+  auto plan_and_attrs_ptr = cslt_plan_cache.find(key);
+  plan_and_attrs plan_and_attrs_values;
+
+  if (plan_and_attrs_ptr) {
+    plan_and_attrs_values = *plan_and_attrs_ptr;
+  } else {
+    plan_and_attrs_values = build_plan_and_attrs(
+        compressed_A,
+        dense_B,
+        bias_opt,
+        tensor_alpha_mode,
+        out_dtype_opt,
+        transpose_result);
+  }
+  auto [plan, alg_sel, n, m] = plan_and_attrs_values;
+
+  ScalarType out_dtype = dense_B.scalar_type();
+  if (out_dtype_opt.has_value()) {
+    ScalarType out_dtype = out_dtype_opt.value();
+  }
+
+  // create result tensor
+  auto res_tensor_options = c10::TensorOptions().dtype(out_dtype).device(dense_B.device());
+  at::Tensor res = (transpose_result) ? at::empty({n, m}, res_tensor_options)
+                                      : at::empty({m, n}, res_tensor_options);
 
   size_t workspace_size;
   TORCH_CUDASPARSE_CHECK(
@@ -401,6 +525,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         &stream,
         1));
   }
+  cslt_plan_cache.update(key, plan_and_attrs_values);
 
   //destroy descriptors
   TORCH_CUDASPARSE_CHECK(
