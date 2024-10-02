@@ -3782,13 +3782,10 @@ def l1_loss(
 
     See :class:`~torch.nn.L1Loss` for details.
     """
-
-    args = (input, target, weight) if weight is not None else (input, target)
-
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
             l1_loss,
-            args,
+            (input, target, weight),
             input,
             target,
             size_average=size_average,
