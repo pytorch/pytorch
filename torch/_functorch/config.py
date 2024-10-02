@@ -138,11 +138,6 @@ visualize_memory_budget_pareto = (
 # cost of some performance
 aggressive_recomputation = False
 
-# If FakeTensor.data_ptr() should error.
-# This option is independent of AOTAutograd and torch.compile, but our policy
-# is to turn it off during torch.compile.
-fake_tensor_allow_unsafe_data_ptr_access = True
-
 # Unlifts effect tokens from the inputs/outputs in the traced graph and instead
 # inserts make_token/sink_token calls in the graph to create tokens and then
 # sink them at the end. Note that this means the graph is no longer functional

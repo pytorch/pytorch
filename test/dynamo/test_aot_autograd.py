@@ -1112,13 +1112,16 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         self.assertEqual(z.grad, z_opt.grad)
 
     def test_data_ptr_access_copy(self):
-        import torch._functorch.config as _config
-
-        with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-            with FakeTensorMode():
-                x = torch.randn(3)
-                y = copy.copy(x)
+        with FakeTensorMode():
+            x = torch.randn(3)
+            y = copy.copy(x)
         self.assertEqual(y.shape, x.shape)
+
+    def test_data_ptr_access_in_eager_errors(self):
+        with FakeTensorMode():
+            x = torch.randn(3)
+            with self.assertRaisesRegex(RuntimeError, "Cannot access data pointer of Tensor"):
+                x.data_ptr()
 
     def test_data_ptr_access_fails_in_forward(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
