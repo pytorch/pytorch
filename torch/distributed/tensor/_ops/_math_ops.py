@@ -431,6 +431,11 @@ def foreach_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> TupleStrateg
         aten.tril.default,
         aten.triu.default,
         aten._linalg_eigh.default,
+        aten.upsample_bicubic2d.default,
+        aten.upsample_bilinear2d.default,
+        aten.upsample_linear1d.default,
+        aten.upsample_nearest2d.default,
+        aten.upsample_trilinear3d.default,
     ],
     schema_info=RuntimeSchemaInfo(1),
 )

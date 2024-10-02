@@ -648,6 +648,27 @@ class DistMathOpsTest(DTensorTestBase):
         distance = torch.dist(local_Q @ torch.diag(local_L) @ local_Q.mT, local_A)
         self.assertEqual(distance.item(), 0.0)
 
+    @with_comms
+    def test_upsampling(self):
+        input = torch.arange(1, 5, dtype=torch.float32).view(1, 1, 1, 2, 2)
+        m = torch.nn.UpsamplingBilinear2d(scale_factor=2)
+        # m = torch.nn.UpsamplingNearest2d(scale_factor=2)
+        m = torch.nn.Upsample(scale_factor=2, mode="trilinear", align_corners=True)
+        # m = torch.nn.UpsamplingBicubic2d(scale_factor=2)
+        result = m(input)
+        print(f"{input=}, {m=}, {result=}, {input.data_ptr()=}, {result.data_ptr()=}")
+
+        mesh = self.build_device_mesh()
+        input_dtensor = distribute_tensor(
+            input, device_mesh=mesh, placements=[Shard(0)]
+        )
+        dtensor_result = m(input_dtensor)
+        print(
+            f"{input_dtensor=}, {result=}, {input_dtensor.data_ptr()=}, {result.data_ptr()=}"
+        )
+
+        self.assertEqual(result, dtensor_result.full_tensor())
+
 
 if __name__ == "__main__":
     run_tests()
