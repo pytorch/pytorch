@@ -1125,7 +1125,6 @@ API Reference
 .. py:module:: torch.fx.experimental.migrate_gradual_types
 .. py:module:: torch.fx.passes.dialect
 .. py:module:: torch.fx.passes.dialect.common
-.. py:module:: torch.fx.passes.tensorify_python_scalars
 .. py:module:: torch.fx.annotate
 .. py:module:: torch.fx.config
 .. py:module:: torch.fx.experimental.accelerator_partitioner

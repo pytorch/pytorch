@@ -27,7 +27,7 @@ from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
 from torch.fx.graph_module import GraphModule
-from torch.fx.passes.tensorify_python_scalars import tensorify_python_scalars
+from torch.fx.passes.tensorify_python_scalars import _tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
 
 from .. import config
@@ -182,7 +182,7 @@ def aot_dispatch_base(
             fake_mode = detect_fake_mode()
             if fake_mode is not None:
                 assert isinstance(fw_module, GraphModule)
-                tensorify_python_scalars(fw_module, fake_mode.shape_env, fake_mode)
+                _tensorify_python_scalars(fw_module, fake_mode.shape_env, fake_mode)
             compiled_fw = compiler(fw_module, updated_flat_args)
 
         if fakified_out_wrapper.needs_post_compile:
@@ -391,7 +391,7 @@ def aot_dispatch_autograd(
             )
             fake_mode = detect_fake_mode()
             if fake_mode is not None:
-                tensorify_python_scalars(fx_g, fake_mode.shape_env, fake_mode)
+                _tensorify_python_scalars(fx_g, fake_mode.shape_env, fake_mode)
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )

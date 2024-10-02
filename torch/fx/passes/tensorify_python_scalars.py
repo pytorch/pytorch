@@ -17,8 +17,6 @@ from torch.fx.proxy import MetaProxy
 from torch.utils._sympy.reference import TensorReferenceAnalysis
 
 
-__all__ = ["tensorify_python_scalars"]
-
 log = logging.getLogger(__name__)
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 
@@ -61,7 +59,7 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 
 
 @torch.fx._compatibility.compatibility(is_backward_compatible=False)
-def tensorify_python_scalars(
+def _tensorify_python_scalars(
     gm: GraphModule, shape_env: ShapeEnv, fake_mode: fake_tensor.FakeTensorMode
 ) -> None:
     """
