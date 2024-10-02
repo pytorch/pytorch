@@ -876,10 +876,6 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
 
 
 class PagedAttention:
-    r"""
-    TODO: Add docs
-    """
-
     def __init__(
         self,
         n_pages: int,
@@ -888,20 +884,20 @@ class PagedAttention:
         max_seq_len: int,
         device: str = "cuda",
     ):
-        super().__init__()
+        # number of pages
+        self.n_pages = n_pages
+
+        # number of tokens per page
         self.page_size = page_size
 
         # page table: [batch, logical_block_idx] -> physical_page_idx
-        max_seq_pages = _cdiv(max_seq_len, page_size)
-        page_table_shape = (max_batch_size, max_seq_pages)
+        max_num_pages = _cdiv(max_seq_len, page_size)
         self.page_table = -torch.ones(
-            page_table_shape, dtype=torch.int64, device=device
+            (max_batch_size, max_num_pages), dtype=torch.int64, device=device
         )
 
-        # current allocated sequence length for a specific batch index
-        self.allocated_seq_len = torch.zeros(
-            max_batch_size, dtype=torch.int64, device=device
-        )
+        # capacity: batch_idx -> allocated sequence length
+        self.capacity = torch.zeros(max_batch_size, dtype=torch.int64, device=device)
 
         # index of empty pages that is available for allocation
         self.empty_pages = list(range(n_pages - 1, -1, -1))
@@ -911,11 +907,78 @@ class PagedAttention:
             (max_batch_size, n_pages), dtype=torch.int64, device=device
         )
 
-    def update(self, batch_idx: Tensor, input_pos: Tensor, val: Tensor, cache: Tensor):
+    def reserve(self, batch_idx: Tensor, seq_len: Tensor):
         """
-        Add docs
+        Requests that the capacity of a given batch be at least enough to
+        hold `seq_len` elements.
+
+        Args:
+            batch_idx (Tensor): batch index to be reserved; shape :math:`(1)`.
+            seq_len (Tensor): minimum capacity for the given batch; shape :math:`(1)`.
         """
-        # batch_idx: [B] input_pos: [S], val: [B, H, S, D], cache: [1, H, MAX_S, D]
+
+        if seq_len <= self.capacity[batch_idx]:
+            return
+
+        num_pages_to_allocate = _cdiv(
+            seq_len - self.capacity[batch_idx], self.page_size
+        )
+
+        assert (
+            len(self.empty_pages) >= num_pages_to_allocate
+        ), f"requested {num_pages_to_allocate} pages but there are only {len(self.empty_pages)} empty pages"
+        start_page_idx = self.capacity[batch_idx] // self.page_size
+        end_page_idx = start_page_idx + num_pages_to_allocate
+
+        # find empty physical pages
+        allocated_pages = torch.tensor(
+            self.empty_pages[-num_pages_to_allocate:],
+            device=num_pages_to_allocate.device,
+        )
+        self.empty_pages = self.empty_pages[:-num_pages_to_allocate]
+
+        # update page table
+        self.page_table[
+            batch_idx,
+            start_page_idx:end_page_idx,
+        ] = allocated_pages
+
+        # update metadata
+        self.physical_to_logical[batch_idx][allocated_pages] = torch.arange(
+            start_page_idx, end_page_idx, device=num_pages_to_allocate.device
+        )
+        self.capacity[batch_idx] += num_pages_to_allocate * self.page_size
+
+    def erase(self, batch_idx: Tensor):
+        """
+        Removes a single batch from paged attention.
+
+        Args:
+            batch_idx (Tensor): batch index to be removed; shape :math:`(1)`.
+        """
+
+        # find allocated pages
+        allocated_page_idx = self.page_table[batch_idx, :] != -1
+        allocated_pages = self.page_table[batch_idx][allocated_page_idx]
+
+        # clean metadata
+        self.capacity[batch_idx] = 0
+        self.empty_pages += allocated_pages.tolist()
+        self.physical_to_logical[batch_idx][allocated_pages] = -1
+        self.page_table[batch_idx] = -1
+
+    def assign(self, batch_idx: Tensor, input_pos: Tensor, val: Tensor, cache: Tensor):
+        """
+        Assigns new contents `val` to the storage `cache` at the location
+        `batch_idx` and `input_pos`.
+
+        Args:
+            batch_idx (Tensor): batch index; shape :math:`(B)`.
+            input_pos (Tensor): input positions to be assigned for the given batch; shape :math:`(S)`.
+            val (Tensor): value to be assigned; shape :math:`(B, H, S, D)`
+            cache (Tensor): the cache to store the values; shape:`(1, H, MAX_S, D)`
+        """
+
         if val.requires_grad:
             raise RuntimeError("val must not require gradient")
 
@@ -969,13 +1032,32 @@ class PagedAttention:
     def convert_logical_block_mask(
         self,
         block_mask: BlockMask,
-        max_cached_seq_len: int,
         batch_idx: Optional[Tensor] = None,
     ) -> BlockMask:
+        """
+        Converts a logical block mask by mapping its logical kv indices to the corresponding
+        physical kv indices.
+
+        Args:
+            block_mask (BlockMask): logical block mask;
+                kv_indices shape :math:`(B, H, ROWS, MAX_BLOCKS_IN_COL)`.
+            batch_idx (Tensor): batch index corresponding to the block_mask
+                batch dimension. This provides flexibility to convert a
+                block mask with smaller batch size than the page table;
+                shape :math:`(1)`.
+        """
         B, H, ROWS, MAX_BLOCKS_IN_COL = block_mask.kv_indices.shape
         assert block_mask.BLOCK_SIZE[1] == self.page_size
         assert B <= self.page_table.size(0)
+
+        # Increase the num columns of converted block mask from logical block mask's
+        # num columns to MAX_CACHED_BLOCKS_IN_COL, since a) the converted block mask
+        # may have larger indices values; and b) `_ordered_to_dense` realizes
+        # a dense tensor with these converted indices. There would be an IndexError
+        # if using the logical block mask's num columns.
+        max_cached_seq_len = self.n_pages * self.page_size
         MAX_CACHED_BLOCKS_IN_COL = _cdiv(max_cached_seq_len, self.page_size)
+
         device = block_mask.kv_num_blocks.device
 
         if batch_idx is None:
@@ -1026,6 +1108,13 @@ class PagedAttention:
     def get_mask_mod(
         self, mask_mod: Optional[_mask_mod_signature]
     ) -> _mask_mod_signature:
+        """
+        Converts a mask_mod based on mapping from the physical block index to the logical
+        block index.
+
+        Args:
+            mask_mod (_mask_mod_signature): mask_mod based on the logical block index.
+        """
         if mask_mod is None:
             mask_mod = noop_mask
 
@@ -1043,6 +1132,13 @@ class PagedAttention:
     def get_score_mod(
         self, score_mod: Optional[_score_mod_signature]
     ) -> _score_mod_signature:
+        """
+        Converts a score_mod based on mapping from the physical block index to the logical
+        block index.
+
+        Args:
+            score_mod (_score_mod_signature): score_mod based on the logical block index.
+        """
         if score_mod is None:
             score_mod = _identity
 
@@ -1058,69 +1154,6 @@ class PagedAttention:
             )
 
         return new_score_mod
-
-    def allocate_single_seq(self, batch_idx: Tensor, num_pages_to_allocate: Tensor):
-        # batch_idx: [1], num_pages_to_allocate: [1]
-        if num_pages_to_allocate == 0:
-            return
-
-        assert (
-            len(self.empty_pages) >= num_pages_to_allocate
-        ), f"requested {num_pages_to_allocate} pages but there are only {len(self.empty_pages)} empty pages"
-        start_page_idx = self.allocated_seq_len[batch_idx] // self.page_size
-        end_page_idx = start_page_idx + num_pages_to_allocate
-
-        # find empty physical pages
-        allocated_pages = torch.tensor(
-            self.empty_pages[-num_pages_to_allocate:],
-            device=num_pages_to_allocate.device,
-        )
-        self.empty_pages = self.empty_pages[:-num_pages_to_allocate]
-
-        # update page table
-        self.page_table[
-            batch_idx,
-            start_page_idx:end_page_idx,
-        ] = allocated_pages
-
-        # update metadata
-        self.physical_to_logical[batch_idx][allocated_pages] = torch.arange(
-            start_page_idx, end_page_idx, device=num_pages_to_allocate.device
-        )
-        self.allocated_seq_len[batch_idx] += num_pages_to_allocate * self.page_size
-
-    def get_num_pages_to_allocate(self, target_seq_len: Tensor) -> Tensor:
-        (B,) = target_seq_len.shape
-        num_tokens_to_allocate = torch.maximum(
-            target_seq_len - self.allocated_seq_len[:B],
-            torch.zeros(B, dtype=torch.int64, device=target_seq_len.device),
-        )
-        return _cdiv(num_tokens_to_allocate, self.page_size)  # [B]
-
-    def allocate(self, num_pages_to_allocate: Tensor):
-        # num_pages_to_allocate: [B]
-        (B,) = num_pages_to_allocate.shape
-        for b in range(B):
-            self.allocate_single_seq(
-                torch.tensor(b),
-                num_pages_to_allocate[b],
-            )
-
-    def allocate_until_length(self, target_seq_len: Tensor):
-        num_pages_to_allocate = self.get_num_pages_to_allocate(target_seq_len)
-        self.allocate(num_pages_to_allocate)
-
-    def deallocate(self, batch: Tensor):
-        # batch: [1]
-        # find allocated pages
-        allocated_page_idx = self.page_table[batch, :] != -1
-        allocated_pages = self.page_table[batch][allocated_page_idx]
-
-        # clean metadata
-        self.allocated_seq_len[batch] = 0
-        self.empty_pages += allocated_pages.tolist()
-        self.physical_to_logical[batch][allocated_pages] = -1
-        self.page_table[batch] = -1
 
 
 def _apply_kernel_options(

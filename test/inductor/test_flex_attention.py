@@ -249,6 +249,15 @@ def query_key_value_clones(
     return query_ref, key_ref, value_ref
 
 
+def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
+    (B,) = target_seq_len.shape
+    for b in range(B):
+        paged_attention.reserve(
+            torch.tensor(b),
+            target_seq_len[b],
+        )
+
+
 class TestFlexAttention(InductorTestCase):
     def _check_equal(
         self,
@@ -438,29 +447,30 @@ class TestFlexAttention(InductorTestCase):
         paged_attention = PagedAttention(
             n_pages, page_size, max_batch_size, MAX_CACHED_SEQ_LEN
         )
-        paged_attention.allocate_until_length(
-            torch.tensor([KV_S // 4, KV_S // 2, KV_S // 4, KV_S // 3], device="cuda")
+        batch_reserve(
+            paged_attention,
+            torch.tensor([KV_S // 4, KV_S // 2, KV_S // 4, KV_S // 3], device="cuda"),
         )
-        paged_attention.allocate_until_length(
-            torch.tensor([KV_S // 4, KV_S // 2, KV_S // 2, KV_S // 2], device="cuda")
+        batch_reserve(
+            paged_attention,
+            torch.tensor([KV_S // 4, KV_S // 2, KV_S // 2, KV_S // 2], device="cuda"),
         )
-        paged_attention.allocate_until_length(
-            torch.tensor([KV_S // 2, KV_S, KV_S // 2, KV_S], device="cuda")
+        batch_reserve(
+            paged_attention,
+            torch.tensor([KV_S // 2, KV_S, KV_S // 2, KV_S], device="cuda"),
         )
-        paged_attention.allocate_until_length(
-            torch.tensor([KV_S, KV_S, KV_S, KV_S], device="cuda")
+        batch_reserve(
+            paged_attention, torch.tensor([KV_S, KV_S, KV_S, KV_S], device="cuda")
         )
 
         # update cache with k and v
         input_pos = torch.arange(KV_S, device="cuda", dtype=torch.int32)
         batch_idx = torch.arange(KV_B, device="cuda", dtype=torch.int32)
-        paged_attention.update(batch_idx, input_pos, k, k_cache)
-        paged_attention.update(batch_idx, input_pos, v, v_cache)
+        paged_attention.assign(batch_idx, input_pos, k, k_cache)
+        paged_attention.assign(batch_idx, input_pos, v, v_cache)
 
         # convert block mask and score mod
-        converted_block_mask = paged_attention.convert_logical_block_mask(
-            block_mask, MAX_CACHED_SEQ_LEN
-        )
+        converted_block_mask = paged_attention.convert_logical_block_mask(block_mask)
         converted_score_mod = paged_attention.get_score_mod(score_mod)
 
         return k_cache, v_cache, converted_block_mask, converted_score_mod
@@ -3153,24 +3163,23 @@ class TestPagedAttention(InductorTestCase):
         n_pages, page_size = 12, 4
         paged_cache = self.allocate_page_cache(n_pages, page_size)
 
-        num_pages_to_allocate = torch.tensor([2, 6, 4])
-        paged_cache.allocate(num_pages_to_allocate)
+        batch_reserve(paged_cache, torch.tensor([8, 48, 16]))
 
         with self.assertRaisesRegex(
             AssertionError, "requested 2 pages but there are only 0 empty pages"
         ):
-            paged_cache.allocate(torch.tensor([2]))
+            paged_cache.reserve(torch.tensor([0]), torch.tensor([16]))
 
-        paged_cache.deallocate(batch=torch.tensor([1]))
-        paged_cache.allocate(num_pages_to_allocate=torch.tensor([4]))
+        paged_cache.erase(torch.tensor([1]))
+        paged_cache.reserve(torch.tensor([0]), torch.tensor([16]))
 
     @supported_platform
-    def test_allocate_until_length(self):
+    def test_allocate(self):
         n_pages, page_size = 12, 4
         paged_cache = self.allocate_page_cache(n_pages, page_size)
 
         target_seq_len = torch.tensor([3, 11, 8])
-        paged_cache.allocate_until_length(target_seq_len)
+        batch_reserve(paged_cache, target_seq_len)
 
         expected_allocated_pages = self.cdiv(target_seq_len, page_size).sum()
         self.assertEqual(
@@ -3181,7 +3190,7 @@ class TestPagedAttention(InductorTestCase):
         )
 
         # deallocate batch 1
-        paged_cache.deallocate(batch=torch.tensor([1]))
+        paged_cache.erase(torch.tensor([1]))
         target_seq_len = torch.tensor([3, 0, 8])
         expected_allocated_pages = self.cdiv(target_seq_len, page_size).sum()
         self.assertEqual(
@@ -3193,7 +3202,7 @@ class TestPagedAttention(InductorTestCase):
 
         # re-allocate
         target_seq_len = torch.tensor([7, 2, 10])
-        paged_cache.allocate_until_length(target_seq_len)
+        batch_reserve(paged_cache, target_seq_len)
         expected_allocated_pages = self.cdiv(target_seq_len, page_size).sum()
         self.assertEqual(
             paged_cache.allocated_seq_len, self.roundup(target_seq_len, page_size)
@@ -3203,7 +3212,7 @@ class TestPagedAttention(InductorTestCase):
         )
 
         # deallocate all batches
-        paged_cache.deallocate(batch=torch.tensor([0, 1, 2]))
+        paged_cache.erase(torch.tensor([0, 1, 2]))
         self.assertEqual(paged_cache.allocated_seq_len, torch.tensor([0, 0, 0]))
         self.assertEqual(len(paged_cache.empty_pages), n_pages)
 
@@ -3211,12 +3220,11 @@ class TestPagedAttention(InductorTestCase):
     def test_convert_logical_block_mask(self):
         n_pages, page_size, max_batch_size, max_seq_len = 16, 128, 2, 512
         paged_cache = PagedAttention(n_pages, page_size, max_batch_size, max_seq_len)
-        MAX_CACHED_SEQ_LEN = n_pages * page_size
 
-        paged_cache.allocate_until_length(torch.tensor([100, 200], device="cuda"))
-        paged_cache.allocate_until_length(torch.tensor([150, 300], device="cuda"))
-        paged_cache.allocate_until_length(torch.tensor([300, 512], device="cuda"))
-        paged_cache.allocate_until_length(torch.tensor([512, 512], device="cuda"))
+        batch_reserve(paged_cache, torch.tensor([100, 200], device="cuda"))
+        batch_reserve(paged_cache, torch.tensor([150, 300], device="cuda"))
+        batch_reserve(paged_cache, torch.tensor([300, 512], device="cuda"))
+        batch_reserve(paged_cache, torch.tensor([512, 512], device="cuda"))
 
         expected_page_table = torch.tensor(
             [[0, 3, 5, 7], [2, 1, 4, 6]],
@@ -3235,9 +3243,7 @@ class TestPagedAttention(InductorTestCase):
         block_mask = create_block_mask(
             causal_mask, max_batch_size, 1, max_seq_len, max_seq_len
         )
-        new_block_mask = paged_cache.convert_logical_block_mask(
-            block_mask, MAX_CACHED_SEQ_LEN
-        )
+        new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
 
         zeros = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         # Check that the new block mask is correct
@@ -3301,10 +3307,10 @@ class TestPagedAttention(InductorTestCase):
         n_pages, page_size, max_batch_size, max_seq_len = 9, 128, 2, 512
         paged_cache = PagedAttention(n_pages, page_size, max_batch_size, max_seq_len)
 
-        paged_cache.allocate_until_length(torch.tensor([100, 200], device="cuda"))
-        paged_cache.allocate_until_length(torch.tensor([150, 300], device="cuda"))
-        paged_cache.allocate_until_length(torch.tensor([300, 512], device="cuda"))
-        paged_cache.allocate_until_length(torch.tensor([512, 512], device="cuda"))
+        batch_reserve(paged_cache, torch.tensor([100, 200], device="cuda"))
+        batch_reserve(paged_cache, torch.tensor([150, 300], device="cuda"))
+        batch_reserve(paged_cache, torch.tensor([300, 512], device="cuda"))
+        batch_reserve(paged_cache, torch.tensor([512, 512], device="cuda"))
 
         expected_page_table = torch.tensor(
             [[0, 3, 5, 7], [2, 1, 4, 6]],
@@ -3347,9 +3353,10 @@ class TestPagedAttention(InductorTestCase):
         n_heads, head_dim = 2, 3
         cache_shape = (1, n_heads, n_pages * page_size, head_dim)
         cache = torch.zeros(cache_shape, dtype=dtype, device="cuda")
-        paged_cache.allocate_until_length(torch.tensor([1, 3], device="cuda"))
-        paged_cache.allocate_until_length(torch.tensor([4, 5], device="cuda"))
-        paged_cache.allocate_until_length(torch.tensor([6, 6], device="cuda"))
+
+        batch_reserve(paged_cache, torch.tensor([1, 3], device="cuda"))
+        batch_reserve(paged_cache, torch.tensor([4, 5], device="cuda"))
+        batch_reserve(paged_cache, torch.tensor([6, 6], device="cuda"))
 
         expected_page_table = torch.tensor(
             [[0, 3, 5], [2, 1, 4]],
@@ -3357,6 +3364,7 @@ class TestPagedAttention(InductorTestCase):
         )
         self.assertEqual(paged_cache.page_table, expected_page_table)
 
+        batch_idx = torch.arange(max_batch_size, device="cuda", dtype=torch.int32)
         input_pos = torch.arange(max_seq_len, device="cuda", dtype=torch.int32)
         k = torch.arange(
             max_batch_size * n_heads * max_seq_len * head_dim,
@@ -3364,7 +3372,7 @@ class TestPagedAttention(InductorTestCase):
             dtype=dtype,
         ).view(max_batch_size, n_heads, max_seq_len, head_dim)
 
-        paged_cache.update(input_pos, k, cache)
+        paged_cache.assign(batch_idx, input_pos, k, cache)
 
         expected_cache = torch.tensor(
             [
@@ -3486,32 +3494,18 @@ class TestPagedAttention(InductorTestCase):
         )
 
         paged_cache = PagedAttention(n_pages, page_size, max_batch_size, max_seq_len)
+        batch_reserve(paged_cache, torch.tensor([100, 200, 50, 300], device="cuda"))
+        batch_reserve(paged_cache, torch.tensor([100, 512, 300, 300], device="cuda"))
+        batch_reserve(paged_cache, torch.tensor([512, 512, 300, 300], device="cuda"))
+        batch_reserve(paged_cache, torch.tensor([512, 512, 512, 300], device="cuda"))
+        batch_reserve(paged_cache, torch.tensor([512, 512, 512, 512], device="cuda"))
 
-        paged_cache.allocate_until_length(
-            torch.tensor([100, 200, 50, 300], device="cuda")
-        )
-        paged_cache.allocate_until_length(
-            torch.tensor([100, 512, 300, 300], device="cuda")
-        )
-        paged_cache.allocate_until_length(
-            torch.tensor([512, 512, 300, 300], device="cuda")
-        )
-        paged_cache.allocate_until_length(
-            torch.tensor([512, 512, 512, 300], device="cuda")
-        )
-        paged_cache.allocate_until_length(
-            torch.tensor([512, 512, 512, 512], device="cuda")
-        )
+        batch_idx = torch.arange(max_batch_size, device="cuda", dtype=torch.int32)
+        input_pos = torch.arange(max_seq_len, device="cuda", dtype=torch.int32)
+        paged_cache.assign(batch_idx, input_pos, k, k_cache)
+        paged_cache.assign(batch_idx, input_pos, v, v_cache)
 
-        input_pos = torch.tensor(
-            range(0, max_seq_len), device="cuda", dtype=torch.int32
-        )
-        paged_cache.update(input_pos, k, k_cache)
-        paged_cache.update(input_pos, v, v_cache)
-
-        new_block_mask = paged_cache.convert_logical_block_mask(
-            block_mask, MAX_CACHED_SEQ_LEN
-        )
+        new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
 
         compiled_sdpa = torch.compile(
             create_attention(
