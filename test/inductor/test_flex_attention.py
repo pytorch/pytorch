@@ -907,6 +907,8 @@ class TestFlexAttention(InductorTestCase):
         Bq, Bkv = batch_dims
         assert Bq > 1 and Bkv == 1
 
+        block_mask = create_block_mask(noop_mask, Bq, 1, 1, S)
+
         self.run_test(
             score_mod,
             dtype,
@@ -918,6 +920,7 @@ class TestFlexAttention(InductorTestCase):
             Hkv,
             S,
             D,
+            block_mask,
         )
 
     @supported_platform
