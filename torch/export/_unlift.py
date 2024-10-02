@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 import torch.utils._pytree as pytree
 from torch._export.utils import _check_input_constraints_for_graph
-from torch.export.unflatten import _assign_attr, _AttrKind, _recursive_getattr
+from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from ._remove_effect_tokens_pass import _remove_effect_tokens
@@ -297,7 +297,7 @@ def _create_stateful_graph_module(
             )
             buffer = buffer.detach()
         *prefix, field = constant_fqn.rsplit(".")
-        submod = _recursive_getattr(stateful_gm, prefix)
+        submod = torch.fx.graph_module._get_attr_via_attr_list(stateful_gm, prefix)
         delattr(submod, field)
         _assign_attr(buffer, stateful_gm, constant_fqn, attr_kind=_AttrKind.CONSTANT)
 
