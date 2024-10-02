@@ -38,9 +38,8 @@ static void THPCapturedTraceback_dealloc(PyObject* self_) {
 }
 
 PyTypeObject THPCapturedTracebackType = {
-    PyVarObject_HEAD_INIT(
-        nullptr,
-        0) "torch._C._profiler.CapturedTraceback", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._profiler.CapturedTraceback", /* tp_name */
     sizeof(THPCapturedTraceback), /* tp_basicsize */
     0, /* tp_itemsize */
     THPCapturedTraceback_dealloc, /* tp_dealloc */
@@ -643,8 +642,9 @@ void initPythonBindings(PyObject* module) {
       {nullptr},
   };
 
-  static PyTypeObject RecordFunctionFast_Type = {
-      PyVarObject_HEAD_INIT(nullptr, 0)};
+  static PyTypeObject RecordFunctionFast_Type = { PyVarObject_HEAD_INIT(nullptr,
+                                                                        0)
+  };
 
   RecordFunctionFast_Type.tp_name = "torch._C._profiler.RecordFunctionFast",
   RecordFunctionFast_Type.tp_basicsize = sizeof(RecordFunctionFast);

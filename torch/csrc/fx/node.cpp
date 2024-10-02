@@ -60,7 +60,8 @@ static void NodeBase_dealloc(PyObject* self) {
 }
 
 static PyTypeObject NodeBaseType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C._NodeBase", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._NodeBase", /* tp_name */
     sizeof(NodeBase), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)NodeBase_dealloc, /* tp_dealloc */
@@ -212,7 +213,8 @@ static void NodeIter_dealloc(PyObject* self) {
 }
 
 static PyTypeObject NodeIterType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C._NodeIter", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._NodeIter", /* tp_name */
     sizeof(NodeIter), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)NodeIter_dealloc, /* tp_dealloc */
