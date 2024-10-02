@@ -524,11 +524,18 @@ class PythonWrapperCodegen(CodeGen):
         self._metas: Dict[str, str] = {}
         self._meta_vars: Set[str] = set()
         self.multi_kernel_state = MultiKernelState()
+        self.already_codegened_subgraphs: Set[str] = set()
 
         # intermediate tensor value printing utility
         self.debug_printer = DebugPrinterManager(
             debug_printer_level=config.aot_inductor.debug_intermediate_value_printer
         )
+
+    @staticmethod
+    def create(is_subgraph, subgraph_name, parent_wrapper):
+        if is_subgraph:
+            return SubgraphPythonWrapperCodegen(subgraph_name, parent_wrapper)
+        return PythonWrapperCodegen()
 
     def set_launcher_fn_name(self) -> None:
         self.launcher_fn_name = "call"
@@ -1267,6 +1274,9 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_defs.splice(body)
 
+    def define_subgraph_launcher_fn(self, fn_code: str):
+        self.header.splice(fn_code)
+
     def define_user_defined_triton_kernel(self, kernel, configs, kwargs):
         from torch.utils._triton import patch_triton_dtype_repr
 
@@ -1976,11 +1986,31 @@ class PythonWrapperCodegen(CodeGen):
             self.push_codegened_graph(subgraph.graph)
             self.writeline(f"{self.comment} subgraph: {subgraph.name}")
             self.codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
-            parent_graph = V.graph
-            with V.set_graph_handler(subgraph.graph):
-                subgraph.graph.codegen_subgraph(
-                    parent_graph=parent_graph,
-                )
+
+            if subgraph.graph.name not in self.already_codegened_subgraphs:
+                # If its codegened, the parent wrapper already has subgraph fn by name subgraph.graph.name
+                with V.set_graph_handler(subgraph.graph):
+                    # Call the codegen of subgraph recursively
+                    result = subgraph.graph.codegen()
+                    subgraph_code = result[0]
+                    self.already_codegened_subgraphs.add(subgraph.graph.name)
+                    self.define_subgraph_launcher_fn(subgraph_code)
+
+            # Get the input and output names of the subgraph
+            inner_inputs = ", ".join(subgraph.graph.graph_input_names)
+            if len(subgraph.graph.graph_input_names) == 1:
+                inner_inputs += ","
+
+            output_names = subgraph.graph.get_output_names()
+            inner_outputs = ", ".join(output_names)
+            if len(output_names) == 1:
+                inner_outputs += ","
+
+            # Call the subgraph launcher function
+            self.writeline(
+                f"({inner_outputs}) = {subgraph.graph.name}([{inner_inputs}])"
+            )
+
             self.codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
         finally:
             self.pop_codegened_graph()
@@ -2091,3 +2121,48 @@ class PythonWrapperCodegen(CodeGen):
     @staticmethod
     def can_prove_buffer_has_static_shape(buffer):
         return PythonWrapperCodegen.static_shape_for_buffer_or_none(buffer) is not None
+
+
+class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
+    """
+    A wrapper codegen that generates code for a subgraph. For most of the
+    methods, we rely on the implementation in the PythonWrapperCodegen. But we
+    override a few functions to produce cleaner code (like avoiding writing
+    imports twice in the output code)
+    """
+
+    def __init__(self, subgraph_name, parent_wrapper):
+        # It is necessary to set the subgraph_name before calling super __init__
+        # because __init__ calls set_launcher_fn_name
+        self.subgraph_name = subgraph_name
+        self.parent_wrapper = parent_wrapper
+        super().__init__()
+
+    def set_launcher_fn_name(self) -> None:
+        # This sets up the name of the function containing the launcher code of
+        # the subgraph.
+        self.launcher_fn_name = self.subgraph_name
+
+    def codegen_input_size_and_nan_asserts(self) -> None:
+        # No need to insert the asserts for the subgraph inputs.
+        pass
+
+    def write_header(self) -> None:
+        pass
+
+    def add_benchmark_harness(self, output):
+        pass
+
+    def benchmark_compiled_module(self, output):
+        pass
+
+    def write_async_compile_wait(self):
+        pass
+
+    @cache_on_self
+    def write_triton_header_once(self) -> None:
+        self.parent_wrapper.write_triton_header_once()
+
+    @cache_on_self
+    def write_get_raw_stream_header_once(self) -> None:
+        self.parent_wrapper.write_get_raw_stream_header_once()
