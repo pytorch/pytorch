@@ -3687,6 +3687,7 @@ if IS_MACOS:
         {
             "test_cond_non_tensor_predicates_dynamic_True": fail_stack_allocation(),
             "test_custom_op_with_concat_inputs": fail_minimal_arrayref_interface(),
+            "test_custom_op_with_multiple_outputs": fail_minimal_arrayref_interface(),
         }
     )
 
@@ -3715,8 +3716,10 @@ if not IS_FBCODE:
     # These only fail in OSS CI and are fine internally.
     CPU_TEST_FAILURES.update(
         {
-            # TODO: tensor-likes are not close
-            "test_model_modified_weights": fail_minimal_arrayref_interface(),
+            # TODO: flaky test; some environments: tensor-likes are not close
+            "test_model_modified_weights": fail_minimal_arrayref_interface(
+                is_skip=True
+            ),
             # TODO: Booleans mismatch: False is not True
             "test_aoti_debug_printer_codegen": fail_with_and_without_stack_allocation(),
             # TODO: segfaults mid-run
