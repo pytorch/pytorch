@@ -34,7 +34,6 @@ max_block: int = TRITON_MAX_BLOCK["X"]
 @config.patch("triton.use_block_ptr", True)
 @instantiate_parametrized_tests
 class TritonBlockPointerTest(InductorTestCase):
-
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -79,7 +78,6 @@ class TritonBlockPointerTest(InductorTestCase):
         with config.patch(config_patches):
             compiled = torch.compile(func, backend="inductor", **compile_kwargs)
             result, code = run_and_get_code(compiled, *args)
-
 
         # Check numerical accuracy
         ref_tensors = flatten_tensors(func(*args))
@@ -521,8 +519,8 @@ class TritonBlockPointerTest(InductorTestCase):
     @parametrize(
         "view_size,num_block_pointers,num_triton_kernels,reduction_op",
         [
-            ((15, 15), 1, 1, torch.sum), # Non-power-of 2 shapes.
-            ((129, 129), 3, 2, torch.sum), # Large size, with loops.
+            ((15, 15), 1, 1, torch.sum),  # Non-power-of 2 shapes.
+            ((129, 129), 3, 2, torch.sum),  # Large size, with loops.
             ((3, 3), 1, 1, torch.argmax),
             ((11, 11), 1, 1, torch.argmax),
             ((15, 15), 1, 1, torch.argmax),
@@ -559,6 +557,7 @@ class TritonBlockPointerTest(InductorTestCase):
         expected_blocks = ["R0_BLOCK", "R1_BLOCK"]
         for block in expected_blocks:
             self.assertIn(block, code)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

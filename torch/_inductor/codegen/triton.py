@@ -1307,6 +1307,7 @@ class BlockParameters:
         a, b = tuple(dataclasses.asdict(x) for x in (self, other))
         return cls(**{key: a[key] + b[key] for key in a})
 
+
 class TritonKernel(SIMDKernel):
     overrides = TritonKernelOverrides  # type: ignore[assignment]
     helper_functions: HelperFunctions
@@ -1534,7 +1535,13 @@ class TritonKernel(SIMDKernel):
                 )
 
                 index_var = range_tree.symbol()
-                dims, strides, block_index_exprs = BlockPatternMatcher.match_mod_div_block_expr(index, index_var, range_tree.numel, num_dims)
+                (
+                    dims,
+                    strides,
+                    block_index_exprs,
+                ) = BlockPatternMatcher.match_mod_div_block_expr(
+                    index, index_var, range_tree.numel, num_dims
+                )
                 slice_numels = BlockPatternMatcher.get_slice_numels(dims)
 
                 # Check for applicable iteration range sizes.
@@ -1613,8 +1620,7 @@ class TritonKernel(SIMDKernel):
                 # (xindex * 5, r0_index * 3).
                 index_subexprs = [
                     BlockPatternMatcher.get_subexpr_involving_symbol(
-                        index_relative_to_xyr_index,
-                        tree.symbol()
+                        index_relative_to_xyr_index, tree.symbol()
                     )
                     for tree in range_trees
                 ]
@@ -1955,13 +1961,12 @@ class TritonKernel(SIMDKernel):
         """
         Reshape to RBLOCK, collapsing all reduction dims.
         """
-        #TODO refactor ndim calculations to reduce duplication among other reductions
+        # TODO refactor ndim calculations to reduce duplication among other reductions
         target_ndim = self.triton_tensor_ndim() - self.num_reduction_dims
         initial_shape = self.dense_size_list()
         target_shape = initial_shape[:target_ndim] + ["RBLOCK"]
         return self.cse.generate(
-            buffer,
-            triton_reshape(value, initial_shape, target_shape)
+            buffer, triton_reshape(value, initial_shape, target_shape)
         )
 
     def reduction(
@@ -1975,12 +1980,20 @@ class TritonKernel(SIMDKernel):
         masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
 
         # rindex = r0_index * r1_numel * ... * rn_numel + ... + rn_index
-        rprefixes= [prefix_str[symt] for symt in list(TritonSymbols.reduction_types)[:self.num_reduction_dims]]
-        rnumels = [sympy.Symbol(f"{prefix}numel", integer=True, positive=True) for prefix in rprefixes]
-        rn_inds = [sympy.Symbol(f"{prefix}index", integer=True, nonnegative=True) for prefix in rprefixes]
+        rprefixes = [
+            prefix_str[symt]
+            for symt in list(TritonSymbols.reduction_types)[: self.num_reduction_dims]
+        ]
+        rnumels = [
+            sympy.Symbol(f"{prefix}numel", integer=True, positive=True)
+            for prefix in rprefixes
+        ]
+        rn_inds = [
+            sympy.Symbol(f"{prefix}index", integer=True, nonnegative=True)
+            for prefix in rprefixes
+        ]
         ridx_coeffs = [
-            sympy_product(rnumels[idx + 1:])
-            for idx in range(len(rprefixes) - 1)
+            sympy_product(rnumels[idx + 1 :]) for idx in range(len(rprefixes) - 1)
         ] + [sympy.Integer(1)]
         rindex = sympy_dot(ridx_coeffs, rn_inds)
         self.indexing_code.splice(f"rindex = {rindex}")
@@ -2017,7 +2030,6 @@ class TritonKernel(SIMDKernel):
         dim: int = self.triton_tensor_ndim() - self.num_reduction_dims
         root_op: str
 
-
         def _final_reduction(buffer, value: str, result_type: Optional[str]) -> str:
             """
             Helper to generate a reduction call, e.g. tl.sum.
@@ -2031,28 +2043,32 @@ class TritonKernel(SIMDKernel):
                     f"{module}.{reduction_type}2({value}, {dim})"
                 )
             else:
-                value = self.reduction_resize(f"{module}.{reduction_type}({value}, {dim})")
+                value = self.reduction_resize(
+                    f"{module}.{reduction_type}({value}, {dim})"
+                )
 
             if result_type is not None:
                 value = f"{value}.to({result_type})"
 
             return value
 
-        def final_reduction_new_var(buffer, value: str, result_type: Optional[str]) -> CSEVariable:
+        def final_reduction_new_var(
+            buffer, value: str, result_type: Optional[str]
+        ) -> CSEVariable:
             """
             Generate a reduction and assign it to a new variable.
             """
             value = _final_reduction(buffer, value, result_type)
             return self.cse.generate(buffer, value)
 
-        def final_reduction_define(buffer, result_var: CSEVariable, value: str, result_type: Optional[str]) -> None:
+        def final_reduction_define(
+            buffer, result_var: CSEVariable, value: str, result_type: Optional[str]
+        ) -> None:
             """
             Generate a reduction and assign it to an existing variable.
             """
             value = _final_reduction(buffer, value, result_type)
-            buffer.splice(
-                f"{result_var} = {value}"
-            )
+            buffer.splice(f"{result_var} = {value}")
 
         def final_argreduce(buffer, result_var, value, index):
             value = self.reduction_collapse_dims(buffer, value)
@@ -2217,7 +2233,9 @@ class TritonKernel(SIMDKernel):
                     # which is needed because tl.reduce doesn't support tl.int1
                     accumulator = f"{accumulator}.to(tl.int8)"
                     result_type = triton_compute_type(dtype)
-                    final_reduction_define(self.suffix, result_var, accumulator, result_type)
+                    final_reduction_define(
+                        self.suffix, result_var, accumulator, result_type
+                    )
                 else:
                     final_reduction_define(self.suffix, result_var, accumulator, None)
 
@@ -2505,18 +2523,26 @@ class TritonKernel(SIMDKernel):
             # Write loop suffixes.
             for level, tree in sorted(enumerate(loop_trees), reverse=True):
                 with self.body.indent(offset=level + 1):
-
                     # Advance pointers at the end of each loop.
-                    for block_ptr, advancement in self.pointer_advancements[tree.symt].items():
+                    for block_ptr, advancement in self.pointer_advancements[
+                        tree.symt
+                    ].items():
                         # Subtract any advancements made in the previous loop level.
                         if level < len(loop_trees) - 1:
                             prev_tree = loop_trees[level + 1]
-                            prev_advancement = self.pointer_advancements[prev_tree.symt][block_ptr]
+                            prev_advancement = self.pointer_advancements[
+                                prev_tree.symt
+                            ][block_ptr]
                             prev_block = TritonSymbols.get_block_size(prev_tree)
                             prev_num_iter = CeilDiv(prev_tree.numel, prev_block)
-                            advancement = [cur - prev * prev_num_iter for cur, prev in zip(advancement, prev_advancement)]
+                            advancement = [
+                                cur - prev * prev_num_iter
+                                for cur, prev in zip(advancement, prev_advancement)
+                            ]
 
-                        self.body.writeline(f"{block_ptr} = tl.advance({block_ptr}, {V.kernel.index_to_str(advancement)})")
+                        self.body.writeline(
+                            f"{block_ptr} = tl.advance({block_ptr}, {V.kernel.index_to_str(advancement)})"
+                        )
 
                 # Invalidate any cache entries that came from inside the loop.
                 self.cse.invalidate(self.outside_loop_vars)
