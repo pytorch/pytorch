@@ -55,7 +55,6 @@ from torch.profiler import (
 
 from torch.nn.parallel import DistributedDataParallel
 from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars, _MixedPrecision
-from torch.testing._internal.common_cuda import SM75OrLater
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     TEST_SKIPS,
@@ -76,6 +75,7 @@ from torch.testing._internal.common_distributed import (
     with_dist_debug_levels,
     verify_ddp_error_logged,
     DistTestCases,
+    sm_lower_than_70,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -8924,10 +8924,14 @@ class DistributedTest:
                     dist.monitored_barrier(timeout=timeout, wait_all_ranks=True)
 
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
-        @unittest.skipIf(not SM75OrLater, "need sm_75")  # see #135273, #137161
         @with_dist_debug_levels(levels=["INFO"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_build_debug_param_to_name_mapping(self):
+            device = torch.device("cuda:%d" % self.rank)
+            # Test needs sm_70, see #135273, #137161
+            if sm_lower_than_70(device):
+                return
+
             model = TwoLinLayerNet()
             net = torch.nn.parallel.DistributedDataParallel(
                 model.cuda(self.rank),
