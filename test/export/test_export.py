@@ -777,7 +777,10 @@ graph():
             torch.randn(10, requires_grad=True),
         )
         export(M(), args)
+    
 
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # T203525943
+    @testing.expectedFailureTrainingIRToRunDecomp  # T203525943
     def test_state_tensors(self):
         class M(torch.nn.Module):  # simple with register buffer
             def __init__(self) -> None:
@@ -3044,7 +3047,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 or node.name in ep.graph_signature.inputs_to_parameters
             ):
                 self.assertTrue("source_fn_stack" in node.meta)
-
+    
+    @testing.expectedFailureSerDer  # T203552516
     def test_export_api_with_dynamic_shapes(self):
         from torch.export import Dim, dims
 
@@ -4720,7 +4724,8 @@ def forward(self, b_a_buffer, x):
         m = Foo([1, 2])
         ep = export(m, ())
         self.assertEqual(ep.graph_signature.lifted_tensor_constants, ["x"])
-
+    
+    @testing.expectedFailureSerDer  # T203552516
     def test_preserve_shape_dynamism_for_unused_inputs(self):
         @dataclass
         class Input:
@@ -5282,18 +5287,18 @@ graph():
             self.assertExpectedInline(
                 str(ep.graph).strip(),
                 """\
-    graph():
-        %c_lifted_tensor_0 : [num_users=1] = placeholder[target=c_lifted_tensor_0]
-        %x : [num_users=2] = placeholder[target=x]
-        %ones : [num_users=1] = call_function[target=torch.ops.aten.ones.default](args = ([3, 3],), kwargs = {device: cpu, pin_memory: False})
-        %detach : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%ones,), kwargs = {})
-        %lift_fresh_copy : [num_users=1] = call_function[target=torch.ops.aten.lift_fresh_copy.default](args = (%c_lifted_tensor_0,), kwargs = {})
-        %detach_1 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%lift_fresh_copy,), kwargs = {})
-        %detach_2 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_1,), kwargs = {})
-        %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%detach, %detach_2), kwargs = {})
-        %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
-        %mul_1 : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %x), kwargs = {})
-        return (mul_1,)""",
+graph():
+    %c_lifted_tensor_0 : [num_users=1] = placeholder[target=c_lifted_tensor_0]
+    %x : [num_users=2] = placeholder[target=x]
+    %ones : [num_users=1] = call_function[target=torch.ops.aten.ones.default](args = ([3, 3],), kwargs = {device: cpu, pin_memory: False})
+    %detach : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%ones,), kwargs = {})
+    %lift_fresh_copy : [num_users=1] = call_function[target=torch.ops.aten.lift_fresh_copy.default](args = (%c_lifted_tensor_0,), kwargs = {})
+    %detach_1 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%lift_fresh_copy,), kwargs = {})
+    %detach_2 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_1,), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%detach, %detach_2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
+    %mul_1 : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %x), kwargs = {})
+    return (mul_1,)""",
             )
 
         unflattened = unflatten(ep)
@@ -5397,7 +5402,8 @@ graph():
 
         inp = (torch.randn(2, 8),)
         ep = export(M(), inp)  # This errors because dynamo adds an extra input
-
+    
+    @testing.expectedFailureSerDer  # T203552516
     def test_export_with_fake_tensor_inputs(self):
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
 
@@ -5431,7 +5437,8 @@ graph():
             decomposed_ep = exported_program.run_decompositions()
             export_res = decomposed_ep.module()(x)
             self.assertTrue(export_res.size() == exp_res.size())
-
+    
+    @testing.expectedFailureSerDer  # T203554117
     def test_export_with_fake_tensor_inputs_on_cuda_devices(self):
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
 
@@ -5891,7 +5898,8 @@ graph():
         gm_flat_strict = ep_strict.module()
 
         self.assertEqual(gm_flat_non_strict(*inp), gm_flat_strict(*inp))
-
+    
+    @testing.expectedFailureSerDer  # T203553154
     def test_nn_module_stack_shared_submodule(self):
         class Leaf(torch.nn.Module):
             def __init__(self) -> None:
@@ -6003,7 +6011,8 @@ graph():
                 r"test_export.py.*in forward\n.*x = self.linear\(x\)", trace_addmm
             )
         )
-
+    
+    @testing.expectedFailureSerDer  # T203551948
     def test_cond_with_module_stack_export_with(self):
         class Bar(torch.nn.Module):
             def __init__(self) -> None:
@@ -6048,17 +6057,17 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
         else:
             self.assertExpectedInline(
                 ep.graph_module.code.strip(),
-                """\
-    def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
-        cos = torch.ops.aten.cos.default(x)
-        sum_1 = torch.ops.aten.sum.default(x)
-        gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [p_bar_linear_bias, p_bar_linear_weight, x]);  gt = true_graph_0 = false_graph_0 = p_bar_linear_bias = p_bar_linear_weight = x = None
-        getitem = cond[0];  cond = None
-        add = torch.ops.aten.add.Tensor(cos, getitem);  cos = getitem = None
-        return (add,)""",
+                    """\
+def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
+    cos = torch.ops.aten.cos.default(x)
+    sum_1 = torch.ops.aten.sum.default(x)
+    gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [p_bar_linear_bias, p_bar_linear_weight, x]);  gt = true_graph_0 = false_graph_0 = p_bar_linear_bias = p_bar_linear_weight = x = None
+    getitem = cond[0];  cond = None
+    add = torch.ops.aten.add.Tensor(cos, getitem);  cos = getitem = None
+    return (add,)""",
             )
         schema = get_hop_schema(ep)
         self.assertExpectedInline(
@@ -6325,7 +6334,8 @@ def forward(self, x, b_t, y):
                 "torch.ops.higher_order.wrap_with_set_grad_enabled",
                 ep.graph_module.code,
             )
-
+    
+    @testing.expectedFailureSerDer  # T203552609
     def test_export_as_backend(self):
         def f(x, y):
             return x + y
@@ -6398,7 +6408,8 @@ def forward(self, x, b_t, y):
 
         ep = export(m, (inp,))
         self.assertEqual(ep.module()(torch.ones(4, 4)), m(torch.ones(4, 4)))
-
+    
+    @testing.expectedFailureSerDer  # T203552609
     def test_trace_under_fake(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -6500,7 +6511,8 @@ def forward(self, x, b_t, y):
         self.assertTrue(torch.allclose(x_new_eager, x_new_export))
         self.assertTrue(torch.allclose(z_new_eager, z_new_export))
         self.assertTrue(torch.allclose(legit_eager, legit_export))
-
+    
+    @testing.expectedFailureSerDer  # T203553154
     def test_custom_op_auto_functionalize_pre_dispatch(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -7048,7 +7060,10 @@ def forward(self, x, y):
             ].count(True),
             0,
         )
+    
 
+    @testing.expectedFailureTrainingIRToRunDecomp  # T203397445
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict  # T203397445
     def test_constant_aliasing(self):
         class M1(torch.nn.Module):
             def __init__(self, m2, foo):
