@@ -74,6 +74,7 @@ def _check_has_dynamic_shape(
 def skipDeviceIf(cond, msg, *, device):
     if cond:
         def decorate_fn(fn):
+            @functools.wraps(fn)
             def inner(self, *args, **kwargs):
                 if not hasattr(self, "device"):
                     warn_msg = "Expect the test class to have attribute device but not found. "

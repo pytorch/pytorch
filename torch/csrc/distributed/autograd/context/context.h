@@ -61,7 +61,7 @@ class TORCH_API DistAutogradContext {
   // needs to be updated.
   void runGradCallbackForVariable(
       const torch::autograd::Variable& variable,
-      GradCallback&& cb);
+      const GradCallback& cb);
 
   DistAutogradContext(const DistAutogradContext&) = delete;
   DistAutogradContext& operator=(const DistAutogradContext&) = delete;
