@@ -187,15 +187,15 @@ test_torchbench_perf() {
   mkdir $TEST_REPORTS_DIR
 
   echo "Setup complete, launching torchbench training perf run"
-  python $(pwd)/benchmarks/dynamo/huggingface.py --backend eager --device mps --performance --training --output=$(TEST_REPORTS_DIR)/torchbench_training.csv
+  python $(pwd)/benchmarks/dynamo/huggingface.py --backend eager --device mps --performance --training --output=${TEST_REPORTS_DIR}/torchbench_training.csv
 
   echo "Launching torchbench inference perf run"
-  python $(pwd)/benchmarks/dynamo/huggingface.py --backend eager --device mps --performance --inference --output=$(TEST_REPORTS_DIR)/torchbench_inference.csv
+  python $(pwd)/benchmarks/dynamo/huggingface.py --backend eager --device mps --performance --inference --output=${TEST_REPORTS_DIR}/torchbench_inference.csv
 
   echo "Pytorch benchmark on mps device completed"
   # TEMP_DEBUG
-  cat $(TEST_REPORTS_DIR)/torchbench_training.csv
-  cat $(TEST_REPORTS_DIR)/torchbench_inference.csv
+  cat ${TEST_REPORTS_DIR}/torchbench_training.csv
+  cat ${TEST_REPORTS_DIR}/torchbench_inference.csv
 }
 
 test_hf_perf() {
@@ -204,16 +204,16 @@ test_hf_perf() {
   mkdir $TEST_REPORTS_DIR
 
   echo "Launching HuggingFace training perf run"
-  python $(pwd)/benchmarks/dynamo/huggingface.py --backend eager --device mps --performance --training --output=$(TEST_REPORTS_DIR)/hf_training.csv
+  python $(pwd)/benchmarks/dynamo/huggingface.py --backend eager --device mps --performance --training --output=${TEST_REPORTS_DIR}/hf_training.csv
 
   echo "Launching HuggingFace inference perf run"
-  python $(pwd)/benchmarks/dynamo/huggingface.py --backend eager --device mps --performance --training --output=$(TEST_REPORTS_DIR)/hf_inference.csv
+  python $(pwd)/benchmarks/dynamo/huggingface.py --backend eager --device mps --performance --training --output=${TEST_REPORTS_DIR}/hf_inference.csv
 
   echo "HuggingFace benchmark on mps device completed"
 
   # TEMP_DEBUG
-  cat $(TEST_REPORTS_DIR)/hf_training.csv
-  cat $(TEST_REPORTS_DIR)/hf_inference.csv
+  cat ${TEST_REPORTS_DIR}/hf_training.csv
+  cat ${TEST_REPORTS_DIR}/hf_inference.csv
 }
 
 test_timm_perf() {
@@ -222,16 +222,16 @@ test_timm_perf() {
   mkdir $TEST_REPORTS_DIR
 
   echo "Launching timm training perf run"
-  python $(pwd)/benchmarks/dynamo/timm_models.py --backend eager --device mps --performance --training --output=$(TEST_REPORTS_DIR)/timm_training.csv
+  python $(pwd)/benchmarks/dynamo/timm_models.py --backend eager --device mps --performance --training --output=${TEST_REPORTS_DIR}/timm_training.csv
 
   echo "Launching timm inference perf run"
-  python $(pwd)/benchmarks/dynamo/timm_models.py --backend eager --device mps --performance --training --output=$(TEST_REPORTS_DIR)/timm_inference.csv
+  python $(pwd)/benchmarks/dynamo/timm_models.py --backend eager --device mps --performance --training --output=${TEST_REPORTS_DIR}/timm_inference.csv
 
   echo "timm benchmark on mps device completed"
 
   # TEMP_DEBUG
-  cat $(TEST_REPORTS_DIR)/timm_inference.csv
-  cat $(TEST_REPORTS_DIR)/timm_training.csv
+  cat ${TEST_REPORTS_DIR}/timm_inference.csv
+  cat ${TEST_REPORTS_DIR}/timm_training.csv
 }
 
 install_tlparse
