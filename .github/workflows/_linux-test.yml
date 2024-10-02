@@ -228,6 +228,7 @@ jobs:
           SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           SCCACHE_ERROR_LOG: /tmp/sccache_log.txt
           SCCACHE_LOG: debug
+          SCCACHE_ALLOW_CORE_DUMPS: 1
           SHM_SIZE: ${{ contains(inputs.build-environment, 'cuda') && '2g' || '1g' }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
@@ -288,6 +289,7 @@ jobs:
             -e SCCACHE_S3_KEY_PREFIX \
             -e SCCACHE_ERROR_LOG \
             -e SCCACHE_LOG \
+            -e SCCACHE_ALLOW_CORE_DUMPS \
             -e XLA_CUDA \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e PYTORCH_TEST_CUDA_MEM_LEAK_CHECK \
