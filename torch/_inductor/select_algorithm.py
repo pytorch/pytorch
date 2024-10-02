@@ -507,8 +507,6 @@ class TritonTemplateKernel(TritonKernel):
         range_trees = self.construct_range_trees(
             pid_cache=None, inside_reduction=False, numels=groups, no_x_dim=False
         )
-
-        original_range_tree = self.range_trees
         with self.create_subgraph_body(f"<LOAD_INPUT_{input_name}>"):
             assert isinstance(indices, (list, tuple))
             assert isinstance(output_name, str)
@@ -528,8 +526,15 @@ class TritonTemplateKernel(TritonKernel):
             assert len(indices) == len(lengths)
 
             # glue to make generated code use same indexing from template
+
+            # TODO (from reviewers as well)
+            # in codegen_template,
+            # prologue_node.codegen(kernel.split_and_set_ranges(prologue_node.get_ranges()))
+            # the ranges need to reflect the group of the prologue input or it will error
+            # not sure if there is any difference between original range_tree_entry in
+            # and new one from correct lengths/groups... both actually seem to work
             for name, range_tree_entry in zip(
-                indices, original_range_tree[0].construct_entries(lengths)
+                indices, self.range_trees[0].construct_entries(lengths)
             ):
                 range_tree_entry.set_name(name)
             contiguous_index = sympy_dot(
@@ -537,9 +542,9 @@ class TritonTemplateKernel(TritonKernel):
             )
             contiguous_index = self.rename_indexing(contiguous_index)
             self.body.writeline("xindex = " + texpr(contiguous_index))
-            original_range_tree[0].lookup(
-                sympy.Integer(1), sympy_product(lengths)
-            ).set_name("xindex")
+            self.range_trees[0].lookup(sympy.Integer(1), sympy_product(lengths)).set_name(
+                "xindex"
+            )
             self.template_mask = mask if mask is not None else "None"
             self.template_out = "xindex"
             self.template_indices = indices

@@ -1006,8 +1006,6 @@ class SIMDScheduling(BaseScheduling):
 
         if not node1.is_reduction() and not node2.is_reduction():
             if not (numel1 == numel2 and rnumel1 == rnumel2):
-                # prologue fusion input sizes differ from output group
-                # TODO - check numel of input to node2 vs node1 ?
                 if not node2.is_template():
                     why(
                         "numel/rnumel mismatch (non-reduce) (%s, %s), (%s, %s)",
@@ -1017,6 +1015,27 @@ class SIMDScheduling(BaseScheduling):
                         rnumel2,
                     )
                     return False
+                else:
+                    prologue, _, _ = node2.get_prologue_template_epilogue(
+                        node2.get_nodes()
+                    )
+                    # prologue fusion input sizes differ from output group
+                    # fuse so long as this node matches the group of existing prologue nodes
+                    # we would have already restricted prologue from fusing if it had multiple
+                    # uses
+                    for pro_node in prologue:
+                        if pro_node.used_buffer_names() & node1.get_buffer_names():
+                            _, (pro_numel, pro_rnumel) = pro_node.Group
+                            if not (numel1 == pro_numel and rnumel1 == pro_rnumel):
+                                why(
+                                    "numel/rnumel mismatch prologue mismatch (%s, %s), (%s, %s)",
+                                    numel1,
+                                    pro_numel,
+                                    rnumel1,
+                                    pro_rnumel,
+                                )
+                                return False
+                    return True
 
             for n, node_name in zip((node1, node2), ("node1", "node2")):
                 if n.is_template():
@@ -1898,17 +1917,14 @@ class SIMDScheduling(BaseScheduling):
             ), V.set_kernel_handler(kernel):
                 src_code = kernel.codegen_kernel()
         else:
-            template_index = next(i for i, n in enumerate(nodes) if n.is_template())
-
-            prologue_nodes = nodes[:template_index]
-            template_node = nodes[template_index]
-            epilogue_nodes = nodes[template_index + 1 :]
-
+            prologue, template, epilogue = nodes[0].get_prologue_template_epilogue(
+                nodes
+            )
             with config.patch("benchmark_kernel", benchmark_kernel):
                 src_code = self.codegen_template(
-                    template_node,
-                    epilogue_nodes,
-                    prologue_nodes,
+                    template,
+                    epilogue,
+                    prologue,
                     only_gen_src_code=True,
                 )
 

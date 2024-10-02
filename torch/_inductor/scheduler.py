@@ -745,6 +745,20 @@ class BaseSchedulerNode:
         assert template is not None
         return template
 
+    @staticmethod
+    def get_prologue_template_epilogue(
+        nodes: List[BaseSchedulerNode],
+    ) -> Tuple[List[BaseSchedulerNode], BaseSchedulerNode, List[BaseSchedulerNode]]:
+        """
+        For the list of nodes, get the prologue, template, and epilogue
+        """
+        template_index = next(i for i, n in enumerate(nodes) if n.is_template())
+
+        prologue = nodes[:template_index]
+        template_node = nodes[template_index]
+        epilogue = nodes[template_index + 1 :]
+        return prologue, template_node, epilogue
+
 
 class WhyNoFuse:
     # TODO when we drop support for Python < 3.10, we can use
@@ -1306,6 +1320,34 @@ class FusedSchedulerNode(BaseSchedulerNode):
             log.warning("Ignoring error in debug_str()", exc_info=True)
 
         return buf.getrawvalue().rstrip()
+
+    def get_fused_template_prologue_groups(
+        self,
+    ) -> Optional[Dict[str, List[BaseSchedulerNode]]]:
+        """
+        Returns a Mapping from Template input buffer to a fused group of prologue nodes for that buffer
+
+        """
+        if not self.is_template():
+            return None
+
+        template_index = next(i for i, n in enumerate(self.snodes) if n.is_template())
+        template_node = self.snodes[template_index]
+        prologue_nodes = self.snodes[:template_index]
+
+        buf_name_to_prologue_group = {}
+        template_reads = template_node.used_buffer_names()
+        prologue_group = []
+        for prologue in prologue_nodes:
+            names = prologue.get_buffer_names()
+            prologue_group.append(prologue)
+            if prologue.get_buffer_names() & template_reads:
+                assert len(names) == 1
+                buf_name_to_prologue_group[next(iter(names))] = prologue_group
+                kernel.final_prologue_buffers.append(next(iter(names)))
+                prologue_group = []
+
+        return buf_name_to_prologue_group
 
 
 class ForeachKernelSchedulerNode(FusedSchedulerNode):
@@ -3010,9 +3052,7 @@ class Scheduler:
                 why("template prologue can only fuse functional pointwise nodes")
                 return False
 
-            prologue_nodes = (
-                node1.snodes if isinstance(node1, FusedSchedulerNode) else [node1]
-            )
+            prologue_nodes = node1.get_nodes()
             for node in prologue_nodes[:-1]:
                 node_outs = node.get_outputs()
                 for out in node_outs:
@@ -3033,7 +3073,9 @@ class Scheduler:
                 and len(prologue_nodes[-1].outputs[0].users) == 1
                 and prologue_nodes[-1].outputs[0].users[0].node is template_snode
             ):
-                why("template prologue can only fuse nodes with a single use")
+                why(
+                    "template prologue can only fuse nodes with a single use into template"
+                )
                 return False
 
             read_bytes = node1.get_read_buffer_sizes()
@@ -3579,13 +3621,9 @@ class Scheduler:
             self.buffer_names_to_free.update(node.last_usage)
 
             if node.is_template():
-                nodes = list(node.get_nodes())
-                template_index = next(i for i, n in enumerate(nodes) if n.is_template())
-
-                prologue = nodes[:template_index]
-                template_node = nodes[template_index]
-                epilogue = nodes[template_index + 1 :]
-
+                prologue, template_node, epilogue = node.get_prologue_template_epilogue(
+                    list(node.get_nodes())
+                )
                 self.get_backend(device).codegen_template(
                     template_node, epilogue, prologue
                 )

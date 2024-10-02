@@ -1010,6 +1010,17 @@ class TestPrologueFusion(TestCase):
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
+    def test_broadcast(self):
+        def foo(x, y):
+            return (x.expand([1, y.shape[0]]) + 1) @ y
+
+        x = torch.rand([1, 1], dtype=torch.float, device="cuda")
+        y = torch.rand([64, 128], dtype=torch.float, device="cuda")
+
+        out, code = run_and_get_code(torch.compile(foo), x, y)
+        self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+
     @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
     @parametrize("benchmark_fusion", (True, False))
     def test_prologue_read_into_both_inputs(self, benchmark_fusion):
@@ -1030,6 +1041,25 @@ class TestPrologueFusion(TestCase):
             # not guaranteed to fuse, but still checking correctness
             if not benchmark_fusion:
                 self.check_code(code[0], num_kernels=2, num_allocs=3, num_deallocs=4)
+
+    @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
+    @config.patch(allow_buffer_reuse=False)
+    def test_mismatched_prologue_group(self):
+        def foo(x, y, z):
+            a = (x + 2) * 2
+            b = a * y
+            return b @ z
+
+        x = torch.rand([1, 256], device="cuda")
+        y = torch.rand([256, 256], device="cuda")
+        z = torch.rand([256, 128], device="cuda")
+
+        out, code = run_and_get_code(torch.compile(foo), x, y, z)
+        self.assertEqual(out, foo(x, y, z), atol=0.05, rtol=0.05)
+        # theres one more dealloc than there should be because of a buffer reuse. TODO:
+        # not sure why disabling buffer reuse doesnt stop
+        FileCheck().check("del buf0  # reuse").run(code[0])
+        self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=5)
 
 
 if __name__ == "__main__":
