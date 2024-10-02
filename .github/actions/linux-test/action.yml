@@ -181,6 +181,9 @@ runs:
         PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
         DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
         HUGGING_FACE_HUB_TOKEN: ${{ inputs.HUGGING_FACE_HUB_TOKEN }}
+        SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
+        IS_A100_RUNNER: ${{ contains(matrix.runner, 'a100') && '1' || '0' }}
+
       shell: bash
       run: |
         set -x
@@ -234,7 +237,9 @@ runs:
           -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
           -e SKIP_SCCACHE_INITIALIZATION=1 \
           -e HUGGING_FACE_HUB_TOKEN \
+          -e SCRIBE_GRAPHQL_ACCESS_TOKEN \
           -e DASHBOARD_TAG \
+          -e IS_A100_RUNNER \
           --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
           --security-opt seccomp=unconfined \
           --cap-add=SYS_PTRACE \
