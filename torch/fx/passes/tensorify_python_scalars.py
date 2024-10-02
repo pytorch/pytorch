@@ -139,7 +139,7 @@ def tensorify_python_scalars(
             node = graph.call_function(
                 torch.ops.aten.scalar_tensor.default, (c,), {"dtype": dtype}
             )
-            node.meta["val"] = fake_mode.from_tensor(torch.tensor(c, dtype=dtype))
+            node.meta["val"] = torch.ops.aten.scalar_tensor.default(c, dtype=dtype)
             expr_to_tensor_proxy[expr] = MetaProxy(
                 node,
                 tracer=tracer,
