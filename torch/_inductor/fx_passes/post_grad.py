@@ -845,7 +845,9 @@ def decompose_auto_functionalized(graph):
         # tracing a function with kwargs.
         def decomp(*flat_args):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
-            return auto_functionalized_dense(*args, only_clone_these_tensors, **kwargs)
+            assert len(args) == 1
+            mode = args[0]
+            return auto_functionalized_dense(mode, only_clone_these_tensors, **kwargs)
 
         match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
@@ -889,7 +891,11 @@ def decompose_auto_functionalized(graph):
         # tracing a function with kwargs.
         def decomp(*flat_args):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
-            return auto_functionalized_v2_dense(*args, only_clone_these_bases, **kwargs)
+            assert len(args) == 1
+            mutable_op = args[0]
+            return auto_functionalized_v2_dense(
+                mutable_op, only_clone_these_bases, **kwargs
+            )
 
         match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 

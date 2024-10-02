@@ -469,6 +469,9 @@ fake_tensor_cache_crosscheck_enabled = (
 # Note: AOT Autograd will still trace joint graphs.
 compiled_autograd = False
 
+# Overrides torch.compile() kwargs for Compiled Autograd:
+compiled_autograd_kwargs_override: Dict[str, Any] = {}
+
 # Enables use of collectives *during* compilation to synchronize behavior
 # across ranks.  Today, this is used solely to modify automatic_dynamic_shapes
 # behavior, making it so that we infer that if an input is dynamic by
