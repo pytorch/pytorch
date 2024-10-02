@@ -424,7 +424,7 @@ static inline float reduce(float32x4_t x[kF32RegistersPerIteration]) {
   return vaddvq_f32(x[0]);
 }
 
-static C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop(
+static C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop_no_bfdot(
   const float16_t* vec1,
   const float16_t* vec2,
   float32x4_t sum[kF32RegistersPerIteration],
@@ -492,10 +492,9 @@ dot_with_fp32_arith_main_inner_loop_bfdot(
 #define TARGET_ARM_BF16_ATTRIBUTE
 #endif // COMPILER_SUPPORTS_BF16_TARGET
 
-template <typename T>
 static C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop_no_bfdot(
-    const T* vec1,
-    const T* vec2,
+    const BFloat16* vec1,
+    const BFloat16* vec2,
     float32x4_t sum[kF32RegistersPerIteration],
     int registerPairIndex) {
   const uint16x8_t temp_vec1 = vld1q_u16(reinterpret_cast<const uint16_t*>(
