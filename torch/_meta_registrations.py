@@ -6467,6 +6467,7 @@ def _register_inplace_meta(fn):
 
 
 @register_meta(aten.lerp)
+@out_wrapper()
 def lerp(start, end, weight):
     torch._check(
         start.dtype == end.dtype,
@@ -6485,6 +6486,7 @@ def lerp(start, end, weight):
 
 
 @register_meta(aten.addcmul)
+@out_wrapper()
 def addcmul(input, tensor1, tensor2, *, value=1):
     return elementwise_meta(
         input, tensor1, tensor2, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
@@ -6492,6 +6494,7 @@ def addcmul(input, tensor1, tensor2, *, value=1):
 
 
 @register_meta(aten.addcdiv)
+@out_wrapper()
 def addcdiv(input, tensor1, tensor2, *, value=1):
     torch._check(
         not (
