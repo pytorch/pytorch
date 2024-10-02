@@ -157,12 +157,16 @@ torchbench_setup_macos() {
   git fetch
   git checkout "$(cat ../.github/ci_commit_pins/vision.txt)"
   git submodule update --init --recursive
+  python setup.py clean
+  python setup.py develop
   popd
 
   pushd torchaudio
   git fetch
   git checkout "$(cat ../.github/ci_commit_pins/audio.txt)"
   git submodule update --init --recursive
+  python setup.py clean
+  python setup.py develop
   popd
 
   checkout_install_torchbench
