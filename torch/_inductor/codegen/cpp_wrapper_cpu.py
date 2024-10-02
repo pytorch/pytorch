@@ -1275,7 +1275,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def generate_extern_kernel_alloc(self, extern_kernel, args):
         if config.abi_compatible:
-            if hasattr(extern_kernel, "outputs"):
+            if getattr(extern_kernel, "outputs", None):
                 # ir.ExternKernelAlloc may have outputs if it returns a tuple
                 self.generate_c_shim_fallback_kernel(extern_kernel, args)
             else:
@@ -2112,15 +2112,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 raise AssertionError(f"Unexpected output: {type(out)}")
 
         # output_args has the same pytree structure as outputs
-        output_args = None
-        if config.abi_compatible:
-            if outputs is None:
-                # outputs is not specified, the default is to write to buf_name
-                output_args = [buf_name]
-            else:
-                output_args = extract_output_name(outputs)
-                if isinstance(output_args, str):
-                    output_args = [output_args]
+        if outputs is None:
+            # outputs is not specified, the default is to write to buf_name
+            output_args = [buf_name]
+        else:
+            output_args = extract_output_name(outputs)
+            if isinstance(output_args, str):
+                output_args = [output_args]
 
         if V.graph.aot_mode and config.abi_compatible:
             assert op_overload is not None
