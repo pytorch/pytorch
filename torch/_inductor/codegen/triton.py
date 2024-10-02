@@ -1536,13 +1536,17 @@ class TritonKernel(SIMDKernel):
                 )
 
                 index_var = range_tree.symbol()
+                match_result = BlockPatternMatcher.match_mod_div_block_expr(
+                    index, index_var, range_tree.numel, num_dims
+                )
+                if match_result is None:
+                    return None
+
                 (
                     dims,
                     strides,
                     block_index_exprs,
-                ) = BlockPatternMatcher.match_mod_div_block_expr(
-                    index, index_var, range_tree.numel, num_dims
-                )
+                ) = match_result
                 slice_numels = BlockPatternMatcher.get_slice_numels(dims)
 
                 # Check for applicable iteration range sizes.
@@ -3128,11 +3132,11 @@ class TritonKernel(SIMDKernel):
         return V.graph.sizevars.statically_known_multiple_of(tree.numel, max_block)
 
     def filter_masks(self, mask_vars: Iterable[str]) -> List[str]:
-        discard_set = set(
+        discard_set = {
             f"{tree.prefix}mask"
             for tree in self.range_trees
             if self._has_constant_mask(tree)
-        )
+        }
         return [var for var in mask_vars if var not in discard_set]
 
     def iteration_ranges_codegen_header(self, entry: IterationRangesRoot, code):

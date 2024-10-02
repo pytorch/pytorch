@@ -114,7 +114,7 @@ class BlockPatternMatcher:
         index_var: sympy.Symbol,
         numel: sympy.Expr,
         num_dims: int,
-    ) -> Tuple[List[sympy.Expr], List[sympy.Expr], List[sympy.Expr]]:
+    ) -> Optional[Tuple[List[sympy.Expr], List[sympy.Expr], List[sympy.Expr]]]:
         """
         Matches modular indexing expressions, converting them to implied block dimensions and strides.
         See triton.py for more information.
@@ -141,7 +141,7 @@ class BlockPatternMatcher:
         # Pattern match.
         match = index.match(match_expr)
         if match is None:
-            return None, None, None
+            return None
 
         # Provide default values for unmatched dims and strides.
         for dim in dims[1:]:
@@ -1508,6 +1508,7 @@ class SIMDScheduling(BaseScheduling):
                 **kernel_kwargs,
                 override_persistent_reduction=False,
             )
+            assert isinstance(kernel2, SIMDKernel)
             self.codegen_node_schedule_with_kernel(node_schedule, kernel2)
             with V.set_kernel_handler(kernel2):
                 src_code2 = kernel2.codegen_kernel()
@@ -1768,7 +1769,7 @@ class SIMDScheduling(BaseScheduling):
     def candidate_tilings(
         node,
     ) -> Iterable[CandidateTiling]:
-        def tile_ranges(ranges, rw) -> Tuple[tuple]:
+        def tile_ranges(ranges, rw) -> List[CandidateTiling]:
             """
             Compute tiling candidates by dividing up the iteration ranges.
             """
@@ -1792,7 +1793,7 @@ class SIMDScheduling(BaseScheduling):
             ]
             write_names = {dep.name for dep in rw.writes}
 
-            tiled_groups = []
+            tilings = []
             for dep in deps:
                 strides = V.graph.sizevars.stride_hints(dep.index, rw.range_vars)
                 assert len(strides) == len(ranges)
@@ -1807,14 +1808,50 @@ class SIMDScheduling(BaseScheduling):
 
                 except ValueError:
                     continue
-                tiled_groups.append(
-                    (
-                        V.graph.sizevars.simplify(sympy_product(ranges[:split])),
-                        V.graph.sizevars.simplify(sympy_product(ranges[split:])),
-                    )
+
+                tiled_groups = (
+                    V.graph.sizevars.simplify(sympy_product(ranges[:split])),
+                    V.graph.sizevars.simplify(sympy_product(ranges[split:])),
                 )
 
-            return tiled_groups
+                # score by number of elements
+                score = V.graph.sizevars.size_hint(
+                    sympy_product(
+                        size for size, stride in zip(ranges, strides) if stride != 0
+                    )
+                )
+                if dep.name in write_names:
+                    # ngimel said contiguous writes is more important than reads
+                    score *= 2
+                if CandidateTiling.is_good_size(tiled_groups[0]):
+                    score *= 2
+                if CandidateTiling.is_good_size(tiled_groups[1]):
+                    score *= 2
+
+                if (
+                    V.graph.sizevars.size_hint(
+                        score - sympy_product(itertools.chain(ranges, reduction_ranges))
+                    )
+                    >= 0
+                ):
+                    tilings.append(
+                        CandidateTiling(
+                            tiling=(
+                                (
+                                    V.graph.sizevars.simplify(
+                                        sympy_product(ranges[:split])
+                                    ),
+                                    V.graph.sizevars.simplify(
+                                        sympy_product(ranges[split:])
+                                    ),
+                                ),
+                            ),
+                            score=score,
+                            name=dep.name,
+                        )
+                    )
+
+            return tilings
 
         pointwise_ranges, reduction_ranges = node.get_ranges()
         if len(pointwise_ranges) <= 1 and len(reduction_ranges) <= 1:
@@ -1833,38 +1870,23 @@ class SIMDScheduling(BaseScheduling):
             )
         )
         tiled_groups = itertools.product(pointwise_tilings, reduction_tilings)
-        # TODO use cls.create_tiling to make a dict
 
-        tilings: List[CandidateTiling] = []
-        for tiling in tiled_groups:
-            # score by number of elements
-            score = V.graph.sizevars.size_hint(
-                sympy_product(
-                    size for size, stride in zip(ranges, strides) if stride != 0
-                )
+        # Add pointwise and reduction scores.
+        tilings = tuple(
+            CandidateTiling(
+                splits=tuple(tiling.tiling for tiling in tiling_group),
+                score=sum(tiling.score for tiling in tiling_group),
+                name="_".join(tiling.name for tiling in tiling_group),
             )
-            if dep.name in write_names:
-                # ngimel said contiguous writes is more important than reads
-                score *= 2
-            if CandidateTiling.is_good_size(tiled_groups[0]):
-                score *= 2
-            if CandidateTiling.is_good_size(tiled_groups[1]):
-                score *= 2
+            for tiling_group in tiled_groups
+        )
 
-            if (
-                V.graph.sizevars.size_hint(
-                    score - sympy_product(itertools.chain(ranges, reduction_ranges))
-                )
-                >= 0
-            ):
-                tilings.append(CandidateTiling(tiled_groups, score, dep.name))
-
-        return tuple(tilings)
+        return tilings
 
     @classmethod
     def create_tiling(
         cls, pw_tiling: Iterable[sympy.Expr], reduction_tiling: Iterable[sympy.Expr]
-    ) -> Dict[str, sympy.Expr]:
+    ) -> Dict[str, Tuple[sympy.Expr]]:
         """
         Create a tiling dict from pointwise and reduction splits.
         """
@@ -1874,6 +1896,92 @@ class SIMDScheduling(BaseScheduling):
             list(zip(pw_prefixes, pw_tiling))
             + list(zip(reduction_prefixes, reduction_tiling))
         )
+
+    @classmethod
+    def get_nd_tilings(
+        cls,
+        node_schedule: List[IRNode],
+    ) -> List[Dict[str, Tuple[sympy.Expr]]]:
+        """
+        Creates N-dimensional tiling candidiates, attempting to simplify loads/stores
+        by tiling the kernel into higher dimensions.
+
+        Returns a list of tilings ranked by dimensionality.
+        """
+        tiling_groups = []
+        for node in node_schedule:
+            if not isinstance(node, scheduler.SchedulerNode):
+                continue
+
+            ranges_and_read_writes = zip(
+                node.get_ranges(),
+                [
+                    node.pointwise_read_writes(),
+                    node.reduction_read_writes(),
+                ],
+            )
+
+            # If we have modular indexing expressions, try to subdivide ranges into
+            # their parameters.
+            node_ranges = node.get_ranges()
+            tiling_groups = [node_ranges]
+            for dep in node.read_writes.reads_and_writes():
+                # Check if the variable ranges coincide with the node ranges.
+                # This lets us partition the variables into pointwise and reduction
+                # splits.
+                var_ranges = tuple(dep.ranges.values())
+                if len(var_ranges) != len(node_ranges) or var_ranges != tuple(
+                    itertools.chain.from_iterable(node_ranges)
+                ):
+                    continue
+
+                # Pattern match the subexpression pertaining to each index variable.
+                divided_tiling_group = []
+                for var, numel in dep.ranges.items():
+                    index = BlockPatternMatcher.get_subexpr_involving_symbol(
+                        dep.index, var
+                    )
+
+                    # Heuristic to bound the maximum dimensionality of the block.
+                    num_dims = max(
+                        2,
+                        index.count(FloorDiv) + index.count(ModularIndexing),
+                        sum(len(range_) for range_ in node_ranges),
+                    )
+
+                    # Attempt to pattern match the index expr.
+                    # Failed matches default to the full range.
+                    match_result = BlockPatternMatcher.match_mod_div_block_expr(
+                        index, var, numel, num_dims
+                    )
+                    dims = match_result[0] if match_result is not None else [numel]
+
+                    divided_tiling_group.append(dims)
+
+                tiling_groups.append(divided_tiling_group)
+
+        tilings: OrderedSet[Tuple[sympy.Expr, sympy.Expr]] = OrderedSet()
+        for tiling_group in tiling_groups:
+            # Concatenate pointwise and reduction tilings.
+            tiling: List[sympy.Expr] = []
+            for node_range in tiling_group:
+                num_leading_dims = max(0, len(node_range) - config.triton.max_tiles)
+                first_trailing_dim = num_leading_dims + 1
+                collapsed_leading_dim = sympy_product(node_range[:first_trailing_dim])
+                tiling.append(
+                    (collapsed_leading_dim,) + tuple(node_range[first_trailing_dim:])
+                )
+            tilings.add(tuple(tiling))
+
+        # Rank tilings by the number of dimensions. E.g., prefer 2D to 1D.
+        # Since this is a stable sort, ties are broken by schedule order.
+        ranked_tilings = sorted(
+            [cls.create_tiling(tiling[0], tiling[1]) for tiling in tilings],
+            key=len,
+            reverse=True,
+        )
+
+        return ranked_tilings
 
     @classmethod
     def select_tiling(
@@ -1897,7 +2005,8 @@ class SIMDScheduling(BaseScheduling):
             for tiling in cls.candidate_tilings(node):
                 if tiling.name in seen_names:
                     continue
-                seen_names.add(tiling.name)
+                elif tiling.name is not None:
+                    seen_names.add(tiling.name)
                 candidate_tiles[tiling.tiling] += tiling.score
 
         ranked_tilings = [tiling for tiling, score in candidate_tiles.most_common()]
@@ -1935,7 +2044,8 @@ class SIMDScheduling(BaseScheduling):
                 # Quit if tiles were incompatible, or no tiles were converted to 3D.
                 # FIXME need to return the existing tiling (instead of None) for reductions?
                 if any(tiling is None for tiling in new_tiling_group) or not any(
-                    len(tiling) == config.max_tiles for tiling in new_tiling_group
+                    len(tiling) == config.triton.max_tiles
+                    for tiling in new_tiling_group
                 ):
                     continue
 
@@ -1947,82 +2057,7 @@ class SIMDScheduling(BaseScheduling):
 
         # Optionally, prefer tiling into as many dimensions as possible.
         if config.triton.prefer_nd_tiling:
-            tiling_groups = []
-            for node in node_schedule:
-                if not isinstance(node, scheduler.SchedulerNode):
-                    continue
-
-                ranges_and_read_writes = zip(
-                    node.get_ranges(),
-                    [
-                        node.pointwise_read_writes(),
-                        node.reduction_read_writes(),
-                    ],
-                )
-
-                # If we have modular indexing expressions, try to subdivide ranges into
-                # their parameters.
-                node_ranges = node.get_ranges()
-                tiling_groups = [node_ranges]
-                for dep in node.read_writes.reads_and_writes():
-                    # Check if the variable ranges coincide with the node ranges.
-                    # This lets us partition the variables into pointwise and reduction
-                    # splits.
-                    var_ranges = tuple(dep.ranges.values())
-                    if len(var_ranges) != len(node_ranges) or var_ranges != tuple(
-                        itertools.chain.from_iterable(node_ranges)
-                    ):
-                        continue
-
-                    # Pattern match the subexpression pertaining to each index variable.
-                    divided_tiling_group = []
-                    for var, numel in dep.ranges.items():
-                        index = BlockPatternMatcher.get_subexpr_involving_symbol(
-                            dep.index, var
-                        )
-
-                        # Heuristic to bound the maximum dimensionality of the block.
-                        num_dims = max(
-                            2,
-                            index.count(FloorDiv) + index.count(ModularIndexing),
-                            sum(len(range_) for range_ in node_ranges),
-                        )
-
-                        # Attempt to pattern match the index expr.
-                        dims = BlockPatternMatcher.match_mod_div_block_expr(
-                            index, var, numel, num_dims
-                        )[0]
-                        if dims is None:
-                            # Failed matches default to the full range.
-                            dims = [numel]
-                        divided_tiling_group.append(dims)
-
-                    tiling_groups.append(divided_tiling_group)
-
-            new_tilings: OrderedSet[Dict[str, sympy.Expr]] = OrderedSet()
-            for tiling_group in tiling_groups:
-                # Concatenate pointwise and reduction tilings.
-                tiling = []
-                for node_range in tiling_group:
-                    num_leading_dims = max(0, len(node_range) - config.triton.max_tiles)
-                    first_trailing_dim = num_leading_dims + 1
-                    collapsed_leading_dim = sympy_product(
-                        node_range[:first_trailing_dim]
-                    )
-                    tiling.append(
-                        (collapsed_leading_dim,)
-                        + tuple(node_range[first_trailing_dim:])
-                    )
-                new_tilings.add(tuple(tiling))
-
-            # Rank tilings by the number of dimensions. E.g., prefer 2D to 1D.
-            # Since this is a stable sort, ties are broken by schedule order.
-            ranked_new_tilings = sorted(
-                [cls.create_tiling(tiling[0], tiling[1]) for tiling in new_tilings],
-                key=len,
-                reverse=True,
-            )
-            ranked_tilings = ranked_new_tilings + ranked_tilings
+            ranked_tilings = cls.get_nd_tilings(node_schedule) + ranked_tilings
 
         for tiled_groups in ranked_tilings:
             if all(
@@ -2097,7 +2132,7 @@ class SIMDScheduling(BaseScheduling):
 
 @dataclasses.dataclass
 class CandidateTiling:
-    tiling: Tuple[sympy.Expr, sympy.Expr]
+    tiling: Tuple[Tuple[sympy.Expr, sympy.Expr], ...]
     score: int  # higher is better
     name: Optional[str] = None
 
