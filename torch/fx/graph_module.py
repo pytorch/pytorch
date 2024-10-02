@@ -267,7 +267,11 @@ def _assign_attr(from_obj: Any, to_module: torch.nn.Module, target: str):
 
 # Recursively look up target from a graph module.
 def _get_attr(model: torch.nn.Module, attr_name: str):
-    *prefix, field = attr_name.split(".")
+    return _get_attr_via_attr_list(model, attr_name.split("."))
+
+
+def _get_attr_via_attr_list(model: torch.nn.Module, attr_list: List[str]):
+    *prefix, field = attr_list
     t = model
     for item in prefix:
         t = getattr(t, item, None)  # type: ignore[assignment]
