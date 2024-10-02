@@ -298,7 +298,10 @@ def substitute_in_graph(
                     )
 
         from torch._dynamo.guards import GuardBuilder
-        from torch._dynamo.trace_rules import get_torch_obj_rule_map
+        from torch._dynamo.trace_rules import (
+            _polyfilled_function_ids,
+            get_torch_obj_rule_map,
+        )
         from torch._dynamo.variables import PolyfilledFunctionVariable
         from torch._dynamo.variables.builder import VariableBuilder
 
@@ -308,6 +311,9 @@ def substitute_in_graph(
                 f"Duplicate dispatch rule for {original_fn}: "
                 "already registered in VariableBuilder's id dispatch map"
             )
+
+        if id(original_fn) in _polyfilled_function_ids:
+            raise ValueError(f"Duplicate polyfilled object {original_fn}")
 
         rule_map: Dict[Any, Type[VariableTracker]] = get_torch_obj_rule_map()
         if original_fn in rule_map:
@@ -338,6 +344,8 @@ def substitute_in_graph(
             )
 
         id_dispatch_map[id(original_fn)] = id_dispatch_map[id(wrapped)] = dispatch_fn
+        _polyfilled_function_ids.add(id(original_fn))
+        _polyfilled_function_ids.add(id(wrapped))
         rule_map[original_fn] = rule_map[wrapped] = PolyfilledFunctionVariable
         polyfill_handlers[original_fn] = polyfill_handlers[wrapped] = wrapped  # type: ignore[assignment]
 

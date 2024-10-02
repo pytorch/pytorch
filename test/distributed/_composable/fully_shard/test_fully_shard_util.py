@@ -130,10 +130,22 @@ class TestUtilsSingleDevice(TestCase):
             torch.float8_e5m2,
             torch.float8_e5m2fnuz,
         ]:
-            src = [torch.zeros(2, 2, device="cuda", dtype=dtype)] * 2
-            dst = [torch.zeros(2, 2, device="cuda", dtype=dtype)] * 2
+            src = [torch.rand(2, 2, device="cuda").to(dtype)] * 2
+            dst = [torch.zeros(2, 2, device="cuda").to(dtype)] * 2
             # needed by fully_shard(Float8Linear)
             torch._foreach_copy_(src, dst)
+            for s, d in zip(src, dst):
+                self.assertEqual(s, d)
+            torch.equal(src[0], dst[0])
+
+            src = [torch.rand(2, 2, device="cpu").to(dtype)] * 2
+            dst = [torch.zeros(2, 2, device="cpu").to(dtype)] * 2
+            # needed by fully_shard(Float8Linear)
+            torch._foreach_copy_(src, dst)
+            for s, d in zip(src, dst):
+                # did not use torch.equal because
+                # "equal_cpu" not implemented
+                assert torch.all(s == d).item()
 
 
 if __name__ == "__main__":
