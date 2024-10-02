@@ -876,6 +876,14 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
 
 
 class PagedAttention:
+    """
+    PagedAttention supports flex attention inference with a large batch size.
+    With PagedAttention, a batch of key/value tensors with varying kv length
+    is splitted into tensor blocks of fixed length and cached in a compact way.
+    Thus we can avoid redundant memory consumption due to varying kv length and
+    support a larger batch size.
+    """
+
     def __init__(
         self,
         n_pages: int,
@@ -924,9 +932,11 @@ class PagedAttention:
             seq_len - self.capacity[batch_idx], self.page_size
         )
 
-        assert (
-            len(self.empty_pages) >= num_pages_to_allocate
-        ), f"requested {num_pages_to_allocate} pages but there are only {len(self.empty_pages)} empty pages"
+        assert len(self.empty_pages) >= num_pages_to_allocate, (
+            f"requested {num_pages_to_allocate} pages "
+            f"but there are only {len(self.empty_pages)} empty pages"
+        )
+
         start_page_idx = self.capacity[batch_idx] // self.page_size
         end_page_idx = start_page_idx + num_pages_to_allocate
 
@@ -1047,8 +1057,12 @@ class PagedAttention:
                 shape :math:`(1)`.
         """
         B, H, ROWS, MAX_BLOCKS_IN_COL = block_mask.kv_indices.shape
-        assert block_mask.BLOCK_SIZE[1] == self.page_size
-        assert B <= self.page_table.size(0)
+
+        if block_mask.BLOCK_SIZE[1] != self.page_size:
+            raise RuntimeError(
+                f"Expect block_mask has the same column block size as page_size"
+                f"but got size={block_mask.BLOCK_SIZE[1]} and size={self.page_size}"
+            )
 
         # Increase the num columns of converted block mask from logical block mask's
         # num columns to MAX_CACHED_BLOCKS_IN_COL, since a) the converted block mask
