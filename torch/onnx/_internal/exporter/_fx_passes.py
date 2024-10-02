@@ -17,11 +17,7 @@ def decompose_with_registry(
     """
     onnx_registered_ops = set(_decomp.get_onnx_implemented_overloads(registry))
     decomp_table = _decomp.create_onnx_friendly_decomposition_table(onnx_registered_ops)
-    # Try to preserve some known CompositeImplicitAutograd ops
-    to_preserve = _decomp.get_preserve_ops()
-    # We can only preserve implemented ops
-    can_preserve = tuple(to_preserve.intersection(onnx_registered_ops))
-    return exported_program.run_decompositions(decomp_table, _preserve_ops=can_preserve)
+    return exported_program.run_decompositions(decomp_table)
 
 
 def insert_type_promotion_nodes(

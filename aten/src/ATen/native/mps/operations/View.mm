@@ -729,31 +729,14 @@ static std::string getGatherScatterFunctionName(ScalarType scalarType, int64_t d
   return kernelName + "_kernel_" + std::to_string(dim == 0 ? 1 : dim);
 }
 
-static const std::string& getGatherScatterScalarType(const Tensor& t) {
-  auto scalar_type = t.scalar_type();
-  static std::unordered_map<c10::ScalarType, std::string> scalarToMetalType = {
-      {c10::ScalarType::Float, "float"},
-      {c10::ScalarType::Half, "half"},
-      {c10::ScalarType::BFloat16, "bfloat"},
-      {c10::ScalarType::Long, "long"},
-      {c10::ScalarType::Int, "int"},
-      {c10::ScalarType::Short, "short"},
-      {c10::ScalarType::Char, "char"},
-      {c10::ScalarType::Byte, "uchar"},
-      {c10::ScalarType::Bool, "bool"},
-      {c10::ScalarType::ComplexFloat, "float2"},
-      {c10::ScalarType::ComplexHalf, "half2"},
-  };
-
-  auto it = scalarToMetalType.find(scalar_type);
-  TORCH_CHECK(it != scalarToMetalType.end(), "Unsupported type byte size: ", scalar_type);
-  return it->second;
-}
-
 static std::string genScatterGatherCvtFunc(const std::string& dtypeSrc, const std::string& dtypeDst, bool needsConj) {
   const bool srcComplex = dtypeSrc[dtypeSrc.size() - 1] == '2';
   const bool dstComplex = dtypeDst[dtypeDst.size() - 1] == '2';
   if (dstComplex) {
+    // TODO: Document why explicit cast is needed only for bfloat types
+    if (dtypeSrc == "bfloat") {
+      return dtypeDst + "(float(x), 0.0)";
+    }
     return dtypeDst + (srcComplex ? needsConj ? "(x.x, -x.y)" : "(x.x, x.y)" : "(x,  0.0)");
   }
   if (srcComplex) {
@@ -767,7 +750,7 @@ static std::string genScatterGatherCvtFunc(const std::string& dtypeSrc, const st
   if (dtypeDst == "bfloat") {
     return "bfloat(x)";
   }
-  return "(x)";
+  return dtypeSrc == "bfloat" ? dtypeDst + "(x)" : "(x)";
 }
 
 static MetalShaderLibrary scatterLib(SCATTER_OPS_TEMPLATE, 3);
@@ -805,8 +788,8 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
     id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
     std::string functionName = getGatherScatterFunctionName(output.scalar_type(), output.dim(), /*needsScatter=*/false);
     id<MTLComputePipelineState> gatherPSO = getPipelineState(functionName,
-                                                             getGatherScatterScalarType(src),
-                                                             getGatherScatterScalarType(output),
+                                                             scalarToMetalTypeString(src),
+                                                             scalarToMetalTypeString(output),
                                                              /*needsScatter=*/false,
                                                              src.is_conj() != dst.is_conj());
 
@@ -862,8 +845,8 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
       std::string functionName =
           getGatherScatterFunctionName(output.scalar_type(), output.dim(), /*needsScatter=*/true);
       id<MTLComputePipelineState> scatterPSO = getPipelineState(functionName,
-                                                                getGatherScatterScalarType(src),
-                                                                getGatherScatterScalarType(output),
+                                                                scalarToMetalTypeString(src),
+                                                                scalarToMetalTypeString(output),
                                                                 /*needsScatter=*/true,
                                                                 src.is_conj() != output.is_conj());
 

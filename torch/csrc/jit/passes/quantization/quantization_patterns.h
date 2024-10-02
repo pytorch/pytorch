@@ -808,13 +808,6 @@ graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype)
        "%count_include_pad",
        "%divisor_override"});
 
-  std::string common_general_value_op = R"(
-          %r_scale : float = aten::q_scale(%a_quant)
-          %r_zero_point : int = aten::q_zero_point(%a_quant)
-          %r_dtype : int = prim::dtype(%a_quant)
-          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-          return (%r_quant) )";
-
   auto avg_pool3d = getInputTensorQParamOpFusionInfo(
       "aten::avg_pool3d",
       {"%kernel_size",
