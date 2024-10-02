@@ -77,9 +77,8 @@ def write_view_information_to_args(
             kwargs[f"{prefix}_base_index"] = None
         else:
             base = get_base(tensor)
-            if (
-                base is None
-                or base.size() == tensor.size()
+            if base is None or (
+                base.size() == tensor.size()
                 and base.stride() == tensor.stride()
                 and base.storage_offset() == tensor.storage_offset()
             ):
