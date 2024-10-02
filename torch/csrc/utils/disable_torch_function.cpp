@@ -34,8 +34,8 @@ void set_disabled_torch_dispatch_impl(PyObject* value) {
 
 typedef struct {
   PyObject_HEAD
-      /* Type-specific fields go here. */
-      at::impl::TorchFunctionDisabledState old_state;
+  /* Type-specific fields go here. */
+  at::impl::TorchFunctionDisabledState old_state;
 } DisableTorchFunctionSubclass;
 
 PyObject* DisableTorchFunctionSubclass__enter(
@@ -131,8 +131,8 @@ PyObject* THPModule_DisableTorchFunctionSubclassType() {
 
 typedef struct {
   PyObject_HEAD
-      /* Type-specific fields go here. */
-      at::impl::TorchFunctionDisabledState old_state;
+  /* Type-specific fields go here. */
+  at::impl::TorchFunctionDisabledState old_state;
 } DisableTorchFunction;
 
 PyObject* DisableTorchFunction__enter(PyObject* self, PyObject* unused) {
