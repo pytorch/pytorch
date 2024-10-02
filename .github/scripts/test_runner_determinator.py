@@ -4,6 +4,10 @@ from unittest.mock import Mock, patch
 import runner_determinator as rd
 
 
+USER_BRANCH = "somebranch"
+EXCEPTION_BRANCH = "main"
+
+
 class TestRunnerDeterminatorIssueParser(TestCase):
     def test_parse_settings(self) -> None:
         settings_text = """
@@ -66,6 +70,40 @@ class TestRunnerDeterminatorIssueParser(TestCase):
             "otherExp settings not parsed correctly",
         )
 
+    def test_parse_all_branches_setting(self) -> None:
+        settings_text = """
+        ```
+        experiments:
+            lf:
+                rollout_perc: 25
+                all_branches: true
+            otherExp:
+                all_branches: True
+                rollout_perc: 0
+        ```
+
+        ---
+
+        Users:
+        @User1,lf
+        @User2,lf,otherExp
+
+        """
+
+        settings = rd.parse_settings(settings_text)
+
+        self.assertTupleEqual(
+            rd.Experiment(rollout_perc=25, all_branches=True),
+            settings.experiments["lf"],
+            "lf settings not parsed correctly",
+        )
+        self.assertTrue(settings.experiments["otherExp"].all_branches)
+        self.assertTupleEqual(
+            rd.Experiment(rollout_perc=0, all_branches=True),
+            settings.experiments["otherExp"],
+            "otherExp settings not parsed correctly",
+        )
+
     def test_parse_users(self) -> None:
         settings_text = """
         experiments:
@@ -119,7 +157,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         @User2,lf,otherExp
 
         """
-        prefix = rd.get_runner_prefix(settings_text, ["User1"])
+        prefix = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
         self.assertEqual("lf.", prefix, "Runner prefix not correct for User1")
 
     def test_opted_in_user_two_experiments(self) -> None:
@@ -136,7 +174,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         @User2,lf,otherExp
 
         """
-        prefix = rd.get_runner_prefix(settings_text, ["User2"])
+        prefix = rd.get_runner_prefix(settings_text, ["User2"], USER_BRANCH)
         self.assertEqual("lf.otherExp.", prefix, "Runner prefix not correct for User2")
 
     @patch("random.uniform", return_value=50)
@@ -154,7 +192,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         @User2,lf,otherExp
 
         """
-        prefix = rd.get_runner_prefix(settings_text, ["User3"])
+        prefix = rd.get_runner_prefix(settings_text, ["User3"], USER_BRANCH)
         self.assertEqual("", prefix, "Runner prefix not correct for user")
 
     @patch("random.uniform", return_value=10)
@@ -174,7 +212,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         """
 
         # User3 is opted out, but is pulled into both experiments by the 10% rollout
-        prefix = rd.get_runner_prefix(settings_text, ["User3"])
+        prefix = rd.get_runner_prefix(settings_text, ["User3"], USER_BRANCH)
         self.assertEqual("lf.otherExp.", prefix, "Runner prefix not correct for user")
 
     def test_lf_prefix_always_comes_first(self) -> None:
@@ -192,7 +230,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
 
         """
 
-        prefix = rd.get_runner_prefix(settings_text, ["User2"])
+        prefix = rd.get_runner_prefix(settings_text, ["User2"], USER_BRANCH)
         self.assertEqual("lf.otherExp.", prefix, "Runner prefix not correct for user")
 
     def test_ignores_commented_users(self) -> None:
@@ -210,7 +248,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
 
         """
 
-        prefix = rd.get_runner_prefix(settings_text, ["User1"])
+        prefix = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
         self.assertEqual("", prefix, "Runner prefix not correct for user")
 
     def test_ignores_extra_experiments(self) -> None:
@@ -229,8 +267,43 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
 
         """
 
-        prefix = rd.get_runner_prefix(settings_text, ["User1"])
+        prefix = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
         self.assertEqual("lf.otherExp.", prefix, "Runner prefix not correct for user")
+
+    def test_disables_experiment_on_exception_branches_when_not_explicitly_opted_in(
+        self,
+    ) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 100
+        ---
+
+        Users:
+        @User,lf,otherExp
+
+        """
+
+        prefix = rd.get_runner_prefix(settings_text, ["User1"], EXCEPTION_BRANCH)
+        self.assertEqual("", prefix, "Runner prefix not correct for user")
+
+    def test_allows_experiment_on_exception_branches_when_explicitly_opted_in(
+        self,
+    ) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 100
+                all_branches: true
+        ---
+
+        Users:
+        @User,lf,otherExp
+
+        """
+
+        prefix = rd.get_runner_prefix(settings_text, ["User1"], EXCEPTION_BRANCH)
+        self.assertEqual("lf.", prefix, "Runner prefix not correct for user")
 
 
 if __name__ == "__main__":
