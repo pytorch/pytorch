@@ -3,26 +3,24 @@ import sys
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
+from torch._environment import is_fbcode
 
 
-def is_fbcode() -> bool:
-    return not hasattr(torch.version, "git_version")
+def _get_tristate_env(name: str) -> Optional[bool]:
+    value = os.environ.get(name)
+    if value == "1":
+        return True
+    if value == "0":
+        return False
+    return None
 
 
 def fx_graph_remote_cache_default() -> Optional[bool]:
-    if os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "1":
-        return True
-    if os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "0":
-        return False
-    return None
+    return _get_tristate_env("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE")
 
 
 def autotune_remote_cache_default() -> Optional[bool]:
-    if os.environ.get("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE") == "1":
-        return True
-    if os.environ.get("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE") == "0":
-        return False
-    return None
+    return _get_tristate_env("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE")
 
 
 # Enable auto_functionalized_v2 (enabled by default)
@@ -226,6 +224,7 @@ use_mixed_mm = True
 # https://pytorch.org/docs/stable/notes/numerical_accuracy.html#batched-computations-or-slice-computations
 fx_passes_numeric_check: Dict[str, Any] = {
     "pre_grad": False,
+    "post_grad": False,
     "precision": 1e-4,
     "num_iterations": 1,
     "requires_optimizer": True,
@@ -258,6 +257,9 @@ reorder_for_compute_comm_overlap_passes = [
     "sink_waits",
     "raise_comms",
 ]
+
+# enable operator reordering for peak memory optimization
+reorder_for_peak_memory = os.environ.get("TORCHINDUCTOR_REORDER_FOR_PEAK_MEMORY") == "1"
 
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
@@ -573,7 +575,13 @@ def decide_compile_threads() -> int:
         return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
     elif sys.platform == "win32":
         return 1
-    elif is_fbcode():
+    # TODO: For internal rollout, we use a killswitch to disable. The justknob should
+    # not be performed at import, however. So for fbcode, we assign compile_threads to
+    # None below and call this method lazily in async_compile.py. Remove this after
+    # rollout completes.
+    elif is_fbcode() and not torch._utils_internal.justknobs_check(
+        "pytorch/inductor:enable_parallel_compile"
+    ):
         return 1
     else:
         cpu_count = (
@@ -585,7 +593,8 @@ def decide_compile_threads() -> int:
         return min(32, cpu_count)
 
 
-compile_threads = decide_compile_threads()
+# TODO: Set directly after internal rollout.
+compile_threads: Optional[int] = None if is_fbcode() else decide_compile_threads()
 
 # gemm autotuning global cache dir
 if is_fbcode():
@@ -916,7 +925,9 @@ class triton:
     # Note: This is orthogonal to descriptive_names - this is deciding whether
     # our triton kernel names should all be `triton_` (to maximize caching) or
     # whether they should be unique.
-    unique_kernel_names = os.environ.get("TORCHINDUCTOR_UNIQUE_KERNEL_NAMES") == "1"
+    unique_kernel_names = (
+        os.environ.get("TORCHINDUCTOR_UNIQUE_KERNEL_NAMES", "1") == "1"
+    )
 
     # should we put op names in kernel names
     # False: No special names (just triton__1, triton__2, etc.)
@@ -1096,6 +1107,10 @@ class cuda:
     cutlass_op_denylist_regex: Optional[str] = "pingpong"
 
 
+if is_fbcode() and torch.version.hip:
+    from triton.fb import build_paths
+
+
 class rocm:
     # Offload arch list for device code compilation, e.g. ["gfx941", "gfx942"].
     # If empty, the `native` arch is used
@@ -1124,7 +1139,9 @@ class rocm:
     print_kernel_resource_usage = False
 
     # Path to ROCm installation, if None, use env variable ROCM_HOME
-    rocm_home: Optional[str] = None
+    rocm_home: Optional[str] = (
+        build_paths.rocm() if is_fbcode() and torch.version.hip else None
+    )
 
     # Path to Composable Kernel library.
     # Install with `pip install git+https://github.com/rocm/composable_kernel@develop`.
@@ -1138,7 +1155,7 @@ class rocm:
     use_preselected_instances: bool = False
 
 
-# Backend to use for CPU codegen either "cpp" or "halide" (experimental)
+# Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental)
 cpu_backend = "cpp"
 
 # Backend to use for CUDA codegen either "triton" or "halide" (experimental)
@@ -1249,6 +1266,9 @@ _cache_config_ignore_prefix = [
     "worker_start_method",
     "compile_threads",
 ]
+
+# External callable for matmul tuning candidates
+external_matmul: List[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

@@ -85,7 +85,6 @@ def write_view_information_to_args(
                 # if the tensor is the base (not view), for simplicity we do not serialize view meta.
                 kwargs[f"{prefix}_base_index"] = base_index
             else:
-                base
                 kwargs[f"{prefix}_base_index"] = base_index
                 kwargs[f"{prefix}_size"] = tensor.size()
                 kwargs[f"{prefix}_stride"] = tensor.stride()
@@ -595,7 +594,9 @@ def auto_functionalized_fake(
     **kwargs: Any,
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     with mode:
-        result = auto_functionalized_dense(_mutable_op, **kwargs)
+        result = auto_functionalized_dense(
+            _mutable_op, _only_clone_these_tensors=None, **kwargs
+        )
         return result
 
 
@@ -690,7 +691,9 @@ def auto_functionalized_v2_fake(
     **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     with mode:
-        result = auto_functionalized_v2_dense(_mutable_op, **kwargs)
+        result = auto_functionalized_v2_dense(
+            _mutable_op, _only_clone_these_bases=None, **kwargs
+        )
         return result
 
 
