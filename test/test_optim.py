@@ -1341,8 +1341,10 @@ class TestOptimRenewed(TestCase):
             optimizer = optim_cls(params, **optim_input.kwargs)
             optimizer.__repr__()
 
+    @parametrize("is_named_optim0", [True, False])
+    @parametrize("is_named_optim1", [True, False])
     @optims(optim_db, dtypes=[torch.float32])
-    def test_state_dict_deterministic(self, device, dtype, optim_info):
+    def test_state_dict_deterministic(self, device, dtype, optim_info, is_named_optim0, is_named_optim1):
         optim_cls = optim_info.optim_cls
 
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
@@ -1356,9 +1358,10 @@ class TestOptimRenewed(TestCase):
         input = torch.randn(3, requires_grad=True, device=device, dtype=dtype)
         params = [weight, bias]
 
-        def make_param_and_named_param(param):
-            named_param = [(f'name{i}', p) for i, p in enumerate(param)]
-            return [param, named_param]
+        def make_named_param(param, is_named):
+            if not is_named:
+                return param
+            return [(f'name{i}', p) for i, p in enumerate(param)]
 
         def without_param_names(state_dict):
             new_state_dict = deepcopy(state_dict)
@@ -1378,55 +1381,54 @@ class TestOptimRenewed(TestCase):
             return loss
 
         for optim_input in all_optim_inputs:
-            for param_in in make_param_and_named_param(params):
-                optimizer = optim_cls(param_in, **optim_input.kwargs)
-                closure = functools.partial(fwd_bwd, optimizer, weight, bias, input)
+            params_in = make_named_param(params, is_named=is_named_optim0)
+            optimizer = optim_cls(params_in, **optim_input.kwargs)
+            closure = functools.partial(fwd_bwd, optimizer, weight, bias, input)
 
-                # Prime the optimizer
-                for _ in range(10):
-                    if optim_info.step_requires_closure:
-                        optimizer.step(closure)
-                    else:
-                        closure()
-                        optimizer.step()
+            # Prime the optimizer
+            for _ in range(10):
+                if optim_info.step_requires_closure:
+                    optimizer.step(closure)
+                else:
+                    closure()
+                    optimizer.step()
 
-                for param_c_index in range(2):
-                    # Clone the weights and construct a new optimizer for them
-                    with torch.no_grad():
-                        weight_c = Parameter(weight.clone())
-                        bias_c = Parameter(bias.clone())
-                    param_c = make_param_and_named_param([weight_c, bias_c])[param_c_index]
-                    optimizer_c = optim_cls(param_c, **optim_input.kwargs)
-                    closure_c = functools.partial(fwd_bwd, optimizer_c, weight_c, bias_c, input)
+            # Clone the weights and construct a new optimizer for them
+            with torch.no_grad():
+                weight_c = Parameter(weight.clone())
+                bias_c = Parameter(bias.clone())
+            params_c = make_named_param([weight_c, bias_c], is_named=is_named_optim1)
+            optimizer_c = optim_cls(params_c, **optim_input.kwargs)
+            closure_c = functools.partial(fwd_bwd, optimizer_c, weight_c, bias_c, input)
 
-                    # Load the state dict from the original optimizer into the new one
-                    optimizer_c.load_state_dict(deepcopy(optimizer.state_dict()))
+            # Load the state dict from the original optimizer into the new one
+            optimizer_c.load_state_dict(deepcopy(optimizer.state_dict()))
 
-                    # Run both optimizers in parallel
-                    for _ in range(10):
-                        if optim_info.step_requires_closure:
-                            optimizer.step(closure)
-                            optimizer_c.step(closure_c)
-                        else:
-                            closure()
-                            closure_c()
-                            optimizer.step()
-                            optimizer_c.step()
+            # Run both optimizers in parallel
+            for _ in range(10):
+                if optim_info.step_requires_closure:
+                    optimizer.step(closure)
+                    optimizer_c.step(closure_c)
+                else:
+                    closure()
+                    closure_c()
+                    optimizer.step()
+                    optimizer_c.step()
 
-                        self.assertEqual(weight, weight_c)
-                        self.assertEqual(bias, bias_c)
+                self.assertEqual(weight, weight_c)
+                self.assertEqual(bias, bias_c)
 
-                    # Make sure state dict is deterministic with equal (not identical) parameters
-                    # Param names are optional and not needed to be the consistent.
-                    self.assertEqual(without_param_names(optimizer.state_dict()),
-                                     without_param_names(optimizer_c.state_dict()))
+            # Make sure state dict is deterministic with equal (not identical) parameters
+            # Param names are optional and not needed to be the consistent.
+            self.assertEqual(without_param_names(optimizer.state_dict()),
+                             without_param_names(optimizer_c.state_dict()))
 
-                    # Make sure repeated parameters have identical representation (see #36831)
-                    optimizer_c.param_groups.extend(optimizer_c.param_groups)
-                    self.assertEqual(
-                        without_param_names(optimizer.state_dict())["param_groups"][-1],
-                        without_param_names(optimizer_c.state_dict())["param_groups"][-1],
-                    )
+            # Make sure repeated parameters have identical representation (see #36831)
+            optimizer_c.param_groups.extend(optimizer_c.param_groups)
+            self.assertEqual(
+                without_param_names(optimizer.state_dict())["param_groups"][-1],
+                without_param_names(optimizer_c.state_dict())["param_groups"][-1],
+            )
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_can_load_older_state_dict(self, device, dtype, optim_info):
@@ -1476,8 +1478,10 @@ class TestOptimRenewed(TestCase):
                 fwd_bwd(optimizer, model, input)
                 optimizer.step()
 
+    @parametrize("is_named_optim0", [True, False])
+    @parametrize("is_named_optim1", [True, False])
     @optims(optim_db, dtypes=[torch.float32])
-    def test_can_load_from_to_named_state_dict(self, device, dtype, optim_info):
+    def test_can_load_from_to_named_state_dict(self, device, dtype, optim_info, is_named_optim0, is_named_optim1):
         optim_cls = optim_info.optim_cls
 
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
@@ -1499,46 +1503,44 @@ class TestOptimRenewed(TestCase):
                 loss.backward()
                 return loss
 
-            init_grp = [
-                {'params': model[0].named_parameters(), 'lr': 1e-2},
-                {'params': model[1].parameters()}
-            ]
-            init_grp2 = [
-                {'params': model[0].parameters(), 'lr': 1e-2},
-                {'params': model[1].named_parameters()}
-            ]
             # test for parameters, named_parameters, and 2 groups:
-            for params_to_optimizer in [model.parameters(), model.named_parameters(), init_grp]:
-                optimizer = optim_cls(params_to_optimizer, **optim_input.kwargs)
+            params_to_optimizer = model.named_parameters() if is_named_optim0 else model.parameters()
+            optimizer = optim_cls(params_to_optimizer, **optim_input.kwargs)
 
-                for _ in range(3):
-                    if optim_info.step_requires_closure:
-                        optimizer.step(functools.partial(fwd_bwd, optimizer, model, input))
-                    else:
-                        fwd_bwd(optimizer, model, input)
-                        optimizer.step()
+            for _ in range(3):
+                if optim_info.step_requires_closure:
+                    optimizer.step(functools.partial(fwd_bwd, optimizer, model, input))
+                else:
+                    fwd_bwd(optimizer, model, input)
+                    optimizer.step()
 
-                # old_state_dict has all new flags del'd
-                old_state_dict = deepcopy(optimizer.state_dict())
-                old_state_dict_pg = old_state_dict["param_groups"]
-                for group in old_state_dict_pg:
-                    for flag in optim_info.not_og_supported_flags:
-                        if flag in group:
-                            del group[flag]
+            # old_state_dict has all new flags del'd
+            old_state_dict = deepcopy(optimizer.state_dict())
+            old_state_dict_pg = old_state_dict["param_groups"]
+            for group in old_state_dict_pg:
+                for flag in optim_info.not_og_supported_flags:
+                    if flag in group:
+                        del group[flag]
 
-                for params_to_optimizer2 in [model.parameters(), model.named_parameters(), init_grp, init_grp2]:
-                    optimizer2 = optim_cls(params_to_optimizer2, **optim_input.kwargs)
-                    optimizer2.load_state_dict(old_state_dict)
+            params_to_optimizer2 = model.named_parameters() if is_named_optim1 else model.parameters()
+            optimizer2 = optim_cls(params_to_optimizer2, **optim_input.kwargs)
+            optimizer2.load_state_dict(old_state_dict)
 
-                    # Make sure we can still step
-                    if optim_info.step_requires_closure:
-                        optimizer2.step(functools.partial(fwd_bwd, optimizer2, model, input))
-                    else:
-                        fwd_bwd(optimizer2, model, input)
-                        optimizer2.step()
+            # Make sure we can still step
+            if optim_info.step_requires_closure:
+                optimizer2.step(functools.partial(fwd_bwd, optimizer2, model, input))
+            else:
+                fwd_bwd(optimizer2, model, input)
+                optimizer2.step()
 
+            # Make sure that param_names are preserved when provided to at least one of the optimizers
+            if is_named_optim0 or is_named_optim1:
+                self.assertEqual(optimizer2.state_dict()['param_groups'][0]['param_names'],
+                                 ['0.weight', '0.bias', '1.weight', '1.bias'])
+
+    @parametrize("is_named_optim", [True, False])
     @optims(optim_db, dtypes=[torch.float32])
-    def test_save_load_equality_with_weights_only(self, device, dtype, optim_info):
+    def test_save_load_equality_with_weights_only(self, device, dtype, optim_info, is_named_optim):
         optim_cls = optim_info.optim_cls
 
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
@@ -1552,9 +1554,10 @@ class TestOptimRenewed(TestCase):
         input = torch.randn(3, requires_grad=True, device=device, dtype=dtype)
         params = [weight, bias]
 
-        def make_param_and_named_param(param):
-            named_param = [(f'name{i}', p) for i, p in enumerate(param)]
-            return [param, named_param]
+        def make_named_param(param, is_named):
+            if not is_named:
+                return param
+            return [(f'name{i}', p) for i, p in enumerate(param)]
 
         def fwd_bwd(optim, w, b, i):
             optim.zero_grad()
@@ -1566,26 +1569,26 @@ class TestOptimRenewed(TestCase):
             return loss
 
         for optim_input in all_optim_inputs:
-            for params_in in make_param_and_named_param(params):
-                optimizer = optim_cls(params_in, **optim_input.kwargs)
-                closure = functools.partial(fwd_bwd, optimizer, weight, bias, input)
+            params_in = make_named_param(params, is_named=is_named_optim)
+            optimizer = optim_cls(params_in, **optim_input.kwargs)
+            closure = functools.partial(fwd_bwd, optimizer, weight, bias, input)
 
-                # Prime the optimizer
-                for _ in range(3):
-                    optimizer.step(closure)
+            # Prime the optimizer
+            for _ in range(3):
+                optimizer.step(closure)
 
-                sd = optimizer.state_dict()
+            sd = optimizer.state_dict()
 
-                # === Check saved/loaded state_dict are the same (including weights_only load). ===
-                with tempfile.TemporaryFile() as f:
-                    torch.save(sd, f)
-                    f.seek(0)
-                    sd_copy = torch.load(f)
-                    self.assertEqual(sd_copy, sd)
-                    del sd_copy
-                    f.seek(0)
-                    sd_copy_wo = torch.load(f, weights_only=True)
-                    self.assertEqual(sd_copy_wo, sd)
+            # === Check saved/loaded state_dict are the same (including weights_only load). ===
+            with tempfile.TemporaryFile() as f:
+                torch.save(sd, f)
+                f.seek(0)
+                sd_copy = torch.load(f)
+                self.assertEqual(sd_copy, sd)
+                del sd_copy
+                f.seek(0)
+                sd_copy_wo = torch.load(f, weights_only=True)
+                self.assertEqual(sd_copy_wo, sd)
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_load_nontensor_step(self, device, dtype, optim_info):
