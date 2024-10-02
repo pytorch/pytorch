@@ -157,12 +157,12 @@ device_op_overrides_dict: Dict[str, DeviceOpOverrides] = {}
 # backend needs to provide a custom Scheduling for its unique kernel code generation. Currently,
 # CppScheduling and TritonScheduling serve the C++/OpenMP and Triton backends, respectively.
 #
-# For the Wrapper, Inductor provides a WrapperCodeGen class to generate the Python wrapper code
-# that bridges kernels. This allows out-of-tree backends to inherit from WrapperCodeGen,
+# For the Wrapper, Inductor provides a PythonWrapperCodegen class to generate the Python wrapper code
+# that bridges kernels. This allows out-of-tree backends to inherit from PythonWrapperCodegen,
 # and override specific member functions to create backend-specific Python wrapper code.
 #
 # Other classes, such as CppKernel and TritonKernel, used for code generation, typically form part
-# of the logic for either Scheduling or WrapperCodeGen. So the Scheduling and WrapperCodeGen interfaces
+# of the logic for either Scheduling or PythonWrapperCodegen. So the Scheduling and PythonWrapperCodegen interfaces
 # provide flexibility to the backend. A backend can choose to implement these classes from scratch,
 # or reuse them by extending and overriding as necessary. And Inductor provides the registration API,
 # register_backend_for_device, to equip a new backend at runtime.
@@ -232,19 +232,24 @@ def get_wrapper_codegen_for_device(device: str, cpp_wrapper: bool = False):
 def init_backend_registration():
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
-    from .cpp_wrapper_cuda import CppWrapperGpu
+    from .cpp_wrapper_cpu_array_ref import CppWrapperCpuArrayRef
+    from .cpp_wrapper_gpu import CppWrapperGpu
     from .cuda_combined_scheduling import CUDACombinedScheduling
     from .halide import HalideScheduling
     from .triton import TritonScheduling
-    from .wrapper import WrapperCodeGen
+    from .wrapper import PythonWrapperCodegen
 
     if get_scheduling_for_device("cpu") is None:
-        cpu_backends = {"cpp": CppScheduling, "halide": HalideScheduling}
+        cpu_backends = {
+            "cpp": CppScheduling,
+            "halide": HalideScheduling,
+            "triton": TritonScheduling,
+        }
         register_backend_for_device(
             "cpu",
             lambda *args, **kwargs: cpu_backends[config.cpu_backend](*args, **kwargs),
-            WrapperCodeGen,
-            CppWrapperCpu,
+            PythonWrapperCodegen,
+            CppWrapperCpuArrayRef if config.allow_stack_allocation else CppWrapperCpu,
         )
 
     if get_scheduling_for_device("cuda") is None:
@@ -253,7 +258,7 @@ def init_backend_registration():
         register_backend_for_device(
             "cuda",
             lambda *args, **kwargs: cuda_backends[config.cuda_backend](*args, **kwargs),
-            WrapperCodeGen,
+            PythonWrapperCodegen,
             CppWrapperGpu,
         )
 
@@ -261,7 +266,7 @@ def init_backend_registration():
         register_backend_for_device(
             "xpu",
             TritonScheduling,
-            WrapperCodeGen,
+            PythonWrapperCodegen,
         )
 
     private_backend = torch._C._get_privateuse1_backend_name()
@@ -273,8 +278,8 @@ def init_backend_registration():
 
         try:
             device_scheduling = _get_custom_mod_func("Scheduling")
-            wrapper_codegen = _get_custom_mod_func("WrapperCodeGen")
-            cpp_wrapper_codegen = _get_custom_mod_func("CppWrapperCodeGen")
+            wrapper_codegen = _get_custom_mod_func("PythonWrapperCodegen")
+            cpp_wrapper_codegen = _get_custom_mod_func("CppWrapperCodegen")
             if device_scheduling and wrapper_codegen and cpp_wrapper_codegen:
                 register_backend_for_device(
                     private_backend,
@@ -301,6 +306,7 @@ def get_device_op_overrides(device: str):
     assert isinstance(device, str)
 
     if not device_op_overrides_dict.keys():
+        from . import cpu_device_op_overrides  # noqa: F401
         from .cuda import device_op_overrides  # noqa: F401
         from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
@@ -897,6 +903,11 @@ class OpOverrides:
         return ops.where(cond, ops.add(r, b), r)
 
     @staticmethod
+    def fma(x, y, z):
+        # for backends that don't override this (halide)
+        return ops.add(ops.mul(x, y), z)
+
+    @staticmethod
     def trunc_to_int(a, dtype):
         return ops.to_dtype(ops.trunc(a), dtype)
 
@@ -1420,6 +1431,7 @@ class KernelArgs:
             arg_defs.append("ws_ptr")
             call_args.append("workspace")
             precompile_args.append(self.workspace_arg)
+            arg_types.append(torch.uint8)
         return arg_defs, call_args, precompile_args, arg_types
 
     def aliases(self):
@@ -2154,7 +2166,7 @@ class KernelTemplate:
                         end = min(len(lines), self.lineno + 2)
                         for i in range(start, end):
                             if i == self.lineno - 1:
-                                error_info += f"{i+1}: --> {lines[i]}\n"
+                                error_info += f"{i + 1}: --> {lines[i]}\n"
                                 if hasattr(self.original_error, "column"):
                                     error_info += (
                                         "     "
@@ -2162,7 +2174,7 @@ class KernelTemplate:
                                         + "^\n"
                                     )
                             else:
-                                error_info += f"{i+1}:     {lines[i]}\n"
+                                error_info += f"{i + 1}:     {lines[i]}\n"
                     return error_info
 
             try:

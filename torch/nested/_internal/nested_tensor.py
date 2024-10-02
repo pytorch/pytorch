@@ -209,7 +209,7 @@ class NestedTensor(torch.Tensor):
     def _min_seqlen(self):
         return self._get_min_seqlen()
 
-    def __repr__(self):
+    def __repr__(self):  # type: ignore[override]
         # We should implement this in torch/_tensor_str.py instead
         grad_fn_str = (
             f", requires_grad={self.requires_grad}" if self.requires_grad else ""
@@ -291,6 +291,13 @@ class NestedTensor(torch.Tensor):
         fn = lookup_jagged(func, *args, **kwargs)
         if fn is not None:
             return fn(*args, **kwargs)
+
+        # Poor man's redispatch for composite ops. This becomes relevant under inference
+        # mode, where disabling autograd key dispatch prevents decomposition.
+        dk = torch._C.DispatchKey.CompositeImplicitAutogradNestedTensor
+        if torch._C._dispatch_has_kernel_for_dispatch_key(func.name(), dk):
+            with torch.overrides.enable_reentrant_dispatch():
+                return func._op_dk(dk, *args, **kwargs)
 
         raise NotImplementedError(func)
 
