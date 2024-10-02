@@ -15,8 +15,11 @@ conda_reinstall() {
 if [ -n "${XPU_VERSION}" ]; then
   TRITON_REPO="https://github.com/intel/intel-xpu-backend-for-triton"
   TRITON_TEXT_FILE="triton-xpu"
+elif [ -n "${TRITON_CPU}" ]; then
+  TRITON_REPO="https://github.com/triton-lang/triton-cpu"
+  TRITON_TEXT_FILE="triton-cpu"
 else
-  TRITON_REPO="https://github.com/openai/triton"
+  TRITON_REPO="https://github.com/triton-lang/triton"
   TRITON_TEXT_FILE="triton"
 fi
 
@@ -44,9 +47,10 @@ chown -R jenkins /var/lib/jenkins/triton
 chgrp -R jenkins /var/lib/jenkins/triton
 pushd /var/lib/jenkins/
 
-as_jenkins git clone ${TRITON_REPO} triton
+as_jenkins git clone --recursive ${TRITON_REPO} triton
 cd triton
 as_jenkins git checkout ${TRITON_PINNED_COMMIT}
+as_jenkins git submodule update --init --recursive
 cd python
 
 # TODO: remove patch setup.py once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
