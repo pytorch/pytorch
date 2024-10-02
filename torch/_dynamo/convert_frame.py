@@ -1113,6 +1113,8 @@ def _compile(
                 remote_cache_time_saved,
                 structured_logging_overhead_s,
                 config.suppress_errors,
+                config.inline_inbuilt_nn_modules,
+                config.specialize_float,
                 str(json.dumps(config_dict)),
             )
             record_compilation_metrics(metrics)
