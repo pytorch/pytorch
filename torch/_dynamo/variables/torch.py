@@ -880,6 +880,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_size(self, tx: "InstructionTranslator", *args, **kwargs):
             return args[0].call_method(tx, "size", args[1:], kwargs)
 
+        @register(torch._C.TensorBase.__getitem__)
+        def handle_getitem(self, tx: "InstructionTranslator", *args, **kwargs):
+            return args[0].call_method(tx, "getitem", args[1:], kwargs)
+
         return handlers
 
     def call_function(
