@@ -106,6 +106,10 @@ def autotune_hints_to_configs(
     """
     xyz_options: Tuple[Tuple[int, Optional[int], Optional[int]], ...]
     configs = []
+    warp_size = device_props.warp_size
+    # CPU target has no concept of "warp"
+    if warp_size is None:
+        warp_size = 32
 
     for hint in hints:
         if hint == AutotuneHint.ONE_ELEMENT_PER_THREAD:
@@ -271,6 +275,11 @@ class CachingAutotuner(KernelInterface):
             seen_configs = set(self.configs)
 
             device_prop = self.device_props
+            warp_size = device_prop.warp_size
+            # CPU target has no concept of "warp"
+            if warp_size is None:
+                warp_size = 32
+
             if (
                 self.inductor_meta.get("dynamic_scale_rblock", True)
                 and self.heuristic_type == HeuristicType.REDUCTION
@@ -316,7 +325,7 @@ class CachingAutotuner(KernelInterface):
                     ):
                         continue
 
-                    nreg_per_warp = nreg * device_prop.warp_size
+                    nreg_per_warp = nreg * warp_size
                     nreg_per_block = nreg_per_warp * triton_config.num_warps
 
                     # Previously we set max_blocks_per_sm to 'max_threads_per_multi_processo / (32 * num_warps)'
@@ -755,8 +764,6 @@ class CachingAutotuner(KernelInterface):
             self.save_cache_hook(self.launchers[0].config, self.autotune_time_taken_ns)
 
     def save_gpu_kernel(self, grid, stream, launcher):
-        if self.cuda_kernel_saved:
-            return
         if callable(grid):
             grid_x, grid_y, grid_z = grid(launcher.config.kwargs)
         else:
