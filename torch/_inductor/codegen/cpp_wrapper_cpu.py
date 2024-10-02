@@ -88,7 +88,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         """
         Generates kernel call code.
 
-        cuda: Defines whether the backend is GPU. Otherwise the backend is CPU.
+        gpu: Defines whether the backend is GPU. Otherwise the backend is CPU.
 
         triton: Defines whether the GPU backend uses Triton for codegen.
                 Otherwise it uses the CUDA language for codegen.
