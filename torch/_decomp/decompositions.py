@@ -3994,7 +3994,7 @@ def constant_pad_nd(
     if builtins.all(statically_known_true(p <= 0) for p in pad):
         for i in range(l_diff, l_inp):
             pad_idx = 2 * (l_inp - i - 1)
-            new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1]
+            new_dim = input_sizes[i] + pad[pad_idx] + pad[pad_idx + 1]
             torch._check(
                 new_dim >= 0,
                 lambda: f"The input size {input_sizes[l_diff + i]}, plus negative padding "
@@ -4005,7 +4005,7 @@ def constant_pad_nd(
         c_input = input
         for i in range(l_diff, l_inp):
             pad_idx = 2 * (l_inp - i - 1)
-            new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1]
+            new_dim = input_sizes[i] + pad[pad_idx] + pad[pad_idx + 1]
             c_input = c_input.narrow(i, -pad[pad_idx], new_dim)
 
         return c_input.clone()
