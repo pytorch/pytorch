@@ -4933,23 +4933,18 @@ class ExternKernel(InputsKernel):
 
         args = []
         for i, x in enumerate(inputs):
-            if isinstance(x, list):
-                names = [i.codegen_reference() for i in x]
-                codegen_reference = f'[{", ".join(names)}]'
-                args.append(codegen_reference)
-            else:
-                if V.graph.cpp_wrapper:
-                    assert self.arg_properties and i < len(
-                        self.arg_properties
-                    ), "Invalid access to ExternKernel.arg_properties"
-                    type_ = self.arg_properties[i].get("type")
-                    args.append(
-                        V.graph.wrapper_code.val_to_arg_str(  # type: ignore[arg-type]
-                            x, type_
-                        )
+            if V.graph.cpp_wrapper:
+                assert self.arg_properties and i < len(
+                    self.arg_properties
+                ), "Invalid access to ExternKernel.arg_properties"
+                type_ = self.arg_properties[i].get("type")
+                args.append(
+                    V.graph.wrapper_code.val_to_arg_str(  # type: ignore[arg-type]
+                        x, type_
                     )
-                else:
-                    args.append(x.codegen_reference())
+                )
+            else:
+                args.append(V.graph.wrapper_code.val_to_arg_str(x))
         if need_codegen_constant_args:
             args.extend(self.codegen_const_args())
         return args
