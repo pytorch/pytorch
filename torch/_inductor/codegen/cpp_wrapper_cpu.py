@@ -2182,6 +2182,17 @@ if (custom_op_wrapper.get() == NULL) {
 
         self.custom_op_wrapper_loaded = True
 
+    def generate_float_value(self, val):
+        assert isinstance(val, float)
+        if val == float("inf"):
+            return "std::numeric_limits<float>::infinity()"
+        elif val == float("-inf"):
+            return "-std::numeric_limits<float>::infinity()"
+        elif val == float("nan"):
+            return "std::numeric_limits<float>::quiet_NaN()"
+        else:
+            return f"{val}"
+
     def generate_py_arg(self, py_args_var, idx, raw_arg, arg_type):
         def generate_py_arg_inner(lines, raw_arg, arg_type):
             if raw_arg is None:
@@ -2211,7 +2222,7 @@ if (custom_op_wrapper.get() == NULL) {
                 )
                 return f"PyLong_FromLongLong({self.expr_printer(expr)})"
             elif isinstance(arg_type, torch.FloatType):
-                return f"PyFloat_FromDouble({raw_arg})"
+                return f"PyFloat_FromDouble({self.generate_float_value(raw_arg)})"
             elif isinstance(arg_type, torch.BoolType):
                 return f"PyBool_FromLong({1 if raw_arg else 0})"
             elif isinstance(arg_type, torch.StringType):
@@ -2222,7 +2233,7 @@ if (custom_op_wrapper.get() == NULL) {
                 if isinstance(raw_arg, int):
                     return f"PyLong_FromLongLong({raw_arg})"
                 elif isinstance(raw_arg, float):
-                    return f"PyFloat_FromDouble({raw_arg})"
+                    return f"PyFloat_FromDouble({self.generate_float_value(raw_arg)})"
                 elif isinstance(raw_arg, bool):
                     return f"PyBool_FromLong({1 if raw_arg else 0})"
                 elif isinstance(raw_arg, complex):
@@ -2441,11 +2452,8 @@ if (py_{buf_name}.get() == NULL) {{
             return self.codegen_device(val)
         elif isinstance(val, torch.dtype):
             return self.codegen_dtype(val)
-        elif isinstance(val, float) and val in [float("inf"), float("-inf")]:
-            if val == float("inf"):
-                return "std::numeric_limits<float>::infinity()"
-            else:
-                return "-std::numeric_limits<float>::infinity()"
+        elif isinstance(val, float):
+            return self.generate_float_value(val)
         elif isinstance(val, (list, tuple)):
             # FIXME: This happens because type_ is not always properly set to torch.ListType
             return f"{{{', '.join(self.val_to_arg_str(x, None) for x in val)}}}"
