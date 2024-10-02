@@ -1192,6 +1192,7 @@ class LinearUnary(ExternKernelAlloc):
                 self.cpp_kernel_key,
                 op_overload=self.op_overload,
                 raw_args=[*self.inputs, *self.constant_args],
+                outputs=self.outputs,
             )
 
     @classmethod
@@ -1220,6 +1221,9 @@ class LinearUnary(ExternKernelAlloc):
             inputs=inputs,
             constant_args=constant_args,
         )
+        if not config.abi_compatible:
+            return packed
+
         output_ir = MultiOutput(
             packed.get_layout(),
             packed,
@@ -1277,6 +1281,7 @@ class LinearBinary(ExternKernelAlloc):
                 self.cpp_kernel_overload_name,
                 op_overload=self.op_overload,
                 raw_args=[*self.inputs, *self.constant_args],
+                outputs=self.outputs,
             )
 
     @classmethod
@@ -1306,6 +1311,9 @@ class LinearBinary(ExternKernelAlloc):
             inputs=inputs,
             constant_args=constant_args,
         )
+        if not config.abi_compatible:
+            return packed
+
         output_ir = MultiOutput(
             packed.get_layout(),
             packed,
