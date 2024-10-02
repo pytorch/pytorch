@@ -16,8 +16,13 @@ from ..utils import (
     use_triton_template,
 )
 from ..virtualized import V
-from .mm import _is_static_problem
-from .mm_common import addmm_epilogue, mm_args, mm_configs, mm_options
+from .mm_common import (
+    _is_static_problem,
+    addmm_epilogue,
+    mm_args,
+    mm_configs,
+    mm_options,
+)
 
 
 log = logging.getLogger(__name__)
@@ -167,7 +172,7 @@ def tuned_bmm(mat1, mat2, *, layout=None):
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
             )
-    static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
+    static_shape, is_nonzero = _is_static_problem(layout)
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
         from ..codegen.cuda.gemm_template import CUTLASS3xGemmTemplate
 
