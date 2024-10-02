@@ -7,6 +7,7 @@ import cProfile
 import dis
 import functools
 import itertools
+import json
 import logging
 import os
 import pstats
@@ -1074,6 +1075,13 @@ def _compile(
                 torch._logging.get_structured_logging_overhead()
             )
 
+            def convert_sets_to_strings(d: Dict[str, Any]) -> Dict[str, Any]:
+                return {
+                    key: str(value) if isinstance(value, set) else value
+                    for key, value in d.items()
+                }
+
+            config_dict = convert_sets_to_strings(config.shallow_copy_dict())
             metrics = CompilationMetrics(
                 str(compile_id),
                 frame_key,
@@ -1105,8 +1113,7 @@ def _compile(
                 remote_cache_time_saved,
                 structured_logging_overhead_s,
                 config.suppress_errors,
-                config.inline_inbuilt_nn_modules,
-                config.specialize_float,
+                str(json.dumps(config_dict)),
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
