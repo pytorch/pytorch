@@ -63,7 +63,8 @@ PYTORCH_TEMPLATE_MAP = {"Dtype": "scalar_t", "T": "scalar_t"}
 __all__ = ['InputError', 'openf', 'bcolors', 'GeneratedFileCleaner', 'match_extensions', 'matched_files_iter',
            'preprocess_file_and_save_result', 'compute_stats', 'add_dim3', 'processKernelLaunches', 'find_closure_group',
            'find_bracket_group', 'find_parentheses_group', 'replace_math_functions', 'hip_header_magic', 'replace_extern_shared',
-           'get_hip_file_path', 'is_out_of_place', 'Trie', 'preprocessor', 'file_specific_replacement', 'file_add_header',
+           'get_hip_file_path', 'is_out_of_place', 'is_pytorch_file', 'is_cusparse_file', 'is_special_file', 'is_caffe2_gpu_file',
+           'Trie', 'preprocessor', 'file_specific_replacement', 'file_add_header',
            'fix_static_global_kernels', 'extract_arguments', 'str2bool', 'CurrentState', 'HipifyResult', 'hipify']
 
 
@@ -610,6 +611,51 @@ def is_out_of_place(rel_filepath):
     if rel_filepath.startswith("tools/autograd/templates/"):
         return False
     return True
+
+
+# deprecated
+def is_pytorch_file(rel_filepath):
+    assert not os.path.isabs(rel_filepath)
+    if rel_filepath.startswith("aten/"):
+        if rel_filepath.startswith("aten/src/ATen/core/"):
+            return False
+        return True
+    if rel_filepath.startswith("torch/"):
+        return True
+    if rel_filepath.startswith("third_party/nvfuser/"):
+        return True
+    if rel_filepath.startswith("tools/autograd/templates/"):
+        return True
+    return False
+
+
+# deprecated
+def is_cusparse_file(rel_filepath):
+    if is_pytorch_file(rel_filepath):
+        return "sparse" in rel_filepath.lower()
+    return False
+
+
+# deprecated
+def is_special_file(rel_filepath):
+    if is_pytorch_file(rel_filepath):
+        if "sparse" in rel_filepath.lower():
+            return True
+        elif "linalg" in rel_filepath.lower():
+            if "batchlinearalgebralibblas" in rel_filepath.lower():
+                return False  # don't use "special" mappings for this specific linalg cublas file
+            return True
+    return False
+
+
+# deprecated
+def is_caffe2_gpu_file(rel_filepath):
+    assert not os.path.isabs(rel_filepath)
+    if rel_filepath.startswith("c10/cuda"):
+        return True
+    filename = os.path.basename(rel_filepath)
+    _, ext = os.path.splitext(filename)
+    return ('gpu' in filename or ext in ['.cu', '.cuh']) and ('cudnn' not in filename)
 
 
 class TrieNode:
