@@ -120,7 +120,7 @@ benchmark_harness = True
 epilogue_fusion = True
 
 # fuse pointwise into template prologues
-prologue_fusion = False
+prologue_fusion = True
 
 # do epilogue fusions before other fusions
 epilogue_fusion_first = False
