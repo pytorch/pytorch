@@ -244,6 +244,8 @@ class CachingAutotuner(KernelInterface):
 
         self.precompile_time_taken_ns = 0
         self.autotune_time_taken_ns = 0
+        # Puts Triton execution into interpret mode.
+        self.triton_interpret = os.environ.get("TRITON_INTERPRET", "0") == "1"
 
     def precompile(self, warm_cache_only=False):
         with self.lock:
