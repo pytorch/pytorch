@@ -377,18 +377,18 @@ def invoke_subgraph_autograd(subgraph, identifier, graph_hash, operands):
         with torch._C._AutoDispatchBelowAutograd():
             return invoke_subgraph(subgraph, identifier, graph_hash, operands)
 
-    # Very bad hack to get around the failures - check test_linear
-    if identifier == "_partitioned":
+    if not torch.is_grad_enabled():
         with torch._C._AutoDispatchBelowAutograd():
             return invoke_subgraph(subgraph, identifier, graph_hash, operands)
 
-    global invoke_subgraph_autograd_cached
-    if graph_hash in invoke_subgraph_autograd_cached:
-        return invoke_subgraph_autograd_cached[graph_hash](
-            *operands
-        )
+    # global invoke_subgraph_autograd_cached
+    # if graph_hash in invoke_subgraph_autograd_cached:
+    #     return invoke_subgraph_autograd_cached[graph_hash](
+    #         *operands
+    #     )
 
     fw_graph, bw_graph = create_fw_bw_graph_local(subgraph, operands)
+
     global counter
     new_identifier = identifier
     if identifier == "start":
@@ -397,10 +397,12 @@ def invoke_subgraph_autograd(subgraph, identifier, graph_hash, operands):
     # TODO(anijain2305) - For some reason, if I pass operands as a tuple to
     # Autograd.Function, it does not pick up the backward pass.
     def cached_fn(*args):
-        return InvokeSubgraphAutogradOp.apply(fw_graph, bw_graph, new_identifier, graph_hash, *args)
-    invoke_subgraph_autograd_cached[graph_hash] = cached_fn
+        y = InvokeSubgraphAutogradOp.apply(fw_graph, bw_graph, new_identifier, graph_hash, *args)
+        return y
+    # invoke_subgraph_autograd_cached[graph_hash] = cached_fn
     return cached_fn(*operands)
 
+invoke_subgraph_fake_cache = {}
 
 @invoke_subgraph.py_functionalize_impl
 def invoke_subgraph_func(ctx, subgraph, identifier, graph_hash, operands):
@@ -415,15 +417,15 @@ def invoke_subgraph_func(ctx, subgraph, identifier, graph_hash, operands):
     return ctx.wrap_tensors(out)
 
 
-invoke_subgraph_fake_prop_cache = {}
+
 
 @invoke_subgraph.py_impl(FakeTensorMode)
 def invoke_subgraph_fake_tensor_mode(mode, subgraph, identifier, graph_hash, operands):
-    if graph_hash in invoke_subgraph_fake_prop_cache:
-        return invoke_subgraph_fake_prop_cache[graph_hash]
+    if graph_hash in invoke_subgraph_fake_cache:
+        return invoke_subgraph_fake_cache[graph_hash]
     with mode:
         out =  subgraph(*operands)
-        invoke_subgraph_fake_prop_cache[graph_hash] = out
+        invoke_subgraph_fake_cache[graph_hash] = out
         return out
 
 
@@ -433,7 +435,7 @@ invoke_subgraph_cache = {}
 def trace_invoke_subgraph(
     proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, graph_hash, operands
 ):
-    example_out = subgraph(*operands)
+    example_out = invoke_subgraph(subgraph, identifier, graph_hash, operands)
     if graph_hash in invoke_subgraph_cache:
         graph = invoke_subgraph_cache[graph_hash]
     else:

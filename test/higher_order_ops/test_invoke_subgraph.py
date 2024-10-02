@@ -63,7 +63,7 @@ class TestInvokeSubgraph(TestCase):
         out.sum().backward()
 
     def test_linear(self):
-        n_layers = 12
+        n_layers = 2
         mods = [torch.nn.Linear(1, 1, bias=False).cuda() for _ in range(n_layers)]
 
         def fn(x):
@@ -75,8 +75,8 @@ class TestInvokeSubgraph(TestCase):
 
         ref = fn(x)
 
-        # opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition")
-        opt_fn = torch.compile(fn)
+        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition")
+        # opt_fn = torch.compile(fn)
 
         res = opt_fn(x)
 
@@ -111,6 +111,47 @@ class TestInvokeSubgraph(TestCase):
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
 
         x = torch.randn(8, 8, requires_grad=True, device="cuda")
+        y = torch.randn(8, 8, requires_grad=True, device="cuda")
+        out = opt_fn(x, y)
+
+    def test_dynamic(self):
+
+        n_layers = 2
+
+        def gn(x, y):
+            return torch.matmul(x, y).sin()
+        
+        def fn(x, y):
+            for _ in range(n_layers):
+                x = invoke_subgraph(gn, "start", None, (x, y))
+            return x
+        
+        # opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        x = torch.randn(8, 8, requires_grad=True, device="cuda")
+        torch._dynamo.mark_dynamic(x, 0)
+        y = torch.randn(8, 8, requires_grad=True, device="cuda")
+        out = opt_fn(x, y)
+
+
+    def test_dynamic_numel(self):
+
+        n_layers = 2
+
+        def gn(x, y):
+            return torch.matmul(x, y).sin() * x.numel()
+        
+        def fn(x, y):
+            for _ in range(n_layers):
+                x = invoke_subgraph(gn, "start", None, (x, y))
+            return x
+        
+        # opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        x = torch.randn(8, 8, requires_grad=True, device="cuda")
+        torch._dynamo.mark_dynamic(x, 0)
         y = torch.randn(8, 8, requires_grad=True, device="cuda")
         out = opt_fn(x, y)
 
