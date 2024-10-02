@@ -1307,7 +1307,6 @@ class BlockParameters:
         a, b = tuple(dataclasses.asdict(x) for x in (self, other))
         return cls(**{key: a[key] + b[key] for key in a})
 
-
 class TritonKernel(SIMDKernel):
     overrides = TritonKernelOverrides  # type: ignore[assignment]
     helper_functions: HelperFunctions
@@ -1340,8 +1339,8 @@ class TritonKernel(SIMDKernel):
         self.block_ptr_id = itertools.count()
         self.helper_functions = HelperFunctions()
         self.pointer_advancements: Dict[
-            SymT, List[DeferredLine]
-        ] = collections.defaultdict(list)
+            SymT, Dict[str, List[sympy.Expr]]
+        ] = collections.defaultdict(dict)
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints: OrderedSet[AutotuneHint] = OrderedSet()
@@ -1715,13 +1714,11 @@ class TritonKernel(SIMDKernel):
                 ):
                     continue
 
-                offset_str = self.index_to_str(advance_offsets)
-                self.pointer_advancements[symt].append(
-                    DeferredLine(
-                        name,
-                        f"{block_ptr} = tl.advance({block_ptr}, {offset_str})",
-                    )
-                )
+                advancements = self.pointer_advancements[symt]
+                assert (
+                    block_ptr not in advancements
+                ), "duplicate advancement for pointer '{block_ptr}' at type '{symt}'"
+                advancements[block_ptr] = advance_offsets
         else:
             block_ptr = indexing.format(var)
         return block_ptr, other
@@ -2508,12 +2505,18 @@ class TritonKernel(SIMDKernel):
             # Write loop suffixes.
             for level, tree in sorted(enumerate(loop_trees), reverse=True):
                 with self.body.indent(offset=level + 1):
+
                     # Advance pointers at the end of each loop.
-                    for advancement in self.pointer_advancements[tree.symt]:
-                        assert (
-                            len(advancement) > 0
-                        ), f"Missing advancement for type {tree.symt}"
-                        self.body.writeline(advancement)
+                    for block_ptr, advancement in self.pointer_advancements[tree.symt].items():
+                        # Subtract any advancements made in the previous loop level.
+                        if level < len(loop_trees) - 1:
+                            prev_tree = loop_trees[level + 1]
+                            prev_advancement = self.pointer_advancements[prev_tree.symt][block_ptr]
+                            prev_block = TritonSymbols.get_block_size(prev_tree)
+                            prev_num_iter = CeilDiv(prev_tree.numel, prev_block)
+                            advancement = [cur - prev * prev_num_iter for cur, prev in zip(advancement, prev_advancement)]
+
+                        self.body.writeline(f"{block_ptr} = tl.advance({block_ptr}, {V.kernel.index_to_str(advancement)})")
 
                 # Invalidate any cache entries that came from inside the loop.
                 self.cse.invalidate(self.outside_loop_vars)

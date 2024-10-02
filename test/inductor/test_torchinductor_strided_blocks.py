@@ -521,12 +521,12 @@ class TritonBlockPointerTest(InductorTestCase):
     @parametrize(
         "view_size,num_block_pointers,num_triton_kernels,reduction_op",
         [
-            ((15, 15), 1, 1, torch.sum),  # Non-power of 2
-            ((129, 129), 3, 2, torch.sum),  # Test a large size, with loops.
-            ((3, 3), 1, 1, torch.argmax),  # Non-power of 2
-            ((11, 11), 1, 1, torch.argmax),  # Non-power of 2
-            ((15, 15), 1, 1, torch.argmax),  # Non-power of 2
-            ((129, 129), 1, 1, torch.argmax),  # Test a large size, with loops.
+            ((15, 15), 1, 1, torch.sum), # Non-power-of 2 shapes.
+            ((129, 129), 3, 2, torch.sum), # Large size, with loops.
+            ((3, 3), 1, 1, torch.argmax),
+            ((11, 11), 1, 1, torch.argmax),
+            ((15, 15), 1, 1, torch.argmax),
+            ((129, 129), 1, 1, torch.argmax),
         ],
     )
     def test_nd_tiling_odd_shapes_reduce(
@@ -542,12 +542,8 @@ class TritonBlockPointerTest(InductorTestCase):
 
         device = torch.device(GPU_TYPE)
         full_size = tuple(2 * dim for dim in view_size)
-
-        # Guarantee uniqueness of data, for argmax
-        numel = torch.empty(full_size).numel()
-        full = torch.randperm(numel).reshape(full_size).to(device) - numel / 2
+        full = torch.randn(full_size).to(device)
         view = torch.as_strided(full, view_size, full.stride())
-        assert torch.unique(view).numel() == view.numel()
 
         # Expect at least 1 block pointer for the input.
         # Add 2 more if we generate 2 kernels.
