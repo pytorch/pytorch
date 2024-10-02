@@ -31,7 +31,7 @@ verify_correctness = False
 # need this many ops to create an FX graph
 minimum_call_count = 1
 
-# turn on/off DCE pass
+# turn on/off DCE pass (deprecated: always true)
 dead_code_elimination = True
 
 # disable (for a function) when cache reaches this size
@@ -68,6 +68,10 @@ specialize_float = True
 
 # legacy config, does nothing now!
 dynamic_shapes = True
+
+use_lazy_graph_module = (
+    os.environ.get("TORCH_COMPILE_USE_LAZY_GRAPH_MODULE", "1") == "1"
+)
 
 # This is a temporarily flag, which changes the behavior of dynamic_shapes=True.
 # When assume_static_by_default is True, we only allocate symbols for shapes marked dynamic via mark_dynamic.
@@ -464,6 +468,9 @@ fake_tensor_cache_crosscheck_enabled = (
 # Enables the Compiled Autograd engine to trace .backward() calls made under torch.compile().
 # Note: AOT Autograd will still trace joint graphs.
 compiled_autograd = False
+
+# Overrides torch.compile() kwargs for Compiled Autograd:
+compiled_autograd_kwargs_override: Dict[str, Any] = {}
 
 # Enables use of collectives *during* compilation to synchronize behavior
 # across ranks.  Today, this is used solely to modify automatic_dynamic_shapes

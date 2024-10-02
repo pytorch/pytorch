@@ -17,6 +17,7 @@ import threading
 import time
 import traceback
 import typing
+import warnings
 import weakref
 from pathlib import Path
 from types import CodeType, FrameType, FunctionType, ModuleType
@@ -37,7 +38,6 @@ from torch._utils_internal import (
     maybe_upload_prof_stats_to_manifold,
     signpost_event,
 )
-from torch.fx._lazy_graph_module import _use_lazy_graph_module
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
@@ -656,10 +656,16 @@ def _compile(
         instructions[:] = output.output_instructions
         code_options.update(output.code_options)
 
-        if config.dead_code_elimination:
-            propagate_inst_exn_table_entries(instructions)
-            check_inst_exn_tab_entries_valid(instructions)
-            instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
+        # The config.dead_code_elimination flag is deprecated
+        # See https://github.com/pytorch/pytorch/issues/136862 for more information
+        if not config.dead_code_elimination:
+            warnings.warn(
+                "The config.dead_code_elimination flag is deprecated, it's now always true."
+            )
+
+        propagate_inst_exn_table_entries(instructions)
+        check_inst_exn_tab_entries_valid(instructions)
+        instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
     def compile_inner(
         code: CodeType,
@@ -820,7 +826,7 @@ def _compile(
 
         return guarded_code
 
-    with _use_lazy_graph_module(True), compile_context(CompileContext(compile_id)):
+    with compile_context(CompileContext(compile_id)):
         restart_reasons: set[str] = set()
         # This is shared across restarts
         mutated_closure_cell_contents: Set[str] = set()
