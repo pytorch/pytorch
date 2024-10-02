@@ -4156,10 +4156,10 @@ class TestSerialization(TestCase, SerializationMixin):
             y = torch.load(f, weights_only=weights_only)
             self.assertEqual(y['x'], x)
             # Check that views are actually views
-            if dtype in (torch.uint16, torch.uint32, torch.uint64):
-                val1, val2, check_dtype = 1, 2, torch.int64
-            else:
+            if dtype.is_signed:
                 val1, val2, check_dtype = 0.25, -0.25, torch.float32
+            else:
+                val1, val2, check_dtype = 1, 2, torch.int64
             y['odd'][0] = torch.tensor(val1, dtype=dtype)
             y['even'][0] = torch.tensor(val2, dtype=dtype)
             self.assertEqual(y['x'][:2].to(dtype=check_dtype), torch.tensor([val2, val1]))
