@@ -141,15 +141,13 @@ def emit_metric(
         return
 
     # Prefix key with metric name and timestamp to derisk chance of a uuid1 name collision
-    default_metrics[
-        "dynamo_key"
-    ] = f"{metric_name}_{int(time.time())}_{uuid.uuid1().hex}"
+    s3_key = f"{metric_name}_{int(time.time())}_{uuid.uuid1().hex}"
 
     if EMIT_METRICS:
         try:
             upload_to_s3(
                 bucket_name="ossci-raw-job-status",
-                key=f"ossci_uploaded_metrics/{default_metrics['dynamo_key']}",
+                key=f"ossci_uploaded_metrics/{s3_key}",
                 docs=[{**default_metrics, "info": metrics}],
             )
         except Exception as e:
