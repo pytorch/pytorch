@@ -1155,7 +1155,7 @@ class CppWrapperCpu(WrapperCodeGen):
         result.splice(
             f"""
             inductor_entry = CppWrapperCodeCache.load_pybinding(
-                ["std::vector<AtenTensorHandle>"], cpp_wrapper_src, {self.device}, {len(V.graph.graph_outputs)})
+                ["std::vector<AtenTensorHandle>"], cpp_wrapper_src, "{self.device}", {len(V.graph.graph_outputs)})
             """
         )
 
