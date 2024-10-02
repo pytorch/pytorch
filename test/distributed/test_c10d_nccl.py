@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import time
+import unittest
 import warnings
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -39,7 +40,7 @@ import torch.testing._internal.common_utils as common
 from torch import nn
 from torch._C._distributed_c10d import OpType
 from torch.nn.parallel import DistributedDataParallel
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_cuda import SM75OrLater, TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     get_timeout,
     init_multigpu_helper,
@@ -428,6 +429,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         os.environ["TORCH_NCCL_NAN_CHECK"] = "0"
 
     @requires_nccl()
+    @unittest.skipIf(not SM75OrLater, "need sm_75")  # see #135273, #137161
     @skip_if_lt_x_gpu(2)
     def test_nan_check(self):
         # Not expecting an error, NaN check should not make legit code fail
@@ -2863,6 +2865,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             torch.distributed.all_reduce_coalesced(tensors, group=process_group)
 
     @requires_nccl()
+    @unittest.skipIf(not SM75OrLater, "need sm_75")  # see #135273, #137161
     @skip_if_lt_x_gpu(2)
     def test_all_reduce_coalesced_manager_nccl(self):
         store = c10d.FileStore(self.file_name, self.world_size)
