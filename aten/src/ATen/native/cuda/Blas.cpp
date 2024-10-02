@@ -626,6 +626,9 @@ TORCH_IMPL_FUNC(bmm_out_cuda)(const Tensor& batch1, const Tensor& batch2, const 
   }
 }
 
+// Early definition as dot and vdot call each other.
+void vdot_out_cuda_impl(const Tensor& self, const Tensor& other, const Tensor& result);
+
 
 void dot_out_cuda_impl(const Tensor& self, const Tensor& other, const Tensor& result) {
   if (self.is_complex()) {
@@ -633,11 +636,11 @@ void dot_out_cuda_impl(const Tensor& self, const Tensor& other, const Tensor& re
       if (other.is_conj()) {
         dot_out_cuda_impl(self.conj(), other.conj(), result);
       } else {
-        result.fill_(vdot_cuda(self.conj(), other));
+        vdot_out_cuda_impl(self.conj(), other, result);
       }
       return;
     } else if (other.is_conj()) {
-      result.fill_(vdot_cuda(other.conj(), self));
+      vdot_out_cuda_impl(other.conj(), self, result);
       return;
     }
   }
