@@ -28,7 +28,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   python_path="/opt/python/cp\$python_nodot-cp\${python_nodot}"
 
-  if [[ -n "$DESIRED_PYTHON" && $DESIRED_PYTHON =~ ([0-9].[0-9]+)t ]]; then
+  if [[ -n "$DESIRED_PYTHON" && $DESIRED_PYTHON == *t ]]; then
     python_digits="\$(echo $DESIRED_PYTHON | tr -cd [:digit:])"
     python_path="/opt/python/cp\$python_digits-cp\${python_digits}t"
   fi
