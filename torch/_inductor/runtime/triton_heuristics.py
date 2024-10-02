@@ -15,7 +15,7 @@ import re
 import sys
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import torch
 
@@ -185,7 +185,7 @@ class CachingAutotuner(KernelInterface):
         fn,
         triton_meta: Dict[str, Any],  # passed directly to triton
         configs: List[Config],
-        save_cache_hook: Optional[Callable],
+        save_cache_hook,
         mutated_arg_names: List[str],  # see [Note: clone mutated buffers]
         heuristic_type: HeuristicType,
         size_hints=None,
