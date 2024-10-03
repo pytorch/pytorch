@@ -117,7 +117,6 @@ class TORCH_API DistAutogradContainer {
     std::unordered_map<int64_t, ContextPtr> contexts;
   };
 
-
   static DistAutogradContainer& getInstanceInternal();
 
   // Retrieve the shard for given context_id.
