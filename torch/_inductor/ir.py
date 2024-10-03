@@ -76,8 +76,7 @@ from .ops_handler import OpCounterCSE, OpCountResult
 from .runtime.benchmarking import benchmarker
 from .runtime.hints import ReductionHint
 from .utils import (
-    argsort,
-    argsort_symint,
+    argsort_sym,
     cache_on_self,
     ceildiv,
     convert_shape_to_inductor,
@@ -251,10 +250,7 @@ def get_stride_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[
     Convert strides to stride order
     """
     seq_lst = list(seq)
-    if all(isinstance(elt, (int, torch.SymInt)) for elt in seq_lst):
-        sorted_idx = argsort_symint(seq_lst)
-    else:
-        sorted_idx = argsort(seq_lst)
+    sorted_idx = argsort_sym(seq_lst)
     out = [0 for _ in range(len(seq))]
     for i, elem in enumerate(sorted_idx):
         out[elem] = i
