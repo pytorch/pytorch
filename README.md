@@ -208,6 +208,8 @@ If you want to compile with ROCm support, install
 - [AMD ROCm](https://rocm.docs.amd.com/en/latest/deploy/linux/quick_start.html) 4.0 and above installation
 - ROCm is currently supported only for Linux systems.
 
+The ROCM_PATH environment variable must be set to the ROCm installation directory and PYTORCH_ROCM_ARCH must be set to a supported [AMD GPU architecture](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-gpus)
+
 If you want to disable ROCm support, export the environment variable `USE_ROCM=0`.
 Other potentially useful environment variables may be found in `setup.py`.
 
