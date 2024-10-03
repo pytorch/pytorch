@@ -405,7 +405,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
    private:
     // Helper function for synchronize
-    void synchronizeInternal(std::chrono::milliseconds timeout);
+    void synchronizeInternal();
 
     // Checks for NCCL errors and sets an appropriate exception_ptr.
     void checkAndSetException();
