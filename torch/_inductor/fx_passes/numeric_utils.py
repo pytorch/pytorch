@@ -236,6 +236,7 @@ def enable_runtime_numeric_check(
         and hasattr(config, "fx_passes_numeric_check")
         and fx_passes_numeric_check
         and example_inputs is not None
+        and fake_mode is not None
     ):
         stable_topological_sort(gm.graph)
         gm_after_fx_passes = copy.deepcopy(gm)

@@ -289,12 +289,21 @@ def _recursive_post_grad_passes(
 ):
     for subgraph_name in _get_subgraph_names(gm):
         subgraph = getattr(gm, subgraph_name)
-        _recursive_post_grad_passes(
-            subgraph, is_inference, example_inputs=example_inputs, fake_mode=fake_mode
+        if example_inputs and fake_mode:
+            _recursive_post_grad_passes(
+                subgraph,
+                is_inference,
+                example_inputs=example_inputs,
+                fake_mode=fake_mode,
+            )
+        else:
+            _recursive_post_grad_passes(subgraph, is_inference)
+    if example_inputs and fake_mode:
+        post_grad_passes(
+            gm, is_inference, example_inputs=example_inputs, fake_mode=fake_mode
         )
-    post_grad_passes(
-        gm, is_inference, example_inputs=example_inputs, fake_mode=fake_mode
-    )
+    else:
+        post_grad_passes(gm, is_inference)
 
 
 def split_const_gm(
@@ -775,12 +784,19 @@ def fx_codegen_and_compile(
 
         with V.set_fake_mode(fake_mode):
             # has some issues with memory in training
-            _recursive_post_grad_passes(
-                gm,
-                is_inference=is_inference,
-                example_inputs=example_inputs,
-                fake_mode=fake_mode,
-            )
+            # if we enable the runtime numeric check for fx passes
+            # we need to pass the example_inputs and fake_mode
+            if hasattr(
+                config, "fx_passes_numeric_check"
+            ) and config.fx_passes_numeric_check.get("post_grad", False):
+                _recursive_post_grad_passes(
+                    gm,
+                    is_inference=is_inference,
+                    example_inputs=example_inputs,
+                    fake_mode=fake_mode,
+                )
+            else:
+                _recursive_post_grad_passes(gm, is_inference=is_inference)
             V.debug.fx_graph_transformed(gm, example_inputs)
             post_grad_graphs_log.debug(
                 "%s",
