@@ -1705,7 +1705,7 @@ def forward(self, x_1, output_1):
         def fn(x):
             x = x * x
             seed = torch.randint(
-                low=0, high=2**62, size=(1,), dtype=torch.int64
+                low=2**32, high=2**62, size=(1,), dtype=torch.int64
             ).item()
             return add_noise(x, seed)
 
