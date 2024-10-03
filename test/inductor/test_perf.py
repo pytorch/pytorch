@@ -913,6 +913,61 @@ class InplacingTests(TestCase):
         self.assertExpectedInline(count_numel_train(f, x), """9""")
 
     @requires_cuda
+    def test_triton_kernel_not_fusable_with_users(self):
+        @triton.jit
+        def _sin_kernel(
+            in_ptr0,
+            out_ptr,
+            out2_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            output = tl.sin(x)
+            tl.store(out_ptr + offsets, output, mask=mask)
+            tl.store(out2_ptr + offsets, output, mask=mask)
+
+        from typing import List
+
+        from torch._library import capture_triton, triton_op
+
+        @triton_op("mylib::sin_kernel", mutates_args={})
+        def sin_kernel(x: torch.Tensor) -> List[torch.Tensor]:
+            n_elements = x.numel()
+            out = torch.empty_like(x)
+            out2 = torch.empty_like(x)
+            capture_triton(_sin_kernel)[(n_elements,)](
+                x, out, out2, n_elements, BLOCK_SIZE=4
+            )
+            return [out, out2]
+
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out, saved = tuple(torch.ops.mylib.sin_kernel(x))
+                ctx.save_for_backward(x, saved)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad):
+                (x, saved) = ctx.saved_tensors
+                return grad * saved.sigmoid() * x
+
+        def f(x):
+            return MySin.apply(x)
+
+        x = T(3, grad=True)
+        # Important bit: saved.sigmoid() can be fused into its consumer (mul),
+        # but not its producer (user triton kernel).
+        # So we should not compute it in the fw and save it for backward
+        # (it will cost an extra kernel)
+        self.assertExpectedInline(count_numel_train(f, x), """27""")
+
+    @requires_cuda
     def test_inplace_custom_op_training_two_mutated_inputs(self):
         @torch.library.custom_op(
             "_reinplacing::sin_cos", mutates_args={"out_sin", "out_cos"}
