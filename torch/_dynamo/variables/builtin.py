@@ -862,13 +862,27 @@ class BuiltinVariable(VariableTracker):
         from .builder import SourcelessBuilder
         from .torch_function import (
             BUILTIN_TO_TENSOR_FN_MAP,
+            BUILTIN_TO_TENSOR_RFN_MAP,
             can_dispatch_torch_function,
             dispatch_torch_function,
         )
 
         if can_dispatch_torch_function(tx, args, kwargs):
             # Use sourceless builder, we built the map ourselves
-            fn_var = SourcelessBuilder.create(tx, BUILTIN_TO_TENSOR_FN_MAP[self.fn])
+            if not isinstance(args[0], TensorVariable):
+                if self.fn in BUILTIN_TO_TENSOR_RFN_MAP:
+                    func = BUILTIN_TO_TENSOR_RFN_MAP[self.fn]
+                else:
+                    func = BUILTIN_TO_TENSOR_FN_MAP[self.fn]
+
+                tmp = args[0]
+                # swap args and call reverse version of func
+                args[0] = args[1]
+                args[1] = tmp
+            else:
+                func = BUILTIN_TO_TENSOR_FN_MAP[self.fn]
+            fn_var = SourcelessBuilder.create(tx, func)
+
             return dispatch_torch_function(tx, fn_var, args, kwargs)
 
         fn = self.fn
