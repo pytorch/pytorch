@@ -428,6 +428,19 @@ PyObject* THCPModule_cudaCachingAllocator_raw_delete(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THCPModule_cudaCachingAllocator_enable(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkBool(arg),
+      "cudaCachingAllocator_enable expects a bool, but got ",
+      THPUtils_typename(arg));
+  c10::cuda::CUDACachingAllocator::enable(THPUtils_unpackBool(arg));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_cudaCachingAllocator_set_allocator_settings(
     PyObject* _unused,
     PyObject* env) {
@@ -1854,6 +1867,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_cudaCachingAllocator_raw_delete",
      THCPModule_cudaCachingAllocator_raw_delete,
+     METH_O,
+     nullptr},
+    {"_cuda_cudaCachingAllocator_enable",
+     THCPModule_cudaCachingAllocator_enable,
      METH_O,
      nullptr},
     {"_cuda_cudaCachingAllocator_set_allocator_settings",
