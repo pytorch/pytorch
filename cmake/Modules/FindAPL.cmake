@@ -21,7 +21,7 @@ IF(NOT APL_INCLUDE_DIR)
 ENDIF()
 
 # Check lib file
-FIND_PATH(APL_LIB_DIR NAMES libarmpl_lp64 libarmpl_lp64.lib PATHS ${APL_LIB_SEARCH_PATHS})
+FIND_PATH(APL_LIB_DIR NAMES armpl_ilp64_mp.dll.lib armpl_ilp64_mp PATHS ${APL_LIB_SEARCH_PATHS})
 IF(NOT APL_LIB_DIR)
     SET(APL_FOUND OFF)
     MESSAGE(STATUS "Could not verify APL lib directory. Turning APL_FOUND off")
@@ -29,22 +29,16 @@ ENDIF()
 
 IF(WIN32)
   set(APL_LIBRARIES
-      "${APL_LIB_DIR}/libomp.dll.lib"
-      "${APL_LIB_DIR}/libarmpl_lp64_mp.lib"
-      "${APL_LIB_DIR}/libarmpl_lp64_mp.dll.lib"
-      "${APL_LIB_DIR}/libarmpl_lp64.lib"
-      "${APL_LIB_DIR}/libarmpl_lp64.dll.lib"
-      "${APL_LIB_DIR}/libarmpl_ilp64_mp.lib"
-      "${APL_LIB_DIR}/libarmpl_ilp64_mp.dll.lib"
-      "${APL_LIB_DIR}/libarmpl_ilp64.lib"
-      "${APL_LIB_DIR}/libarmpl_ilp64.dll.lib"
-      "${APL_LIB_DIR}/Fortran_main.static.lib"
-      "${APL_LIB_DIR}/FortranDecimal.static.lib"
-      "${APL_LIB_DIR}/FortranRuntime.static.lib"
+    "${APL_LIB_DIR}/armpl_ilp64_mp.dll.lib"
+    "${APL_LIB_DIR}/amath.dll.lib"  
   )
+  message(STATUS "APL_LIBRARIES: ${APL_LIBRARIES}")
 ELSEIF(UNIX)
-  # TODO
-  set(APL_LIBRARIES armpl_lp64 libarmpl.so libarmpl.a amath libamath.so libamath.a)
+  # TODO: Add/test support for Linux
+  set(APL_LIBRARIES
+    "${APL_LIB_DIR}/armpl_ilp64_mp"
+    "${APL_LIB_DIR}/amath"  
+  )
 ENDIF()
 
 
@@ -52,8 +46,6 @@ IF (APL_FOUND)
   MESSAGE(STATUS "Found APL header: ${APL_INCLUDE_DIR}")
   MESSAGE(STATUS "Found APL library: ${APL_LIB_DIR}")
   SET(CMAKE_REQUIRED_LIBRARIES ${APL_LIBRARIES})
-  target_link_libraries(torch_python PRIVATE ${APL_LIBRARIES})
-  include(CheckCSourceRuns)
   CHECK_C_SOURCE_RUNS("
 #include <stdlib.h>
 #include <stdio.h>
