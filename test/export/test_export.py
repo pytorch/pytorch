@@ -5974,6 +5974,250 @@ graph():
 
         self.assertEqual(gm_flat_non_strict(*inp), gm_flat_strict(*inp))
 
+    def test_unflatten_multiple_graphs_preserve_signature_error(self):
+        class N(torch.nn.Module):
+            def forward(self, x, b):
+                if b:
+                    return x + 1
+                else:
+                    return x + 2
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n = N()
+
+            def forward(self, x):
+                x = self.n(x, True)
+                x = x + 1
+                x = self.n(x, False)
+                x = x + 1
+                return x
+
+        inp = (torch.ones(1),)
+        m = M()
+        eager_result = m(*inp)
+
+        if not is_retracebility_test(self._testMethodName):
+            ep = export(M(), inp, preserve_module_call_signature=("n",))
+            with self.assertRaisesRegex(
+                ValueError,
+                "Cannot unflatten multiple calls to module n while preserving its signature",
+            ):
+                torch.export.unflatten(ep)
+
+        ep = export(M(), inp)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+
+        exported_result = epm(*inp)
+        self.assertTrue(torch.allclose(exported_result, eager_result))
+
+        unflattened_result = ufm(*inp)
+        self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
+    def test_unflatten_multiple_graphs_state(self):
+        class N(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(1), persistent=False)
+
+            def forward(self, x, b):
+                if b:
+                    self.buf.add_(1)
+                else:
+                    self.buf.add_(2)
+                return x + self.buf
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n = N()
+
+            def forward(self, x):
+                x = self.n(x, True)
+                x = x + 1
+                x = self.n(x, False)
+                x = x + 1
+                x = self.n(x, True)
+                x = x + 1
+                x = self.n(x, False)
+                return x
+
+        inp = (torch.ones(1),)
+        m = M()
+        eager_result = m(*inp)
+
+        ep = export(M(), inp)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+
+        exported_result = epm(*inp)
+        self.assertTrue(torch.allclose(exported_result, eager_result))
+
+        unflattened_result = ufm(*inp)
+        self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
+    def test_unflatten_multiple_graphs_shared_submodule(self):
+        class N(torch.nn.Module):
+            def forward(self, x, b):
+                if b:
+                    return x + 1
+                else:
+                    return x + 2
+
+        def gen_m(n, n_1, p, p_1):
+            # Create a module instance where self.n and self.p
+            # share the same submodule instance.
+            # The booleans n, n_1 and p, p_1 are passed to two calls each
+            # to self.n and self.p, and they determine which path through
+            # the shared submodule instance is taken during export.
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.n = N()
+                    self.p = self.n
+
+                def forward(self, x):
+                    x = x + 3
+                    x = self.n(x, n)
+                    x = x + 4
+                    x = self.n(x, n_1)
+                    x = x + 5
+                    x = self.p(x, p)
+                    x = x + 6
+                    x = self.p(x, p_1)
+                    return x + 7
+
+            return M()
+
+        inp = (torch.ones(1),)
+
+        def test(m, expected_graph, expected_fqns, expected_duplicates):
+            eager_result = m(*inp)
+
+            ep = export(m, inp)
+            exported_result = ep.module()(*inp)
+            # exported and eager results should match (baseline)
+            self.assertTrue(torch.allclose(exported_result, eager_result))
+
+            unflattened = torch.export.unflatten(ep)
+            unflattened_result = unflattened(*inp)
+            # unflattened and eager results should match
+            # (needs multiple specialized graphs for shared submodule instance)
+            self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
+            # expected graph should call minimal number of specialized submodules
+            self.assertExpectedInline(
+                str(unflattened.graph).strip(),
+                expected_graph,
+            )
+
+            # expected graph should contain minimal number of specialized submodule fqns
+            self.assertEqual(
+                sorted(
+                    [
+                        fqn
+                        for fqn, _ in unflattened.named_modules(remove_duplicate=False)
+                    ]
+                ),
+                expected_fqns,
+            )
+            # expected graph should contain minimal number of specialized submodule instances
+            for a, b in expected_duplicates:
+                if is_non_strict_test(self._testMethodName):
+                    # NOTE: non-strict does not de-duplicate shared submodules through different fqns.
+                    # In particular, we use different module ids for self.n and self.p calls in non-strict,
+                    # but in strict we use the same module id, which enables additional reuse.
+                    # This is pre-existing behavior that might need to be fixed orthogonally.
+                    self.assertNotEqual(
+                        id(getattr(unflattened, a)), id(getattr(unflattened, b))
+                    )
+                else:
+                    self.assertEqual(
+                        id(getattr(unflattened, a)), id(getattr(unflattened, b))
+                    )
+
+        test(
+            gen_m(n=True, n_1=False, p=False, p_1=False),
+            # p should share n_1 graph, p_1 should be optimized away
+            """\
+graph():
+    %x : [num_users=1] = placeholder[target=x]
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, 3), kwargs = {})
+    %n : [num_users=1] = call_module[target=n](args = (%add,), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n, 4), kwargs = {})
+    %n_1 : [num_users=1] = call_module[target=n@1](args = (%add_2,), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n_1, 5), kwargs = {})
+    %p : [num_users=1] = call_module[target=p](args = (%add_4,), kwargs = {})
+    %add_6 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p, 6), kwargs = {})
+    %p_1 : [num_users=1] = call_module[target=p](args = (%add_6,), kwargs = {})
+    %add_8 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p_1, 7), kwargs = {})
+    return (add_8,)""",
+            ["", "n", "n@1", "p"],
+            [("n@1", "p")],
+        )
+
+        test(
+            gen_m(n=True, n_1=False, p=True, p_1=False),
+            # p should reuse n graph, p_1 should reuse n_1 graph
+            """\
+graph():
+    %x : [num_users=1] = placeholder[target=x]
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, 3), kwargs = {})
+    %n : [num_users=1] = call_module[target=n](args = (%add,), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n, 4), kwargs = {})
+    %n_1 : [num_users=1] = call_module[target=n@1](args = (%add_2,), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n_1, 5), kwargs = {})
+    %p : [num_users=1] = call_module[target=p](args = (%add_4,), kwargs = {})
+    %add_6 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p, 6), kwargs = {})
+    %p_1 : [num_users=1] = call_module[target=p@1](args = (%add_6,), kwargs = {})
+    %add_8 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p_1, 7), kwargs = {})
+    return (add_8,)""",
+            ["", "n", "n@1", "p", "p@1"],
+            [("n", "p"), ("n@1", "p@1")],
+        )
+
+        test(
+            gen_m(n=True, n_1=True, p=True, p_1=False),
+            # n_1 should be optimized away, p should reuse n graph
+            """\
+graph():
+    %x : [num_users=1] = placeholder[target=x]
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, 3), kwargs = {})
+    %n : [num_users=1] = call_module[target=n](args = (%add,), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n, 4), kwargs = {})
+    %n_1 : [num_users=1] = call_module[target=n](args = (%add_2,), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n_1, 5), kwargs = {})
+    %p : [num_users=1] = call_module[target=p](args = (%add_4,), kwargs = {})
+    %add_6 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p, 6), kwargs = {})
+    %p_1 : [num_users=1] = call_module[target=p@1](args = (%add_6,), kwargs = {})
+    %add_8 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p_1, 7), kwargs = {})
+    return (add_8,)""",
+            ["", "n", "p", "p@1"],
+            [("n", "p")],
+        )
+
+        test(
+            gen_m(n=True, n_1=False, p=False, p_1=True),
+            # p should reuse n_1 graph, p_1 should reuse n graph
+            """\
+graph():
+    %x : [num_users=1] = placeholder[target=x]
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, 3), kwargs = {})
+    %n : [num_users=1] = call_module[target=n](args = (%add,), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n, 4), kwargs = {})
+    %n_1 : [num_users=1] = call_module[target=n@1](args = (%add_2,), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n_1, 5), kwargs = {})
+    %p : [num_users=1] = call_module[target=p](args = (%add_4,), kwargs = {})
+    %add_6 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p, 6), kwargs = {})
+    %p_1 : [num_users=1] = call_module[target=p@1](args = (%add_6,), kwargs = {})
+    %add_8 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p_1, 7), kwargs = {})
+    return (add_8,)""",
+            ["", "n", "n@1", "p", "p@1"],
+            [("n", "p@1"), ("p", "n@1")],
+        )
+
     def test_stack_trace(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
