@@ -15,6 +15,7 @@ from .optimizer import (
     _use_grad_for_differentiable,
     DeviceDict,
     Optimizer,
+    ParamsT,
 )
 
 
@@ -24,12 +25,12 @@ __all__ = ["SGD", "sgd"]
 class SGD(Optimizer):  # noqa: D101
     def __init__(
         self,
-        params,
+        params: ParamsT,
         lr: Union[float, Tensor] = 1e-3,
         momentum: float = 0,
         dampening: float = 0,
         weight_decay: float = 0,
-        nesterov=False,
+        nesterov: bool = False,
         *,
         maximize: bool = False,
         foreach: Optional[bool] = None,

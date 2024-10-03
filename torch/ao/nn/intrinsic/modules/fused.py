@@ -228,7 +228,7 @@ class ConvAdd2d(_FusedModule):
         super().__init__(conv)
         self.add = add
 
-    def forward(self, x1, x2):
+    def forward(self, x1, x2):  # type: ignore[override]
         return self.add(self[0](x1), x2)
 
 
@@ -241,5 +241,5 @@ class ConvAddReLU2d(_FusedModule):
         self.add = add
         self.relu = relu
 
-    def forward(self, x1, x2):
+    def forward(self, x1, x2):  # type: ignore[override]
         return self.relu(self.add(self[0](x1), x2))

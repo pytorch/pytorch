@@ -84,7 +84,9 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
       std::nullopt);
   ++source->ncclCommSplitCounter_;
   comm->rank_ = rank;
-  comm->initialized_ = true;
+  if (!nccl_use_nonblocking()) {
+    comm->initialized_ = true;
+  }
   return comm;
 }
 #endif
@@ -534,6 +536,7 @@ const c10::List<c10::IValue> NCCLTraceBuffer::getCollectiveTrace(
     bool includeStacktraces,
     bool onlyActive) {
   auto entries = new_list();
+  // Entries are returned in the order they were recorded
   auto result = dump_entries();
   std::vector<torch::CapturedTraceback*> tracebacks;
   torch::SymbolizedTracebacks stracebacks;

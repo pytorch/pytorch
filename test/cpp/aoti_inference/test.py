@@ -35,7 +35,7 @@ data_with_tensor_constants = {}
 
 # Basice AOTI model test generation.
 def generate_basic_tests():
-    for device in ["cpu", "cuda"]:
+    for device in ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]:
         for use_runtime_constant_folding in [True, False]:
             if device == "cpu" and use_runtime_constant_folding:
                 # We do not test runtime const folding for cpu mode.
@@ -74,6 +74,9 @@ def generate_basic_tests():
 
 # AOTI model which will create additional tensors during autograd.
 def generate_test_with_additional_tensors():
+    if not torch.cuda.is_available():
+        return
+
     model = NetWithTensorConstants()
     x = torch.randn((30, 1), device="cuda")
     y = torch.randn((30, 1), device="cuda")

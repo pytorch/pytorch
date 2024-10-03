@@ -52,6 +52,9 @@ class TraceWrapped(HigherOrderOperator):
     def __init__(self):
         super().__init__("trace_wrapped")
 
+    def __call__(self, *args, **kwargs):
+        return super().__call__(*args, **kwargs)
+
 
 # TODO(jansel): need to ensure this does not get DCEed
 _trace_wrapped_op = TraceWrapped()

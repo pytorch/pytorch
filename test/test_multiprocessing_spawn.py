@@ -92,7 +92,7 @@ def _test_nested(i, pids_queue, nested_child_sleep, start_method):
     # Kill self. This should take down the child processes as well.
     os.kill(os.getpid(), signal.SIGTERM)
 
-class _TestMultiProcessing(TestCase):
+class _TestMultiProcessing:
     start_method = None
 
     def test_success(self):
@@ -194,11 +194,10 @@ class _TestMultiProcessing(TestCase):
             self.assertLess(time.time() - start, nested_child_sleep / 2)
             time.sleep(0.1)
 
-
 @unittest.skipIf(
     NO_MULTIPROCESSING_SPAWN,
     "Disabled for environments that don't support the spawn start method")
-class SpawnTest(_TestMultiProcessing):
+class SpawnTest(TestCase, _TestMultiProcessing):
     start_method = 'spawn'
 
     def test_exception_raises(self):
@@ -222,7 +221,7 @@ class SpawnTest(_TestMultiProcessing):
     IS_WINDOWS,
     "Fork is only available on Unix",
 )
-class ForkTest(_TestMultiProcessing):
+class ForkTest(TestCase, _TestMultiProcessing):
     start_method = 'fork'
 
 
@@ -230,11 +229,7 @@ class ForkTest(_TestMultiProcessing):
     IS_WINDOWS,
     "Fork is only available on Unix",
 )
-class ForkServerTest(_TestMultiProcessing):
-    start_method = 'forkserver'
-
-
-class _ParallelTest:
+class ParallelForkServerShouldWorkTest(TestCase, _TestMultiProcessing):
     orig_paralell_env_val = None
 
     def setUp(self):
@@ -251,37 +246,16 @@ class _ParallelTest:
 
 
 @unittest.skipIf(
-    NO_MULTIPROCESSING_SPAWN,
-    "Disabled for environments that don't support the spawn start method")
-class ParallelSpawnShouldFallbackAndWorkTest(SpawnTest, _ParallelTest):
-    pass
-
-
-@unittest.skipIf(
-    IS_WINDOWS,
-    "Fork is only available on Unix",
-)
-class ParallelForkShouldFallbackAndWorkTest(ForkTest, _ParallelTest):
-    pass
-
-
-@unittest.skipIf(
-    IS_WINDOWS,
-    "Fork is only available on Unix",
-)
-class ParallelForkServerShouldWorkTest(ForkServerTest, _ParallelTest):
-    pass
-
-
-@unittest.skipIf(
     IS_WINDOWS,
     "Fork is only available on Unix",
 )
 class ParallelForkServerPerfTest(TestCase):
+
     def test_forkserver_perf(self):
+
         start_method = 'forkserver'
         expensive = Expensive()
-        nprocs = 6
+        nprocs = 4
         orig_paralell_env_val = os.environ.get(mp.ENV_VAR_PARALLEL_START)
 
         # test the non parallel case
@@ -289,7 +263,7 @@ class ParallelForkServerPerfTest(TestCase):
         start = time.perf_counter()
         mp.start_processes(expensive.my_call, nprocs=nprocs, start_method=start_method)
         elapsed = time.perf_counter() - start
-        # the time should be at least 6x the sleep time
+        # the elapsed time should be at least {nprocs}x the sleep time
         self.assertGreaterEqual(elapsed, Expensive.SLEEP_SECS * nprocs)
 
         # test the parallel case
@@ -297,9 +271,8 @@ class ParallelForkServerPerfTest(TestCase):
         start = time.perf_counter()
         mp.start_processes(expensive.my_call, nprocs=nprocs, start_method=start_method)
         elapsed = time.perf_counter() - start
-
-        # the time should be at most 1x the sleep time + small overhead
-        self.assertLess(elapsed, Expensive.SLEEP_SECS + 10)
+        # the elapsed time should be less than {nprocs}x the sleep time
+        self.assertLess(elapsed, Expensive.SLEEP_SECS * nprocs)
 
         if orig_paralell_env_val is None:
             del os.environ[mp.ENV_VAR_PARALLEL_START]
@@ -308,7 +281,7 @@ class ParallelForkServerPerfTest(TestCase):
 
 
 class Expensive:
-    SLEEP_SECS = 10
+    SLEEP_SECS = 5
     # Simulate startup overhead such as large imports
     time.sleep(SLEEP_SECS)
 

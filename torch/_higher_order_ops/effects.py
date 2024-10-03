@@ -2,6 +2,7 @@
 # mypy: allow-untyped-defs
 from enum import Enum
 from typing import Any, Dict, Optional, Tuple, Union
+from weakref import WeakKeyDictionary
 
 import torch
 import torch.utils._pytree as pytree
@@ -23,11 +24,12 @@ class _EffectType(Enum):
 OpType = Union[torch._ops.HigherOrderOperator, torch._ops.OpOverload]
 
 
-# TODO(ivankobzarev): Make SIDE_EFFECTS dictionary WeakKeyDictionary as operator can go out of scope
-SIDE_EFFECTS: Dict[OpType, _EffectType] = {
-    torch.ops.aten._print.default: _EffectType.ORDERED,
-    call_torchbind: _EffectType.ORDERED,
-}
+SIDE_EFFECTS: "WeakKeyDictionary[OpType, _EffectType]" = WeakKeyDictionary(
+    {
+        torch.ops.aten._print.default: _EffectType.ORDERED,
+        call_torchbind: _EffectType.ORDERED,
+    }
+)
 
 
 def _register_effectful_op(op: OpType, effect: _EffectType):
@@ -125,8 +127,7 @@ def get_effect_key(op, args, kwargs) -> Optional[_EffectType]:
 
 
 def new_token_tensor() -> torch.Tensor:
-    # Use dtype bool to not affect Inductor dtype promotions
-    return torch.tensor([], dtype=torch.bool)
+    return torch.tensor([])
 
 
 @with_effects.py_impl(DispatchKey.CompositeExplicitAutograd)
