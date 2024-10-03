@@ -578,8 +578,8 @@ void TensorPipeAgent::pipeRead(
 
           // FIXME This does some unpickling, which could be a bit expensive:
           // perhaps it would be best to perform it inside the worker threads?
-          c10::intrusive_ptr<Message> rpcMessage = tensorpipeDeserialize(
-              std::move(tpDescriptor), std::move(*tpBuffers));
+          c10::intrusive_ptr<Message> rpcMessage =
+              tensorpipeDeserialize(tpDescriptor, std::move(*tpBuffers));
 
           fn(error, std::move(rpcMessage), std::move(streams));
         });
@@ -624,13 +624,14 @@ void TensorPipeAgent::sendCompletedResponseMessage(
   if (!futureResponseMessage.hasError()) {
     c10::intrusive_ptr<Message> responseMessage =
         futureResponseMessage.value().toCustomClass<Message>();
-    responseMessage->setId(messageId);
+    responseMessage->setId(static_cast<int64_t>(messageId));
 
     std::vector<c10::Device> devices;
     try {
       devices = getDevicesForRemote(pipe->getRemoteName(), *responseMessage);
     } catch (const std::exception& e) {
-      responseMessage = createExceptionResponse(e.what(), messageId);
+      responseMessage =
+          createExceptionResponse(e.what(), static_cast<int64_t>(messageId));
     }
 
     for (const auto& tensor : responseMessage->tensors()) {
@@ -652,7 +653,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
                   oss.str(),
                   "which is not yet supported. Please file a feature request "
                   "issue in PyTorch GitHub repo."),
-              messageId);
+              static_cast<int64_t>(messageId));
           break;
         }
       }
@@ -681,7 +682,8 @@ void TensorPipeAgent::sendCompletedResponseMessage(
     pipeWrite(
         pipe,
         createExceptionResponse(
-            futureResponseMessage.tryRetrieveErrorMessage(), messageId),
+            futureResponseMessage.tryRetrieveErrorMessage(),
+            static_cast<int64_t>(messageId)),
         /* devices */ {},
         std::move(streams),
         [this, pipe, messageId](const tensorpipe::Error& error) {

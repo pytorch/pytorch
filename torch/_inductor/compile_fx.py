@@ -82,7 +82,7 @@ from .utils import (
     clone_preserve_strides,
     copy_misaligned_inputs,
     get_cloned_parameter_buffer_name,
-    has_incompatible_cudagraph_ops,
+    get_first_incompatible_cudagraph_node,
     maybe_get_suppress_shape_guards_ctx,
     output_node,
     remove_unaligned_input_idxs,
@@ -604,7 +604,6 @@ def _compile_fx_inner(
 
                 cudagraph_tests = [
                     (not has_mutation, "mutated inputs"),
-                    (not has_incompatible_cudagraph_ops(gm), "incompatible ops"),
                     (not complex_memory_overlap_inputs, "complex memory overlap"),
                     (
                         all(
@@ -900,6 +899,16 @@ def fx_codegen_and_compile(
                     else:
                         disable = f"{disable}\n"
                     V.graph.disable_cudagraphs_reason = disable
+
+                if cudagraphs and not V.graph.disable_cudagraphs_reason:
+                    maybe_incompat_node = get_first_incompatible_cudagraph_node(gm)
+                    if maybe_incompat_node:
+                        disable = f"disabling cudagraphs due to incompatible op {maybe_incompat_node.target}"
+                        if stack_trace := maybe_incompat_node.meta.get(
+                            "stack_trace", None
+                        ):
+                            disable = f"{disable} Found from {stack_trace}\n"
+                        V.graph.disable_cudagraphs_reason = disable
 
                 if V.aot_compilation is True:
                     return compiled_fn
