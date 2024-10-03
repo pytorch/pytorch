@@ -133,7 +133,6 @@ extern "C" void sgetrf_(int *m, int *n, float *a, int *lda, int *ipiv, int *info
 
 // potrs
 #if defined(_WIN32) && defined(_M_ARM64)
-#if AT_BUILD_WITH_APL()
 
 #define LAPACK_COL_MAJOR 102
 #define LAPACK_ROW_MAJOR 101
@@ -159,7 +158,6 @@ static inline void spotrs_(char *uplo, int *n, int *nrhs, float *a, int *lda, fl
   *info = LAPACKE_spotrs(LAPACK_COL_MAJOR, *uplo, *n, *nrhs, a, *lda, b, *ldb);
 }
 
-#endif
 #else
 
 extern "C" void zpotrs_(char *uplo, int *n, int *nrhs, std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb, int *info);
@@ -316,7 +314,7 @@ extern "C" void dorgqr_(int *m, int *n, int *k, double *a, int *lda, double *tau
 extern "C" void sorgqr_(int *m, int *n, int *k, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
 
 // ormqr
-#if AT_BUILD_WITH_APL()
+#if defined(_WIN32) && defined(_M_ARM64)
 extern "C" int LAPACKE_zunmqr_work(int matrix_layout, char side, char trans, int m, int n, int k, const std::complex<double> *a, int lda, const std::complex<double> *tau, std::complex<double> *c, int ldc, std::complex<double> *work, int lwork);
 extern "C" int LAPACKE_cunmqr_work(int matrix_layout, char side, char trans, int m, int n, int k, const std::complex<float> *a, int lda, const std::complex<float> *tau, std::complex<float> *c, int ldc, std::complex<float> *work, int lwork);
 extern "C" int LAPACKE_dormqr_work(int matrix_layout, char side, char trans, int m, int n, int k, const double *a, int lda, const double *tau, double *c, int ldc, double *work, int lwork);
