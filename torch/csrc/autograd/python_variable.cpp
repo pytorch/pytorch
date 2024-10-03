@@ -409,7 +409,7 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
   return true;
 }
 
-static int THPVariable_clear(THPVariable* self) {
+static int THPVariable_subclass_clear(THPVariable* self) {
   // Is it OK for an object to still be live after running
   // tp_clear? Yes. When Python is breaking reference cycles, it can't assume
   // that an object will dealloc after it's cleared.  The source code explicitly
@@ -465,7 +465,7 @@ static int THPVariable_clear(THPVariable* self) {
       //  !tensor.unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj()INTERNAL
       //  ASSERT FAILED at "../torch/csrc/autograd/python_variable.cpp":171,
       //  please report a bug to PyTorch. Exception raised from
-      //  THPVariable_clear at
+      //  THPVariable_subclass_clear at
       //  ../torch/csrc/autograd/python_variable.cpp:171 (most recent call
       //  first): frame #0: c10::Error::Error(c10::SourceLocation,
       //  std::__1::basic_string<char, std::__1::char_traits<char>,
@@ -475,7 +475,7 @@ static int THPVariable_clear(THPVariable* self) {
       //  c10::detail::torchInternalAssertFail(char const*, char const*,
       //  unsigned int, char const*, c10::detail::CompileTimeEmptyString) + 9
       //  (0x1141e3f89 in libtorch_python.dylib) frame #3:
-      //  THPVariable_clear(THPVariable*) + 412 (0x1148a547c in
+      //  THPVariable_subclass_clear(THPVariable*) + 412 (0x1148a547c in
       //  libtorch_python.dylib) frame #4:
       //  THPVariable_subclass_dealloc(_object*) + 453 (0x1148a5035 in
       //  libtorch_python.dylib) frame #5: (anonymous
@@ -1990,7 +1990,7 @@ void THPVariable_subclass_dealloc(PyObject* self) {
   TORCH_INTERNAL_ASSERT(Py_TYPE(self) == type);
 
   // Finally clear out the base THPVariable
-  THPVariable_clear((THPVariable*)self);
+  THPVariable_subclass_clear((THPVariable*)self);
   ((THPVariable*)self)->cdata.~MaybeOwned<Variable>();
   Py_TYPE(self)->tp_free(self);
 
@@ -2293,7 +2293,7 @@ int THPVariableMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs) {
   ((PyTypeObject*)cls)->tp_dealloc = (destructor)THPVariable_subclass_dealloc;
   ((PyTypeObject*)cls)->tp_traverse =
       (traverseproc)THPVariable_subclass_traverse;
-  ((PyTypeObject*)cls)->tp_clear = (inquiry)THPVariable_clear;
+  ((PyTypeObject*)cls)->tp_clear = (inquiry)THPVariable_subclass_clear;
 
   // Don't do anything for the base Tensor class
   if (!THPVariableClass) {
