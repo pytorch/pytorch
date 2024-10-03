@@ -371,10 +371,11 @@ at::Tensor CUDASymmetricMemory::get_buffer(
       " bytes) exceeds the allocated size (",
       buffer_size_,
       " bytes)");
+  auto data_ptr = reinterpret_cast<uint8_t*>(buffers_[rank]) +
+      storage_offset * element_size;
   auto device = c10::Device(c10::DeviceType::CUDA, local_device_idx_);
   auto options = at::TensorOptions().dtype(dtype).device(device);
-  return at::for_blob(buffers_[rank], sizes)
-      .storage_offset(storage_offset)
+  return at::for_blob(data_ptr, sizes)
       .options(options)
       .target_device(device)
       .make_tensor();
