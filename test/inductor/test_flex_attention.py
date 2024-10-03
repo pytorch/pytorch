@@ -2212,7 +2212,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             return q < M
 
-        block_mask = create_block_mask(mask_mod, 1, 1, S, S)
+        block_mask = create_block_mask(mask_mod, B, 1, S, S)
 
         def noop_mod(score, b, h, q_idx, kv_idx):
             return score

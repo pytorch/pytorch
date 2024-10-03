@@ -26,7 +26,7 @@ BlockMask
     :undoc-members:
 
 PagedAttention
----------
+--------------
 
 .. autoclass:: BlockMask
     :members:
