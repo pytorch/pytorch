@@ -332,7 +332,8 @@ static PyMethodDef THPStream_methods[] = {
     {nullptr}};
 
 PyTypeObject THPStreamType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.Stream", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.Stream", /* tp_name */
     sizeof(THPStream), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)THPStream_dealloc, /* tp_dealloc */
