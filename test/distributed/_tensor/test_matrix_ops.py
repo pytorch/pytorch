@@ -6,7 +6,7 @@ from typing import cast, List, Optional
 
 import torch
 import torch.nn.functional as F
-from torch.distributed._tensor import DeviceMesh, distribute_tensor
+from torch.distributed._tensor import distribute_tensor
 from torch.distributed._tensor.api import DTensor
 from torch.distributed._tensor.placement_types import (
     Partial,
@@ -17,16 +17,15 @@ from torch.distributed._tensor.placement_types import (
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorOpTestBase,
     skip_unless_torch_gpu,
-    with_comms,
 )
 
 
-class DistMatrixOpsTest(DTensorTestBase):
-    @with_comms
+class DistMatrixOpsTest(DTensorOpTestBase):
+    
     def test_addmm(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_mesh(self.device_type, list(range(self.world_size)))
         shard_spec = [Shard(0)]
         replica_spec = [Replicate()]
 
@@ -41,9 +40,9 @@ class DistMatrixOpsTest(DTensorTestBase):
         local_res = torch.addmm(input_tensor, tensor_to_shard, tensor_to_replicate)
         self.assertEqual(dist_res.full_tensor(), local_res)
 
-    @with_comms
+    
     def test_addmm_empty_operand(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh(self.device_type, list(range(self.world_size)))
         shard_spec = [Shard(0)]
         replica_spec = [Replicate()]
 
@@ -58,9 +57,9 @@ class DistMatrixOpsTest(DTensorTestBase):
         local_res = torch.addmm(input_tensor, tensor_to_shard, tensor_to_replicate)
         self.assertEqual(dist_res.full_tensor(), local_res)
 
-    @with_comms
+    
     def test_addmm_auto_redistribute(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh(self.device_type, list(range(self.world_size)))
         shard0_spec = [Shard(0)]
         shard1_spec = [Shard(1)]
         replica_spec = [Replicate()]
@@ -89,9 +88,9 @@ class DistMatrixOpsTest(DTensorTestBase):
         self.assertIsNotNone(mat2.grad)
         self.assertEqual(mat2.grad.full_tensor(), tensor_to_shard0.grad)
 
-    @with_comms
+    
     def test_mm(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh(self.device_type, list(range(self.world_size)))
         shard0_spec = Shard(0)
         shard1_spec = Shard(1)
         replica_spec = Replicate()
@@ -119,9 +118,9 @@ class DistMatrixOpsTest(DTensorTestBase):
         for spec in shard_specs_comb:
             test_placement_comb([spec[0]], [spec[1]])
 
-    @with_comms
+    
     def test_t(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh(self.device_type, list(range(self.world_size)))
         shard_spec = [Shard(0)]
 
         tensor_to_transpose = torch.randn(12, 8, requires_grad=True)
@@ -133,9 +132,9 @@ class DistMatrixOpsTest(DTensorTestBase):
         self.assertEqual(tranposed_mat2.size(), torch.Size([12, 8]))
         self.assertEqual(tranposed_mat2.placements, shard_spec)
 
-    @with_comms
+    
     def test_t_partial(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh(self.device_type, list(range(self.world_size)))
 
         a = torch.randn(12, 8)
         b = torch.randn(8, 4)
@@ -157,10 +156,10 @@ class DistMatrixOpsTest(DTensorTestBase):
         )
 
     # baddbmm introduces nan occasionally on CPU: https://github.com/pytorch/pytorch/issues/80588
-    @with_comms
+    
     @skip_unless_torch_gpu
     def test_baddbmm(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh(self.device_type, list(range(self.world_size)))
         tensor = torch.rand(4, 4, 8, device=self.device_type, requires_grad=True)
         batch_1 = torch.rand(4, 4, 8, device=self.device_type, requires_grad=True)
         batch_2 = torch.rand(4, 8, 8, device=self.device_type, requires_grad=True)
@@ -222,9 +221,9 @@ class DistMatrixOpsTest(DTensorTestBase):
                     [spec[0]], [spec[1]], [spec[2]], beta, alpha, batch_1.grad
                 )
 
-    @with_comms
+    
     def test_bmm(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh(self.device_type, list(range(self.world_size)))
         mat1 = torch.rand(4, 8, 4, device=self.device_type, requires_grad=True)
         mat2 = torch.rand(4, 4, 8, device=self.device_type, requires_grad=True)
         local_result = torch.bmm(mat1, mat2)
@@ -266,10 +265,10 @@ class DistMatrixOpsTest(DTensorTestBase):
         for spec in shard_specs_comb:
             test_placement_comb([spec[0]], [spec[1]])
 
-    @with_comms
+    
     @skip_unless_torch_gpu
     def test_scaled_dot_product_attention(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh(self.device_type, list(range(self.world_size)))
         comm_mode = CommDebugMode()
         # bsz, n_heads, slen, head_dim
         query = torch.rand(
