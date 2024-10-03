@@ -1791,7 +1791,8 @@ static struct PyMethodDef THPFunction_methods[] = {
     {nullptr}};
 
 PyTypeObject THPFunctionType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C._FunctionBase", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._FunctionBase", /* tp_name */
     sizeof(THPFunction), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)THPFunction_dealloc, /* tp_dealloc */
