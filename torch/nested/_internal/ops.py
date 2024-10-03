@@ -1472,6 +1472,10 @@ def slice_tensor(func, *args, **kwargs):
 
 
 @register_jagged_func(
+    torch.ops.aten.index_put.default,
+    "input: jt_all, indices: any, values: t, accumulate: any?",
+)
+@register_jagged_func(
     torch.ops.aten.index_put_.default,
     "input: jt_all, indices: any, values: t, accumulate: any?",
 )
@@ -1509,7 +1513,9 @@ def index_put_(func, *args, **kwargs):
     )
 
     return NestedTensor(
-        func(inp._values, func_indices, **new_kwargs), **extract_kwargs(inp)
+        func(inp._values, func_indices, **new_kwargs),
+        **extract_kwargs(inp),
+        lengths=inp.lengths(),
     )
 
 

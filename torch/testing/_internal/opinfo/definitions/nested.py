@@ -106,6 +106,10 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
         args = tree_map(_slice_input, sample.args)
         kwargs = tree_map(_slice_input, sample.kwargs)
 
+        # Handle indices in index_put
+        if "index_put" in op.full_name and "indices" in kwargs:
+            kwargs["indices"] = [t[i] for t in kwargs["indices"][1:]]
+
         from torch._prims_common import canonicalize_dims
 
         # Need to adjust dim to apply on NJT component
@@ -326,6 +330,41 @@ def sample_inputs_masked_select(
         )
 
 
+def sample_inputs_index_put(
+    op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs
+):
+    for njt in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[2]
+    ):
+        indices = [
+            torch.tensor(list(range(njt.size(0))), device=njt.device),
+            *[
+                torch.tensor([0] * njt.size(0), device=njt.device)
+                for _ in range(njt.dim() - 1)
+            ],
+        ]
+        yield SampleInput(
+            njt,
+            kwargs={"indices": indices, "values": torch.tensor(1.0, device=njt.device)},
+        )
+
+    # Non-cont NJT for completeness
+    offsets = torch.tensor([0, 2, 5, 7], device="cuda")
+    lengths = torch.tensor([2, 2, 2], device="cuda")
+    indices = [
+        torch.tensor([0, 1, 2], device="cuda"),
+        torch.tensor([0, 1, 1], device="cuda"),
+        torch.tensor([0, 0, 0], device="cuda"),
+    ]
+    a = torch.nested.nested_tensor_from_jagged(
+        torch.zeros(7, 3, device="cuda"), offsets, lengths
+    )
+
+    yield SampleInput(
+        a, kwargs={"indices": indices, "values": torch.tensor(1.0, device=a.device)}
+    )
+
+
 def sample_inputs_nn_functional_embedding_bag(
     op_info, device, dtype, requires_grad, **kwargs
 ):
@@ -464,6 +503,7 @@ njt_sample_inputs = {
     **{f"polygamma.polygamma_n_{n}": sample_inputs_polygamma_n(n=n) for n in range(5)},
     "special.polygamma.special_polygamma_n_0": sample_inputs_special_polygamma_n(n=0),
     "masked_select": sample_inputs_masked_select,
+    "index_put": sample_inputs_index_put,
 }
 
 njt_references = {
