@@ -483,6 +483,9 @@ compiled_autograd_kwargs_override: Dict[str, Any] = {}
 # NCCL timeout.
 enable_compiler_collectives = os.environ.get("TORCH_COMPILER_COLLECTIVES", "0") == "1"
 
+# HACK: this is for testing custom ops profiling only
+_custom_ops_profile: Optional[Any] = None
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
