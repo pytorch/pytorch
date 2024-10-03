@@ -605,8 +605,7 @@ class FxGraphCachePickler(pickle.Pickler):
             try:
                 pickler.dump(obj)
             except (TypeError, AttributeError) as e:
-                # Some configs options are callables, e.g., post_grad_custom_pre_pass,
-                # and may not pickle.
+                # Some configs options may not pickle.
                 log.warning("Can't pickle", exc_info=True)
                 raise BypassFxGraphCache("Config options may be unpickleable") from e
             return stream.getvalue()
@@ -1257,6 +1256,13 @@ class FxGraphCache:
         Check some conditions that would preclude caching and raise BypassFxGraphCache
         to bypass in case caching is not possible.
         """
+        # TODO: https://github.com/pytorch/pytorch/issues/130772
+        if (
+            config.post_grad_custom_pre_pass is not None
+            or config.post_grad_custom_post_pass is not None
+        ):
+            raise BypassFxGraphCache("Post grad custom passes unsupported")
+
         # Freezing can embed constants that wouldn't be static across runs.
         if config.freezing or config.aot_inductor.use_runtime_constant_folding:
             raise BypassFxGraphCache(
