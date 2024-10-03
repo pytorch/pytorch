@@ -342,3 +342,8 @@ parameterized==0.8.1
 #Description: Parameterizes unittests, both the tests themselves and the entire testing class
 #Pinned versions:
 #test that import:
+
+pulp==2.9.0 ; python_version >= "3.11"
+#Description: required for tesing ilp formulaiton under torch/distributed
+#Pinned versions: 2.9.0
+#test that import: test_sac_ilp.py
