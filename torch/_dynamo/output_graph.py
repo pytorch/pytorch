@@ -304,7 +304,6 @@ class OutputGraph:
 
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
-        import torch._functorch.config as _config
 
         fake_mode = torch._subclasses.FakeTensorMode(
             shape_env=shape_env,
@@ -1353,8 +1352,6 @@ class OutputGraph:
             self.call_cleanup_hooks()
             old_fake_mode = self.tracing_context.fake_mode
             if not self.export:
-                import torch._functorch.config as _config
-
                 # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
                 backend_fake_mode = torch._subclasses.FakeTensorMode(
                     shape_env=old_fake_mode.shape_env,

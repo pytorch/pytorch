@@ -1120,7 +1120,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
     def test_data_ptr_access_in_eager_errors(self):
         with FakeTensorMode():
             x = torch.randn(3)
-            with self.assertRaisesRegex(RuntimeError, "Cannot access data pointer of Tensor"):
+            with self.assertRaisesRegex(
+                RuntimeError, "Cannot access data pointer of Tensor"
+            ):
                 x.data_ptr()
 
     def test_data_ptr_access_fails_in_forward(self):

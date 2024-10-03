@@ -1880,8 +1880,6 @@ class _MakefxTracer:
 
                 fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
                 if fake_tensor_mode is None:
-                    import torch._functorch.config as _config
-
                     fake_tensor_mode = FakeTensorMode(
                         allow_fallback_kernels=True,
                         allow_non_fake_inputs=self._allow_non_fake_inputs,
@@ -1895,7 +1893,6 @@ class _MakefxTracer:
                 fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
                 if fake_tensor_mode is None:
                     shape_env = ShapeEnv()
-                    import torch._functorch.config as _config
 
                     fake_tensor_mode = FakeTensorMode(
                         allow_fallback_kernels=False,
