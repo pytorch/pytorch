@@ -596,14 +596,16 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
       currentTimepoint - workStartTime_);
   auto workTimeout = timeout ? *timeout : opTimeout_;
 
-  if (timeElapsed < workTimeout)
+  if (timeElapsed < workTimeout) {
     return false;
+  }
 
   // Timed out
 
   // There is already an error, we don't override it
-  if (exception())
+  if (exception()) {
     return true;
+  }
 
   std::string exceptionMsg = c10::str(
       logPrefix(),
@@ -643,6 +645,8 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
   synchronizeStream();
 
   // Device synchronize only after we've completed timeout checks.
+  // TODO: Is this necessary for barrier if we already block the cpu thread till
+  // the completion of the work?
   if (barrierTensor_.defined()) {
     // If we use the work to do barrier, we should block here
     // `dist.barrier()` only requires all CPU processes to enter this
@@ -687,13 +691,10 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
       -1,
       -1,
       static_cast<int>(1)); // number of device?
-  
-  // syncrhoize() will block the current stream on the NCCL stream
-  synchronize();
 
-  // In case of blockingWait or a timeout value is specified, we further block the CPU thread
-  // until the work is completed.
-  if (blockingWait_ || timeout != kNoTimeout) {
+  // In case of blockingWait or a timeout value is specified by the user, we
+  // block the CPU thread until the work is completed or timed out.
+  if (blockingWait_ || timeout != kNoTimeout || barrierTensor_.defined()) {
     while (!isCompleted()) {
       bool timedOut = checkTimeout(
           timeout == kNoTimeout ? std::nullopt : std::make_optional(timeout));
@@ -704,10 +705,7 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
       // can not run new events successfully.
       if (timedOut) {
         std::string exceptionMsg = c10::str(
-            logPrefix(),
-            "Work ",
-            (*this),
-            " timed out in blocking wait.");
+            logPrefix(), "Work ", (*this), " timed out in blocking wait.");
         LOG(ERROR) << exceptionMsg;
         break;
       }
@@ -715,16 +713,18 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
       std::this_thread::sleep_for(
           std::chrono::milliseconds(kSynchronizeBusyWaitMillis));
     }
-    // 
-    // 
+
     if (exception()) {
       // Abort NCCL communicators
       abort();
       // Throw exception (from main thread here)
       handleException(TearDown);
     }
-  } 
-  
+  }
+
+  // syncrhoize() will block the current stream on the NCCL stream
+  synchronize();
+
   // TODO(kwen2501): this should be moved to c10d tests, to qualify a NCCL
   // upgrade. Once a NCCL version is qualified, this code should not be needed
   // at runtime.
