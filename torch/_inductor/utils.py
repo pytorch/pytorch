@@ -856,18 +856,50 @@ def argsort(seq) -> List[int]:
     return list(reversed(sorted(a_r, key=getter, reverse=True)))  # noqa: C413
 
 
-def argsort_symint(seq: List[Union[int, torch.SymInt]]) -> List[int]:
-    stuff = list(enumerate(seq))
+def argsort_sym(seq: List[Union[int, torch.SymInt, sympy.Expr]]) -> List[int]:
+    # Convert all symints to sympy.Expr. (Converting the other way is hard
+    # because we need a shape_env)
+    seq_with_exprs = []
+    maybe_shape_env = None
+    for idx, maybe_symint in enumerate(seq):
+        if isinstance(maybe_symint, torch.SymInt):
+            expr = maybe_symint.node.expr
+            shape_env = maybe_symint.node.shape_env
+            if maybe_shape_env is None:
+                maybe_shape_env = shape_env
+            else:
+                assert (
+                    maybe_shape_env is shape_env
+                ), "tried to compare SymInts from different shape_envs"
+        else:
+            expr = maybe_symint
+        seq_with_exprs.append((idx, expr))
 
     def cmp(a, b):
-        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
-
         a_val = a[1]
         b_val = b[1]
 
-        if guard_size_oblivious(a_val < b_val):
+        def evaluate(expr):
+            if isinstance(expr, bool):
+                return expr
+            if maybe_shape_env is not None:
+                return maybe_shape_env.evaluate_expr(expr, size_oblivious=True)
+            # By the way, this function only handles sympy.Expr that are not provable
+            # to be True/False if they were originally passed in as torch.SymInt,
+            # because we grab the shape_env from those SymInt and the shape_env
+            # is needed to evaluate the Expr.
+            # If you need this case then you'll need to either
+            # pass the Expr in as torch.SymInt or refactor
+            # argsort_sym to accept a shape_env and modify all the callers
+            # (like get_stride_order to accept a shape_env). We didn't do the refactor
+            # because these functions have a lot of callers and our ultimate goal is
+            # to unify on torch.SymInt over sympy.Expr in Inductor
+            # (https://github.com/pytorch/pytorch/issues/137093)
+            return bool(expr)
+
+        if evaluate(a_val < b_val):
             return -1
-        if guard_size_oblivious(a_val > b_val):
+        if evaluate(a_val > b_val):
             return 1
         # If strides are the same, prefer the original order.
         # (this matches argsort's algorithm).
@@ -879,8 +911,8 @@ def argsort_symint(seq: List[Union[int, torch.SymInt]]) -> List[int]:
             return -1
         return 0
 
-    stuff_sorted = sorted(stuff, key=functools.cmp_to_key(cmp))
-    result = [idx for idx, _ in stuff_sorted]
+    seq_with_exprs_sorted = sorted(seq_with_exprs, key=functools.cmp_to_key(cmp))
+    result = [idx for idx, _ in seq_with_exprs_sorted]
     return result
 
 
