@@ -57,9 +57,7 @@ DEVICE_INLINE void streamLoad128(bf16x8& val, const T* addr) {
   CUDA_KERNEL_ASSERT(false);
 #else
   unsigned long long int low, high;
-  asm("ld.global.nc.v2.u64 {%0, %1}, [%2];"
-      : "=l"(low), "=l"(high)
-      : "l"(addr));
+  asm("ld.global.v2.u64 {%0, %1}, [%2];" : "=l"(low), "=l"(high) : "l"(addr));
   reinterpret_cast<unsigned long long int*>(&val)[0] = low;
   reinterpret_cast<unsigned long long int*>(&val)[1] = high;
 #endif
@@ -72,7 +70,7 @@ __device__ inline void streamStore128(at::BFloat16* addr, const bf16x8& val) {
   unsigned long long int low, high;
   low = reinterpret_cast<const unsigned long long int*>(&val)[0];
   high = reinterpret_cast<const unsigned long long int*>(&val)[1];
-  asm("st.global.cs.v2.u64 [%0], {%1, %2};" : : "l"(addr), "l"(low), "l"(high));
+  asm("st.global.v2.u64 [%0], {%1, %2};" : : "l"(addr), "l"(low), "l"(high));
 #endif
 }
 
@@ -104,21 +102,11 @@ static __global__ void oneShotAllReduceKernel(
     size_t N_aligned,
     P2pState** p2pStates,
     at::BFloat16** buffers,
-    size_t rank,
-    bool fuseInputCopy) {
+    size_t rank) {
   const size_t numelPerThread = kBytesPerThread / sizeof(at::BFloat16);
   const size_t offset =
       (blockDim.x * blockIdx.x + threadIdx.x) * numelPerThread;
   const size_t stride = blockDim.x * gridDim.x * numelPerThread;
-
-  if (fuseInputCopy) {
-    for (size_t i = offset; i < N_aligned; i += stride) {
-      bf16x8 val;
-      streamLoad128(val, &input[i]);
-      streamStore128(&buffers[rank][i], val);
-    }
-    __threadfence();
-  }
 
   barrier_and_acquire_previous_kernel_writes(
       reinterpret_cast<uint32_t**>(p2pStates), rank, kWorldSize);
@@ -195,8 +183,8 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
     bf16x8 vals[kWorldSize];
 #pragma unroll kWorldSize
     for (size_t ii = 0; ii < kWorldSize; ++ii) {
-      // Make sure the values in `vals` are order by rank so that the reduction
-      // results are consistent across ranks.
+      // Make sure the values in `vals` are ordered by rank so that the
+      // reduction results are consistent across ranks.
       int srcRank = (ii + kWorldSize - rank) % kWorldSize;
       streamLoad128(vals[srcRank], &srcs[ii][N_start + i]);
     }
@@ -214,7 +202,6 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
     streamStore128(&input[N_start + i], sums);
   }
   __syncthreads();
-  __threadfence();
 
   barrier_and_acquire_previous_kernel_writes(
       reinterpret_cast<uint32_t**>(p2pStates), rank, kWorldSize);
@@ -485,19 +472,12 @@ at::Tensor IntraNodeComm::oneShotAllReduce(
 
   at::cuda::OptionalCUDAGuard guard(input.get_device());
 
-  // When the input data is small, copying inside the kernel is faster. Because
-  // in such cases, the launch overhead of cudaMemcpyAsync outweighs its
-  // efficiency. Here we consider the input data to be small if the copy loop
-  // can finish in a single iteration.
-  const bool fuseInputCopy = isAligned && blocks.x < kMaxAllReduceBlocks;
-  if (!fuseInputCopy) {
-    AT_CUDA_CHECK(cudaMemcpyAsync(
-        symmetricMemory_->get_buffer_ptrs()[rank_],
-        input.data_ptr(),
-        input.numel() * input.element_size(),
-        cudaMemcpyDeviceToDevice,
-        stream));
-  }
+  AT_CUDA_CHECK(cudaMemcpyAsync(
+      symmetricMemory_->get_buffer_ptrs()[rank_],
+      input.data_ptr(),
+      input.numel() * input.element_size(),
+      cudaMemcpyDeviceToDevice,
+      stream));
 
 #define X(kWorldSize, kAligned)                            \
   if (worldSize_ == kWorldSize) {                          \
@@ -508,8 +488,7 @@ at::Tensor IntraNodeComm::oneShotAllReduce(
             N_aligned,                                     \
             reinterpret_cast<P2pState**>(p2pStatesDev_),   \
             reinterpret_cast<at::BFloat16**>(buffersDev_), \
-            rank_,                                         \
-            fuseInputCopy);                                \
+            rank_);                                        \
     C10_CUDA_KERNEL_LAUNCH_CHECK();                        \
   }
 
