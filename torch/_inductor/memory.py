@@ -130,6 +130,7 @@ def compute_size_for_scheduler_buffer(
         A dictionary mapping a scheduler buffer to a tuple of (size_alloc, size_free).
     """
     from .scheduler import OutputNode
+    from .ir import MultiOutput
 
     sched_buf_to_size: Dict[str, Tuple[int, int]] = dict()
 
@@ -137,12 +138,13 @@ def compute_size_for_scheduler_buffer(
         sched_buf: SchedulerBuffer, user_of_MultiOutputLayout: bool = False
     ) -> int:
         if isinstance(sched_buf.node.layout, MultiOutputLayout):
-            size_alloc = sum(
-                _get_buf_size(buf, True)
-                for user in sched_buf.users
-                if not isinstance(user.node, OutputNode)
-                for buf in user.node.get_outputs()
-            )
+            size_alloc = 0
+            for user in sched_buf.users:
+                if isinstance(user.node, OutputNode):
+                    continue
+                for buf in user.node.get_outputs():
+                    if isinstance(buf.node, MultiOutput):
+                        size_alloc += _get_buf_size(buf, True)
             sched_buf_to_size[sched_buf.get_name()] = (
                 0 if user_of_MultiOutputLayout else size_alloc,
                 0,
@@ -214,7 +216,7 @@ def assign_memory_planning_info_for_scheduler_nodes(
             Union[SchedulerBuffer, FreeableInputBuffer]
         ] = OrderedSet()
         for dep in node.read_writes.reads:
-            if dep.name in name_to_buf:
+            if dep.name in name_to_buf and dep in node.unmet_dependencies:
                 pred_buffers.add(name_to_buf[dep.name])
             elif dep.name in name_to_freeable_input_buf:
                 pred_buffers.add(name_to_freeable_input_buf[dep.name])
