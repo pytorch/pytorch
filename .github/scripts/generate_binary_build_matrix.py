@@ -333,7 +333,7 @@ def generate_wheels_matrix(
         package_type = "manywheel"
 
     if python_versions is None:
-        python_versions = FULL_PYTHON_VERSIONS + ["3.13"]
+        python_versions = FULL_PYTHON_VERSIONS + ["3.13", "3.13t"]
 
     if arches is None:
         # Define default compute archivectures
@@ -369,7 +369,13 @@ def generate_wheels_matrix(
             # TODO: Enable python 3.13 on rocm, aarch64, windows
             if (
                 gpu_arch_type == "rocm" or (os != "linux" and os != "linux-s390x")
-            ) and python_version == "3.13":
+            ) and (python_version == "3.13" or python_version == "3.13t"):
+                continue
+
+            # TODO: Enable python 3.13t on xpu and cpu-s390x
+            if (
+                gpu_arch_type == "xpu" or gpu_arch_type == "cpu-s390x"
+            ) and python_version == "3.13t":
                 continue
 
             if use_split_build and (
@@ -412,8 +418,8 @@ def generate_wheels_matrix(
                         ),
                     }
                 )
-                # Special build building to use on Colab. PyThon 3.10 for 12.1 CUDA
-                if python_version == "3.10" and arch_version == "12.1":
+                # Special build building to use on Colab. Python 3.11 for 12.1 CUDA
+                if python_version == "3.11" and arch_version == "12.1":
                     ret.append(
                         {
                             "python_version": python_version,
