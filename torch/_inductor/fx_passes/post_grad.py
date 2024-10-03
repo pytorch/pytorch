@@ -71,6 +71,11 @@ pass_patterns = [
     PatternMatcherPass(),
 ]
 
+def remove_self_clone(graph: torch.fx.Graph):
+    for node in graph.nodes:
+        if node.target == torch.ops.aten.copy_.default and node.args[0] == node.args[1]:
+            node.replace_all_uses_with(node.args[0])
+            graph.erase_node(node)
 
 def post_grad_passes(
     gm: torch.fx.GraphModule, is_inference: bool, example_inputs=None, fake_mode=None
@@ -158,7 +163,7 @@ def post_grad_passes(
     # ./fx_passes/README.md for a discussion of mutation invariants.
     reinplace_inplaceable_ops(gm.graph)
     decompose_auto_functionalized(gm.graph)
-
+    remove_self_clone(gm.graph)
     comms.reinplace_fsdp_all_gather(gm.graph)
 
     gm.recompile()
