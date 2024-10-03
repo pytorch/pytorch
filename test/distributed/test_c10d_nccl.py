@@ -2554,6 +2554,24 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             del process_group
             func()
 
+    def _test_barrier_error(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(
+            store,
+            self.rank,
+            self.world_size,
+            timeout=timedelta(seconds=10),
+        )
+        process_group.barrier().wait()
+        if self.rank == 0:
+            with self.assertRaisesRegex(dist.DistBackendError, ""):
+                # It seems the error message would be different depending on
+                # whether the test is run on CI machine and devGPU.  Skipping
+                # the error message check to make both sides happy.
+                process_group.barrier().wait(
+                    timeout=timedelta(seconds=self.op_timeout_sec)
+                )
+
     @with_nccl_blocking_wait
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
@@ -2602,22 +2620,22 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     def test_nccl_blocking_wait_with_barrier(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(
-            store,
-            self.rank,
-            self.world_size,
-            timeout=timedelta(seconds=10),
+        self._test_barrier_error()
+
+    @requires_nccl()
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
+    @skip_if_lt_x_gpu(3)
+    def test_nccl_non_blocking_wait_with_barrier(self):
+        prev_nccl_async_error_handling = os.environ.get(
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING", None
         )
-        process_group.barrier().wait()
-        if self.rank == 0:
-            with self.assertRaisesRegex(dist.DistBackendError, ""):
-                # It seems the error message would be different depending on
-                # whether the test is run on CI machine and devGPU.  Skipping
-                # the error message check to make both sides happy.
-                process_group.barrier().wait(
-                    timeout=timedelta(seconds=self.op_timeout_sec)
-                )
+        # avoid watchdog thread interference
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
+        self._test_barrier_error()
+        if prev_nccl_async_error_handling is not None:
+            os.environ[
+                "TORCH_NCCL_ASYNC_ERROR_HANDLING"
+            ] = prev_nccl_async_error_handling
 
     def _run_invalid_nccl_blocking_wait_env(self, val):
         os.environ["TORCH_NCCL_BLOCKING_WAIT"] = val
