@@ -665,15 +665,6 @@ test_inductor_torchbench_smoketest_perf() {
   # The threshold value needs to be actively maintained to make this check useful
   python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_training_smoketest.csv" -t 1.4
 
-  TORCHINDUCTOR_ABI_COMPATIBLE=1 python benchmarks/dynamo/torchbench.py --device cuda --performance --bfloat16 --inference \
-    --export-aot-inductor --only nanogpt --output "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv"
-  # The threshold value needs to be actively maintained to make this check useful
-  # The perf number of nanogpt seems not very stable, e.g.
-  # https://github.com/pytorch/pytorch/actions/runs/7158691360/job/19491437314,
-  # and thus we lower its threshold to reduce flakiness. If this continues to be a problem,
-  # we switch to use some other model.
-  python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv" -t 4.9
-
   # Check memory compression ratio for a few models
   for test in hf_Albert timm_vision_transformer; do
     python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --amp --training \
@@ -1469,7 +1460,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   # https://github.com/opencv/opencv-python/issues/885
   pip_install opencv-python==4.8.0.74
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
-    checkout_install_torchbench hf_Bert hf_Albert nanogpt timm_vision_transformer
+    checkout_install_torchbench hf_Bert hf_Albert timm_vision_transformer
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
   elif [[ "${TEST_CONFIG}" == *inductor_torchbench_cpu_smoketest_perf* ]]; then
     checkout_install_torchbench timm_vision_transformer phlippe_densenet basic_gnn_edgecnn \
