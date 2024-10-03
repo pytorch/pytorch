@@ -58,8 +58,7 @@ def remove_build_path():
         shutil.rmtree(default_build_root, ignore_errors=True)
 
 
-@unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
-class ExtensionBackendTests(TestCase):
+class BaseExtensionBackendTests(TestCase):
     module = None
 
     @classmethod
@@ -105,6 +104,9 @@ class ExtensionBackendTests(TestCase):
         # return the working directory (see setUp)
         os.chdir(self.old_working_dir)
 
+
+@unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
+class ExtensionBackendTests(BaseExtensionBackendTests):
     def test_open_device_registration(self):
         torch.utils.rename_privateuse1_backend("extension_device")
         torch._register_device_module("extension_device", self.module)
