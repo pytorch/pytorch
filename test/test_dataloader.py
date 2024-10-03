@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfNoDill,
     skipIfRocm,
+    skipIfXpu,
     slowTest,
     TEST_CUDA,
     TEST_NUMPY,
@@ -40,6 +41,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TestCase,
+    xfailIfLinux,
 )
 from torch.utils.data import (
     _utils,
@@ -97,9 +99,6 @@ TEST_CUDA_IPC = (
 )  # https://github.com/pytorch/pytorch/issues/90940
 
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
-
-if TEST_CUDA_IPC:
-    torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
 if not NO_MULTIPROCESSING_SPAWN:
     # We want to use `spawn` if able because some of our tests check that the
@@ -1385,6 +1384,11 @@ except RuntimeError as e:
             del loader1_it
             del loader2_it
 
+    # This case pass on Intel GPU, but currently expected failure on other device,
+    # please don't forget to remove this skip when remove the xfailIfLinux.
+    @skipIfXpu
+    # https://github.com/pytorch/pytorch/issues/128551
+    @xfailIfLinux
     def test_segfault(self):
         p = ErrorTrackingProcess(target=_test_segfault)
         p.start()
@@ -3032,9 +3036,7 @@ class DictDataset(Dataset):
     def __getitem__(self, ndx):
         return {
             "a_tensor": torch.empty(4, 2).fill_(ndx),
-            "another_dict": {
-                "a_number": ndx,
-            },
+            "another_dict": {"a_number": ndx},
         }
 
 

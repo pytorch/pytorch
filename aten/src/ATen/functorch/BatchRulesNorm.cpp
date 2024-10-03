@@ -42,7 +42,7 @@ static Tensor padRight(const Tensor& tensor, std::optional<int64_t> has_bdim, in
 }
 
 template<typename F, F Func>
-std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>,Tensor,optional<int64_t>>
+std::tuple<Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>>
 batch_norm_batch_rule(
     const Tensor& input, std::optional<int64_t> input_bdim,
     const std::optional<Tensor>& weight_opt, std::optional<int64_t> weight_bdim,
@@ -124,7 +124,7 @@ batch_norm_batch_rule(
 }
 
 template<typename F, F Func>
-std::tuple<at::Tensor,optional<int64_t>> batch_norm_backward_no_weight_bias_batch_rule(
+std::tuple<at::Tensor, std::optional<int64_t>> batch_norm_backward_no_weight_bias_batch_rule(
     const at::Tensor & grad_out, std::optional<int64_t> grad_out_bdim,
     const at::Tensor & input, std::optional<int64_t> input_bdim,
     const std::optional<at::Tensor> & running_mean_opt, std::optional<int64_t> running_mean_bdim,
@@ -337,7 +337,7 @@ static std::tuple<Tensor,Tensor,Tensor> native_group_norm_plumbing(
   return std::make_tuple(result0, mean, rstd);
 }
 
-static std::tuple<at::Tensor,optional<int64_t>> group_norm_backward_no_weight_bias_batch_rule(
+static std::tuple<at::Tensor, std::optional<int64_t>> group_norm_backward_no_weight_bias_batch_rule(
     const at::Tensor & grad_out, std::optional<int64_t> grad_out_bdim,
     const at::Tensor & input, std::optional<int64_t> input_bdim,
     const at::Tensor & mean, std::optional<int64_t> mean_bdim,
@@ -484,7 +484,7 @@ C10_ALWAYS_INLINE void _check_layer_norm_inputs(
   check_same_shape(bias, bias_bdim, normalized_shape, "weight");
 }
 
-static std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>,Tensor,optional<int64_t>>
+static std::tuple<Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>>
 native_layer_norm_batch_rule(
     const Tensor& input, std::optional<int64_t> input_bdim,
     c10::SymIntArrayRef normalized_shape,
@@ -530,7 +530,7 @@ native_layer_norm_batch_rule(
   return std::make_tuple(result0, 0, mean, stats_bdim, rstd, stats_bdim);
 }
 
-static std::tuple<at::Tensor,optional<int64_t>> native_layer_norm_backward_no_weight_bias_batch_rule(
+static std::tuple<at::Tensor, std::optional<int64_t>> native_layer_norm_backward_no_weight_bias_batch_rule(
     const at::Tensor & grad_out, std::optional<int64_t> grad_out_bdim,
     const at::Tensor & input, std::optional<int64_t> input_bdim,
     at::IntArrayRef normalized_shape,
@@ -651,7 +651,7 @@ static std::tuple<at::Tensor,at::Tensor,at::Tensor> native_layer_norm_backward_p
 
 template <typename F, F Func>
 struct NativeBatchNormBatchRuleHelper {
-  static std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>,Tensor,optional<int64_t>> apply(
+  static std::tuple<Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>> apply(
     const Tensor& input, std::optional<int64_t> input_bdim,
     const std::optional<Tensor>& weight_opt, std::optional<int64_t> weight_bdim,
     const std::optional<Tensor>& bias_opt, std::optional<int64_t> bias_bdim,
@@ -666,7 +666,7 @@ struct NativeBatchNormBatchRuleHelper {
 
 template <typename F, F Func>
 struct CudnnBatchNormBatchRuleHelper {
-  static std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>,Tensor,optional<int64_t>,Tensor,optional<int64_t>> apply(
+  static std::tuple<Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>> apply(
     const Tensor& input, std::optional<int64_t> input_bdim,
     const Tensor& weight_opt, std::optional<int64_t> weight_bdim,
     const std::optional<Tensor>& bias_opt, std::optional<int64_t> bias_bdim,
@@ -683,7 +683,7 @@ struct CudnnBatchNormBatchRuleHelper {
 
 template <typename F, F Func>
 struct MiopenBatchNormBatchRuleHelper {
-  static std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>,Tensor,optional<int64_t>> apply(
+  static std::tuple<Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>> apply(
     const Tensor& input, std::optional<int64_t> input_bdim,
     const Tensor& weight_opt, std::optional<int64_t> weight_bdim,
     const std::optional<Tensor>& bias_opt, std::optional<int64_t> bias_bdim,

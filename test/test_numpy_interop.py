@@ -327,13 +327,7 @@ class TestNumPyInterop(TestCase):
 
         # list of list or numpy array.
         with self.assertRaisesRegex(ValueError, "expected sequence of length"):
-            torch.tensor(
-                [
-                    [1, 2, 3],
-                    np.random.random(size=(2,)),
-                ],
-                device=device,
-            )
+            torch.tensor([[1, 2, 3], np.random.random(size=(2,))], device=device)
 
     @onlyCPU
     def test_ctor_with_numpy_scalar_ctor(self, device) -> None:

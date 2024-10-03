@@ -5,9 +5,7 @@ import torch._C
 from torch._C import _add_docstr as add_docstr
 
 
-storage_classes = [
-    "StorageBase",
-]
+storage_classes = ["StorageBase"]
 
 
 def add_docstr_all(method, docstr):

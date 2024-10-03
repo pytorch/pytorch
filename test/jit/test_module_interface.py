@@ -160,7 +160,7 @@ class TestModuleInterface(JitTestCase):
                 # type: (Tensor) -> Tensor
                 r"""stuff 1"""
                 r"""stuff 2"""
-                pass
+                pass  # noqa: PIE790
                 r"""stuff 3"""
 
         class TestModule(nn.Module):

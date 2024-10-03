@@ -278,7 +278,6 @@ static bool xnnpack_use_convolution2d(
 }
 #endif
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 // This struct is templated so that we can run backend selection in a dynamic
 // shapes context; all of the real kernel selection in eager mode runs with
 // int64_t
@@ -297,7 +296,7 @@ struct ConvParams {
 
   bool is_strided() const {
     bool is_strided = false;
-    for (auto s : stride) {
+    for (const auto& s : stride) {
       is_strided |= (s != 1);
     }
     return is_strided;
@@ -422,11 +421,17 @@ struct ConvParams {
   // cudnn and miopen are guaranteed not to be on mobile, and T102591915 / T110194934 suggest
   // that maybe the compiledWithCuDNN() check sometimes segfaults (though I can't imagine how)
 #if !defined(C10_MOBILE)
-    if (needs_64bit_indexing_no_split(input, weight)) {
-      return false;
-    }
     if (!detail::getCUDAHooks().compiledWithCuDNN()) {
       return false;
+    }
+    if (needs_64bit_indexing_no_split(input, weight)) {
+      static long cudnn_version = detail::getCUDAHooks().versionCuDNN();
+      if (!(cudnn_version >= 90300 && at::native::cudnnv8_enabled_check_debug())) {
+        TORCH_WARN_ONCE("cuDNN cannot be used for large non-batch-splittable convolutions"
+                        " if the V8 API is not enabled or before cuDNN version 9.3+."
+                        " Consider upgrading cuDNN and/or enabling the V8 API for better efficiency.");
+        return false;
+      }
     }
     if (!input.is_cuda() || !cudnn_enabled) {
       return false;
@@ -1658,14 +1663,8 @@ at::Tensor _convolution(
       break;
     case ConvBackend::Mps:
 #ifdef USE_MPS
-      TORCH_CHECK(input.options().type_equal(weight.options()),
-               "Input type (", input.toString(), ") and weight type (", weight.toString(),
-               ") should be the same");
-      TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options())),
-               "Input type (", input.toString(), ") and bias type (", bias.toString(),
-               ") should be the same");
-
-      output = at::_mps_convolution(input.contiguous(), weight, bias.defined() ? bias.contiguous() : bias,
+      check_input_same_type_as_parameters(input, weight, bias);
+      output = at::_mps_convolution(input, weight, bias.defined() ? bias.contiguous() : bias,
                                      params.padding, params.stride, params.dilation,
                                      params.groups);
 #else
@@ -1674,12 +1673,7 @@ at::Tensor _convolution(
       break;
     case ConvBackend::MpsTranspose:
 #ifdef USE_MPS
-      TORCH_CHECK(input.options().type_equal(weight.options()),
-               "Input type (", input.toString(), ") and weight type (", weight.toString(),
-               ") should be the same");
-      TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options())),
-               "Input type (", input.toString(), ") and bias type (", bias.toString(),
-               ") should be the same");
+      check_input_same_type_as_parameters(input, weight, bias);
       output = at::_mps_convolution_transpose(
           input.contiguous(backend_memory_format), weight,
           params.padding, params.output_padding,
@@ -1757,7 +1751,6 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const std::option
   // See: https://github.com/pytorch/pytorch/pull/36355
   if (!params.transposed && input.dim() > 4) {
     // Avoid undefined behavior when num channels == 0; params are unused for that case.
-    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     params.groups = (weight.size(1) > 0) ? input.size(1) / weight.size(1) : -1;
   } else {
     params.groups = groups_;

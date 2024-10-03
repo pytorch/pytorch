@@ -12,6 +12,7 @@ struct NoOpPythonTracer : public PythonTracerBase {
   ~NoOpPythonTracer() override = default;
 
   void stop() override {}
+  void restart() override {}
   std::vector<std::shared_ptr<Result>> getEvents(
       std::function<c10::time_t(c10::approx_time_t)>,
       std::vector<CompressedEvent>&,

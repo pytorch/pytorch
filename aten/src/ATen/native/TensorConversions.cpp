@@ -220,7 +220,7 @@ static inline Device ensure_has_index(Device device) {
   return impl->getDevice();
 }
 
-static inline std::optional<Device> ensure_has_index(optional<Device> device) {
+static inline std::optional<Device> ensure_has_index(std::optional<Device> device) {
   if (!device.has_value()) {
     return std::nullopt;
   }
@@ -772,9 +772,6 @@ inline SymDimVector compute_strides_for_view_dtype_upsize(SymIntArrayRef old_str
 }
 
 Tensor view_dtype(const Tensor& self, ScalarType dtype) {
-  if (self.scalar_type() == dtype) {
-    return self;
-  }
   const auto type_meta = c10::scalarTypeToTypeMeta(dtype);
   TORCH_CHECK(!self.is_conj(),
     "torch.Tensor.view is not supported for conjugate view tensors when converting to a different dtype.");

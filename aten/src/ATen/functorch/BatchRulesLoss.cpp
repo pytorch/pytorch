@@ -27,7 +27,7 @@ static at::Tensor flatten_logical(const Tensor& tensor, std::optional<int64_t> b
 
 // Useful for many loss functions
 template <typename Func>
-static std::tuple<at::Tensor,optional<int64_t>>
+static std::tuple<at::Tensor, std::optional<int64_t>>
 loss_batch_rule_helper(const at::Tensor& self, std::optional<int64_t> self_bdim, const at::Tensor& target,
           std::optional<int64_t> target_bdim, int64_t reduction,
           Func loss_fn) {
@@ -49,7 +49,7 @@ loss_batch_rule_helper(const at::Tensor& self, std::optional<int64_t> self_bdim,
   TORCH_INTERNAL_ASSERT(false);
 };
 
-static std::tuple<at::Tensor,optional<int64_t>>
+static std::tuple<at::Tensor, std::optional<int64_t>>
 mse_loss_batch_rule(const at::Tensor& self, std::optional<int64_t> self_bdim, const at::Tensor& target,
           std::optional<int64_t> target_bdim, int64_t reduction) {
   return loss_batch_rule_helper(self, self_bdim, target, target_bdim,
@@ -58,7 +58,7 @@ mse_loss_batch_rule(const at::Tensor& self, std::optional<int64_t> self_bdim, co
                                 });
 };
 
-static std::tuple<at::Tensor,optional<int64_t>>
+static std::tuple<at::Tensor, std::optional<int64_t>>
 huber_loss_batch_rule(const at::Tensor& self, std::optional<int64_t> self_bdim, const at::Tensor& target,
           std::optional<int64_t> target_bdim, int64_t reduction, double delta) {
   return loss_batch_rule_helper(self, self_bdim, target, target_bdim,
@@ -67,7 +67,7 @@ huber_loss_batch_rule(const at::Tensor& self, std::optional<int64_t> self_bdim, 
                                 });
 };
 
-static std::tuple<at::Tensor,optional<int64_t>>
+static std::tuple<at::Tensor, std::optional<int64_t>>
 smooth_l1_loss_batch_rule(const at::Tensor& self, std::optional<int64_t> self_bdim, const at::Tensor& target,
           std::optional<int64_t> target_bdim, int64_t reduction, double beta) {
   return loss_batch_rule_helper(self, self_bdim, target, target_bdim,

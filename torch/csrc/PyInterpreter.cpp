@@ -44,6 +44,7 @@ struct ConcretePyInterpreterVTable final
     : public c10::impl::PyInterpreterVTable {
   std::string name() const override;
 
+  void incref(PyObject* pyobj) const override;
   void decref(PyObject* pyobj, bool has_pyobj_slot) const override;
 
   // TODO: Need to make this work for StorageImpl too. I imagine I'll want to
@@ -273,6 +274,13 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool has_pyobj_slot)
     }
   }
   Py_DECREF(pyobj);
+};
+
+void ConcretePyInterpreterVTable::incref(PyObject* pyobj) const {
+  if (!Py_IsInitialized())
+    return;
+  pybind11::gil_scoped_acquire gil;
+  Py_INCREF(pyobj);
 };
 
 bool isPythonTensor(const at::Tensor& tensor) {
