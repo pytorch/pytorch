@@ -507,9 +507,15 @@ static int THPVariable_clear(THPVariable* self) {
   return 0;
 }
 
-int THPFunction_traverse(THPFunction* self, visitproc visit, void* arg) {
+int THPFake_traverse(THPFunction* self, visitproc visit, void* arg) {
   TORCH_INTERNAL_ASSERT(
-      false, "Tensor tp_traverse function was not overriden properly");
+      false, "TensorBase tp_traverse function was not overriden properly");
+  return 0;
+}
+
+int THPFake_clear(THPFunction* self, visitproc visit, void* arg) {
+  TORCH_INTERNAL_ASSERT(
+      false, "TensorBase tp_clear function was not overriden properly");
   return 0;
 }
 
@@ -1850,8 +1856,8 @@ PyTypeObject THPVariableType = {
         Py_TPFLAGS_HAVE_GC, /* tp_flags */
     nullptr, /* tp_doc */
     // Also set by metaclass
-    (traverseproc)THPFunction_traverse, /* tp_traverse */
-    (inquiry)THPVariable_clear, /* tp_clear */
+    (traverseproc)THPFake_traverse, /* tp_traverse */
+    (inquiry)THPFake_clear, /* tp_clear */
     nullptr, /* tp_richcompare */
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
@@ -2277,9 +2283,17 @@ int THPVariableMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs) {
   if (PyType_Type.tp_init(cls, args, kwargs) < 0) {
     return -1;
   }
+  // It is important for all three of these to be overriden correctly for the
+  // resurrection checks to properly happen. In particular, an older version
+  // was not overriding tp_clear here. This lead to the default subtype_clear
+  // running on the Tensor object (as only TensorBase tp_clear was custom),
+  // clearing the __dict__ field, before the TensorBase custom clear was called
+  // and would properly detect the resurrect.
+  // See https://github.com/pytorch/pytorch/issues/136358 for the exact behavior
   ((PyTypeObject*)cls)->tp_dealloc = (destructor)THPVariable_subclass_dealloc;
   ((PyTypeObject*)cls)->tp_traverse =
       (traverseproc)THPVariable_subclass_traverse;
+  ((PyTypeObject*)cls)->tp_clear = (inquiry)THPVariable_clear;
 
   // Don't do anything for the base Tensor class
   if (!THPVariableClass) {
