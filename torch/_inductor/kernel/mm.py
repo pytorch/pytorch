@@ -20,7 +20,7 @@ from .. import config as inductor_config
 from ..codegen.common import BackendFeature
 from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
-from ..codegen.wrapper import WrapperCodeGen
+from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import FlexibleLayout, is_triton
 from ..lowering import register_lowering
 from ..select_algorithm import (
@@ -121,6 +121,13 @@ mm_template = TritonTemplate(
     {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
 """,
 )
+
+
+# prevent duplication registration of extern functions
+@functools.lru_cache(None)
+def lazy_register_extern_choice(fn):
+    return ExternKernelChoice(fn)
+
 
 aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
 
@@ -245,6 +252,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
         log.warning("No choices for GEMM, using ATen backend as fallback")
         return aten_mm.bind((mat1, mat2), aten_layout).output_node()
 
+    for k in inductor_config.external_matmul:
+        choices.append(lazy_register_extern_choice(k).bind((mat1, mat2), layout))
+
     try:
         return autotune_select_algorithm(name, choices, [mat1, mat2], layout)
     except NoValidChoicesError:
@@ -259,11 +269,13 @@ def _is_static_problem(inputs_tensors, layout):
     # have a static shape by attempting to convert the dimensions
     # to int
     static_shape = True
-    static_size = WrapperCodeGen.statically_known_list_of_ints_or_none(layout.size)
+    static_size = PythonWrapperCodegen.statically_known_list_of_ints_or_none(
+        layout.size
+    )
     if static_size is None:
         nonzero = True
         for s in layout.size:
-            sz = WrapperCodeGen.statically_known_int_or_none(s)
+            sz = PythonWrapperCodegen.statically_known_int_or_none(s)
             if sz is not None and sz == 0:
                 nonzero = False
                 break
@@ -390,7 +402,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         # broadcasting on the last dim of the bias term seems not to be working
         # in the linear GEMM epilogue used by addmm.
         if (
-            WrapperCodeGen.statically_known_int_or_none(inp_expanded.layout.stride[-1])
+            PythonWrapperCodegen.statically_known_int_or_none(
+                inp_expanded.layout.stride[-1]
+            )
             != 0
         ):
             CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
