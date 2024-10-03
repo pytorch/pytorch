@@ -185,8 +185,11 @@ class TritonTemplateKernel(TritonKernel):
 
         self.subgraph_bodies: Dict[str, SubgraphInfo] = {}
 
-        self._input_names_with_prologue_fusion: OrderedSet[str] = OrderedSet()
-        self.final_prologue_buffers: List[str] = []
+        # input buffers which we are allowed to prologue fuse into
+        self.prologue_supported_inputs: OrderedSet[str] = OrderedSet()
+
+        # input buffers which we are fusing into
+        self.prologue_fused_inputs: OrderedSet[str] = OrderedSet()
 
         # The following attributes are all used for triton kernel codegen.
         # They are swapped onto the TritonTemplateKernel object by
@@ -244,19 +247,6 @@ class TritonTemplateKernel(TritonKernel):
         )
         with self.set_subgraph_body(body_name):
             yield
-
-    @property
-    def input_bufs_with_prologue_fusion(self) -> OrderedSet[str]:
-        """
-        What input buffers are loaded with the api that allows prologue fusion to occur
-        """
-        # translate input names -> input buffers
-        bufs = OrderedSet([inp.get_name() for inp in self.named_input_nodes.values()])
-        for name, buf in self.named_input_nodes.items():
-            if name not in self._input_names_with_prologue_fusion:
-                bufs.discard(buf.get_name())
-
-        return bufs
 
     def need_numel_args(self):
         return False
@@ -354,7 +344,7 @@ class TritonTemplateKernel(TritonKernel):
             self.named_input_nodes[name] = input_node
             if input_node.get_name() in V.graph.removed_buffers:
                 continue
-            if input_node.get_name() in self.final_prologue_buffers:
+            if input_node.get_name() in self.prologue_fused_inputs:
                 continue
 
             self.args.input_buffers[input_node.get_name()] = arg_name
@@ -364,7 +354,7 @@ class TritonTemplateKernel(TritonKernel):
             input_node = self.named_input_nodes[name]
             if input_node.get_name() in V.graph.removed_buffers:
                 continue
-            if input_node.get_name() in self.final_prologue_buffers:
+            if input_node.get_name() in self.prologue_fused_inputs:
                 continue
             arg_name = self.args.input_buffers[input_node.get_name()]
             if input_node.get_layout().offset == 0:
@@ -377,7 +367,7 @@ class TritonTemplateKernel(TritonKernel):
             # get args in correct order
             if input_node.get_name() in V.graph.removed_buffers:
                 continue
-            if input_node.get_name() in self.final_prologue_buffers:
+            if input_node.get_name() in self.prologue_fused_inputs:
                 continue
 
             self.args.input(input_node.get_name())
@@ -509,8 +499,8 @@ class TritonTemplateKernel(TritonKernel):
             indent_width (int): The number of spaces to use for indentation.
         """
 
-        self._input_names_with_prologue_fusion.add(input_name)
         input_node = self.named_input_nodes[input_name]
+        self.prologue_supported_inputs.add(input_name)
         groups = (sympy_product(input_node.get_size()), sympy.Integer(1))
         range_trees = self.construct_range_trees(
             pid_cache=None, inside_reduction=False, numels=groups, no_x_dim=False
@@ -581,7 +571,7 @@ class TritonTemplateKernel(TritonKernel):
                 ):
                     V.kernel.store_buffer_names.add(name)
                     V.kernel.cse.store_cache[name] = value
-                    if name in V.kernel.final_prologue_buffers:
+                    if name in V.kernel.prologue_fused_inputs:
                         V.kernel.compute.writeline(f"{output_name} = {value}")
 
             self.ops_handler = StoreOutputSubstitution
@@ -620,7 +610,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.cse.invalidate(set())
                 self.codegen_body()
                 self.cse.invalidate(set())
-                if input_node.get_name() not in self.final_prologue_buffers:
+                if input_node.get_name() not in self.prologue_fused_inputs:
                     self.body.writeline(load_code)
 
                 return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
@@ -1004,7 +994,7 @@ class TritonTemplate(KernelTemplate):
                 "acc_type": str(kwargs.get("ACC_TYPE", None)),
             },
             mutated_inputs=mutated_inputs,
-            allowed_prologue_inps=kernel.input_bufs_with_prologue_fusion.copy(),
+            allowed_prologue_inps=kernel.prologue_supported_inputs.copy(),
         )
 
 

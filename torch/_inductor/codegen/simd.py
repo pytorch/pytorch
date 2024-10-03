@@ -1541,7 +1541,7 @@ class SIMDScheduling(BaseScheduling):
             if prologue.get_buffer_names() & template_reads:
                 assert len(names) == 1
                 buf_name_to_prologue_group[next(iter(names))] = prologue_group
-                kernel.final_prologue_buffers.append(next(iter(names)))
+                kernel.prologue_fused_inputs.add(next(iter(names)))
                 prologue_group = []
 
         with kernel:
