@@ -12,7 +12,7 @@ import json
 import os
 import warnings
 from hashlib import sha256
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 from unittest import main, mock, skip, TestCase
 from urllib.error import HTTPError
 
@@ -77,10 +77,7 @@ def mock_query(
             err_msg += f" locally, by deleting it and running {os.path.basename(__file__)} with"
             err_msg += " GitHub Personal Access Token passed via GITHUB_TOKEN"
             err_msg += " and drci api key passed via DRCI_BOT_KEY environment variables"
-            if (
-                os.getenv("GITHUB_TOKEN") is None
-                or os.getenv("DRCI_BOT_KEY") is None
-            ):
+            if os.getenv("GITHUB_TOKEN") is None or os.getenv("DRCI_BOT_KEY") is None:
                 err_msg = (
                     "Failed to update cached queries as GITHUB_TOKEN or DRCI_BOT_KEY "
                     + "is not defined. "
