@@ -1673,17 +1673,17 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             out = foo(inp).detach()
             out2 = foo(inp).detach()
 
-            with self.assertRaisesRegex(
-                Exception, "overwritten by a subsequent forward run."
-            ):
+            with self.assertRaises(Exception) as exc:
                 out + out
+
+            FileCheck().check("overwritten").check("x * x * x").run(repr(exc.exception))
 
             foo(inp)
 
-            with self.assertRaisesRegex(
-                Exception, "overwritten by a subsequent forward run."
-            ):
+            with self.assertRaises(Exception) as exc:
                 out2 + out2
+
+            FileCheck().check("overwritten").check("x * x * x").run(repr(exc.exception))
 
         @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
         def test_conv_benchmark(self):

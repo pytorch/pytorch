@@ -2350,64 +2350,54 @@ class CUDAGraphTreeManager:
             "before each model invocation"
         )
 
+    @staticmethod
+    def format_dealloc_msg(stack_trace: Optional[str]):
+        stack_trace = (
+            stack_trace.strip() if stack_trace else "[Could not find stack trace]"
+        )
+        return (
+            "Error: accessing tensor output of CUDAGraphs that has been overwritten by a subsequent run. "
+            f"Stack trace: {stack_trace}. "
+            "To prevent overwriting, clone the tensor outside of torch.compile() "
+            "or call torch.compiler.cudagraph_mark_step_begin() before each model invocation."
+        )
+
     def dealloc_current_path_weakrefs(self) -> None:
         assert self.current_node is not None
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
-        run_type = "backward" if self.mode == CompilationMode.BACKWARD else "forward"
-
-        stack_map = {}
         for node in self.current_node._path_from_root:
             assert node.stack_traces is not None
-            assert (
-                len(node.tensor_weakrefs)
-                == len(node.stack_traces)
-                == len(node.outputs_weakrefs)
-            )
-            for t, stack_trace, stor_ref in zip(
-                node.tensor_weakrefs, node.stack_traces, node.outputs_weakrefs
-            ):
-
+            assert len(node.tensor_weakrefs) == len(node.stack_traces)
+            for t, stack_trace in zip(node.tensor_weakrefs, node.stack_traces):
                 ten = None if t is None else t()
                 if ten is None:
                     continue
 
-                stack_trace = (
-                    stack_trace.strip()
-                    if stack_trace
-                    else "[Could not find stack trace]"
+                torch._C._set_storage_access_error_msg(
+                    ten, self.format_dealloc_msg(stack_trace)
                 )
 
-                if stor_ref is not None and stor_ref() is not None:
-                    stack_map[stor_ref.data_ptr()] = stack_trace
-
-                ten = None if t is None else t()
-                if ten is None:
-                    continue
-
-                msg = (
-                    "Error: accessing tensor output of CUDAGraphs that has been overwritten by a subsequent "
-                    f"{run_type} run. Stack trace: {stack_trace}. "
-                    "To prevent overwriting, clone the tensor outside of torch.compile() "
-                    "or call torch.compiler.cudagraph_mark_step_begin() before each model invocation."
-                )
-                torch._C._set_storage_access_error_msg(ten, msg)
+        # we would to enable the following assertion, but an internal model failed with a command
+        # that does not repro. len(node.outputs_weakrefs) == len(node.stack_traces)
+        # so, pessimistically assume that they might differ by doing the debug info
+        # loop separately from the dealloc loop
+        stor_stack_trace = {}
+        for storage_ref, stack_trace in zip(node.outputs_weakrefs, node.stack_traces):
+            if not storage_ref or not storage_ref():
+                continue
+            stor_stack_trace[storage_ref.data_ptr()] = stack_trace
 
         deleted = set()
         for storage_ref in self.current_node.path_live_weakrefs():
             _storage_deref = storage_ref()
             if _storage_deref and storage_ref.data_ptr() not in deleted:
                 deleted.add(storage_ref.data_ptr())
-                stack_trace = stack_map.get(
-                    storage_ref.data_ptr(), "[Could not find stack trace]"
+                torch._C._free_And_Remove_DeleterFn(_storage_deref)
+
+                msg = self.format_dealloc_msg(
+                    stor_stack_trace.get(storage_ref.data_ptr())
                 )
-                msg = (
-                    "Error: accessing tensor output of CUDAGraphs that has been overwritten by a subsequent "
-                    f"{run_type} run. Stack trace: {stack_trace}. "
-                    "To prevent overwriting, clone the tensor outside of torch.compile() "
-                    "or call torch.compiler.cudagraph_mark_step_begin() before each model invocation."
-                )
-                torch._C._free_And_Remove_DeleterFn(storage_ref())
                 torch._C._set_storage_data_ptr_access_error_msg(storage_ref(), msg)
 
     def clear_current_path_state_and_set_to_none(self) -> None:
