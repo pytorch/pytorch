@@ -20,12 +20,12 @@ from torch.distributed._composable.fsdp import (
     register_fsdp_forward_method,
 )
 from torch.distributed._tensor import DTensor, init_device_mesh
-from torch.distributed._tensor.debug.comm_mode import CommDebugMode
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
     apply_activation_checkpointing,
 )
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -285,6 +285,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 "delay_before_all_gather": [False, True],
                 "delay_before_reduce_scatter": [False, True],
                 "delay_before_optim": [False, True],
+                "unshard_async_op": [False],
             },
             self._test_train_parity_multi_group,
         )
@@ -307,6 +308,28 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 "delay_before_all_gather": [False, True],
                 "delay_before_reduce_scatter": [False, True],
                 "delay_before_optim": [False, True],
+                "unshard_async_op": [False],
+            },
+            self._test_train_parity_multi_group,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    @test_compiled_fsdp(compile_compute_on_module=Transformer)
+    def test_train_parity_multi_group_unshard_async_op(self):
+        """
+        Tests train parity against DDP when using multiple parameter groups for
+        communication and setting ``unshard_async_op=True``.
+        """
+        self.run_subtests(
+            {
+                "reshard_after_forward": [True],
+                "device_type": ["cuda"],
+                "offload_policy": [OffloadPolicy()],
+                "delay_after_forward": [False, True],
+                "delay_before_all_gather": [False, True],
+                "delay_before_reduce_scatter": [False, True],
+                "delay_before_optim": [False, True],
+                "unshard_async_op": [True],
             },
             self._test_train_parity_multi_group,
         )
@@ -320,6 +343,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         delay_before_all_gather: bool,
         delay_before_reduce_scatter: bool,
         delay_before_optim: bool,
+        unshard_async_op: bool,
     ):
         # Only test individual delays or all four delays to save test time
         if (
@@ -359,6 +383,8 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             if isinstance(module, TransformerBlock):
                 fully_shard_fn(module)
         fully_shard_fn(model)
+        if unshard_async_op:
+            model._set_unshard_async_op(unshard_async_op)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
         delay_in_ms = 100
@@ -993,7 +1019,9 @@ class TestFullyShardNDTraining(FSDPTest):
             {
                 "reshard_after_forward": [False, True],
                 "use_activation_checkpointing": [False, True],
-                "mlp_dim": [3, 16, 17],
+                # TODO: change "mlp_dim" back to [3, 16, 17] when uneven sharding
+                # is supported for FSDP+TP
+                "mlp_dim": [4, 16, 20],
                 "foreach": [False],
             },
             functools.partial(self._test_2d_mlp_with_nd_mesh, global_mesh),
@@ -1045,6 +1073,79 @@ class TestFullyShardNDTraining(FSDPTest):
             self.assertEqual(p.device_mesh.ndim, 2)
             self.assertEqual(len(p.placements), 2)
             self.assertEqual(p.device_mesh.mesh_dim_names, ("dp", "tp"))
+
+
+class TestFullyShardHSDP3DTraining(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(8, torch.cuda.device_count())
+
+    def init_global_mesh(self) -> DeviceMesh:
+        return init_device_mesh(
+            "cuda",
+            (2, 2, 2),
+            mesh_dim_names=("dp_replicate", "dp_shard", "tp"),
+        )
+
+    @skip_if_lt_x_gpu(8)
+    def test_3d_mlp_with_nd_mesh(self):
+        global_mesh = self.init_global_mesh()
+        self.run_subtests(
+            {
+                "reshard_after_forward": [False, True],
+                "use_activation_checkpointing": [False, True],
+                # TODO: change "mlp_dim" back to [3, 16, 17] when uneven sharding
+                # is supported for FSDP+TP
+                "mlp_dim": [4, 16, 20],
+                "foreach": [False],
+            },
+            functools.partial(self._test_3d_mlp_with_nd_mesh, global_mesh),
+        )
+
+    def _test_3d_mlp_with_nd_mesh(
+        self,
+        global_mesh: DeviceMesh,
+        reshard_after_forward: bool,
+        use_activation_checkpointing: bool,
+        mlp_dim: int,
+        foreach: bool,
+    ):
+        global_mesh = self.init_global_mesh()
+        dp_mesh, tp_mesh = global_mesh["dp_replicate", "dp_shard"], global_mesh["tp"]
+        dp_pg = dp_mesh._flatten().get_group()  # used for `replicate()`
+
+        torch.manual_seed(42)
+        model = MLPStack(mlp_dim)
+        ref_model = copy.deepcopy(model).cuda()
+        replicate(ref_model, device_ids=[self.rank], process_group=dp_pg)
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=foreach)
+        model.parallelize(
+            tp_mesh,
+            dp_mesh,
+            use_activation_checkpointing,
+            reshard_after_forward=reshard_after_forward,
+        )
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=foreach)
+
+        torch.manual_seed(42 + dp_pg.rank() + 1)
+        device = torch.device("cuda")
+        for iter_idx in range(10):
+            inp = torch.randn((8, mlp_dim), device=device)
+            losses: List[torch.Tensor] = []
+            for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+                _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+                losses.append(_model(inp).sum())
+                losses[-1].backward()
+                _optim.step()
+            self.assertEqual(losses[0], losses[1])
+
+        for n, p in model.named_parameters():
+            self.assertIsInstance(p, DTensor)
+            self.assertEqual(p.device_mesh.ndim, 3)
+            self.assertEqual(len(p.placements), 3)
+            self.assertEqual(
+                p.device_mesh.mesh_dim_names, ("dp_replicate", "dp_shard", "tp")
+            )
 
 
 class TestFullyShardHSDPTraining(FSDPTest):

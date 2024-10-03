@@ -12,9 +12,9 @@
 #include <ATen/ops/_fused_adamw.h>
 #include <ATen/ops/_fused_adamw_native.h>
 #endif
-namespace at {
 
-namespace native {
+
+namespace at::native {
 
 void _fused_adam_kernel_cpu_(
     at::TensorList params,
@@ -46,7 +46,7 @@ void _fused_adam_kernel_cpu_(
   if (amsgrad) {
     TORCH_CHECK(max_exp_avg_sqs.size() == n_tensors);
   } else {
-    TORCH_CHECK(max_exp_avg_sqs.size() == 0);
+    TORCH_CHECK(max_exp_avg_sqs.empty());
   }
   TORCH_CHECK(state_steps.size() == n_tensors);
   at::Tensor max_exp_avg_sq = at::Tensor();
@@ -122,7 +122,7 @@ void _fused_adamw_kernel_cpu_(
   if (amsgrad) {
     TORCH_CHECK(max_exp_avg_sqs.size() == n_tensors);
   } else {
-    TORCH_CHECK(max_exp_avg_sqs.size() == 0);
+    TORCH_CHECK(max_exp_avg_sqs.empty());
   }
   TORCH_CHECK(state_steps.size() == n_tensors);
   at::Tensor max_exp_avg_sq = at::Tensor();
@@ -171,5 +171,4 @@ void _fused_adamw_kernel_cpu_(
 
 DEFINE_DISPATCH(fused_adam_stub);
 
-}
 }
