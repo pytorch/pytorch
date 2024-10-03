@@ -189,6 +189,18 @@ def _transpose_ordered(num_blocks_in_row: Tensor, col_indices: Tensor):
     return _dense_to_ordered(dense.transpose(-2, -1))
 
 
+def _adjust_num_blocks_and_indices(
+    num_blocks: Tensor, indices: Tensor, new_num_rows: int, new_num_columns: int
+):
+    num_rows = indices.shape[-2]
+    num_columns = indices.shape[-1]
+    indices = indices[:, :, :new_num_rows, :new_num_columns]
+    num_blocks = num_blocks[:, :, :new_num_rows]
+    num_blocks = torch.where(num_blocks < new_num_columns, num_blocks, new_num_columns)
+    num_blocks = torch.sum(indices < num_blocks[:, :, :, None], dim=-1)
+    return num_blocks, indices
+
+
 class BlockMask:
     r"""
     BlockMask is our format for representing a block-sparse attention mask.
@@ -465,6 +477,48 @@ class BlockMask:
             f"    sparsity={self.sparsity():.2f}%,\n"
             f"    mask_mod={self.mask_mod.__name__ if hasattr(self.mask_mod, '__name__') else self.mask_mod}\n"
             f")"
+        )
+
+    def _adjust(self, new_num_rows: int, new_num_cols: int):
+        new_kv_num_blocks, new_kv_indices = _adjust_num_blocks_and_indices(
+            self.kv_num_blocks, self.kv_indices, new_num_rows, new_num_cols
+        )
+        if self.full_kv_num_blocks is not None:
+            assert self.full_kv_indices is not None
+            (
+                new_full_kv_num_blocks,
+                new_full_kv_indices,
+            ) = _adjust_num_blocks_and_indices(
+                self.full_kv_num_blocks,
+                self.full_kv_indices,
+                new_num_rows,
+                new_num_cols,
+            )
+        new_q_num_blocks, new_q_indices = _adjust_num_blocks_and_indices(
+            self.q_num_blocks, self.q_indices, new_num_cols, new_num_rows
+        )
+        if self.full_q_num_blocks is not None:
+            assert self.full_q_indices is not None
+            (
+                new_full_q_num_blocks,
+                new_full_q_indices,
+            ) = _adjust_num_blocks_and_indices(
+                self.full_q_num_blocks,
+                self.full_q_indices,
+                new_num_cols,
+                new_num_rows,
+            )
+        return BlockMask(
+            kv_num_blocks=new_kv_num_blocks,
+            kv_indices=new_kv_indices,
+            full_kv_num_blocks=new_full_kv_num_blocks,
+            full_kv_indices=new_full_kv_indices,
+            q_num_blocks=new_q_num_blocks,
+            q_indices=new_q_indices,
+            full_q_num_blocks=new_full_q_num_blocks,
+            full_q_indices=new_full_q_indices,
+            BLOCK_SIZE=self.BLOCK_SIZE,
+            mask_mod=self.mask_mod,
         )
 
     @property
@@ -1012,6 +1066,13 @@ def flex_attention(
         score_mod = _identity
     if block_mask is None:
         block_mask = _create_empty_block_mask(query, key)
+    elif (
+        query.size(-2) < block_mask.kv_indices.size(-2) * block_mask.BLOCK_SIZE[0]
+        or key.size(-2) < block_mask.kv_indices.size(-1) * block_mask.BLOCK_SIZE[1]
+    ):
+        new_num_rows = _round_up_to_multiple(query.size(-2), block_mask.BLOCK_SIZE[0])
+        new_num_cols = _round_up_to_multiple(key.size(-2), block_mask.BLOCK_SIZE[1])
+        block_mask = block_mask._adjust(new_num_rows, new_num_cols)
     if scale is None:
         scale = 1.0 / math.sqrt(query.size(-1))
 

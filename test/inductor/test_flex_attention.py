@@ -192,6 +192,25 @@ def _trig2(score, b, h, m, n):
     return z
 
 
+# --------- Useful mask mod functions for testing ---------
+def _causal_mask(
+    batch: Tensor,
+    head: Tensor,
+    token_q: Tensor,
+    token_kv: Tensor,
+) -> Tensor:
+    return token_q >= token_kv
+
+
+def _inverse_causal_mask(
+    batch: Tensor,
+    head: Tensor,
+    token_q: Tensor,
+    token_kv: Tensor,
+) -> Tensor:
+    return token_q <= token_kv
+
+
 test_score_mods = [
     _identity,
     _times_two,
@@ -202,6 +221,17 @@ test_score_mods = [
     _rel_causal,
     _generate_alibi_bias(8),
 ]
+
+test_score_mask_mod_map = {
+    _identity: noop_mask,
+    _times_two: noop_mask,
+    _squared: noop_mask,
+    _causal: _causal_mask,
+    _inverse_causal: _inverse_causal_mask,
+    _rel_bias: noop_mask,
+    _rel_causal: noop_mask,
+    _generate_alibi_bias(8): noop_mask,
+}
 
 captured_buffers_map = {
     "_head_offset": _head_offset,
@@ -421,17 +451,18 @@ class TestFlexAttention(InductorTestCase):
 
     def run_dynamic_test(
         self,
-        score_mod: Callable,
+        score_mask_mod: Tuple[Callable, Callable],
         dtype: torch.dtype = torch.float16,
         B: int = B,
         H: int = H,
         S: int = S,
         D: int = D,
     ):
+        score_mod, mask_mod = score_mask_mod
         # If the seqlen becomes smaller than the seqlen of the previous batch,
         # we can still reuse the block_mask created from a larger seqlen.
         MAX_S = S
-        block_mask = create_block_mask(noop_mask, 1, 1, MAX_S, MAX_S)
+        block_mask = create_block_mask(mask_mod, 1, 1, MAX_S, MAX_S)
         sdpa_partial = create_attention(score_mod, block_mask=block_mask)
         # The first eager batch, shape (B, H, S, D)
         q1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
@@ -463,6 +494,21 @@ class TestFlexAttention(InductorTestCase):
         golden_out2.backward(backward_grad2.to(torch.float64))
         ref_out2.backward(backward_grad2)
 
+        # The third eager batch, shape (B * 2, H, S / 4, D)
+        S = int(S / 2)
+        q3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        k3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        v3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        q3_ref, k3_ref, v3_ref = query_key_value_clones(q3, k3, v3)
+        q3_gold, k3_gold, v3_gold = query_key_value_clones(q3, k3, v3, torch.float64)
+        ref_out3 = sdpa_partial(q3_ref, k3_ref, v3_ref)
+        golden_out3 = sdpa_partial(q3_gold, k3_gold, v3_gold)
+
+        backward_grad3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+
+        golden_out3.backward(backward_grad3.to(torch.float64))
+        ref_out3.backward(backward_grad3)
+
         # Need to clear dynamo counters, since flex attention eager mode also uses dynamo tracing.
         # We check dynamo counters["frames"]["ok"] to ensure there is no re-compilation.
         torch._dynamo.reset()
@@ -487,7 +533,8 @@ class TestFlexAttention(InductorTestCase):
         )
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
 
-        # No re-compilation, use the compiled dynamic shape version.
+        # Since current q_seqlen (MAX_S/2) is smaller than the seqlen from block_mask (MAX_S),
+        # recompile to include the BlockMask._adjust part.
         compiled_out2 = compiled_sdpa(q2, k2, v2)
         compiled_out2.backward(backward_grad2)
         self._check_out_and_grad(
@@ -504,11 +551,32 @@ class TestFlexAttention(InductorTestCase):
             v2_ref,
             v2,
         )
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
 
-        # The third iteration, shape (B * 2, H, S * 2, D)
+        # No re-compilation, use the compiled dynamic shape version.
+        # The current q_seqlen (MAX_S/4) is still smaller than the seqlen from block_mask (MAX_S),
+        # we don't recompile since we can reuse the compiled graph, which already includes the BlockMask._adjust part.
+        compiled_out3 = compiled_sdpa(q3, k3, v3)
+        compiled_out3.backward(backward_grad3)
+        self._check_out_and_grad(
+            golden_out3,
+            ref_out3,
+            compiled_out3,
+            q3_gold,
+            q3_ref,
+            q3,
+            k3_gold,
+            k3_ref,
+            k3,
+            v3_gold,
+            v3_ref,
+            v3,
+        )
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+
+        # The forth iteration, shape (B * 2, H, S * 2, D)
         # Since seqlen is larger than the seqlen in block_mask, throw errors.
-        S = int(S * 4)
+        S = int(S * 8)
         q3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         k3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         v3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
@@ -630,9 +698,11 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
-    @common_utils.parametrize("score_mod", test_score_mods)
-    def test_builtin_score_mods_dynamic(self, dtype: torch.dtype, score_mod: Callable):
-        self.run_dynamic_test(score_mod, dtype)
+    @common_utils.parametrize("score_mask_mod", test_score_mask_mod_map.items())
+    def test_builtin_score_mods_dynamic(
+        self, dtype: torch.dtype, score_mask_mod: Tuple[Callable, Callable]
+    ):
+        self.run_dynamic_test(score_mask_mod, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
