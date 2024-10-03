@@ -2398,9 +2398,6 @@ class CUDAGraphTreeManager:
             _storage_deref = storage_ref()
             if _storage_deref and storage_ref.data_ptr() not in deleted:
                 deleted.add(storage_ref.data_ptr())
-<<<<<<< HEAD
-                torch._C._free_And_Remove_DeleterFn(_storage_deref)
-=======
                 stack_trace = stack_map.get(
                     storage_ref.data_ptr(), "[Could not find stack trace]"
                 )
@@ -2412,7 +2409,6 @@ class CUDAGraphTreeManager:
                 )
                 torch._C._free_And_Remove_DeleterFn(storage_ref())
                 torch._C._set_storage_data_ptr_access_error_msg(storage_ref(), msg)
->>>>>>> 165fece5329 (Invalidate StorageImpl instances when tensor is overwritten with cudagraphs)
 
     def clear_current_path_state_and_set_to_none(self) -> None:
         assert isinstance(self.current_node, CUDAGraphNode)
