@@ -5,6 +5,7 @@ import argparse
 import os
 import sys
 
+
 sys.path.append(
     os.path.realpath(
         os.path.join(
@@ -14,6 +15,7 @@ sys.path.append(
 )
 
 from hipify import hipify_python  # type: ignore[import]
+
 
 parser = argparse.ArgumentParser(
     description="Top-level script for HIPifying, filling in most common parameters"
@@ -205,7 +207,7 @@ hipify_python.hipify(
     ignores=ignores,
     extra_files=[
         "torch/_inductor/codegen/cpp_wrapper_cpu.py",
-        "torch/_inductor/codegen/cpp_wrapper_cuda.py",
+        "torch/_inductor/codegen/cpp_wrapper_gpu.py",
         "torch/_inductor/codegen/wrapper.py",
     ],
     out_of_place_only=args.out_of_place_only,

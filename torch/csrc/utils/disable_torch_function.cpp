@@ -34,8 +34,8 @@ void set_disabled_torch_dispatch_impl(PyObject* value) {
 
 typedef struct {
   PyObject_HEAD
-      /* Type-specific fields go here. */
-      at::impl::TorchFunctionDisabledState old_state;
+  /* Type-specific fields go here. */
+  at::impl::TorchFunctionDisabledState old_state;
 } DisableTorchFunctionSubclass;
 
 PyObject* DisableTorchFunctionSubclass__enter(
@@ -64,15 +64,24 @@ PyObject* THPModule_isEnabledTorchFunction(PyObject* self, PyObject* unused) {
   }
 }
 
+PyObject* THPModule_isAllDisabledTorchFunction(
+    PyObject* self,
+    PyObject* unused) {
+  if (at::impl::torch_function_all_disabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
 static PyMethodDef DisableTorchFunctionSubclass_methods[] = { // NOLINT
     {"__enter__", DisableTorchFunctionSubclass__enter, METH_NOARGS, nullptr},
     {"__exit__", DisableTorchFunctionSubclass__exit, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyTypeObject DisableTorchFunctionSubclassType = {
-    PyVarObject_HEAD_INIT(
-        nullptr,
-        0) "torch._C.DisableTorchFunctionSubclass", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C.DisableTorchFunctionSubclass", /* tp_name */
     sizeof(DisableTorchFunctionSubclass), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
@@ -121,8 +130,8 @@ PyObject* THPModule_DisableTorchFunctionSubclassType() {
 
 typedef struct {
   PyObject_HEAD
-      /* Type-specific fields go here. */
-      at::impl::TorchFunctionDisabledState old_state;
+  /* Type-specific fields go here. */
+  at::impl::TorchFunctionDisabledState old_state;
 } DisableTorchFunction;
 
 PyObject* DisableTorchFunction__enter(PyObject* self, PyObject* unused) {
@@ -145,9 +154,8 @@ static PyMethodDef DisableTorchFunction_methods[] = { // NOLINT
     {nullptr, nullptr, 0, nullptr}};
 
 PyTypeObject DisableTorchFunctionType = {
-    PyVarObject_HEAD_INIT(
-        nullptr,
-        0) "torch._C.DisableTorchFunction", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C.DisableTorchFunction", /* tp_name */
     sizeof(DisableTorchFunction), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */

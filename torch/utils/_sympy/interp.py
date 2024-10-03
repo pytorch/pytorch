@@ -16,6 +16,7 @@ import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
+
 from .functions import (
     CeilToInt,
     CleanDiv,
@@ -26,6 +27,8 @@ from .functions import (
     Identity,
     IntTrueDiv,
     IsNonOverlappingAndDenseIndicator,
+    Max,
+    Min,
     Mod,
     ModularIndexing,
     PowByNatural,
@@ -90,6 +93,8 @@ def handlers():
         sympy.exp: "exp",
         sympy.Min: "minimum",
         sympy.Max: "maximum",
+        Min: "minimum",
+        Max: "maximum",
         ModularIndexing: "modular_indexing",
         sympy.functions.elementary.piecewise.ExprCondPair: "expr_cond_pair",
         sympy.Piecewise: "piecewise",

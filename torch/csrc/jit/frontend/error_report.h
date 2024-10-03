@@ -2,8 +2,7 @@
 
 #include <torch/csrc/jit/frontend/tree.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct Call {
   std::string fn_name;
@@ -13,7 +12,7 @@ struct Call {
 struct TORCH_API ErrorReport : public std::exception {
   ErrorReport(const ErrorReport& e);
 
-  explicit ErrorReport(SourceRange r);
+  explicit ErrorReport(const SourceRange& r);
   explicit ErrorReport(const TreeRef& tree) : ErrorReport(tree->range()) {}
   explicit ErrorReport(const Token& tok) : ErrorReport(tok.range) {}
 
@@ -49,5 +48,4 @@ const ErrorReport& operator<<(const ErrorReport& e, const T& t) {
   return e;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

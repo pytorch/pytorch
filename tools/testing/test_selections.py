@@ -6,8 +6,9 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Sequence
 
-from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
+from tools.stats.import_test_stats import get_disabled_tests
 from tools.testing.test_run import ShardedTest, TestRun
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -257,5 +258,4 @@ def calculate_shards(
 
 
 def get_test_case_configs(dirpath: str) -> None:
-    get_slow_tests(dirpath=dirpath)
     get_disabled_tests(dirpath=dirpath)

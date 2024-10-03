@@ -9,8 +9,19 @@ from torch.distributed.checkpoint.planner_helpers import _create_write_item_for_
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-# TODO: add comments for create_plan
-def create_plan(second_fqn) -> SavePlan:
+def create_plan(second_fqn: str) -> SavePlan:
+    """
+    Creates a SavePlan with two write items:
+
+    1. A write item representing a shard of a tensor named "tensor_0".
+    2. A write item representing another tensor identified by the provided second_fqn.
+
+    Args:
+        second_fqn (str): The fully qualified name for the second tensor.
+
+    Returns:
+        SavePlan: A plan that includes the two write items.
+    """
     # the first write item is for a duplicated shard (that covers the whole tensor)
     write_item_1 = _create_write_item_for_tensor("tensor_0", torch.rand(4))
     write_item_1 = dataclasses.replace(write_item_1, type=WriteItemType.SHARD)
@@ -21,8 +32,11 @@ def create_plan(second_fqn) -> SavePlan:
     return SavePlan([write_item_1, write_item_2])
 
 
-# TODO: add comments for TestDedupTensor
 class TestDedupTensor(TestCase):
+    """
+    Test class for deduplication of tensor write items across different ranks.
+    """
+
     def test_dedup_shards(self):
         rank0 = create_plan("r0")
         rank1 = create_plan("r1")

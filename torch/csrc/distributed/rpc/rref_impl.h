@@ -10,9 +10,7 @@
 
 #include <atomic>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 class RRef;
 class RRefContext;
@@ -31,10 +29,15 @@ constexpr int RFD_TUPLE_SIZE = 7; // number of RRefForkData fields in py::tuple
 
 // Represents fork of an RRef to be sent over the wire.
 struct TORCH_API RRefForkData {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const worker_id_t ownerId_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const RRefId rrefId_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const ForkId forkId_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const worker_id_t parent_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::string typeStr_;
 
   RRefForkData(
@@ -415,6 +418,4 @@ inline TORCH_API c10::intrusive_ptr<c10::RRefInterface> fromOwnerRRef(
   return c10::static_intrusive_pointer_cast<c10::RRefInterface>(ownerRRef);
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

@@ -229,6 +229,7 @@ AliasDb::AliasDb(
   analyze(graph_);
 
   memoryDAG_ = std::move(*memoryDAGBuilder_).createMemoryDAG();
+  // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
   memoryDAGBuilder_ = nullptr; // to make further access a hard error
 
   memoryDAG_->setWildcards(
@@ -278,6 +279,7 @@ AliasDb::AliasDb(
   // Now that we've built the write index, we can null out the WriteRegistry to
   // make future access an error. In this way we prevent the index from getting
   // out of sync (since we have no way of registering new writes)
+  // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
   writeRegistry_ = nullptr;
 
   // Initialize the write cache
@@ -995,7 +997,9 @@ void AliasDb::analyzeGradOf(Node* node) {
   mapAliases(node->outputs(), grad_of_block->outputs());
 }
 
-void AliasDb::analyzeSubgraph(Node* node, std::shared_ptr<Graph> subgraph) {
+void AliasDb::analyzeSubgraph(
+    Node* node,
+    const std::shared_ptr<Graph>& subgraph) {
   const auto subgraphBlock = subgraph->block();
   // CallFunction nodes have an extra first parameter
   if (node->kind() == prim::CallFunction) {
@@ -1569,8 +1573,8 @@ bool AliasDb::safeToChangeAliasingRelationship(
 // Helper for topologically-safe node moves. See `tryMove()` for details.
 class AliasDb::WorkingSet {
  public:
-  explicit WorkingSet(Node* mover, const AliasDb& aliasDb) : aliasDb_(aliasDb) {
-    mover_ = mover;
+  explicit WorkingSet(Node* mover, const AliasDb& aliasDb)
+      : aliasDb_(aliasDb), mover_(mover) {
     for (const auto user : getUsersSameBlock(mover_)) {
       moverUsers_.insert(user);
     }
@@ -1581,7 +1585,7 @@ class AliasDb::WorkingSet {
   // Add `n` to the working set
   void add(Node* n) {
     nodes_.push_back(n);
-    node_to_index_[n] = nodes_.size() - 1;
+    node_to_index_[n] = static_cast<int64_t>(nodes_.size()) - 1;
     for (const auto user : getUsersSameBlock(n)) {
       users_.insert(user);
     }
@@ -1705,6 +1709,7 @@ class AliasDb::WorkingSet {
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const AliasDb& aliasDb_;
   std::vector<Node*> nodes_;
   // Extra data structure for nodes for faster look up
@@ -1752,12 +1757,9 @@ bool AliasDb::tryMove(
   // dependencies
   WorkingSet workingSet(toMove, *this);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int direction;
+  auto direction = kNextDirection;
   if (toMove->isAfter(movePoint)) {
     direction = kPrevDirection;
-  } else {
-    direction = kNextDirection;
   }
 
   auto curNode = toMove->next_in_graph[direction];
@@ -1976,7 +1978,7 @@ std::optional<Element*> AliasDb::setWildcard(const Value* v) {
   // invariant that all mutable values have an Element
   getOrCreateElement(v);
   wildcards_.insert(v);
-  return *maybe_wildcardElement;
+  return maybe_wildcardElement;
 }
 
 void AliasDb::buildWrittenToLocationsIndex() {

@@ -1,5 +1,6 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, Optional
+from typing import Any, cast, Dict, List, Optional, Union
 
 import torch
 from torch import Tensor
@@ -19,6 +20,7 @@ from .optimizer import (
     ParamsT,
 )
 
+
 __all__ = ["Adadelta", "adadelta"]
 
 
@@ -26,7 +28,7 @@ class Adadelta(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: float = 1.0,
+        lr: Union[float, Tensor] = 1.0,
         rho: float = 0.9,
         eps: float = 1e-6,
         weight_decay: float = 0,
@@ -36,6 +38,8 @@ class Adadelta(Optimizer):
         maximize: bool = False,
         differentiable: bool = False,
     ):
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= rho <= 1.0:
@@ -223,7 +227,7 @@ Adadelta.__doc__ = (
             oscillations in the learning process.
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-6).
-        lr (float, optional): coefficient that scale delta before it is applied
+        lr (float, Tensor, optional): coefficient that scale delta before it is applied
             to the parameters (default: 1.0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         {_foreach_doc}
@@ -325,15 +329,20 @@ def _multi_tensor_adadelta(
         return
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, square_avgs, acc_deltas, state_steps]
+        [params, grads, square_avgs, acc_deltas, state_steps]  # type: ignore[list-item]
     )
     for (
-        device_params,
-        device_grads,
-        device_square_avgs,
-        device_acc_deltas,
-        device_state_steps,
+        device_params_,
+        device_grads_,
+        device_square_avgs_,
+        device_acc_deltas_,
+        device_state_steps_,
     ), _ in grouped_tensors.values():
+        device_params = cast(List[Tensor], device_params_)
+        device_grads = cast(List[Tensor], device_grads_)
+        device_square_avgs = cast(List[Tensor], device_square_avgs_)
+        device_acc_deltas = cast(List[Tensor], device_acc_deltas_)
+        device_state_steps = cast(List[Tensor], device_state_steps_)
         if has_complex:
             _view_as_real(
                 device_params, device_grads, device_square_avgs, device_acc_deltas
@@ -343,7 +352,7 @@ def _multi_tensor_adadelta(
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if device_state_steps[0].is_cpu:
+        if not torch._utils.is_compiling() and device_state_steps[0].is_cpu:
             torch._foreach_add_(
                 device_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
             )

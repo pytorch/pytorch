@@ -44,6 +44,7 @@ from torch.hub import tqdm
 
 from .. import config
 
+
 log = logging.getLogger(__name__)
 
 
@@ -244,6 +245,8 @@ isolate_fails_code_str = None
         elif isinstance(arg, torch.Tensor):
             # TODO: improve these names with FQN
             writer.tensor(placeholder, arg)
+        elif arg is None:
+            writer.const(placeholder)
         else:
             raise TypeError(f"arg is neither SymInt/int nor torch.Tensor, {arg}")
 
@@ -322,7 +325,6 @@ def dump_compiler_graph_state(gm, args, compiler_name, *, accuracy=None):
             BuckTargetWriter(file_name).write()
     except OSError:
         log.warning("No write permissions for %s", repro_path)
-        pass
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -521,7 +523,7 @@ ACCURACY_FAILS: Dict[str, Callable[[nn.Module, Any], bool]] = {
 def repro_minifier_query(options, mod, load_args):
     mod, args = repro_common(options, mod, load_args)
     fail_fn = functools.partial(
-        ACCURACY_FAILS[options.accuracy], check_str=options.check_str
+        ACCURACY_FAILS[options.accuracy], check_str=options.check_str  # type: ignore[call-arg]
     )
     if fail_fn(mod, args):
         sys.exit(1)
@@ -628,7 +630,7 @@ def repro_analyze(options, mod, load_args):
             assert not new_args
 
     class WriterInterp(fx.Interpreter):
-        def __init__(self, mod, subdir):
+        def __init__(self, mod, subdir) -> None:
             super().__init__(mod)
             self.subdir = subdir
 

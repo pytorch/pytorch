@@ -22,7 +22,7 @@ ARTIFACTS = [
     "test-reports",
 ]
 ARTIFACT_REGEX = re.compile(
-    r"test-reports-test-(?P<name>[\w\-]+)-\d+-\d+-(?P<runner>[\w\.]+)_(?P<job>\d+).zip"
+    r"test-reports-test-(?P<name>[\w\-]+)-\d+-\d+-(?P<runner>[\w\.-]+)_(?P<job>\d+).zip"
 )
 
 

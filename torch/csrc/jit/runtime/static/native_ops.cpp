@@ -1092,7 +1092,7 @@ class TORCH_API ForkedSubgraphSRLauncher {
   execution of subgraphs
 */
 c10::intrusive_ptr<Future> createFutureTypeFromGraphOutput(
-    std::shared_ptr<torch::jit::Graph> graph) {
+    const std::shared_ptr<torch::jit::Graph>& graph) {
   TypePtr return_type_;
   if (graph->outputs().size() == 1) {
     return_type_ = graph->outputs().at(0)->type();

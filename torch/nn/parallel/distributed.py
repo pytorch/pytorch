@@ -19,10 +19,9 @@ import torch.distributed as dist
 from torch._utils import _get_device_index
 from torch.autograd import Function, Variable
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
+from torch.nn.modules import Module
+from torch.nn.parallel.scatter_gather import gather, scatter_kwargs
 from torch.utils._pytree import tree_flatten, tree_unflatten
-
-from ..modules import Module
-from .scatter_gather import gather, scatter_kwargs
 
 
 RPC_AVAILABLE = False
@@ -46,6 +45,7 @@ if dist.rpc.is_available():
 
 if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
+
 
 __all__ = ["DistributedDataParallel"]
 
@@ -672,7 +672,10 @@ class DistributedDataParallel(Module, Joinable):
             self.process_group = device_mesh.get_group(mesh_dim=0)
             from torch.distributed.device_mesh import _mesh_resources
 
-            if _mesh_resources.get_parent_mesh(device_mesh) is not None:
+            root_mesh = _mesh_resources.get_root_mesh(device_mesh)
+            # if a root mesh is not the same as device_mesh,
+            # meaning the device_mesh is sliced out from the root mesh.
+            if root_mesh != device_mesh:
                 # TODO: This is a temporary work around to enable DDP + TP.
                 # We should do the logic in DDP so that the 2D implementation is
                 # sound and the state_dict works out of the box.
