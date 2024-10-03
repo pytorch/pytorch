@@ -4,10 +4,10 @@ PyTorch 2.0 Troubleshooting
 **Author**: `Michael Lazos <https://github.com/mlazos>`_
 
 
-NOTE: This document is out of date and in need of an update - in the mean time
+.. note:: This document is currently outdated and requires revision.  For the interim period, please refer to
 the `comprehensive manual for torch.compile
-<https://docs.google.com/document/d/1y5CRfMLdwEoF1nTk9q8qEu1mgMUuUtvhklPKJ2emLU8/edit#heading=h.ivdr7fmrbeab>`__ is
-the best resource for troubleshooting.
+<https://docs.google.com/document/d/1y5CRfMLdwEoF1nTk9q8qEu1mgMUuUtvhklPKJ2emLU8/edit#heading=h.ivdr7fmrbeab>`__ as
+the primary resource for troubleshooting guidance.
 
 
 We are actively developing debug tools, profilers, and improving our
