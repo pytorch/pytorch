@@ -430,7 +430,7 @@ class SIMDKernel(Kernel):
 
     def __init__(
         self,
-        groups: Dict[str, sympy.Expr],
+        tiling: Dict[str, sympy.Expr],
         index_dtype: str,
         mutations: Optional[OrderedSet[str]] = None,
         pid_cache=None,
@@ -443,7 +443,7 @@ class SIMDKernel(Kernel):
         self.body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
         self.numels = {
-            prefix: V.graph.sizevars.simplify(val) for prefix, val in groups.items()
+            prefix: V.graph.sizevars.simplify(val) for prefix, val in tiling.items()
         }
         self.mutations: OrderedSet[str] = (
             mutations if mutations is not None else OrderedSet()
@@ -1458,7 +1458,7 @@ class SIMDScheduling(BaseScheduling):
     ):
         from torch._inductor.codegen.triton_split_scan import TritonSplitScanKernel
 
-        tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
+        tiling = self.select_tiling(node_schedule, numel, reduction_numel)
         (
             reduction_hint_val,
             mutations,
@@ -1473,7 +1473,7 @@ class SIMDScheduling(BaseScheduling):
         if is_split_scan and issubclass(TritonSplitScanKernel, kernel_type):
             kernel_type = TritonSplitScanKernel
 
-        kernel_args = tiled_groups
+        kernel_args = [tiling]
         kernel_kwargs = dict(
             reduction_hint=reduction_hint_val,
             mutations=mutations,
@@ -1496,7 +1496,7 @@ class SIMDScheduling(BaseScheduling):
             kernel_kwargs["override_persistent_reduction"] = True
 
         kernel = kernel_type(
-            kernel_args,
+            *kernel_args,
             **kernel_kwargs,
         )
         kernel.buf_accesses = buf_accesses
@@ -1504,7 +1504,7 @@ class SIMDScheduling(BaseScheduling):
         kernel2: Optional[SIMDKernel] = None
         if kernel.persistent_reduction and config.triton.multi_kernel and not has_sort:
             kernel2 = self.kernel_type(
-                kernel_args,
+                *kernel_args,
                 **kernel_kwargs,
                 override_persistent_reduction=False,
             )
@@ -1686,15 +1686,15 @@ class SIMDScheduling(BaseScheduling):
         for pn, nodes in zip(subkernel_nodes, fused_node_lists):
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
-            tiled_groups = self.select_tiling(node_schedule, numel, rnumel)
-            node_schedule_map[pn] = node_schedule, tiled_groups, numel, rnumel
+            tiling = self.select_tiling(node_schedule, numel, rnumel)
+            node_schedule_map[pn] = node_schedule, tiling, numel, rnumel
             (
                 reduction_hint_val,
                 mutations,
                 index_dtype,
             ) = self.get_kernel_args(node_schedule, numel, rnumel)
             subkernel_map[pn] = ComboKernel.create_triton_kernel(
-                *tiled_groups,
+                tiling=tiling,
                 reduction_hint=reduction_hint_val,
                 mutations=mutations,
                 index_dtype=index_dtype,
@@ -1874,9 +1874,12 @@ class SIMDScheduling(BaseScheduling):
         # Add pointwise and reduction scores.
         tilings = tuple(
             CandidateTiling(
-                splits=tuple(tiling.tiling for tiling in tiling_group),
+                tiling=tuple(tiling.tiling for tiling in tiling_group),
                 score=sum(tiling.score for tiling in tiling_group),
-                name="_".join(tiling.name for tiling in tiling_group),
+                name="_".join(
+                    tiling.name if tiling.name is not None else ""
+                    for tiling in tiling_group
+                ),
             )
             for tiling_group in tiled_groups
         )
@@ -1885,7 +1888,7 @@ class SIMDScheduling(BaseScheduling):
 
     @classmethod
     def create_tiling(
-        cls, pw_tiling: Iterable[sympy.Expr], reduction_tiling: Iterable[sympy.Expr]
+        cls, pw_tiling: Sequence[sympy.Expr], reduction_tiling: Sequence[sympy.Expr]
     ) -> Dict[str, Tuple[sympy.Expr]]:
         """
         Create a tiling dict from pointwise and reduction splits.
@@ -2018,9 +2021,11 @@ class SIMDScheduling(BaseScheduling):
             #
             # NB: More than three max tiles is not enabled by default.
 
-            def convert_tiling_to_3d(tiling0: tuple, tiling1: tuple) -> Optional[tuple]:
-                a0, a1 = tiling0[0]
-                b0, b1 = tiling1[0]
+            def convert_tiling_to_3d(
+                tiling0: Dict[str, sympy.Expr], tiling1: Dict[str, sympy.Expr]
+            ) -> Optional[Dict[str, sympy.Expr]]:
+                a0, a1 = tiling0["x"], tiling0["y"]
+                b0, b1 = tiling1["x"], tiling1["y"]
                 if V.graph.sizevars.size_hint(a1 - b1) == 0:
                     return None
                 if V.graph.sizevars.size_hint(a1 - b1) < 0:
@@ -2030,27 +2035,28 @@ class SIMDScheduling(BaseScheduling):
                 if not V.graph.sizevars.statically_known_multiple_of(a1, b1):
                     return None
 
-                new_tiling = (a0, FloorDiv(a1, b1), b1)
-                return new_tiling
+                new_tiling = {"x": a0, "y": FloorDiv(a1, b1), "z": b1}
 
-            # Add one 3D tiling choice
-            for i in range(1, len(ranked_tilings)):
-                # Merge pointwise and reduction tilings separately.
-                new_tiling_group = tuple(
-                    convert_tiling_to_3d(tiling0, tiling1)
-                    for tiling0, tiling1 in zip(ranked_tilings[0], ranked_tilings[i])
+                # Copy the existing reduction tiling
+                new_tiling.update(
+                    {
+                        dim: split
+                        for dim, split in tiling0.items()
+                        if dim not in new_tiling
+                    }
                 )
 
-                # Quit if tiles were incompatible, or no tiles were converted to 3D.
-                # FIXME need to return the existing tiling (instead of None) for reductions?
-                if any(tiling is None for tiling in new_tiling_group) or not any(
-                    len(tiling) == config.triton.max_tiles
-                    for tiling in new_tiling_group
-                ):
-                    continue
+                return new_tiling
 
-                ranked_tilings = [new_tiling_group] + ranked_tilings
-                break  # only 1 choice for now
+            # Optionally add one 3D tiling choice.
+            if config.triton.max_tiles > 2:
+                for i in range(1, len(ranked_tilings)):
+                    new_3d_tiling = convert_tiling_to_3d(
+                        ranked_tilings[0], ranked_tilings[i]
+                    )
+                    if new_3d_tiling is not None:
+                        ranked_tilings = [new_3d_tiling] + ranked_tilings
+                        break  # only 1 choice for now
 
         if len(ranked_tilings) > 1:
             perf_hint_log.info("possibly bad tiling: %s", ranked_tilings)
@@ -2132,7 +2138,7 @@ class SIMDScheduling(BaseScheduling):
 
 @dataclasses.dataclass
 class CandidateTiling:
-    tiling: Tuple[Tuple[sympy.Expr, sympy.Expr], ...]
+    tiling: Tuple[Any, ...]
     score: int  # higher is better
     name: Optional[str] = None
 

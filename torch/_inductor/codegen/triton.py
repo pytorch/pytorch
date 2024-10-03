@@ -1317,7 +1317,7 @@ class TritonKernel(SIMDKernel):
 
     def __init__(
         self,
-        *groups,
+        tiling: Dict[str, sympy.Expr],
         index_dtype: str,
         mutations: Optional[OrderedSet[str]] = None,
         pid_cache=None,
@@ -1328,7 +1328,7 @@ class TritonKernel(SIMDKernel):
     ) -> None:
         self.optimize_mask: bool = optimize_mask
         super().__init__(
-            *groups,
+            tiling=tiling,
             index_dtype=index_dtype,
             mutations=mutations,
             reduction_hint=reduction_hint,

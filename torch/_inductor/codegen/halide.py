@@ -670,7 +670,7 @@ class HalideKernel(SIMDKernel):
 
     def __init__(
         self,
-        *groups,
+        tiling: Dict[str, sympy.Expr],
         index_dtype: str,
         mutations: Optional[OrderedSet[str]] = None,
         pid_cache=None,
@@ -678,7 +678,7 @@ class HalideKernel(SIMDKernel):
         override_persistent_reduction=None,
     ) -> None:
         super().__init__(
-            *groups,
+            tiling,
             index_dtype=index_dtype,
             mutations=mutations,
             reduction_hint=reduction_hint,

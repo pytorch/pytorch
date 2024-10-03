@@ -16,6 +16,7 @@ from typing import (
     Union,
 )
 
+import sympy
 from sympy import Integer, Symbol
 
 from torch.utils._ordered_set import OrderedSet
@@ -465,7 +466,7 @@ class ComboKernel(Kernel):
 
     @staticmethod
     def create_triton_kernel(
-        *groups: Any,
+        tiling: Dict[str, sympy.Expr],
         index_dtype: str,
         mutations: OrderedSet[str],
         reduction_hint: ReductionHint,
@@ -476,7 +477,7 @@ class ComboKernel(Kernel):
         2) numels except x dimension are the same for each sub kernel.
         """
         return TritonKernel(
-            *groups,
+            tiling,
             index_dtype=index_dtype,
             mutations=mutations,
             pid_cache={"tl.program_id(0)": "pid_offset"},

@@ -1,6 +1,8 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Optional
+from typing import Dict, Optional
+
+import sympy
 
 import torch._inductor.runtime.hints
 from torch._inductor import config
@@ -30,14 +32,14 @@ class TritonSplitScanKernel(TritonKernel):
 
     def __init__(
         self,
-        *groups,
+        tiling: Dict[str, sympy.Expr],
         index_dtype: str,
         mutations: Optional[OrderedSet[str]] = None,
         reduction_hint=torch._inductor.runtime.hints.ReductionHint.DEFAULT,
         min_elem_per_thread=0,
     ) -> None:
         super().__init__(
-            *groups,
+            tiling,
             index_dtype=index_dtype,
             mutations=mutations,
             pid_cache=None,
