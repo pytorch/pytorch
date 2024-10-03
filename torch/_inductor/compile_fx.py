@@ -82,7 +82,7 @@ from .utils import (
     clone_preserve_strides,
     copy_misaligned_inputs,
     get_cloned_parameter_buffer_name,
-    has_incompatible_cudagraph_ops,
+    get_first_incompatible_cudagraph_node,
     maybe_get_suppress_shape_guards_ctx,
     output_node,
     remove_unaligned_input_idxs,
@@ -284,11 +284,17 @@ def _recursive_joint_graph_passes(gm):
     joint_graph_passes(gm)
 
 
-def _recursive_post_grad_passes(gm, is_inference: bool = False):
+def _recursive_post_grad_passes(
+    gm, is_inference: bool = False, example_inputs=None, fake_mode=None
+):
     for subgraph_name in _get_subgraph_names(gm):
         subgraph = getattr(gm, subgraph_name)
-        _recursive_post_grad_passes(subgraph, is_inference)
-    post_grad_passes(gm, is_inference)
+        _recursive_post_grad_passes(
+            subgraph, is_inference, example_inputs=example_inputs, fake_mode=fake_mode
+        )
+    post_grad_passes(
+        gm, is_inference, example_inputs=example_inputs, fake_mode=fake_mode
+    )
 
 
 def split_const_gm(
@@ -598,7 +604,6 @@ def _compile_fx_inner(
 
                 cudagraph_tests = [
                     (not has_mutation, "mutated inputs"),
-                    (not has_incompatible_cudagraph_ops(gm), "incompatible ops"),
                     (not complex_memory_overlap_inputs, "complex memory overlap"),
                     (
                         all(
@@ -770,7 +775,12 @@ def fx_codegen_and_compile(
 
         with V.set_fake_mode(fake_mode):
             # has some issues with memory in training
-            _recursive_post_grad_passes(gm, is_inference=is_inference)
+            _recursive_post_grad_passes(
+                gm,
+                is_inference=is_inference,
+                example_inputs=example_inputs,
+                fake_mode=fake_mode,
+            )
             V.debug.fx_graph_transformed(gm, example_inputs)
             post_grad_graphs_log.debug(
                 "%s",
@@ -889,6 +899,16 @@ def fx_codegen_and_compile(
                     else:
                         disable = f"{disable}\n"
                     V.graph.disable_cudagraphs_reason = disable
+
+                if cudagraphs and not V.graph.disable_cudagraphs_reason:
+                    maybe_incompat_node = get_first_incompatible_cudagraph_node(gm)
+                    if maybe_incompat_node:
+                        disable = f"disabling cudagraphs due to incompatible op {maybe_incompat_node.target}"
+                        if stack_trace := maybe_incompat_node.meta.get(
+                            "stack_trace", None
+                        ):
+                            disable = f"{disable} Found from {stack_trace}\n"
+                        V.graph.disable_cudagraphs_reason = disable
 
                 if V.aot_compilation is True:
                     return compiled_fn
@@ -1186,14 +1206,36 @@ def fw_compiler_freezing(
     )
 
     static_input_idxs = list(range(num_fixed))
+    wrapper_new_args_unwrapped_indices: List[int] = []
     # constant params will be real tensors, not fake
     tracing_context = torch._guards.TracingContext.try_get()
+    unwrapped_args_offsets = [0]
+    max_offset_idx = 0
     if tracing_context is not None:
-        params_flat = tracing_context.params_flat
-        assert params_flat is not None
-        for i in range(len(params_flat)):
+        assert tracing_context.params_flat_unwrap_subclasses is not None
+        params_flat_unwrap = tracing_context.params_flat_unwrap_subclasses
+        max_offset_idx = max(0, len(params_flat_unwrap) - 1)
+        preserved_indices_params_flat = set()
+        unwrapped_idxs = tracing_context.params_unwrapped_to_flat_index
+        assert unwrapped_idxs is not None
+        current_offset = 0
+        if len(params_flat_unwrap) > 0:
+            unwrapped_args_offsets = []
+
+        for i in range(len(params_flat_unwrap)):
             if i not in preserved_arg_indices:
-                params_flat[i] = None
+                params_flat_unwrap[i] = None
+                if i > 0 and unwrapped_idxs[i] == unwrapped_idxs[i - 1]:
+                    current_offset += 1
+            else:
+                preserved_indices_params_flat.add(unwrapped_idxs[i])
+            unwrapped_args_offsets.append(current_offset)
+
+        # Deallocate wrapped params, if all subelements were deallocated
+        assert tracing_context.params_flat is not None
+        for i in range(len(tracing_context.params_flat)):
+            if i not in preserved_indices_params_flat:
+                tracing_context.params_flat[i] = None
 
         if tracing_context.fw_metadata:
             static_input_idxs += tracing_context.fw_metadata.static_input_indices
@@ -1217,7 +1259,10 @@ def fw_compiler_freezing(
         return optimized_function
 
     def wrapper(args):
-        args_new = [args[i] for i in preserved_arg_indices]
+        args_new = [
+            args[i - unwrapped_args_offsets[min(i, max_offset_idx)]]
+            for i in preserved_arg_indices
+        ]
         args.clear()
         return optimized_function(args_new)
 

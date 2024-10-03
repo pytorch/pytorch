@@ -57,6 +57,8 @@ if triton is not None:
     from triton.runtime.autotuner import OutOfResources
     from triton.runtime.jit import KernelInterface
 
+    from . import triton_helpers
+
     try:
         from triton.compiler.compiler import ASTSource
     except ImportError:
@@ -67,11 +69,14 @@ if triton is not None:
     except ImportError:
         GPUTarget = None
 else:
+    from types import ModuleType
+
     Config = object
     KernelInterface = object
     OutOfResources = object
     ASTSource = None
     GPUTarget = None
+    triton_helpers = ModuleType("triton_helpers")
 
 try:
     autograd_profiler = torch.autograd.profiler
@@ -85,7 +90,10 @@ log = logging.getLogger(__name__)
 
 
 def autotune_hints_to_configs(
-    hints: Set[AutotuneHint], size_hints, block_size: int
+    hints: Set[AutotuneHint],
+    size_hints,
+    block_size: int,
+    device_props: DeviceProperties,
 ) -> List[Config]:
     """
     AutotuneHints can be attached to the metadata of triton kernels for providing
@@ -98,9 +106,13 @@ def autotune_hints_to_configs(
     """
     xyz_options: Tuple[Tuple[int, Optional[int], Optional[int]], ...]
     configs = []
+    warp_size = device_props.warp_size
+    # CPU target has no concept of "warp"
+    if warp_size is None:
+        warp_size = 32
 
     for hint in hints:
-        if hint == AutotuneHint.ELEMENTS_PER_WARP_32:
+        if hint == AutotuneHint.ONE_ELEMENT_PER_THREAD:
             if len(size_hints) == 1:
                 xyz_options = ((block_size // 4, None, None),)
             elif len(size_hints) == 2:
@@ -116,7 +128,9 @@ def autotune_hints_to_configs(
                     triton_config(
                         size_hints,
                         *xyz,
-                        num_elements_per_warp=32,
+                        num_elements_per_warp=device_props.warp_size
+                        if device_props.warp_size
+                        else 32,
                     )
                 )
 
@@ -265,6 +279,11 @@ class CachingAutotuner(KernelInterface):
             seen_configs = set(self.configs)
 
             device_prop = self.device_props
+            warp_size = device_prop.warp_size
+            # CPU target has no concept of "warp"
+            if warp_size is None:
+                warp_size = 32
+
             if (
                 self.inductor_meta.get("dynamic_scale_rblock", True)
                 and self.heuristic_type == HeuristicType.REDUCTION
@@ -315,7 +334,7 @@ class CachingAutotuner(KernelInterface):
                     ):
                         continue
 
-                    nreg_per_warp = nreg * device_prop.warp_size
+                    nreg_per_warp = nreg * warp_size
                     nreg_per_block = nreg_per_warp * triton_config.num_warps
 
                     # Previously we set max_blocks_per_sm to 'max_threads_per_multi_processo / (32 * num_warps)'
@@ -370,7 +389,7 @@ class CachingAutotuner(KernelInterface):
                 if k == "waves_per_eu":
                     compile_meta["waves_per_eu"] = v
                     continue
-            compile_meta["constants"][self.fn.arg_names.index(k)] = v
+            compile_meta["constants"][k] = v
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
         compile_meta["debug"] = self.inductor_meta.get(
@@ -380,6 +399,11 @@ class CachingAutotuner(KernelInterface):
         # device type will be "hip" rather than "cuda" here
         compile_meta["device_type"] = self.device_props.type
         compile_meta["cc"] = self.device_props.cc
+
+        if self.device_props.type == "cpu":
+            triton_helpers.set_driver_to_cpu()
+        else:
+            triton_helpers.set_driver_to_gpu()
 
         if ASTSource:
             compile_args = (
@@ -683,6 +707,9 @@ class CachingAutotuner(KernelInterface):
 
             return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
 
+        if self.device_props.type == "cpu":
+            return benchmarker.benchmark_cpu(kernel_call)
+
         return benchmarker.benchmark_gpu(kernel_call, rep=40)
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
@@ -838,7 +865,9 @@ class CachingAutotuner(KernelInterface):
             )
         return config2launcher.get(best_config)
 
-    def run(self, *args, grid, stream, **kwargs):  # type:ignore[override]
+    def run(
+        self, *args, grid, stream, benchmark_run=False, **kwargs
+    ):  # type:ignore[override]
         if len(self.launchers) != 1:
             if len(self.launchers) == 0:
                 start_time = time.time_ns()
@@ -857,7 +886,7 @@ class CachingAutotuner(KernelInterface):
             ]
 
         (launcher,) = self.launchers
-        if launcher.store_cubin:
+        if launcher.store_cubin and (not benchmark_run or not self.cuda_kernel_saved):
             self.save_gpu_kernel(grid, stream, launcher)
 
         if os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_PARAMS", 0) == "1":
@@ -1394,43 +1423,31 @@ def pointwise(
     bs = max(256, min(numel // 128, 1024))
 
     hinted_configs = autotune_hints_to_configs(
-        inductor_meta.get("autotune_hints", set()), size_hints, bs
+        inductor_meta.get("autotune_hints", set()),
+        size_hints,
+        bs,
+        triton_meta["device"],
     )
 
     triton_config_with_settings = functools.partial(
         triton_config, min_elem_per_thread=min_elem_per_thread
     )
 
+    configs = None
     if len(size_hints) == 1:
         if disable_pointwise_autotuning(inductor_meta) and not (
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
         ):
-            return cached_autotune(
-                size_hints,
-                [triton_config_with_settings(size_hints, bs)],
-                triton_meta=triton_meta,
-                inductor_meta=inductor_meta,
-                heuristic_type=HeuristicType.POINTWISE,
-                filename=filename,
-            )
+            configs = [triton_config_with_settings(size_hints, bs)]
         else:
-            return cached_autotune(
-                size_hints,
-                [
-                    triton_config_with_settings(
-                        size_hints, bs, num_elements_per_warp=256
-                    ),
-                    triton_config_with_settings(
-                        size_hints, bs // 2, num_elements_per_warp=64
-                    ),
-                    *hinted_configs,
-                ],
-                triton_meta=triton_meta,
-                inductor_meta=inductor_meta,
-                heuristic_type=HeuristicType.POINTWISE,
-                filename=filename,
-            )
+            configs = [
+                triton_config_with_settings(size_hints, bs, num_elements_per_warp=256),
+                triton_config_with_settings(
+                    size_hints, bs // 2, num_elements_per_warp=64
+                ),
+                *hinted_configs,
+            ]
     if len(size_hints) == 2:
         if (
             disable_pointwise_autotuning(inductor_meta) or tile_hint == TileHint.SQUARE
@@ -1438,17 +1455,9 @@ def pointwise(
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
         ):
-            return cached_autotune(
-                size_hints,
-                [triton_config_with_settings(size_hints, 32, 32)],
-                triton_meta=triton_meta,
-                inductor_meta=inductor_meta,
-                heuristic_type=HeuristicType.POINTWISE,
-                filename=filename,
-            )
-        return cached_autotune(
-            size_hints,
-            [
+            configs = [triton_config_with_settings(size_hints, 32, 32)]
+        else:
+            configs = [
                 triton_config_with_settings(size_hints, 32, 32),
                 triton_config_with_settings(size_hints, 64, 64),  # ~8% better for fp16
                 triton_config_with_settings(size_hints, 256, 16),
@@ -1456,25 +1465,12 @@ def pointwise(
                 triton_config_with_settings(size_hints, bs, 1),
                 triton_config_with_settings(size_hints, 1, bs),
                 *hinted_configs,
-            ],
-            triton_meta=triton_meta,
-            inductor_meta=inductor_meta,
-            filename=filename,
-            heuristic_type=HeuristicType.POINTWISE,
-        )
+            ]
     if len(size_hints) == 3:
         if disable_pointwise_autotuning(inductor_meta):
-            return cached_autotune(
-                size_hints,
-                [triton_config_with_settings(size_hints, 16, 16, 16)],
-                triton_meta=triton_meta,
-                inductor_meta=inductor_meta,
-                heuristic_type=HeuristicType.POINTWISE,
-                filename=filename,
-            )
-        return cached_autotune(
-            size_hints,
-            [
+            configs = [triton_config_with_settings(size_hints, 16, 16, 16)]
+        else:
+            configs = [
                 triton_config_with_settings(size_hints, 16, 16, 16),
                 triton_config_with_settings(size_hints, 64, 8, 8),
                 triton_config_with_settings(size_hints, 8, 64, 8),
@@ -1483,13 +1479,18 @@ def pointwise(
                 triton_config_with_settings(size_hints, 1, bs, 1),
                 triton_config_with_settings(size_hints, 1, 1, bs),
                 *hinted_configs,
-            ],
-            triton_meta=triton_meta,
-            inductor_meta=inductor_meta,
-            filename=filename,
-            heuristic_type=HeuristicType.POINTWISE,
-        )
-    raise NotImplementedError(f"size_hints: {size_hints}")
+            ]
+
+    if not configs:
+        raise NotImplementedError(f"size_hints: {size_hints}")
+    return cached_autotune(
+        size_hints,
+        configs,
+        triton_meta=triton_meta,
+        inductor_meta=inductor_meta,
+        heuristic_type=HeuristicType.POINTWISE,
+        filename=filename,
+    )
 
 
 def _reduction_configs(
