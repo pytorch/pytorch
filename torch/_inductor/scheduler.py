@@ -396,6 +396,10 @@ class BaseSchedulerNode:
             and hasattr(V.kernel, "args")
         ):
             return
+        fused_nodes = {
+            node.get_name()
+            for node in self.scheduler.name_to_fused_node[self.get_name()].get_nodes()
+        }
 
         ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
 
@@ -419,6 +423,11 @@ class BaseSchedulerNode:
                     and V.graph.wrapper_code.can_reuse(input_buf, self)
                     and not isinstance(input_buf.defining_op, NopKernelSchedulerNode)
                 ):
+                    # If the writers of input_buf are in the same FusedSchedulerNode as the current op, then there is
+                    # no need to inplace.
+                    if input_buf.defining_op.get_name() in fused_nodes:
+                        continue
+
                     assert input_buf.users is not None
                     remaining_uses = [
                         x
@@ -2672,6 +2681,8 @@ class Scheduler:
 
         buffer_names_grouping = collections.defaultdict(list)
         for node in nodes:
+            if self.unfusable_node(node):
+                continue
             for buf in node.used_buffer_names():
                 buffer_names_grouping[buf].append(node)
         for node_grouping in buffer_names_grouping.values():
@@ -2894,6 +2905,15 @@ class Scheduler:
             )
 
         return self.score_fusion_memory(node1, node2) > 0
+
+    def unfusable_node(self, node: BaseSchedulerNode) -> bool:
+        """
+        Is this node unfusable under any conditions.
+        """
+        return (
+            isinstance(node, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
+            and not node.is_template()
+        )
 
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
         """

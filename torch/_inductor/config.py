@@ -3,10 +3,7 @@ import sys
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
-
-
-def is_fbcode() -> bool:
-    return not hasattr(torch.version, "git_version")
+from torch._environment import is_fbcode
 
 
 def _get_tristate_env(name: str) -> Optional[bool]:
@@ -227,6 +224,7 @@ use_mixed_mm = True
 # https://pytorch.org/docs/stable/notes/numerical_accuracy.html#batched-computations-or-slice-computations
 fx_passes_numeric_check: Dict[str, Any] = {
     "pre_grad": False,
+    "post_grad": False,
     "precision": 1e-4,
     "num_iterations": 1,
     "requires_optimizer": True,
@@ -565,6 +563,20 @@ _fuse_ddp_communication_passes: List[Union[Callable[..., None], str]] = [
 _micro_pipeline_tp: bool = False
 
 
+def parallel_compile_enabled_internally() -> bool:
+    """
+    TODO: Remove when parallel compiled is fully enabled internally. For rollout, use a
+    knob to enable / disable. The justknob should not be performed at import, however.
+    So for fbcode, we assign compile_threads to 'None' below and initialize lazily in
+    async_compile.py.
+    """
+    ENABLE_PARALLEL_COMPILE_VERSION = 1
+
+    jk_name = "pytorch/inductor:enable_parallel_compile_version"
+    version = torch._utils_internal.justknobs_getval_int(jk_name)
+    return ENABLE_PARALLEL_COMPILE_VERSION >= version
+
+
 def decide_compile_threads() -> int:
     """
     Here are the precedence to decide compile_threads
@@ -577,13 +589,7 @@ def decide_compile_threads() -> int:
         return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
     elif sys.platform == "win32":
         return 1
-    # TODO: For internal rollout, we use a killswitch to disable. The justknob should
-    # not be performed at import, however. So for fbcode, we assign compile_threads to
-    # None below and call this method lazily in async_compile.py. Remove this after
-    # rollout completes.
-    elif is_fbcode() and not torch._utils_internal.justknobs_check(
-        "pytorch/inductor:enable_parallel_compile"
-    ):
+    elif is_fbcode() and not parallel_compile_enabled_internally():
         return 1
     else:
         cpu_count = (
@@ -1136,7 +1142,8 @@ class rocm:
     # Flag to print register and LDS usage during compilation
     print_kernel_resource_usage = False
 
-    # Path to ROCm installation, if None, use env variable ROCM_HOME
+    # Path to ROCm installation, if None, use env variable ROCM_HOME.
+    # In fbcode see triton/fb/TARGETS for how ROCM_HOME gets set.
     rocm_home: Optional[str] = None
 
     # Path to Composable Kernel library.
@@ -1262,6 +1269,9 @@ _cache_config_ignore_prefix = [
     "worker_start_method",
     "compile_threads",
 ]
+
+# External callable for matmul tuning candidates
+external_matmul: List[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
