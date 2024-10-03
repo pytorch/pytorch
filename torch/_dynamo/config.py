@@ -424,6 +424,7 @@ cudagraph_backend_support_input_mutation = False
 # correctness of custom ops.
 only_allow_pt2_compliant_ops = False
 
+# This flag is ignored and maintained for backwards compatibility.
 capture_autograd_function = True
 
 # enable/disable dynamo tracing for `torch.func` transforms
