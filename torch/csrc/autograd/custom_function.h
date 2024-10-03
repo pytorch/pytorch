@@ -192,7 +192,6 @@ struct CppNode : public Node {
     static_assert(
         std::is_same_v<std::remove_cv_t<decltype(T::is_traceable)>, bool>);
     if (T::is_traceable) {
-      std::cout << "compiled_args: 1" << std::endl;
       // although neither of the 2 methods below have uniqueness guarantees
       // it is unlikely for them to collide at the same time
       args.collect(static_cast<uint64_t>(typeid(T).hash_code()));
@@ -210,7 +209,6 @@ struct CppNode : public Node {
       args.collect(input_info_);
       args.collect(output_info_);
     } else if (args.opaque_cpp_node()) {
-      std::cout << "compiled_args: 2" << std::endl;
       args.collect(static_cast<uint64_t>(typeid(T).hash_code()));
       args.collect(std::string(typeid(T).name()));
       // but the symint wont be passed to the op
@@ -224,12 +222,10 @@ struct CppNode : public Node {
       args.collect(output_info_);
       args.collect(input_info_);
 
-      std::cout << "compiled_args on lambda" << std::endl;
       std::function<variable_list(variable_list)> lambda =
           [&](variable_list&& inputs) { return apply(std::move(inputs)); };
       args.collect(this, std::move(lambda), is_variable_input_, input_info_);
     } else {
-      std::cout << "compiled_args: 3" << std::endl;
       throw std::runtime_error(
           "Attempting to trace a potentially unsafe C++ autograd function: " +
           name() +
@@ -241,7 +237,6 @@ struct CppNode : public Node {
       const variable_list& inputs,
       SwapSavedVariables& saved) override {
     if (T::is_traceable) {
-      std::cout << "apply_with_saved: 1" << std::endl;
       saved.before(ctx_.saved_data);
       TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
       TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
@@ -251,7 +246,6 @@ struct CppNode : public Node {
       saved.before(ctx_.has_freed_buffers_);
       saved.before(input_info_);
       saved.before(output_info_);
-      std::cout << "applying bwd" << std::endl;
       auto results = apply(variable_list(inputs));
       saved.after(ctx_.saved_data);
       TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
@@ -264,7 +258,6 @@ struct CppNode : public Node {
       saved.after(output_info_);
       return results;
     } else if (saved.opaque_cpp_node()) {
-      std::cout << "apply_with_saved: 2" << std::endl;
       saved.before(output_info_);
       saved.before(input_info_);
       auto grads = saved.lift(variable_list(inputs));

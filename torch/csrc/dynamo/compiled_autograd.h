@@ -254,13 +254,9 @@ struct AutogradCompilerCall {
   std::vector<c10::SafePyObject> hooks;
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type = SizeInput::STATIC;
-
-  // NodeCall id of each size, only when verbose logging is enabled
-  std::vector<uint32_t> size_input_origins;
-  std::optional<size_t> active_node_call_idx;
-
   const bool opaque_cpp_node;
-  // still need to get py::cpp_function here, cuz need it alive at runtime
+
+  // Currently, these lift untraceable CppNodes as one-time use custom ops
   std::function<at::IValue*(
       CompiledNodeArgs&,
       Node*,
@@ -270,6 +266,10 @@ struct AutogradCompilerCall {
       collect;
   std::function<variable_list(SwapSavedVariables&, PyObject*, variable_list)>
       lift;
+
+  // NodeCall id of each size, only when verbose logging is enabled
+  std::vector<uint32_t> size_input_origins;
+  std::optional<size_t> active_node_call_idx;
 };
 
 class CompiledNodeArgs {
@@ -366,7 +366,7 @@ class CompiledNodeArgs {
       const std::vector<VariableInfo>& output_metas) {
     at::IValue* ptr = _compiler.collect(
         *this, fn, std::move(lambda), is_variable_input, output_metas);
-    TORCH_INTERNAL_ASSERT(ptr->isInt(), "WTF");
+    TORCH_INTERNAL_ASSERT(ptr->isInt(), "Unexpected non-int index");
     _compiler.lifted_ivalue_args.args.emplace_back(ptr);
   }
   void collect(const at::IValue& iv, bool nested = false) {
@@ -650,9 +650,6 @@ struct TraceState {
       : sym_sizes(ss), outputs(num_outputs) {}
 
   void debug_asserts() {
-    // TODO: does this still cause problems?
-    std::cout << "expected: " << sym_sizes_index << ", "
-              << "found: " << sym_sizes.size() << std::endl;
     TORCH_INTERNAL_ASSERT(sym_sizes_index == sym_sizes.size());
   }
   std::optional<c10::SymInt> next_sym_size() {

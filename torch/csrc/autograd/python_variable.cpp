@@ -1091,7 +1091,6 @@ int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
       "' to a tensor located on device with index '",
       var.get_device(),
       "'. Please ensure that the gradient and the tensor are on the same device");
-  std::cout << "grad defined=" << grad.defined() << std::endl;
   TORCH_CHECK(
       grad.sym_sizes().equals(var.sym_sizes()),
       "attempting to assign a gradient of size '",

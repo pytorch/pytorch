@@ -242,22 +242,6 @@ class AutogradCompilerInstance:
             self.bind_tensors_to_proxies(grad_ins, cpp_node_proxies)
 
         return grad_ins
-        # grad_ins may be torch.empty i.e. None i.e. undefined output variables
-        # but torch.empty is not considered undefined
-        # empty is:
-        # .dim() == 1
-        # .size(0) == 0
-        # unfill_proxies = self.fx_tracer.create_proxy(
-        #     kind="call_function",
-        #     target=unfill_uninitialized,
-        #     args=(self.to_proxy(grad_ins),),
-        #     kwargs={},
-        # )
-        # with disable_proxy_modes_tracing():
-        #     processed_outputs = [maybe_clone(x) for x in grad_ins]
-        #     self.bind_tensors_to_proxies(processed_outputs, unfill_proxies)
-
-        # return processed_outputs
 
     def proxy_call_backward(
         self,
