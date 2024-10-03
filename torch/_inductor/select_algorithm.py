@@ -500,7 +500,7 @@ class TritonTemplateKernel(TritonKernel):
         """
 
         input_node = self.named_input_nodes[input_name]
-        self.prologue_supported_inputs.add(input_name)
+        self.prologue_supported_inputs.add(input_node.get_name())
         groups = (sympy_product(input_node.get_size()), sympy.Integer(1))
         range_trees = self.construct_range_trees(
             pid_cache=None, inside_reduction=False, numels=groups, no_x_dim=False
