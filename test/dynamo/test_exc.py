@@ -171,7 +171,7 @@ from user code:
             munge_exc(record.getMessage()),
             """\
 Graph break in user code at test_exc.py:N
-Reason: Unsupported: skip function graph_break in file _dynamo/decorators.py
+Reason: Unsupported: 'skip function graph_break in file _dynamo/decorators.py'
 User code traceback:
   File "test_exc.py", line N, in fn001
     return fn002(x)
