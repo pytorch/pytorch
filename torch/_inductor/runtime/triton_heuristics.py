@@ -15,7 +15,7 @@ import re
 import sys
 import threading
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Container, Dict, List, Optional, Set, Tuple
 
 import torch
 
@@ -57,6 +57,8 @@ if triton is not None:
     from triton.runtime.autotuner import OutOfResources
     from triton.runtime.jit import KernelInterface
 
+    from . import triton_helpers
+
     try:
         from triton.compiler.compiler import ASTSource
     except ImportError:
@@ -67,11 +69,14 @@ if triton is not None:
     except ImportError:
         GPUTarget = None
 else:
+    from types import ModuleType
+
     Config = object
     KernelInterface = object
     OutOfResources = object
     ASTSource = None
     GPUTarget = None
+    triton_helpers = ModuleType("triton_helpers")
 
 try:
     autograd_profiler = torch.autograd.profiler
@@ -101,6 +106,10 @@ def autotune_hints_to_configs(
     """
     xyz_options: Tuple[Tuple[int, Optional[int], Optional[int]], ...]
     configs = []
+    warp_size = device_props.warp_size
+    # CPU target has no concept of "warp"
+    if warp_size is None:
+        warp_size = 32
 
     for hint in hints:
         if hint == AutotuneHint.ONE_ELEMENT_PER_THREAD:
@@ -178,6 +187,8 @@ class CachingAutotuner(KernelInterface):
         configs,
         save_cache_hook,
         mutated_arg_names: List[str],  # see [Note: clone mutated buffers]
+        is_inference,
+        is_backward,
         heuristic_type,
         size_hints=None,
         inductor_meta=None,  # metadata not relevant to triton
@@ -201,6 +212,8 @@ class CachingAutotuner(KernelInterface):
         self.inductor_meta = {} if inductor_meta is None else inductor_meta
         self.save_cache_hook = save_cache_hook
         self.mutated_arg_names = mutated_arg_names
+        self.is_inference = is_inference
+        self.is_backward = is_backward
         self.configs = configs
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
@@ -266,6 +279,11 @@ class CachingAutotuner(KernelInterface):
             seen_configs = set(self.configs)
 
             device_prop = self.device_props
+            warp_size = device_prop.warp_size
+            # CPU target has no concept of "warp"
+            if warp_size is None:
+                warp_size = 32
+
             if (
                 self.inductor_meta.get("dynamic_scale_rblock", True)
                 and self.heuristic_type == HeuristicType.REDUCTION
@@ -311,7 +329,7 @@ class CachingAutotuner(KernelInterface):
                     ):
                         continue
 
-                    nreg_per_warp = nreg * device_prop.warp_size
+                    nreg_per_warp = nreg * warp_size
                     nreg_per_block = nreg_per_warp * triton_config.num_warps
 
                     # Previously we set max_blocks_per_sm to 'max_threads_per_multi_processo / (32 * num_warps)'
@@ -375,6 +393,11 @@ class CachingAutotuner(KernelInterface):
         # device type will be "hip" rather than "cuda" here
         compile_meta["device_type"] = self.device_props.type
         compile_meta["cc"] = self.device_props.cc
+
+        if self.device_props.type == "cpu":
+            triton_helpers.set_driver_to_cpu()
+        else:
+            triton_helpers.set_driver_to_gpu()
 
         if ASTSource:
             compile_args = (
@@ -667,10 +690,12 @@ class CachingAutotuner(KernelInterface):
         cpu_copies = self.copy_args_to_cpu_if_needed(*args, **kwargs)
 
         def kernel_call():
-            new_args, new_kwargs = self.maybe_clone_args(cpu_copies, *args, **kwargs)
+            cloned_args, cloned_kwargs = self.maybe_clone_args(
+                cpu_copies, *args, **kwargs
+            )
             launcher(
-                *new_args,
-                **new_kwargs,
+                *cloned_args,
+                **cloned_kwargs,
                 grid=grid,
                 stream=stream,
             )
@@ -681,6 +706,9 @@ class CachingAutotuner(KernelInterface):
 
             return do_bench_using_profiling(kernel_call, warmup=10, rep=40)
 
+        if self.device_props.type == "cpu":
+            return benchmarker.benchmark_cpu(kernel_call)
+
         return benchmarker.benchmark_gpu(kernel_call, rep=40)
 
     def copy_args_to_cpu_if_needed(self, *args, **kwargs):
@@ -690,7 +718,14 @@ class CachingAutotuner(KernelInterface):
         If those clones would increase the peak memory usage, however, we instead
         copy to cpu and restore them after each iteratrion. Figure out the args
         to be copied and do the copying.
+
+        Skip this optimization for forward of the training loop where we expect
+        every new node will increase the peak memory and our greedy approach
+        would introduce a lot of unnecessary cpu copies.
         """
+        if not self.is_inference and not self.is_backward:
+            return {}
+
         copies = {}
         budget = torch.cuda.max_memory_allocated() - torch.cuda.memory_allocated()
 
@@ -726,25 +761,33 @@ class CachingAutotuner(KernelInterface):
             arg, cpu_arg = pair
             arg.copy_(cpu_arg, non_blocking=True)
 
-    def maybe_clone_args(self, cpu_copies, *args, **kwargs):
+    def maybe_clone_args(
+        self, exclude: Container[str], *args, **kwargs
+    ) -> Tuple[List[Any], Dict[str, Any]]:
         """
-        Prepare args for benchmarking by cloning mutated args, except for
-        the set copied to cpu. Pass non-mutated args directly.
+        Prepare new args and kwargs by cloning any in-place buffers
+        (that are not in the provided exclusion list), to avoid autotune
+        contaminating them. Avoid cloning the other buffers because it
+        leads to increased memory usage.
         """
         from ..compile_fx import clone_preserve_strides
 
         def prepare_arg(name, arg):
-            if name in cpu_copies or name not in self.mutated_arg_names:
-                return arg
-            else:
+            if name in self.mutated_arg_names and name not in exclude:
+                assert isinstance(arg, torch.Tensor)
                 return clone_preserve_strides(arg)
+            else:
+                return arg
 
-        new_args = [
+        cloned_args = [
             prepare_arg(self.fn.arg_names[i], arg) for i, arg in enumerate(args)
         ]
-        new_kwargs = {name: prepare_arg(name, arg) for name, arg in kwargs.items()}
+        cloned_kwargs = {name: prepare_arg(name, arg) for name, arg in kwargs.items()}
 
-        return new_args, new_kwargs
+        return cloned_args, cloned_kwargs
+
+    def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
+        return self.maybe_clone_args(set(), *args, **kwargs)
 
     def benchmark_all_configs(self, *args, **kwargs):
         with dynamo_timed("CachingAutotuner.benchmark_all_configs"):
@@ -783,8 +826,6 @@ class CachingAutotuner(KernelInterface):
             self.save_cache_hook(self.launchers[0].config, self.autotune_time_taken_ns)
 
     def save_gpu_kernel(self, grid, stream, launcher):
-        if self.cuda_kernel_saved:
-            return
         if callable(grid):
             grid_x, grid_y, grid_z = grid(launcher.config.kwargs)
         else:
@@ -876,7 +917,9 @@ class CachingAutotuner(KernelInterface):
             )
         return config2launcher.get(best_config)
 
-    def run(self, *args, grid, stream, **kwargs):  # type:ignore[override]
+    def run(
+        self, *args, grid, stream, benchmark_run=False, **kwargs
+    ):  # type:ignore[override]
         if len(self.launchers) != 1:
             if len(self.launchers) == 0:
                 start_time = time.time_ns()
@@ -895,7 +938,7 @@ class CachingAutotuner(KernelInterface):
             ]
 
         (launcher,) = self.launchers
-        if launcher.store_cubin:
+        if launcher.store_cubin and (not benchmark_run or not self.cuda_kernel_saved):
             self.save_gpu_kernel(grid, stream, launcher)
 
         if os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_PARAMS", 0) == "1":
@@ -1089,6 +1132,8 @@ def cached_autotune(
             log.debug("autotune caching is disabled by config.force_disable_caches")
 
     mutated_arg_names = inductor_meta.pop("mutated_arg_names", ())
+    is_inference = inductor_meta.pop("is_inference", False)
+    is_backward = inductor_meta.pop("is_backward", False)
 
     def decorator(fn):
         # Remove XBLOCK from config if it's not a function argument.
@@ -1115,6 +1160,8 @@ def cached_autotune(
                 configs=configs,
                 save_cache_hook=autotune_cache and autotune_cache.save,
                 mutated_arg_names=mutated_arg_names,
+                is_inference=is_inference,
+                is_backward=is_backward,
                 heuristic_type=heuristic_type,
                 size_hints=size_hints,
                 custom_kernel=custom_kernel,
@@ -1127,6 +1174,8 @@ def cached_autotune(
             configs=configs,
             save_cache_hook=autotune_cache and autotune_cache.save,
             mutated_arg_names=mutated_arg_names,
+            is_inference=is_inference,
+            is_backward=is_backward,
             heuristic_type=heuristic_type,
             size_hints=size_hints,
             custom_kernel=custom_kernel,

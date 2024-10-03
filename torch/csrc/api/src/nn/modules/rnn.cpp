@@ -18,8 +18,7 @@
 
 using namespace torch::nn::utils::rnn;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// These must line up with the CUDNN mode codes:
 /// https://docs.nvidia.com/deeplearning/sdk/cudnn-developer-guide/index.html#cudnnRNNMode_t
@@ -892,7 +891,7 @@ RNNCellImpl::RNNCellImpl(const RNNCellOptions& options_)
           /*num_chunks=*/1)),
       options(options_) {}
 
-Tensor RNNCellImpl::forward(const Tensor& input, Tensor hx) {
+Tensor RNNCellImpl::forward(const Tensor& input, const Tensor& hx) {
   this->check_forward_input(input, "input");
   this->check_forward_input(hx, "hidden");
 
@@ -1000,7 +999,7 @@ GRUCellImpl::GRUCellImpl(const GRUCellOptions& options_)
           /*num_chunks=*/3)),
       options(options_) {}
 
-Tensor GRUCellImpl::forward(const Tensor& input, Tensor hx) {
+Tensor GRUCellImpl::forward(const Tensor& input, const Tensor& hx) {
   this->check_forward_input(input, "input");
   this->check_forward_input(hx, "hidden");
 
@@ -1026,5 +1025,4 @@ Tensor GRUCellImpl::forward(const Tensor& input, Tensor hx) {
   return ret;
 }
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn
