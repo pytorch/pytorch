@@ -17,8 +17,7 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import use_aten_gemm_kernels, use_ck_template, use_triton_template
-from .mm import _is_static_problem  # TODO(yangsiyu) move to mm_common
-from .mm_common import mm_args, mm_grid, scaled_mm_configs
+from .mm_common import _is_static_problem, mm_args, mm_grid, scaled_mm_configs
 
 
 log = logging.getLogger(__name__)
@@ -277,7 +276,7 @@ def tuned_scaled_mm(
     if use_aten_gemm_kernels():
         choices.append(aten_choice)
 
-    static_shape, is_nonzero = _is_static_problem([mat_a, mat_b], layout)
+    static_shape, is_nonzero = _is_static_problem(layout)
     if is_nonzero and use_triton_template(layout, enable_float8=True):
         for config in scaled_mm_configs(m, n, k):
             if k == 16 and config.kwargs["BLOCK_M"] >= 64:
