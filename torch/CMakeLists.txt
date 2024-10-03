@@ -157,7 +157,7 @@ if(USE_ROCM)
       USE_ROCM
       __HIP_PLATFORM_AMD__
       )
-    if (TARGET rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+    if(TARGET rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
     endif()
 endif()
