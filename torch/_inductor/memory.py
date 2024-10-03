@@ -129,8 +129,8 @@ def compute_size_for_scheduler_buffer(
     Returns:
         A dictionary mapping a scheduler buffer to a tuple of (size_alloc, size_free).
     """
-    from .scheduler import OutputNode
     from .ir import MultiOutput
+    from .scheduler import OutputNode
 
     sched_buf_to_size: Dict[str, Tuple[int, int]] = dict()
 
