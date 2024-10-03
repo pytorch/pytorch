@@ -2637,9 +2637,11 @@ main()
         # Must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
-    @unittest.skipIf(not HAS_CUDA, "requires cuda")
     @parameterized.expand([(True,), (False,)])
     def test_cudagraphs_cpu_scalar_used_in_cpp_custom_op(self, opaque):
+        if not HAS_CUDA:
+            self.skipTest("requires cuda")
+
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = <is_traceable>;
