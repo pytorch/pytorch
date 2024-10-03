@@ -3048,23 +3048,6 @@ def forward(self, x):
         res = gm(input_tensor, input_tensor2)
         self.assertTrue(torch._dynamo.utils.same(ref, res))
 
-    def test_export_mark_dynamic_conflict_dynamic_dim(self):
-        y = torch.randn([3, 3, 3])
-
-        def my_dyn_fn(x):
-            if x.shape[0] > 3:
-                return x.sin()
-            return x.cos()
-
-        torch._dynamo.mark_dynamic(y, 0)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Constraints violated",
-        ):
-            torch._dynamo.export(
-                my_dyn_fn, dynamic_shapes=({0: torch.export.Dim("dim")},)
-            )(y)
-
     def test_export_dynamic_dim_cleanup(self):
         y = torch.randn([3, 3, 3])
 

@@ -2527,7 +2527,8 @@ class DeviceCachingAllocator {
       return false;
     // Allow oversized block size to be rounded up but within a limit
     if ((p.size() >= CUDAAllocatorConfig::max_split_size()) &&
-        ((*it)->size >= p.size() + kLargeBuffer))
+        ((*it)->size >=
+         p.size() + CUDAAllocatorConfig::max_non_split_rounding_size()))
       return false;
     p.block = *it;
     pool.blocks.erase(it);

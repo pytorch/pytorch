@@ -78,7 +78,7 @@ struct VecReduceAllSIMD<float, Op> {
 #endif // defined(CPU_CAPABILITY_AVX512)
 #endif // defined(__GNUC__) && (__GNUC__ > 5) && !defined(_MSC_VER) && !defined(C10_MOBILE)
 
-#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
+#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && !defined(CPU_CAPABILITY_SVE)
 template <typename Op>
 struct VecReduceAllSIMD<float, Op> {
   static inline float apply(const Op& vec_fun, const Vectorized<float>& acc_vec) {

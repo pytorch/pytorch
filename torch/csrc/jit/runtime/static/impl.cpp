@@ -399,8 +399,6 @@ ManagedTensorRanges::ManagedTensorRanges(
     const AliasDb& alias_db,
     const c10::FastSet<const Value*>& managed_tensor_values) {
   const std::vector<Node*> nodes(block.nodes().begin(), block.nodes().end());
-  const c10::FastSet<const Value*> graph_inputs(
-      block.inputs().begin(), block.inputs().end());
 
   const auto num_nodes = static_cast<uint32_t>(nodes.size());
   for (const auto i : c10::irange(num_nodes)) {

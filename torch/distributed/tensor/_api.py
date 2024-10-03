@@ -22,7 +22,7 @@ from torch.distributed.tensor._redistribute import (
 )
 from torch.distributed.tensor._utils import (
     compute_global_tensor_info,
-    compute_local_shape,
+    compute_local_shape_and_global_offset,
     normalize_to_torch_size,
 )
 from torch.distributed.tensor.placement_types import (
@@ -283,7 +283,7 @@ class DTensor(torch.Tensor):
 
     # pyre-fixme[14]: `__repr__` overrides method defined in `DTensor` inconsistently.
     # pyre-fixme[3]: Return type must be annotated.
-    def __repr__(self):
+    def __repr__(self):  # type: ignore[override]
         # TODO: consider all_gather the local tensors for better debugging
         return f"DTensor(local_tensor={self._local_tensor}, device_mesh={self._spec.mesh}, placements={self._spec.placements})"
 
@@ -629,7 +629,7 @@ def distribute_tensor(
     Distribute a leaf ``torch.Tensor`` (i.e. nn.Parameter/buffers) to the ``device_mesh`` according
     to the ``placements`` specified. The rank of ``device_mesh`` and ``placements`` must be the
     same. The ``tensor`` to distribute is the logical or "global" tensor, and the API would use
-    the ``tensor`` from first rank of the DeviceMesh dimension as the source of truth to perserve
+    the ``tensor`` from first rank of the DeviceMesh dimension as the source of truth to preserve
     the single-device semantic. If you want to construct a DTensor in the middle of the Autograd
     computation, please use :meth:`DTensor.from_local` instead.
 
@@ -931,7 +931,10 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     torch_stride = torch._prims_common.make_contiguous_strides_for(size)
 
     # get local tensor shape
-    local_shape = compute_local_shape(size, device_mesh, placements)
+    local_shape, _ = compute_local_shape_and_global_offset(
+        size, device_mesh, placements
+    )
+
     # initialize the local tensor
     if init_op == torch.full:
         fill_value = kwargs.pop("fill_value", 0)

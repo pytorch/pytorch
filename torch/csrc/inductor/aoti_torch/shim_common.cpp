@@ -55,6 +55,50 @@ namespace fs = std::filesystem;
 namespace fs = std::experimental::filesystem;
 #endif
 
+#ifndef _WIN32
+#include <limits.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
+
+// HACK for failed builds in ARVR, where it cannot find these symbols within
+// std::experimental::filesystem
+namespace {
+std::string get_current_path() {
+#if __has_include("filesystem") && !defined(__linux__)
+  return fs::current_path().string();
+#else
+  char currentPath[PATH_MAX];
+  if (getcwd(currentPath, sizeof(currentPath)) != nullptr) {
+    return std::string(currentPath);
+  } else {
+    throw std::runtime_error("Failed to get current path");
+  }
+#endif
+}
+
+bool file_exists(std::string& path) {
+#if __has_include("filesystem") && !defined(__linux__)
+  return fs::exists(path);
+#else
+  struct stat rc;
+  return lstat(path.c_str(), &rc) == 0;
+#endif
+}
+
+bool create_directories(const std::string& path) {
+#if __has_include("filesystem") && !defined(__linux__)
+  return fs::create_directories(path);
+#else
+  if (mkdir(path.c_str(), 0777) == -1) {
+    throw std::runtime_error("Failed to create directory");
+  }
+  return true;
+#endif
+}
+} // namespace
+
 using namespace torch::aot_inductor;
 
 namespace {
@@ -71,13 +115,15 @@ static c10::Device c10_device(int32_t device_type, int32_t device_index) {
 
 const int AOTI_TORCH_MAX_NUMEL_TO_PRINT = 64;
 
-int32_t aoti_torch_device_type_cpu() {
-  return (int32_t)c10::DeviceType::CPU;
-}
+#define AOTI_TORCH_DEVICE_TYPE_IMPL(device_str, device_type) \
+  int32_t aoti_torch_device_type_##device_str() {            \
+    return (int32_t)c10::DeviceType::device_type;            \
+  }
 
-int32_t aoti_torch_device_type_cuda() {
-  return (int32_t)c10::DeviceType::CUDA;
-}
+AOTI_TORCH_DEVICE_TYPE_IMPL(cpu, CPU)
+AOTI_TORCH_DEVICE_TYPE_IMPL(cuda, CUDA)
+AOTI_TORCH_DEVICE_TYPE_IMPL(privateuse1, PrivateUse1)
+#undef AOTI_TORCH_DEVICE_TYPE_IMPL
 
 #define AOTI_TORCH_DTYPE_IMPL(dtype, stype) \
   int32_t aoti_torch_dtype_##dtype() {      \
@@ -1004,14 +1050,14 @@ AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
   at::Tensor* t = tensor_handle_to_tensor_pointer(self);
 #ifndef C10_MOBILE
   // Save tensor to tmp .pt file for tensors and can be torch.load'ed later
-  std::string cwd = fs::current_path().string();
+  std::string cwd = get_current_path();
   std::string tmp_folder = cwd + "/tmp/aoti_torch/";
-  if (!fs::exists(tmp_folder)) {
+  if (!file_exists(tmp_folder)) {
     std::cout
         << "aoti_torch_save_tensor_handle: Path does not exist, creating it..."
         << tmp_folder << std::endl;
 
-    if (!fs::create_directories(tmp_folder)) {
+    if (!create_directories(tmp_folder)) {
       std::cout << "aoti_torch_save_tensor_handle: Error creating directory: "
                 << tmp_folder << std::endl;
       return;
@@ -1025,7 +1071,7 @@ AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
   fout.write(bytes.data(), bytes.size());
   fout.close();
 
-  std::cout << "aoti_torch_save_tensor_handle: Saved tensor to: "
+  std::cout << "aoti_torch_save_tensor_handle: Saved tensor to "
             << tensor_filepath_to_save << std::endl;
 #endif // !defined(C10_MOBILE)
 }
@@ -1131,5 +1177,12 @@ AOTITorchError aoti_torch__alloc_from_pool(
         static_cast<c10::ScalarType>(dtype),
         sizes,
         strides));
+  });
+}
+
+AOTITorchError aoti_torch_zero_(AtenTensorHandle tensor) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    t->zero_();
   });
 }
