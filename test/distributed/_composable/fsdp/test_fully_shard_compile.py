@@ -844,6 +844,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_inductor_fullgraph_True(self):
+        raise Exception()
         for fullgraph, all_requires_grad, activation_checkpoint in itertools.product(
             [True], [True, False], [True, False]
         ):
