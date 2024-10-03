@@ -3127,26 +3127,10 @@ class DeviceCachingAllocator {
 // Returns whether to force all allocations to bypass the caching allocator and
 // go straight to cudaMalloc.  This setting is useful when debugging GPU memory
 // errors, since the caching allocator foils cuda-memcheck.
-static bool forceUncachedAllocator() {
-  // Allow either CUDA or HIP name for env var for maximum user comfort
-  // the CUDA env var avoids being hipified in cuda_to_hip_mappings.py
-  static const char* cuda_env = getenv("PYTORCH_NO_CUDA_MEMORY_CACHING");
-  static const char* rocm_env = getenv("PYTORCH_NO_HIP_MEMORY_CACHING");
-  static bool force_uncached = (cuda_env != nullptr) || (rocm_env != nullptr);
+bool forceUncachedAllocator() {
+  static bool force_uncached =
+      getenv("PYTORCH_NO_CUDA_MEMORY_CACHING") != nullptr;
   return force_uncached;
-}
-
-static void* uncached_allocate(size_t size) {
-  void* devPtr = nullptr;
-  // Deliberately don't use cudaMallocMaybeCapturing here, to force an error
-  // if someone tries to use forceUncachedAllocator while capturing.
-  C10_CUDA_CHECK(cudaMalloc(&devPtr, size));
-  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-  if (C10_UNLIKELY(interp)) {
-    (*interp)->trace_gpu_memory_allocation(
-        c10::kCUDA, reinterpret_cast<uintptr_t>(devPtr));
-  }
-  return devPtr;
 }
 
 static void uncached_delete(void* ptr) {
@@ -3166,9 +3150,6 @@ void local_raw_delete(void* ptr);
 
 class NativeCachingAllocator : public CUDAAllocator {
  private:
-  // allows this allocator to be turned on and off programmatically
-  bool enable_ = true;
-
   // Shard allocation region to have independent mutexes to reduce contention.
   static constexpr size_t kNumMutexShard = 67;
 
@@ -3343,14 +3324,6 @@ class NativeCachingAllocator : public CUDAAllocator {
       da->emptyCache();
   }
 
-  void enable(bool value) override {
-    enable_ = value;
-  }
-
-  bool isEnabled() const override {
-    return enable_;
-  }
-
   void* getBaseAllocation(void* ptr, size_t* outSize) override {
     Block* block = get_allocated_block(ptr);
     if (!block) {
@@ -3485,9 +3458,17 @@ class NativeCachingAllocator : public CUDAAllocator {
     void (*deleteFunc)(void*) = &local_raw_delete;
     CUDAStream stream = cuda::getCurrentCUDAStream(device);
 
-    if (forceUncachedAllocator() || !isEnabled()) {
+    if (forceUncachedAllocator()) {
       deleteFunc = &uncached_delete;
-      devPtr = uncached_allocate(size);
+
+      // Deliberately don't use cudaMallocMaybeCapturing here, to force an error
+      // if someone tries to use forceUncachedAllocator while capturing.
+      C10_CUDA_CHECK(cudaMalloc(&devPtr, size));
+      const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+      if (C10_UNLIKELY(interp)) {
+        (*interp)->trace_gpu_memory_allocation(
+            c10::kCUDA, reinterpret_cast<uintptr_t>(devPtr));
+      }
     } else {
       if (size != 0) {
         this->malloc(&devPtr, device, size, stream);
@@ -3501,7 +3482,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     return {devPtr, devPtr, deleteFunc, Device(DeviceType::CUDA, device)};
   }
   DeleterFnPtr raw_deleter() const override {
-    if (forceUncachedAllocator() || !isEnabled()) {
+    if (forceUncachedAllocator()) {
       return &uncached_delete;
     } else {
       return &local_raw_delete;
@@ -3558,14 +3539,10 @@ class NativeCachingAllocator : public CUDAAllocator {
     if (nbytes == 0) {
       return nullptr;
     }
+    c10::DeviceIndex device = 0;
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
-    if (forceUncachedAllocator() || !isEnabled()) {
-      r = uncached_allocate(nbytes);
-    } else {
-      c10::DeviceIndex device = 0;
-      C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-      malloc(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
-    }
+    malloc(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
     return r;
   }
 
@@ -3573,14 +3550,10 @@ class NativeCachingAllocator : public CUDAAllocator {
     if (nbytes == 0) {
       return nullptr;
     }
+    c10::DeviceIndex device = 0;
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
-    if (forceUncachedAllocator() || !isEnabled()) {
-      r = uncached_allocate(nbytes);
-    } else {
-      c10::DeviceIndex device = 0;
-      C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-      malloc(&r, device, nbytes, stream);
-    }
+    malloc(&r, device, nbytes, stream);
     return r;
   }
 
@@ -3625,11 +3598,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   void raw_delete(void* ptr) override {
-    if (forceUncachedAllocator() || !isEnabled()) {
-      uncached_delete(ptr);
-    } else {
-      this->free(ptr);
-    }
+    this->free(ptr);
   }
 
   // In CUDA IPC, sender sends a tensor to receiver via shareIPCHandle,
