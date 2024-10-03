@@ -82,7 +82,7 @@ AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise_binary_(
     for (int64_t i = 0; i < unary_scalars_len_; i++) {
       unary_scalars_list.emplace_back(pointer_to_optional(unary_scalars[i]));
     }
-    at::native::mkldnn_convolution_pointwise_binary_(
+    auto tmp_result = at::native::mkldnn_convolution_pointwise_binary_(
         *tensor_handle_to_tensor_pointer(other),
         *tensor_handle_to_tensor_pointer(X),
         *tensor_handle_to_tensor_pointer(W),
@@ -96,7 +96,7 @@ AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise_binary_(
         pointer_to_optional<c10::string_view>(unary_attr),
         unary_scalars_list,
         pointer_to_optional<c10::string_view>(unary_algorithm));
-    *ret0 = other;
+    *ret0 = new_tensor_handle(std::move(tmp_result));
   });
 }
 
