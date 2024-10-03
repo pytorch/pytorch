@@ -2244,7 +2244,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             + re.escape(
                 "specified at `dynamic_shapes[0]['k']['k'][0]` "
                 "(expected either a list/tuple of dimensions, or a dict mapping indices to dimensions,"
-                " where each dimension is an int, a Dim, Dim.AUTO, or Dim.STATIC)"
+                " where each dimension is an int, a Dim, Dim.AUTO, Dim.STATIC, or Dim.DYNAMIC)"
             ),
         ):
             export(M(), inputs, dynamic_shapes=dynamic_shapes)
@@ -2321,7 +2321,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             re.escape(
-                "Specifying both `Dim.AUTO` and `Dim` or `DerivedDim` in `dynamic_shapes` is not well supported at the moment, "
+                "Specifying both `Dim.AUTO/Dim.DYNAMIC` and `Dim/DerivedDim` in `dynamic_shapes` is not well supported at the moment, "
                 "and can easily lead to constraint violation errors or obscure errors in torch.export."
             ),
         ):
@@ -5974,6 +5974,250 @@ graph():
 
         self.assertEqual(gm_flat_non_strict(*inp), gm_flat_strict(*inp))
 
+    def test_unflatten_multiple_graphs_preserve_signature_error(self):
+        class N(torch.nn.Module):
+            def forward(self, x, b):
+                if b:
+                    return x + 1
+                else:
+                    return x + 2
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n = N()
+
+            def forward(self, x):
+                x = self.n(x, True)
+                x = x + 1
+                x = self.n(x, False)
+                x = x + 1
+                return x
+
+        inp = (torch.ones(1),)
+        m = M()
+        eager_result = m(*inp)
+
+        if not is_retracebility_test(self._testMethodName):
+            ep = export(M(), inp, preserve_module_call_signature=("n",))
+            with self.assertRaisesRegex(
+                ValueError,
+                "Cannot unflatten multiple calls to module n while preserving its signature",
+            ):
+                torch.export.unflatten(ep)
+
+        ep = export(M(), inp)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+
+        exported_result = epm(*inp)
+        self.assertTrue(torch.allclose(exported_result, eager_result))
+
+        unflattened_result = ufm(*inp)
+        self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
+    def test_unflatten_multiple_graphs_state(self):
+        class N(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(1), persistent=False)
+
+            def forward(self, x, b):
+                if b:
+                    self.buf.add_(1)
+                else:
+                    self.buf.add_(2)
+                return x + self.buf
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n = N()
+
+            def forward(self, x):
+                x = self.n(x, True)
+                x = x + 1
+                x = self.n(x, False)
+                x = x + 1
+                x = self.n(x, True)
+                x = x + 1
+                x = self.n(x, False)
+                return x
+
+        inp = (torch.ones(1),)
+        m = M()
+        eager_result = m(*inp)
+
+        ep = export(M(), inp)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+
+        exported_result = epm(*inp)
+        self.assertTrue(torch.allclose(exported_result, eager_result))
+
+        unflattened_result = ufm(*inp)
+        self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
+    def test_unflatten_multiple_graphs_shared_submodule(self):
+        class N(torch.nn.Module):
+            def forward(self, x, b):
+                if b:
+                    return x + 1
+                else:
+                    return x + 2
+
+        def gen_m(n, n_1, p, p_1):
+            # Create a module instance where self.n and self.p
+            # share the same submodule instance.
+            # The booleans n, n_1 and p, p_1 are passed to two calls each
+            # to self.n and self.p, and they determine which path through
+            # the shared submodule instance is taken during export.
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.n = N()
+                    self.p = self.n
+
+                def forward(self, x):
+                    x = x + 3
+                    x = self.n(x, n)
+                    x = x + 4
+                    x = self.n(x, n_1)
+                    x = x + 5
+                    x = self.p(x, p)
+                    x = x + 6
+                    x = self.p(x, p_1)
+                    return x + 7
+
+            return M()
+
+        inp = (torch.ones(1),)
+
+        def test(m, expected_graph, expected_fqns, expected_duplicates):
+            eager_result = m(*inp)
+
+            ep = export(m, inp)
+            exported_result = ep.module()(*inp)
+            # exported and eager results should match (baseline)
+            self.assertTrue(torch.allclose(exported_result, eager_result))
+
+            unflattened = torch.export.unflatten(ep)
+            unflattened_result = unflattened(*inp)
+            # unflattened and eager results should match
+            # (needs multiple specialized graphs for shared submodule instance)
+            self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
+            # expected graph should call minimal number of specialized submodules
+            self.assertExpectedInline(
+                str(unflattened.graph).strip(),
+                expected_graph,
+            )
+
+            # expected graph should contain minimal number of specialized submodule fqns
+            self.assertEqual(
+                sorted(
+                    [
+                        fqn
+                        for fqn, _ in unflattened.named_modules(remove_duplicate=False)
+                    ]
+                ),
+                expected_fqns,
+            )
+            # expected graph should contain minimal number of specialized submodule instances
+            for a, b in expected_duplicates:
+                if is_non_strict_test(self._testMethodName):
+                    # NOTE: non-strict does not de-duplicate shared submodules through different fqns.
+                    # In particular, we use different module ids for self.n and self.p calls in non-strict,
+                    # but in strict we use the same module id, which enables additional reuse.
+                    # This is pre-existing behavior that might need to be fixed orthogonally.
+                    self.assertNotEqual(
+                        id(getattr(unflattened, a)), id(getattr(unflattened, b))
+                    )
+                else:
+                    self.assertEqual(
+                        id(getattr(unflattened, a)), id(getattr(unflattened, b))
+                    )
+
+        test(
+            gen_m(n=True, n_1=False, p=False, p_1=False),
+            # p should share n_1 graph, p_1 should be optimized away
+            """\
+graph():
+    %x : [num_users=1] = placeholder[target=x]
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, 3), kwargs = {})
+    %n : [num_users=1] = call_module[target=n](args = (%add,), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n, 4), kwargs = {})
+    %n_1 : [num_users=1] = call_module[target=n@1](args = (%add_2,), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n_1, 5), kwargs = {})
+    %p : [num_users=1] = call_module[target=p](args = (%add_4,), kwargs = {})
+    %add_6 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p, 6), kwargs = {})
+    %p_1 : [num_users=1] = call_module[target=p](args = (%add_6,), kwargs = {})
+    %add_8 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p_1, 7), kwargs = {})
+    return (add_8,)""",
+            ["", "n", "n@1", "p"],
+            [("n@1", "p")],
+        )
+
+        test(
+            gen_m(n=True, n_1=False, p=True, p_1=False),
+            # p should reuse n graph, p_1 should reuse n_1 graph
+            """\
+graph():
+    %x : [num_users=1] = placeholder[target=x]
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, 3), kwargs = {})
+    %n : [num_users=1] = call_module[target=n](args = (%add,), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n, 4), kwargs = {})
+    %n_1 : [num_users=1] = call_module[target=n@1](args = (%add_2,), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n_1, 5), kwargs = {})
+    %p : [num_users=1] = call_module[target=p](args = (%add_4,), kwargs = {})
+    %add_6 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p, 6), kwargs = {})
+    %p_1 : [num_users=1] = call_module[target=p@1](args = (%add_6,), kwargs = {})
+    %add_8 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p_1, 7), kwargs = {})
+    return (add_8,)""",
+            ["", "n", "n@1", "p", "p@1"],
+            [("n", "p"), ("n@1", "p@1")],
+        )
+
+        test(
+            gen_m(n=True, n_1=True, p=True, p_1=False),
+            # n_1 should be optimized away, p should reuse n graph
+            """\
+graph():
+    %x : [num_users=1] = placeholder[target=x]
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, 3), kwargs = {})
+    %n : [num_users=1] = call_module[target=n](args = (%add,), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n, 4), kwargs = {})
+    %n_1 : [num_users=1] = call_module[target=n](args = (%add_2,), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n_1, 5), kwargs = {})
+    %p : [num_users=1] = call_module[target=p](args = (%add_4,), kwargs = {})
+    %add_6 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p, 6), kwargs = {})
+    %p_1 : [num_users=1] = call_module[target=p@1](args = (%add_6,), kwargs = {})
+    %add_8 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p_1, 7), kwargs = {})
+    return (add_8,)""",
+            ["", "n", "p", "p@1"],
+            [("n", "p")],
+        )
+
+        test(
+            gen_m(n=True, n_1=False, p=False, p_1=True),
+            # p should reuse n_1 graph, p_1 should reuse n graph
+            """\
+graph():
+    %x : [num_users=1] = placeholder[target=x]
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, 3), kwargs = {})
+    %n : [num_users=1] = call_module[target=n](args = (%add,), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n, 4), kwargs = {})
+    %n_1 : [num_users=1] = call_module[target=n@1](args = (%add_2,), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%n_1, 5), kwargs = {})
+    %p : [num_users=1] = call_module[target=p](args = (%add_4,), kwargs = {})
+    %add_6 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p, 6), kwargs = {})
+    %p_1 : [num_users=1] = call_module[target=p@1](args = (%add_6,), kwargs = {})
+    %add_8 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%p_1, 7), kwargs = {})
+    return (add_8,)""",
+            ["", "n", "n@1", "p", "p@1"],
+            [("n", "p@1"), ("p", "n@1")],
+        )
+
     def test_stack_trace(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
@@ -7329,6 +7573,35 @@ def forward(self, x, y):
         spec = torch.complex(real_part, imaginary_part)
         export(model, (spec,))
 
+    def test_custom_op_preserve(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = torch.ops.testlib.foo_functional.default(x)
+                return torch.ops.testlib.foo_mutated.default(y)
+
+        decomp_table = torch.export.core_aten_decompositions()
+
+        # FIXME (We need to design a proper way that doesn't need _preserve_ops)
+        ep = torch.export.export(M(), (torch.randn(4, 4),)).run_decompositions(
+            decomp_table,
+            _preserve_ops=(
+                torch.ops.testlib.foo_functional.default,
+                torch.ops.testlib.foo_mutated.default,
+            ),
+        )
+
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, x):
+    foo_functional = torch.ops.testlib.foo_functional.default(x);  x = None
+    cos = torch.ops.aten.cos.default(foo_functional)
+    auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = foo_functional, z = cos);  foo_functional = cos = None
+    getitem_3 = auto_functionalized[3];  auto_functionalized = None
+    cos_1 = torch.ops.aten.cos.default(getitem_3)
+    return (getitem_3, cos_1)""",
+        )
+
     def test_export_linear_preserve_dynamic_shape(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -7756,6 +8029,82 @@ def forward(self, x, y):
                 },
             }
             _load_dynamic_shapes(spec, from_dict=True)
+
+    @testing.expectedFailureSerDer  # TODO(pianpwk): PowByNatural valuerange deserialization
+    def test_dim_dynamic(self):
+        dynamic = Dim.DYNAMIC
+
+        # dynamic should infer equalities and relations
+        class Relations(torch.nn.Module):
+            def forward(self, u, w, x, y, z):
+                a = u[1:] + w + x  # s0 == s1 + 1 == s2 + 1
+                b = y.flatten() + z  # s2*s3 == s4
+                return a, b
+
+        inputs = (
+            torch.randn(5),
+            torch.randn(4),
+            torch.randn(4),
+            torch.randn(4, 4),
+            torch.randn(16),
+        )
+        ep = export(
+            Relations(),
+            inputs,
+            dynamic_shapes={
+                "u": (dynamic,),
+                "w": (dynamic,),
+                "x": (dynamic,),
+                "y": (dynamic, dynamic),
+                "z": (dynamic,),
+            },
+        )
+        ep.module()(
+            torch.randn(6),
+            torch.randn(5),
+            torch.randn(5),
+            torch.randn(7, 8),
+            torch.randn(56),
+        )
+
+        # dynamic should complain when force specialized
+        class Specialize(torch.nn.Module):
+            def forward(self, x):
+                torch._check(x.shape[0] == 4)
+                return x + 2
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Not all values of RelaxedUnspecConstraint.* are valid because .* was inferred to be a constant",
+        ):
+            ep = export(
+                Specialize(),
+                (torch.randn(4, 8),),
+                dynamic_shapes={
+                    "x": (dynamic, dynamic),
+                },
+            )
+
+        # dynamic should handle complex guards in the same way as auto
+        class ModConstraint(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x.view(x.shape[0] - 1, -1)
+
+        ep = export(
+            ModConstraint(),
+            (torch.randn(3, 4),),
+            dynamic_shapes={
+                "x": (dynamic, dynamic),
+            },
+        )
+        ep.module()(torch.randn(5, 8))
+        num_asserts = [
+            node.target == torch.ops.aten._assert_scalar.default
+            for node in ep.graph.nodes
+        ].count(True)
+        self.assertEqual(num_asserts, 1)
+        with self.assertRaises(RuntimeError):
+            ep.module()(torch.randn(4, 2))
 
     @testing.expectedFailureNonStrict
     @testing.expectedFailureTrainingIRToRunDecompNonStrict  # unbacked symint not tracked?
