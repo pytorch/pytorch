@@ -3245,6 +3245,7 @@ MOD_INLINELIST = [
     "torch._functorch.functional_call",
     "torch._functorch.vmap",
     "torch._higher_order_ops.associative_scan",
+    "torch._higher_order_ops.flex_attention",
     "torch._higher_order_ops.scan",
     "torch._higher_order_ops.strict_mode",
     "torch._higher_order_ops.while_loop",
