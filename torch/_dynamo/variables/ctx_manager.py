@@ -637,6 +637,8 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
 
     def _call_func(self, tx: "InstructionTranslator", values):
         assert len(values) == 1
+        tx.symbolic_torch_function_state.torch_function_subclass_enabled = values[0]
+        tx.symbolic_torch_function_state.torch_function_mode_enabled = values[0]
         tx.output.set_torch_function_state(values[0])
 
 

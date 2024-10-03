@@ -66,6 +66,7 @@ class TestPatternMatcher(TestCase):
         additional_check(codes)
         counters.clear()
 
+    @inductor_config.patch(max_autotune_gemm=True)
     def test_mm_plus_mm(self):
         def fn(a, b, c, d):
             return torch.add(torch.mm(a, b), torch.mm(c, d))
