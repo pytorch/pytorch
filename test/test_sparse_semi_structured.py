@@ -124,7 +124,7 @@ def rand_sparse_semi_structured(r, c, dtype, device, choice=None):
             [0, 0, 1, 1]
         ]
     mask_entries = [choice or random.choice(choices) for i in range(r * c // ksparse)]
-    mask = torch.tensor(mask_ent>>>>>>> mainries, dtype=torch.bool).view(r, c).to(device)
+    mask = torch.tensor(mask_entries, dtype=torch.bool).view(r, c).to(device)
     dense = make_tensor(r, c, dtype=dtype, device=device)
     dense[dense == 0] = 1  # To prevent zeros except where mask applied.
     dense = dense.masked_fill(~mask, 0)
@@ -163,7 +163,7 @@ def rand_sparse_semi_structured_all_patterns(r, c, dtype, device):
         ]
     mask_rows = [random.randint(0, len(choices) - 1) for i in range(r * c // ksparse)]
 
-    COL_INV, COL_VAL = 0, 1>>>>>>> main
+    COL_INV, COL_VAL = 0, 1
     mask_entries_inv = [choices[i][COL_INV] for i in mask_rows]
     mask_entries_val = [choices[i][COL_VAL] for i in mask_rows]
     mask_inv = torch.tensor(mask_entries_inv, dtype=torch.bool).view(r, c).to(device)
@@ -186,10 +186,7 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
     def tearDown(self):
         super().tearDown()
 
-    @staticmethod
-    def _test_mlp_contiguous_relu_compile(backend, dense_input_shape):
-        """
-        Test nn.Linear + .contiguous() + nn.ReLU with SparseSemiStructuredTensor + torch.compile
+    @staticmethod>eSemiStructuredTensor + torch.compile
         We expect:
             (1) The sparse tensor subclass should turn nn.Linear into `aten._structured_sparse_addmm` + `aten.contiguous()`
             (2) Inductor should fuse the .contiguous() call into the relu
@@ -264,7 +261,7 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
         # Eager
         output = fn(x, e)
         output.backward(output)
-        # Torch compile>>>>>>> main
+        # Torch compile
         output = torch.compile(fn)(x, e)
         output.backward(output)
 
@@ -471,7 +468,7 @@ class TestSparseSemiStructured(TestCase):
         for i in range(2):
             m, n = model[i].weight.shape
             mask = rand_sparse_semi_structured_mask(
-                m, n, device=devi>>>>>>> maince, dtype=torch.bool
+                m, n, device=device, dtype=torch.bool
             )
             # set masked weight
             model[i].weight = nn.Parameter(model[i].weight * mask)
@@ -551,7 +548,7 @@ class TestSparseSemiStructured(TestCase):
     @parametrize_backends
     def test_unsupported_dim(self, device, backend):
         SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
-        if backend == "cutlass" a>>>>>>> mainnd IS_WINDOWS:
+        if backend == "cutlass" and IS_WINDOWS:
             self.skipTest("CUTLASS not supported on Windows")
         A = torch.rand(128, 128, 128, device=device, dtype=torch.float16)
 
@@ -678,7 +675,7 @@ class TestSparseSemiStructuredTraining(TestCase):
         a = (4 * torch.arange(8))[:, None] + torch.arange(8)[None, :]
         a = a.repeat(M // 8, N // 8)
         assert a.shape == (M, N)
-        a = a.cuda().to(dtype)>>>>>>> main
+        a = a.cuda().to(dtype)
         b = torch.randn([a.shape[1], 128], device="cuda", dtype=dtype)
 
         a_sparse = SEMI_STRUCTURED_SUPPORTED_BACKENDS[backend].prune_dense_static_sort(a)
@@ -717,7 +714,7 @@ class TestSparseSemiStructuredTraining(TestCase):
         ]
         # Heuristic to ensure we pack the same values
         torch.testing.assert_close(
-            packed.to(torch.float>>>>>>> main64).sum(), packed_t.to(torch.float64).sum()
+            packed.to(torch.float64).sum(), packed_t.to(torch.float64).sum()
         )
 
         mask_dense = sparse24_largest_mask_2d(a.to(dtype))
@@ -797,7 +794,7 @@ class TestSparseSemiStructuredTraining(TestCase):
             x.shape,
             packed=packed,
             meta=meta,
-            packed_t=packed_t,>>>>>>> main
+            packed_t=packed_t,
             meta_t=meta_t,
             compressed_swizzled_bitmask=bitmask,
         ).to_dense()
@@ -905,7 +902,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
                 silu = torch.nn.SiLU()
                 output0 = silu(output0)
 
-            compressed = to_spars>>>>>>> maine_semi_structured(weight)
+            compressed = to_sparse_semi_structured(weight)
 
             weight_sparse = compressed.values()
             meta = compressed.indices()
@@ -986,7 +983,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
                 )
             torch.testing.assert_close(output1.to(dtype_dense), output0, rtol=rtol, atol=atol)
 
-        if dtype == torch.float32>>>>>>> main:
+        if dtype == torch.float32:
             # Inputs are converted to TF32 internally for sparse GEMM,
             # so make dense GEMM to do the same for matching results.
             orig = torch.backends.cuda.matmul.allow_tf32

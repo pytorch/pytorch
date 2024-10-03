@@ -15,8 +15,7 @@
 #include <mutex>
 #include <string_view>
 
-//#if AT_CUSPARSELT_ENABLED()
-#if true
+#if AT_CUSPARSELT_ENABLED()
 
 #include <cusparseLt.h>
 
@@ -160,7 +159,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
     const std::optional<Tensor>& alpha_opt,
     const std::optional<c10::ScalarType> out_dtype_opt,
     bool transpose_result,
-    int alg_id,<<<<<<< SparseSemiStructure_CK
+    int alg_id,
     bool search_alg_id
 )
 {
