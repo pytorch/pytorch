@@ -14,8 +14,6 @@ from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from unittest import mock
 
-from parameterized import parameterized
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -26,7 +24,12 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import scoped_load_inline, skipIfWindows
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    scoped_load_inline,
+    skipIfWindows,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
 
@@ -70,6 +73,7 @@ def hook3(gI, gO):
     return (torch.sin(gI[0]) + gO[0],)
 
 
+@instantiate_parametrized_tests
 class TestCompiledAutograd(TestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -1648,7 +1652,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_non_traceable, m) {
 
         self.check_output_and_recompiles(fn)
 
-    @parameterized.expand([(True,), (False,)])
+    @parametrize("opaque", [True, False])
     def test_autograd_cpp_node_non_variable_inputs_int(self, opaque):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -1705,7 +1709,7 @@ TORCH_LIBRARY(<module_name>, m) {
         with config.patch(compiled_autograd_opaque_cpp_node=opaque):
             self.check_output_and_recompiles(fn, 2)
 
-    @parameterized.expand([(True,), (False,)])
+    @parametrize("opaque", [True, False])
     def test_autograd_cpp_node_non_variable_inputs_tensor(self, opaque):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -1770,7 +1774,7 @@ TORCH_LIBRARY(<module_name>, m) {
             else:
                 self.check_output_and_recompiles(fn, 2)
 
-    @parameterized.expand([(True,), (False,)])
+    @parametrize("opaque", [True, False])
     def test_autograd_cpp_node(self, opaque):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -1822,7 +1826,7 @@ TORCH_LIBRARY(<module_name>, m) {
             # compiles for 10 (static) and 100 (dynamic)
             self.check_output_and_recompiles(fn, 2)
 
-    @parameterized.expand([(True,), (False,)])
+    @parametrize("opaque", [True, False])
     def test_autograd_cpp_node_undefined_grad(self, opaque):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -1950,7 +1954,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_all_options, m) {
         with config.patch(compiled_autograd_opaque_cpp_node=True):
             self.check_output_and_recompiles(fn, 2)
 
-    @parameterized.expand([(True,), (False,)])
+    @parametrize("opaque", [True, False])
     def test_autograd_cpp_node_id(self, opaque):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -2037,7 +2041,7 @@ TORCH_LIBRARY(<module_name>, m) {
         with config.patch(compiled_autograd_opaque_cpp_node=opaque):
             self.check_output_and_recompiles(different_autograd_fn, 2)
 
-    @parameterized.expand([(True,), (False,)])
+    @parametrize("opaque", [True, False])
     def test_autograd_cpp_node_saved(self, opaque):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -2129,7 +2133,7 @@ TORCH_LIBRARY(<module_name>, m) {
         with config.patch(compiled_autograd_opaque_cpp_node=opaque):
             self.check_output_and_recompiles(fn, 2)
 
-    @parameterized.expand([(True,), (False,)])
+    @parametrize("opaque", [True, False])
     def test_autograd_cpp_node_saved_dynamic(self, opaque):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -2190,7 +2194,7 @@ TORCH_LIBRARY(<module_name>, m) {
             # compiles for 10 (static) and 100 (dynamic)
             self.check_output_and_recompiles(fn, 2)
 
-    @parameterized.expand([(True,), (False,)])
+    @parametrize("opaque", [True, False])
     def test_autograd_cpp_node_saved_int(self, opaque):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -2253,7 +2257,7 @@ TORCH_LIBRARY(<module_name>, m) {
         with config.patch(compiled_autograd_opaque_cpp_node=opaque):
             self.check_output_and_recompiles(fn)
 
-    @parameterized.expand([(True,), (False,)])
+    @parametrize("opaque", [True, False])
     def test_autograd_cpp_node_saved_float(self, opaque):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -2319,7 +2323,7 @@ TORCH_LIBRARY(<module_name>, m) {
             else:
                 self.check_output_and_recompiles(fn, [1, 3])
 
-    @parameterized.expand([(True,), (False,)])
+    @parametrize("opaque", [True, False])
     def test_autograd_cpp_node_data_dependent(self, opaque):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -2637,11 +2641,9 @@ main()
         # Must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
-    @parameterized.expand([(True,), (False,)])
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    @parametrize("opaque", [True, False])
     def test_cudagraphs_cpu_scalar_used_in_cpp_custom_op(self, opaque):
-        if not HAS_CUDA:
-            self.skipTest("requires cuda")
-
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = <is_traceable>;
