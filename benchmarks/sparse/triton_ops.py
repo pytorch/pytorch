@@ -1,4 +1,5 @@
 import torch
+from torch._inductor.runtime.benchmarking import benchmarker
 
 
 def create_blocked_tensor(B, M, N, blocksize, sparsity, dtype, device):
@@ -27,11 +28,7 @@ def create_blocked_tensor(B, M, N, blocksize, sparsity, dtype, device):
 
 
 def _test_worker(test_func):
-    import triton
-
-    ms, ms_min, ms_max = triton.testing.do_bench(
-        test_func, warmup=500, rep=100, fast_flush=False
-    )
+    ms, ms_min, ms_max = benchmarker.benchmark_gpu(test_func, warmup=500, rep=100)
 
     tflops = 2 * m * k * n * 1e-12 / (ms * 1e-3)
     return ms, tflops

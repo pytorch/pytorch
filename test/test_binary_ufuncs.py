@@ -156,7 +156,6 @@ class TestBinaryUfuncs(TestCase):
             numpy_sample = sample.numpy()
             l_numpy = numpy_sample.input
             r_numpy = numpy_sample.args[0]
-
             actual = op(l, r)
             expected = op.ref(l_numpy, r_numpy)
 
@@ -3407,29 +3406,41 @@ class TestBinaryUfuncs(TestCase):
         assert m.dim() == 0, "m is intentionally a scalar"
         self.assertEqual(torch.pow(2, m), 2**m)
 
-    @onlyCPU
     def test_ldexp(self, device):
         # random values
         mantissas = torch.randn(64, device=device)
         exponents = torch.randint(-31, 31, (64,), device=device, dtype=torch.int32)
 
         # basic test
-        np_outcome = np.ldexp(mantissas.numpy(), exponents.numpy())
+        np_outcome = np.ldexp(mantissas.cpu().numpy(), exponents.cpu().numpy())
         pt_outcome_1 = torch.ldexp(mantissas, exponents)
         pt_outcome_2 = mantissas.ldexp(exponents)
-        self.assertEqual(np_outcome, pt_outcome_1)
-        self.assertEqual(np_outcome, pt_outcome_2)
+        self.assertEqual(np_outcome, pt_outcome_1.cpu())
+        self.assertEqual(np_outcome, pt_outcome_2.cpu())
         mantissas.ldexp_(exponents)
-        self.assertEqual(np_outcome, mantissas)
+        self.assertEqual(np_outcome, mantissas.cpu())
 
         # test bounds
         mantissas = torch.tensor(
             [float("inf"), float("-inf"), float("inf"), float("nan")], device=device
         )
         exponents = torch.randint(0, 31, (4,), device=device, dtype=torch.int32)
-        np_outcome = np.ldexp(mantissas.numpy(), exponents.numpy())
+        np_outcome = np.ldexp(mantissas.cpu().numpy(), exponents.cpu().numpy())
         pt_outcome = torch.ldexp(mantissas, exponents)
-        self.assertEqual(np_outcome, pt_outcome)
+        self.assertEqual(np_outcome, pt_outcome.cpu())
+
+        # test half dtype behavior
+        mantissas = torch.randn(64, device=device, dtype=torch.half)
+        exponents = torch.randint(-5, 5, (64,), device=device)
+        self.assertEqual(torch.ldexp(mantissas, exponents).dtype, torch.half)
+
+        # test float64 computation
+        mantissas = torch.tensor([1], dtype=torch.float64, device=device)
+        exponents = torch.tensor([128], dtype=torch.int64, device=device)
+        expected = torch.pow(
+            torch.full((1,), 2, device=device, dtype=torch.float64), 128
+        )
+        self.assertEqual(torch.ldexp(mantissas, exponents), expected)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_lerp(self, device, dtype):

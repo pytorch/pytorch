@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 """Utilities for converting and operating on ONNX, JIT and torch types."""
+
 from __future__ import annotations
 
 import enum

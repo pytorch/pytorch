@@ -41,16 +41,6 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
     return;
   }
 
-  if (!is_macos_13_or_newer()) {
-    TORCH_WARN_ONCE("torch.sort is supported by MPS on MacOS 13+, please upgrade. Falling back to CPU");
-    Tensor cpu_indices = indices.clone().to("cpu");
-    Tensor cpu_values = values.clone().to("cpu");
-    at::sort_out(cpu_values, cpu_indices, self.to(at::Device(kCPU)), false, dim, descending);
-    values.copy_(cpu_values);
-    indices.copy_(cpu_indices);
-    return;
-  }
-
   MPSStream* stream = getCurrentMPSStream();
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}

@@ -87,7 +87,7 @@ def fp16_compress_hook(
         decompressed_tensor.copy_(value)
         return decompressed_tensor
 
-    if torch.compiler.is_compiling():
+    if torch._utils.is_compiling():
         grad = dist._functional_collectives.all_reduce(
             compressed_tensor, "sum", group_to_use
         )
@@ -136,7 +136,7 @@ def bf16_compress_hook(
         decompressed_tensor.copy_(value)
         return decompressed_tensor
 
-    if torch.compiler.is_compiling():
+    if torch._utils.is_compiling():
         grad = dist._functional_collectives.all_reduce(
             compressed_tensor, "sum", group_to_use
         )
