@@ -31,24 +31,35 @@ void multilabel_margin_loss_shape_check(
     const Tensor& target) {
     TORCH_CHECK(
         (ndims == 2 && input.size(1) != 0) || (ndims == 1 && input.size(0) != 0) || ndims == 0,
-        "Expected non-empty vector or matrix with optional 0-dim batch size, but got: ",
-        input.sizes());
+        "Expected non-empty vector or matrix with optional 0-dim batch size, but got input of size: ",
+        input.sizes(), ".");
 
     if (ndims <= 1) {
-      nframe = 1;
-      dim = ndims == 0 ? 1 : input.size(0);
-      TORCH_CHECK(
-          target.dim() <= 1 && target.numel() == dim,
-          "inconsistent target size: ", target.sizes(), " for input of size: ",
-          input.sizes());
+        nframe = 1;
+        dim = ndims == 0 ? 1 : input.size(0);
+        TORCH_CHECK(
+            target.dim() <= 1,
+            "Expected target tensor of dimension <= 1 for input of dimension ", ndims,
+            ", but got target dimension ", target.dim(), ".");
+        TORCH_CHECK(
+            target.numel() == dim,
+            "Expected target tensor with ", dim, " elements (got ", target.numel(),
+            ") for input of size ", input.sizes(), ".");
     } else {
-      nframe = input.size(0);
-      dim = input.size(1);
-      TORCH_CHECK(
-          target.dim() == 2 && target.size(0) == nframe &&
-          target.size(1) == dim,
-          "inconsistent target size: ", target.sizes(), " for input of size: ",
-          input.sizes());
+        nframe = input.size(0);
+        dim = input.size(1);
+        TORCH_CHECK(
+            target.dim() == 2,
+            "Expected target tensor of dimension 2 (got ", target.dim(),
+            ") for input of dimension ", ndims, ".");
+        TORCH_CHECK(
+            target.size(0) == nframe,
+            "Expected target.size(0) to match input.size(0) (", nframe, "), but got ",
+            target.size(0), ".");
+        TORCH_CHECK(
+            target.size(1) == dim,
+            "Expected target.size(1) to match input.size(1) (", dim, "), but got ",
+            target.size(1), ".");
     }
 }
 
