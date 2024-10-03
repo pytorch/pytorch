@@ -361,8 +361,57 @@ def _detect_and_normalize_assert_statement(
     return True
 
 
+explain = False
+
+
+def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
+    if user_stack is None:
+        user_stack = torch._guards.TracingContext.extract_stack()
+
+    # TODO: Also report the traceback from the parent frame
+    try:
+        frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
+    except IndexError:
+        # first instruction
+        frame_loc = (
+            code_options["co_filename"],
+            code_options["co_firstlineno"],
+        )
+
+    # torch._dynamo.explain() formats this a little nicer, and presents a slightly
+    # more actionable user code pointer
+    if (
+        graph_break_log.isEnabledFor(logging.DEBUG)
+        and not explain
+        and graph_break_dup_warning_checker.add(frame_loc)
+    ):
+        user_stack_formatted = "".join(traceback.format_list(user_stack))
+        # This log line MUST contain the string "Graph break in user code",
+        # This log line is exercised from
+        #   python test/dynamo/test_exc.py -k test_graph_break_log
+        graph_break_log.debug(
+            "Graph break in user code at %s:%s\nReason: %s\nUser code traceback:\n%s",
+            frame_loc[0],
+            frame_loc[1],
+            reason,
+            user_stack_formatted,
+            exc_info=exc_info,
+        )
+    else:
+        # This log line MUST contain the string "details suppressed",
+        # exercised by
+        #   python test/dynamo/test_misc.py -k test_duplicate_graph_break_log
+        graph_break_log.debug(
+            "Graph break (details suppressed) in user code at %s:%s\nReason: %s",
+            frame_loc[0],
+            frame_loc[1],
+            reason,
+        )
+
+
 def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
     def jump_graph_break(self, inst, value, extra_msg=""):
+        log_graph_break(self.code_options, reason="Data-dependent jump")
         if not self.should_compile_partial_graph():
             unimplemented("should_compile_partial_graph=False")
         # compile a partial subgraph prefix then jump into user code
@@ -555,9 +604,6 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
     return inner
 
 
-explain = False
-
-
 def break_graph_if_unsupported(*, push):
     def decorator(inner_fn):
         @functools.wraps(inner_fn)
@@ -581,40 +627,12 @@ def break_graph_if_unsupported(*, push):
                 if not self.should_compile_partial_graph():
                     raise
 
-                user_stack = excp.real_stack
-                # TODO: Also report the traceback from the parent frame
-                try:
-                    frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
-                except IndexError:
-                    # first instruction
-                    code_options = self.code_options
-                    frame_loc = (
-                        code_options["co_filename"],
-                        code_options["co_firstlineno"],
-                    )
-                # torch._dynamo.explain() formats this a little nicer, and presents a slightly
-                # more actionable user code pointer
-                if (
-                    graph_break_log.isEnabledFor(logging.DEBUG)
-                    and not explain
-                    and graph_break_dup_warning_checker.add(frame_loc)
-                ):
-                    user_stack_formatted = "".join(traceback.format_list(user_stack))
-                    # This log line is exercised from
-                    #   python test/dynamo/test_exc.py -k test_graph_break_log
-                    graph_break_log.debug(
-                        "Graph break: from user code at:\n%s",
-                        user_stack_formatted,
-                        exc_info=True,
-                    )
-                else:
-                    # This log line MUST NOT contain the string "Graph break",
-                    # exercised by
-                    #   python test/dynamo/test_misc.py -k test_duplicate_graph_break_log
-                    log.debug(
-                        "Unsupported break in user code at %s:%s (details suppressed)",
-                        *frame_loc,
-                    )
+                log_graph_break(
+                    self.code_options,
+                    exc_info=True,
+                    reason=f"Unsupported: {excp}",
+                    user_stack=excp.real_stack,
+                )
 
                 if self.maybe_has_backedge():
                     msg = (
@@ -626,7 +644,7 @@ def break_graph_if_unsupported(*, push):
 
                 excp.remove_from_stats()
                 excp.add_to_stats("graph_break")
-                speculation.reason = GraphCompileReason(excp.msg, user_stack)
+                speculation.reason = GraphCompileReason(excp.msg, excp.real_stack)
             speculation.fail_and_restart_analysis()
 
         def handle_graph_break(
@@ -1760,6 +1778,7 @@ class InstructionTranslatorBase(
         speculation.fail_and_restart_analysis()
 
     def store_attr_graph_break(self, inst):
+        log_graph_break(self.code_options, reason="STORE_ATTR-caused graph break")
         if not self.should_compile_partial_graph():
             unimplemented("should_compile_partial_graph=False")
         self.output.compile_subgraph(

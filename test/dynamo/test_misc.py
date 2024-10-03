@@ -5795,7 +5795,9 @@ utils_device.CURRENT_DEVICE == None""".split(
             return a + b + c
 
         def count_graph_break_msgs(msgs):
-            return sum(msg.find("Graph break") != -1 for msg in msgs)
+            return sum(
+                "Graph break" in msg and "details suppressed" not in msg for msg in msgs
+            )
 
         with self.assertLogs(
             logger="torch._dynamo", level=logging.DEBUG
