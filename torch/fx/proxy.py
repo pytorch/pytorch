@@ -97,6 +97,7 @@ _COPY_META_FIELDS = [
     "original_aten",
     "recompute",
     "ac_graph_id",
+    "has_backward_hook",
     "from_node",
     "quantization_tag",  # TODO deprecated
     "_numeric_debug_handle",  # TODO deprecated
