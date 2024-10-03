@@ -1512,6 +1512,10 @@ def index_put_(func, *args, **kwargs):
         + indices[inp._ragged_idx + 1 :]
     )
 
+    if func == torch.ops.aten.index_put_.default:
+        func(inp._values, func_indices, **new_kwargs)
+        return inp
+
     return NestedTensor(
         func(inp._values, func_indices, **new_kwargs),
         **extract_kwargs(inp),
