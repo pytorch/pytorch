@@ -21,7 +21,7 @@ class TORCH_API RecvRpcBackward : public torch::autograd::Node {
  public:
   explicit RecvRpcBackward(
       const AutogradMetadata& autogradMetadata,
-      std::shared_ptr<DistAutogradContext> autogradContext,
+      const std::shared_ptr<DistAutogradContext>& autogradContext,
       rpc::worker_id_t fromWorkerId,
       rpc::DeviceMap deviceMap);
 

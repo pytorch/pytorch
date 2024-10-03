@@ -1134,6 +1134,38 @@ def forward(self, p_linear_weight, p_linear_bias, x):
         ]
         self.assertEqual(actual_torch_fns, exp_torch_fns)
 
+    def test_duplicate_modules_with_non_persistent_buffers(self):
+        class FooWithBuf(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.randn(4), persistent=False)
+
+            def forward(self, x):
+                return x + self.buf
+
+        class BarWithFoo(torch.nn.Module):
+            def __init__(self, foo):
+                super().__init__()
+                self.foo = foo
+
+            def forward(self, x):
+                return self.foo(x)
+
+        class ModWith2Bars(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                foo = FooWithBuf()
+                self.b1 = BarWithFoo(foo)
+                self.b2 = BarWithFoo(foo)
+
+            def forward(self, x):
+                return self.b1(x) + self.b2(x)
+
+        mod = ModWith2Bars()
+        inputs = (torch.randn(4),)
+        ep = export(mod, inputs)
+        self.assertTrue(torch.allclose(ep.module()(*inputs), mod(*inputs)))
+
     def test_derived_dim_basic(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -2212,7 +2244,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             + re.escape(
                 "specified at `dynamic_shapes[0]['k']['k'][0]` "
                 "(expected either a list/tuple of dimensions, or a dict mapping indices to dimensions,"
-                " where each dimension is an int, a Dim, Dim.AUTO, or Dim.STATIC)"
+                " where each dimension is an int, a Dim, Dim.AUTO, Dim.STATIC, or Dim.DYNAMIC)"
             ),
         ):
             export(M(), inputs, dynamic_shapes=dynamic_shapes)
@@ -2289,7 +2321,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             re.escape(
-                "Specifying both `Dim.AUTO` and `Dim` or `DerivedDim` in `dynamic_shapes` is not well supported at the moment, "
+                "Specifying both `Dim.AUTO/Dim.DYNAMIC` and `Dim/DerivedDim` in `dynamic_shapes` is not well supported at the moment, "
                 "and can easily lead to constraint violation errors or obscure errors in torch.export."
             ),
         ):
@@ -3874,6 +3906,50 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(torch._dynamo.exc.UserError, "to be a tuple"):
             # Intentionally not wrapping `inp` in a tuple to trigger the error
             _ = export(M(), inp)
+
+    def test_decomp_item_in_prim_before_decomposition(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                torch.ops.aten._assert_async.msg(torch.tensor(True), "Fail")
+                return x
+
+        ep = export(M(), (torch.randn(2, 2),))
+        FileCheck().check_count(
+            "torch.ops.aten._assert_async.msg", 1, exactly=True
+        ).run(ep.graph_module.code)
+
+    def test_decomp_item_in_prim_after_decomposition(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                torch.ops.aten._assert_async.msg(torch.tensor(True), "Fail")
+                return x
+
+        from torch._decomp import decomposition_table
+
+        ep = export(M(), (torch.randn(2, 2),)).run_decompositions(decomposition_table)
+
+        # The difference seems fine because export_for_training catches const tensor little differently.
+        if is_training_ir_test(self._testMethodName):
+            self.assertExpectedInline(
+                str(ep.graph_module.code).strip(),
+                """\
+def forward(self, c_lifted_tensor_0, x):
+    clone = torch.ops.prims.clone.default(c_lifted_tensor_0, memory_format = torch.preserve_format);  c_lifted_tensor_0 = None
+    _assert_async = torch.ops.aten._assert_async.msg(clone, 'Fail');  clone = _assert_async = None
+    return (x,)""",
+            )
+        else:
+            self.assertExpectedInline(
+                str(ep.graph_module.code).strip(),
+                """\
+def forward(self, c_lifted_tensor_0, x):
+    clone = torch.ops.prims.clone.default(c_lifted_tensor_0, memory_format = torch.preserve_format);  c_lifted_tensor_0 = None
+    view_of = torch.ops.prims.view_of.default(clone);  clone = None
+    view_of_1 = torch.ops.prims.view_of.default(view_of);  view_of = None
+    view_of_2 = torch.ops.prims.view_of.default(view_of_1);  view_of_1 = None
+    _assert_async = torch.ops.aten._assert_async.msg(view_of_2, 'Fail');  view_of_2 = _assert_async = None
+    return (x,)""",
+            )
 
     def test_decomp_batch_norm_functional_predispatch(self):
         class ConvBatchnorm(torch.nn.Module):
@@ -6307,6 +6383,19 @@ def forward(self, x, b_t, y):
         ep = export(m, (inp,))
         self.assertEqual(ep.module()(torch.ones(4, 4)), m(torch.ones(4, 4)))
 
+    def test_double_lifted_constants(self):
+        class EmptyM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self):
+                return (torch.tensor([1, 2, 3]), torch.tensor([4, 5, 6]))
+
+        m = EmptyM()
+        ep = torch.export.export(m, ())
+        for out, real_out in zip(ep.module()(), m()):
+            self.assertTrue(torch.allclose(out, real_out))
+
     def test_trace_under_fake(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -7222,8 +7311,6 @@ def forward(self, x, y):
             if node.op == "call_function":
                 self.assertTrue(False)
 
-    @testing.expectedFailureTrainingIRToRunDecomp  # T200904004
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_istft_op(self):
         class istft_class(torch.nn.Module):
             def forward(self, spec):
@@ -7241,6 +7328,70 @@ def forward(self, x, y):
         imaginary_part = torch.randn(1, 513, 282, dtype=torch.float32)
         spec = torch.complex(real_part, imaginary_part)
         export(model, (spec,))
+
+    def test_custom_op_preserve(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = torch.ops.testlib.foo_functional.default(x)
+                return torch.ops.testlib.foo_mutated.default(y)
+
+        decomp_table = torch.export.core_aten_decompositions()
+
+        # FIXME (We need to design a proper way that doesn't need _preserve_ops)
+        ep = torch.export.export(M(), (torch.randn(4, 4),)).run_decompositions(
+            decomp_table,
+            _preserve_ops=(
+                torch.ops.testlib.foo_functional.default,
+                torch.ops.testlib.foo_mutated.default,
+            ),
+        )
+
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, x):
+    foo_functional = torch.ops.testlib.foo_functional.default(x);  x = None
+    cos = torch.ops.aten.cos.default(foo_functional)
+    auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = foo_functional, z = cos);  foo_functional = cos = None
+    getitem_3 = auto_functionalized[3];  auto_functionalized = None
+    cos_1 = torch.ops.aten.cos.default(getitem_3)
+    return (getitem_3, cos_1)""",
+        )
+
+    def test_export_linear_preserve_dynamic_shape(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        mod = M()
+        ep = export(
+            mod,
+            (torch.randn(8, 4),),
+            dynamic_shapes={
+                "x": {
+                    0: Dim("x"),
+                }
+            },
+        )
+
+        if IS_FBCODE:
+            ep = ep.run_decompositions(
+                {}, _preserve_ops=(torch.ops.aten.linear.default,)
+            )
+        else:
+            table = torch.export.core_aten_decompositions()
+            del table[torch.ops.aten.linear.default]
+            ep = ep.run_decompositions(table)
+
+        comp_mod = ep.module()
+        inp1 = torch.randn(3, 4)
+        inp2 = torch.randn(7, 4)
+        self.assertTrue(torch.allclose(comp_mod(inp1), mod(inp1)))
+        self.assertTrue(torch.allclose(comp_mod(inp2), mod(inp2)))
 
     def test_automatic_dynamic_shapes_simple_equality(self):
         # The next 3 test cases tests for automatic dynamic shapes specs, verifying that automatic dynamism
@@ -7634,6 +7785,82 @@ def forward(self, x, y):
                 },
             }
             _load_dynamic_shapes(spec, from_dict=True)
+
+    @testing.expectedFailureSerDer  # TODO(pianpwk): PowByNatural valuerange deserialization
+    def test_dim_dynamic(self):
+        dynamic = Dim.DYNAMIC
+
+        # dynamic should infer equalities and relations
+        class Relations(torch.nn.Module):
+            def forward(self, u, w, x, y, z):
+                a = u[1:] + w + x  # s0 == s1 + 1 == s2 + 1
+                b = y.flatten() + z  # s2*s3 == s4
+                return a, b
+
+        inputs = (
+            torch.randn(5),
+            torch.randn(4),
+            torch.randn(4),
+            torch.randn(4, 4),
+            torch.randn(16),
+        )
+        ep = export(
+            Relations(),
+            inputs,
+            dynamic_shapes={
+                "u": (dynamic,),
+                "w": (dynamic,),
+                "x": (dynamic,),
+                "y": (dynamic, dynamic),
+                "z": (dynamic,),
+            },
+        )
+        ep.module()(
+            torch.randn(6),
+            torch.randn(5),
+            torch.randn(5),
+            torch.randn(7, 8),
+            torch.randn(56),
+        )
+
+        # dynamic should complain when force specialized
+        class Specialize(torch.nn.Module):
+            def forward(self, x):
+                torch._check(x.shape[0] == 4)
+                return x + 2
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Not all values of RelaxedUnspecConstraint.* are valid because .* was inferred to be a constant",
+        ):
+            ep = export(
+                Specialize(),
+                (torch.randn(4, 8),),
+                dynamic_shapes={
+                    "x": (dynamic, dynamic),
+                },
+            )
+
+        # dynamic should handle complex guards in the same way as auto
+        class ModConstraint(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x.view(x.shape[0] - 1, -1)
+
+        ep = export(
+            ModConstraint(),
+            (torch.randn(3, 4),),
+            dynamic_shapes={
+                "x": (dynamic, dynamic),
+            },
+        )
+        ep.module()(torch.randn(5, 8))
+        num_asserts = [
+            node.target == torch.ops.aten._assert_scalar.default
+            for node in ep.graph.nodes
+        ].count(True)
+        self.assertEqual(num_asserts, 1)
+        with self.assertRaises(RuntimeError):
+            ep.module()(torch.randn(4, 2))
 
     @testing.expectedFailureNonStrict
     @testing.expectedFailureTrainingIRToRunDecompNonStrict  # unbacked symint not tracked?
