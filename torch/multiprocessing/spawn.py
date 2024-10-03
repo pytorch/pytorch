@@ -9,12 +9,25 @@ import sys
 import tempfile
 import time
 import warnings
+from concurrent.futures import as_completed, ThreadPoolExecutor
 from typing import Optional
 
 from . import _prctl_pr_set_pdeathsig  # type: ignore[attr-defined]
 
 
+ENV_VAR_PARALLEL_START = "TORCH_MP_PARALLEL_START"
+
 log = logging.getLogger(__name__)
+
+__all__ = [
+    "ProcessContext",
+    "ProcessException",
+    "ProcessExitedException",
+    "ProcessRaisedException",
+    "spawn",
+    "SpawnContext",
+    "start_processes",
+]
 
 
 class ProcessException(Exception):
@@ -205,12 +218,32 @@ class SpawnContext(ProcessContext):
 # Currently we only add this API first, we can consider adding it to documentation as
 # needed in the future.
 def start_processes(
-    fn, args=(), nprocs=1, join=True, daemon=False, start_method="spawn"
+    fn,
+    args=(),
+    nprocs=1,
+    join=True,
+    daemon=False,
+    start_method="spawn",
 ):
+    # To speed up performance in certain cases (see https://github.com/pytorch/pytorch/issues/133010),
+    # this func will start processes in parallel if start_method is 'forkserver'.
+    # Please opt in to this perf optimization by setting env var (TORCH_MP_PARALLEL_START) to 1.
+    # todo: investigate why spawn does not work with threadpool and raises SIGINT
+    if (
+        start_method == "forkserver"
+        and os.environ.get(ENV_VAR_PARALLEL_START, "0") == "1"
+    ):
+        log.info("Starting processes in parallel.")
+        start_parallel = True
+    else:
+        # Set env var TORCH_MP_PARALLEL_START to 0 to disable parallel start
+        start_parallel = False
+
     mp = multiprocessing.get_context(start_method)
-    error_files = []
-    processes = []
-    for i in range(nprocs):
+    error_files = [None] * nprocs
+    processes = [None] * nprocs
+
+    def start_process(i):
         # Each process is assigned a file to write tracebacks to.  We
         # use the file being non-empty to indicate an exception
         # occurred (vs an expected shutdown).  Note: this previously
@@ -228,9 +261,21 @@ def start_processes(
             daemon=daemon,
         )
         process.start()
-        error_files.append(tf.name)
-        processes.append(process)
+        return i, process, tf.name
 
+    if not start_parallel:
+        for i in range(nprocs):
+            idx, process, tf_name = start_process(i)
+            error_files[idx] = tf_name
+            processes[idx] = process
+    else:
+        with ThreadPoolExecutor(max_workers=nprocs) as executor:
+            futures = [executor.submit(start_process, i) for i in range(nprocs)]
+            for fut in as_completed(futures):
+                idx, process, tf_name = fut.result()
+                # idx and process rank needs to be the same.
+                error_files[idx] = tf_name
+                processes[idx] = process
     context = ProcessContext(processes, error_files)
     if not join:
         return context

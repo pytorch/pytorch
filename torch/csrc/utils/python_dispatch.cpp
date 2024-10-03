@@ -222,11 +222,11 @@ static torch::_RegisterOrVerify register_or_verify() {
 
 static py::object ophandle_call_boxed(
     const c10::OperatorHandle& handle,
-    py::args args,
+    const py::args& args,
     const py::kwargs& kwargs) {
   auto stack = torch::jit::createStackForSchema(
       handle.schema(),
-      std::move(args),
+      args,
       kwargs,
       /*self=*/std::nullopt);
   {

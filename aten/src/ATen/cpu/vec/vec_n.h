@@ -88,6 +88,9 @@ class VectorizedN {
   template <int L = N, typename std::enable_if_t<L == 1, int> = 0>
   VectorizedN(const Vectorized<T>& val) : values({val}) {}
 
+  template <int L = N, typename std::enable_if_t<L == 2, int> = 0>
+  VectorizedN(const Vectorized<T>& val_0, const Vectorized<T>& val_1) : values({val_0, val_1}) {}
+
   template <int L = N, typename std::enable_if_t<L == 1, int> = 0>
   inline operator Vectorized<T>() const {
     return values[0];
@@ -142,13 +145,14 @@ class VectorizedN {
       int64_t count = size()) {
     VectorizedN<T, N> result;
     for (int i = 0; i < N; ++i) {
-      result.values[i] = Vectorized<T>::set(
-          a.values[i],
-          b.values[i],
-          std::min(count, (int64_t)Vectorized<T>::size()));
-      count -= Vectorized<T>::size();
-      if (count <= 0) {
-        break;
+      if (count > 0) {
+        result.values[i] = Vectorized<T>::set(
+            a.values[i],
+            b.values[i],
+            std::min(count, (int64_t)Vectorized<T>::size()));
+        count -= Vectorized<T>::size();
+      } else {
+        result.values[i] = a.values[i];
       }
     }
     return result;
