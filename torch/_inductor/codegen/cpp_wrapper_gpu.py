@@ -17,7 +17,7 @@ from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides
 from .cpp_utils import cexpr, DTYPE_TO_CPP
-from .cpp_wrapper_cpu import CppWrapperCpu
+from .cpp_wrapper_cpu import CppWrapperCpu, SubgraphCppWrapperCpu
 from .wrapper import SymbolicCallArg
 
 
@@ -173,9 +173,8 @@ class CppWrapperGpu(CppWrapperCpu):
 
     @staticmethod
     def create(is_subgraph, subgraph_name, parent_wrapper):
-        # TODO(anijain2305) - Need to make changes in this wrapper for subgraphs
         if is_subgraph:
-            raise NotImplementedError("codegen not implemented for subgraphs")
+            return SubgraphCppWrapperGpu(subgraph_name, parent_wrapper)
         return CppWrapperGpu()
 
     def write_header(self):
@@ -467,3 +466,7 @@ class CppWrapperGpu(CppWrapperCpu):
                 self.writeline(f"workspace.zero_(){self.ending}")
             if config.triton.autotune_at_compile_time:
                 self.kernel_autotune_calls.writeline(f"workspace.zero_(){self.ending}")
+
+
+class SubgraphCppWrapperGpu(SubgraphCppWrapperCpu, CppWrapperGpu):
+    pass

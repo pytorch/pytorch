@@ -1986,6 +1986,20 @@ class PythonWrapperCodegen(CodeGen):
                 f"{outer_output} = {inner_output.codegen_reference()}{self.ending}"
             )
 
+    def codegen_subgraph_call(self, subgraph, outer_inputs, outer_outputs):
+        # Get the input and output names of the subgraph
+        inner_inputs = ", ".join(subgraph.graph.graph_input_names)
+        if len(subgraph.graph.graph_input_names) == 1:
+            inner_inputs += ","
+
+        output_names = subgraph.graph.get_output_names()
+        inner_outputs = ", ".join(output_names)
+        if len(output_names) == 1:
+            inner_outputs += ","
+
+        # Call the subgraph launcher function
+        self.writeline(f"({inner_outputs}) = {subgraph.graph.name}([{inner_inputs}])")
+
     def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
         try:
             self.push_codegened_graph(subgraph.graph)
@@ -1996,7 +2010,7 @@ class PythonWrapperCodegen(CodeGen):
             parent_graph = V.graph
             subgraph.graph.cpp_wrapper = parent_graph.cpp_wrapper
 
-            if subgraph.graph.name not in self.already_codegened_subgraphs:
+            if True or subgraph.graph.name not in self.already_codegened_subgraphs:
                 # If its codegened, the parent wrapper already has subgraph fn by name subgraph.graph.name
                 with V.set_graph_handler(subgraph.graph):
                     # Call the codegen of subgraph recursively
@@ -2005,20 +2019,7 @@ class PythonWrapperCodegen(CodeGen):
                     self.already_codegened_subgraphs.add(subgraph.graph.name)
                     self.define_subgraph_launcher_fn(subgraph_code)
 
-            # Get the input and output names of the subgraph
-            inner_inputs = ", ".join(subgraph.graph.graph_input_names)
-            if len(subgraph.graph.graph_input_names) == 1:
-                inner_inputs += ","
-
-            output_names = subgraph.graph.get_output_names()
-            inner_outputs = ", ".join(output_names)
-            if len(output_names) == 1:
-                inner_outputs += ","
-
-            # Call the subgraph launcher function
-            self.writeline(
-                f"({inner_outputs}) = {subgraph.graph.name}([{inner_inputs}])"
-            )
+            self.codegen_subgraph_call(subgraph, outer_inputs, outer_outputs)
 
             self.codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
         finally:
