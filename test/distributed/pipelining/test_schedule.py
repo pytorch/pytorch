@@ -62,7 +62,9 @@ class ScheduleTest(TestCase):
         # List of all expected schedule names
         schedule_names = [
             "1F1B",
+            "1f1b",
             "Interleaved1F1B",
+            "INTERLEAVED1F1B",
             "GPipe",
             "FlexibleInterleaved1F1B",
             "LoopedBFS",
@@ -81,6 +83,12 @@ class ScheduleTest(TestCase):
                     issubclass(schedule_class, _PipelineSchedule),
                     f"{name} should be a subclass of _PipelineSchedule",
                 )
+
+        error_case = ["ScheduleThatDoesNotExist"]
+        for name in error_case:
+            # Test that the original name is included in the error message
+            with self.assertRaisesRegex(ValueError, f"{name}"):
+                get_schedule_class(name)
 
 
 class TestSchedulePlan(TestCase):
