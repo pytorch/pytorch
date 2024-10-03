@@ -224,6 +224,7 @@ use_mixed_mm = True
 # https://pytorch.org/docs/stable/notes/numerical_accuracy.html#batched-computations-or-slice-computations
 fx_passes_numeric_check: Dict[str, Any] = {
     "pre_grad": False,
+    "post_grad": False,
     "precision": 1e-4,
     "num_iterations": 1,
     "requires_optimizer": True,
@@ -1133,7 +1134,8 @@ class rocm:
     # Flag to print register and LDS usage during compilation
     print_kernel_resource_usage = False
 
-    # Path to ROCm installation, if None, use env variable ROCM_HOME
+    # Path to ROCm installation, if None, use env variable ROCM_HOME.
+    # In fbcode see triton/fb/TARGETS for how ROCM_HOME gets set.
     rocm_home: Optional[str] = None
 
     # Path to Composable Kernel library.
@@ -1259,6 +1261,9 @@ _cache_config_ignore_prefix = [
     "worker_start_method",
     "compile_threads",
 ]
+
+# External callable for matmul tuning candidates
+external_matmul: List[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
