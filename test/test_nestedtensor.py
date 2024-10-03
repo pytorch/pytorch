@@ -6135,23 +6135,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ):
             a.copy_(b)
 
-    def test_index_put_(self, device):
-        offsets = torch.tensor([0, 2, 5, 7], device=device)
-        a = torch.nested.nested_tensor_from_jagged(
-            torch.zeros(7, 3, device=device), offsets
-        )
-        indices = [
-            torch.tensor([0, 1, 2], device=a.device),
-            torch.tensor([0, 2, 1], device=a.device),
-            torch.tensor([0, 0, 0], device=a.device),
-        ]
-        a[indices] = 1.0
-
-        sentences = a.unbind()
-        self.assertEqual(sentences[0][0], torch.tensor([1.0, 0.0, 0.0]))
-        self.assertEqual(sentences[0][1], torch.tensor([0.0, 0.0, 0.0]))
-        self.assertEqual(sentences[1][2], torch.tensor([1.0, 0.0, 0.0]))
-
+    # This can't happen in the opinfo tests due to subprocess creation
+    def test_index_put_error(self, device):
         import subprocess
 
         with self.subTest():
