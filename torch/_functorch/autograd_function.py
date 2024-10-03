@@ -333,7 +333,9 @@ def custom_function_call_vmap_helper(
         if autograd_function_case:
             return interpreter.lower()
         else:
-            return torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet("FuncTorchBatched"))
+            return torch._C._ExcludeDispatchKeyGuard(
+                torch._C.DispatchKeySet(torch._C.DispatchKey.FuncTorchBatched)
+            )
 
     unwrapped_operands, in_dims = unwrap_batched(operands, current_level)
     # If none of the tensors are batched at the current level, then we skip the
