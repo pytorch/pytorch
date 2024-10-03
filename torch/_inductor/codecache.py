@@ -1463,7 +1463,7 @@ class FxGraphCache:
         torch._logging.trace_structured(
             "artifact",
             metadata_fn=lambda: {
-                "name": "fx_graph_cache_hash",
+                "name": f"fx_graph_cache_{cache_state}",
                 "encoding": "json",
             },
             payload_fn=lambda: json.dumps(cache_info),
