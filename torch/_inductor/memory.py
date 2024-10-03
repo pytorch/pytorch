@@ -399,14 +399,13 @@ def topological_sort_lpmf(
     )
 
     # this is the total output memory, which is a lower bound for peak memory
-    output_memory = sum(
-        (
-            name_to_buf[buf_name].mpi_buffer.size_free
-            if buf_name in name_to_buf
-            else name_to_freeable_input_buf[buf_name].mpi_buffer.size_free
-        )
-        for buf_name in graph_outputs
-    )
+    # we do not include the memory of non freeable input buffers
+    output_memory = 0
+    for buf_name in graph_outputs:
+        if buf_name in name_to_buf:
+            output_memory += name_to_buf[buf_name].mpi_buffer.size_free
+        elif buf_name in name_to_freeable_input_buf:
+            output_memory += name_to_freeable_input_buf[buf_name].mpi_buffer.size_free
     max_memory = max(live_memory, output_memory)
 
     # compute the amount of memory that is allocated when a node is scheduled
