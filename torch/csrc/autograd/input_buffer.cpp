@@ -17,8 +17,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 namespace {
 // look what you made me do >.<
@@ -246,5 +245,4 @@ auto InputBuffer::variables(InputBuffer&& g) -> std::vector<Variable> {
   return result;
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

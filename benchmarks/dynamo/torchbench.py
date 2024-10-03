@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import functools
+
 import gc
 import importlib
 import logging
@@ -10,17 +10,17 @@ import warnings
 from collections import namedtuple
 from os.path import abspath, exists
 
-import yaml
-
 import torch
 
+
 try:
-    from .common import BenchmarkRunner, main
+    from .common import BenchmarkRunner, load_yaml_file, main
 except ImportError:
-    from common import BenchmarkRunner, main
+    from common import BenchmarkRunner, load_yaml_file, main
 
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
+
 
 # We are primarily interested in tf32 datatype
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -56,6 +56,9 @@ def setup_torchbench_cwd():
         "../../torchbenchmark",
         "../../torchbench",
         "../../benchmark",
+        "../../../torchbenchmark",
+        "../../../torchbench",
+        "../../../benchmark",
     ):
         if exists(torchbench_dir):
             break
@@ -66,31 +69,6 @@ def setup_torchbench_cwd():
         sys.path.append(torchbench_dir)
 
     return original_dir
-
-
-@functools.lru_cache(maxsize=1)
-def load_yaml_file():
-    filename = "torchbench.yaml"
-    filepath = os.path.join(os.path.dirname(__file__), filename)
-
-    with open(filepath) as f:
-        data = yaml.safe_load(f)
-
-    def flatten(lst):
-        for item in lst:
-            if isinstance(item, list):
-                yield from flatten(item)
-            else:
-                yield item
-
-    def maybe_list_to_set(obj):
-        if isinstance(obj, dict):
-            return {k: maybe_list_to_set(v) for k, v in obj.items()}
-        if isinstance(obj, list):
-            return set(flatten(obj))
-        return obj
-
-    return maybe_list_to_set(data)
 
 
 def process_hf_reformer_output(out):
@@ -125,7 +103,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
     @property
     def _config(self):
-        return load_yaml_file()
+        return load_yaml_file("torchbench.yaml")
 
     @property
     def _skip(self):
@@ -160,8 +138,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._skip["device"]["cuda"]
 
     @property
-    def skip_models_for_freezing(self):
-        return self._skip["freezing"]
+    def skip_models_for_freezing_cuda(self):
+        return self._skip["freezing"]["cuda"]
+
+    @property
+    def skip_models_for_freezing_cpu(self):
+        return self._skip["freezing"]["cpu"]
 
     @property
     def slow_models(self):
@@ -233,6 +215,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             "detectron2_maskrcnn_r_101_fpn",
             "vision_maskrcnn",
             "doctr_reco_predictor",
+            "hf_T5_generate",
         }
 
     def load_model(

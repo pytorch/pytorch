@@ -5,7 +5,8 @@ import sympy
 
 import torch
 from torch.utils._sympy.value_ranges import ValueRanges
-from .ir import LoopBody
+
+from .loop_body import LoopBody
 from .utils import dominated_nodes
 
 

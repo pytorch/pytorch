@@ -131,21 +131,21 @@ static Device getATenDevice(const DLDevice& ctx, void* data) {
 #ifndef USE_ROCM
     // if we are compiled under HIP, we cannot do cuda
     case DLDeviceType::kDLCUDA:
-      return at::Device(DeviceType::CUDA, ctx.device_id);
+      return at::Device(DeviceType::CUDA, static_cast<c10::DeviceIndex>(ctx.device_id));
 #endif
     case DLDeviceType::kDLOpenCL:
-      return at::Device(DeviceType::OPENCL, ctx.device_id);
+      return at::Device(DeviceType::OPENCL, static_cast<c10::DeviceIndex>(ctx.device_id));
     case DLDeviceType::kDLROCM:
 #ifdef USE_ROCM
       // this looks funny, we need to return CUDA here to masquerade
-      return at::Device(DeviceType::CUDA, ctx.device_id);
+      return at::Device(DeviceType::CUDA, static_cast<c10::DeviceIndex>(ctx.device_id));
 #else
-      return at::Device(DeviceType::HIP, ctx.device_id);
+      return at::Device(DeviceType::HIP, static_cast<c10::DeviceIndex>(ctx.device_id));
 #endif
     case DLDeviceType::kDLOneAPI:
       return at::detail::getXPUHooks().getDeviceFromPtr(data);
     case DLDeviceType::kDLMAIA:
-      return at::Device(DeviceType::MAIA, ctx.device_id);
+      return at::Device(DeviceType::MAIA, static_cast<c10::DeviceIndex>(ctx.device_id));
     default:
       TORCH_CHECK(
           false, "Unsupported device_type: ", std::to_string(ctx.device_type));
@@ -286,7 +286,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
     device_id = src.get_device();
   }
   atDLMTensor->tensor.dl_tensor.device = getDLDevice(src, device_id);
-  atDLMTensor->tensor.dl_tensor.ndim = src.dim();
+  atDLMTensor->tensor.dl_tensor.ndim = static_cast<int32_t>(src.dim());
   atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src);
   atDLMTensor->tensor.dl_tensor.shape = view.sizes().data();
   atDLMTensor->tensor.dl_tensor.strides = view.strides().data();
@@ -295,7 +295,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
 }
 
 Tensor fromDLPack(DLManagedTensor* src) {
-  auto deleter = [src](void* self) {
+  auto deleter = [src](void* self [[maybe_unused]]) {
     if (src->deleter) {
       src->deleter(src);
     }

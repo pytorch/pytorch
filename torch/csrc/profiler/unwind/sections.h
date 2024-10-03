@@ -57,11 +57,7 @@ struct Sections {
   Section symtab;
   Section strtab;
 
-  const char* readString(
-      CheckedLexer& data,
-      uint64_t encoding,
-      bool is_64bit,
-      uint64_t str_offsets_base) {
+  const char* readString(CheckedLexer& data, uint64_t encoding, bool is_64bit) {
     switch (encoding) {
       case DW_FORM_string: {
         return data.readCString();
@@ -81,7 +77,7 @@ struct Sections {
     return is_64bit ? data.read<uint64_t>() : data.read<uint32_t>();
   }
 
-  unwind::optional<uint64_t> findDebugInfoOffset(uint64_t address) {
+  std::optional<uint64_t> findDebugInfoOffset(uint64_t address) {
     return debug_info_offsets_.find(address);
   }
   size_t compilationUnitCount() {

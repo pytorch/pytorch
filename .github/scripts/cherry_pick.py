@@ -4,11 +4,9 @@ import json
 import os
 import re
 from typing import Any, cast, Dict, List, Optional
-
 from urllib.error import HTTPError
 
 from github_utils import gh_fetch_url, gh_post_pr_comment, gh_query_issues_by_labels
-
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from trymerge import get_pr_commit_sha, GitHubPR
 
@@ -171,7 +169,8 @@ def create_cherry_pick_branch(
     repo.create_branch_and_checkout(branch=cherry_pick_branch)
 
     # We might want to support ghstack later
-    repo._run_git("cherry-pick", "-x", "-X", "theirs", commit_sha)
+    # We don't want to resolve conflicts here.
+    repo._run_git("cherry-pick", "-x", commit_sha)
     repo.push(branch=cherry_pick_branch, dry_run=False)
 
     return cherry_pick_branch

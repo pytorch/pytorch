@@ -2,18 +2,19 @@
 from __future__ import annotations
 
 import contextlib
-
-from typing import Callable, Mapping, Optional
+from typing import Callable, Mapping, TYPE_CHECKING
 
 import torch
 import torch._ops
-import torch.fx
 from torch._dispatch import python as python_dispatch
 from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
-from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass, diagnostics
 from torch.onnx._internal.fx.passes import _utils
+
+
+if TYPE_CHECKING:
+    import torch.fx
 
 
 class Decompose(_pass.Transform):
@@ -23,14 +24,13 @@ class Decompose(_pass.Transform):
         module: torch.fx.GraphModule,
         decomposition_table: Mapping[torch._ops.OpOverload, Callable],
         enable_dynamic_axes: bool,
-        allow_fake_constant: Optional[bool] = False,
+        allow_fake_constant: bool | None = False,
     ):
         super().__init__(diagnostic_context, module)
         self.decomposition_table = decomposition_table
         self.enable_dynamic_axes = enable_dynamic_axes
         self.allow_fake_constant = allow_fake_constant
 
-    @_beartype.beartype
     def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
         assert not kwargs, "kwargs is not supported in Decompose."
 
@@ -53,7 +53,7 @@ class Decompose(_pass.Transform):
 
         # Mimic `torch._dynamo.export(aten_graph=True)` behavior in invoking `make_fx`.
         # TODO: May need revisit for user fake mode export + dynamic shape scenario.
-        fake_mode: Optional[fake_tensor.FakeTensorMode] = self.fake_mode
+        fake_mode: fake_tensor.FakeTensorMode | None = self.fake_mode
         maybe_fake_args = self._maybe_fakefy_args(fake_mode, *args)
         if fake_mode is not None:
             # Using existing fake mode as context, signal `make_fx` that it does not need
@@ -66,9 +66,7 @@ class Decompose(_pass.Transform):
 
         # Apply decomposition table to the input graph.
         assert fake_mode is not None  # for mypy
-        with proxy_tensor.maybe_disable_fake_tensor_mode(), python_dispatch.enable_python_dispatcher(), (
-            fake_mode
-        ):
+        with fake_tensor.unset_fake_temporarily(), python_dispatch.enable_python_dispatcher(), fake_mode:
             decomposed_module = proxy_tensor.make_fx(
                 module,
                 decomposition_table=self.decomposition_table,

@@ -85,12 +85,9 @@ TORCH_LIBRARY_IMPL(aten, MPS, m) {
   // These ops are not supported via MPS backend currently, and we fallback to run on CPU.
   // For the rest of unsupported ops the user needs to pass 'PYTORCH_ENABLE_MPS_FALLBACK=1'
   // to fallback on CPU, otherwise we will error out.
-  m.impl("bitwise_left_shift.Tensor_out", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
-  m.impl("bitwise_right_shift.Tensor_out", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
   m.impl("embedding_renorm_", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
   m.impl("linalg_svd", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
   m.impl("linalg_svd.U", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
-  m.impl("im2col", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>()); // Used in  preprocessing by nn.Unfold
   m.impl("col2im", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
   m.impl("_slow_conv2d_forward", slow_conv2d_forward_mps);
   m.impl("upsample_nearest3d.vec", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());

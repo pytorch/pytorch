@@ -9,8 +9,7 @@
 #include <math.h>
 #include <optional>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace upsample {
 // TODO: Remove duplicate declaration.
@@ -72,7 +71,7 @@ __device__ inline scalar_t max(scalar_t a, scalar_t b) {
 
 // see NOTE [ Nearest neighbor upsampling kernel implementation ]
 template <typename accscalar_t>
-__host__ __forceinline__ static accscalar_t compute_scales_value(
+__host__ __forceinline__ accscalar_t compute_scales_value(
     const std::optional<double> scale,
     int64_t src_size,
     int64_t dst_size) {
@@ -83,7 +82,7 @@ __host__ __forceinline__ static accscalar_t compute_scales_value(
 
 // see NOTE [ Nearest neighbor upsampling kernel implementation ]
 template <typename accscalar_t>
-__host__ __forceinline__ static accscalar_t compute_scales_value_backwards(
+__host__ __forceinline__ accscalar_t compute_scales_value_backwards(
     const std::optional<double> scale,
     int64_t src_size,
     int64_t dst_size) {
@@ -93,7 +92,7 @@ __host__ __forceinline__ static accscalar_t compute_scales_value_backwards(
 }
 
 template <typename accscalar_t>
-__host__ __forceinline__ static accscalar_t area_pixel_compute_scale(
+__host__ __forceinline__ accscalar_t area_pixel_compute_scale(
     int input_size,
     int output_size,
     bool align_corners,
@@ -112,7 +111,7 @@ __host__ __forceinline__ static accscalar_t area_pixel_compute_scale(
 }
 
 template <typename accscalar_t>
-__device__ __forceinline__ static accscalar_t area_pixel_compute_source_index(
+__device__ __forceinline__ accscalar_t area_pixel_compute_source_index(
     accscalar_t scale,
     int dst_index,
     bool align_corners,
@@ -130,7 +129,7 @@ __device__ __forceinline__ static accscalar_t area_pixel_compute_source_index(
 }
 
 // see NOTE [ Nearest neighbor upsampling kernel implementation ]
-__device__ __forceinline__ static int nearest_neighbor_compute_source_index(
+__device__ __forceinline__ int nearest_neighbor_compute_source_index(
     const float scale,
     int dst_index,
     int input_size) {
@@ -144,7 +143,7 @@ __device__ __forceinline__ static int nearest_neighbor_compute_source_index(
   return src_index;
 }
 
-__device__ __forceinline__ static int nearest_neighbor_exact_compute_source_index(
+__device__ __forceinline__ int nearest_neighbor_exact_compute_source_index(
     const float scale,
     int dst_index,
     int input_size) {
@@ -157,7 +156,7 @@ __device__ __forceinline__ static int nearest_neighbor_exact_compute_source_inde
 }
 
 // see NOTE [ Nearest neighbor upsampling kernel implementation ]
-__device__ __forceinline__ static int nearest_neighbor_bw_compute_source_index(
+__device__ __forceinline__ int nearest_neighbor_bw_compute_source_index(
     const float scale,
     int dst_index,
     int output_size) {
@@ -170,7 +169,7 @@ __device__ __forceinline__ static int nearest_neighbor_bw_compute_source_index(
 }
 
 // see NOTE [ Nearest neighbor upsampling kernel implementation ]
-__device__ __forceinline__ static int nearest_neighbor_exact_bw_compute_source_index(
+__device__ __forceinline__ int nearest_neighbor_exact_bw_compute_source_index(
     const float scale,
     int dst_index,
     int output_size) {
@@ -182,7 +181,7 @@ __device__ __forceinline__ static int nearest_neighbor_exact_bw_compute_source_i
 
 /* Used by UpSampleBicubic2d.cu */
 template <typename scalar_t>
-__device__ __forceinline__ static scalar_t upsample_get_value_bounded(
+__device__ __forceinline__ scalar_t upsample_get_value_bounded(
     const PackedTensorAccessor64<const scalar_t, 4>& data,
     int batch,
     int channel,
@@ -197,7 +196,7 @@ __device__ __forceinline__ static scalar_t upsample_get_value_bounded(
 
 /* Used by UpSampleBicubic2d.cu */
 template <typename scalar_t, typename accscalar_t>
-__device__ __forceinline__ static void upsample_increment_value_bounded(
+__device__ __forceinline__ void upsample_increment_value_bounded(
     PackedTensorAccessor64<scalar_t, 4>& data,
     int batch,
     int channel,
@@ -218,21 +217,21 @@ __device__ __forceinline__ static void upsample_increment_value_bounded(
 // Based on
 // https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
 template <typename accscalar_t>
-__device__ __forceinline__ static accscalar_t cubic_convolution1(
+__device__ __forceinline__ accscalar_t cubic_convolution1(
     accscalar_t x,
     accscalar_t A) {
   return ((A + 2) * x - (A + 3)) * x * x + 1;
 }
 
 template <typename accscalar_t>
-__device__ __forceinline__ static accscalar_t cubic_convolution2(
+__device__ __forceinline__ accscalar_t cubic_convolution2(
     accscalar_t x,
     accscalar_t A) {
   return ((A * x - 5 * A) * x + 8 * A) * x - 4 * A;
 }
 
 template <typename accscalar_t>
-__device__ __forceinline__ static void get_cubic_upsampling_coefficients(
+__device__ __forceinline__ void get_cubic_upsampling_coefficients(
     accscalar_t coeffs[4],
     accscalar_t t) {
   accscalar_t A = -0.75;
@@ -248,7 +247,7 @@ __device__ __forceinline__ static void get_cubic_upsampling_coefficients(
 }
 
 template <typename scalar_t, typename accscalar_t>
-__device__ __forceinline__ static accscalar_t cubic_interp1d(
+__device__ __forceinline__ accscalar_t cubic_interp1d(
     scalar_t x0,
     scalar_t x1,
     scalar_t x2,
@@ -306,7 +305,7 @@ struct BicubicFilterFunctor {
 };
 
 template <typename accscalar_t>
-__device__ __forceinline__ static void _compute_weights_span(
+__device__ __forceinline__ void _compute_weights_span(
     const int i,
     const int input_size,
     const accscalar_t scale,
@@ -320,7 +319,7 @@ __device__ __forceinline__ static void _compute_weights_span(
 }
 
 template <typename scalar_t, typename accscalar_t, typename interp_filter_t>
-__device__ __forceinline__ static void _compute_weights(
+__device__ __forceinline__ void _compute_weights(
     scalar_t* wt_ptr,
     const accscalar_t scale,
     int interp_size,
@@ -347,7 +346,7 @@ __device__ __forceinline__ static void _compute_weights(
 }
 
 template <typename scalar_t, typename accscalar_t>
-__device__ __forceinline__ static accscalar_t interpolate_aa_single_dim(
+__device__ __forceinline__ accscalar_t interpolate_aa_single_dim(
     const scalar_t* src,
     const scalar_t* weights,
     int size) {
@@ -366,5 +365,4 @@ __device__ __forceinline__ static accscalar_t interpolate_aa_single_dim(
 
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

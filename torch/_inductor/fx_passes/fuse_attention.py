@@ -6,6 +6,7 @@ import math
 
 import torch
 from torch.nn.attention import sdpa_kernel, SDPBackend
+
 from ..._dynamo.utils import counters
 from ..pattern_matcher import (
     filter_nodes,
@@ -13,6 +14,7 @@ from ..pattern_matcher import (
     gen_register_replacement,
     joint_fwd_bwd,
 )
+
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -809,16 +811,14 @@ def _get_sfdp_patterns():
                 _sfdp_replacement_18,
                 [g(), g(), g(), m_bool()],
                 d,
-                # CUDA AOT Inductor CI job's GPT2ForSequenceClassification accuracy test failed
-                _sfdp_extra_check(disable_cuda=True),
+                _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_18,
                 _sfdp_replacement_18,
                 [g_bs1(), g_bs1(), g_bs1(), m_bs1_bool()],
                 d,
-                # CUDA AOT Inductor CI job's GPT2ForSequenceClassification accuracy test failed
-                _sfdp_extra_check(disable_cuda=True),
+                _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_19,

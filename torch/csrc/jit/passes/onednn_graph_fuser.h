@@ -5,10 +5,9 @@
 
 #include <ATen/Config.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace onednn {
+namespace torch::jit {
+
+namespace fuser::onednn {
 
 static std::atomic<bool> onednn_enabled{true};
 
@@ -18,8 +17,7 @@ static std::atomic<bool>& getLlgaEnabled() {
 
 TORCH_API void fuseGraph(std::shared_ptr<Graph>& g);
 
-} // namespace onednn
-} // namespace fuser
+} // namespace fuser::onednn
 
 struct C10_EXPORT RegisterLlgaFuseGraph
     : public PassManager<RegisterLlgaFuseGraph> {
@@ -60,5 +58,4 @@ struct C10_EXPORT RegisterLlgaFuseGraph
   }
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -71,6 +71,8 @@
 #include <ATen/ops/threshold_backward_native.h>
 #include <ATen/ops/trunc.h>
 #include <ATen/ops/trunc_native.h>
+#include <ATen/ops/is_pinned_native.h>
+#include <ATen/ops/_pin_memory_native.h>
 #endif
 
 namespace at::native {
