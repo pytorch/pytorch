@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import importlib
 import itertools
 import operator
 from typing import Any, List, Optional, Sequence, Tuple, TYPE_CHECKING, Union
@@ -29,7 +28,6 @@ __all__ = [
     "block_diag",
     "cdist",
     "chain_matmul",
-    "cumsum",
     "einsum",
     "istft",
     "lu",
@@ -2035,62 +2033,6 @@ def chain_matmul(*matrices, out=None):
         return _VF.chain_matmul(matrices)  # type: ignore[attr-defined]
     else:
         return _VF.chain_matmul(matrices, out=out)  # type: ignore[attr-defined]
-
-
-def cumsum(
-    self: Tensor,
-    dim: Optional[int] = None,
-    *,
-    dtype: Optional[torch.dtype] = None,
-    out: Optional[Tensor] = None,
-    axis: Optional[int] = None,
-):
-    r"""
-    cumsum(input, dim, *, dtype=None, out=None) -> Tensor
-
-    Returns the cumulative sum of elements of :attr:`input` in the dimension
-    :attr:`dim`.
-
-    For example, if :attr:`input` is a vector of size N, the result will also be
-    a vector of size N, with elements.
-
-    .. math::
-        y_i = x_1 + x_2 + x_3 + \dots + x_i
-
-    Args:
-        input (Tensor): the input tensor.
-        dim  (int): the dimension to do the operation over
-
-    Keyword args:
-        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-            If specified, the input tensor is casted to :attr:`dtype` before the operation
-            is performed. This is useful for preventing data type overflows. Default: None.
-        out (Tensor, optional): the output tensor.
-
-    Example::
-
-        >>> torch.manual_seed(0)
-        >>> a = torch.randint(1, 20, (10,))
-        >>> a
-        tensor([16,  5,  1,  1, 12,  8,  6, 10, 10,  5])
-        >>> torch.cumsum(a, dim=0)
-        tensor([16, 21, 22, 23, 35, 43, 49, 59, 69, 74])
-    """
-    if axis is not None:
-        if dim is None:
-            dim = axis
-        else:
-            raise RuntimeError("expected either 'dim' or 'axis' to be given, not both")
-    if has_torch_function_unary(self):
-        return handle_torch_function(cumsum, (self,), self, dim, dtype=dtype, out=out)
-    if not torch.jit.is_scripting():
-        if torch.are_deterministic_algorithms_enabled() and self.is_cuda:
-            ref_func = importlib.import_module("torch._refs").cumsum
-            return ref_func(self, dim, dtype=dtype, out=out)
-    if out is None:
-        return _VF.cumsum(self, dim, dtype=dtype)  # type: ignore[attr-defined]
-    else:
-        return _VF.cumsum(self, dim, dtype=dtype, out=out)  # type: ignore[attr-defined]
 
 
 def _lu_impl(A, pivot=True, get_infos=False, out=None):

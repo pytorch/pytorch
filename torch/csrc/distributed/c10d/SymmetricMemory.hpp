@@ -83,7 +83,7 @@ class SymmetricMemoryAllocator : public c10::intrusive_ptr_target {
   virtual size_t get_alloc_size(void* ptr) = 0;
   virtual c10::intrusive_ptr<SymmetricMemory> rendezvous(void* ptr) = 0;
   virtual bool is_rendezvous_completed(void* ptr) = 0;
-  virtual bool has_multicast_support() = 0;
+  virtual bool has_multicast_support(int device_idx) = 0;
 };
 
 C10_EXPORT bool is_finalizing();
@@ -156,6 +156,8 @@ TORCH_API c10::intrusive_ptr<SymmetricMemory> rendezvous(
 TORCH_API c10::intrusive_ptr<SymmetricMemory> get_symmetric_memory(
     const at::Tensor& tensor);
 
-TORCH_API bool has_multicast_support(c10::DeviceType device_type);
+TORCH_API bool has_multicast_support(
+    c10::DeviceType device_type,
+    int device_idx);
 } // namespace symmetric_memory
 } // namespace c10d

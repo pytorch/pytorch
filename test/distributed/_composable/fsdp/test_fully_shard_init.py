@@ -383,6 +383,18 @@ class TestFullyShardShardedParameterTensor(FSDPTestMultiThread):
         ):
             fully_shard(model)
 
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_raise_noncontiguous_parameter(self):
+        """
+        Tests raising an exception when the model has non-contiguous
+        parameters. This is due to lack of implementation support.
+        """
+        conv2d = nn.Conv2d(8, 8, 3).to(memory_format=torch.channels_last)
+        with self.assertRaisesRegex(
+            NotImplementedError, "FSDP does not support non-contiguous parameters"
+        ):
+            fully_shard(conv2d)
+
 
 class TestFullyShardShardedParameterDTensor(FSDPTestMultiThread):
     @property
