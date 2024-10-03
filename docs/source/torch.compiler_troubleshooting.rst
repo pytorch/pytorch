@@ -4,7 +4,7 @@ PyTorch 2.0 Troubleshooting
 **Author**: `Michael Lazos <https://github.com/mlazos>`_
 
 
-NOTE: This document is out of date in need of an update - in the mean time
+NOTE: This document is out of date and in need of an update - in the mean time
 the `comprehensive manual for torch.compile
 <https://docs.google.com/document/d/1y5CRfMLdwEoF1nTk9q8qEu1mgMUuUtvhklPKJ2emLU8/edit#heading=h.ivdr7fmrbeab>`__ is
 the best resource for troubleshooting.
