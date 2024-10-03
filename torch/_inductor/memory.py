@@ -594,7 +594,7 @@ def reorder_for_peak_memory(
     resulting topological order has the lowest peak memory estimation.
     """
 
-    torch_log.warning("Reordering for peak memory -- %d nodes", len(nodes))
+    torch_log.info("Reordering for peak memory -- %d nodes", len(nodes))
 
     @dataclasses.dataclass
     class PeakMemoryResult:
