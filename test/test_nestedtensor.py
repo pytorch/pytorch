@@ -7018,6 +7018,63 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertIsNone(nt.grad)
         self.assertIsNone(nt._values.grad_fn)
 
+    @onlyCUDA
+    @dtypes(torch.float64, torch.float32, torch.half)
+    @parametrize(
+        "contiguity",
+        ["noncontig_transposed", "noncontig_with_holes"],
+        name_fn=lambda c: c,
+    )
+    def test_noncontiguous_to(self, device, dtype, contiguity):
+        # Dense tensors preserve non-contiguity through to() calls (i.e. strides are
+        # preserved). Test for the analogous behavior for NJTs:
+        # 1. non-contiguous transposed
+        # 2. non-contiguous with holes
+        if contiguity == "noncontig_transposed":
+            nt = random_nt_from_dims(
+                [3, None, 5, 2],
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+            ).transpose(-3, -2)
+        elif contiguity == "noncontig_with_holes":
+            nt = torch.nested.nested_tensor_from_jagged(
+                values=torch.randn(10, 3, device=device, dtype=dtype),
+                offsets=torch.tensor([0, 3, 7, 10], device=device, dtype=torch.int64),
+                # these lengths specify holes
+                lengths=torch.tensor([1, 2, 3], device=device, dtype=torch.int64),
+            )
+        else:
+            raise ValueError("invalid contiguity specified for test_noncontiguous_to()")
+
+        # test dtype conversion
+        dtype_conversions = {
+            torch.float32: torch.half,
+            torch.float64: torch.float32,
+            torch.half: torch.float32,
+        }
+        other_dtype = dtype_conversions[dtype]
+        nt2 = nt.to(dtype=other_dtype)
+        self.assertEqual(nt2.dtype, other_dtype)
+        self.assertEqual(nt.is_contiguous(), nt2.is_contiguous())
+        self.assertEqual(nt._values.is_contiguous(), nt2._values.is_contiguous())
+        self.assertEqual(nt.shape, nt2.shape)
+        # expect no change for offsets / lengths
+        self.assertEqual(nt._offsets, nt2._offsets)
+        self.assertEqual(nt._lengths, nt2._lengths)
+
+        # test device conversion
+        other_device = torch.device("cpu")
+        nt3 = nt.to(device=other_device)
+        self.assertEqual(nt3.device, other_device)
+        self.assertEqual(nt.is_contiguous(), nt3.is_contiguous())
+        self.assertEqual(nt._values.is_contiguous(), nt3._values.is_contiguous())
+        self.assertEqual(nt.shape, nt3.shape)
+        # expect device change for offsets / lengths
+        self.assertEqual(nt3._offsets.device, other_device)
+        if nt._lengths is not None:
+            self.assertEqual(nt3._lengths.device, other_device)
+
     @dtypes(torch.float64, torch.float32, torch.half)
     def test_jagged_padded_dense_conversion_kernels(self, device, dtype):
         values = torch.randn(10, 5, device=device, dtype=dtype)
@@ -7625,6 +7682,15 @@ COMPILE_FORWARD_FAILURES = {
     # clone() on non-contiguous with holes NJTs currently use unbind(), leading to
     # data-dependent error in torch.compile
     "clone",
+    # to(device) allocates a new nested int in compile only.
+    # AssertionError: The values for attribute 'shape' do not match:
+    # torch.Size([7, j2]) != torch.Size([7, j1]).
+    ("to", "cuda"),
+}
+
+COMPILE_BACKWARD_FAILURES = {
+    *COMPILE_FORWARD_FAILURES,
+    *BACKWARD_FAILURES,
 }
 
 COMPARE_TENSOR_COMPONENT_EQUALITY = {
@@ -7636,7 +7702,12 @@ COMPARE_TENSOR_COMPONENT_EQUALITY = {
 def withXFails(failure_list):
     return decorateIf(
         unittest.expectedFailure,
-        lambda params: params["op"].full_name in failure_list,
+        lambda params: (
+            params["op"].full_name in failure_list
+            or
+            # allow for e.g. (op_name, "cuda") to skip on CUDA only
+            (params["op"].full_name, params["device"].split(":")[0]) in failure_list
+        ),
     )
 
 
@@ -7715,7 +7786,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
             else:
                 self.assertEqual(out_compile, out_ref)
 
-    @withXFails(BACKWARD_FAILURES)
+    @withXFails(COMPILE_BACKWARD_FAILURES)
     @ops(
         [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
         allowed_dtypes=(torch.float32,),
