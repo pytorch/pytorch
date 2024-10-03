@@ -180,6 +180,7 @@ def to_underlying_dtype(qdtype):
         torch.quint2x4: torch.uint8,
         torch.uint8: torch.uint8,
         torch.int8: torch.int8,
+        torch.uint16: torch.uint16,
         torch.int16: torch.int16,
         torch.int32: torch.int32,
         torch.float8_e5m2: torch.float8_e5m2,
