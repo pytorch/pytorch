@@ -349,15 +349,15 @@ def sample_inputs_index_put(
         )
 
     # Non-cont NJT for completeness
-    offsets = torch.tensor([0, 2, 5, 7], device="cuda")
-    lengths = torch.tensor([2, 2, 2], device="cuda")
+    offsets = torch.tensor([0, 2, 5, 7], device=device)
+    lengths = torch.tensor([2, 2, 2], device=device)
     indices = [
-        torch.tensor([0, 1, 2], device="cuda"),
-        torch.tensor([0, 1, 1], device="cuda"),
-        torch.tensor([0, 0, 0], device="cuda"),
+        torch.tensor([0, 1, 2], device=device),
+        torch.tensor([0, 1, 1], device=device),
+        torch.tensor([0, 0, 0], device=device),
     ]
     a = torch.nested.nested_tensor_from_jagged(
-        torch.zeros(7, 3, device="cuda"), offsets, lengths
+        torch.zeros(7, 3, device=device), offsets, lengths
     )
 
     yield SampleInput(
