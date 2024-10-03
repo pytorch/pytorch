@@ -186,11 +186,8 @@ test_torchbench_perf() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir $TEST_REPORTS_DIR
 
-  echo "Setup complete, launching torchbench training perf run"
-  python $(pwd)/benchmarks/dynamo/huggingface.py --backend eager --device mps --performance --training --output=${TEST_REPORTS_DIR}/torchbench_training.csv
-
-  echo "Launching torchbench inference perf run"
-  python $(pwd)/benchmarks/dynamo/huggingface.py --backend eager --device mps --performance --inference --output=${TEST_REPORTS_DIR}/torchbench_inference.csv
+  echo "Setup complete, launching torchbench performance run"
+  pytest torchbench/test_bench.py --mps_only --ignore_machine_config --benchmark-autosave
 
   echo "Pytorch benchmark on mps device completed"
   # TEMP_DEBUG
