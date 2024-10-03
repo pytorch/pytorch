@@ -259,7 +259,8 @@ reorder_for_compute_comm_overlap_passes = [
 ]
 
 # enable operator reordering for peak memory optimization
-reorder_for_peak_memory = os.environ.get("TORCHINDUCTOR_REORDER_FOR_PEAK_MEMORY") == "1"
+# reorder_for_peak_memory = os.environ.get("TORCHINDUCTOR_REORDER_FOR_PEAK_MEMORY") == "1"
+reorder_for_peak_memory = True
 
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
