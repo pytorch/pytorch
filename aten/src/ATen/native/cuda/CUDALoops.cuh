@@ -260,6 +260,7 @@ void gpu_kernel_impl_nocast(TensorIteratorBase& iter, const func_t& f) {
   at::detail::Array<char*, ntensors> data;
   for (int i = 0; i < ntensors; i++) {
     data[i] = (char*)iter.data_ptr(i);
+    std::cout << "GALVEZ: data[" << i << "]=" << (void*)data[i] << std::endl;
   }
 
   int64_t numel = iter.numel();

@@ -25,6 +25,16 @@ void THCPGraph_init(PyObject* module) {
 
   torch_C_m.def("_graph_pool_handle", &::at::cuda::graph_pool_handle);
 
+  py::class_<::at::cuda::UpdateAndTensorOffset>(
+      torch_C_m, "UpdateAndTensorOffset")
+      .def(py::init<cudaGraphKernelNodeUpdate, ptrdiff_t>()) // Default
+                                                             // constructor
+      .def_readwrite("update", &::at::cuda::UpdateAndTensorOffset::update)
+      .def_readwrite(
+          "tensor_offset", &::at::cuda::UpdateAndTensorOffset::tensor_offset);
+
+  torch_C_m.def("create_device_updates", &::at::cuda::create_device_updates);
+
   shared_ptr_class_<::at::cuda::CUDAGraph>(torch_C_m, "_CUDAGraph")
       .def(py::init<>())
       .def(
