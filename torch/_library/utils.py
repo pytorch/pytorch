@@ -193,6 +193,8 @@ def zip_schema(
                 yield info, kwargs[info.name]
             continue
         if i >= len(args):
+            if not info.kwarg_only and  info.name in kwargs:
+                yield info, kwargs[info.name]
             # args that are equal to their default values are not populated
             # if they are followed by args that are equal to their defaults.
             # Skip these.
