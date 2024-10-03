@@ -473,6 +473,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         handle = pynvml.nvmlDeviceGetHandleByIndex(self.rank)
         processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
         nprocs = len(processes)
+
+        # A barrier for non-0 ranks
+        c10d.all_reduce(x)
+        torch.cuda.synchronize(device)
         c10d.destroy_process_group()
         self.assertEqual(
             nprocs,
@@ -502,6 +506,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             free, total = torch.cuda.mem_get_info(device)
             used_after = float(total - free)
         del work
+
+        # A barrier for non-0 ranks
+        c10d.all_reduce(x)
+        torch.cuda.synchronize(device)
         c10d.destroy_process_group()
         if self.rank == 0:
             # If non-0 rank creates a context on device 0, this assert would

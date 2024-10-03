@@ -3507,6 +3507,11 @@ class DistributedTest:
         )
         @skip_if_no_gpu
         def test_all_gather_v_cuda(self):
+            device = torch.device("cuda:%d" % self.rank)
+            # Test needs sm_70, see #135273, #137161
+            if sm_lower_than_70(device):
+                return
+
             self._barrier()
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
