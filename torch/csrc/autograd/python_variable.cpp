@@ -1781,9 +1781,8 @@ struct THPVariableMeta {
 int THPVariableMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs);
 
 PyTypeObject THPVariableMetaType = {
-    PyVarObject_HEAD_INIT(
-        DEFERRED_ADDRESS(&PyType_Type),
-        0) "torch._C._TensorMeta", /* tp_name */
+    PyVarObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type), 0)
+    "torch._C._TensorMeta", /* tp_name */
     sizeof(THPVariableMeta), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
@@ -1824,9 +1823,8 @@ PyTypeObject THPVariableMetaType = {
 };
 
 PyTypeObject THPVariableType = {
-    PyVarObject_HEAD_INIT(
-        &THPVariableMetaType,
-        0) "torch._C.TensorBase", /* tp_name */
+    PyVarObject_HEAD_INIT(&THPVariableMetaType, 0)
+    "torch._C.TensorBase", /* tp_name */
     sizeof(THPVariable), /* tp_basicsize */
     0, /* tp_itemsize */
     // This is unspecified, because it is illegal to create a THPVariableType
