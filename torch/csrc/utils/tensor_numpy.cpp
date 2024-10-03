@@ -480,7 +480,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
     if (data_ptr != nullptr) {
       return {};
     } else {
-      const auto current_device = at::detail::getCUDAHooks().current_device();
+      const auto current_device = at::detail::getCUDAHooks().getCurrentDevice();
       return Device(
           kCUDA,
           static_cast<DeviceIndex>(current_device > -1 ? current_device : 0));
