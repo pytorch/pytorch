@@ -1107,10 +1107,6 @@ class cuda:
     cutlass_op_denylist_regex: Optional[str] = "pingpong"
 
 
-if is_fbcode() and torch.version.hip:
-    from triton.fb import build_paths
-
-
 class rocm:
     # Offload arch list for device code compilation, e.g. ["gfx941", "gfx942"].
     # If empty, the `native` arch is used
@@ -1138,10 +1134,9 @@ class rocm:
     # Flag to print register and LDS usage during compilation
     print_kernel_resource_usage = False
 
-    # Path to ROCm installation, if None, use env variable ROCM_HOME
-    rocm_home: Optional[str] = (
-        build_paths.rocm() if is_fbcode() and torch.version.hip else None
-    )
+    # Path to ROCm installation, if None, use env variable ROCM_HOME.
+    # In fbcode see triton/fb/TARGETS for how ROCM_HOME gets set.
+    rocm_home: Optional[str] = None
 
     # Path to Composable Kernel library.
     # Install with `pip install git+https://github.com/rocm/composable_kernel@develop`.
