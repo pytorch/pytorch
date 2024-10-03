@@ -515,15 +515,15 @@ class CppMicroGemmAMX(CppMicroGemm):
     // Except maybe for the tail-case, an AMX tile of B has 16x32 BF16 elements
     // It's possible that N may not be equal to Nr, but might be a multiple of it.
     // In that case, Kc (which is K in the microkernel) would be smaller (than the case in which N == Nr).
-    const int64_t num_elements_per_b_tile = 512;
-    const int64_t buf_size_per_nr_block = ((K + {{block_k}} - 1) / {{block_k}}) * num_elements_per_b_tile * 2;
-    const int64_t buf_size = buf_size_per_nr_block * (N / {{block_n}});
-
+    const auto num_elements_per_b_tile = 512;
+    const auto buf_size_per_nr_block = ((K + {{block_k}} - 1) / {{block_k}}) * num_elements_per_b_tile * 2;
+    const auto buf_size = buf_size_per_nr_block * (N / {{block_n}});
     alignas(4096) {{input_t}} bf16_weights_buf[buf_size];
+
     const auto last_k_offset = K / {{block_k}} * {{block_k}};
     const auto tail_k_size = K - last_k_offset;
-    int num_b_rows = (last_k_offset > 0) ? 16 : (tail_k_size * sizeof({{input_t}})) / 4;
-    int b_tile_ptr_stride = ldb * {{vnni_size}};
+    const auto num_b_rows = (last_k_offset > 0) ? 16 : (tail_k_size * sizeof({{input_t}})) / 4;
+    const auto b_tile_ptr_stride = ldb * {{vnni_size}};
 
     auto load_B_row = [&]({{input2_t}}* {{restrict_keyword}} src, {{input_t}}* {{restrict_keyword}} dst) {
         auto b_int8 = at::vec::Vectorized<int8_t>::loadu(src, static_cast<int64_t>(32));
