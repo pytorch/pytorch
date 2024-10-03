@@ -34,10 +34,19 @@ from torch.profiler import (
     supported_activities,
 )
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCPU,
+    onlyDeviceTypesSupportProfilingTest,
+    skipCPUIf,
+)
 from torch.testing._internal.common_utils import (
+    ALLOW_XPU_PROFILING_TEST,
+    DEVICE_LIST_SUPPORT_PROFILING_TEST,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
+    TEST_XPU,
     TestCase,
 )
 from torch.utils._triton import has_triton
@@ -47,7 +56,7 @@ Json = Dict[str, Any]
 
 
 class TestExecutionTrace(TestCase):
-    def payload(self, use_cuda=False):
+    def payload(self, use_device):
         u = torch.randn(3, 4, 5, requires_grad=True)
         with record_function("## TEST 1 ##", "1, 2, 3"):
             inf_val = float("inf")
@@ -66,19 +75,14 @@ class TestExecutionTrace(TestCase):
                 neg_inf_val,
                 nan_val,
             )
-            x = torch.randn(10, 10, requires_grad=True)
-            if use_cuda:
-                x = x.cuda()
-            y = torch.randn(10, 10, requires_grad=True)
-            if use_cuda:
-                y = y.cuda()
+            x = torch.randn(10, 10, requires_grad=True, device=use_device)
+            y = torch.randn(10, 10, requires_grad=True, device=use_device)
             z = x + y + x * y + x * y
             z.backward(z)
             gelu = nn.GELU()
             m = torch.randn(2)
             _ = gelu(m)
-            if use_cuda:
-                z = z.cpu()
+            z = z.cpu()
             _record_function_with_args_exit(rf_handle)
 
     def get_execution_trace_root(self, output_file_name) -> Json:
@@ -117,14 +121,14 @@ class TestExecutionTrace(TestCase):
         )
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    def test_execution_trace_with_kineto(self):
+    @onlyDeviceTypesSupportProfilingTest
+    def test_execution_trace_with_kineto(self, device):
         trace_called_num = 0
 
         def trace_handler(p):
             nonlocal trace_called_num
             trace_called_num += 1
 
-        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
         # Create a temp file to save execution trace and kineto data.
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
         fp.close()
@@ -145,7 +149,7 @@ class TestExecutionTrace(TestCase):
         ) as p:
             for idx in range(10):
                 with record_function(f"## LOOP {idx} ##"):
-                    self.payload(use_cuda=use_cuda)
+                    self.payload(use_device=device)
                 p.step()
             self.assertEqual(fp.name, p.execution_trace_observer.get_output_file_path())
 
@@ -190,8 +194,8 @@ class TestExecutionTrace(TestCase):
             f"  rf_ids_kineto = {rf_ids_kineto}\n",
         )
 
-    def test_execution_trace_alone(self):
-        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+    @onlyDeviceTypesSupportProfilingTest
+    def test_execution_trace_alone(self, device):
         # Create a temp file to save execution trace data.
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
         fp.close()
@@ -203,7 +207,7 @@ class TestExecutionTrace(TestCase):
         for idx in range(5):
             expected_loop_events += 1
             with record_function(f"## LOOP {idx} ##"):
-                self.payload(use_cuda=use_cuda)
+                self.payload(use_device=device)
         et.stop()
 
         assert fp.name == et.get_output_file_path()
@@ -230,15 +234,20 @@ class TestExecutionTrace(TestCase):
     @unittest.skipIf(
         sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
     )
-    @unittest.skipIf(not TEST_CUDA or not has_triton(), "need CUDA and triton to run")
-    def test_execution_trace_with_pt2(self):
+    @unittest.skipIf(
+        (not has_triton()) or (not TEST_CUDA and not TEST_XPU),
+        "need triton and device(CUDA or XPU) availability to run",
+    )
+    @skipCPUIf(True, "skip for cpu")
+    @onlyDeviceTypesSupportProfilingTest
+    def test_execution_trace_with_pt2(self, device):
         @torchdynamo.optimize("inductor")
         def fn(a, b, c):
             x = torch.nn.functional.linear(a, b)
             x = x + c
             return x.cos()
 
-        a, b, c = (torch.randn(4, 4, requires_grad=True).to("cuda") for _ in range(3))
+        a, b, c = (torch.randn(4, 4, requires_grad=True).to(device) for _ in range(3))
 
         inputs = [a, b, c]
         with torch._inductor.config.patch(compile_threads=1):
@@ -275,8 +284,8 @@ class TestExecutionTrace(TestCase):
                         assert len(n["outputs"]["values"]) == 0
         assert found_captured_triton_kernel_node
 
-    def test_execution_trace_start_stop(self):
-        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+    @onlyDeviceTypesSupportProfilingTest
+    def test_execution_trace_start_stop(self, device):
         # Create a temp file to save execution trace data.
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
         fp.close()
@@ -294,7 +303,7 @@ class TestExecutionTrace(TestCase):
             if et._execution_trace_running:
                 expected_loop_events += 1
             with record_function(f"## LOOP {idx} ##"):
-                self.payload(use_cuda=use_cuda)
+                self.payload(use_device=device)
 
         assert fp.name == et.get_output_file_path()
         et.unregister_callback()
@@ -310,8 +319,8 @@ class TestExecutionTrace(TestCase):
         assert found_root_node
         assert loop_count == expected_loop_events
 
-    def test_execution_trace_repeat_in_loop(self):
-        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+    @onlyDeviceTypesSupportProfilingTest
+    def test_execution_trace_repeat_in_loop(self, device):
         iter_list = {3, 4, 6, 8}
         expected_loop_events = len(iter_list)
         output_files = []
@@ -324,7 +333,7 @@ class TestExecutionTrace(TestCase):
                 et = ExecutionTraceObserver().register_callback(fp.name)
                 et.start()
             with record_function(f"## LOOP {idx} ##"):
-                self.payload(use_cuda=use_cuda)
+                self.payload(use_device=device)
             if idx in iter_list:
                 et.stop()
                 et.unregister_callback()
@@ -343,6 +352,7 @@ class TestExecutionTrace(TestCase):
             assert found_root_node
         assert event_count == expected_loop_events
 
+    @onlyCPU
     def test_execution_trace_no_capture(self):
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
         fp.close()
@@ -358,6 +368,7 @@ class TestExecutionTrace(TestCase):
         assert found_root_node
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/124500")
+    @onlyCPU
     def test_execution_trace_nested_tensor(self):
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
         fp.close()
@@ -382,6 +393,13 @@ class TestExecutionTrace(TestCase):
                 found_cos = True
         assert found_cos
 
+
+instantiate_device_type_tests(
+    TestExecutionTrace,
+    globals(),
+    only_for=DEVICE_LIST_SUPPORT_PROFILING_TEST,
+    allow_xpu=ALLOW_XPU_PROFILING_TEST,
+)
 
 if __name__ == "__main__":
     run_tests()

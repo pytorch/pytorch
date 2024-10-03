@@ -3,12 +3,23 @@ import functools
 import gc
 import itertools as it
 import textwrap
+import unittest
 from typing import Callable, Dict, Iterator, List, Optional, Tuple
 
 import torch
 from torch._C._profiler import _EventType, _TensorMetadata
 from torch.profiler import _memory_profiler, _utils
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyDeviceTypesSupportProfilingTest,
+)
+from torch.testing._internal.common_utils import (
+    ALLOW_XPU_PROFILING_TEST,
+    DEVICE_LIST_SUPPORT_PROFILING_TEST,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 from torch.utils import _pytree as pytree
 
 
@@ -1553,14 +1564,22 @@ class TestMemoryProfilerE2E(TestCase):
             destroy                    GRADIENT                    13(v0)         1024 kB""",
         )
 
-    def test_memory_timeline_no_id(self) -> None:
+
+@skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
+class TestMemoryProfilerTimeline(TestCase):
+    @unittest.skipIf(
+        torch.xpu.is_available(),
+        "The XPU Profiler will not cover this case for now. Will support it in next period.",
+    )
+    @onlyDeviceTypesSupportProfilingTest
+    def test_memory_timeline_no_id(self, device) -> None:
         # On CPU the default behavior is to simply forward to malloc. That
         # means that when we free `x` the allocator doesn't actually know how
         # many bytes are in the allocation, and thus there's no point to
         # calling `c10::reportMemoryUsageToProfiler`. So in order to test that
-        # memory profiler processes this case correctly we need to use CUDA
+        # memory profiler processes this case correctly we need to use device
         # where we do always keep a record.
-        x = torch.ones((1024,), device="cuda" if torch.cuda.is_available() else "cpu")
+        x = torch.ones((1024,), device=device)
 
         with profile() as prof:
             # We never see `x` used so we don't know the storage is for a
@@ -1595,7 +1614,7 @@ class TestMemoryProfilerE2E(TestCase):
         actual = [(action, size) for _, action, _, size in memory_profile.timeline]
 
         # See above.
-        if not torch.cuda.is_available():
+        if device == "cpu":
             expected = expected[2:]
             for event in expected:
                 self.assertTrue(
@@ -1608,6 +1627,13 @@ class TestMemoryProfilerE2E(TestCase):
                 f"expected does not match actual: {actual}",
             )
 
+
+instantiate_device_type_tests(
+    TestMemoryProfilerTimeline,
+    globals(),
+    only_for=DEVICE_LIST_SUPPORT_PROFILING_TEST,
+    allow_xpu=ALLOW_XPU_PROFILING_TEST,
+)
 
 if __name__ == "__main__":
     run_tests()

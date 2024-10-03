@@ -260,7 +260,10 @@ class TestProfilerTree(TestCase):
 
     # TODO: Add logic for CUDA version of test
     @ProfilerTree.test
-    @unittest.skipIf(torch.cuda.is_available(), "Test not working for CUDA")
+    @unittest.skipIf(
+        torch.cuda.is_available() or torch.xpu.is_available(),
+        "Test not working for CUDA and XPU",
+    )
     def test_profiler_experimental_tree(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
         with torch.profiler.profile() as p:
@@ -315,7 +318,10 @@ class TestProfilerTree(TestCase):
 
     # TODO: Add logic for CUDA version of test
     @ProfilerTree.test
-    @unittest.skipIf(torch.cuda.is_available(), "Test not working for CUDA")
+    @unittest.skipIf(
+        torch.cuda.is_available() or torch.xpu.is_available(),
+        "Test not working for CUDA and XPU",
+    )
     def test_profiler_experimental_tree_with_record_function(self):
         with torch.profiler.profile() as p:
             with torch.autograd.profiler.record_function("Top level Annotation"):
@@ -365,7 +371,10 @@ class TestProfilerTree(TestCase):
 
     # TODO: Add logic for CUDA version of test
     @ProfilerTree.test
-    @unittest.skipIf(torch.cuda.is_available(), "Test not working for CUDA")
+    @unittest.skipIf(
+        torch.cuda.is_available() or torch.xpu.is_available(),
+        "Test not working for CUDA and XPU",
+    )
     def test_profiler_experimental_tree_with_memory(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
         with torch.profiler.profile(profile_memory=True) as p:
