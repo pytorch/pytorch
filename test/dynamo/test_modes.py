@@ -488,12 +488,13 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(expected, actual)
 
     # Needs larger cache size since we recompile for each op
-    @patch.object(torch._dynamo.config, "cache_size_limit", 24)
+    @patch.object(torch._dynamo.config, "cache_size_limit", 48)
     def test_builtin_equivalent_funcs(self):
         from torch._dynamo.variables.torch_function import (
             bin_int_ops,
             bin_ops,
             BUILTIN_TO_TENSOR_FN_MAP,
+            BUILTIN_TO_TENSOR_RFN_MAP,
             tensor_and_int_ops,
             un_int_ops,
             un_ops,
@@ -534,25 +535,51 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             return op(inp0, inp1)
 
         @torch.compile(fullgraph=True)
-        def fn_tensor_and_int(op, inp0):
-            return op(inp0, 0)
+        def fn_tensor_and_int(op, inp0, inp1):
+            return op(inp0, inp1)
 
         setups_and_oplists = [
             (lambda o: fn_un(o, inp0), un_ops),
             (lambda o: fn_un_int(o, inp0_int), un_int_ops),
             (lambda o: fn_bin(o, inp0, inp1), bin_ops),
             (lambda o: fn_bin_int(o, inp0_int, inp1_int), bin_int_ops),
-            (lambda o: fn_tensor_and_int(o, inp0_int), tensor_and_int_ops),
+            (lambda o: fn_tensor_and_int(o, inp0_int, 0), tensor_and_int_ops),
         ]
+
+        # gather the reverse functions
+        rsetups_and_oplists = [
+            (
+                lambda o: fn_bin(o, 1, inp1),
+                bin_ops,
+            ),  # Get r* ops, (ex. __sub__(int, Tensor) -> __rsub__(Tensor, int))
+            (lambda o: fn_bin_int(o, 1, inp1_int), bin_int_ops),
+            (lambda o: fn_tensor_and_int(o, 0, inp0_int), tensor_and_int_ops),
+        ]
+
         skips = {operator.not_}  # Has local scalar dense call which graph breaks
-        for setup_fn, op_list in setups_and_oplists:
-            for op in op_list:
-                if op in skips:
-                    continue
-                with FuncEquivMode():
-                    expected_func = BUILTIN_TO_TENSOR_FN_MAP[op]
-                    setup_fn(op)
-                    self.assertTrue(valid)
+        rskips = {
+            operator.matmul,
+            operator.imatmul,
+            operator.getitem,
+        }  # Doesn't type check with reversed args
+
+        def run_checks(setups_and_oplists, skips, ref_map):
+            nonlocal valid
+            nonlocal expected_func
+            for setup_fn, op_list in setups_and_oplists:
+                for op in op_list:
+                    if op in skips or op not in ref_map:
+                        continue
+                    with FuncEquivMode():
+                        expected_func = ref_map[op]
+                        setup_fn(op)
+                        self.assertTrue(valid)
+
+                    expected_func = None
+                    valid = False
+
+        run_checks(setups_and_oplists, skips, BUILTIN_TO_TENSOR_FN_MAP)
+        run_checks(rsetups_and_oplists, rskips, BUILTIN_TO_TENSOR_RFN_MAP)
 
 
 if __name__ == "__main__":

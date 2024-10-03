@@ -118,6 +118,13 @@ un_ops = [
 
 BUILTIN_TO_TENSOR_FN_MAP = {}
 
+# These functions represent the r* versions of the above ops
+# Basically, if __add__(1, Tensor) is called, it is translated
+# to __radd__(Tensor, 1).
+# In the builtin var, we check if there is a tensor in the first args position,
+# if not, we swap the args and use the r* version of the op.
+BUILTIN_TO_TENSOR_RFN_MAP = {}
+
 
 def populate_builtin_to_tensor_fn_map():
     global BUILTIN_TO_TENSOR_FN_MAP
@@ -153,6 +160,26 @@ def populate_builtin_to_tensor_fn_map():
                 setup_fn(op)
                 assert most_recent_func is not None
                 BUILTIN_TO_TENSOR_FN_MAP[op] = most_recent_func
+
+        # gather the reverse functions
+        rsetups_and_oplists = [
+            (
+                lambda o: o(1, inp1),
+                bin_ops,
+            ),  # Get r* ops, (ex. __sub__(int, Tensor) -> __rsub__(Tensor, int))
+            (lambda o: o(1, inp1_int), bin_int_ops),
+            (lambda o: o(0, inp0_int), tensor_and_int_ops),
+        ]
+
+        rskips = {operator.matmul, operator.imatmul, operator.getitem}
+        for setup_fn, op_list in rsetups_and_oplists:
+            for op in op_list:
+                if op in rskips:
+                    continue
+                setup_fn(op)
+                assert most_recent_func is not None
+                if most_recent_func != BUILTIN_TO_TENSOR_FN_MAP[op]:
+                    BUILTIN_TO_TENSOR_RFN_MAP[op] = most_recent_func
 
 
 populate_builtin_to_tensor_fn_map()
