@@ -427,7 +427,7 @@ only_allow_pt2_compliant_ops = False
 
 capture_autograd_function = True
 
-# enable/disable dynamo tracing for `torch.func` transforms
+# This flag is ignored and maintained for backwards compatbility.
 capture_func_transforms = True
 
 # If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
