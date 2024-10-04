@@ -646,7 +646,6 @@ def _compile_fx_inner(
                     and i in static_input_idxs
                 ):
                     input._is_inductor_static = True  # type: ignore[attr-defined]
-
             compiled_graph = FxGraphCache.load(
                 codegen_and_compile,
                 gm,

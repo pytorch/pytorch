@@ -27,7 +27,6 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 static_inputs_log = torch._logging.getArtifactLogger(
     __name__, "cudagraph_static_inputs"
 )
-
 from . import config
 from ._aot_autograd.autograd_cache import (  # noqa: F401
     AOTAutogradCache,
