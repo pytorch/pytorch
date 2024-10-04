@@ -231,7 +231,7 @@ test_score_mask_mod_map = {
     _causal: _causal_mask,
     _inverse_causal: _inverse_causal_mask,
     _rel_bias: noop_mask,
-    _rel_causal: noop_mask,
+    _rel_causal: _causal_mask,
     _generate_alibi_bias(8): noop_mask,
 }
 
@@ -709,7 +709,7 @@ class TestFlexAttention(InductorTestCase):
             self.skipTest(
                 "Alibi bias broken with dynamic shapes since we don't support capturing dynamic shapes"
             )
-        # self.run_dynamic_test(score_mask_mod, dtype)
+        self.run_dynamic_test(score_mask_mod, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1740,6 +1740,66 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         torch.testing.assert_close(out, out2, atol=tolerance.atol, rtol=tolerance.rtol)
         torch.testing.assert_close(lse, lse2, atol=tolerance.atol, rtol=tolerance.rtol)
+        torch.testing.assert_close(
+            q_grad, q_grad2, atol=tolerance.atol, rtol=tolerance.rtol
+        )
+        torch.testing.assert_close(
+            k_grad, k_grad2, atol=tolerance.atol, rtol=tolerance.rtol
+        )
+        torch.testing.assert_close(
+            v_grad, v_grad2, atol=tolerance.atol, rtol=tolerance.rtol
+        )
+
+    # Use weird mask to test reusing block_mask does work well.
+    @supported_platform
+    def test_block_mask_reuse_with_weird_mask(self):
+        def mask(b, h, q, kv):
+            return (kv < 256) | (kv >= 2048)
+
+        make_tensor = functools.partial(
+            torch.randn,
+            (4, 4, 4096, 64),
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+
+        block_mask = create_block_mask(mask, None, None, 4096, 4096)
+        # Compile 1st version with q/k/v(seqlen=4096) and block_mask(seqlen=4096)
+        torch.compile(flex_attention, dynamic=True)(
+            make_tensor(), make_tensor(), make_tensor(), block_mask=block_mask
+        )
+
+        make_tensor2 = functools.partial(
+            torch.randn,
+            (4, 4, 2048, 64),
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        q, k, v = make_tensor2(), make_tensor2(), make_tensor2()
+
+        # Compile 2st version with q/k/v(seqlen=2048) and block_mask(seqlen=4096),
+        # The graph includes the BlockMask._adjust part.
+        out = torch.compile(flex_attention, dynamic=True)(
+            q, k, v, block_mask=block_mask
+        )
+        out.sum().backward()
+        q_grad, k_grad, v_grad = q.grad, k.grad, v.grad
+        q.grad = None
+        k.grad = None
+        v.grad = None
+
+        block_mask2 = create_block_mask(mask, None, None, 2048, 2048)
+        # Reuse the 1st version with q/k/v(seqlen=2048) and block_mask(seqlen=2048)
+        out2 = torch.compile(flex_attention, dynamic=True)(
+            q, k, v, block_mask=block_mask2
+        )
+        out2.sum().backward()
+        q_grad2, k_grad2, v_grad2 = q.grad, k.grad, v.grad
+        tolerance = Tolerances(atol=1e-3, rtol=1e-3)
+
+        torch.testing.assert_close(out, out2, atol=tolerance.atol, rtol=tolerance.rtol)
         torch.testing.assert_close(
             q_grad, q_grad2, atol=tolerance.atol, rtol=tolerance.rtol
         )
