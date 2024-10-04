@@ -32,6 +32,8 @@ from . import config
 from ._aot_autograd.autograd_cache import (  # noqa: F401
     AOTAutogradCache,
     autograd_cache_key,
+    should_use_local_autograd_cache,
+    should_use_remote_autograd_cache,
 )
 from ._aot_autograd.collect_metadata_analysis import (  # noqa: F401
     run_functionalized_fw_and_collect_metadata,
@@ -99,6 +101,7 @@ from ._aot_autograd.subclass_utils import (  # noqa: F401
     create_metadata_for_subclass,
     requires_subclass_dispatch,
     unwrap_tensor_subclasses,
+    unwrap_tensor_subclasses_with_indices_to_original,
     wrap_tensor_subclasses,
     wrap_tensor_subclasses_maybe_joint,
 )
@@ -677,6 +680,7 @@ def _create_aot_dispatcher_function(
                             num_intermediate_bases=fw_metadata.num_intermediate_bases,
                             keep_input_mutations=aot_config.keep_inference_input_mutations,
                             traced_tangents=fw_metadata.traced_tangents,
+                            traced_tangent_memory_formats=fw_metadata.traced_tangent_memory_formats,
                             subclass_inp_meta=fw_metadata.subclass_inp_meta,
                             subclass_fw_graph_out_meta=fw_metadata.subclass_fw_graph_out_meta,
                             subclass_tangent_meta=fw_metadata.subclass_tangent_meta,
@@ -978,6 +982,10 @@ def aot_module_simplified(
 
     if tracing_context := torch._guards.TracingContext.try_get():
         tracing_context.params_flat = params_flat
+        (
+            tracing_context.params_flat_unwrap_subclasses,
+            tracing_context.params_unwrapped_to_flat_index,
+        ) = unwrap_tensor_subclasses_with_indices_to_original(params_flat)
 
     aot_autograd_arg_pos_to_source = None
     # Then, the params 1:1 mapped sources, if relevant.
@@ -1045,7 +1053,7 @@ def aot_module_simplified(
         static_input_indices=static_input_indices,
         is_export=False,
         no_tangents=False,
-        cache_key=None,
+        cache_info=None,
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     fake_flat_args = process_inputs(full_args, aot_config, fake_mode, shape_env)
@@ -1063,9 +1071,18 @@ def aot_module_simplified(
         return compiled_fn
 
     # Autograd cache stuff
-    if config.enable_autograd_cache:
+    remote = should_use_remote_autograd_cache()
+    local = should_use_local_autograd_cache()
+
+    if local or remote:
         compiled_fn = AOTAutogradCache.load(
-            dispatch_and_compile, mod, fake_flat_args, aot_config, cudagraphs
+            dispatch_and_compile,
+            mod,
+            fake_flat_args,
+            aot_config,
+            cudagraphs,
+            local,
+            remote,
         )
     else:
         compiled_fn = dispatch_and_compile()

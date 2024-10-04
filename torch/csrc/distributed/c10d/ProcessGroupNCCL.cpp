@@ -834,6 +834,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // both timeout and other errors.
   dumpOnTimeoutOrEx_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
+  sleepAfterException_ = getCvarBool(TORCH_NCCL_SLEEP_AFTER_EXCEPTION, false);
   // logging C++ stack isn't safe. Introduce a variable to control it.
   logCppStackOnUncleanShutdown_ =
       getCvarBool(TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN, true);
@@ -1201,6 +1202,8 @@ void ProcessGroupNCCL::abortCommsFromMap(
 
 // Abort all communicators on this rank
 bool ProcessGroupNCCL::abort(std::optional<std::string> abortReason) {
+  // This will log counter for how long the abort actually takes.
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__abort);
   // Remove record from global ncclCommDevIdxMapMutex before aboarting,
   // so that a new cache segment would not register to already aborded
   // communicators. Note that ncclCommDevIdxMap is a global container which may
@@ -1808,12 +1811,14 @@ void ProcessGroupNCCL::watchdogHandler() {
             }
             // signal the monitor thread on PG0 to start dumping
             shouldDump_.store(true);
-            // This sleep is used to give time for dumping before throwing
-            // exception
-            std::this_thread::sleep_for(
-                std::chrono::seconds(heartbeatTimeoutInSec_));
-            LOG(INFO) << logPrefix() << "slept for " << heartbeatTimeoutInSec_
-                      << " giving time for flight recorder dumps to finish.";
+            if (sleepAfterException_) {
+              // This sleep is used to give time for dumping before throwing
+              // exception
+              std::this_thread::sleep_for(
+                  std::chrono::seconds(heartbeatTimeoutInSec_));
+              LOG(INFO) << logPrefix() << "slept for " << heartbeatTimeoutInSec_
+                        << " giving time for flight recorder dumps to finish.";
+            }
           } catch (const std::exception& e) {
             LOG(ERROR) << logPrefix()
                        << "Failed to set dump signal in tcpstore. "
@@ -2299,7 +2304,8 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
       size_); // worldSize
 
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
-            << ncclComm->ncclComm_ << " on CUDA device: " << deviceIndex;
+            << ncclComm->ncclComm_
+            << " on CUDA device: " << static_cast<int>(deviceIndex);
 
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file
