@@ -48,7 +48,7 @@ def remove_assertion_nodes(graph_module: torch.fx.GraphModule) -> torch.fx.Graph
 
 
 def insert_flatten_between_transpose_and_view(
-        exported_program: torch.export.ExportedProgram
+        exported_program: torch.export.ExportedProgram,
 ) -> torch.export.ExportedProgram:
     """Modifies the module inplace to insert a node 'flatten' between a node 'transpose' followed by a node 'view'.
 
