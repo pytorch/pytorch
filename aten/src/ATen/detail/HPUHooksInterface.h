@@ -1,6 +1,8 @@
 #pragma once
 
+#include <ATen/core/Generator.h>
 #include <ATen/detail/AcceleratorHooksInterface.h>
+
 #include <c10/core/Allocator.h>
 #include <c10/util/Registry.h>
 
@@ -25,11 +27,11 @@ struct TORCH_API HPUHooksInterface : AcceleratorHooksInterface {
         false, "Cannot get device of pointer on HPU without HPU backend");
   }
 
-  virtual bool isPinnedPtr(const void*) const override {
+  bool isPinnedPtr(const void*) const override {
     return false;
   }
 
-  virtual Allocator* getPinnedMemoryAllocator() const override {
+  Allocator* getPinnedMemoryAllocator() const override {
     TORCH_CHECK(
         false,
         "You should register `HPUHooksInterface` for HPU before call `getPinnedMemoryAllocator`.");
