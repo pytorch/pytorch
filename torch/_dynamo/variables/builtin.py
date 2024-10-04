@@ -868,19 +868,25 @@ class BuiltinVariable(VariableTracker):
         )
 
         if can_dispatch_torch_function(tx, args, kwargs):
-            # Use sourceless builder, we built the map ourselves
-            if not isinstance(args[0], TensorVariable):
-                if self.fn in BUILTIN_TO_TENSOR_RFN_MAP:
-                    func = BUILTIN_TO_TENSOR_RFN_MAP[self.fn]
+            # Only remap the fn to tensor methods if we aren't exporting
+            # export serde does not handle method descriptors today
+            if not tx.export:
+                # Use sourceless builder, we built the map ourselves
+                if not isinstance(args[0], TensorVariable):
+                    if self.fn in BUILTIN_TO_TENSOR_RFN_MAP:
+                        func = BUILTIN_TO_TENSOR_RFN_MAP[self.fn]
+                    else:
+                        func = BUILTIN_TO_TENSOR_FN_MAP[self.fn]
+
+                    tmp = args[0]
+                    # swap args and call reverse version of func
+                    args[0] = args[1]
+                    args[1] = tmp
                 else:
                     func = BUILTIN_TO_TENSOR_FN_MAP[self.fn]
-
-                tmp = args[0]
-                # swap args and call reverse version of func
-                args[0] = args[1]
-                args[1] = tmp
             else:
-                func = BUILTIN_TO_TENSOR_FN_MAP[self.fn]
+                func = self.fn
+
             fn_var = SourcelessBuilder.create(tx, func)
 
             return dispatch_torch_function(tx, fn_var, args, kwargs)
