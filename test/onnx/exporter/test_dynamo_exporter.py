@@ -24,11 +24,10 @@ class DynamoExporterTest(common_utils.TestCase):
                 return final
 
         model = Model()
-        device = "cpu"
 
-        query = torch.rand(32, 8, 128, 64, dtype=torch.float16, device=device)
-        key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device=device)
-        value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device=device)
+        query = torch.rand(32, 8, 128, 64, dtype=torch.float16)
+        key = torch.rand(32, 8, 128, 64, dtype=torch.float16)
+        value = torch.rand(32, 8, 128, 64, dtype=torch.float16)
 
         onnx_program = torch.onnx.export(
             model, (query, key, value), dynamo=True, fallback=False
