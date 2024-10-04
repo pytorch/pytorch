@@ -3900,8 +3900,8 @@ MemPool::MemPool(
 }
 
 MemPool::~MemPool() {
+  TORCH_INTERNAL_ASSERT(use_count() == 1);
   CUDACachingAllocator::decPoolUseCountAndMaybeMarkPoolFree(device_, id_);
-  TORCH_INTERNAL_ASSERT(use_count() == 0);
 }
 
 MempoolId_t MemPool::id() {
