@@ -196,7 +196,7 @@ class FSDPParam:
     reduce_dtype: Optional[torch.dtype]
     _orig_size: torch.Size  # ND
     sharded_size: torch.Size  # ND
-    contiguous_sharded_stride: Tuple[int, ...]  # only Shard(0)
+    contiguous_sharded_stride: Tuple[int, ...]  # only Shard(0) or no padding
     padded_sharded_param_size: torch.Size  # ND
     sharded_post_forward_size: torch.Size  # ND
     contiguous_sharded_post_forward_stride: Tuple[int, ...]

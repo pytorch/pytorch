@@ -442,7 +442,11 @@ def foreach_reduce(
             padded_unsharded_sizes, fsdp_params
         ):
             shard_dim = fsdp_param.fsdp_placement.dim
-            if shard_dim == 0:
+            has_padding = (
+                fsdp_param.padded_sharded_param_size.numel()
+                != fsdp_param.sharded_size.numel()
+            )
+            if shard_dim == 0 or not has_padding:
                 new_sharded_grad = torch.as_strided(
                     reduce_output,
                     size=fsdp_param.sharded_size,
@@ -450,24 +454,23 @@ def foreach_reduce(
                     storage_offset=flat_grad_offset,
                 )
             else:
-                has_padding = (
-                    fsdp_param.padded_sharded_param_size.numel()
-                    != fsdp_param.sharded_size.numel()
-                )
-                new_sharded_grad = reduce_output[
-                    flat_grad_offset : flat_grad_offset
-                    + fsdp_param.padded_sharded_param_size.numel()
-                ].view(fsdp_param.padded_sharded_param_size)
-                if has_padding:
-                    # TODO: We should copy-out all gradients in this case to
-                    # avoid redundant memory, ideally to a contiguous tensor.
-                    new_sharded_grad = new_sharded_grad.narrow(
+                # TODO: We should copy-out all gradients in this case to avoid
+                # redundant memory, ideally to a contiguous tensor.
+                new_sharded_grad = (
+                    reduce_output[
+                        flat_grad_offset : flat_grad_offset
+                        + fsdp_param.padded_sharded_param_size.numel()
+                    ]
+                    .view(fsdp_param.padded_sharded_param_size)
+                    .narrow(
                         dim=shard_dim,
                         start=0,
                         length=fsdp_param.sharded_size[shard_dim]
                         if fsdp_param.sharded_size.numel() > 0
                         else 0,
-                    ).contiguous()
+                    )
+                    .contiguous()
+                )
             to_accumulate_grad = fsdp_param.sharded_param.grad is not None
             if fsdp_param.offload_to_cpu:
                 # Only overlap the D2H copy (copying to pinned memory) if not
