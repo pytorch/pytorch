@@ -3,6 +3,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/core/Tensor.h>
 #include <torch/library.h>
+#include <ATen/native/mkldnn/Linear.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -19,7 +20,6 @@
 #include <ATen/ops/mkldnn_linear_native.h>
 #endif
 
-#include <ATen/native/mkldnn/Linear.h>
 #if !AT_MKLDNN_ENABLED()
 
 namespace at {

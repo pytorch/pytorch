@@ -1678,10 +1678,6 @@ PyObject* initModule() {
       PyModuleDef_HEAD_INIT, "torch._C", nullptr, -1, methods.data()};
   module = PyModule_Create(&torchmodule);
   ASSERT_TRUE(module);
-#ifdef Py_GIL_DISABLED
-  PyUnstable_Module_SetGIL(module, Py_MOD_GIL_NOT_USED);
-#endif
-
   ASSERT_TRUE(THPGenerator_init(module));
   ASSERT_TRUE(THPException_init(module));
   THPSize_init(module);
@@ -2120,7 +2116,7 @@ Call this whenever a new thread is created in order to propagate values from
     auto device_type = at::getAccelerator();
     if (device_type.has_value()) {
       return at::globalContext()
-          .getAcceleratorHooksInterface(device_type.value())
+          .getAcceleratorHooksInterface(device_type)
           .deviceCount();
     }
     return c10::DeviceIndex(-1);
@@ -2132,7 +2128,7 @@ Call this whenever a new thread is created in order to propagate values from
         auto device_type = at::getAccelerator();
         if (device_type.has_value()) {
           at::globalContext()
-              .getAcceleratorHooksInterface(device_type.value())
+              .getAcceleratorHooksInterface(device_type)
               .setCurrentDevice(device_index);
         }
       });
@@ -2141,7 +2137,7 @@ Call this whenever a new thread is created in order to propagate values from
     auto device_type = at::getAccelerator();
     if (device_type.has_value()) {
       return at::globalContext()
-          .getAcceleratorHooksInterface(device_type.value())
+          .getAcceleratorHooksInterface(device_type)
           .getCurrentDevice();
     }
     return c10::DeviceIndex(-1);
@@ -2152,7 +2148,7 @@ Call this whenever a new thread is created in order to propagate values from
         auto device_type = at::getAccelerator();
         if (device_type.has_value()) {
           return at::globalContext()
-              .getAcceleratorHooksInterface(device_type.value())
+              .getAcceleratorHooksInterface(device_type)
               .exchangeDevice(device_index);
         }
         return c10::DeviceIndex(-1);
@@ -2164,7 +2160,7 @@ Call this whenever a new thread is created in order to propagate values from
         auto device_type = at::getAccelerator();
         if (device_type.has_value()) {
           return at::globalContext()
-              .getAcceleratorHooksInterface(device_type.value())
+              .getAcceleratorHooksInterface(device_type)
               .maybeExchangeDevice(device_index);
         }
         return c10::DeviceIndex(-1);
