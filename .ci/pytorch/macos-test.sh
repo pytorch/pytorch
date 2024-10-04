@@ -183,10 +183,10 @@ test_torchbench_perf() {
   mkdir $TEST_REPORTS_DIR
 
   echo "Setup complete, launching torchbench training performance run"
-  python benchmarks/dynamo/torchbench.py --performance --backend eager --training --devices mps --output "$TEST_REPORTS_DIR/torchbench_training.csv"
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --backend eager --training --devices mps --output "$TEST_REPORTS_DIR/torchbench_training.csv"
 
   echo "Launching torchbench inference performance run"
-  python benchmarks/dynamo/torchbench.py --performance --backend eager --inference --devices mps --output "$TEST_REPORTS_DIR/torchbench_training.csv"
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --backend eager --inference --devices mps --output "$TEST_REPORTS_DIR/torchbench_training.csv"
 
   echo "Pytorch benchmark on mps device completed"
   # TEMP_DEBUG
