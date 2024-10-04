@@ -369,7 +369,7 @@ void ConcretePyInterpreterVTable::python_dispatcher(
   c10::DispatchKey k = ks.highestPriorityTypeId();
   PyObject* raw_handler = nullptr;
   if (PyDict_GetItemRef(cache.ptr(), py::cast(k).ptr(), &raw_handler) < 0) {
-    // Error that is not missing key
+    // There was an error that is not missing key (which would return 0)
     throw python_error();
   }
   auto handler = py::reinterpret_steal<py::object>(raw_handler);
