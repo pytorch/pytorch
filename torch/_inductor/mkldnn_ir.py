@@ -227,6 +227,20 @@ def _prepare_linear_fusion_create(
     return inputs, constant_args, kernel_layout, req_stride_order
 
 
+def _create_output_node(packed):
+    if not config.abi_compatible:
+        return packed
+
+    output_ir = MultiOutput(
+        packed.get_layout(),
+        packed,
+        [],
+    )
+    packed.layout = MultiOutputLayout(packed.get_device())
+    packed.outputs = [output_ir]
+    return output_ir
+
+
 class ConvolutionUnary(ExternKernelAlloc):
     def __init__(
         self,
@@ -1221,16 +1235,7 @@ class LinearUnary(ExternKernelAlloc):
             inputs=inputs,
             constant_args=constant_args,
         )
-        if not config.abi_compatible:
-            return packed
-
-        output_ir = MultiOutput(
-            packed.get_layout(),
-            packed,
-            [],
-        )
-        packed.outputs = [output_ir]
-        return output_ir
+        return _create_output_node(packed)
 
     def apply_constraint(self):
         pass
@@ -1311,16 +1316,7 @@ class LinearBinary(ExternKernelAlloc):
             inputs=inputs,
             constant_args=constant_args,
         )
-        if not config.abi_compatible:
-            return packed
-
-        output_ir = MultiOutput(
-            packed.get_layout(),
-            packed,
-            [],
-        )
-        packed.outputs = [output_ir]
-        return output_ir
+        return _create_output_node(packed)
 
     def apply_constraint(self):
         pass
