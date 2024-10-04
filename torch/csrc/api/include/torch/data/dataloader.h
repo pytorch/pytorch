@@ -36,7 +36,7 @@ std::enable_if_t<
 make_data_loader(
     Dataset dataset,
     DataLoaderOptions options = DataLoaderOptions()) {
-  const optional<size_t> size = dataset.size();
+  const std::optional<size_t> size = dataset.size();
   TORCH_CHECK(
       size.has_value(),
       "Expected the dataset to be sized in "

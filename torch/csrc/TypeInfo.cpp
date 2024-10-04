@@ -194,7 +194,7 @@ static PyObject* THPIInfo_min(THPIInfo* self, void*) {
 
 static PyObject* THPIInfo_dtype(THPIInfo* self, void*) {
   HANDLE_TH_ERRORS
-  auto primary_name = torch::utils::getDtypeNames(self->type).first;
+  auto primary_name = c10::getDtypeNames(self->type).first;
   return AT_DISPATCH_IINFO_TYPES(self->type, "dtype", [&primary_name] {
     return PyUnicode_FromString(primary_name.data());
   });
@@ -227,7 +227,7 @@ static PyObject* THPFInfo_resolution(THPFInfo* self, void*) {
 
 static PyObject* THPFInfo_dtype(THPFInfo* self, void*) {
   HANDLE_TH_ERRORS
-  auto primary_name = torch::utils::getDtypeNames(self->type).first;
+  auto primary_name = c10::getDtypeNames(self->type).first;
   return _AT_DISPATCH_FINFO_TYPES(self->type, "dtype", [&primary_name] {
     return PyUnicode_FromString(primary_name.data());
   });
@@ -286,7 +286,8 @@ static PyMethodDef THPFInfo_methods[] = {
 };
 
 PyTypeObject THPFInfoType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.finfo", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.finfo", /* tp_name */
     sizeof(THPFInfo), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
@@ -339,7 +340,8 @@ static PyMethodDef THPIInfo_methods[] = {
 };
 
 PyTypeObject THPIInfoType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.iinfo", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.iinfo", /* tp_name */
     sizeof(THPIInfo), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */

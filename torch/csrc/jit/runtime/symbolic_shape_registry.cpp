@@ -77,7 +77,7 @@ std::unordered_map<const FunctionSchema*, BoundedShapeGraphs>
 // CompilationUnit that holds all these Functions and keeps them alive.
 auto compilation_unit = std::make_shared<CompilationUnit>();
 
-const at::optional<const FunctionSchema*> getInplaceVariant(
+const std::optional<const FunctionSchema*> getInplaceVariant(
     const FunctionSchema& base_schema) {
   auto& inplace_variants =
       getAllOperatorsFor(c10::Symbol::fromQualString(base_schema.name() + "_"));
@@ -102,7 +102,7 @@ const at::optional<const FunctionSchema*> getInplaceVariant(
 
     return schema;
   }
-  return at::nullopt;
+  return std::nullopt;
 }
 
 TypePtr mapTensorToListOfInts(TypePtr type) {
@@ -219,7 +219,7 @@ void checkInputAndOutputTypes(
 
 void transformShapeFunction(
     const FunctionSchema* schema_string,
-    std::shared_ptr<Graph> graph) {
+    const std::shared_ptr<Graph>& graph) {
   Inline(*graph);
 
   // ATEN operators can return multiple unboxed values, this in contrast to
@@ -411,7 +411,7 @@ TORCH_API std::optional<BoundedShapeGraphs> boundedGraphsForSchema(
 
 void RegisterShapeComputeGraphForSchema(
     const FunctionSchema& schema,
-    std::shared_ptr<Graph> g) {
+    const std::shared_ptr<Graph>& g) {
   std::lock_guard<std::mutex> guard(lock);
   if (cached_schema_to_graph.empty()) {
     loadFunctions();

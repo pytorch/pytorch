@@ -28,6 +28,7 @@ from torch.testing._internal.common_utils import (
     dtype_name,
     get_tracked_input,
     IS_FBCODE,
+    is_privateuse1_backend_available,
     IS_REMOTE_GPU,
     IS_SANDCASTLE,
     IS_WINDOWS,
@@ -53,8 +54,9 @@ try:
     import psutil  # type: ignore[import]
 
     HAS_PSUTIL = True
-except ImportError:
+except ModuleNotFoundError:
     HAS_PSUTIL = False
+    psutil = None
 
 # Note [Writing Test Templates]
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -505,7 +507,12 @@ class DeviceTypeTestBase(TestCase):
             decorator_fn,
         ) in parametrize_fn(test, generic_cls, cls):
             test_suffix = "" if test_suffix == "" else "_" + test_suffix
-            device_suffix = "_" + cls.device_type
+            cls_device_type = (
+                cls.device_type
+                if cls.device_type != "privateuse1"
+                else torch._C._get_privateuse1_backend_name()
+            )
+            device_suffix = "_" + cls_device_type
 
             # Note: device and dtype suffix placement
             # Special handling here to place dtype(s) after device according to test name convention.
@@ -704,7 +711,7 @@ class PrivateUse1TestBase(DeviceTypeTestBase):
 def get_device_type_test_bases():
     # set type to List[Any] due to mypy list-of-union issue:
     # https://github.com/python/mypy/issues/3351
-    test_bases: List[Any] = list()
+    test_bases: List[Any] = []
 
     if IS_SANDCASTLE or IS_FBCODE:
         if IS_REMOTE_GPU:
@@ -718,9 +725,7 @@ def get_device_type_test_bases():
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
 
-        device_type = torch._C._get_privateuse1_backend_name()
-        device_mod = getattr(torch, device_type, None)
-        if hasattr(device_mod, "is_available") and device_mod.is_available():
+        if is_privateuse1_backend_available():
             test_bases.append(PrivateUse1TestBase)
         # Disable MPS testing in generic device testing temporarily while we're
         # ramping up support.
@@ -741,6 +746,20 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
     assert (
         not intersect
     ), f"device ({intersect}) appeared in both except_for and only_for"
+
+    # Replace your privateuse1 backend name with 'privateuse1'
+    if is_privateuse1_backend_available():
+        privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+        except_for = (
+            ["privateuse1" if x == privateuse1_backend_name else x for x in except_for]
+            if except_for is not None
+            else None
+        )
+        only_for = (
+            ["privateuse1" if x == privateuse1_backend_name else x for x in only_for]
+            if only_for is not None
+            else None
+        )
 
     if except_for:
         device_type_test_bases = filter(
@@ -786,13 +805,13 @@ PYTORCH_TESTING_DEVICE_FOR_CUSTOM_KEY = "PYTORCH_TESTING_DEVICE_FOR_CUSTOM"
 
 
 def get_desired_device_type_test_bases(
-    except_for=None, only_for=None, include_lazy=False, allow_mps=False
+    except_for=None, only_for=None, include_lazy=False, allow_mps=False, allow_xpu=False
 ):
     # allow callers to specifically opt tests into being tested on MPS, similar to `include_lazy`
     test_bases = device_type_test_bases.copy()
     if allow_mps and TEST_MPS and MPSTestBase not in test_bases:
         test_bases.append(MPSTestBase)
-    if only_for == "xpu" and TEST_XPU and XPUTestBase not in test_bases:
+    if allow_xpu and TEST_XPU and XPUTestBase not in test_bases:
         test_bases.append(XPUTestBase)
     if TEST_HPU and HPUTestBase not in test_bases:
         test_bases.append(HPUTestBase)
@@ -853,6 +872,7 @@ def get_desired_device_type_test_bases(
 # device-specific tests (NB: this supports additional @parametrize usage).
 #
 # See note "Writing Test Templates"
+# TODO: remove "allow_xpu" option after Interl GPU support all test case instantiate by this function.
 def instantiate_device_type_tests(
     generic_test_class,
     scope,
@@ -860,6 +880,7 @@ def instantiate_device_type_tests(
     only_for=None,
     include_lazy=False,
     allow_mps=False,
+    allow_xpu=False,
 ):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
@@ -883,7 +904,7 @@ def instantiate_device_type_tests(
 
     # Creates device-specific test cases
     for base in get_desired_device_type_test_bases(
-        except_for, only_for, include_lazy, allow_mps
+        except_for, only_for, include_lazy, allow_mps, allow_xpu
     ):
         class_name = generic_test_class.__name__ + base.device_type.upper()
 
@@ -1122,11 +1143,13 @@ class ops(_TestParametrizer):
                         except Exception as e:
                             tracked_input = get_tracked_input()
                             if PRINT_REPRO_ON_FAILURE and tracked_input is not None:
-                                raise Exception(  # noqa: TRY002
+                                e_tracked = Exception(  # noqa: TRY002
                                     f"Caused by {tracked_input.type_desc} "
                                     f"at index {tracked_input.index}: "
                                     f"{_serialize_sample(tracked_input.val)}"
-                                ) from e
+                                )
+                                e_tracked._tracked_input = tracked_input  # type: ignore[attr]
+                                raise e_tracked from e
                             raise e
                         finally:
                             clear_tracked_input()
@@ -1201,6 +1224,12 @@ class skipCUDAIf(skipIf):
         super().__init__(dep, reason, device_type="cuda")
 
 
+# Skips a test on XPU if the condition is true.
+class skipXPUIf(skipIf):
+    def __init__(self, dep, reason):
+        super().__init__(dep, reason, device_type="xpu")
+
+
 # Skips a test on Lazy if the condition is true.
 class skipLazyIf(skipIf):
     def __init__(self, dep, reason):
@@ -1249,6 +1278,9 @@ def _has_sufficient_memory(device, size):
 
     if device == "xla":
         raise unittest.SkipTest("TODO: Memory availability checks for XLA?")
+
+    if device == "xpu":
+        raise unittest.SkipTest("TODO: Memory availability checks for Intel GPU?")
 
     if device != "cpu":
         raise unittest.SkipTest("Unknown device type")
@@ -1379,6 +1411,25 @@ def onlyNativeDeviceTypes(fn):
     return only_fn
 
 
+# Only runs the test on the native device types and devices specified in the devices list
+def onlyNativeDeviceTypesAnd(devices=None):
+    def decorator(fn):
+        @wraps(fn)
+        def only_fn(self, *args, **kwargs):
+            if (
+                self.device_type not in NATIVE_DEVICES
+                and self.device_type not in devices
+            ):
+                reason = f"onlyNativeDeviceTypesAnd {devices} : doesn't run on {self.device_type}"
+                raise unittest.SkipTest(reason)
+
+            return fn(self, *args, **kwargs)
+
+        return only_fn
+
+    return decorator
+
+
 # Specifies per-dtype precision overrides.
 # Ex.
 #
@@ -1506,6 +1557,11 @@ class dtypesIfMPS(dtypes):
         super().__init__(*args, device_type="mps")
 
 
+class dtypesIfHPU(dtypes):
+    def __init__(self, *args):
+        super().__init__(*args, device_type="hpu")
+
+
 class dtypesIfPRIVATEUSE1(dtypes):
     def __init__(self, *args):
         super().__init__(*args, device_type=torch._C._get_privateuse1_backend_name())
@@ -1588,6 +1644,10 @@ def expectedFailureXPU(fn):
 
 def expectedFailureMeta(fn):
     return skipIfTorchDynamo()(expectedFailure("meta")(fn))
+
+
+def expectedFailureMPS(fn):
+    return expectedFailure("mps")(fn)
 
 
 def expectedFailureXLA(fn):

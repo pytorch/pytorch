@@ -1,3 +1,4 @@
+#include <c10/core/ScalarType.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/native/ReduceOps.h>
@@ -14,7 +15,6 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/WrapDimUtils.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
@@ -178,6 +178,7 @@ static void aminmax_kernel(
     " but got ", min_result.scalar_type(), " and ", max_result.scalar_type());
 
   if (self.numel() == 1 && self.ndimension() == 0) {
+    TORCH_CHECK(!self.is_complex(), "aminmax not implemented for ", self.scalar_type());
     min_result.resize_({});
     max_result.resize_({});
     min_result.fill_(self);
@@ -324,7 +325,7 @@ static void isin_default_kernel_cpu(
     .check_all_same_dtype(false)
     .build();
   // Dispatch based on promoted type.
-  AT_DISPATCH_ALL_TYPES(iter.dtype(1), "isin_default_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.dtype(1), "isin_default_cpu", [&]() {
     cpu_kernel(iter, [&](scalar_t element_val) -> bool {
       const auto* test_element_data = test_elements_flat.const_data_ptr<scalar_t>();
       for (const auto j : c10::irange(test_elements_flat.numel())) {

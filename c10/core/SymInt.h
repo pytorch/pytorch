@@ -5,11 +5,12 @@
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <optional>
+#include <c10/util/Optional.h>
 
 #include <cstdint>
 #include <iterator>
 #include <numeric>
+#include <optional>
 #include <ostream>
 #include <type_traits>
 

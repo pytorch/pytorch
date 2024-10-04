@@ -1,16 +1,15 @@
 # Owner(s): ["module: inductor"]
 import os
+import sys
 import unittest
 
 import sympy
 
 import torch
-
 from torch._inductor.codegen.cpp import cexpr
 from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
-from torch._inductor.runtime.runtime_utils import do_bench_gpu
-
+from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_triton_code
@@ -18,13 +17,14 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.utils._sympy.functions import (
     FloorDiv,
     ModularIndexing,
     RoundDecimal,
     RoundToInt,
 )
+
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
@@ -102,12 +102,12 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertEqual(FloorDiv(i0 * 4, 2), i0 * 2)
 
         # Nested modular indexing is correctly simplified
-        var_ranges = {sympy.Symbol("i1"): 13, sympy.Symbol("i2"): 121}
+        var_ranges = {i1: 13, i2: 121}
         expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784), 1, 28)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
         expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784) + 1, 1, 28)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
-        var_ranges = {sympy.Symbol("i2"): 784}
+        var_ranges = {i2: 784}
         expr = ModularIndexing(ModularIndexing(i2, 1, 28), 7, 4)
         expected = FloorDiv(ModularIndexing(i2, 1, 28), 7)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
@@ -220,7 +220,7 @@ class TestIndexingSimplification(InductorTestCase):
         expected = FloorDiv(x * 15 + y, 3)
         self.assertEqual(expected, FloorDiv(actual, denominator))
 
-    @unittest.skipUnless(HAS_CUDA, "Need GPU for this test")
+    @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
     def test_int8_unpack(self):
         @torch.compile
         def f(x):
@@ -231,14 +231,14 @@ class TestIndexingSimplification(InductorTestCase):
             )
             return unpacked * 2
 
-        x = torch.randint(0, 255, (2, 4096, 5504), dtype=torch.uint8, device="cuda")
+        x = torch.randint(0, 255, (2, 4096, 5504), dtype=torch.uint8, device=GPU_TYPE)
 
         triton_code = run_and_get_triton_code(f, x)
         # Make sure the 2 load uses simpified indexing rather than something like
         # tl.load(in_ptr0 + ((5504*x1) + (x0 // 2)),
         self.assertEqual(2, triton_code.count("tl.load(in_ptr0 + ((x2 // 2)),"))
         if DO_PERF_TEST:
-            ms = do_bench_gpu(lambda: f(x))
+            ms = benchmarker.benchmark_gpu(lambda: f(x))
             print(f"{ms=:.03f}")
 
 
@@ -263,14 +263,19 @@ class ExprPrinterTests(InductorTestCase):
         cpu_cases = common_cases + [
             (
                 sympy.Pow(s1 + s2, 2),
-                lambda c, L: "static_cast<long>((bar + foo)*(bar + foo))",
+                lambda c, L: "static_cast<int64_t>((bar + foo)*(bar + foo))",
             )
         ]
         for expr, result in gpu_cases:
             self.assertEqual(texpr(expr), result(1, ""))
             self.assertEqual(pexpr(expr), result(1, ""))
         for expr, result in cpu_cases:
-            self.assertEqual(cexpr(expr), result(1.0, "L"))  # 1.0 for FP div
+            self.assertEqual(
+                cexpr(expr),
+                result(1.0, "LL")
+                if sys.platform in ["darwin", "win32"]
+                else result(1.0, "L"),
+            )  # 1.0 for FP div
 
     def test_print_floor(self):
         for integer in [True, False]:
@@ -279,7 +284,7 @@ class ExprPrinterTests(InductorTestCase):
             if integer:
                 self.assertEqual(pexpr(expr), "math.floor((1/2)*s1)")
                 self.assertEqual(
-                    cexpr(expr), "static_cast<long>(std::floor((1.0/2.0)*s1))"
+                    cexpr(expr), "static_cast<int64_t>(std::floor((1.0/2.0)*s1))"
                 )
             else:
                 self.assertExpectedInline(pexpr(expr), """math.floor((1/2)*s1)""")
@@ -296,7 +301,7 @@ class ExprPrinterTests(InductorTestCase):
             if integer:
                 self.assertExpectedInline(pexpr(expr), """math.ceil((1/2)*s1)""")
                 self.assertExpectedInline(
-                    cexpr(expr), """static_cast<long>(std::ceil((1.0/2.0)*s1))"""
+                    cexpr(expr), """static_cast<int64_t>(std::ceil((1.0/2.0)*s1))"""
                 )
             else:
                 self.assertExpectedInline(pexpr(expr), """math.ceil((1/2)*s1)""")
@@ -326,31 +331,49 @@ class ExprPrinterTests(InductorTestCase):
         s2 = sympy.Symbol("s2", integer=True)
         expr = FloorDiv(s1, s2)
         self.assertEqual(pexpr(expr), "(s1 // s2)")
-        self.assertEqual(cexpr(expr), "c10::div_floor_integer(s1, s2)")
+        self.assertEqual(
+            cexpr(expr),
+            "c10::div_floor_integer(static_cast<int64_t>(s1), static_cast<int64_t>(s2))",
+        )
 
         s1 = sympy.Symbol("s1", integer=True)
         s2 = sympy.S(-1)
         expr = FloorDiv(s1, s2)
         self.assertEqual(pexpr(expr), "(-1)*s1")
-        self.assertEqual(cexpr(expr), "(-1L)*s1")
+        self.assertEqual(cexpr(expr), "(-1LL)*s1") if sys.platform in [
+            "darwin",
+            "win32",
+        ] else "(-1L)*s1"
 
     def test_print_Min_Max(self):
         cases = (
-            (sympy.Min, "min"),
-            (sympy.Max, "max"),
+            (sympy.Min, "min", "<"),
+            (sympy.Max, "max", ">"),
         )
-        for f, s in cases:
+        for f, s, cmp in cases:
             x = sympy.Symbol("x", integer=True)
             expr = f(-2, x)
-            self.assertEqual(texpr(expr), f"tl.{s}imum(-2, x)")
-            self.assertEqual(cexpr(expr), f"std::{s}(-2L, x)")
+            self.assertEqual(
+                texpr(expr), f"((-2) * ((-2) {cmp}= (x)) + (x) * ((x) {cmp} (-2)))"
+            )
+            self.assertEqual(
+                cexpr(expr),
+                f"std::{s}(static_cast<int64_t>(-2LL), static_cast<int64_t>(x))"
+                if sys.platform in ["darwin", "win32"]
+                else f"std::{s}(static_cast<int64_t>(-2L), static_cast<int64_t>(x))",
+            )
 
             expr = f(x, 2 * x, 3 * x)
             self.assertEqual(
                 texpr(expr),
-                f"tl.{s}imum(x, tl.{s}imum(2*x, 3*x))",
+                f"((x) * ((x) {cmp}= (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x))))) + (((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) * ((((2*x) * ((2*x) {cmp}= (3*x)) + (3*x) * ((3*x) {cmp} (2*x)))) {cmp} (x)))",  # noqa: B950 line too long
             )
-            self.assertEqual(cexpr(expr), f"std::{s}({{x, 2L*x, 3L*x}})")
+            self.assertEqual(
+                cexpr(expr),
+                f"std::{s}({{x, 2LL*x, 3LL*x}})"
+                if sys.platform in ["darwin", "win32"]
+                else f"std::{s}({{x, 2L*x, 3L*x}})",
+            )
 
 
 instantiate_parametrized_tests(ExprPrinterTests)
@@ -359,5 +382,5 @@ instantiate_parametrized_tests(ExprPrinterTests)
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_GPU:
         run_tests("sympy")

@@ -55,6 +55,7 @@ class ModTracker:
 
     def __init__(self):
         self.parents = {"Global"}
+        self._active_module_cnt = {}
         self._known_modules: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         self._seen_modules: weakref.WeakSet = weakref.WeakSet()
         self._has_callback = False
@@ -175,7 +176,11 @@ class ModTracker:
                     "The module hierarchy tracking maybe be messed up."
                     " Please file a bug to PyTorch, if it is the case."
                 )
-            self.parents.add(name)
+            if name not in self.parents:
+                self._active_module_cnt[name] = 1
+                self.parents.add(name)
+            else:
+                self._active_module_cnt[name] += 1
 
             if self._user_pre_bw_hook is not None and is_bw:
                 self._user_pre_bw_hook(w_mod(), args)
@@ -186,10 +191,11 @@ class ModTracker:
         def fn(*args):
             if self._user_post_bw_hook is not None and is_bw:
                 self._user_post_bw_hook(w_mod(), args)
-
             if name in self.parents:
-                self.parents.remove(name)
-            elif not is_bw:
+                self._active_module_cnt[name] -= 1
+                if self._active_module_cnt[name] == 0:
+                    self.parents.remove(name)
+            elif not self.is_bw:
                 # Due to some input/output not requiring gradients, we cannot enforce
                 # proper nesting in backward
                 raise RuntimeError(

@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
 import torch
-from torch.distributed._shard.sharded_tensor import (
-    _sharded_op_impl,
-)
+from torch.distributed._shard.sharded_tensor import _sharded_op_impl
+
 
 # This is used by `_apply()` within module.py to set new
 # parameters after apply a certain method, we should follow

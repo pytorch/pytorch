@@ -27,9 +27,9 @@ kernel void renorm(constant T* norm [[buffer(0)]],
                    device T* factor [[buffer(1)]],
                    constant float& maxnorm [[buffer(2)]],
                    uint index [[thread_position_in_grid]]) {
-  constexpr T eps = 1e-7;
+  constexpr auto eps = static_cast<T>(1e-7);
   constexpr T one = 1;
-  factor[index] = norm[index] > maxnorm ? maxnorm / (norm[index] + eps) : one;
+  factor[index] = norm[index] > maxnorm ? static_cast<T>(maxnorm / (norm[index] + eps)) : one;
 }
 
 #define REGISTER_RENORM_OP(DTYPE)                                  \
@@ -42,6 +42,9 @@ kernel void renorm<DTYPE>(constant DTYPE* norm [[buffer(0)]],      \
 
 REGISTER_RENORM_OP(float);
 REGISTER_RENORM_OP(half);
+#if __METAL_VERSION__ >= 310
+REGISTER_RENORM_OP(bfloat);
+#endif
 
 )RENORM_METAL");
 
@@ -55,7 +58,6 @@ void renorm_out_mps(const Tensor& self, const Scalar& p, int64_t dim, const Scal
 
   Tensor norm = at::linalg_vector_norm(self, p.toDouble(), reduce_dims, /*keepdim=*/true);
   auto factor = at::empty(norm.sizes(), self.options());
-  auto maxnorm_f = maxnorm.to<float>();
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   id<MTLBuffer> normBuffer = getMTLBufferStorage(norm);
@@ -74,7 +76,7 @@ void renorm_out_mps(const Tensor& self, const Scalar& p, int64_t dim, const Scal
       [computeEncoder setComputePipelineState:renormPSO];
       mtl_setBuffer(computeEncoder, norm, 0);
       mtl_setBuffer(computeEncoder, factor, 1);
-      [computeEncoder setBytes:&maxnorm_f length:sizeof(float) atIndex:2];
+      mtl_setBytes(computeEncoder, maxnorm.to<float>(), 2);
       mtl_dispatch1DJob(computeEncoder, renormPSO, norm.numel());
 
       getMPSProfiler().endProfileKernel(renormPSO);

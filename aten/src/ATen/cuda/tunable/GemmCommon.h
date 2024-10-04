@@ -81,15 +81,26 @@ struct GemmParams : OpParams {
   }
 
   std::string Signature() const override {
-    static std::string val = c10::str(transa, transb, "_", m, "_", n, "_", k);
-    return val;
+    return c10::str(transa, transb, "_", m, "_", n, "_", k);
+  }
+
+  size_t GetSizeA() const {
+    return sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m);
+  }
+
+  size_t GetSizeB() const {
+    return sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k);
+  }
+
+  size_t GetSizeC() const {
+    return sizeof(T) * ldc * n;
   }
 
   size_t GetSize(bool duplicate_inputs) const {
-    size_t size = sizeof(T) * ldc * n;
+    size_t size = GetSizeC();
     if (duplicate_inputs) {
-      size += sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m);
-      size += sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k);
+      size += GetSizeA();
+      size += GetSizeB();
     }
     return size;
   }
@@ -99,13 +110,13 @@ struct GemmParams : OpParams {
     *copy = *this;
     c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
-    size_t c_size = ldc * n * sizeof(T);
+    size_t c_size = GetSizeC();
     copy->c = static_cast<T*>(c10::cuda::CUDACachingAllocator::raw_alloc(c_size));
     AT_CUDA_CHECK(c10::cuda::CUDACachingAllocator::memcpyAsync(
         copy->c, device, c, device, c_size, getCurrentCUDAStream(device), true));
     if (duplicate_inputs) {
-      size_t a_size = sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m);
-      size_t b_size = sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k);
+      size_t a_size = GetSizeA();
+      size_t b_size = GetSizeB();
       copy->a = static_cast<const T*>(c10::cuda::CUDACachingAllocator::raw_alloc(a_size));
       copy->b = static_cast<const T*>(c10::cuda::CUDACachingAllocator::raw_alloc(b_size));
       copy->duplicate_inputs_ = true;
@@ -147,8 +158,7 @@ private:
 template <typename T>
 struct GemmAndBiasParams : OpParams {
   std::string Signature() const override {
-    static std::string val = c10::str(transa, transb, "_", m, "_", n, "_", k);
-    return val;
+    return c10::str(transa, transb, "_", m, "_", n, "_", k);
   }
 
   size_t GetSize(bool duplicate_inputs) const {
@@ -218,15 +228,26 @@ struct GemmStridedBatchedParams : OpParams {
   }
 
   std::string Signature() const override {
-    static std::string val = c10::str(transa, transb, "_", m, "_", n, "_", k, "_B_", batch);
-    return val;
+    return c10::str(transa, transb, "_", m, "_", n, "_", k, "_B_", batch);
+  }
+
+  size_t GetSizeA() const {
+    return sizeof(T) * std::min(lda, stride_a) * ((transa == 'n' || transa == 'N') ? k : m) * batch;
+  }
+
+  size_t GetSizeB() const {
+    return sizeof(T) * std::min(ldb, stride_b) * ((transb == 'n' || transb == 'N') ? n : k) * batch;
+  }
+
+  size_t GetSizeC() const {
+    return sizeof(T) * std::min(ldc, stride_c) * n * batch;
   }
 
   size_t GetSize(bool duplicate_inputs) const {
-    size_t size = sizeof(T) * stride_c * batch;
+    size_t size = GetSizeC();
     if (duplicate_inputs) {
-      size += sizeof(T) * stride_a * batch;
-      size += sizeof(T) * stride_b * batch;
+      size += GetSizeA();
+      size += GetSizeB();
     }
     return size;
   }
@@ -236,13 +257,13 @@ struct GemmStridedBatchedParams : OpParams {
     *copy = *this;
     c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
-    size_t c_size = batch * stride_c * sizeof(T);
+    size_t c_size = GetSizeC();
     copy->c = static_cast<T*>(c10::cuda::CUDACachingAllocator::raw_alloc(c_size));
     AT_CUDA_CHECK(c10::cuda::CUDACachingAllocator::memcpyAsync(
         copy->c, device, c, device, c_size, getCurrentCUDAStream(device), true));
     if (duplicate_inputs) {
-      size_t a_size = sizeof(T) * stride_a * batch;
-      size_t b_size = sizeof(T) * stride_b * batch;
+      size_t a_size = GetSizeA();
+      size_t b_size = GetSizeB();
       copy->a = static_cast<const T*>(c10::cuda::CUDACachingAllocator::raw_alloc(a_size));
       copy->b = static_cast<const T*>(c10::cuda::CUDACachingAllocator::raw_alloc(b_size));
       copy->duplicate_inputs_ = true;
@@ -292,15 +313,26 @@ struct ScaledGemmParams : OpParams {
   }
 
   std::string Signature() const override {
-    static std::string val = c10::str(transa, transb, "_", m, "_", n, "_", k);
-    return val;
+    return c10::str(transa, transb, "_", m, "_", n, "_", k);
+  }
+
+  size_t GetSizeA() const {
+    return sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m);
+  }
+
+  size_t GetSizeB() const {
+    return sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k);
+  }
+
+  size_t GetSizeC() const {
+    return sizeof(T) * ldc * n;
   }
 
   size_t GetSize(bool duplicate_inputs) const {
-    size_t size = sizeof(T) * ldc * n;
+    size_t size = GetSizeC();
     if (duplicate_inputs) {
-      size += sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m);
-      size += sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k);
+      size += GetSizeA();
+      size += GetSizeB();
     }
     return size;
   }
@@ -310,13 +342,13 @@ struct ScaledGemmParams : OpParams {
     *copy = *this;
     c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
-    size_t c_size = ldc * n * sizeof(T);
+    size_t c_size = GetSizeC();
     copy->c = c10::cuda::CUDACachingAllocator::raw_alloc(c_size);
     AT_CUDA_CHECK(c10::cuda::CUDACachingAllocator::memcpyAsync(
         copy->c, device, c, device, c_size, getCurrentCUDAStream(device), true));
     if (duplicate_inputs) {
-      size_t a_size = sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m);
-      size_t b_size = sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k);
+      size_t a_size = GetSizeA();
+      size_t b_size = GetSizeB();
       copy->a = c10::cuda::CUDACachingAllocator::raw_alloc(a_size);
       copy->b = c10::cuda::CUDACachingAllocator::raw_alloc(b_size);
       copy->duplicate_inputs_ = true;

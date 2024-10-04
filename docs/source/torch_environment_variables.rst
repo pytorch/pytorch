@@ -21,6 +21,7 @@ If you find anything in this documentation that is missing, incorrect, or could 
 
    threading_environment_variables
    cuda_environment_variables
+   mps_environment_variables
    debugging_environment_variables
    miscellaneous_environment_variables
    logging

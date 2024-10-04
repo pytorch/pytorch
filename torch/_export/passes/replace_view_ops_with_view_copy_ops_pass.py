@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
-from typing import Dict, Optional, Set
-
+from typing import Dict, Optional
 import torch
-from torch._ops import OpOverload, OpOverloadPacket, HigherOrderOperator
+from torch._ops import OpOverload, HigherOrderOperator
 from torch._export.error import InternalError
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 
@@ -14,12 +13,6 @@ _NON_FUNCTIONAL_OPS_TO_FUNCTIONAL_OPS: Dict[OpOverload, OpOverload] = {
     torch.ops.aten._unsafe_view.default: torch.ops.aten.view_copy.default,
 }
 
-# TODO (tmanlaibaatar) remove this after https://github.com/pytorch/pytorch/pull/100749
-_BLACK_LISTED_OPS: Set[OpOverloadPacket] = {
-    torch.ops.aten.sym_size,
-    torch.ops.aten.sym_stride,
-    torch.ops.aten.sym_numel,
-}
 
 def is_view_op(schema: torch._C.FunctionSchema) -> bool:
     if len(schema.arguments) == 0:
@@ -63,7 +56,7 @@ class ReplaceViewOpsWithViewCopyOpsPass(_ExportPassBaseDeprecatedDoNotUse):
                 (_NON_FUNCTIONAL_OPS_TO_FUNCTIONAL_OPS[op]), args, kwargs, meta
             )
 
-        if op in _BLACK_LISTED_OPS or isinstance(op, HigherOrderOperator):
+        if isinstance(op, HigherOrderOperator):
             return super().call_operator(op, args, kwargs, meta)
 
         if view_copy_op := get_view_copy_of_view_op(op._schema):

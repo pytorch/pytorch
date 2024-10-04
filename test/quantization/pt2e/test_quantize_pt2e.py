@@ -4,8 +4,8 @@ from typing import List, Tuple
 import torch
 from torch import Tensor
 from torch._export import capture_pre_autograd_graph
+from torch._utils_internal import capture_pre_autograd_graph_using_training_ir
 from torch.ao.quantization import observer, ObserverOrFakeQuantize, QConfigMapping
-
 from torch.ao.quantization.qconfig import (
     default_per_channel_symmetric_qnnpack_qconfig,
     float_qparams_weight_only_qconfig,
@@ -13,7 +13,6 @@ from torch.ao.quantization.qconfig import (
     QConfig,
     weight_observer_range_neg_127_to_127,
 )
-
 from torch.ao.quantization.quantize_pt2e import (
     convert_pt2e,
     prepare_pt2e,
@@ -42,7 +41,6 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     QuantizationConfig,
 )
 from torch.fx import Node
-
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     PT2EQuantizationTestCase,
@@ -602,6 +600,14 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
     def test_fixed_qparams_qspec_observer_dedup(self):
         class BackendAQuantizer(Quantizer):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                act_qspec = FixedQParamsQuantizationSpec(
+                    dtype=torch.uint8,
+                    quant_min=0,
+                    quant_max=255,
+                    qscheme=torch.per_tensor_affine,
+                    scale=1.0 / 256.0,
+                    zero_point=0,
+                )
                 for node in model.graph.nodes:
                     if (
                         node.op == "call_function"
@@ -609,14 +615,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                     ):
                         input_act = node.args[0]
                         assert isinstance(input_act, Node)
-                        act_qspec = FixedQParamsQuantizationSpec(
-                            dtype=torch.uint8,
-                            quant_min=0,
-                            quant_max=255,
-                            qscheme=torch.per_tensor_affine,
-                            scale=1.0 / 256.0,
-                            zero_point=0,
-                        )
                         node.meta["quantization_annotation"] = QuantizationAnnotation(
                             input_qspec_map={
                                 input_act: act_qspec,
@@ -632,13 +630,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                         assert isinstance(input_act, Node)
                         input_act1 = node.args[1]
                         assert isinstance(input_act, Node)
-                        act_qspec = QuantizationSpec(
-                            observer_or_fake_quant_ctr=observer.default_observer,
-                            dtype=torch.uint8,
-                            quant_min=0,
-                            quant_max=255,
-                            qscheme=torch.per_tensor_affine,
-                        )
                         node.meta["quantization_annotation"] = QuantizationAnnotation(
                             input_qspec_map={
                                 input_act0: act_qspec,
@@ -1181,15 +1172,16 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self.assertIsNot(observers[0], observers[2])
         self.assertIsNot(observers[1], observers[2])
 
-    @parametrize("dtype", (torch.int16, torch.float8_e5m2, torch.float8_e4m3fn))
-    def test_quantization_dtype(self, dtype):
+    @parametrize("dtype", (torch.float32, torch.bfloat16))
+    @parametrize("quant_dtype", (torch.int16, torch.float8_e5m2, torch.float8_e4m3fn))
+    def test_quantization_dtype(self, dtype, quant_dtype):
         class DtypeActQuantizer(Quantizer):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
-                info_fun = torch.iinfo if dtype == torch.int16 else torch.finfo
+                info_fun = torch.iinfo if quant_dtype == torch.int16 else torch.finfo
                 activate_qspec = QuantizationSpec(
-                    dtype=dtype,
-                    quant_min=int(info_fun(dtype).min),
-                    quant_max=int(info_fun(dtype).max),
+                    dtype=quant_dtype,
+                    quant_min=int(info_fun(quant_dtype).min),
+                    quant_max=int(info_fun(quant_dtype).max),
                     qscheme=torch.per_tensor_affine,
                     is_dynamic=False,
                     observer_or_fake_quant_ctr=observer.default_observer,
@@ -1214,9 +1206,9 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 pass
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, dtype):
                 super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.conv = torch.nn.Conv2d(3, 3, 3, dtype=dtype)
 
             def forward(self, x):
                 return self.conv(x)
@@ -1233,14 +1225,45 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             torch.ops.aten.conv2d.default,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
         ]
-        example_inputs = (torch.randn(1, 3, 3, 3),)
-        self._test_quantizer(
-            M().eval(),
+        example_inputs = (torch.randn(1, 3, 3, 3, dtype=dtype),)
+        m = self._test_quantizer(
+            M(dtype).eval(),
             example_inputs,
             quantizer,
             node_occurrence,
             node_list,
         )
+
+        def verify_quant_dequant_iotypes(m):
+            for node in m.graph.nodes:
+                if (
+                    node.op == "call_function"
+                    and node.target.__name__ == "dequantize_per_tensor.default"
+                ):
+                    # Check dequantize node
+                    dequant_node = node
+                    dequant_in_dtype = dequant_node.args[5]
+                    dequant_out_dtype = torch.float32
+                    if "out_dtype" in dequant_node.kwargs:
+                        dequant_out_dtype = dequant_node.kwargs["out_dtype"]
+
+                    # Check preceding quantize node
+                    # Depending on fold_quantize flag, quantize node may be absent
+                    quant_node = node.args[0]
+                    if (
+                        quant_node.op == "call_function"
+                        and quant_node.target.__name__ == "quantize_per_tensor.default"
+                    ):
+                        quant_in_dtype = torch.float32
+                        if "val" in quant_node.args[0].meta:
+                            quant_in_dtype = quant_node.args[0].meta["val"].dtype
+                        quant_out_dtype = quant_node.args[5]
+                        assert (
+                            quant_in_dtype == dequant_out_dtype
+                            and quant_out_dtype == dequant_in_dtype
+                        ), "quant dequant io dtype check failed!"
+
+        verify_quant_dequant_iotypes(m)
 
     def test_input_edge_sanity_check(self):
         class M(torch.nn.Module):
@@ -1280,7 +1303,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         m = M().eval()
         example_inputs = torch.randn(1, 2, 3, 3)
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = capture_pre_autograd_graph(m, (example_inputs,))
         with self.assertRaises(Exception):
             m = prepare_pt2e(m, BackendAQuantizer())
 
@@ -1321,7 +1344,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(2, 2)
                 self.dont_fold_me = torch.nn.Parameter(torch.randn(2, 2))
@@ -1360,7 +1383,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.randn(2, 2)
 
@@ -1391,7 +1414,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(2, 2)
 
@@ -1423,7 +1446,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         for n in m.graph.nodes:
             if n.op == "get_attr" and "frozen_param" in n.target:
-                self.assertIn("stack_trace", n.meta)
                 for key in n.meta:
                     self.assertEqual(n.meta[key], weight_meta[key])
 
@@ -1471,9 +1493,14 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             def transform_for_annotation(
                 self, model: torch.fx.GraphModule
             ) -> torch.fx.GraphModule:
-                for n in model.graph.nodes:
+                # Make a copy of the graph to ensure that we are using the
+                # return value of this function.
+                graph = torch.fx.Graph()
+                graph.graph_copy(model.graph, {})
+                for n in graph.nodes:
                     if n.target == torch.ops.aten.add.Tensor:
                         n.target = torch.ops.aten.mul.Tensor
+                model = torch.fx.GraphModule(model, graph)
                 return model
 
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
@@ -1786,7 +1813,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.dropout = torch.nn.Dropout(0.5, inplace=inplace)
 
@@ -1829,6 +1856,14 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self._test_move_exported_model_dropout(inplace=True)
 
     def _get_bn_train_eval_ops(self):
+        if capture_pre_autograd_graph_using_training_ir():
+            return (
+                torch.ops.aten.batch_norm.default,
+                torch.ops.aten.batch_norm.default,
+            )
+        # TODO: This branch is going through a deprecated branch and should be deleted soon,
+        # after capture_pre_autograd_graph fully migrate to training IR
+        # T199018392
         if TEST_WITH_ROCM:
             return (
                 torch.ops.aten.miopen_batch_norm.default,
@@ -1852,7 +1887,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.bn = torch.nn.BatchNorm2d(3)
 
@@ -1920,7 +1955,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
     def test_allow_exported_model_train_eval(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.bn = torch.nn.BatchNorm2d(3)
                 self.dropout = torch.nn.Dropout(0.5)
@@ -2221,7 +2256,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             return model
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(5, 5)
 
@@ -2285,7 +2320,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3)
 

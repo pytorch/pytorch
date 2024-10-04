@@ -456,9 +456,11 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       const void* mat1_scale_ptr = GetAScalePointerFromParams<CT>(params);
       const void* mat2_scale_ptr = GetBScalePointerFromParams<CT>(params);
       const void* result_scale_ptr = GetDScalePointerFromParams<CT>(params);
-      if (mat1_scale_ptr && mat2_scale_ptr && result_scale_ptr) {
+      if (mat1_scale_ptr && mat2_scale_ptr) {
         matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
         matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
+      }
+      if (result_scale_ptr) {
         matmul.setAttribute(HIPBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
       }
 

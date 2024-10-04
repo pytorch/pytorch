@@ -1,24 +1,14 @@
 # mypy: allow-untyped-defs
-from collections import defaultdict
-
-from itertools import chain
-
+import operator
 import pickle
-
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    no_type_check,
-    Sequence,
-    TYPE_CHECKING,
-)
+from collections import defaultdict
+from itertools import chain
+from typing import Any, Callable, Dict, List, no_type_check, Sequence, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
 from torch.utils._python_dispatch import TorchDispatchMode
-import operator
+
 
 if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
@@ -234,6 +224,7 @@ class MemoryTracker:
 
     def _create_pre_forward_hook(self, name: str) -> Callable:
         """Prefix operator name with current module and 'forward', and insert 'fw_start' marker at forward pass start."""
+
         def _pre_forward_hook(module: nn.Module, inputs: Any) -> None:
             self._cur_module_name = f"{name}.forward"
             if (

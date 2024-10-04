@@ -6,8 +6,8 @@ from torch.distributed._state_dict_utils import (
     _create_cpu_state_dict,
     _offload_state_dict_to_cpu,
 )
-
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
+
 
 __all__ = ["AsyncStager", "BlockingAsyncStager"]
 
@@ -65,7 +65,6 @@ class AsyncStager(Protocol):
         In the case `stage` is async in some way, this method should be called to ensure staging
         is complete and it is safe to begin modifying the original `state_dict`
         """
-        pass
 
 
 class BlockingAsyncStager(AsyncStager):
@@ -116,4 +115,3 @@ class BlockingAsyncStager(AsyncStager):
         """
         No-op function, since staging is blocking.
         """
-        pass

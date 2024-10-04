@@ -3,7 +3,8 @@ from functools import partial
 from typing import Any, Optional, Tuple
 
 import torch
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
+from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard
+
 
 __all__ = [
     "input_reshard",
@@ -38,6 +39,9 @@ def input_reshard(
     Return:
         A :class:`nn.Module` object registered with TP input resharding.
     """
+    if input_reshard_dim is None:
+        return module
+
     cx: Optional[torch.autograd.graph.saved_tensors_hooks] = None
 
     def input_reshard_forward_pre_hook(_: torch.nn.Module, _i: Tuple[Any, ...]) -> None:
@@ -49,18 +53,20 @@ def input_reshard(
         nonlocal cx
         cx = saved_tensor_hooks  # type: ignore[name-defined]
 
-    def input_reshard_backward_hook(_: torch.nn.Module, _i: Tuple[Any, ...], _o: Any) -> Any:
+    def input_reshard_backward_hook(
+        _: torch.nn.Module, _i: Tuple[Any, ...], _o: Any
+    ) -> Any:
         nonlocal cx
         cx.__exit__()  # type: ignore[name-defined, union-attr]
 
-    if input_reshard_dim is None:
-        return module
     module.register_forward_pre_hook(input_reshard_forward_pre_hook)
     module.register_forward_hook(input_reshard_backward_hook)
     return module
 
 
-def _pack_hook_tp(mesh: DeviceMesh, input_reshard_dim: int, x: torch.Tensor) -> Any:  # noqa: D401
+def _pack_hook_tp(
+    mesh: DeviceMesh, input_reshard_dim: int, x: torch.Tensor
+) -> Any:  # noqa: D401
     """Hook function called after FWD to shard input."""
     if isinstance(x, DTensor) and all(p.is_replicate() for p in x._spec.placements):
         return x.redistribute(device_mesh=mesh, placements=[Shard(input_reshard_dim)])
@@ -78,7 +84,9 @@ def _pack_hook_tp(mesh: DeviceMesh, input_reshard_dim: int, x: torch.Tensor) -> 
         return x
 
 
-def _unpack_hook_tp(mesh: DeviceMesh, input_reshard_dim: int, x: Any) -> torch.Tensor:  # noqa: D401
+def _unpack_hook_tp(
+    mesh: DeviceMesh, input_reshard_dim: int, x: Any
+) -> torch.Tensor:  # noqa: D401
     """Hook function called before activation recomputing in BWD to restore input."""
     if (
         isinstance(x, DTensor)

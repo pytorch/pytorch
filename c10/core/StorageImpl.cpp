@@ -7,9 +7,12 @@ namespace c10 {
 C10_API std::array<StorageImplCreateHelper, at::COMPILE_TIME_MAX_DEVICE_TYPES>
     StorageImplCreate;
 
-// A allowlist of device type, currently available is PrivateUse1.
-static ska::flat_hash_set<c10::DeviceType> DeviceTypeAllowList{
-    DeviceType::PrivateUse1};
+// A allowlist of device type, currently available is PrivateUse1
+inline ska::flat_hash_set<c10::DeviceType>& GetBackendMetaAllowlist() {
+  static ska::flat_hash_set<c10::DeviceType> DeviceTypeAllowList{
+      DeviceType::PrivateUse1};
+  return DeviceTypeAllowList;
+}
 
 void throwNullDataPtrError() {
   TORCH_CHECK(
@@ -18,31 +21,16 @@ void throwNullDataPtrError() {
       "If you're using torch.compile/export/fx, it is likely that we are erroneously "
       "tracing into a custom kernel. To fix this, please wrap the custom kernel into "
       "an opaque custom op. Please see the following for details: "
-      "https://pytorch.org/docs/main/notes/custom_operators.html");
-}
-
-// NOTE: [FakeTensor.data_ptr deprecation]
-// Today:
-// - FakeTensor.data_ptr errors out in torch.compile.
-// - FakeTensor.data_ptr raises the following deprecation warning otherwise.
-// - the following deprecation warning is only for FakeTensor (for now).
-//   In the future we can consider extending to more wrapper Tensor subclasses.
-void warnDeprecatedDataPtr() {
-  TORCH_WARN_ONCE(
-      "Accessing the data pointer of FakeTensor is deprecated and will error in "
-      "PyTorch 2.5. This is almost definitely a bug in your code and will "
-      "cause undefined behavior with subsystems like torch.compile. "
-      "Please wrap calls to tensor.data_ptr() in an opaque custom op; "
-      "If all else fails, you can guard accesses to tensor.data_ptr() on "
-      "isinstance(tensor, FakeTensor).")
+      "https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html");
 }
 
 void SetStorageImplCreate(DeviceType t, StorageImplCreateHelper fptr) {
   // Allowlist verification.
   // Only if the devicetype is in the allowlist,
   // we allow the extension to be registered for storageImpl create.
+  const auto& DeviceTypeAllowlist = GetBackendMetaAllowlist();
   TORCH_CHECK(
-      DeviceTypeAllowList.find(t) != DeviceTypeAllowList.end(),
+      DeviceTypeAllowlist.find(t) != DeviceTypeAllowlist.end(),
       "It is only allowed to register the storageImpl create method ",
       "for PrivateUse1. ",
       "If you have related storageImpl requirements, ",

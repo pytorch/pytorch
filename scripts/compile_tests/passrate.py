@@ -7,8 +7,8 @@ from common import (
     key,
     open_test_results,
 )
-
 from download_reports import download_reports
+
 
 """
 Usage: passrate.py commit_sha
@@ -41,13 +41,7 @@ def should_exclude(key):
     if test_file == "UNKNOWN":
         return True
     # Policy: "pass rate" does not include inductor, export, or dynamo tests.
-    if test_file.startswith("inductor/"):
-        return True
-    if test_file.startswith("export/"):
-        return True
-    if test_file.startswith("dynamo/"):
-        return True
-    return False
+    return test_file.startswith(("inductor/", "export/", "dynamo/"))
 
 
 def compute_pass_rate(eager_dir, dynamo_dir):

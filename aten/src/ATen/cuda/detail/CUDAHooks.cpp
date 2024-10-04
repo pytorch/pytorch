@@ -241,6 +241,9 @@ DeviceIndex current_device() {
   return -1;
 }
 
+/**
+ * DEPRECATED: use getCurrentDevice() instead
+ */
 DeviceIndex CUDAHooks::current_device() const {
   return at::cuda::detail::current_device();
 }
@@ -436,9 +439,34 @@ void CUDAHooks::cuFFTClearPlanCache(DeviceIndex device_index) const {
   at::native::detail::cufft_clear_plan_cache_impl(device_index);
 }
 
+/**
+ * DEPRECATED: use deviceCount() instead
+ */
 int CUDAHooks::getNumGPUs() const {
   return at::cuda::device_count();
 }
+
+DeviceIndex CUDAHooks::deviceCount() const {
+  return at::cuda::device_count();
+}
+
+DeviceIndex CUDAHooks::getCurrentDevice() const {
+  return at::cuda::detail::current_device();
+}
+
+#ifdef USE_ROCM
+bool CUDAHooks::isGPUArch(DeviceIndex device_index, const std::vector<std::string>& archs) const {
+  hipDeviceProp_t* prop = at::cuda::getDeviceProperties(device_index);
+  std::string device_arch = prop->gcnArchName;
+  for (std::string arch : archs) {
+      size_t substring = device_arch.find(arch);
+      if (substring != std::string::npos) {
+          return true;
+      }
+  }
+  return false;
+}
+#endif
 
 void CUDAHooks::deviceSynchronize(DeviceIndex device_index) const {
   at::DeviceGuard device_guard(at::Device(at::DeviceType::CUDA, device_index));

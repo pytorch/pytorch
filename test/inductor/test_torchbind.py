@@ -6,7 +6,6 @@ import torch._inductor
 import torch._inductor.decomposition
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._inductor.test_case import run_tests, TestCase
-
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
 
@@ -22,7 +21,7 @@ class TestTorchbind(TestCase):
         """
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
                 self.b = torch.randn(2, 3)

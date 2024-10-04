@@ -177,7 +177,7 @@ sycl::event matmul(
   pattr.set_post_ops(po);
 
   #if ONEDNN_SUPPORT_DETERMINISTIC
-    if(at::globalContext().deterministicAlgorithms())
+    if(at::globalContext().deterministicAlgorithms() || at::globalContext().deterministicMkldnn())
         pattr.set_deterministic(true);
   #endif
 
@@ -220,7 +220,7 @@ sycl::event matmul(
 
   size_t scratchpad_size = matmul_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::empty(
-      {static_cast<int64_t>(scratchpad_size)}, m1.options().dtype(at::kByte), c10::nullopt);
+      {static_cast<int64_t>(scratchpad_size)}, m1.options().dtype(at::kByte), std::nullopt);
   auto scratchpad_memory = make_onednn_memory(
       matmul_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_memory});

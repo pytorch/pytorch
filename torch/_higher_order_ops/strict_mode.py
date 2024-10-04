@@ -1,12 +1,9 @@
 # mypy: allow-untyped-defs
 import torch
 import torch._subclasses.functional_tensor
-
 import torch.utils._pytree as pytree
-
 from torch._C import DispatchKey
 from torch._functorch.utils import exposed_in
-
 from torch._higher_order_ops.utils import _set_compilation_env, autograd_not_implemented
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -31,7 +28,15 @@ def strict_mode(callable, operands):
             )
 
 
-strict_mode_op = HigherOrderOperator("strict_mode")
+class StrictMode(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("strict_mode")
+
+    def __call__(self, callable, operands):
+        return super().__call__(callable, operands)
+
+
+strict_mode_op = StrictMode()
 
 
 @strict_mode_op.py_impl(DispatchKey.CompositeExplicitAutograd)
@@ -48,10 +53,7 @@ strict_mode_op.py_impl(DispatchKey.Autograd)(
 
 @strict_mode_op.py_impl(ProxyTorchDispatchMode)
 def inner(mode, callable, operands):
-    if mode.enable_tracing:
-        return trace_strict_mode(mode, strict_mode_op, callable, operands)
-    else:
-        return strict_mode_op(callable, operands)
+    return trace_strict_mode(mode, strict_mode_op, callable, operands)
 
 
 def trace_strict_mode(mode, strict_mode_op, callable, operands):

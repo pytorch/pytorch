@@ -255,6 +255,9 @@ struct C10_API ExtraMeta {
       custom_storage_error_msg_ = other.custom_storage_error_msg_;
     }
   }
+  ExtraMeta& operator=(const ExtraMeta& other) = delete;
+  ExtraMeta(ExtraMeta&& other) = delete;
+  ExtraMeta& operator=(ExtraMeta&& other) = delete;
 
   ExtraMeta(
       std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta,
@@ -1580,7 +1583,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "If you're using torch.compile/export/fx, it is likely that we are erroneously "
         "tracing into a custom kernel. To fix this, please wrap the custom kernel into "
         "an opaque custom op. Please see the following for details: "
-        "https://pytorch.org/docs/main/notes/custom_operators.html\n"
+        "https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html\n"
         "If you're using Caffe2, Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
     // Caller does the type check.
@@ -1891,7 +1894,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * storage / storage_offset). See NOTE [ Metadata Change for a Detached Tensor
    * ] for details.
    */
-  void set_allow_tensor_metadata_change(bool value) {
+  void set_allow_tensor_metadata_change(bool value [[maybe_unused]]) {
     // TODO: at some point, we should kill this field completely.
     allow_tensor_metadata_change_ = true;
   }
@@ -2031,7 +2034,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
            BackendComponent::MPSBit,
            BackendComponent::HIPBit,
            BackendComponent::XPUBit,
-           BackendComponent::HPUBit});
+           BackendComponent::HPUBit,
+           BackendComponent::MTIABit});
       constexpr auto dense_k = DispatchKeySet(DispatchKey::Dense);
       return ts.has_any(dense_k) && ts.has_any(dense_backends);
     };

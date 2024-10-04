@@ -730,14 +730,17 @@ inline Vectorized<float> Vectorized<float>::frac() const {
   return *this - this->trunc();
 }
 
-// Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
-// either input is a NaN.
-template <>
-Vectorized<float> inline maximum(const Vectorized<float>& a, const Vectorized<float>& b) {
-  float32x4_t r0 = vmaxq_f32(a.get_low(), b.get_low());
-  float32x4_t r1 = vmaxq_f32(a.get_high(), b.get_high());
-  return Vectorized<float>(r0, r1);
-}
+//Added sleef Implementation for Maximum
+Vectorized<float> inline maximum(const Vectorized<float>& a, const Vectorized<float>& b)  {
+  if(!a.has_inf_nan() && !b.has_inf_nan()){
+    return USE_SLEEF(
+      Vectorized<float>(Sleef_fmaxf4(a.get_low(), b.get_low()),Sleef_fmaxf4(a.get_high(), b.get_high())),
+      Vectorized<float>(vmaxq_f32(a.get_low(), b.get_low()),vmaxq_f32(a.get_high(), b.get_high())));
+  }
+  else{
+    return Vectorized<float>(vmaxq_f32(a.get_low(), b.get_low()),vmaxq_f32(a.get_high(), b.get_high()));
+  }
+  }
 
 // Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
 // either input is a NaN.
@@ -823,12 +826,16 @@ inline Vectorized<float> Vectorized<float>::le(const Vectorized<float>& other) c
 template <>
 inline void convert(const float* src, int32_t* dst, int64_t n) {
   int64_t i;
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (i = 0; i <= (n - Vectorized<float>::size()); i += Vectorized<float>::size()) {
     vst1q_s32(dst + i, vcvtq_s32_f32(vld1q_f32(src + i)));
     vst1q_s32(dst + i + 4, vcvtq_s32_f32(vld1q_f32(src + i + 4)));
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (; i < n; i++) {
     dst[i] = static_cast<int32_t>(src[i]);
   }
@@ -837,12 +844,16 @@ inline void convert(const float* src, int32_t* dst, int64_t n) {
 template <>
 inline void convert(const int32_t* src, float* dst, int64_t n) {
   int64_t i;
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (i = 0; i <= (n - Vectorized<float>::size()); i += Vectorized<float>::size()) {
     vst1q_f32(dst + i, vcvtq_f32_s32(vld1q_s32(src + i)));
     vst1q_f32(dst + i + 4, vcvtq_f32_s32(vld1q_s32(src + i + 4)));
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (; i < n; i++) {
     dst[i] = static_cast<float>(src[i]);
   }

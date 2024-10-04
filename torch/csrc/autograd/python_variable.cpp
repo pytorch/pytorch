@@ -227,7 +227,7 @@ static bool check_has_torch_dispatch(PyObject* obj) {
       attr.ptr() != torch::disabled_torch_dispatch_impl());
 }
 
-// NOLINTNEXTLINE
+// NOLINTNEXTLINE(*-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyObject* device_to_py_class_[static_cast<size_t>(
     c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
 
@@ -382,19 +382,19 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
 
   tensor_impl->pyobj_slot()->set_owns_pyobj(true);
 
-// Resurrect the Python object.  This is something CPython does
-// internally occasionally, see
-// https://github.com/python/cpython/blob/b98eba5bc2ffbe7a0ed49d540ebc4f756ae61985/Objects/object.c#L248-L259
-// so we just copy the pattern here.  Note that we don't have to worry
-// about saving and restoring the refcount (as the quoted code does)
-// because we actually DO need to reset the refcount to one here, we
-// can't assume that some other code has taken care of it.
-// NB: this will overreport _Py_RefTotal but based on inspection of object.c
-// there is no way to avoid this
-#ifdef Py_TRACE_REFS
-  _Py_AddToAllObjects(reinterpret_cast<PyObject*>(self), 1);
-#endif
-  Py_INCREF(self);
+  // Resurrect the Python object.  This is something CPython does
+  // internally occasionally, see
+  // https://github.com/python/cpython/blob/b98eba5bc2ffbe7a0ed49d540ebc4f756ae61985/Objects/object.c#L248-L259
+  // so we just copy the pattern here.  Note that we don't have to worry
+  // about saving and restoring the refcount (as the quoted code does)
+  // because we actually DO need to reset the refcount to one here, we
+  // can't assume that some other code has taken care of it.
+  // NB: this will overreport _Py_RefTotal but based on inspection of object.c
+  // there is no way to avoid this
+
+  // When resurrecting, we MUST use _Py_NewReference and not Py_INCREF to
+  // ensure the PyObject is in a valid state
+  _Py_NewReference((PyObject*)self);
 
   // Flip THPVariable to be non-owning
   // (near use-after-free miss here: fresh MaybeOwned is created breaking
@@ -887,8 +887,8 @@ static PyObject* THPVariable_make_wrapper_subclass(
   END_HANDLE_TH_ERRORS
 }
 
-typedef PyObject* (*getter)(PyObject*, void*);
-typedef int (*setter)(PyObject*, PyObject*, void*);
+using getter = PyObject* (*)(PyObject*, void*);
+using setter = int (*)(PyObject*, PyObject*, void*);
 
 PyObject* THPVariable_get_python_dispatch(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
@@ -1084,15 +1084,13 @@ int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
         grad.options().type_equal(var.options()),
         "attempting to assign a gradient to a tensor that has data of a different type");
   }
-  if (var.is_cuda()) {
-    TORCH_CHECK(
-        grad.get_device() == var.get_device(),
-        "attempting to assign a gradient located on device with index '",
-        grad.get_device(),
-        "' to a tensor located on device with index '",
-        var.get_device(),
-        "'. Please ensure that the gradient and the tensor are on the same device");
-  }
+  TORCH_CHECK(
+      grad.get_device() == var.get_device(),
+      "attempting to assign a gradient located on device with index '",
+      grad.get_device(),
+      "' to a tensor located on device with index '",
+      var.get_device(),
+      "'. Please ensure that the gradient and the tensor are on the same device");
   TORCH_CHECK(
       grad.sym_sizes().equals(var.sym_sizes()),
       "attempting to assign a gradient of size '",
@@ -1222,7 +1220,7 @@ int THPVariable_set_names(PyObject* self, PyObject* names, void* unused) {
   }
   const auto& var = THPVariable_Unpack(self);
   if (names == Py_None) {
-    at::internal_set_names_inplace(var, at::nullopt);
+    at::internal_set_names_inplace(var, std::nullopt);
   } else {
     TORCH_CHECK(
         THPUtils_checkDimnameList(names),
@@ -1783,9 +1781,8 @@ struct THPVariableMeta {
 int THPVariableMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs);
 
 PyTypeObject THPVariableMetaType = {
-    PyVarObject_HEAD_INIT(
-        DEFERRED_ADDRESS(&PyType_Type),
-        0) "torch._C._TensorMeta", /* tp_name */
+    PyVarObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type), 0)
+    "torch._C._TensorMeta", /* tp_name */
     sizeof(THPVariableMeta), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
@@ -1826,9 +1823,8 @@ PyTypeObject THPVariableMetaType = {
 };
 
 PyTypeObject THPVariableType = {
-    PyVarObject_HEAD_INIT(
-        &THPVariableMetaType,
-        0) "torch._C.TensorBase", /* tp_name */
+    PyVarObject_HEAD_INIT(&THPVariableMetaType, 0)
+    "torch._C.TensorBase", /* tp_name */
     sizeof(THPVariable), /* tp_basicsize */
     0, /* tp_itemsize */
     // This is unspecified, because it is illegal to create a THPVariableType
@@ -2161,14 +2157,9 @@ static int traverse_slots(
     PyObject* self,
     visitproc visit,
     void* arg) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  Py_ssize_t i, n;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  PyMemberDef* mp;
-
-  n = Py_SIZE(type);
-  mp = type->tp_members;
-  for (i = 0; i < n; i++, mp++) {
+  auto n = Py_SIZE(type);
+  auto mp = type->tp_members;
+  for (Py_ssize_t i = 0; i < n; i++, mp++) {
     if (mp->type == T_OBJECT_EX) {
       char* addr = (char*)self + mp->offset;
       PyObject* obj = *(PyObject**)addr;
@@ -2380,6 +2371,7 @@ bool THPVariable_initModule(PyObject* module) {
     return false;
   Py_INCREF(&THPVariableType);
   PyModule_AddObject(module, "TensorBase", (PyObject*)&THPVariableType);
+  Py_INCREF(&THPVariableType);
   PyModule_AddObject(module, "_TensorBase", (PyObject*)&THPVariableType);
   torch::autograd::initTorchFunctions(module);
   torch::autograd::initTensorImplConversion(module);

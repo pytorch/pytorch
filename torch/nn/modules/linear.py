@@ -4,18 +4,18 @@ from typing import Any
 
 import torch
 from torch import Tensor
+from torch.nn import functional as F, init
 from torch.nn.parameter import Parameter, UninitializedParameter
-from .. import functional as F
-from .. import init
-from .module import Module
+
 from .lazy import LazyModuleMixin
+from .module import Module
 
 
 __all__ = [
-    'Bilinear',
-    'Identity',
-    'LazyLinear',
-    'Linear',
+    "Bilinear",
+    "Identity",
+    "LazyLinear",
+    "Linear",
 ]
 
 
@@ -85,22 +85,30 @@ class Linear(Module):
         torch.Size([128, 30])
     """
 
-    __constants__ = ['in_features', 'out_features']
+    __constants__ = ["in_features", "out_features"]
     in_features: int
     out_features: int
     weight: Tensor
 
-    def __init__(self, in_features: int, out_features: int, bias: bool = True,
-                 device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        bias: bool = True,
+        device=None,
+        dtype=None,
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.weight = Parameter(torch.empty((out_features, in_features), **factory_kwargs))
+        self.weight = Parameter(
+            torch.empty((out_features, in_features), **factory_kwargs)
+        )
         if bias:
             self.bias = Parameter(torch.empty(out_features, **factory_kwargs))
         else:
-            self.register_parameter('bias', None)
+            self.register_parameter("bias", None)
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
@@ -117,7 +125,7 @@ class Linear(Module):
         return F.linear(input, self.weight, self.bias)
 
     def extra_repr(self) -> str:
-        return f'in_features={self.in_features}, out_features={self.out_features}, bias={self.bias is not None}'
+        return f"in_features={self.in_features}, out_features={self.out_features}, bias={self.bias is not None}"
 
 
 # This class exists solely to avoid triggering an obscure error when scripting
@@ -126,10 +134,17 @@ class Linear(Module):
 # TODO: fail fast on quantization API usage error, then remove this class
 # and replace uses of it with plain Linear
 class NonDynamicallyQuantizableLinear(Linear):
-    def __init__(self, in_features: int, out_features: int, bias: bool = True,
-                 device=None, dtype=None) -> None:
-        super().__init__(in_features, out_features, bias=bias,
-                         device=device, dtype=dtype)
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        bias: bool = True,
+        device=None,
+        dtype=None,
+    ) -> None:
+        super().__init__(
+            in_features, out_features, bias=bias, device=device, dtype=dtype
+        )
 
 
 class Bilinear(Module):
@@ -170,25 +185,34 @@ class Bilinear(Module):
         torch.Size([128, 40])
     """
 
-    __constants__ = ['in1_features', 'in2_features', 'out_features']
+    __constants__ = ["in1_features", "in2_features", "out_features"]
     in1_features: int
     in2_features: int
     out_features: int
     weight: Tensor
 
-    def __init__(self, in1_features: int, in2_features: int, out_features: int, bias: bool = True,
-                 device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+    def __init__(
+        self,
+        in1_features: int,
+        in2_features: int,
+        out_features: int,
+        bias: bool = True,
+        device=None,
+        dtype=None,
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.in1_features = in1_features
         self.in2_features = in2_features
         self.out_features = out_features
-        self.weight = Parameter(torch.empty((out_features, in1_features, in2_features), **factory_kwargs))
+        self.weight = Parameter(
+            torch.empty((out_features, in1_features, in2_features), **factory_kwargs)
+        )
 
         if bias:
             self.bias = Parameter(torch.empty(out_features, **factory_kwargs))
         else:
-            self.register_parameter('bias', None)
+            self.register_parameter("bias", None)
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
@@ -201,8 +225,10 @@ class Bilinear(Module):
         return F.bilinear(input1, input2, self.weight, self.bias)
 
     def extra_repr(self) -> str:
-        return (f'in1_features={self.in1_features}, in2_features={self.in2_features}, '
-                f'out_features={self.out_features}, bias={self.bias is not None}')
+        return (
+            f"in1_features={self.in1_features}, in2_features={self.in2_features}, "
+            f"out_features={self.out_features}, bias={self.bias is not None}"
+        )
 
 
 class LazyLinear(LazyModuleMixin, Linear):
@@ -238,9 +264,10 @@ class LazyLinear(LazyModuleMixin, Linear):
     weight: UninitializedParameter
     bias: UninitializedParameter  # type: ignore[assignment]
 
-    def __init__(self, out_features: int, bias: bool = True,
-                 device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+    def __init__(
+        self, out_features: int, bias: bool = True, device=None, dtype=None
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
         # bias is hardcoded to False to avoid creating tensor
         # that will soon be overwritten.
         super().__init__(0, 0, False)
@@ -261,4 +288,6 @@ class LazyLinear(LazyModuleMixin, Linear):
                 if self.bias is not None:
                     self.bias.materialize((self.out_features,))
                 self.reset_parameters()
+
+
 # TODO: PartialLinear - maybe in sparse?

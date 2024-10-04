@@ -37,6 +37,9 @@ install_conda_dependencies() {
 
 install_pip_dependencies() {
   pushd executorch/.ci/docker
+  # Install PyTorch CPU build beforehand to avoid installing the much bigger CUDA
+  # binaries later, ExecuTorch only needs CPU
+  pip_install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
   # Install all Python dependencies
   pip_install -r requirements-ci.txt
   popd
@@ -44,13 +47,14 @@ install_pip_dependencies() {
 
 setup_executorch() {
   pushd executorch
-  source .ci/scripts/utils.sh
+  # Setup swiftshader and Vulkan SDK which are required to build the Vulkan delegate
+  as_jenkins bash .ci/scripts/setup-vulkan-linux-deps.sh
 
-  install_flatc_from_source
-  pip_install .
+  export PYTHON_EXECUTABLE=python
+  export EXECUTORCH_BUILD_PYBIND=ON
+  export CMAKE_ARGS="-DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
 
-  # Make sure that all the newly generate files are owned by Jenkins
-  chown -R jenkins .
+  as_jenkins .ci/scripts/setup-linux.sh cmake
   popd
 }
 
