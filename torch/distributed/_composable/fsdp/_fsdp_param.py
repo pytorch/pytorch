@@ -758,10 +758,6 @@ class FSDPParam:
         shard_dim = self.fsdp_placement.dim
         if shard_dim == 0 or sharded_param.size() == self.padded_sharded_param_size:
             return sharded_param
-        if torch.distributed.get_rank() == 1:
-            print(
-                f"[Rank 1] padding from {sharded_param.size()=} to {self.padded_sharded_param_size=}"
-            )
         padded_sharded_param = sharded_param.new_empty(self.padded_sharded_param_size)
         if sharded_param.numel() > 0:
             padded_sharded_param.narrow(
