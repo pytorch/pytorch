@@ -95,13 +95,10 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     return getStreamFromPoolMasqueradingAsCUDA(isHighPriority, d.index());
   }
   Stream exchangeStream(Stream s) const noexcept override {
+    HIPStreamMasqueradingAsCUDA cs(s);
     auto old_stream = getCurrentHIPStreamMasqueradingAsCUDA(s.device().index());
-    setStream(s);
+    setCurrentHIPStreamMasqueradingAsCUDA(cs);
     return old_stream.unwrap();
-  }
-  void setStream(Stream s) const override {
-    const HIPStreamMasqueradingAsCUDA stream(s);
-    setCurrentHIPStreamMasqueradingAsCUDA(stream);
   }
   DeviceIndex deviceCount() const noexcept override {
     int deviceCnt;
@@ -219,7 +216,7 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     C10_HIP_CHECK(hipEventSynchronize(hip_event));
   }
 
-  void syncStreamsOnDevice(const c10::DeviceIndex device_index) const override {
+  void synchronizeDevice(const c10::DeviceIndex device_index) const override {
     int orig_device;
     C10_HIP_CHECK(hipGetDevice(&orig_device));
     C10_HIP_CHECK(hipSetDevice(device_index));

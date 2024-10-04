@@ -49,9 +49,6 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
       const override {
     return impl_->getStreamFromGlobalPool(d, isHighPriority);
   }
-  void setStream(Stream s) const override {
-    impl_->setStream(s);
-  }
   Stream exchangeStream(Stream s) const noexcept override {
     return impl_->exchangeStream(s);
   }
@@ -99,8 +96,8 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
     return impl_->synchronizeEvent(event);
   }
 
-  void syncStreamsOnDevice(const DeviceIndex device_index) const override {
-    return impl_->syncStreamsOnDevice(device_index);
+  void synchronizeDevice(const DeviceIndex device_index) const override {
+    return impl_->synchronizeDevice(device_index);
   }
 
  private:
