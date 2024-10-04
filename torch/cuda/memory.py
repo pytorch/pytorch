@@ -71,11 +71,13 @@ if not hasattr(torch._C, "_MemPool"):
     torch._C.__dict__["_cuda_endAllocateCurrentStreamToPool"] = _dummy_type(
         "_cuda_endAllocateCurrentStreamToPool"
     )
+    torch._C.__dict__["_cuda_releasePool"] = _dummy_type("_cuda_releasePool")
 
 from torch._C import (  # noqa: F401
     _cuda_beginAllocateToPool,
     _cuda_CUDAAllocator,
     _cuda_endAllocateCurrentStreamToPool,
+    _cuda_releasePool,
     _MemPool,
     _MemPoolContext,
 )
@@ -994,8 +996,12 @@ class MemPool(_MemPool):
 
     @property
     def allocator(self) -> Optional[_cuda_CUDAAllocator]:
-        r"""Returns the allocator this MemPool routes allocations to"""
+        r"""Returns the allocator this MemPool routes allocations to."""
         return super().allocator
+
+    def use_count(self) -> int:
+        r"""Returns the reference count of this pool."""
+        return super().use_count()
 
 
 class MemPoolContext(_MemPoolContext):
@@ -1038,4 +1044,5 @@ def use_mem_pool(pool: MemPool, device: Union[Device, int] = None):
         yield
     finally:
         _cuda_endAllocateCurrentStreamToPool(device_index, pool.id)
+        _cuda_releasePool(device_index, pool.id)
         del ctx
