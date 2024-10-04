@@ -70,6 +70,31 @@ class TestDCPCompatbility(TestCase):
         self.assertEqual(storage_meta.save_id, writer.save_id)
         self.assertEqual(storage_meta.load_id, reader.load_id)
 
+    @with_temp_dir
+    def test_with_v_2_3(self) -> None:
+        sd = {
+            "a": torch.zeros(4, 4),
+            "dict": {
+                "dict_a": {"dict_a_1": 1, "dict_a_2": 2},
+                "dict_b": {"dict_b_1": 1, "dict_b_2": 2},
+            },
+            "list": [0, 1, 2, 3, 4, 5],
+        }
+        load_sd = {
+            "a": torch.ones(4, 4),
+            "dict": {
+                "dict_a": {"dict_a_1": 2, "dict_a_2": 4},
+                "dict_b": {"dict_b_1": 2, "dict_b_2": 4},
+            },
+            "list": [10, 11, 12, 13, 14, 15],
+        }
+
+        dcp._version._act_like_version = "2_3"
+        dcp.save(sd, checkpoint_id=self.temp_dir)
+        dcp._version._act_like_version = None
+        dcp.load(load_sd, checkpoint_id=self.temp_dir)
+        self.assertEqual(sd, load_sd)
+
 
 if __name__ == "__main__":
     run_tests()

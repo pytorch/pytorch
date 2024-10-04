@@ -11,7 +11,6 @@ import numpy as np
 from numpy import inf
 
 import torch
-
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     _get_magma_version,
@@ -2390,12 +2389,6 @@ op_db: List[OpInfo] = [
                 toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
                 "TestCommon",
                 "test_noncontiguous_samples",
-                device_type="cuda",
-            ),
-            DecorateInfo(
-                toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1e-03)}),
-                "TestOperatorsCUDA",
-                "test_vjp",
                 device_type="cuda",
             ),
             DecorateInfo(

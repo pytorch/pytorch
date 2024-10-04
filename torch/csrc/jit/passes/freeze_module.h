@@ -16,8 +16,7 @@
  * produces a cloned frozen module.
  */
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 TORCH_API Module freeze_module(
     const Module& module,
@@ -32,5 +31,4 @@ TORCH_API void freeze_module_inplace(
     std::vector<std::string> preservedAttrs = std::vector<std::string>(),
     bool freezeInterfaces = true,
     bool preserveParameters = false);
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

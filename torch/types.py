@@ -1,7 +1,5 @@
 # mypy: allow-untyped-defs
 
-import builtins
-
 # In some cases, these basic types are shadowed by corresponding
 # top-level values.  The underscore variants let us refer to these
 # types.  See https://github.com/python/mypy/issues/4146 for why these
@@ -14,97 +12,114 @@ from builtins import (  # noqa: F401
     int as _int,
     str as _str,
 )
-from typing import Any, List, Optional, Sequence, Tuple, TYPE_CHECKING, Union
+from typing import Any, Dict, List, Sequence, Tuple, TYPE_CHECKING, Union
+from typing_extensions import TypeAlias
 
-import torch
-from torch import SymInt
+# `as` imports have better static analysis support than assignment `ExposedType: TypeAlias = HiddenType`
+from torch import (  # noqa: F401
+    device as _device,
+    DispatchKey as DispatchKey,
+    dtype as _dtype,
+    layout as _layout,
+    qscheme as _qscheme,
+    Size as Size,
+    SymBool as SymBool,
+    SymFloat as SymFloat,
+    SymInt as SymInt,
+    Tensor as Tensor,
+)
 
 
 if TYPE_CHECKING:
     from torch.autograd.graph import GradientEdge
 
+
 __all__ = ["Number", "Device", "Storage"]
 
 # Convenience aliases for common composite types that we need
 # to talk about in PyTorch
-
-_TensorOrTensors = Union[torch.Tensor, Sequence[torch.Tensor]]
-_TensorOrTensorsOrGradEdge = Union[
-    torch.Tensor,
-    Sequence[torch.Tensor],
+_TensorOrTensors: TypeAlias = Union[Tensor, Sequence[Tensor]]  # noqa: PYI047
+_TensorOrTensorsOrGradEdge: TypeAlias = Union[  # noqa: PYI047
+    Tensor,
+    Sequence[Tensor],
     "GradientEdge",
     Sequence["GradientEdge"],
 ]
 
-_dtype = torch.dtype
-_device = torch.device
-_qscheme = torch.qscheme
-_layout = torch.layout
-_size = Union[torch.Size, List[builtins.int], Tuple[builtins.int, ...]]
-_symsize = Union[torch.Size, Sequence[Union[_int, SymInt]]]
-_dispatchkey = Union[builtins.str, torch._C.DispatchKey]
+_size: TypeAlias = Union[Size, List[int], Tuple[int, ...]]  # noqa: PYI042,PYI047
+_symsize: TypeAlias = Union[Size, Sequence[Union[int, SymInt]]]  # noqa: PYI042,PYI047
+_dispatchkey: TypeAlias = Union[str, DispatchKey]  # noqa: PYI042,PYI047
 
 # int or SymInt
-IntLikeType = Union[_int, torch.SymInt]
+IntLikeType: TypeAlias = Union[int, SymInt]
+# float or SymFloat
+FloatLikeType: TypeAlias = Union[float, SymFloat]
+# bool or SymBool
+BoolLikeType: TypeAlias = Union[bool, SymBool]
+
+py_sym_types = (SymInt, SymFloat, SymBool)
+PySymType: TypeAlias = Union[SymInt, SymFloat, SymBool]
 
 # Meta-type for "numeric" things; matches our docs
-Number = Union[builtins.int, builtins.float, builtins.bool]
+Number: TypeAlias = Union[int, float, bool]
 
 # Meta-type for "device-like" things.  Not to be confused with 'device' (a
 # literal device object).  This nomenclature is consistent with PythonArgParser.
 # None means use the default device (typically CPU)
-Device = Optional[Union[_device, builtins.str, builtins.int]]
-del Optional
+Device: TypeAlias = Union[_device, str, int, None]
+
 
 # Storage protocol implemented by ${Type}StorageBase classes
-
-
 class Storage:
-    _cdata: _int
-    device: torch.device
-    dtype: torch.dtype
-    _torch_load_uninitialized: _bool
+    _cdata: int
+    device: _device
+    dtype: _dtype
+    _torch_load_uninitialized: bool
 
-    def __deepcopy__(self, memo: dict) -> "Storage":
+    def __deepcopy__(self, memo: Dict[int, Any]) -> "Storage":
         raise NotImplementedError
 
-    def _new_shared(self, size: _int) -> "Storage":
+    def _new_shared(self, size: int) -> "Storage":
         raise NotImplementedError
 
     def _write_file(
         self,
         f: Any,
-        is_real_file: _bool,
-        save_size: _bool,
-        element_size: _int,
+        is_real_file: bool,
+        save_size: bool,
+        element_size: int,
     ) -> None:
         raise NotImplementedError
 
-    def element_size(self) -> _int:
+    def element_size(self) -> int:
         raise NotImplementedError
 
-    def is_shared(self) -> _bool:
+    def is_shared(self) -> bool:
         raise NotImplementedError
 
     def share_memory_(self) -> "Storage":
         raise NotImplementedError
 
-    def nbytes(self) -> _int:
+    def nbytes(self) -> int:
         raise NotImplementedError
 
     def cpu(self) -> "Storage":
         raise NotImplementedError
 
-    def data_ptr(self) -> _int:
+    def data_ptr(self) -> int:
         raise NotImplementedError
 
     def from_file(
         self,
-        filename: _str,
-        shared: _bool = False,
-        nbytes: _int = 0,
+        filename: str,
+        shared: bool = False,
+        nbytes: int = 0,
     ) -> "Storage":
         raise NotImplementedError
 
-    def _new_with_file(self, f: Any, element_size: _int) -> "Storage":
+    def _new_with_file(
+        self,
+        f: Any,
+        element_size: int,
+    ) -> "Storage":
         raise NotImplementedError

@@ -15,7 +15,7 @@ from torchgen.model import NativeFunction, TensorOptionsArguments, Variant
 from torchgen.utils import FileManager, mapMaybe
 
 
-OPTIONAL_TYPE_PATTERN = re.compile(r"c10::optional<(.+)>")
+OPTIONAL_TYPE_PATTERN = re.compile(r"std::optional<(.+)>")
 TYPE_PATTERN = re.compile(r"(?:const\s+)?([A-Z]\w+)")
 
 
@@ -23,7 +23,7 @@ TYPE_PATTERN = re.compile(r"(?:const\s+)?([A-Z]\w+)")
 # TODO: maybe update the cpp argument API to take optional namespace argument?
 def fully_qualified_type(argument_type: str) -> str:
     def maybe_optional_type(type: str, is_opt: bool) -> str:
-        return f"c10::optional<{type}>" if is_opt else type
+        return f"std::optional<{type}>" if is_opt else type
 
     opt_match = OPTIONAL_TYPE_PATTERN.match(argument_type)
     is_opt = opt_match is not None
@@ -100,7 +100,7 @@ def process_function(f: NativeFunction) -> str | None:
                 # which would fail otherwise). We handle requires_grad explicitly here
                 # instead of passing it through to the kernel.
                 exprs.append(
-                    f"at::TensorOptions({arg.name}).requires_grad(c10::nullopt)"
+                    f"at::TensorOptions({arg.name}).requires_grad(::std::nullopt)"
                 )
                 # Manually set the requires_grad bit on the result tensor.
                 requires_grad = f"{arg.name}.requires_grad()"

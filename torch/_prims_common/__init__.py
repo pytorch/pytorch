@@ -3,11 +3,9 @@ from __future__ import annotations
 
 import operator
 import warnings
-import weakref
-
 from contextlib import nullcontext
 from enum import Enum
-from functools import cmp_to_key, reduce
+from functools import reduce
 from typing import (
     Any,
     Callable,
@@ -448,17 +446,23 @@ def compute_elementwise_output_logical_to_physical_perm(
     if ndim == 1:
         return [0]
 
-    # Short-circuits if contiguous, following the fake fast path.
+    # Short-circuits if contiguous or channels last, following the fake fast path.
     # This reduces the number of guards we end up making
-    # TODO: do channels last too
     is_contiguous = True
+    is_channels_last = True
     for t in tensors:
         is_contiguous = is_contiguous and t.is_contiguous(
             memory_format=torch.contiguous_format
         )
+        is_channels_last = is_channels_last and t.is_contiguous(
+            memory_format=torch.channels_last
+        )
 
-    if is_contiguous:
+    if is_contiguous and not is_channels_last:
         return list(range(ndim))
+
+    if is_channels_last and not is_contiguous:
+        return [0, *list(range(2, ndim)), 1]
 
     shape = tensors[0].shape
 
@@ -687,13 +691,7 @@ def is_valid_permutation(rank: int, perm: DimsSequenceType) -> bool:
     Validates that perm is a permutation of length rank.
     """
 
-    if not isinstance(perm, Sequence):
-        return False
-
-    if not (tuple(sorted(perm)) == tuple(range(0, rank))):
-        return False
-
-    return True
+    return isinstance(perm, Sequence) and sorted(perm) == list(range(rank))
 
 
 def is_same_shape(a: Sequence, b: Sequence) -> bool:
@@ -1841,7 +1839,7 @@ def are_strides_like_channels_last(
     for d in dim_order:
         if guard_size_oblivious(shape[d] == 0):
             return False
-        if strides[d] < min:
+        if guard_size_oblivious(strides[d] < min):
             return False
         if d == 0 and min == strides[1]:
             return False

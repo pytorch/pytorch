@@ -22,7 +22,7 @@ class ScriptListIterator final {
       c10::impl::GenericList::iterator iter,
       c10::impl::GenericList::iterator end)
       : iter_(iter), end_(end) {}
-  IValue next();
+  at::IValue next();
   bool done() const;
 
  private:
@@ -42,20 +42,20 @@ class ScriptList final {
   using ssize_t = Py_ssize_t;
 
   // Constructor for empty lists created during slicing, extending, etc.
-  ScriptList(const TypePtr& type) : list_(AnyType::get()) {
-    auto list_type = type->expect<ListType>();
+  ScriptList(const at::TypePtr& type) : list_(at::AnyType::get()) {
+    auto list_type = type->expect<at::ListType>();
     list_ = c10::impl::GenericList(list_type);
   }
 
   // Constructor for instances based on existing lists (e.g. a
   // Python instance or a list nested inside another).
-  ScriptList(IValue data) : list_(AnyType::get()) {
+  ScriptList(const at::IValue& data) : list_(at::AnyType::get()) {
     TORCH_INTERNAL_ASSERT(data.isList());
     list_ = data.toList();
   }
 
-  ListTypePtr type() const {
-    return ListType::create(list_.elementType());
+  at::ListTypePtr type() const {
+    return at::ListType::create(list_.elementType());
   }
 
   // Return a string representation that can be used
@@ -68,7 +68,7 @@ class ScriptList final {
       if (f) {
         s << ", ";
       }
-      s << IValue(elem);
+      s << at::IValue(elem);
       f = true;
     }
     s << ']';
@@ -89,19 +89,19 @@ class ScriptList final {
   }
 
   // Get the value for the given index.
-  IValue getItem(diff_type idx) {
+  at::IValue getItem(diff_type idx) {
     idx = wrap_index(idx);
     return list_.get(idx);
   };
 
   // Set the value corresponding to the given index.
-  void setItem(diff_type idx, const IValue& value) {
+  void setItem(diff_type idx, const at::IValue& value) {
     idx = wrap_index(idx);
     return list_.set(idx, value);
   }
 
   // Check whether the list contains the given value.
-  bool contains(const IValue& value) {
+  bool contains(const at::IValue& value) {
     for (const auto& elem : list_) {
       if (elem == value) {
         return true;
@@ -124,7 +124,7 @@ class ScriptList final {
   }
 
   // Count the number of times a value appears in the list.
-  ssize_t count(const IValue& value) const {
+  ssize_t count(const at::IValue& value) const {
     ssize_t total = 0;
 
     for (const auto& elem : list_) {
@@ -137,7 +137,7 @@ class ScriptList final {
   }
 
   // Remove the first occurrence of a value from the list.
-  void remove(const IValue& value) {
+  void remove(const at::IValue& value) {
     auto list = list_;
 
     int64_t idx = -1, i = 0;
@@ -159,7 +159,7 @@ class ScriptList final {
   }
 
   // Append a value to the end of the list.
-  void append(const IValue& value) {
+  void append(const at::IValue& value) {
     list_.emplace_back(value);
   }
 
@@ -169,14 +169,14 @@ class ScriptList final {
   }
 
   // Append the contents of an iterable to the list.
-  void extend(const IValue& iterable) {
+  void extend(const at::IValue& iterable) {
     list_.append(iterable.toList());
   }
 
   // Remove and return the element at the specified index from the list. If no
   // index is passed, the last element is removed and returned.
-  IValue pop(std::optional<size_type> idx = std::nullopt) {
-    IValue ret;
+  at::IValue pop(std::optional<size_type> idx = std::nullopt) {
+    at::IValue ret;
 
     if (idx) {
       idx = wrap_index(*idx);
@@ -191,7 +191,7 @@ class ScriptList final {
   }
 
   // Insert a value before the given index.
-  void insert(const IValue& value, diff_type idx) {
+  void insert(const at::IValue& value, diff_type idx) {
     // wrap_index cannot be used; idx == len() is allowed
     if (idx < 0) {
       idx += len();

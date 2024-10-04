@@ -2,6 +2,7 @@
 import copy
 import io
 import math
+import weakref
 from typing import (
     Any,
     Callable,
@@ -26,7 +27,8 @@ from torch.distributed._functional_collectives import AsyncCollectiveTensor
 if dist.is_available() or TYPE_CHECKING:
     from torch.distributed import distributed_c10d
     from torch.distributed._shard.sharded_tensor import ShardedTensor
-    from torch.distributed._tensor import distribute_tensor, DTensor, Replicate
+    from torch.distributed.tensor import distribute_tensor, DTensor, Replicate
+    from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
 
 
 def _identity_func(
@@ -406,12 +408,23 @@ def _create_cpu_state_dict(
             return torch.tensor(0, dtype=obj.dtype)
 
         if share_memory:
-            t = torch.empty(*tuple(obj.size()), dtype=obj.dtype).share_memory_()
+            t = torch.empty(*tuple(obj.size()), dtype=obj.dtype)
+            t = t.share_memory_()
             if pin_memory:
-                succ = torch.cuda.cudart().cudaHostRegister(
-                    t.data_ptr(),
-                    t.numel() * t.element_size(),
-                    1,  # lines up with 'cudaHostRegisterPortable'
+
+                def unpin_memory(t):
+                    succ = int(torch.cuda.cudart().cudaHostUnregister(t.data_ptr()))
+                    assert (
+                        succ == 0
+                    ), f"Unpinning shared memory failed with error-code: {succ}"
+
+                weakref.finalize(t, unpin_memory, t)
+                succ = int(
+                    torch.cuda.cudart().cudaHostRegister(
+                        t.data_ptr(),
+                        t.numel() * t.element_size(),
+                        1,  # lines up with 'cudaHostRegisterPortable'
+                    )
                 )
                 assert (
                     succ == 0
@@ -539,8 +552,23 @@ def _distribute_tensors(
 
         local_state = _local_state[0]
         full_tensor = _local_state[1]
-        local_state_dict[key] = distribute_tensor(
-            full_tensor, local_state.device_mesh, local_state.placements
+
+        shape, offset = compute_local_shape_and_global_offset(
+            full_tensor.shape, local_state.device_mesh, local_state.placements
+        )
+        slices = [
+            slice(cur_offset, cur_offset + cur_shape)
+            for cur_shape, cur_offset in zip(shape, offset)
+        ]
+        local_tensor = full_tensor[slices]
+        # TODO: currently, we cannot handle strided sharding if the dp dimension is not even. For example,
+        # one of the case that is not yet supported is when placements = (Shard(0), _StridedShard(0, sf=2)).
+        local_state_dict[key] = DTensor.from_local(
+            local_tensor,
+            local_state.device_mesh,
+            local_state.placements,
+            shape=local_state.shape,
+            stride=local_state.stride(),
         )
 
 
@@ -615,16 +643,17 @@ def _distribute_state_dict(
             local_state_dict[key] = value.cpu()
         else:
             assert isinstance(value, torch.Tensor)
-            full_tensor = value.detach().to(device)
             local_state = local_state_dict.get(key, None)
             if local_state is None:
                 continue
             elif isinstance(local_state, DTensor):
-                local_state_dict[key] = (local_state, full_tensor)
+                local_state_dict[key] = distribute_tensor(
+                    value.detach().to(device),
+                    local_state.device_mesh,
+                    local_state.placements,
+                )
             else:
-                local_state_dict[key] = full_tensor
-
-            _distribute_tensors(local_state_dict, [key], device, pg)
+                local_state_dict[key] = value.detach().to(device)
 
 
 # These APIs are from torch.distributed.checkpoint.

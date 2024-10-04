@@ -16,10 +16,14 @@ from ..utils import (
     use_triton_template,
 )
 from ..virtualized import V
+from .mm_common import (
+    _is_static_problem,
+    addmm_epilogue,
+    mm_args,
+    mm_configs,
+    mm_options,
+)
 
-from .mm import _is_static_problem
-
-from .mm_common import addmm_epilogue, mm_args, mm_configs, mm_options
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -27,6 +31,19 @@ aten = torch.ops.aten
 
 def bmm_grid(b, m, n, meta):
     return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]), b, 1)
+
+
+def _is_large_block_for_cpu(m, n, k):
+    # Thresholds are experimentally determined to reduce Triton CPU compile times
+    if m > 128 or n > 128 or k > 128:
+        return True
+    return m * n > 2**12
+
+
+def bmm_configs(m, n, k, *, device_type):
+    if device_type == "cpu":
+        return mm_configs(m, n, k, scale=0.5, exclude=_is_large_block_for_cpu)
+    return mm_configs(m, n, k)
 
 
 bmm_template = TritonTemplate(
@@ -148,18 +165,18 @@ def tuned_bmm(mat1, mat2, *, layout=None):
     # options to tune from
     choices = [aten_bmm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
     if use_triton_template(layout):
-        for config in mm_configs(m, n, k):
+        for config in bmm_configs(m, n, k, device_type=ir.get_device_type(mat1)):
             bmm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
             )
-    static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
+    static_shape, is_nonzero = _is_static_problem(layout)
     if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
-        from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
+        from ..codegen.cuda.gemm_template import CUTLASS3xGemmTemplate
 
-        CUTLASSGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
 
     if len(choices) == 0:
         log.warning("No choices for GEMM, using ATen backend as fallback")
@@ -180,7 +197,7 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         else []
     )
     if use_triton_template(layout):
-        for config in mm_configs(m, n, k):
+        for config in bmm_configs(m, n, k, device_type=ir.get_device_type(mat1)):
             bmm_template.maybe_append_choice(
                 choices,
                 input_nodes=(inp, mat1, mat2),

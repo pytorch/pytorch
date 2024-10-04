@@ -12,6 +12,7 @@ from torch.package import (
 )
 from torch.testing._internal.common_utils import run_tests
 
+
 try:
     from .common import PackageTestCase
 except ImportError:
@@ -168,7 +169,7 @@ class TestPackageFX(PackageTestCase):
 
     def test_package_fx_wrap(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, a):

@@ -1,18 +1,26 @@
 from __future__ import annotations
 
-import decimal
+import gzip
 import inspect
+import json
 import sys
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict
 from unittest import mock
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
-from tools.stats.upload_metrics import add_global_metric, emit_metric
 
-from tools.stats.upload_stats_lib import BATCH_SIZE, upload_to_rockset
+from tools.stats.upload_metrics import add_global_metric, emit_metric, global_metrics
+from tools.stats.upload_stats_lib import (
+    BATCH_SIZE,
+    get_s3_resource,
+    remove_nan_inf,
+    upload_to_rockset,
+)
+
 
 sys.path.remove(str(REPO_ROOT))
 
@@ -30,9 +38,22 @@ JOB_ID = 234
 JOB_NAME = "some-job-name"
 
 
+@mock.patch("boto3.resource")
 class TestUploadStats(unittest.TestCase):
+    emitted_metric: Dict[str, Any] = {"did_not_emit": True}
+
+    def mock_put_item(self, **kwargs: Any) -> None:
+        # Utility for mocking putting items into s3.  THis will save the emitted
+        # metric so tests can check it
+        self.emitted_metric = json.loads(
+            gzip.decompress(kwargs["Body"]).decode("utf-8")
+        )
+
     # Before each test, set the env vars to their default values
     def setUp(self) -> None:
+        get_s3_resource.cache_clear()
+        global_metrics.clear()
+
         mock.patch.dict(
             "os.environ",
             {
@@ -51,7 +72,6 @@ class TestUploadStats(unittest.TestCase):
             clear=True,  # Don't read any preset env vars
         ).start()
 
-    @mock.patch("boto3.Session.resource")
     def test_emits_default_and_given_metrics(self, mock_resource: Any) -> None:
         metric = {
             "some_number": 123,
@@ -76,29 +96,20 @@ class TestUploadStats(unittest.TestCase):
             "run_id": RUN_ID,
             "run_number": RUN_NUMBER,
             "run_attempt": RUN_ATTEMPT,
-            "some_number": 123,
-            "float_number": decimal.Decimal(str(32.34)),
             "job_id": JOB_ID,
             "job_name": JOB_NAME,
+            "info": metric,
         }
 
-        # Preserve the metric emitted
-        emitted_metric: dict[str, Any] = {}
-
-        def mock_put_item(Item: dict[str, Any]) -> None:
-            nonlocal emitted_metric
-            emitted_metric = Item
-
-        mock_resource.return_value.Table.return_value.put_item = mock_put_item
+        mock_resource.return_value.Object.return_value.put = self.mock_put_item
 
         emit_metric("metric_name", metric)
 
         self.assertEqual(
-            emitted_metric,
-            {**emit_should_include, **emitted_metric},
+            self.emitted_metric,
+            {**self.emitted_metric, **emit_should_include},
         )
 
-    @mock.patch("boto3.Session.resource")
     def test_when_global_metric_specified_then_it_emits_it(
         self, mock_resource: Any
     ) -> None:
@@ -116,23 +127,15 @@ class TestUploadStats(unittest.TestCase):
             global_metric_name: global_metric_value,
         }
 
-        # Preserve the metric emitted
-        emitted_metric: dict[str, Any] = {}
-
-        def mock_put_item(Item: dict[str, Any]) -> None:
-            nonlocal emitted_metric
-            emitted_metric = Item
-
-        mock_resource.return_value.Table.return_value.put_item = mock_put_item
+        mock_resource.return_value.Object.return_value.put = self.mock_put_item
 
         emit_metric("metric_name", metric)
 
         self.assertEqual(
-            emitted_metric,
-            {**emitted_metric, **emit_should_include},
+            self.emitted_metric,
+            {**self.emitted_metric, "info": emit_should_include},
         )
 
-    @mock.patch("boto3.Session.resource")
     def test_when_local_and_global_metric_specified_then_global_is_overridden(
         self, mock_resource: Any
     ) -> None:
@@ -152,23 +155,15 @@ class TestUploadStats(unittest.TestCase):
             global_metric_name: local_override,
         }
 
-        # Preserve the metric emitted
-        emitted_metric: dict[str, Any] = {}
-
-        def mock_put_item(Item: dict[str, Any]) -> None:
-            nonlocal emitted_metric
-            emitted_metric = Item
-
-        mock_resource.return_value.Table.return_value.put_item = mock_put_item
+        mock_resource.return_value.Object.return_value.put = self.mock_put_item
 
         emit_metric("metric_name", metric)
 
         self.assertEqual(
-            emitted_metric,
-            {**emitted_metric, **emit_should_include},
+            self.emitted_metric,
+            {**self.emitted_metric, "info": emit_should_include},
         )
 
-    @mock.patch("boto3.Session.resource")
     def test_when_optional_envvar_set_to_actual_value_then_emit_vars_emits_it(
         self, mock_resource: Any
     ) -> None:
@@ -177,7 +172,7 @@ class TestUploadStats(unittest.TestCase):
         }
 
         emit_should_include = {
-            **metric,
+            "info": {**metric},
             "pr_number": PR_NUMBER,
         }
 
@@ -188,23 +183,15 @@ class TestUploadStats(unittest.TestCase):
             },
         ).start()
 
-        # Preserve the metric emitted
-        emitted_metric: dict[str, Any] = {}
-
-        def mock_put_item(Item: dict[str, Any]) -> None:
-            nonlocal emitted_metric
-            emitted_metric = Item
-
-        mock_resource.return_value.Table.return_value.put_item = mock_put_item
+        mock_resource.return_value.Object.return_value.put = self.mock_put_item
 
         emit_metric("metric_name", metric)
 
         self.assertEqual(
-            emitted_metric,
-            {**emit_should_include, **emitted_metric},
+            self.emitted_metric,
+            {**self.emitted_metric, **emit_should_include},
         )
 
-    @mock.patch("boto3.Session.resource")
     def test_when_optional_envvar_set_to_a_empty_str_then_emit_vars_ignores_it(
         self, mock_resource: Any
     ) -> None:
@@ -221,35 +208,20 @@ class TestUploadStats(unittest.TestCase):
             },
         ).start()
 
-        # Preserve the metric emitted
-        emitted_metric: dict[str, Any] = {}
-
-        def mock_put_item(Item: dict[str, Any]) -> None:
-            nonlocal emitted_metric
-            emitted_metric = Item
-
-        mock_resource.return_value.Table.return_value.put_item = mock_put_item
+        mock_resource.return_value.Object.return_value.put = self.mock_put_item
 
         emit_metric("metric_name", metric)
 
         self.assertEqual(
-            emitted_metric,
-            {**emit_should_include, **emitted_metric},
+            self.emitted_metric,
+            {**self.emitted_metric, "info": emit_should_include},
             f"Metrics should be emitted when an option parameter is set to '{default_val}'",
         )
         self.assertFalse(
-            emitted_metric.get("pr_number"),
+            self.emitted_metric.get("pr_number"),
             f"Metrics should not include optional item 'pr_number' when it's envvar is set to '{default_val}'",
         )
 
-    @mock.patch("boto3.Session.resource")
-    def test_blocks_emission_if_reserved_keyword_used(self, mock_resource: Any) -> None:
-        metric = {"repo": "awesome/repo"}
-
-        with self.assertRaises(ValueError):
-            emit_metric("metric_name", metric)
-
-    @mock.patch("boto3.Session.resource")
     def test_no_metrics_emitted_if_required_env_var_not_set(
         self, mock_resource: Any
     ) -> None:
@@ -264,19 +236,12 @@ class TestUploadStats(unittest.TestCase):
             clear=True,
         ).start()
 
-        put_item_invoked = False
-
-        def mock_put_item(Item: dict[str, Any]) -> None:
-            nonlocal put_item_invoked
-            put_item_invoked = True
-
-        mock_resource.return_value.Table.return_value.put_item = mock_put_item
+        mock_resource.return_value.Object.return_value.put = self.mock_put_item
 
         emit_metric("metric_name", metric)
 
-        self.assertFalse(put_item_invoked)
+        self.assertTrue(self.emitted_metric["did_not_emit"])
 
-    @mock.patch("boto3.Session.resource")
     def test_no_metrics_emitted_if_required_env_var_set_to_empty_string(
         self, mock_resource: Any
     ) -> None:
@@ -289,19 +254,13 @@ class TestUploadStats(unittest.TestCase):
             },
         ).start()
 
-        put_item_invoked = False
-
-        def mock_put_item(Item: dict[str, Any]) -> None:
-            nonlocal put_item_invoked
-            put_item_invoked = True
-
-        mock_resource.return_value.Table.return_value.put_item = mock_put_item
+        mock_resource.return_value.Object.return_value.put = self.mock_put_item
 
         emit_metric("metric_name", metric)
 
-        self.assertFalse(put_item_invoked)
+        self.assertTrue(self.emitted_metric["did_not_emit"])
 
-    def test_upload_to_rockset_batch_size(self) -> None:
+    def test_upload_to_rockset_batch_size(self, _mocked_resource: Any) -> None:
         cases = [
             {
                 "batch_size": BATCH_SIZE - 1,
@@ -331,6 +290,29 @@ class TestUploadStats(unittest.TestCase):
             self.assertEqual(
                 mock_client.Documents.add_documents.call_count,
                 expected_number_of_requests,
+            )
+
+    def test_remove_nan_inf(self, _mocked_resource: Any) -> None:
+        checks = [
+            (float("inf"), '"inf"', "Infinity"),
+            (float("nan"), '"nan"', "NaN"),
+            ({1: float("inf")}, '{"1": "inf"}', '{"1": Infinity}'),
+            ([float("nan")], '["nan"]', "[NaN]"),
+            ({1: [float("nan")]}, '{"1": ["nan"]}', '{"1": [NaN]}'),
+        ]
+
+        for input, clean, unclean in checks:
+            clean_output = json.dumps(remove_nan_inf(input))
+            unclean_output = json.dumps(input)
+            self.assertEqual(
+                clean_output,
+                clean,
+                f"Expected {clean} when input is {unclean}, got {clean_output}",
+            )
+            self.assertEqual(
+                unclean_output,
+                unclean,
+                f"Expected {unclean} when input is {unclean}, got {unclean_output}",
             )
 
 
