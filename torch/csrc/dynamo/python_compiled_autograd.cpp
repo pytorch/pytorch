@@ -571,7 +571,7 @@ static PyObject* call_lambda(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
-static bool fallback_on_error = true;
+static bool fallback_on_error = false;
 static PyObject* set_fallback_on_error(PyObject* dummy, PyObject* args) {
   HANDLE_TH_ERRORS;
   PyObject* enable = nullptr;
