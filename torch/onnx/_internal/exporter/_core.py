@@ -728,13 +728,17 @@ def _insert_flatten_between_transpose_and_view(exported_program):
     graph = exported_program.graph_module.graph
     for node in graph.nodes:
         if (node.op != "call_method" or node.target != "transpose") and (
-            node.op != "call_function" or node.target.name() != "aten::transpose.int"
+            node.op != "call_function"
+            or not hasattr(node.target, "name")
+            or node.target.name() != "aten::transpose.int"
         ):
             continue
         insert = False
         for user in node.users:
             if (user.op == "call_method" and user.target == "view") or (
-                user.op == "call_function" and user.target.name() == "aten::view"
+                user.op == "call_function"
+                and hasattr(node.target, "name")
+                and user.target.name() == "aten::view"
             ):
                 insert = True
                 break
