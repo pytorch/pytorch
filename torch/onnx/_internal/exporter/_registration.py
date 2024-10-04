@@ -18,17 +18,17 @@ import math
 import operator
 import types
 import typing
-from typing import Callable, Literal, Mapping, Union
+from typing import Callable, Literal, Union
 from typing_extensions import TypeAlias
 
 import torch
 import torch._ops
+from torch.onnx._internal._lazy_import import onnxscript_apis
 from torch.onnx._internal.exporter import _schemas
 
 
 if typing.TYPE_CHECKING:
     import onnxscript
-    from onnxscript.function_libs.torch_lib import registration as torchlib_registration
 
 _DEFAULT_OPSET_VERSION = 18
 
@@ -49,7 +49,7 @@ class OnnxDecompMeta:
     device: The device the function is registered to. If None, it is registered to all devices.
     """
 
-    onnx_function: onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction
+    onnx_function: Callable
     fx_target: TorchOp
     is_custom: bool = False
     is_complex: bool = False
@@ -135,24 +135,21 @@ class ONNXRegistry:
         return self._opset_version
 
     @classmethod
-    def from_torchlib(
-        cls,
-        torchlib_registry: Mapping[str, torchlib_registration.OverloadedFunction]
-        | None = None,
-    ) -> ONNXRegistry:
+    def from_torchlib(cls) -> ONNXRegistry:
         """Populates the registry with ATen functions from torchlib.
 
         Args:
             torchlib_registry: The torchlib registry to use for populating the registry.
         """
         registry = cls()
-        if torchlib_registry is None:
-            from onnxscript.function_libs.torch_lib import (
-                registration as torchlib_registration,
-            )
 
-            torchlib_registry = torchlib_registration.default_registry  # type: ignore[assignment]
-        for qualified_name, aten_overloads_func in torchlib_registry.items():  # type: ignore[union-attr]
+        torchlib_ops = onnxscript_apis.get_torchlib_ops()
+
+        for meta in torchlib_ops:
+            qualified_name = meta.qualified_name
+            overload_func = meta.function
+            domain = meta.domain
+            name = meta.name
             try:
                 # NOTE: This is heavily guarded with try-except because we don't want
                 # to fail the entire registry population if one function fails.
@@ -162,33 +159,19 @@ class ONNXRegistry:
                 target = _get_overload(qualified_name)
                 if target is None:
                     continue
-                for overload_func in aten_overloads_func.overloads:
-                    overload_func.signature = _schemas.OpSignature.from_function(
-                        overload_func,
-                        overload_func.function_ir.domain,
-                        overload_func.name,
-                    )
-                    onnx_decomposition = OnnxDecompMeta(
-                        onnx_function=overload_func,
-                        fx_target=target,
-                        is_custom=False,
-                        is_complex=False,
-                    )
-                    registry._register(target, onnx_decomposition)
 
-                for complex_func in aten_overloads_func.complex:
-                    overload_func.signature = _schemas.OpSignature.from_function(
-                        overload_func,
-                        overload_func.function_ir.domain,
-                        overload_func.name,
-                    )
-                    onnx_decomposition = OnnxDecompMeta(
-                        onnx_function=complex_func,
-                        fx_target=target,
-                        is_custom=False,
-                        is_complex=True,
-                    )
-                    registry._register(target, onnx_decomposition)
+                overload_func.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
+                    overload_func,
+                    domain,
+                    name,
+                )
+                onnx_decomposition = OnnxDecompMeta(
+                    onnx_function=overload_func,
+                    fx_target=target,
+                    is_custom=False,
+                    is_complex=meta.is_complex,
+                )
+                registry._register(target, onnx_decomposition)
             except Exception:
                 logger.exception("Failed to register '%s'. Skipped", qualified_name)
                 continue

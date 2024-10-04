@@ -12,6 +12,9 @@ class RunConstGraph(HigherOrderOperator):
     def __init__(self):
         super().__init__("run_const_graph")
 
+    def __call__(self, *args):
+        return super().__call__(*args)
+
 
 run_const_graph = RunConstGraph()
 

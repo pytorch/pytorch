@@ -4,8 +4,8 @@ from typing import cast, List, NamedTuple, Optional, Tuple, Union
 import torch
 import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
-from torch.distributed._tensor import DTensor
 from torch.distributed.distributed_c10d import ReduceOp
+from torch.distributed.tensor import DTensor
 
 from ._fsdp_common import (
     _get_dim0_padded_size,

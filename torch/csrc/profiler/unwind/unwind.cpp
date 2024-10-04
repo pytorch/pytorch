@@ -7,29 +7,29 @@
     !__has_include("ext/stdio_filebuf.h")
 namespace torch::unwind {
 std::vector<void*> unwind() {
-  TORCH_CHECK(
-      false,
+  TORCH_WARN_ONCE(
       "record_context_cpp is not support on non-linux non-x86_64 platforms");
+  return {};
 }
 
 std::optional<std::pair<std::string, uint64_t>> libraryFor(void* addr) {
-  TORCH_CHECK(
-      false,
+  TORCH_WARN_ONCE(
       "record_context_cpp is not support on non-linux non-x86_64 platforms");
+  return {};
 }
 
 #ifndef FBCODE_CAFFE2
 std::vector<Frame> symbolize(const std::vector<void*>& frames, Mode mode) {
-  TORCH_CHECK(
-      false,
+  TORCH_WARN_ONCE(
       "record_context_cpp is not support on non-linux non-x86_64 platforms");
+  return {};
 }
 #endif
 
 Stats stats() {
-  TORCH_CHECK(
-      false,
+  TORCH_WARN_ONCE(
       "record_context_cpp is not support on non-linux non-x86_64 platforms");
+  return {};
 }
 
 } // namespace torch::unwind
