@@ -32,6 +32,7 @@ from .. import config
 from .autograd_cache import (
     AOTAutogradCache,
     AOTAutogradCacheEntry,
+    autograd_cache_enabled,
     CompiledBackward,
     CompiledForward,
 )
@@ -195,7 +196,7 @@ def aot_dispatch_base(
         compiled_fw, aot_config, runtime_metadata=fw_metadata
     )
     cache_info = aot_config.cache_info
-    if config.enable_autograd_cache and cache_info:
+    if autograd_cache_enabled() and cache_info:
         if fw_key := getattr(compiled_fw, "_fx_graph_cache_key", None):
             time_taken_ns = time.time_ns() - cache_info.start_time_ns
             entry = AOTAutogradCacheEntry(
@@ -736,7 +737,7 @@ def aot_dispatch_autograd(
 
     try_save_cache_entry: Optional[Callable] = None
 
-    if config.enable_autograd_cache:
+    if autograd_cache_enabled():
         cache_info = aot_config.cache_info
         if cache_info is not None:
             forward_time_taken_ns = time.time_ns() - cache_info.start_time_ns
