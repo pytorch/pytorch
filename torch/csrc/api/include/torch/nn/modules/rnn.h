@@ -303,7 +303,7 @@ class TORCH_API RNNCellImpl : public detail::RNNCellImplBase<RNNCellImpl> {
       : RNNCellImpl(RNNCellOptions(input_size, hidden_size)) {}
   explicit RNNCellImpl(const RNNCellOptions& options_);
 
-  Tensor forward(const Tensor& input, Tensor hx = {});
+  Tensor forward(const Tensor& input, const Tensor& hx = {});
 
  protected:
   FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(Tensor())})
@@ -381,7 +381,7 @@ class TORCH_API GRUCellImpl : public detail::RNNCellImplBase<GRUCellImpl> {
       : GRUCellImpl(GRUCellOptions(input_size, hidden_size)) {}
   explicit GRUCellImpl(const GRUCellOptions& options_);
 
-  Tensor forward(const Tensor& input, Tensor hx = {});
+  Tensor forward(const Tensor& input, const Tensor& hx = {});
 
  protected:
   FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(Tensor())})

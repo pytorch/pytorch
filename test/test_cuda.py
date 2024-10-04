@@ -221,13 +221,27 @@ class TestCuda(TestCase):
         device_capability_no_argument = torch.cuda.get_device_capability()
         self.assertEqual(current_device_capability, device_capability_no_argument)
 
+    def test_cuda_get_device_properties(self):
+        # Testing the behaviour with None as an argument
+        current_device = torch.cuda.current_device()
+        current_device_properties = torch.cuda.get_device_properties(current_device)
+        device_properties_None = torch.cuda.get_device_properties(None)
+        self.assertEqual(current_device_properties, device_properties_None)
+
+        # Testing the behaviour for No argument
+        device_properties_no_argument = torch.cuda.get_device_properties()
+        self.assertEqual(current_device_properties, device_properties_no_argument)
+
+    @unittest.skipIf(
+        IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
+    )
     def test_out_of_memory(self):
         tensor = torch.zeros(1024, device="cuda")
 
         oom_regex = (
             "would exceed allowed memory"
             if TEST_CUDAMALLOCASYNC
-            else "Tried to allocate 800000000.00 GiB"
+            else f"Tried to allocate 800000000.00 GiB. GPU {tensor.device.index} has a total capacity of"
         )
         with self.assertRaisesRegex(RuntimeError, oom_regex):
             torch.empty(1024 * 1024 * 1024 * 800000000, dtype=torch.int8, device="cuda")
@@ -647,6 +661,9 @@ class TestCuda(TestCase):
             device_index=stream.device_index,
             device_type=stream.device_type,
         )
+        self.assertIsInstance(cuda_stream, torch.Stream)
+        self.assertTrue(issubclass(type(cuda_stream), torch.Stream))
+        self.assertTrue(torch.Stream in type(cuda_stream).mro())
         self.assertEqual(stream.stream_id, cuda_stream.stream_id)
         self.assertNotEqual(stream.stream_id, torch.cuda.current_stream().stream_id)
 
@@ -669,6 +686,10 @@ class TestCuda(TestCase):
         self.assertNotEqual(event1.event_id, event2.event_id)
         self.assertEqual(c_cuda.cpu(), a + b)
         self.assertTrue(event1.elapsed_time(event2) > 0)
+        cuda_event = torch.cuda.Event()
+        self.assertIsInstance(cuda_event, torch.Event)
+        self.assertTrue(issubclass(type(cuda_event), torch.Event))
+        self.assertTrue(torch.Event in type(cuda_event).mro())
 
     def test_record_stream(self):
         cycles_per_ms = get_cycles_per_ms()
@@ -3579,7 +3600,8 @@ class TestCudaMallocAsync(TestCase):
         torch.cuda.memory.empty_cache()
         mb = 1024 * 1024
         _, all_memory = torch.cuda.memory.mem_get_info()
-        total_allowed = 120 * mb
+        pre_reserved = torch.cuda.memory_reserved()
+        total_allowed = 120 * mb + pre_reserved
         fraction_allowed = total_allowed / all_memory
         assert int(fraction_allowed * all_memory) == total_allowed
         torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
@@ -3609,7 +3631,8 @@ class TestCudaMallocAsync(TestCase):
         torch.cuda.memory.empty_cache()
         mb = 1024 * 1024
         _, all_memory = torch.cuda.memory.mem_get_info()
-        total_allowed = 120 * mb
+        pre_reserved = torch.cuda.memory_reserved()
+        total_allowed = 120 * mb + pre_reserved
         fraction_allowed = total_allowed / all_memory
         assert int(fraction_allowed * all_memory) == total_allowed
         torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
@@ -5073,7 +5096,7 @@ class TestCudaAutocast(TestAutocast):
 
         dtypes = (torch.float16, torch.bfloat16) if TEST_BF16 else (torch.float16,)
         for dtype in dtypes:
-            with torch.cuda.amp.autocast(dtype=dtype):
+            with torch.autocast(device_type="cuda", dtype=dtype):
                 output = mymm(x, y)
                 self.assertTrue(output.dtype is dtype)
                 loss = output.sum()

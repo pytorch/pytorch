@@ -83,8 +83,8 @@ class TestMemoryPlanning(TestCase):
         try:
             from .test_aot_inductor import AOTIRunnerUtil
         except ImportError:
-            from test_aot_inductor import (
-                AOTIRunnerUtil,  # @manual=fbcode//caffe2/test/inductor:test_aot_inductor-library
+            from test_aot_inductor import (  # @manual=fbcode//caffe2/test/inductor:test_aot_inductor-library
+                AOTIRunnerUtil,
             )
 
         f, args = self._generate(device="cuda")
