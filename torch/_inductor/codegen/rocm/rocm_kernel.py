@@ -152,10 +152,9 @@ class ROCmTemplateKernel(ROCmKernel):
             kernel_args.append(arg)
 
         # add size args
-        size_args =  [
-                f"{V.graph.sizevars.simplify(sarg)}"
-                for sarg in node.template.size_args()
-            ]
+        size_args = [
+            f"{V.graph.sizevars.simplify(sarg)}" for sarg in node.template.size_args()
+        ]
         if V.graph.cpp_wrapper:
             kernel_args.extend(size_args)
         else:
@@ -175,7 +174,9 @@ class ROCmTemplateKernel(ROCmKernel):
                 node.get_workspace_size(), V.graph.scheduler.current_device, False
             )
             data_ptr = "workspace.data_ptr()"
-            kernel_args.append(data_ptr if V.graph.cpp_wrapper else f"c_void_p({data_ptr})")
+            kernel_args.append(
+                data_ptr if V.graph.cpp_wrapper else f"c_void_p({data_ptr})"
+            )
         else:
             kernel_args.append("nullptr" if V.graph.cpp_wrapper else "None")
         if V.graph.cpp_wrapper:
