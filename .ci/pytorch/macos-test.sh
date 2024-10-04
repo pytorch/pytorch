@@ -174,25 +174,25 @@ torchbench_setup_macos() {
 
 
 test_torchbench_perf() {
-  echo $(pwd)
-  ls -a
-  echo "ls complete"
-  ls .github
   print_cmake_info
 
   echo "Launching torchbench setup"
+  cd ..
   torchbench_setup_macos
+  pushd torchbench
 
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir $TEST_REPORTS_DIR
 
   echo "Setup complete, launching torchbench performance run"
-  pytest torchbench/test_bench.py --mps_only --ignore_machine_config --benchmark-autosave
+  pytest test_bench.py --mps_only --ignore_machine_config --benchmark-autosave
 
   echo "Pytorch benchmark on mps device completed"
   # TEMP_DEBUG
   cat ${TEST_REPORTS_DIR}/torchbench_training.csv
   cat ${TEST_REPORTS_DIR}/torchbench_inference.csv
+  popd torchbench
+  cd pytorch
 }
 
 test_hf_perf() {
