@@ -416,6 +416,7 @@ class TestSerialize(TestCase):
         self.assertEqual(node.inputs[3].name, "side")
         self.assertEqual(node.inputs[3].arg.as_string, "right")
 
+    @skipIfCrossRef  # Doesn't support serializing methods (+ is a method when dispatched via torch function)
     def test_canonicalize(self) -> None:
         class Module(torch.nn.Module):
             def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
