@@ -6583,6 +6583,34 @@ def forward(self, x, b_t, y):
                 ep.graph_module.code,
             )
 
+    # T203671967
+    @testing.expectedFailureRetraceability  # autocast nodes not created after re-tracing
+    def test_export_with_autocast(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                with torch.autocast(
+                    device_type="cuda", dtype=torch.int16, enabled=True
+                ):
+                    y = x.sin().sum()
+                with torch.autocast(
+                    device_type="cpu", dtype=torch.float64, enabled=True
+                ):
+                    z = y.sin().sum()
+                return z
+
+        model = Model()
+        ep = export(model, (torch.randn(4, 4),), {})
+        # _export_for_traininig is using pre_dispatch=False
+        # Therefore the autocast calls are not replaced with a hop.
+        # non_strict doesn't have autocast nodes
+        if not is_non_strict_test(self._testMethodName) and not is_training_ir_test(
+            self._testMethodName
+        ):
+            self.assertIn(
+                "torch.ops.higher_order.wrap_with_autocast",
+                ep.graph_module.code,
+            )
+
     def test_export_as_backend(self):
         def f(x, y):
             return x + y
