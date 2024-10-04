@@ -4413,13 +4413,9 @@ class TestAutograd(TestCase):
         def hook(*args, **kwargs):
             executed.append("B")
 
-        x = torch.randn(
-            (3, 3), dtype=torch.bfloat16, device="cuda", requires_grad=True
-        )
+        x = torch.randn((3, 3), dtype=torch.bfloat16, device="cuda", requires_grad=True)
         x = HookFunction.apply(x)
-        w = torch.randn(
-            (3, 3), dtype=torch.bfloat16, device="cuda", requires_grad=True
-        )
+        w = torch.randn((3, 3), dtype=torch.bfloat16, device="cuda", requires_grad=True)
         w.register_hook(hook)
         o = Matmul.apply(x, w)
         o.sum().backward()

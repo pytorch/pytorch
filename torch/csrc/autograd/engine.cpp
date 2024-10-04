@@ -1110,7 +1110,6 @@ void Engine::evaluate_function(
           next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
 
       if (is_ready) {
-        // NB: The first forward output's device determines the queue
         auto queue = ready_queue(cpu_ready_queue, next.function->device());
         queue->push(
             NodeTask(graph_task, next.function, std::move(input_buffer)));
