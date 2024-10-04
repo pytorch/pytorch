@@ -398,6 +398,7 @@ class CppWrapperGpu(CppWrapperCpu):
             if V.graph.aot_mode
             else self.write_get_raw_stream(device_index, V.graph)
         )
+
         if triton:
             device_index, call_args = self.prepare_triton_kernel_call(
                 device_index, call_args
