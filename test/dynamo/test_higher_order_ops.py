@@ -6240,7 +6240,7 @@ class GraphModule(torch.nn.Module):
         actual = opt(x, 0), opt(x, 1), opt(x, 2)
         self.assertEqual(expected, actual)
         self.assertEqual(cnt.frame_count, 3)
-        self.assertEqual(cnt.op_count, 21)
+        self.assertEqual(cnt.op_count, 18)
 
     def test_vmap_multiple_invocation_out_dims(self):
         counters.clear()
