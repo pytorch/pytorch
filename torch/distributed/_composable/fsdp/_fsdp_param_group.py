@@ -433,9 +433,6 @@ class FSDPParamGroup:
             # have mistargeted prefetches if not all modules used in forward
             # are used in this backward
             target_fsdp_param_group = self.comm_ctx.post_forward_order[target_index]
-            if not target_fsdp_param_group._reshard_after_forward:
-                # Skip to avoid unintentional unshard after reshard in backward
-                return
             self._prefetch_unshard(target_fsdp_param_group, "backward")
 
     @staticmethod
