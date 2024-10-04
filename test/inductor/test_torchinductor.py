@@ -1638,7 +1638,7 @@ class CommonTemplate:
             (
                 torch.randn(8, device=self.device),
                 torch.tensor([True, False, True], device=self.device),
-                [torch.tensor([3, 9, -2], device=self.device)],
+                [torch.tensor([3, 9, 2], device=self.device)],
             ),
         )
 
@@ -1651,7 +1651,7 @@ class CommonTemplate:
             (
                 torch.randn(8, device=self.device),
                 torch.tensor([True, False, True], device=self.device),
-                [torch.tensor([3, 9, -2], device=self.device)],
+                [torch.tensor([3, 9, 2], device=self.device)],
                 torch.randn(3, device=self.device),
             ),
         )
