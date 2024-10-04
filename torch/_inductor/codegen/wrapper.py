@@ -462,6 +462,7 @@ class PythonWrapperCodegen(CodeGen):
         self.wrapper_call = IndentedBuffer()
         self.kernel_autotune_defs = IndentedBuffer()
         self.kernel_autotune_calls = IndentedBuffer()
+        self.subgraph_definitions = IndentedBuffer()
         self.kernel_autotune_names: Set[str] = set()
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
@@ -898,6 +899,9 @@ class PythonWrapperCodegen(CodeGen):
         if V.graph.aot_mode and V.graph.cpp_wrapper and V.graph.is_const_graph:
             result = IndentedBuffer()
 
+        # Add subgraph definitions to the result
+        result.splice(self.subgraph_definitions)
+
         with contextlib.ExitStack() as stack:
             stack.enter_context(self.wrapper_call.indent())
             if config.profiler_mark_wrapper_call:
@@ -1280,7 +1284,7 @@ class PythonWrapperCodegen(CodeGen):
             self.kernel_autotune_defs.splice(body)
 
     def define_subgraph_launcher_fn(self, fn_code: str):
-        self.header.splice(fn_code)
+        self.subgraph_definitions.splice(fn_code)
 
     def define_user_defined_triton_kernel(self, kernel, configs, kwargs):
         from torch.utils._triton import patch_triton_dtype_repr
@@ -1986,6 +1990,20 @@ class PythonWrapperCodegen(CodeGen):
                 f"{outer_output} = {inner_output.codegen_reference()}{self.ending}"
             )
 
+    def codegen_subgraph_call(self, subgraph, outer_inputs, outer_outputs):
+        # Get the input and output names of the subgraph
+        inner_inputs = ", ".join(subgraph.graph.graph_input_names)
+        if len(subgraph.graph.graph_input_names) == 1:
+            inner_inputs += ","
+
+        output_names = subgraph.graph.get_output_names()
+        inner_outputs = ", ".join(output_names)
+        if len(output_names) == 1:
+            inner_outputs += ","
+
+        # Call the subgraph launcher function
+        self.writeline(f"({inner_outputs}) = {subgraph.graph.name}([{inner_inputs}])")
+
     def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
         try:
             self.push_codegened_graph(subgraph.graph)
@@ -1996,7 +2014,7 @@ class PythonWrapperCodegen(CodeGen):
             parent_graph = V.graph
             subgraph.graph.cpp_wrapper = parent_graph.cpp_wrapper
 
-            if subgraph.graph.name not in self.already_codegened_subgraphs:
+            if True or subgraph.graph.name not in self.already_codegened_subgraphs:
                 # If its codegened, the parent wrapper already has subgraph fn by name subgraph.graph.name
                 with V.set_graph_handler(subgraph.graph):
                     # Call the codegen of subgraph recursively
@@ -2005,20 +2023,7 @@ class PythonWrapperCodegen(CodeGen):
                     self.already_codegened_subgraphs.add(subgraph.graph.name)
                     self.define_subgraph_launcher_fn(subgraph_code)
 
-            # Get the input and output names of the subgraph
-            inner_inputs = ", ".join(subgraph.graph.graph_input_names)
-            if len(subgraph.graph.graph_input_names) == 1:
-                inner_inputs += ","
-
-            output_names = subgraph.graph.get_output_names()
-            inner_outputs = ", ".join(output_names)
-            if len(output_names) == 1:
-                inner_outputs += ","
-
-            # Call the subgraph launcher function
-            self.writeline(
-                f"({inner_outputs}) = {subgraph.graph.name}([{inner_inputs}])"
-            )
+            self.codegen_subgraph_call(subgraph, outer_inputs, outer_outputs)
 
             self.codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
         finally:

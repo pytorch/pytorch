@@ -63,17 +63,24 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.used_cached_devices = set()
         self.used_cached_dtypes = set()
         self.used_cached_layouts = set()
+        self.written_cached_devices = set()
+        self.written_cached_dtypes = set()
+        self.written_cached_layouts = set()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
         self.expr_printer = cexpr
+        self.inductor_entry_name = None
+        self.set_inductor_entry_name()
 
     @staticmethod
     def create(is_subgraph, subgraph_name, parent_wrapper):
-        # TODO(anijain2305) - Need to make changes in this wrapper for subgraphs
         if is_subgraph:
-            raise NotImplementedError("codegen not implemented for subgraphs")
+            return SubgraphCppWrapperCpu(subgraph_name, parent_wrapper)
         return CppWrapperCpu()
+
+    def set_inductor_entry_name(self):
+        self.inductor_entry_name = "inductor_entry_impl"
 
     def generate_kernel_call(
         self,
@@ -403,6 +410,31 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 gen_check("input_handles", idx, name, tensor)
         self.prefix.writeline("}")
 
+    def write_release_gil(self):
+        self.prefix.splice("py::gil_scoped_release release;")
+
+    def write_wrapper_signature(self):
+        self.prefix.splice(
+            f"""
+            void {self.inductor_entry_name}(
+                AtenTensorHandle*
+                    input_handles, // array of input AtenTensorHandle; handles
+                                    // are stolen; the array itself is borrowed
+                AtenTensorHandle*
+                    output_handles  // array for writing output AtenTensorHandle; handles
+                                    // will be stolen by the caller; the array itself is
+                                    // borrowed)
+            ) {{
+            """
+        )
+
+    def write_non_abi_compatible_stealing_from_handles(self, num_args):
+        self.prefix.splice(
+            f"""
+                auto inputs = alloc_tensors_by_stealing_from_handles(input_handles, {num_args});
+            """
+        )
+
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
         if V.graph.aot_mode:
@@ -519,19 +551,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     self.prefix.splice(run_impl_proto)
         else:
             # cpp entry function for JIT with cpp wrapper
-            self.prefix.splice(
-                """
-                void inductor_entry_impl(
-                    AtenTensorHandle*
-                        input_handles, // array of input AtenTensorHandle; handles
-                                        // are stolen; the array itself is borrowed
-                    AtenTensorHandle*
-                        output_handles  // array for writing output AtenTensorHandle; handles
-                                        // will be stolen by the caller; the array itself is
-                                        // borrowed)
-                ) {
-                """
-            )
+            self.write_wrapper_signature()
         with self.prefix.indent():
             # assign inputs and outputs in both cases so the later codegen can be simplified
             if not config.use_minimal_arrayref_interface:
@@ -542,7 +562,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         # Weights are promoted in the JIT mode
                         num_args = len(V.graph.graph_inputs) + len(V.graph.constants)
                         # release GIL to support multiple instances inference (in different threads of the same process)
-                        self.prefix.splice("py::gil_scoped_release release;")
+                        self.write_release_gil()
 
                     if config.abi_compatible:
                         self.prefix.splice(
@@ -552,11 +572,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         )
                     else:
                         # This looks dumb, but can avoid creating two versions of code in the AOTInductor runtime.
-                        self.prefix.splice(
-                            f"""
-                                auto inputs = alloc_tensors_by_stealing_from_handles(input_handles, {num_args});
-                            """
-                        )
+                        self.write_non_abi_compatible_stealing_from_handles(num_args)
 
             if inputs_len != 0:
                 for idx, input_key in enumerate(V.graph.graph_inputs.keys()):
@@ -944,14 +960,18 @@ class CppWrapperCpu(PythonWrapperCodegen):
         return super().generate(is_inference)
 
     def finalize_prefix(self):
+        # Subgraph finalize_prefix might already insert the CACHE_TORCH_* lines.
         cached_dtypes_buffer = IndentedBuffer()
         if config.abi_compatible:
-            for dtype in self.used_cached_dtypes:
+            for dtype in self.used_cached_dtypes - self.written_cached_dtypes:
                 cached_dtypes_buffer.writeline(f"CACHE_TORCH_DTYPE({dtype});")
-            for device in self.used_cached_devices:
+                self.written_cached_dtypes.add(dtype)
+            for device in self.used_cached_devices - self.written_cached_devices:
                 cached_dtypes_buffer.writeline(f"CACHE_TORCH_DEVICE({device});")
-            for layout in self.used_cached_layouts:
+                self.written_cached_devices.add(device)
+            for layout in self.used_cached_layouts - self.written_cached_layouts:
                 cached_dtypes_buffer.writeline(f"CACHE_TORCH_LAYOUT({layout});")
+                self.written_cached_layouts.add(layout)
         cached_dtypes_buffer.splice(self.prefix)
         self.prefix = cached_dtypes_buffer
 
@@ -1141,22 +1161,24 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     # See NOTE(return_constant) above.
                 else:
                     output_expr = output
-                self.wrapper_call.writeline(
-                    f"output_handles[{idx}] = reinterpret_cast<AtenTensorHandle>("
-                    + f"new at::Tensor({output_expr}));"
-                )
-
+                self.write_for_non_abi_compatible_output_handle_line(idx, output_expr)
             if output not in output2idx:
                 output2idx[output] = idx
         if arr_iface:
             self.wrapper_call.writeline("return output_arrayref_tensors;")
+
+    def write_for_non_abi_compatible_output_handle_line(self, idx, output_expr):
+        self.wrapper_call.writeline(
+            f"output_handles[{idx}] = reinterpret_cast<AtenTensorHandle>("
+            + f"new at::Tensor({output_expr}));"
+        )
 
     def generate_before_suffix(self, result):
         if not V.graph.is_const_graph:
             if V.graph.aot_mode:
                 result.writeline("} // AOTInductorModel::run_impl")
             else:
-                result.writeline("} // inductor_entry_impl")
+                result.writeline(f"}} // {self.inductor_entry_name}")
 
     def generate_end(self, result):
         if V.graph.aot_mode:
@@ -1829,12 +1851,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 # (inner_input) in the nested scope. we can't std::move here, as the codegened
                 # outer input may be an expression / rvalue (e.g., reinterpret_view(x)), so we
                 # can't necessarily std::move it back to the origin (x).
-                self.writeline(f"AtenTensorHandle {inner_input}_handle;")
+                self.writeline(f"AtenTensorHandle {inner_input};")
+
+                # Since we use recursive codegen, we just pass on the
+                # ATenTensorHandle pointers to the subgraph call.
                 self.writeline(
-                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors_out({outer_input}, &{inner_input}_handle));"
-                )
-                self.writeline(
-                    f"RAIIAtenTensorHandle {inner_input}({inner_input}_handle);"
+                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors_out({outer_input}, &{inner_input}));"
                 )
             else:
                 self.writeline(
@@ -1842,10 +1864,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 )
 
     def codegen_subgraph_suffix(self, subgraph, outer_inputs, outer_outputs):
-        for inner_output, outer_output in zip(
-            subgraph.graph.graph_outputs, outer_outputs
+        for idx, (inner_output, outer_output) in enumerate(
+            zip(subgraph.graph.graph_outputs, outer_outputs)
         ):
-            src = inner_output.codegen_reference()
+            src = f"{subgraph.graph.name}_outputs[{idx}]"
             if config.abi_compatible:
                 # in ABI-compatible mode, we need to std::move subgraph output (inner_output)
                 # to the conditional output (outer_output), as RAIIAtenTensorHandle's copy
@@ -1854,7 +1876,36 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 # in case the outer_output carried a value
                 # before (e.g., in the while_loop codegen)
                 self.writeline(f"{outer_output}.reset();")
+
             self.writeline(f"{outer_output} = {src}{self.ending}")
+
+            self.writeline(f"{subgraph.graph.name}_inputs.clear();")
+            self.writeline(f"{subgraph.graph.name}_outputs.clear();")
+
+    def codegen_subgraph_call(self, subgraph, outer_inputs, outer_outputs):
+        subgraph_name = subgraph.graph.name
+
+        inputs = ", ".join(subgraph.graph.graph_input_names)
+        if config.abi_compatible:
+            self.writeline(
+                f"std::vector<AtenTensorHandle> {subgraph_name}_inputs{{{inputs}}};"
+            )
+            self.writeline(
+                f"std::vector<AtenTensorHandle> {subgraph_name}_outputs({len(outer_outputs)});"
+            )
+            self.writeline(
+                f"{subgraph_name}({subgraph_name}_inputs.data(), {subgraph_name}_outputs.data());"
+            )
+        else:
+            self.writeline(
+                f"std::vector<at::Tensor> {subgraph_name}_inputs{{{inputs}}};"
+            )
+            self.writeline(
+                f"std::vector<at::Tensor> {subgraph_name}_outputs({len(outer_outputs)});"
+            )
+            self.writeline(
+                f"{subgraph_name}({subgraph_name}_inputs, {subgraph_name}_outputs);"
+            )
 
     def codegen_conditional(self, conditional):
         name = conditional.get_name()
@@ -2588,3 +2639,72 @@ if (py_{buf_name}.get() == NULL) {{
             )
         else:
             return "", ""
+
+
+class SubgraphCppWrapperCpu(CppWrapperCpu):
+    def __init__(self, subgraph_name, parent_wrapper):
+        self.subgraph_name = subgraph_name
+        self.parent_wrapper = parent_wrapper
+        super().__init__()
+
+    def set_inductor_entry_name(self):
+        self.inductor_entry_name = self.subgraph_name
+
+    def write_header(self):
+        pass
+
+    def generate_end(self, result):
+        pass
+
+    def add_benchmark_harness(self, output):
+        pass
+
+    def benchmark_compiled_module(self, output):
+        pass
+
+    def write_release_gil(self):
+        pass
+
+    def write_wrapper_signature(self):
+        if config.abi_compatible:
+            super().write_wrapper_signature()
+        else:
+            self.prefix.splice(
+                f"""
+                void {self.inductor_entry_name}(
+                    std::vector<at::Tensor>& inputs,
+                    std::vector<at::Tensor>& outputs
+                ) {{
+                """
+            )
+
+    def write_for_non_abi_compatible_output_handle_line(self, idx, output_expr):
+        # TODO(anijain2305) - Do we need a new at::Tensor here?
+        self.wrapper_call.writeline(f"outputs[{idx}] = {output_expr};")
+
+    def write_non_abi_compatible_stealing_from_handles(self, num_args):
+        pass
+
+    def finalize_prefix(self):
+        # We write the CACHE_TORCH_* lines for subgraphs, while parent_wrapper
+        # keeps track of written lines. The future subgraphs rely on the
+        # parent_wrapper to find the already inserted lines.
+        cached_dtypes_buffer = IndentedBuffer()
+        if config.abi_compatible:
+            for dtype in (
+                self.used_cached_dtypes - self.parent_wrapper.written_cached_dtypes
+            ):
+                cached_dtypes_buffer.writeline(f"CACHE_TORCH_DTYPE({dtype});")
+                self.parent_wrapper.written_cached_dtypes.add(dtype)
+            for device in (
+                self.used_cached_devices - self.parent_wrapper.written_cached_devices
+            ):
+                cached_dtypes_buffer.writeline(f"CACHE_TORCH_DEVICE({device});")
+                self.parent_wrapper.written_cached_devices.add(device)
+            for layout in (
+                self.used_cached_layouts - self.parent_wrapper.written_cached_layouts
+            ):
+                cached_dtypes_buffer.writeline(f"CACHE_TORCH_LAYOUT({layout});")
+                self.parent_wrapper.written_cached_layouts.add(layout)
+        cached_dtypes_buffer.splice(self.prefix)
+        self.prefix = cached_dtypes_buffer
