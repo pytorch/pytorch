@@ -48,11 +48,11 @@ def remove_assertion_nodes(graph_module: torch.fx.GraphModule) -> torch.fx.Graph
 
 
 def insert_flatten_between_transpose_and_view(exported_program):
-    """
-    Modifies the module inplace to insert a node 'flatten' between a node
-    'transpose' followed by a node 'view'.
+    """Modifies the module inplace to insert a node 'flatten' between a node 'transpose' followed by a node 'view'.
+
     The modification takes place inplace.
-    See issue https://github.com/pytorch/pytorch/issues/136543.
+
+    Remove after issue https://github.com/pytorch/pytorch/issues/136543 is fixed.
     """
     modified = False
     graph = exported_program.graph_module.graph
