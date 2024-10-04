@@ -507,13 +507,13 @@ static int THPVariable_subclass_clear(THPVariable* self) {
   return 0;
 }
 
-int THPFake_traverse(THPFunction* self, visitproc visit, void* arg) {
+int THPFake_traverse(THPVariable* self, visitproc visit, void* arg) {
   TORCH_INTERNAL_ASSERT(
       false, "TensorBase tp_traverse function was not overriden properly");
   return 0;
 }
 
-int THPFake_clear(THPFunction* self, visitproc visit, void* arg) {
+int THPFake_clear(THPVariable* self) {
   TORCH_INTERNAL_ASSERT(
       false, "TensorBase tp_clear function was not overriden properly");
   return 0;
