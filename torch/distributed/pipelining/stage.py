@@ -155,7 +155,6 @@ class _PipelineStageBase(ABC):
 
         # Forward infra
         self.args_recv_info: Dict[int, Tuple[InputInfo, ...]] = {}
-        self.set_requires_grad: Dict[int, bool] = {}
         self.act_send_info: Dict[int, List] = {}
 
         # Backward infra will created lazily
@@ -306,13 +305,6 @@ class _PipelineStageBase(ABC):
         for this stage.
         """
         recv_infos: Tuple[InputInfo, ...] = self.args_recv_info[fwd_chunk_id]
-
-        # In case there is backward pass, set requires_grad for receive buffers
-        # before first forward
-        if self.has_backward and not self.set_requires_grad[fwd_chunk_id]:
-            for a in recv_infos:
-                if isinstance(a, _RecvInfo):
-                    a.buffer.requires_grad_(True)
 
         return self._get_recv_ops(recv_infos)
 
@@ -563,19 +555,22 @@ class _PipelineStageBase(ABC):
     ):
         """
         Perform forward pass on the stage with one microbatch.
-        `args` and `kwargs` are the inputs from *external* to this stage. They
-        applies only to the first stage in most cases.
+        `args` and `kwargs` are the inputs from *external* to this stage.
+        As of Sept 2024:
+        - `args` applies to the first stage only, other stages receives args
+          through activation transmission.
+        - `kwargs` can be passed to all stages via respective `step` calls.
         """
 
         if self.is_first:
             # First stage doesn't need to receive anything
             composite_args = args
-            composite_kwargs = kwargs or {}
         else:
             # Receive activations for this chunk
             # Activations only come in args form
             composite_args = self._retrieve_recv_activations(fwd_chunk_id)
-            composite_kwargs = {}
+
+        composite_kwargs = kwargs or {}
 
         self._validate_fwd_input(args, kwargs)
 
@@ -690,7 +685,7 @@ class _PipelineStageBase(ABC):
 
                 # TODO: we dont need to save this, add to dw_runner?
                 self.backward_state[bwd_chunk_id] = (
-                    input_values,
+                    bwd_kwargs["input_values"],
                     param_groups,
                     bwd_kwargs["stage_output"],
                     bwd_kwargs["output_grads"],
@@ -752,8 +747,9 @@ class _PipelineStageBase(ABC):
 
         if len(kwargs):
             # TODO- need a mapping of kwarg to position in self.args_recv_info
-            # without it, we just validate shapes for args and ignore kwargs
-            expected_args = expected_args[: len(expected_args) - len(kwargs)]
+            # Without it, we are not 100% sure how to match the args and
+            # expected_args.
+            return
 
         # TODO- need a mapping of kwarg to position in self.args_recv_info
         # maybe it's impossible to tell whether the len mismatches because
@@ -856,11 +852,8 @@ class _PipelineStage(_PipelineStageBase):
         """
         Create send/recv infrastructures for activations (during forward)
         """
-        # Flag per chunk to keep track of whether we have set `requires_grad`
-        # for receive buffers. Format: {chunk : Boolean}
         for chunk in range(num_microbatches):
             self.args_recv_info[chunk] = self._create_act_recv_info()
-            self.set_requires_grad[chunk] = False
 
         # Send info during forward for each activation
         self.act_send_info = self._create_act_send_info()
@@ -913,6 +906,10 @@ class _PipelineStage(_PipelineStageBase):
                 example_value.dtype,
             )
             buffer = _make_tensor_from_meta(example_value, self.device)
+            # In case there is backward pass, set requires_grad for receive buffers
+            # before first forward
+            if self.has_backward:
+                buffer.requires_grad_(True)
 
             return _RecvInfo(
                 arg_node.name,
@@ -1315,7 +1312,6 @@ class PipelineStage(_PipelineStageBase):
         # Receive info during forward
         # TODO: create args_recv_info lazily? (same needed for PipelineStage)
         for chunk_id in range(num_microbatches):
-            self.set_requires_grad[chunk_id] = False
             if not self.is_first:
                 # We assume that we always receive from stage - 1
                 recv_infos = tuple(
@@ -1328,6 +1324,10 @@ class PipelineStage(_PipelineStageBase):
                         for inp in self.inputs_meta
                     ]
                 )
+                # In case there is backward pass, set requires_grad for receive buffers
+                if self.has_backward:
+                    for r in recv_infos:
+                        r.buffer.requires_grad_(True)
 
                 self.args_recv_info[chunk_id] = recv_infos
             else:

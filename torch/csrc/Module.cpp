@@ -738,6 +738,27 @@ PyObject* THPModule_userEnabledMathSDP(PyObject* _unused, PyObject* noargs) {
   else
     Py_RETURN_FALSE;
 }
+PyObject* THPModule_setAllowFP16BF16ReductionMathSDP(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_sdp_use_math expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setAllowFP16BF16ReductionMathSDP(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+PyObject* THPModule_allowFP16BF16ReductionMathSDP(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().allowFP16BF16ReductionMathSDP())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
 PyObject* THPModule_setSDPUseOverrideable(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -1362,6 +1383,14 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      METH_NOARGS,
      nullptr},
     {"_set_sdp_use_math", THPModule_setSDPUseMath, METH_O, nullptr},
+    {"_get_math_sdp_allow_fp16_bf16_reduction",
+     THPModule_allowFP16BF16ReductionMathSDP,
+     METH_NOARGS,
+     nullptr},
+    {"_set_math_sdp_allow_fp16_bf16_reduction",
+     THPModule_setAllowFP16BF16ReductionMathSDP,
+     METH_O,
+     nullptr},
     {"_get_overrideable_sdp_enabled",
      THPModule_userEnabledOverrideableSDP,
      METH_NOARGS,
@@ -2087,7 +2116,7 @@ Call this whenever a new thread is created in order to propagate values from
     auto device_type = at::getAccelerator();
     if (device_type.has_value()) {
       return at::globalContext()
-          .getAcceleratorHooksInterface(device_type.value())
+          .getAcceleratorHooksInterface(device_type)
           .deviceCount();
     }
     return c10::DeviceIndex(-1);
@@ -2099,7 +2128,7 @@ Call this whenever a new thread is created in order to propagate values from
         auto device_type = at::getAccelerator();
         if (device_type.has_value()) {
           at::globalContext()
-              .getAcceleratorHooksInterface(device_type.value())
+              .getAcceleratorHooksInterface(device_type)
               .setCurrentDevice(device_index);
         }
       });
@@ -2108,7 +2137,7 @@ Call this whenever a new thread is created in order to propagate values from
     auto device_type = at::getAccelerator();
     if (device_type.has_value()) {
       return at::globalContext()
-          .getAcceleratorHooksInterface(device_type.value())
+          .getAcceleratorHooksInterface(device_type)
           .getCurrentDevice();
     }
     return c10::DeviceIndex(-1);
@@ -2119,7 +2148,7 @@ Call this whenever a new thread is created in order to propagate values from
         auto device_type = at::getAccelerator();
         if (device_type.has_value()) {
           return at::globalContext()
-              .getAcceleratorHooksInterface(device_type.value())
+              .getAcceleratorHooksInterface(device_type)
               .exchangeDevice(device_index);
         }
         return c10::DeviceIndex(-1);
@@ -2131,7 +2160,7 @@ Call this whenever a new thread is created in order to propagate values from
         auto device_type = at::getAccelerator();
         if (device_type.has_value()) {
           return at::globalContext()
-              .getAcceleratorHooksInterface(device_type.value())
+              .getAcceleratorHooksInterface(device_type)
               .maybeExchangeDevice(device_index);
         }
         return c10::DeviceIndex(-1);
