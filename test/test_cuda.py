@@ -4407,6 +4407,13 @@ class TestMemPool(TestCase):
         # out tensor
         self.assertEqual(called_dummy_alloc.value, 123)
 
+        with torch.cuda.use_mem_pool(pool):
+            out_1 = torch.randn(1, device="cuda")
+
+        # pool should have 2 segments since we made two allocations above in
+        # in the same pool
+        self.assertEqual(len(pool.snapshot()), 2)
+
     def test_mempool_context(self):
         active_pool = torch.cuda.MemPoolContext.active_pool()
 
