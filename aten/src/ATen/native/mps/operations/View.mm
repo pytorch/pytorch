@@ -733,6 +733,10 @@ static std::string genScatterGatherCvtFunc(const std::string& dtypeSrc, const st
   const bool srcComplex = dtypeSrc[dtypeSrc.size() - 1] == '2';
   const bool dstComplex = dtypeDst[dtypeDst.size() - 1] == '2';
   if (dstComplex) {
+    // TODO: Document why explicit cast is needed only for bfloat types
+    if (dtypeSrc == "bfloat") {
+      return dtypeDst + "(float(x), 0.0)";
+    }
     return dtypeDst + (srcComplex ? needsConj ? "(x.x, -x.y)" : "(x.x, x.y)" : "(x,  0.0)");
   }
   if (srcComplex) {
@@ -746,7 +750,7 @@ static std::string genScatterGatherCvtFunc(const std::string& dtypeSrc, const st
   if (dtypeDst == "bfloat") {
     return "bfloat(x)";
   }
-  return "(x)";
+  return dtypeSrc == "bfloat" ? dtypeDst + "(x)" : "(x)";
 }
 
 static MetalShaderLibrary scatterLib(SCATTER_OPS_TEMPLATE, 3);

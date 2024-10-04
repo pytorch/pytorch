@@ -2116,7 +2116,7 @@ Call this whenever a new thread is created in order to propagate values from
     auto device_type = at::getAccelerator();
     if (device_type.has_value()) {
       return at::globalContext()
-          .getAcceleratorHooksInterface(device_type.value())
+          .getAcceleratorHooksInterface(device_type)
           .deviceCount();
     }
     return c10::DeviceIndex(-1);
@@ -2128,7 +2128,7 @@ Call this whenever a new thread is created in order to propagate values from
         auto device_type = at::getAccelerator();
         if (device_type.has_value()) {
           at::globalContext()
-              .getAcceleratorHooksInterface(device_type.value())
+              .getAcceleratorHooksInterface(device_type)
               .setCurrentDevice(device_index);
         }
       });
@@ -2137,7 +2137,7 @@ Call this whenever a new thread is created in order to propagate values from
     auto device_type = at::getAccelerator();
     if (device_type.has_value()) {
       return at::globalContext()
-          .getAcceleratorHooksInterface(device_type.value())
+          .getAcceleratorHooksInterface(device_type)
           .getCurrentDevice();
     }
     return c10::DeviceIndex(-1);
@@ -2148,7 +2148,7 @@ Call this whenever a new thread is created in order to propagate values from
         auto device_type = at::getAccelerator();
         if (device_type.has_value()) {
           return at::globalContext()
-              .getAcceleratorHooksInterface(device_type.value())
+              .getAcceleratorHooksInterface(device_type)
               .exchangeDevice(device_index);
         }
         return c10::DeviceIndex(-1);
@@ -2160,7 +2160,7 @@ Call this whenever a new thread is created in order to propagate values from
         auto device_type = at::getAccelerator();
         if (device_type.has_value()) {
           return at::globalContext()
-              .getAcceleratorHooksInterface(device_type.value())
+              .getAcceleratorHooksInterface(device_type)
               .maybeExchangeDevice(device_index);
         }
         return c10::DeviceIndex(-1);

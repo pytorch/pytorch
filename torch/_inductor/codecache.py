@@ -1643,13 +1643,13 @@ class AotCodeCompiler:
         fbcode_aot_cpu_re = False
         use_absolute_path = False
         if config.is_fbcode():
-            ld_command = build_paths.ld()
+            ld_command = build_paths.ld
             if device_type == "cpu" and graph.aot_mode:  # Meta internal AOTInductor CPU
-                objcopy_command = build_paths.objcopy_fallback()
+                objcopy_command = build_paths.objcopy_fallback
                 fbcode_aot_cpu_re = True
                 use_absolute_path = True
             else:
-                objcopy_command = build_paths.objcopy()
+                objcopy_command = build_paths.objcopy
         else:
             ld_command = "ld"
             objcopy_command = "objcopy"
@@ -1935,6 +1935,15 @@ class AotCodeCompiler:
                 "darwin": _compile_consts_darwin,
             }[sys.platform](aot_constants)
 
+            kernels_o = []
+            gpu_codecache: Union[ROCmCodeCache, CUDACodeCache] = (
+                ROCmCodeCache() if torch.version.hip else CUDACodeCache()
+            )
+            for entry in gpu_codecache.cache.values():
+                if entry.output_path.endswith(".o"):
+                    kernels_o.append(entry.output_path)
+            kernels_o = " ".join(kernels_o)
+
             output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
             so_build_options = CppTorchDeviceOptions(
                 vec_isa=picked_vec_isa,
@@ -1944,7 +1953,7 @@ class AotCodeCompiler:
             )
             so_builder = CppBuilder(
                 name=output_name,
-                sources=[output_o, consts_o],
+                sources=[output_o, consts_o, kernels_o],
                 output_dir=output_dir,
                 BuildOption=so_build_options,
             )
@@ -2996,7 +3005,7 @@ def _cuda_compiler() -> Optional[str]:
     if cuda_env.nvcc_exist(config.cuda.cuda_cxx):
         return config.cuda.cuda_cxx
     if config.is_fbcode():
-        return os.path.join(build_paths.cuda(), "bin", "nvcc")
+        return os.path.join(build_paths.sdk_home, "bin", "nvcc")
     if cuda_env.nvcc_exist(os.getenv("CUDACXX")):
         return os.getenv("CUDACXX", "")
     if cuda_env.nvcc_exist(os.getenv("CUDA_HOME")):
@@ -3063,6 +3072,8 @@ def _nvcc_compiler_options() -> List[str]:
     options = [
         "-t=0",
         "-DCUTLASS_ENABLE_TENSOR_CORE_MMA=1",
+        "-DCUTLASS_ENABLE_SM90_EXTENDED_MMA_SHAPES=1",
+        "-DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED",
         "-w",
         f"-gencode=arch=compute_{arch},code=[{','.join(code)}]",
         config.cuda.compile_opt_level,
@@ -3071,7 +3082,7 @@ def _nvcc_compiler_options() -> List[str]:
         "-DNDEBUG",
     ]
     if config.is_fbcode():
-        options.extend(["-ccbin", os.path.dirname(build_paths.gcc())])
+        options.extend(["-ccbin", os.path.dirname(build_paths.gcc)])
     if config.cuda.enable_debug_info:
         options.extend(["-lineinfo", "-g", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"])
     if config.cuda.enable_ptxas_info:

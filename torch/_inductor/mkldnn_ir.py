@@ -7,6 +7,7 @@ import torch
 from torch._prims_common import make_channels_last_strides_for
 from torch.utils._ordered_set import OrderedSet
 
+from . import config
 from .ir import (
     ExternKernelAlloc,
     FixedLayout,
@@ -224,6 +225,20 @@ def _prepare_linear_fusion_create(
     else:
         constant_args.insert(0, bias)
     return inputs, constant_args, kernel_layout, req_stride_order
+
+
+def _create_output_node(packed):
+    if not config.abi_compatible:
+        return packed
+
+    output_ir = MultiOutput(
+        packed.get_layout(),
+        packed,
+        [],
+    )
+    packed.layout = MultiOutputLayout(packed.get_device())
+    packed.outputs = [output_ir]
+    return output_ir
 
 
 class ConvolutionUnary(ExternKernelAlloc):
@@ -1161,6 +1176,9 @@ class LinearUnary(ExternKernelAlloc):
             constant_args,
             None,
             op_overload=torch.ops.mkldnn._linear_pointwise.default,
+            cpp_kernel_name="aoti_torch_cpu__linear_pointwise"
+            if config.abi_compatible
+            else None,
         )
         self.cpp_kernel_key = "linear_pointwise"
         self.cpp_op_schema = """
@@ -1173,16 +1191,23 @@ class LinearUnary(ExternKernelAlloc):
                 std::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
-        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
-            self.get_name(),
-            self.python_kernel_name,
-            self.cpp_kernel_name,
-            self.codegen_args(),
-            self.cpp_op_schema,
-            self.cpp_kernel_key,
-            op_overload=self.op_overload,
-            raw_args=[*self.inputs, *self.constant_args],
-        )
+        if config.abi_compatible:
+            wrapper.include_extra_header(
+                "torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h"
+            )
+            super().codegen(wrapper)
+        else:
+            wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
+                self.get_name(),
+                self.python_kernel_name,
+                self.cpp_kernel_name,
+                self.codegen_args(),
+                self.cpp_op_schema,
+                self.cpp_kernel_key,
+                op_overload=self.op_overload,
+                raw_args=[*self.inputs, *self.constant_args],
+                outputs=self.outputs,
+            )
 
     @classmethod
     def create(cls, x, w, B, attr, scalars, algorithm):
@@ -1191,6 +1216,8 @@ class LinearUnary(ExternKernelAlloc):
 
         *m, ic = x.get_size()
         oc, ic = w.get_size()
+        output_size = list(m) + [oc]
+        output_stride = FlexibleLayout.contiguous_strides(output_size)
         inputs = [x, w]
         constant_args = [attr, scalars if scalars else [-1], algorithm]
         if B is not None:
@@ -1199,15 +1226,16 @@ class LinearUnary(ExternKernelAlloc):
         else:
             constant_args.insert(0, None)
 
-        return LinearUnary(
+        packed = LinearUnary(
             layout=FlexibleLayout(
                 device=x.get_device(),
                 dtype=x.get_dtype(),
-                size=list(m) + [oc],
+                size=output_size,
             ),
             inputs=inputs,
             constant_args=constant_args,
         )
+        return _create_output_node(packed)
 
     def apply_constraint(self):
         pass
@@ -1228,6 +1256,9 @@ class LinearBinary(ExternKernelAlloc):
             constant_args,
             None,
             op_overload=torch.ops.mkldnn._linear_pointwise.binary,
+            cpp_kernel_name="aoti_torch_cpu__linear_pointwise_binary"
+            if config.abi_compatible
+            else None,
         )
         self.cpp_op_schema = """
             at::Tensor(
@@ -1239,17 +1270,24 @@ class LinearBinary(ExternKernelAlloc):
         """
 
     def codegen(self, wrapper):
-        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
-            self.get_name(),
-            self.python_kernel_name,
-            self.cpp_kernel_name,
-            self.codegen_args(),
-            self.cpp_op_schema,
-            self.cpp_kernel_key,
-            self.cpp_kernel_overload_name,
-            op_overload=self.op_overload,
-            raw_args=[*self.inputs, *self.constant_args],
-        )
+        if config.abi_compatible:
+            wrapper.include_extra_header(
+                "torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h"
+            )
+            super().codegen(wrapper)
+        else:
+            wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
+                self.get_name(),
+                self.python_kernel_name,
+                self.cpp_kernel_name,
+                self.codegen_args(),
+                self.cpp_op_schema,
+                self.cpp_kernel_key,
+                self.cpp_kernel_overload_name,
+                op_overload=self.op_overload,
+                raw_args=[*self.inputs, *self.constant_args],
+                outputs=self.outputs,
+            )
 
     @classmethod
     def create(cls, x, y, w, B, attr):
@@ -1259,7 +1297,8 @@ class LinearBinary(ExternKernelAlloc):
 
         *m, ic = x.get_size()
         oc, ic = w.get_size()
-
+        output_size = list(m) + [oc]
+        output_stride = FlexibleLayout.contiguous_strides(output_size)
         inputs = [x, y, w]
         constant_args = [attr]
         if B is not None:
@@ -1268,15 +1307,16 @@ class LinearBinary(ExternKernelAlloc):
         else:
             constant_args.insert(0, B)
 
-        return LinearBinary(
+        packed = LinearBinary(
             layout=FlexibleLayout(
                 device=x.get_device(),
                 dtype=x.get_dtype(),
-                size=list(m) + [oc],
+                size=output_size,
             ),
             inputs=inputs,
             constant_args=constant_args,
         )
+        return _create_output_node(packed)
 
     def apply_constraint(self):
         pass
@@ -1793,7 +1833,6 @@ class MkldnnRnnLayer(ExternKernelAlloc):
             None,
             op_overload=torch.ops.aten.mkldnn_rnn_layer.default,
         )
-        self.outputs: List[MultiOutput] = []
 
     @classmethod
     def create(

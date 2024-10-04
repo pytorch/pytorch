@@ -4398,47 +4398,14 @@ class ExternKernel(InputsKernel):
         )
         # FIXME: self.kwargs does not always match kwargs defined in schema, so sometimes
         # ordered_kwargs_for_cpp_kernel is explicilty passed in.
-        if (
-            isinstance(self.op_overload, torch._ops.OpOverload)
-            and not self.ordered_kwargs_for_cpp_kernel
-        ):
-            self.ordered_kwargs_for_cpp_kernel = [
-                x.name for x in self.op_overload._schema.arguments if x.kwarg_only
+        if isinstance(self.op_overload, torch._ops.OpOverload):
+            if not self.ordered_kwargs_for_cpp_kernel:
+                self.ordered_kwargs_for_cpp_kernel = [
+                    x.name for x in self.op_overload._schema.arguments if x.kwarg_only
+                ]
+            self.schema_kwargs = [
+                x for x in self.op_overload._schema.arguments if x.kwarg_only
             ]
-
-    def fill_non_provided_args(self, args, kwargs, convert_val_to_str=False):
-        # Previously, we want to maintain forward-compatibility by skipping
-        # default args in the serialized artifacts in fbcode. However,
-        # some of our shim interfaces require default values being OrderedSet.
-        # Discussed with Sherlock offline and we decided to allow serializing
-        # default args into the C++ wrapper code for now. We will refine this
-        # part if we see real FC requirement. More details related to FC
-        # can be found at:
-        # https://docs.google.com/document/d/1FzWm-sHYwmRi3x_g036kOxd99KaYquUsA-L5JwOn8ys/edit?usp=sharing
-        assert isinstance(args, (list, tuple))
-        if isinstance(args, tuple):
-            args = list(args)
-        assert self.arg_properties, "ExternKernel.arg_properties should not be empty"
-
-        n_args = len(args)
-        n_pos_args = len(self.arg_properties)
-        # For cpp wrapper, if some positional args are not provided, we need to check
-        # if they're in the kwargs or use their default value
-        if n_args < n_pos_args:
-            log.debug(
-                "%s has %d unprovided positional arguments. "
-                "Will check if they are in the keyword arguments or will use default values.",
-                self.op_overload,
-                n_pos_args - n_args,
-            )
-            for i in range(n_args, n_pos_args):
-                arg_name = self.arg_properties[i]["name"]
-                args.append(
-                    kwargs[arg_name]
-                    if arg_name in kwargs
-                    else self.arg_properties[i]["default_value"]
-                )
-        return args
 
     def decide_layout(self):
         if isinstance(self.layout, FlexibleLayout):
@@ -4884,6 +4851,40 @@ class ExternKernel(InputsKernel):
     def apply_constraint(self):
         pass
 
+    def fill_non_provided_args(self, args, kwargs):
+        # Previously, we want to maintain forward-compatibility by skipping
+        # default args in the serialized artifacts in fbcode. However,
+        # some of our shim interfaces require default values being OrderedSet.
+        # Discussed with Sherlock offline and we decided to allow serializing
+        # default args into the C++ wrapper code for now. We will refine this
+        # part if we see real FC requirement. More details related to FC
+        # can be found at:
+        # https://docs.google.com/document/d/1FzWm-sHYwmRi3x_g036kOxd99KaYquUsA-L5JwOn8ys/edit?usp=sharing
+        assert isinstance(args, (list, tuple))
+        if isinstance(args, tuple):
+            args = list(args)
+        assert self.arg_properties, "ExternKernel.arg_properties should not be empty"
+
+        n_args = len(args)
+        n_pos_args = len(self.arg_properties)
+        # For cpp wrapper, if some positional args are not provided, we need to check
+        # if they're in the kwargs or use their default value
+        if n_args < n_pos_args:
+            log.debug(
+                "%s has %d unprovided positional arguments. "
+                "Will check if they are in the keyword arguments or will use default values.",
+                self.op_overload,
+                n_pos_args - n_args,
+            )
+            for i in range(n_args, n_pos_args):
+                arg_name = self.arg_properties[i]["name"]
+                args.append(
+                    kwargs[arg_name]
+                    if arg_name in kwargs
+                    else self.arg_properties[i]["default_value"]
+                )
+        return args
+
     def codegen_const_args(self, names: Optional[List[str]] = None):
         if V.graph.cpp_wrapper:
             result = []
@@ -4919,26 +4920,33 @@ class ExternKernel(InputsKernel):
             return map(V.graph.wrapper_code.val_to_arg_str, self.constant_args)
 
     def codegen_args(self):
+        if V.graph.cpp_wrapper and self.op_overload is not None:
+            # cpp wrapper needs special logic to fill in missing args with default values
+            inputs = self.fill_non_provided_args(
+                [*self.inputs, *self.constant_args], self.kwargs
+            )
+            # fill_non_provided_args has handled constant args, so no need to codegen for that later
+            need_codegen_constant_args = False
+        else:
+            inputs = self.inputs
+            need_codegen_constant_args = True
+
         args = []
-        for i, x in enumerate(self.inputs):
-            if isinstance(x, list):
-                names = [i.codegen_reference() for i in x]
-                codegen_reference = f'[{", ".join(names)}]'
-                args.append(codegen_reference)
-            else:
-                if V.graph.cpp_wrapper:
-                    assert self.arg_properties and i < len(
-                        self.arg_properties
-                    ), "Invalid access to ExternKernel.arg_properties"
-                    type_ = self.arg_properties[i].get("type")
-                    args.append(
-                        V.graph.wrapper_code.val_to_arg_str(  # type: ignore[arg-type]
-                            x, type_
-                        )
+        for i, x in enumerate(inputs):
+            if V.graph.cpp_wrapper:
+                assert self.arg_properties and i < len(
+                    self.arg_properties
+                ), "Invalid access to ExternKernel.arg_properties"
+                type_ = self.arg_properties[i].get("type")
+                args.append(
+                    V.graph.wrapper_code.val_to_arg_str(  # type: ignore[arg-type]
+                        x, type_
                     )
-                else:
-                    args.append(x.codegen_reference())
-        args.extend(self.codegen_const_args())
+                )
+            else:
+                args.append(V.graph.wrapper_code.val_to_arg_str(x))
+        if need_codegen_constant_args:
+            args.extend(self.codegen_const_args())
         return args
 
     def get_kwargs_value(self, arg_name):
@@ -4951,6 +4959,10 @@ class ExternKernel(InputsKernel):
 
     def codegen_kwargs(self, skip_out=False):
         if V.graph.cpp_wrapper:
+            if self.op_overload is not None and len(self.schema_kwargs) == 0:
+                # All the args should have been generated by fill_non_provided_args in codegen_args
+                return []
+
             kwargs = []
             for arg_name in self.ordered_kwargs_for_cpp_kernel:
                 if skip_out and arg_name == "out":
@@ -5163,6 +5175,10 @@ class ExternKernelAlloc(ExternKernel):
             ordered_kwargs_for_cpp_kernel,
             op_overload,
         )
+        # We need output buffers for generating kernel arguments in the
+        # abi-compatible mode, where we retrieve outputs by pass each individual
+        # output through the abi-compatible interface.
+        self.outputs: Sequence[Any] = []
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
@@ -5349,7 +5365,7 @@ class InplaceCopyFallback(ExternKernel):
 
     def codegen(self, wrapper):
         (dst, src, non_blocking) = self.codegen_args()
-        wrapper.codegen_device_copy(src, dst)
+        wrapper.codegen_device_copy(src, dst, non_blocking)
 
     def should_allocate(self):
         return False
@@ -5584,7 +5600,7 @@ class IndexPutFallback(ExternKernel):
 
 class DeviceCopy(ExternKernelOut):
     @classmethod
-    def create(cls, x, device):
+    def create(cls, x, device, non_blocking):
         if (
             not x.is_extern()
             and all(r in V.graph.constants for r in x.get_read_names())
@@ -5596,6 +5612,7 @@ class DeviceCopy(ExternKernelOut):
         V.graph.add_device_info(x.get_device())
 
         developer_warning("DeviceCopy in input program")
+        constant_args = (non_blocking,)
         return DeviceCopy(
             FlexibleLayout(
                 device=device,
@@ -5603,15 +5620,18 @@ class DeviceCopy(ExternKernelOut):
                 size=x.get_size(),
             ),
             [cls.realize_input(x)],
+            constant_args,
         )
 
     def codegen(self, wrapper):
         args = self.codegen_args()
-        assert len(args) == 1
+        assert len(args) == 2
         if self.output_view:
-            wrapper.codegen_device_copy(args[0], self.output_view.codegen_reference())
+            wrapper.codegen_device_copy(
+                args[0], self.output_view.codegen_reference(), args[1]
+            )
         else:
-            wrapper.codegen_device_copy(args[0], self.codegen_reference())
+            wrapper.codegen_device_copy(args[0], self.codegen_reference(), args[1])
 
 
 class DynamicScalar(ExternKernel):
@@ -5741,10 +5761,6 @@ class FallbackKernel(ExternKernelAlloc):
             op_overload=kernel,
         )
 
-        # We need output buffers for generating kernel arguments in the
-        # abi-compatible mode, where we retrieve outputs by pass each individual
-        # output through the abi-compatible interface.
-        self.outputs: Sequence[Any] = []
         self.use_runtime_dispatch = False
         self.unbacked_bindings = unbacked_bindings
 
@@ -5901,9 +5917,11 @@ class FallbackKernel(ExternKernelAlloc):
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         if unbacked_bindings := getattr(self, "unbacked_bindings", None):
-            return resolve_unbacked_bindings(
+            resolved = resolve_unbacked_bindings(
                 V.graph.sizevars.shape_env, unbacked_bindings
-            ).keys()
+            )
+            assert resolved is not None
+            return resolved.keys()  # type: ignore[return-value]
         else:
             return OrderedSet()
 

@@ -31,7 +31,7 @@ verify_correctness = False
 # need this many ops to create an FX graph
 minimum_call_count = 1
 
-# turn on/off DCE pass
+# turn on/off DCE pass (deprecated: always true)
 dead_code_elimination = True
 
 # disable (for a function) when cache reaches this size
@@ -334,8 +334,7 @@ raise_on_ctx_manager_usage = True
 # If True, raise when aot autograd is unsafe to use
 raise_on_unsafe_aot_autograd = False
 
-# If true, error if you torch.jit.trace over a dynamo-optimized function.
-# If false, silently suppress dynamo
+# This flag is ignored and maintained for backwards compatibility.
 error_on_nested_jit_trace = True
 
 # If true, error with a better message if we symbolically trace over a
@@ -427,7 +426,7 @@ only_allow_pt2_compliant_ops = False
 
 capture_autograd_function = True
 
-# enable/disable dynamo tracing for `torch.func` transforms
+# This flag is ignored and maintained for backwards compatbility.
 capture_func_transforms = True
 
 # If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
@@ -468,6 +467,9 @@ fake_tensor_cache_crosscheck_enabled = (
 # Enables the Compiled Autograd engine to trace .backward() calls made under torch.compile().
 # Note: AOT Autograd will still trace joint graphs.
 compiled_autograd = False
+
+# Overrides torch.compile() kwargs for Compiled Autograd:
+compiled_autograd_kwargs_override: Dict[str, Any] = {}
 
 # Enables use of collectives *during* compilation to synchronize behavior
 # across ranks.  Today, this is used solely to modify automatic_dynamic_shapes
