@@ -187,8 +187,7 @@ class CachingAutotuner(KernelInterface):
         configs,
         save_cache_hook,
         mutated_arg_names: List[str],  # see [Note: clone mutated buffers]
-        is_inference,
-        is_backward,
+        optimize_mem,
         heuristic_type,
         size_hints=None,
         inductor_meta=None,  # metadata not relevant to triton
@@ -212,8 +211,7 @@ class CachingAutotuner(KernelInterface):
         self.inductor_meta = {} if inductor_meta is None else inductor_meta
         self.save_cache_hook = save_cache_hook
         self.mutated_arg_names = mutated_arg_names
-        self.is_inference = is_inference
-        self.is_backward = is_backward
+        self.optimize_mem = optimize_mem
         self.configs = configs
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
@@ -718,12 +716,8 @@ class CachingAutotuner(KernelInterface):
         If those clones would increase the peak memory usage, however, we instead
         copy to cpu and restore them after each iteratrion. Figure out the args
         to be copied and do the copying.
-
-        Skip this optimization for forward of the training loop where we expect
-        every new node will increase the peak memory and our greedy approach
-        would introduce a lot of unnecessary cpu copies.
         """
-        if not self.is_inference and not self.is_backward:
+        if not self.optimize_mem:
             return {}
 
         copies = {}
@@ -1132,8 +1126,7 @@ def cached_autotune(
             log.debug("autotune caching is disabled by config.force_disable_caches")
 
     mutated_arg_names = inductor_meta.pop("mutated_arg_names", ())
-    is_inference = inductor_meta.pop("is_inference", False)
-    is_backward = inductor_meta.pop("is_backward", False)
+    optimize_mem = inductor_meta.pop("optimize_mem", True)
 
     def decorator(fn):
         # Remove XBLOCK from config if it's not a function argument.
@@ -1160,8 +1153,7 @@ def cached_autotune(
                 configs=configs,
                 save_cache_hook=autotune_cache and autotune_cache.save,
                 mutated_arg_names=mutated_arg_names,
-                is_inference=is_inference,
-                is_backward=is_backward,
+                optimize_mem=optimize_mem,
                 heuristic_type=heuristic_type,
                 size_hints=size_hints,
                 custom_kernel=custom_kernel,
@@ -1174,8 +1166,7 @@ def cached_autotune(
             configs=configs,
             save_cache_hook=autotune_cache and autotune_cache.save,
             mutated_arg_names=mutated_arg_names,
-            is_inference=is_inference,
-            is_backward=is_backward,
+            optimize_mem=optimize_mem,
             heuristic_type=heuristic_type,
             size_hints=size_hints,
             custom_kernel=custom_kernel,
