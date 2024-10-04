@@ -21,7 +21,7 @@ IF(NOT APL_INCLUDE_DIR)
 ENDIF()
 
 # Check lib file
-FIND_PATH(APL_LIB_DIR NAMES armpl_lp64_mp.dll.lib armpl_lp64_mp PATHS ${APL_LIB_SEARCH_PATHS})
+FIND_PATH(APL_LIB_DIR NAMES libarmpl_lp64_mp.dll.lib libarmpl_lp64_mp PATHS ${APL_LIB_SEARCH_PATHS})
 IF(NOT APL_LIB_DIR)
     SET(APL_FOUND OFF)
     MESSAGE(STATUS "Could not verify APL lib directory. Turning APL_FOUND off")
@@ -29,15 +29,13 @@ ENDIF()
 
 IF(WIN32)
   set(APL_LIBRARIES
-    "${APL_LIB_DIR}/armpl_lp64_mp.dll.lib"
-    "${APL_LIB_DIR}/amath.dll.lib"  
+    "${APL_LIB_DIR}/libarmpl_lp64_mp.dll.lib"
   )
   message(STATUS "APL_LIBRARIES: ${APL_LIBRARIES}")
 ELSEIF(UNIX)
   # TODO: Add/test support for Linux
   set(APL_LIBRARIES
-    "${APL_LIB_DIR}/armpl_lp64_mp"
-    "${APL_LIB_DIR}/amath"  
+    "${APL_LIB_DIR}/libarmpl_lp64_mp"
   )
 ENDIF()
 
