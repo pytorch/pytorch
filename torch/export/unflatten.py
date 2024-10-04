@@ -25,7 +25,7 @@ from torch.export.exported_program import (
     TensorArgument,
 )
 from torch.fx._symbolic_trace import is_fx_tracing
-from torch.fx.graph_module import _print_readable
+from torch.fx.graph_module import _get_attr, _get_attr_via_attr_list, _print_readable
 from torch.fx.passes.tools_common import legalize_graph, NodeList
 from torch.fx.passes.utils.fuser_utils import erase_nodes, fuse_as_graphmodule
 from torch.utils._pytree import GetAttrKey, SequenceKey
@@ -269,9 +269,7 @@ class UnflattenedModule(torch.nn.Module):
 
         non_persistent_buffers = set(self.graph_signature.non_persistent_buffers)
         assigned_buffers: Set[str] = set()  # tracking unused buffers
-        id_to_buffer: Dict[
-            int, Tuple[torch.nn.Parameter, bool]
-        ] = {}  # handle weight-sharing
+        id_to_buffer: Dict[int, Tuple[torch.nn.Parameter, bool]] = {}
         for name in self.graph_signature.buffers:  # this loop adds used buffers
             if name in non_persistent_buffers:
                 persistent = False
@@ -1214,9 +1212,9 @@ def _deduplicate_modules(partitions):
                         # So we remove the current module from the hierarchy and replace
                         # the current call name with the seen call name in the parent graph.
                         *prefix, name = target.split(".")
-                        _recursive_getattr(entry.parent_module, prefix)._modules.pop(
-                            name
-                        )
+                        _get_attr_via_attr_list(
+                            entry.parent_module, prefix
+                        )._modules.pop(name)
                         seen_child_fqn = _call_name(seen.fqn, seen.call_idx)
                         seen_target = _compute_accessor(
                             entry.parent_fqn, seen_child_fqn
@@ -1280,7 +1278,7 @@ def _sink_params(
     # Also remove from call_module nodes
     call_module_nodes = filter(lambda n: n.op == "call_module", graph.nodes)
     for node in call_module_nodes:
-        submodule = _recursive_getattr(module, node.target.split("."))
+        submodule = _get_attr(module, node.target)
         # remove placeholder from call_module node arguments, only if we've
         # erased the placeholder node in the corresponding _sink_params() call
         if submodule is not None and id(submodule) in module_id_to_inputs_removed:
@@ -1324,7 +1322,7 @@ def _sink_params(
     for node, state_name in inputs_to_state_of_scope.items():
         if len(node.users) > 0:
             attr_path = state_name[len(scope) :]
-            state_attr = _recursive_getattr(module, attr_path)
+            state_attr = _get_attr_via_attr_list(module, attr_path)
             assert isinstance(state_attr, (torch.Tensor, torch.ScriptObject))
 
             # Make sure the newly created get_attr node is placed after the last placeholder node
@@ -1340,15 +1338,6 @@ def _sink_params(
         module.finalize()
 
     return {id(module): inputs_removed}
-
-
-def _recursive_getattr(obj, attr_path):
-    for attr in attr_path:
-        if not hasattr(obj, attr):
-            return None
-        obj = getattr(obj, attr)
-
-    return obj
 
 
 def _construct_inputs(
