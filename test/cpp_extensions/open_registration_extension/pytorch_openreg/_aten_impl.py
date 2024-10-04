@@ -52,6 +52,8 @@ def _openreg_kernel_fallback(op, *args, **kwargs):
     device = get_tensor_device(*args)
     if device is None:
         return _kernel_fallback(op, *args, **kwargs)
+    
+    # Mimicks the DeviceGuard system we have in aten
     with DeviceContext(device):
         return _kernel_fallback(op, *args, **kwargs)
 

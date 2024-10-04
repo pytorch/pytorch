@@ -90,7 +90,7 @@ class Driver:
         self.curr_stream = 0
         # Constant properties of our device
         self.num_devices = 2
-        # Allocated memory belongs to which deivce
+        # Allocated memory belongs to which device
         self.memory_belong = {}
         self.devices = []
 
@@ -114,7 +114,7 @@ class Driver:
         if cmd in Driver.registry:
             res = Driver.registry[cmd](self, *args)
         else:
-            res = self.run_on_exeuctor(self.curr_device_idx, cmd, *args)
+            res = self.run_on_executor(self.curr_device_idx, cmd, *args)
 
         log.info("Main process result for %s received: %s", cmd, safe_str(res))
         if res == "ERROR":
@@ -122,7 +122,7 @@ class Driver:
         else:
             return res
 
-    def run_on_exeuctor(self, device_idx, cmd, *args):
+    def run_on_executor(self, device_idx, cmd, *args):
         req_queue, ans_queue, _ = self.devices[device_idx]
         validate_send_queue_args(cmd, args)
         req_queue.put((cmd,) + args)
@@ -153,7 +153,7 @@ class Driver:
 
     @register(registry)
     def malloc(self, size):
-        ptr = self.run_on_exeuctor(self.curr_device_idx, "malloc", size)
+        ptr = self.run_on_executor(self.curr_device_idx, "malloc", size)
         self.memory_belong[ptr] = self.curr_device_idx
         return ptr
 
@@ -162,7 +162,7 @@ class Driver:
         device_idx = self.memory_belong.pop(ptr, None)
         if device_idx is None:
             return False
-        return self.run_on_exeuctor(device_idx, "free", ptr)
+        return self.run_on_executor(device_idx, "free", ptr)
 
 
 class _Executor:
