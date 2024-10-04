@@ -17,6 +17,9 @@ from torch._C import (
     _push_on_torch_dispatch_stack,
     DispatchKey,
 )
+import threading
+from contextlib import contextmanager
+
 
 
 # TODO: Limitations and things about enable_torch_dispatch_mode we should fix before exposing it:
@@ -121,6 +124,16 @@ class TorchDispatchMode:
     def is_infra_mode(cls):
         return False
 
+
+_eager_only_torch_dispatch_mode_enabled = threading.local()
+
+def is_eager_only_torch_dispatch_mode_enabled():
+    return getattr(_eager_only_torch_dispatch_mode_enabled, "value", True)
+
+
+def set_eager_only_torch_dispatch_mode_enabled(value):
+    global _eager_only_torch_dispatch_mode_enabled
+    _eager_only_torch_dispatch_mode_enabled.value = value
 
 
 def _get_current_dispatch_mode():

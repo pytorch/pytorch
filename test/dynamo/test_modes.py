@@ -12,6 +12,7 @@ from torch._C import (
 from torch.overrides import _get_current_function_mode_stack, BaseTorchFunctionMode
 from torch.utils._device import DeviceContext
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._python_dispatch import is_eager_only_torch_dispatch_mode_enabled
 
 
 class TestMode(BaseTorchFunctionMode):
@@ -53,6 +54,44 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(eager_res, compiled_res)
         self.assertEqual(cnt.frame_count, 0)
+
+    def test_eager_only_torch_dispatch_modes(self):
+        class CustomMode(TorchDispatchMode):
+            def __init__(self):
+                self.funcs = []
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if is_eager_only_torch_dispatch_mode_enabled():
+                    self.funcs.append(func.__name__)
+                return func(*args, **kwargs)
+
+        class MLP(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                z = x * x
+                z = self.relu_graph_break(z)
+                z = z + z
+                return z
+            
+            @torch.compiler.disable
+            def relu_graph_break(self, x):
+                print("in graph break")
+                return self.relu(x)
+
+        model = MLP()
+        inp = torch.rand(4, 4, device="cuda")
+        custom_mode = CustomMode()
+        with custom_mode:
+            model(inp)
+        self.assertEqual(len(custom_mode.funcs), 3)
+
+        custom_mode.funcs.clear()
+        with custom_mode:
+            torch.compile(model)(inp)
+        self.assertEqual(len(custom_mode.funcs), 1)
 
 
 class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
