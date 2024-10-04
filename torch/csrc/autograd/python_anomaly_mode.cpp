@@ -59,14 +59,16 @@ void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
     }
     const std::string parent_name(parent_name_char);
     PyObject* parent_stack = nullptr;
-    if (PyDict_GetItemStringRef(parent_metadata.get(), ANOMALY_TRACE_KEY, &parent_stack) < 0) {
-        throw python_error();
+    if (PyDict_GetItemStringRef(
+            parent_metadata.get(), ANOMALY_TRACE_KEY, &parent_stack) < 0) {
+      throw python_error();
     }
     _print_stack(parent_stack, parent_name, true);
     // get the parent of this node, if this node is a root, pyparent is simply
     // null
-    if (PyDict_GetItemStringRef(parent_metadata.get(), ANOMALY_PARENT_KEY, &pyparent) < 0) {
-        throw python_error();
+    if (PyDict_GetItemStringRef(
+            parent_metadata.get(), ANOMALY_PARENT_KEY, &pyparent) < 0) {
+      throw python_error();
     }
   }
 }

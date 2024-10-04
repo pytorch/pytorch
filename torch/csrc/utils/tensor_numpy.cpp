@@ -394,7 +394,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   {
     PyObject* py_shape = nullptr;
     if (PyDict_GetItemStringRef(cuda_dict, "shape", &py_shape) < 0) {
-        throw python_error();
+      throw python_error();
     }
     if (py_shape == nullptr) {
       throw TypeError("attribute `shape` must exist");
@@ -410,7 +410,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   {
     PyObject* py_typestr = nullptr;
     if (PyDict_GetItemStringRef(cuda_dict, "typestr", &py_typestr) < 0) {
-        throw python_error();
+      throw python_error();
     }
     if (py_typestr == nullptr) {
       throw TypeError("attribute `typestr` must exist");
@@ -434,7 +434,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   {
     PyObject* py_data = nullptr;
     if (PyDict_GetItemStringRef(cuda_dict, "data", &py_data) < 0) {
-        throw python_error();
+      throw python_error();
     }
     if (py_data == nullptr) {
       throw TypeError("attribute `shape` data exist");
@@ -461,7 +461,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   {
     PyObject* py_strides = nullptr;
     if (PyDict_GetItemStringRef(cuda_dict, "strides", &py_strides) < 0) {
-        throw python_error();
+      throw python_error();
     }
     if (py_strides != nullptr && py_strides != Py_None) {
       if (PySequence_Length(py_strides) == -1 ||
