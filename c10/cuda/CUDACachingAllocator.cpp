@@ -3946,8 +3946,8 @@ MemPool::MemPool(
 }
 
 MemPool::~MemPool() {
+  TORCH_INTERNAL_ASSERT(use_count() == 1);
   CUDACachingAllocator::decPoolUseCountAndMaybeMarkPoolFree(device_, id_);
-  TORCH_INTERNAL_ASSERT(use_count() == 0);
   auto ctx = MemPoolContext(this);
   c10::cuda::CUDACachingAllocator::emptyCache();
 }
