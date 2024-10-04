@@ -1937,7 +1937,9 @@ def module_inputs_torch_nn_RMSNorm(module_info, device, dtype, requires_grad, tr
         normalized_shape = m.normalized_shape
         weight = m.weight
         dims = [ndim - i - 1 for i in range(len(normalized_shape))]
-        result = i * torch.rsqrt(i.pow(2).mean(dim=dims, keepdim=True) + m.eps)
+        upcasted_i = i.float()
+        result = upcasted_i * torch.rsqrt(upcasted_i.pow(2).mean(dim=dims, keepdim=True) + m.eps)
+        result = result.type_as(i)
         if weight is not None:
             result *= weight
         return result
@@ -3452,7 +3454,7 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_BatchNorm2d,
                skips=(
                    # See https://github.com/pytorch/pytorch/issues/134580
-                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_memory_format'),
+                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_memory_format', active_if=operator.itemgetter('training')),
                    # tracking here rather than in the list in test_aotdispatch.py as eval mode passes
                    # RuntimeError: tried to get Double out of SymInt
                    DecorateInfo(

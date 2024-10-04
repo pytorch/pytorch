@@ -2,6 +2,7 @@
 
 import functools
 import itertools
+import math
 import sys
 from typing import Callable, Union
 
@@ -372,6 +373,7 @@ def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
     return repeats.new_empty(output_size)
 
 
+@register_op_impl(torch.ops.aten.item.default)
 @register_op_impl(torch.ops.aten._local_scalar_dense.default)
 def local_scalar_dense(fake_mode, func, arg):
     if (r := arg.item_memo) is not None:
@@ -435,6 +437,38 @@ def nonzero(fake_mode, func, arg):
     return arg.new_empty((nnz, arg.dim()), dtype=torch.int64)
 
 
+@register_op_impl(torch.ops.aten._padded_dense_to_jagged_forward.default)
+def _padded_dense_to_jagged_forward(fake_mode, func, padded, offsets, total_L=None):
+    # only one jagged dim is supported for now
+    assert len(offsets) == 1
+
+    if not total_L:
+        if (
+            fake_mode.shape_env is None
+            or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+        ):
+            # Without symints/symfloats, cannot handle this
+            raise DynamicOutputShapeException(func)
+
+        total_L = fake_mode.shape_env.create_unbacked_symint()
+
+        maxval = sys.maxsize - 1
+
+        # Avoid importing sympy at a module level
+        from torch.fx.experimental.symbolic_shapes import (
+            _constrain_range_for_size,
+            has_free_symbols,
+        )
+
+        if not has_free_symbols(padded.numel()):
+            maxval = int(padded.numel())
+
+        _constrain_range_for_size(total_L, min=0, max=maxval)
+
+    output_shape = (total_L, *padded.shape[2:])
+    return padded.new_empty(output_shape)
+
+
 @register_op_impl(torch.ops.aten.masked_select.default)
 def masked_select(fake_mode, func, self, mask):
     if (
@@ -454,10 +488,23 @@ def masked_select(fake_mode, func, self, mask):
         _constrain_range_for_size,
         has_free_symbols,
     )
+    from torch.utils._sympy.numbers import IntInfinity
+    from torch.utils._sympy.value_ranges import bound_sympy
 
+    # If num elements is expressed symbolically, calculate
+    # the concrete value based on upper bounds. Otherwise,
+    # we can set max val directly.
     if not has_free_symbols(self.numel()):
-        if self.numel() > 2:
-            maxval = int(self.numel())
+        num_elements = int(self.numel())
+    else:
+        prod_node = math.prod(self.shape).node
+        prod_range = bound_sympy(prod_node.expr, prod_node.shape_env.var_to_range)
+        if isinstance(prod_range.upper, IntInfinity):
+            num_elements = sys.maxsize - 1
+        else:
+            num_elements = prod_range.upper
+    if num_elements > 2:
+        maxval = num_elements
 
     _constrain_range_for_size(nnz, max=maxval)
 

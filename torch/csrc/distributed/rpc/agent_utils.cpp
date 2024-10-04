@@ -16,6 +16,7 @@ std::unordered_map<std::string, worker_id_t> collectNames(
   std::unordered_map<std::string, worker_id_t> nameToId;
   nameToId.reserve(worldSize);
   nameToId.emplace(selfName, selfId);
+  // NOLINTNEXTLINE(bugprone-too-small-loop-variable)
   for (worker_id_t workerId = 0; workerId < worldSize; ++workerId) {
     if (workerId == selfId) {
       continue;
@@ -136,7 +137,7 @@ void removeCurrentName(
 
   // Remove the current name and rank
   std::string str_to_erase = fmt::format("{}-{},", selfName, selfId);
-  int start_position_to_erase = allWorkerInfos.find(str_to_erase);
+  auto start_position_to_erase = allWorkerInfos.find(str_to_erase);
   allWorkerInfos.erase(start_position_to_erase, str_to_erase.length());
 
   // Set the new data
@@ -178,7 +179,7 @@ int syncCallCount(
 
   // Add to keys which will record the number of processes and active calls
   store.add(activeCallCountKey, activeCalls);
-  int totalProcessCount = store.add(processCountKey, 1);
+  auto totalProcessCount = store.add(processCountKey, 1);
 
   // The last worker will need to set the ready key
   if (totalProcessCount == worldSize) {

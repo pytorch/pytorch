@@ -115,6 +115,18 @@ aotriton::TensorView<Rank> mk_aotensor(const at::Tensor& q, c10::string_view ten
                                     cast_dtype(q.dtype()));
 }
 
+inline aotriton::TensorView<0> mk_aoscalartensor(const at::Tensor& q)
+{
+  return aotriton::TensorView<0>(reinterpret_cast<intptr_t>(q.data_ptr()),
+                                 cast_dtype(q.dtype()));
+}
+
+inline aotriton::TensorView<0> mk_philoxtensor(const int64_t* ptr)
+{
+  return aotriton::TensorView<0>(reinterpret_cast<intptr_t>(ptr),
+                                 aotriton::DType::kUInt64);  // AOTriton excepts unsigned int64
+}
+
 } // namespace aotriton_adapter
 
 } // namespace sdp

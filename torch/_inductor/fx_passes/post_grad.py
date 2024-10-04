@@ -1,5 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import copy
 import functools
 import itertools
 import logging
@@ -22,6 +23,7 @@ from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 
 from .. import config, ir, pattern_matcher
 from ..codegen.common import BackendFeature, has_backend_feature
+from ..comms import remove_fsdp2_unsharded_param_graph_input_usage
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
@@ -48,6 +50,7 @@ from .b2b_gemm import B2B_GEMM_PASS
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .micro_pipeline_tp import micro_pipeline_tp_pass
+from .numeric_utils import enable_runtime_numeric_check
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
@@ -69,13 +72,18 @@ pass_patterns = [
 ]
 
 
-def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
+def post_grad_passes(
+    gm: torch.fx.GraphModule, is_inference: bool, example_inputs=None, fake_mode=None
+):
     """
     Passes that run on after grad.  This is called once on the forwards
     graph and once on the backwards graph.
 
     The IR here has been normalized and functionalized.
     """
+    if not torch._dynamo.config.skip_fsdp_hooks:
+        remove_fsdp2_unsharded_param_graph_input_usage(gm.graph)
+
     if config.dce:
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
@@ -93,6 +101,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     if config.pattern_matcher:
         lazy_init()
+        gm_before_fx_passes = None
+        if hasattr(
+            config, "fx_passes_numeric_check"
+        ) and config.fx_passes_numeric_check.get("post_grad", False):
+            gm_before_fx_passes = copy.deepcopy(gm)
         optimus_scuba_log["before_recompile_post_grad"] = upload_graph(gm.graph)
         group_batch_fusion_passes(gm.graph, pre_grad=False)
         remove_noop_ops(gm.graph)
@@ -111,6 +124,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 optimus_scuba_log[
                     f"{pattern_matcher_pass.pass_name}_post_grad"
                 ] = upload_graph(gm.graph)
+        optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
+        fx_passes_numeric_check = config.fx_passes_numeric_check.get("post_grad", False)
+        enable_runtime_numeric_check(
+            example_inputs, fake_mode, gm_before_fx_passes, gm, fx_passes_numeric_check
+        )
         if config.b2b_gemm_pass:
             B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
 
@@ -144,7 +162,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     comms.reinplace_fsdp_all_gather(gm.graph)
 
     gm.recompile()
-    optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
     gm.graph.lint()
 
 
@@ -207,6 +224,9 @@ def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
 
 
 def is_valid_mm_plus_mm(match: Match):
+    if not torch._inductor.utils.use_max_autotune():
+        return False
+
     *b1, m1, k1 = match.kwargs["mat1"].meta.get("tensor_meta").shape
     *b2, k2, n1 = match.kwargs["mat2"].meta.get("tensor_meta").shape
     if k1 != k2:
@@ -704,7 +724,7 @@ def convert_element_type_noop(x, dtype: torch.dtype):
 
 
 @register_noop_decomp(torch.ops.prims.device_put)
-def device_put_noop(x, device):
+def device_put_noop(x, device, non_blocking=True):
     return x.device == decode_device(device)
 
 
@@ -811,7 +831,7 @@ def decompose_auto_functionalized(graph):
         CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized),
         pass_dict=graph_pass,
     )
-    def replacement(match: Match, *args, **kwargs):
+    def _(match: Match, *args, **kwargs):
         from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
 
         only_clone_these_tensors = tuple(
@@ -825,7 +845,9 @@ def decompose_auto_functionalized(graph):
         # tracing a function with kwargs.
         def decomp(*flat_args):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
-            return auto_functionalized_dense(*args, only_clone_these_tensors, **kwargs)
+            assert len(args) == 1
+            mode = args[0]
+            return auto_functionalized_dense(mode, only_clone_these_tensors, **kwargs)
 
         match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
@@ -849,11 +871,46 @@ def decompose_auto_functionalized(graph):
 
         match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
+    @register_graph_pattern(
+        CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized_v2),
+        pass_dict=graph_pass,
+    )
+    def _(match: Match, *args, **kwargs):
+        from torch._higher_order_ops.auto_functionalize import (
+            auto_functionalized_v2_dense,
+        )
+
+        only_clone_these_bases = tuple(
+            match.nodes[0].meta.get("only_clone_these_tensors", [])
+        )
+
+        flat_args, spec = pytree.tree_flatten((args, kwargs))
+
+        # NB: we combine (args, kwargs) into flat args for replacing.
+        # This is replace_by_example uses make_fx which does not support
+        # tracing a function with kwargs.
+        def decomp(*flat_args):
+            args, kwargs = pytree.tree_unflatten(flat_args, spec)
+            assert len(args) == 1
+            mutable_op = args[0]
+            return auto_functionalized_v2_dense(
+                mutable_op, only_clone_these_bases, **kwargs
+            )
+
+        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+
     graph_pass.apply(graph)
+
     for node in graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.auto_functionalized
     ):
         raise AssertionError("auto_functionalized was not removed")
+
+    for node in graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.auto_functionalized_v2
+    ):
+        raise AssertionError("auto_functionalized_v2 was not removed")
+
     for node in graph.find_nodes(
         op="call_function",
         target=torch.ops.higher_order.triton_kernel_wrapper_functional,
