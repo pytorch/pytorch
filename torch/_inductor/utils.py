@@ -14,6 +14,7 @@ import math
 import operator
 import os
 import platform
+import re
 import shutil
 import sys
 import tempfile
@@ -34,6 +35,7 @@ from typing import (
     Protocol,
     Sequence,
     Set,
+    Tuple,
     TypeVar,
     Union,
     ValuesView,
@@ -44,6 +46,7 @@ from unittest import mock
 import sympy
 
 import torch
+from torch.utils._pytree import tree_map_only
 
 
 GPU_TYPES = ["cuda", "xpu"]
@@ -357,16 +360,15 @@ def is_pointwise_use(
 
 def gen_gm_and_inputs(target, args, kwargs):
     g = torch.fx.Graph()
-    g_args = []
-    a_args = []
-    for n, arg in enumerate(args):
-        if isinstance(arg, torch.Tensor):
-            g_args.append(g.placeholder(f"arg{n}"))
-            a_args.append(arg)
-        else:
-            g_args.append(arg)
-    assert all(not isinstance(x, torch.Tensor) for x in kwargs.values())
-    node = g.call_function(target, tuple(g_args), kwargs)
+    graph_args = []
+
+    def add_tensor_arg(arg):
+        graph_args.append(arg)
+        return g.placeholder(f"arg{len(graph_args)}")
+
+    node = g.call_function(
+        target, *tree_map_only(torch.Tensor, add_tensor_arg, (args, kwargs))
+    )
     if (
         len(target._schema.returns) == 1
         and str(target._schema.returns[0].type) == "Tensor"
@@ -375,7 +377,7 @@ def gen_gm_and_inputs(target, args, kwargs):
     g.output(node)
 
     gm = torch.fx.GraphModule({}, g)
-    return gm, a_args
+    return gm, graph_args
 
 
 def synchronize(device: str = "cuda"):
@@ -728,7 +730,9 @@ def any_is_symbolic(*args: Any) -> bool:
     return any(is_symbolic(a) for a in args)
 
 
-def get_first_incompatible_cudagraph_node(gm):
+def get_first_incompatible_cudagraph_node(
+    gm: torch.fx.GraphModule,
+) -> Optional[torch.fx.Node]:
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
     forbidden_set = {
@@ -769,10 +773,6 @@ def get_first_incompatible_cudagraph_node(gm):
         if (val := node.meta.get("val")) is not None and free_unbacked_symbols(val):
             return node
     return None
-
-
-def has_incompatible_cudagraph_ops(gm):
-    return get_first_incompatible_cudagraph_node(gm) is not None
 
 
 def output_node(gm: torch.fx.GraphModule):
@@ -857,8 +857,7 @@ def argsort(seq) -> List[int]:
 
 
 def argsort_sym(seq: List[Union[int, torch.SymInt, sympy.Expr]]) -> List[int]:
-    # Convert all symints to sympy.Expr. (Converting the other way is hard
-    # because we need a shape_env)
+    # Strategy: convert all symints to sympy.Expr, then evaluate them.
     seq_with_exprs = []
     maybe_shape_env = None
     for idx, maybe_symint in enumerate(seq):
@@ -884,19 +883,11 @@ def argsort_sym(seq: List[Union[int, torch.SymInt, sympy.Expr]]) -> List[int]:
                 return expr
             if maybe_shape_env is not None:
                 return maybe_shape_env.evaluate_expr(expr, size_oblivious=True)
-            # By the way, this function only handles sympy.Expr that are not provable
-            # to be True/False if they were originally passed in as torch.SymInt,
-            # because we grab the shape_env from those SymInt and the shape_env
-            # is needed to evaluate the Expr.
-            # If you need this case then you'll need to either
-            # pass the Expr in as torch.SymInt or refactor
-            # argsort_sym to accept a shape_env and modify all the callers
-            # (like get_stride_order to accept a shape_env). We didn't do the refactor
-            # because these functions have a lot of callers and our ultimate goal is
-            # to unify on torch.SymInt over sympy.Expr in Inductor
-            # (https://github.com/pytorch/pytorch/issues/137093)
-            return bool(expr)
-
+            # Grab Inductor's global shape_env as a last resort.
+            # We don't always do this because this helper function is called
+            # from non-Inductor contexts (but only with ints or symints)
+            from .virtualized import V
+            return V.graph._shape_env.evaluate_expr(expr, size_oblivious=True)
         if evaluate(a_val < b_val):
             return -1
         if evaluate(a_val > b_val):
@@ -1275,6 +1266,9 @@ def use_ck_template(layout, m, n, k):
         log.warning("Please pip install Composable Kernel package")
         return False
 
+    if config.is_fbcode():
+        config.rocm.ck_dir = ck_package_dirname
+
     if not config.rocm.ck_dir:
         log.warning("Please set TORCHINDUCTOR_CK_DIR env variable")
         return False
@@ -1363,7 +1357,7 @@ class DebugDirManager:
         torch._dynamo.config.debug_dir_root = self.prev_debug_name
 
 
-def run_and_get_code(fn, *args, **kwargs):
+def run_and_get_code(fn, *args, **kwargs) -> Tuple[Any, List[str]]:
     from .graph import GraphLowering
 
     source_codes: List[str] = []
@@ -2136,3 +2130,7 @@ def should_use_remote_fx_graph_cache():
         jk_name = "pytorch/remote_cache:fx_graph_memcache_version_amd"
 
     return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(jk_name)
+
+
+def normalize_name(name: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_]", "_", name)

@@ -4,7 +4,7 @@
 namespace torch::xpu {
 
 size_t device_count() {
-  return at::detail::getXPUHooks().getNumGPUs();
+  return at::detail::getXPUHooks().deviceCount();
 }
 
 bool is_available() {
@@ -13,7 +13,7 @@ bool is_available() {
 
 void manual_seed(uint64_t seed) {
   if (is_available()) {
-    auto index = at::detail::getXPUHooks().current_device();
+    auto index = at::detail::getXPUHooks().getCurrentDevice();
     auto gen = at::detail::getXPUHooks().getDefaultXPUGenerator(index);
     {
       // See Note [Acquire lock when using random generators]
