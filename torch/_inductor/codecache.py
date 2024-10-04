@@ -788,7 +788,7 @@ class FxGraphHashDetails:
 
     def _get_custom_pass_detail(
         self, custom_pass: CustomGraphPassType
-    ) -> Optional[Union[bytes, str]]:
+    ) -> Optional[Any]:
         if not custom_pass:
             return None
         assert isinstance(custom_pass, CustomGraphPass)
