@@ -241,7 +241,7 @@ class TritonBlockPointerTest(InductorTestCase):
             ((3 * max_block, 2), 3, 2),  # Multiple of max block. Uses loops.
             (
                 (2, 3 * max_block),
-                3,
+                2,
                 2,
             ),  # Multiple of max block. Uses loops.
             ((128, 128), 3, 2),  # Test a large size, with loops.
