@@ -1300,11 +1300,10 @@ class PythonWrapperCodegen(CodeGen):
                         arg, 1  # type: ignore[arg-type]
                     ):
                         equal_to_1_args.append(key)
-        index_dtype = "tl.int32"
         triton_meta = {
             "signature": signature_to_meta(
                 signature,
-                size_dtype=index_dtype,
+                size_dtype=None,  # try to infer based on symints
                 indices=non_constant_indices,
                 argdefs=kernel.arg_names,
             ),
