@@ -60,7 +60,7 @@ class ROCmTemplateKernel(ROCmKernel):
         return {**self.args.input_buffers, **self.args.output_buffers}.get(
             node.get_name(), None
         )
-    
+
     def get_signature(self):
         return self.signature
 
