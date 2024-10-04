@@ -887,7 +887,9 @@ def argsort_sym(seq: List[Union[int, torch.SymInt, sympy.Expr]]) -> List[int]:
             # We don't always do this because this helper function is called
             # from non-Inductor contexts (but only with ints or symints)
             from .virtualized import V
+
             return V.graph._shape_env.evaluate_expr(expr, size_oblivious=True)
+
         if evaluate(a_val < b_val):
             return -1
         if evaluate(a_val > b_val):
