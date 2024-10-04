@@ -2441,6 +2441,32 @@ class TestBlockMask(InductorTestCase):
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((1, 1, 4, 4)))
 
     @supported_platform
+    def test_compiling_create_block_mask_no_recompile(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        torch._dynamo.reset()
+        block_mask = create_block_mask(mask_mod, 2, 4, 1024, 1024, _compile=True)
+        self.assertIsInstance(block_mask, BlockMask)
+        self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((2, 4, 8)))
+        self.assertEqual(block_mask.kv_indices.shape, torch.Size((2, 4, 8, 8)))
+        self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 1)
+
+        # automatic dynamic shapes triggered and recompilation.
+        block_mask = create_block_mask(mask_mod, 4, 8, 2048, 2048, _compile=True)
+        self.assertIsInstance(block_mask, BlockMask)
+        self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((4, 8, 16)))
+        self.assertEqual(block_mask.kv_indices.shape, torch.Size((4, 8, 16, 16)))
+        self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
+
+        # no recompilation.
+        block_mask = create_block_mask(mask_mod, 6, 16, 3072, 3072, _compile=True)
+        self.assertIsInstance(block_mask, BlockMask)
+        self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((6, 16, 24)))
+        self.assertEqual(block_mask.kv_indices.shape, torch.Size((6, 16, 24, 24)))
+        self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
+
+    @supported_platform
     def test_block_mask_viz(self):
         def causal_mask(b, h, q, kv):
             return q >= kv
