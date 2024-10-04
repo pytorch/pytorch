@@ -136,6 +136,7 @@ struct TORCH_API Engine {
       const std::shared_ptr<Node>& graph_root,
       GraphTask& graph_task,
       bool accumulate_grad,
+      bool create_graph,
       const edge_list& outputs);
   static void set_compiled_autograd(compiled_autograd_fn fn);
 

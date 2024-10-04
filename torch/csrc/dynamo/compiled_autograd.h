@@ -2,6 +2,7 @@
 #include <ATen/TensorGeometry.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
+#include <c10/util/Exception.h>
 #include <c10/util/flat_hash_map.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/input_metadata.h>
@@ -16,6 +17,21 @@
 
 namespace torch::dynamo::autograd {
 using namespace torch::autograd;
+
+// Fallback to eager autograd
+class EagerFallbackException : public std::exception {
+ public:
+  EagerFallbackException() = delete;
+  EagerFallbackException(const std::exception& orig)
+      : msg(std::string(orig.what())) {}
+
+  const char* what() const noexcept override {
+    return msg.c_str();
+  }
+
+ private:
+  std::string msg;
+};
 
 struct SizeInput {
   // Note: int value is still needed when dynamic to pass as an arg
@@ -226,10 +242,11 @@ struct LiftedIValueArgs {
 
 struct AutogradCompilerCall {
   AutogradCompilerCall() = delete;
-  AutogradCompilerCall(bool opaque_cpp_node)
+  AutogradCompilerCall(bool opaque_cpp_node, bool fallback_on_error)
       : tensor_args(active_node_call_idx),
         lifted_ivalue_args(active_node_call_idx),
-        opaque_cpp_node(opaque_cpp_node) {}
+        opaque_cpp_node(opaque_cpp_node),
+        fallback_on_error(fallback_on_error) {}
   void add_size_input(const c10::SymInt& s) {
     all_size_inputs.emplace_back(
         default_dyn_type, s.guard_int(__FILE__, __LINE__));
@@ -255,6 +272,7 @@ struct AutogradCompilerCall {
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type = SizeInput::STATIC;
   const bool opaque_cpp_node;
+  bool fallback_on_error;
 
   // Currently, these lift untraceable CppNodes as one-time use custom ops
   std::function<at::IValue*(
@@ -296,6 +314,10 @@ class CompiledNodeArgs {
     collect(_compiler.tensor_args.add(t));
   }
   void collect(const SavedVariable& sv, bool is_output) {
+    // TODO: remove this once we lift unpack hooks
+    if (sv.has_hooks()) {
+      _compiler.fallback_on_error = false;
+    }
     collect(
         _compiler.tensor_args.add(sv, is_output ? _node_call.node : nullptr));
   }

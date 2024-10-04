@@ -571,6 +571,23 @@ static PyObject* call_lambda(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
+static bool fallback_on_error = true;
+static PyObject* set_fallback_on_error(PyObject* dummy, PyObject* args) {
+  HANDLE_TH_ERRORS;
+  PyObject* enable = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &enable)) {
+    Py_RETURN_FALSE;
+  }
+
+  if (enable == Py_True) {
+    fallback_on_error = true;
+  } else {
+    fallback_on_error = false;
+  }
+  Py_RETURN_TRUE;
+  END_HANDLE_TH_ERRORS;
+}
+
 // NOLINTNEXTLINE(*array*)
 static PyMethodDef _methods[] = {
     {"set_autograd_compiler", set_autograd_compiler, METH_VARARGS, nullptr},
@@ -578,6 +595,7 @@ static PyMethodDef _methods[] = {
     {"is_cache_empty", is_cache_empty, METH_NOARGS, nullptr},
     {"set_verbose_logger", set_verbose_logger, METH_VARARGS, nullptr},
     {"set_opaque_cpp_node", set_opaque_cpp_node, METH_VARARGS, nullptr},
+    {"set_fallback_on_error", set_fallback_on_error, METH_NOARGS, nullptr},
     {"call_lambda", call_lambda, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
@@ -712,18 +730,27 @@ static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
 
 // Only call this function while holding GIL
 CacheNode* _compiled_autograd_impl(
+    AutogradCompilerCall& compiler_call,
     const std::shared_ptr<Node>& graph_root,
     GraphTask& graph_task,
     bool accumulate_grad,
+    bool create_graph,
     const edge_list& output_edges,
     THPObjectPtr* graph_arg_inputs,
     THPObjectPtr* graph_arg_sizes,
     THPObjectPtr* graph_arg_ivalue_args,
     THPObjectPtr* graph_arg_hooks) {
+  TORCH_CHECK(!create_graph, "compiled_autograd does not support create_graph");
+  TORCH_CHECK(
+      !AnomalyMode::is_enabled(),
+      "compiled_autograd does not support AnomalyMode");
+  TORCH_CHECK(
+      c10::impl::TorchDispatchModeTLS::stack_len() == 0,
+      "TorchDispatchMode not yet implemented for compiled autograd");
+
   custom_op_impls->reset();
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
-  AutogradCompilerCall compiler_call(opaque_cpp_node);
 
   // bind methods with python deps
   compiler_call.collect = lambda_collect;
@@ -797,6 +824,8 @@ CacheNode* _compiled_autograd_impl(
     }
     i++;
   }
+  // TODO(xmfan): identify all side effects and relax this constraint
+  compiler_call.fallback_on_error = false;
 
   // TODO(jansel): some dynamic sizes seem to be ints not symints
   if (!cache->check_dynamic_sizes(compiler_call, vlogger)) {
@@ -965,10 +994,8 @@ variable_list compiled_autograd(
     const std::shared_ptr<Node>& graph_root,
     GraphTask& graph_task,
     bool accumulate_grad,
+    bool create_graph,
     const edge_list& output_edges) {
-  TORCH_CHECK(
-      c10::impl::TorchDispatchModeTLS::stack_len() == 0,
-      "TorchDispatchMode not yet implemented for compiled autograd")
   static std::mutex mtx;
   LockGuardWithErrorLogs lock_guard(mtx);
   pybind11::gil_scoped_acquire gil;
@@ -978,15 +1005,33 @@ variable_list compiled_autograd(
   THPObjectPtr sizes;
   THPObjectPtr ivalue_args;
   THPObjectPtr hooks;
-  CacheNode* cache = _compiled_autograd_impl(
-      graph_root,
-      graph_task,
-      accumulate_grad,
-      output_edges,
-      &inputs,
-      &sizes,
-      &ivalue_args,
-      &hooks);
+  CacheNode* cache = nullptr;
+  {
+    AutogradCompilerCall compiler_call(opaque_cpp_node, fallback_on_error);
+    try {
+      cache = _compiled_autograd_impl(
+          compiler_call,
+          graph_root,
+          graph_task,
+          accumulate_grad,
+          create_graph,
+          output_edges,
+          &inputs,
+          &sizes,
+          &ivalue_args,
+          &hooks);
+    } catch (const std::exception& e) {
+      if (!compiler_call.fallback_on_error) {
+        // error was unrecoverable
+        throw;
+      }
+
+      TORCH_WARN_ONCE(
+          "Falling back to eager autograd. Exception thrown during Compiled Autograd tracing: " +
+          std::string(e.what()));
+      throw EagerFallbackException(e);
+    }
+  }
 
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
       cache->runtime_wrapper.get(),
