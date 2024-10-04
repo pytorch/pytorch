@@ -3,6 +3,7 @@ import sys
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
+import torch._inductor.post_grad_custom_pass
 from torch._environment import is_fbcode
 
 
@@ -141,8 +142,18 @@ b2b_gemm_pass = False
 #
 # torch._inductor.config.post_grad_custom_pre_pass = my_custom_pre_pass
 # torch._inductor.config.post_grad_custom_post_pass = my_custom_post_pass
-post_grad_custom_pre_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
-post_grad_custom_post_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
+post_grad_custom_pre_pass: Optional[
+    Union[
+        torch._inductor.post_grad_custom_pass.PostGradCustomPass,
+        Callable[[torch.fx.graph.Graph], None],
+    ]
+] = None
+post_grad_custom_post_pass: Optional[
+    Union[
+        torch._inductor.post_grad_custom_pass.PostGradCustomPass,
+        Callable[[torch.fx.graph.Graph], None],
+    ]
+] = None
 
 # Registers a custom joint graph pass.
 joint_custom_pre_pass: Optional[Callable[[torch.fx.Graph], None]] = None
@@ -1245,8 +1256,6 @@ class trace:
 _save_config_ignore = [
     # workaround: "Can't pickle <function ...>"
     "trace.upload_tar",
-    "post_grad_custom_post_pass",
-    "post_grad_custom_pre_pass",
     "joint_custom_pre_pass",
     "joint_custom_post_pass",
     "pre_grad_custom_pass",
@@ -1260,6 +1269,9 @@ _cache_config_ignore_prefix = [
     # not relevant
     "worker_start_method",
     "compile_threads",
+    # see PostGradCustomPass; these are handled specially
+    "post_grad_custom_post_pass",
+    "post_grad_custom_pre_pass",
 ]
 
 # External callable for matmul tuning candidates

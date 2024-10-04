@@ -65,6 +65,7 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
     rocm_compiler,
 )
+from torch._inductor.post_grad_custom_pass import PostGradCustomPass
 from torch._utils_internal import log_cache_bypass
 
 from .remote_cache import create_cache
@@ -777,6 +778,13 @@ class FxGraphHashDetails:
         self.system_info = CacheBase.get_system()
         self.inductor_config = config.save_config_portable()
 
+        # Custom post grad passes must have implemented PostGradCustomPass in order
+        # to be eligible for caching.
+        self.post_grad_custom_post_pass = config.post_grad_custom_post_pass.uuid()
+        self.post_grad_custom_pre_pass = config.post_grad_custom_pre_pass.uuid()
+        assert self.post_grad_custom_post_pass
+        assert self.post_grad_custom_pre_pass
+
     def debug_lines(self) -> List[str]:
         """
         Get a printable string describing in more detail all the attributes
@@ -1256,12 +1264,11 @@ class FxGraphCache:
         Check some conditions that would preclude caching and raise BypassFxGraphCache
         to bypass in case caching is not possible.
         """
-        # TODO: https://github.com/pytorch/pytorch/issues/130772
-        if (
-            config.post_grad_custom_pre_pass is not None
-            or config.post_grad_custom_post_pass is not None
-        ):
-            raise BypassFxGraphCache("Post grad custom passes unsupported")
+        # Post grad custom passes must implement the PostGradCustomPass or we don't
+        # know how to include them in the cache key calculation.
+        for p in (config.post_grad_custom_pre_pass, config.post_grad_custom_post_pass):
+            if not isinstance(p, PostGradCustomPass) or not p.uuid():
+                raise BypassFxGraphCache("Unsupported post grad custom pass")
 
         # Freezing can embed constants that wouldn't be static across runs.
         if config.freezing or config.aot_inductor.use_runtime_constant_folding:
