@@ -4193,6 +4193,35 @@ def forward(self, x):
             )
         )
 
+    def test_cleanup_dynamic_markers(self) -> None:
+        class Foo(torch.nn.Module):
+            def forward(self, inputs):
+                x, y = inputs["x"], inputs["y"]
+                return x + y
+
+        inputs = (
+            {
+                "x": torch.randn(4, 8),
+                "y": torch.randn(4, 8),
+            },
+        )
+        shapes = {
+            "inputs": {
+                "x": (Dim.AUTO, Dim.STATIC),
+                "y": (Dim.DYNAMIC, Dim.STATIC),
+            },
+        }
+        ep = export(Foo(), inputs, dynamic_shapes=shapes)
+        for tensor in inputs[0].values():
+            for attr in [
+                "_dynamo_weak_dynamic_indices",
+                "_dynamo_dynamic_indices",
+                "_dynamo_dynamic_range",
+                "_dynamo_static_indices",
+                "_dynamo_unbacked_indices",
+            ]:
+                self.assertFalse(hasattr(tensor, attr))
+
     def test_constrain_decomp(self) -> None:
         class M(torch.nn.Module):
             def __init__(self) -> None:
