@@ -65,7 +65,7 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
     rocm_compiler,
 )
-from torch._inductor.post_grad_custom_pass import PostGradCustomPass
+from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
 from torch._utils_internal import log_cache_bypass
 
 from .remote_cache import create_cache
@@ -778,12 +778,21 @@ class FxGraphHashDetails:
         self.system_info = CacheBase.get_system()
         self.inductor_config = config.save_config_portable()
 
-        # Custom post grad passes must have implemented PostGradCustomPass in order
-        # to be eligible for caching.
-        self.post_grad_custom_post_pass = config.post_grad_custom_post_pass.uuid()
-        self.post_grad_custom_pre_pass = config.post_grad_custom_pre_pass.uuid()
-        assert self.post_grad_custom_post_pass
-        assert self.post_grad_custom_pre_pass
+        # Custom post grad passes should provide an ID to hash.
+        self.post_grad_custom_pre_pass = self._get_custom_pass_detail(
+            config.post_grad_custom_pre_pass
+        )
+        self.post_grad_custom_post_pass = self._get_custom_pass_detail(
+            config.post_grad_custom_post_pass
+        )
+
+    def _get_custom_pass_detail(
+        self, custom_pass: CustomGraphPassType
+    ) -> Optional[Union[bytes, str]]:
+        if not custom_pass:
+            return None
+        assert isinstance(custom_pass, CustomGraphPass)
+        return custom_pass.uuid()
 
     def debug_lines(self) -> List[str]:
         """
@@ -1264,10 +1273,10 @@ class FxGraphCache:
         Check some conditions that would preclude caching and raise BypassFxGraphCache
         to bypass in case caching is not possible.
         """
-        # Post grad custom passes must implement the PostGradCustomPass or we don't
+        # Post grad custom passes must implement the CustomGraphPass or we don't
         # know how to include them in the cache key calculation.
         for p in (config.post_grad_custom_pre_pass, config.post_grad_custom_post_pass):
-            if not isinstance(p, PostGradCustomPass) or not p.uuid():
+            if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
                 raise BypassFxGraphCache("Unsupported post grad custom pass")
 
         # Freezing can embed constants that wouldn't be static across runs.
