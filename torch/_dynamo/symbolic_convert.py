@@ -398,7 +398,7 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
             exc_info=exc_info,
         )
     else:
-        # This log line MUST contain the string "details suppressed",
+        # This log line MUST not contain the string "Graph break in user code",
         # exercised by
         #   python test/dynamo/test_misc.py -k test_duplicate_graph_break_log
         graph_break_log.debug(
