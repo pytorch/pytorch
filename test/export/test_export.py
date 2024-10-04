@@ -8666,7 +8666,6 @@ class TestExportCustomClass(TorchTestCase):
             lib_file_path = find_library_location("libtorchbind_test.so")
         torch.ops.load_library(str(lib_file_path))
 
-    @skipIfCrossRef  # Export doesn't support serializing method descriptors
     def test_lift_custom_obj(self):
         # TODO: fix this test once custom class tracing is implemented
 
