@@ -20,6 +20,8 @@ TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
 
 void dynamicGraphUpdater(cudaGraphKernelNodeUpdate* updates, size_t numUpdates);
 
+int graphTestMain();
+
 struct UpdateAndTensorOffset {
   cudaGraphKernelNodeUpdate update;
   ptrdiff_t tensor_offset; // TODO: change to intptr_t
@@ -57,6 +59,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void debug_dump(const std::string& debug_path);
   void compare_with_recapture(const CUDAGraph& graph2);
   void replay_dynamic(std::vector<void*> prefilledDataPtrs, std::vector<size_t> prefilledLens);
+  void instantiate_graph_exec();
 
   friend std::vector<std::vector<UpdateAndTensorOffset>> create_device_updates(
       CUDAGraph* graph1_ptr,

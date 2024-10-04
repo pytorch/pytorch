@@ -36,10 +36,11 @@ def make_dynamic(func):
 
 def myFunc(a, b, c):
     print("myFunc is running") # Can't actually print a,b,c here, because when it's run in capture mode, their data_ptrs are nullptr
-    a += b.sum() * c
+    #a += b.sum() * c
     #temp = torch.ones_like(c) # we can even allocate :)
     #temp += 1
     #a += temp
+    a[:] = c
 
 myFuncWrapped = make_dynamic(myFunc)
 

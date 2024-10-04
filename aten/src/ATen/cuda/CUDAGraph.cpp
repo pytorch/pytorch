@@ -195,7 +195,14 @@ void CUDAGraph::capture_end() {
 
   TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
   has_graph_ = true;
+  if (!sentinelAllocationsMode) {
+    instantiate_graph_exec();
+  }
+}
 
+void CUDAGraph::instantiate_graph_exec() {
+  TORCH_CHECK(has_graph_, "must have graph");
+  TORCH_CHECK(!has_graph_exec_, "must not have graph exec");
   // In typical graph usage some tensors (e.g. the tensors used for graph IO) are not freed
   // between replays.
   // If Pytorch compiles and runs with a CUDA 11.4+ toolkit, there's a chance the allocator backend
@@ -365,6 +372,7 @@ void CUDAGraph::compare_with_recapture(const CUDAGraph& graph2) {
   TORCH_CHECK(graph2.sentinelAllocationsMode == 2, "The other graph must have been captured with all allocations overridden to allocationIdx+1");
   TORCH_CHECK(allocationSizes == graph2.allocationSizes, "Both graphs must have done the exact same allocations in the exact same order with the exact same sizes");
   TORCH_CHECK(has_graph_, "must have graph");
+  TORCH_CHECK(!has_graph_exec_, "must not have graph exec");
 
   CUDAGraph& graph1 = *this;
 
@@ -484,10 +492,14 @@ void CUDAGraph::compare_with_recapture(const CUDAGraph& graph2) {
       // device-side update API can't do that, unfortunately.
     }
   }
+  instantiate_graph_exec(); // must do this after cudaGraphKernelNodeSetAttribute
   hasComparedAgainstRecapture = true;
 }
 
 void CUDAGraph::replay_dynamic(std::vector<void*> prefilledDataPtrs, std::vector<size_t> prefilledLens) {
+  std::cout << "launching graph test main" << std::endl;
+  graphTestMain();
+  cudaDeviceSynchronize();
   TORCH_CHECK(hasComparedAgainstRecapture, "Must compare against a pointer offsetted sentinel recapture");
   TORCH_CHECK(has_graph_exec_,
               "Called CUDAGraph::replay without a preceding successful capture.");
