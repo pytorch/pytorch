@@ -291,9 +291,9 @@ at::BlasBackend Context::blasPreferredBackend() {
   if (blas_preferred_backend == at::BlasBackend::Cublaslt) {
     static const bool hipblaslt_unsupported = []() {
       static const std::vector<std::string> archs = {
-	      "gfx90a", "gfx940", "gfx941", "gfx942",
+          "gfx90a", "gfx940", "gfx941", "gfx942",
 #if ROCM_VERSION >= 60200
-	      "gfx1100", "gfx1101"
+          "gfx1100", "gfx1101"
 #endif
       };
       for (auto index: c10::irange(getNumGPUs())) {
