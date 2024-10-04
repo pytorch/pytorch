@@ -4387,10 +4387,13 @@ class TestMemPool(TestCase):
         # holds a reference
         self.assertEqual(pool.use_count(), 1)
 
-        # no allocations happened yet, so called_dummy_alloc should be 0
+        # no allocations happened yet, so called_dummy_alloc and
+        # called_dummy_free should be 0
         alloc_lib = ctypes.CDLL(dummy_allocator)
         called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
+        called_dummy_free = ctypes.c_int.in_dll(alloc_lib, "called_dummy_free")
         self.assertEqual(called_dummy_alloc.value, 0)
+        self.assertEqual(called_dummy_free.value, 0)
 
         with torch.cuda.use_mem_pool(pool):
             out_0 = torch.randn(1, device="cuda")
@@ -4413,6 +4416,15 @@ class TestMemPool(TestCase):
         # pool should have 2 segments since we made two allocations above in
         # in the same pool
         self.assertEqual(len(pool.snapshot()), 2)
+
+        del out_0, out_1, pool
+        # pool now should have 0 segments if del pool reclaimed all the
+        # memory
+        self.assertEqual(len(pool.snapshot()), 0)
+
+        # called_dummy_free should be 321 if dummy_free was used to deallocate
+        # out tensor
+        self.assertEqual(called_dummy_free.value, 321)
 
     def test_mempool_context(self):
         active_pool = torch.cuda.MemPoolContext.active_pool()
