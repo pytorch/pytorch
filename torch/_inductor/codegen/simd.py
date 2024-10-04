@@ -1912,7 +1912,7 @@ class SIMDScheduling(BaseScheduling):
         Returns a list of tilings ranked by dimensionality.
         """
         tiling_groups = []
-        for node in node_schedule:
+        for node in EnableReduction.filter(node_schedule):
             if not isinstance(node, scheduler.SchedulerNode):
                 continue
 
@@ -2004,7 +2004,7 @@ class SIMDScheduling(BaseScheduling):
 
         seen_names: OrderedSet[str] = OrderedSet()
         candidate_tiles: Counter[Any] = collections.Counter()
-        for node in node_schedule:
+        for node in EnableReduction.filter(node_schedule):
             for tiling in cls.candidate_tilings(node):
                 if tiling.name in seen_names:
                     continue
