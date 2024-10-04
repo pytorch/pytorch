@@ -5364,6 +5364,11 @@ class TestCudaAutocast(TestAutocast):
             with torch.cuda.amp.autocast():
                 _ = torch.ones(10)
 
+    def test_cuda_module_loading_env(self):
+        torch.cuda.init()
+        val = os.environ.get("CUDA_MODULE_LOADING", "")
+        self.assertEqual(val, "LAZY")
+
 
 instantiate_parametrized_tests(TestCuda)
 instantiate_parametrized_tests(TestCudaMallocAsync)
