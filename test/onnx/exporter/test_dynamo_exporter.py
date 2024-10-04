@@ -3,11 +3,9 @@
 
 from __future__ import annotations
 
-import numpy as np
-import onnx.reference as rt
-
 import torch
 from torch.testing._internal import common_utils
+from torch.onnx._internal.exporter import _testing as onnx_testing
 
 
 @common_utils.instantiate_parametrized_tests
@@ -32,17 +30,11 @@ class DynamoExporterTest(common_utils.TestCase):
         query = torch.rand(32, 8, 128, 64, dtype=torch.float16, device=device)
         key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device=device)
         value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device=device)
-        expected = model(query, key, value)
 
         onnx_program = torch.onnx.export(
             model, (query, key, value), dynamo=True, fallback=False
         )
-        proto = onnx_program.model_proto
-        ref = rt.ReferenceEvaluator(proto)
-        got = ref.run(
-            None, {"query": query.numpy(), "key": key.numpy(), "value": value.numpy()}
-        )
-        np.testing.assert_allclose(expected.numpy(), got[0], atol=1e-3)
+        onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
 
 
 if __name__ == "__main__":
