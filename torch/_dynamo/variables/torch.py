@@ -34,7 +34,6 @@ from ..utils import (
     product,
     proxy_args_kwargs,
     unwrap_if_wrapper,
-    unwrap_sym_or_const,
 )
 from .base import VariableTracker
 from .ctx_manager import (
@@ -301,7 +300,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             assert len(args) == 2
             return VmapIncrementNestingCtxManagerVariable.create(
                 tx,
-                [unwrap_sym_or_const(x) for x in args],
+                args,
             )
         elif self.value is torch._functorch.eager_transforms.jvp_increment_nesting:
             assert len(args) == 0

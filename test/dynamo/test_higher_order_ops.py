@@ -2431,7 +2431,7 @@ class GraphModule(torch.nn.Module):
             func = torch.vmap(func, in_dims=(None, None, None, 0))
             return func(a, b, c, d)
 
-        cnt = CompileCounterWithBackend("inductor")
+        cnt = CompileCounterWithBackend("eager")
         # We generate corresponding dynamic shapes test case at
         # `test/dynamo/test_dynamic_shapes.py` automatically.
         compiled_fn = torch.compile(fn, backend=cnt)
@@ -2443,6 +2443,47 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(fn(gn, a, b, c, d), compiled_fn(gn, a, b, c, d))
         # Ensure no recompile if dynamic shapes enabled.
         self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
+        graph = cnt.graphs[0]
+
+        # Check dynamic shapes generates correct graph.
+        if check_dynamic_shape_capture():
+            self.assertExpectedInline(
+                graph.code.strip(),
+                """\
+def forward(self, L_a_ : torch.SymInt, L_b_ : torch.SymInt, L_c_ : torch.SymInt, L_d_ : torch.SymInt):
+    l_a_ = L_a_
+    l_b_ = L_b_
+    l_c_ = L_c_
+    l_d_ = L_d_
+    a = torch.arange(l_a_)
+    b = torch.arange(l_b_)
+    c = torch.arange(l_c_)
+    d = torch.arange(l_d_)
+    lazy_load_decompositions = torch._functorch.vmap.lazy_load_decompositions();  lazy_load_decompositions = None
+    _vmap_increment_nesting = torch._C._functorch._vmap_increment_nesting(l_d_, 'error');  _vmap_increment_nesting = None
+    child = torch._C._functorch._add_batch_dim(d, 0, 1);  d = None
+    lazy_load_decompositions_1 = torch._functorch.vmap.lazy_load_decompositions();  lazy_load_decompositions_1 = None
+    _vmap_increment_nesting_1 = torch._C._functorch._vmap_increment_nesting(l_c_, 'error');  _vmap_increment_nesting_1 = None
+    child_1 = torch._C._functorch._add_batch_dim(c, 0, 2);  c = None
+    lazy_load_decompositions_2 = torch._functorch.vmap.lazy_load_decompositions();  lazy_load_decompositions_2 = None
+    _vmap_increment_nesting_2 = torch._C._functorch._vmap_increment_nesting(l_b_, 'error');  _vmap_increment_nesting_2 = None
+    child_2 = torch._C._functorch._add_batch_dim(b, 0, 3);  b = None
+    lazy_load_decompositions_3 = torch._functorch.vmap.lazy_load_decompositions();  lazy_load_decompositions_3 = None
+    _vmap_increment_nesting_3 = torch._C._functorch._vmap_increment_nesting(l_a_, 'error');  _vmap_increment_nesting_3 = None
+    _add_batch_dim_3 = torch._C._functorch._add_batch_dim(a, 0, 4);  a = None
+    add = _add_batch_dim_3 + child_2;  _add_batch_dim_3 = child_2 = None
+    add_1 = add + child_1;  add = child_1 = None
+    batched_outputs = add_1 + child;  add_1 = child = None
+    batched_outputs_1 = torch._C._functorch._remove_batch_dim(batched_outputs, 4, l_a_, 0);  batched_outputs = l_a_ = None
+    _vmap_decrement_nesting = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
+    batched_outputs_2 = torch._C._functorch._remove_batch_dim(batched_outputs_1, 3, l_b_, 0);  batched_outputs_1 = l_b_ = None
+    _vmap_decrement_nesting_1 = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting_1 = None
+    batched_outputs_3 = torch._C._functorch._remove_batch_dim(batched_outputs_2, 2, l_c_, 0);  batched_outputs_2 = l_c_ = None
+    _vmap_decrement_nesting_2 = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting_2 = None
+    _remove_batch_dim_3 = torch._C._functorch._remove_batch_dim(batched_outputs_3, 1, l_d_, 0);  batched_outputs_3 = l_d_ = None
+    _vmap_decrement_nesting_3 = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting_3 = None
+    return (_remove_batch_dim_3,)""",  # noqa: B950
+            )
 
     def test_cond_pytree_operands(self):
         def _construct_pytree():
@@ -2961,7 +3002,7 @@ class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
             warnings.warn(msg)
 
     def _compile_check(self, fn, inputs, fullgraph=True, graph_idx=0):
-        backend = CompileCounterWithBackend("inductor")
+        backend = EagerAndRecordGraphs()
         actual = fn(*inputs)
         expected = torch.compile(fn, backend=backend, fullgraph=fullgraph)(*inputs)
 
