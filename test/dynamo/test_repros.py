@@ -14,7 +14,6 @@ import inspect
 import itertools
 import os
 import random
-import sys
 import unittest
 import warnings
 import weakref
@@ -458,7 +457,7 @@ class PartialT5(torch.nn.Module):
         if past_key_value is not None:
             assert (
                 len(past_key_value) == 2
-            ), f"past_key_value should have 2 past states: keys and values. Got { len(past_key_value)} past states"
+            ), f"past_key_value should have 2 past states: keys and values. Got {len(past_key_value)} past states"
             real_seq_length += (
                 past_key_value[0].shape[2] if query_length is None else query_length
             )
@@ -4547,7 +4546,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f(*args)
         self.assertEqual(num_compiles, 1)
 
-    @unittest.skipIf(sys.version_info < (3, 9), "requires python 3.9+")
     def test_issue134451(self):
         class BoundingBox2DIndex(IntEnum):
             _X = 0
@@ -4620,7 +4618,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         input_tensor = torch.randn(1, 10, dtype=torch.float32)
         opt = torch.compile(model.eval(), backend="eager", fullgraph=True)
         actual = opt(input_tensor)
-        expected = model(input_tensor)
+        try:
+            expected = model(input_tensor)
+        except Exception as e:
+            raise unittest.SkipTest("eager failed, requires Python>=3.12") from e
         self.assertEqual(actual, expected)
 
     def test_invalid_seq_unpack(self):
@@ -6003,6 +6004,22 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         ref = outer_func(x)
         res = compile_outer(x)
         self.assertEqual(ref, res)
+
+    # https://github.com/pytorch/pytorch/issues/119162
+    def test_inductor_rng_default_dtype(self) -> None:
+        @torch.compile
+        def fn():
+            tmp = torch.randn(4, 4, dtype=torch.bfloat16)
+            return tmp
+
+        try:
+            old = torch.get_default_dtype()
+            torch.set_default_dtype(torch.bfloat16)
+            out = fn()
+        finally:
+            torch.set_default_dtype(old)
+        # output dtype should be float32
+        self.assertEqual(out.dtype, torch.bfloat16)
 
 
 instantiate_parametrized_tests(ReproTests)

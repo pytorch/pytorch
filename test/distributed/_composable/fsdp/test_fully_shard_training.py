@@ -725,7 +725,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                 )
 
 
-class TestFullyShardShardPlacementFn(FSDPTest):
+class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
     @property
     def world_size(self) -> int:
         return min(8, torch.cuda.device_count())
@@ -777,6 +777,39 @@ class TestFullyShardShardPlacementFn(FSDPTest):
         for param, ref_param in zip(model.parameters(), ref_model.parameters()):
             full_param = param.full_tensor()
             self.assertEqual(full_param, ref_param)
+
+
+class TestFullyShardShardPlacementFnMultiThread(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_shard_placement_fn_contiguous_params_grads(self):
+        dim = 5
+        model = MLP(dim=dim, dim_multiplier=3)
+
+        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+            if param.ndim > 1:
+                return Shard(1)
+            return Shard(0)
+
+        fully_shard(model.in_proj, shard_placement_fn=shard_placement_fn)
+        fully_shard(model.out_proj, shard_placement_fn=shard_placement_fn)
+        fully_shard(model, shard_placement_fn=shard_placement_fn)
+
+        for param in model.parameters():
+            self.assertTrue(param.is_contiguous())
+            self.assertTrue(param.to_local().is_contiguous())
+
+        inp = torch.randn((2, dim), device="cuda")
+        model(inp).sum().backward()
+
+        for param in model.parameters():
+            self.assertTrue(param.is_contiguous())
+            self.assertTrue(param.to_local().is_contiguous())
+            self.assertTrue(param.grad.is_contiguous())
+            self.assertTrue(param.grad.to_local().is_contiguous())
 
 
 class TestFullyShardSharedParams(FSDPTest):

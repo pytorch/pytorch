@@ -161,11 +161,11 @@ constexpr int NLL_LOSS_THREADS = 32;
   AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Byte, index_t, __VA_ARGS__) \
   AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Long, index_t, __VA_ARGS__))
 
-#define CHECK_INDEX_IN_CLASS(INDEX, N_CLASSES)                                \
-  if constexpr(std::is_unsigned<decltype(INDEX)>::value) {                    \
-    CUDA_KERNEL_ASSERT(INDEX < N_CLASSES);                                    \
-  } else {                                                                    \
-    CUDA_KERNEL_ASSERT(INDEX >= 0 && INDEX < N_CLASSES);                      \
+#define CHECK_INDEX_IN_CLASS(INDEX, N_CLASSES)                           \
+  if constexpr(std::is_unsigned_v<decltype(INDEX)>) {                    \
+    CUDA_KERNEL_ASSERT(INDEX < N_CLASSES);                               \
+  } else {                                                               \
+    CUDA_KERNEL_ASSERT(INDEX >= 0 && INDEX < N_CLASSES);                 \
   }
 
 template <typename scalar_t, typename index_t>
@@ -470,7 +470,7 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
       CHECK_INDEX_IN_CLASS(t, n_classes);
       // NOTE(crcrpar): this index could overflow in int64_t as `t` itself can be close to the max.
       const bwd_index_t index = static_cast<bwd_index_t>(i) * ndim + t;
-      if constexpr(!std::is_unsigned<decltype(index)>::value) {
+      if constexpr(!std::is_unsigned_v<decltype(index)>) {
         CUDA_KERNEL_ASSERT(index >= 0);
       }
       grad_input[index] = weights != nullptr ? weights[t] * grad : grad;

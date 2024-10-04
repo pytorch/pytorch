@@ -383,6 +383,18 @@ class TestFullyShardShardedParameterTensor(FSDPTestMultiThread):
         ):
             fully_shard(model)
 
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_raise_noncontiguous_parameter(self):
+        """
+        Tests raising an exception when the model has non-contiguous
+        parameters. This is due to lack of implementation support.
+        """
+        conv2d = nn.Conv2d(8, 8, 3).to(memory_format=torch.channels_last)
+        with self.assertRaisesRegex(
+            NotImplementedError, "FSDP does not support non-contiguous parameters"
+        ):
+            fully_shard(conv2d)
+
 
 class TestFullyShardShardedParameterDTensor(FSDPTestMultiThread):
     @property
@@ -1117,6 +1129,19 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
         for param, ref_param in zip(model.parameters(), ref_model.parameters()):
             full_param = param.full_tensor()
             self.assertEqual(full_param, ref_param)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_invalid_shard_dim(self):
+        model = nn.Sequential(nn.Linear(16, 17), nn.Linear(17, 8))
+
+        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+            return Shard(1)
+
+        # Shard(1) is invalid for 1D bias parameters
+        with self.assertRaisesRegex(
+            AssertionError, "Shard dim 1 is invalid for 1D tensor"
+        ):
+            fully_shard(model, shard_placement_fn=shard_placement_fn)
 
 
 if __name__ == "__main__":
