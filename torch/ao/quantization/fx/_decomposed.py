@@ -13,7 +13,7 @@ from torch.library import impl, Library
 # name is not too long
 quantized_decomposed_lib = Library("quantized_decomposed", "DEF")
 
-_INTEGER_DTYPES = [torch.uint8, torch.int8, torch.int16, torch.int32]
+_INTEGER_DTYPES = [torch.uint8, torch.int8, torch.uint16, torch.int16, torch.int32]
 _FLOAT_DTYPES = [torch.float8_e5m2, torch.float8_e4m3fn]
 
 _DTYPE_TO_QVALUE_BOUNDS = {

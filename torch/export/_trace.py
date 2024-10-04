@@ -1847,6 +1847,18 @@ def _export(
         An ExportedProgram containing the traced method.
     """
 
+    from torch._utils_internal import export_training_ir_rollout_check
+
+    if export_training_ir_rollout_check():
+        return _export_for_training(
+            mod,
+            args,
+            kwargs,
+            dynamic_shapes,
+            strict=strict,
+            preserve_module_call_signature=preserve_module_call_signature,
+        )
+
     global _EXPORT_FLAGS, _EXPORT_MODULE_HIERARCHY
     _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
 
