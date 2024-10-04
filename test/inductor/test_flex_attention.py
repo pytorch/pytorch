@@ -2,11 +2,12 @@
 # flake8: noqa: B950
 
 import functools
+import random
 import string
 import unittest
 from collections import namedtuple
-from contextlib import contextmanager, nullcontext
-from typing import Callable, Optional, Tuple, Union
+from contextlib import contextmanager
+from typing import Callable, List, Optional, Tuple, Union
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 
@@ -19,6 +20,7 @@ from torch.nn.attention.flex_attention import (
     _create_empty_block_mask,
     _DEFAULT_SPARSE_BLOCK_SIZE,
     _identity,
+    _mask_mod_signature,
     _score_mod_signature,
     and_masks,
     BlockMask,
@@ -632,6 +634,11 @@ class TestFlexAttention(InductorTestCase):
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_dynamic(self, dtype: torch.dtype, score_mod: Callable):
+        if score_mod.__name__ == "_alibi_bias":
+            # TODO
+            self.skipTest(
+                "Alibi bias broken with dynamic shapes since we don't support capturing dynamic shapes"
+            )
         self.run_dynamic_test(score_mod, dtype)
 
     @supported_platform
@@ -912,7 +919,7 @@ class TestFlexAttention(InductorTestCase):
         self.run_test(composed_score_mod, dtype)
 
     @supported_platform
-    @skip("Not support compiled flex attention with training bias")
+    @expectedFailure  # TODO: Remove this after supporting compiled flex attention with training bias
     @common_utils.parametrize("dtype", test_dtypes)
     def test_captured_buffers(self, dtype: torch.dtype):
         head_offset = torch.rand(8, device="cuda", dtype=dtype, requires_grad=True)
@@ -967,6 +974,53 @@ class TestFlexAttention(InductorTestCase):
             return score + bias[b, q, kv]
 
         self.run_test(bias_mod, dtype)
+
+    @supported_platform
+    def test_load_from_view_buffer(self):
+        dtype = torch.float16
+        device = "cuda"
+        W = 8
+
+        class SimpleAttention(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rel_pos_h = torch.randn(2 * H - 1, D, device=device, dtype=dtype)
+
+            def forward(self, q, k, v):
+                q = q.view(B * H, H * W, -1)
+                score_mod = self.generate_score_mod(q)
+                q = q.view(B, H, H * W, -1)
+                return flex_attention(q, k, v, score_mod=score_mod)
+
+            def generate_score_mod(self, q):
+                rel_h = self.add_decomposed_rel_pos(q)
+                rel_h = rel_h.view(
+                    B, H, rel_h.size(1), rel_h.size(2), rel_h.size(3)
+                ).squeeze(-1)
+
+                def score_mod(score, batch, head, q_idx, k_idx):
+                    h_idx = k_idx // W
+                    return score + rel_h[batch, head, q_idx, h_idx]
+
+                return score_mod
+
+            @torch.no_grad()
+            def add_decomposed_rel_pos(self, q):
+                q_coords = torch.arange(H, device=self.rel_pos_h.device)[:, None]
+                k_coords = torch.arange(H, device=self.rel_pos_h.device)[None, :]
+                relative_coords = (q_coords - k_coords) + (H - 1)
+                Rh = self.rel_pos_h[relative_coords.long()]
+                r_q = q.reshape(B * H, H, W, D)
+                rel_h = torch.einsum("bhwc,hkc->bhwk", r_q, Rh)
+                return rel_h.reshape(B * H, H * W, H, 1)
+
+        m = SimpleAttention().to(device).eval()
+        m = torch.compile(m, mode="max-autotune", fullgraph=True)
+        q = torch.randn(B, H, H * W, D, device=device, dtype=dtype, requires_grad=True)
+        k = torch.randn(B, H, H * W, D, device=device, dtype=dtype, requires_grad=True)
+        v = torch.randn(B, H, H * W, D, device=device, dtype=dtype, requires_grad=True)
+        out = m(q, k, v)
+        out.sum().backward()
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1334,17 +1388,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test(bias_mod)
 
-    # TODO this config segfaults with Triton without:
-    # https://github.com/triton-lang/triton/pull/4540
     @supported_platform
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("head_dims", [(D, D // 2), (D // 2, D)])
     def test_non_equal_head_dims(self, dtype, score_mod, head_dims):
         qk_d, v_d = head_dims
-        context = nullcontext() if qk_d > v_d else self.assertRaises(ValueError)
-        with context:
-            self.run_test(score_mod, dtype, B, H, S, qk_d, B, H, S, V_D=v_d)
+        self.run_test(score_mod, dtype, B, H, S, qk_d, B, H, S, V_D=v_d)
 
     @supported_platform
     def test_autograd_function_in_score_mod(self):
@@ -1390,6 +1440,24 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         attention = functools.partial(flex_attention, block_mask=block_mask)
 
         self.run_test_with_call(attention)
+
+    @supported_platform
+    def test_new_empty_mask_mod(self):
+        S = 128
+        q, k, v = (torch.randn(4, 1, S, 64, device="cuda") for _ in range(3))
+
+        attn_mask = torch.ones(4, 1, S, S, dtype=torch.bool, device="cuda").tril()
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            h_ = h.new_zeros(h.shape)
+            return score + attn_mask[b, h_, q_idx, kv_idx]
+
+        def causal(b, h, q_idx, kv_idx):
+            h_ = h.new_zeros(h.shape)
+            return attn_mask[b, h_, q_idx, kv_idx]
+
+        block_mask = create_block_mask(causal, B=4, H=None, Q_LEN=S, KV_LEN=S)
+        torch.compile(flex_attention)(q, k, v, score_mod, block_mask=block_mask)
 
     @supported_platform
     def test_GQA_causal_mask(self):
@@ -1913,6 +1981,36 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         def rel_pos_2d(score, b, h, q_idx, kv_idx):
             return score + bias_flex[q_idx, kv_idx]
+
+        bias_indices = torch.arange(S)[:, None] + torch.arange(S)
+        bias_spda_ref = bias.detach().clone().requires_grad_(True)
+        implicit_bias_spda_ref = bias_spda_ref
+        bias_spda_gold = (
+            bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
+        )
+        implicit_bias_spda_gold = bias_spda_gold
+
+        self._test_learnable_bias_inner(
+            B,
+            H,
+            S,
+            D,
+            rel_pos_2d,
+            bias_flex,
+            implicit_bias_spda_ref,
+            bias_spda_ref,
+            implicit_bias_spda_gold,
+            bias_spda_gold,
+        )
+
+        # 2-dimensional bias + index multiple
+        B, H, S, D = 1, 1, 256, 64
+        bias = torch.randn(S, S, device="cuda", dtype=torch.float16, requires_grad=True)
+
+        bias_flex = bias.detach().clone().requires_grad_(True)
+
+        def rel_pos_2d(score, b, h, q_idx, kv_idx):
+            return score + bias_flex[q_idx][kv_idx]
 
         bias_indices = torch.arange(S)[:, None] + torch.arange(S)
         bias_spda_ref = bias.detach().clone().requires_grad_(True)
@@ -2550,6 +2648,32 @@ class TestBlockMask(InductorTestCase):
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((1, 1, 4, 4)))
 
     @supported_platform
+    def test_compiling_create_block_mask_no_recompile(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        torch._dynamo.reset()
+        block_mask = create_block_mask(mask_mod, 2, 4, 1024, 1024, _compile=True)
+        self.assertIsInstance(block_mask, BlockMask)
+        self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((2, 4, 8)))
+        self.assertEqual(block_mask.kv_indices.shape, torch.Size((2, 4, 8, 8)))
+        self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 1)
+
+        # automatic dynamic shapes triggered and recompilation.
+        block_mask = create_block_mask(mask_mod, 4, 8, 2048, 2048, _compile=True)
+        self.assertIsInstance(block_mask, BlockMask)
+        self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((4, 8, 16)))
+        self.assertEqual(block_mask.kv_indices.shape, torch.Size((4, 8, 16, 16)))
+        self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
+
+        # no recompilation.
+        block_mask = create_block_mask(mask_mod, 6, 16, 3072, 3072, _compile=True)
+        self.assertIsInstance(block_mask, BlockMask)
+        self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((6, 16, 24)))
+        self.assertEqual(block_mask.kv_indices.shape, torch.Size((6, 16, 24, 24)))
+        self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
+
+    @supported_platform
     def test_block_mask_viz(self):
         def causal_mask(b, h, q, kv):
             return q >= kv
@@ -2774,6 +2898,91 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         )
 
         torch.testing.assert_close(causal_mask_out, sdpa_mask_out, atol=5e-3, rtol=0.0)
+
+    @supported_platform
+    def test_doc_mask_clamped_repro(self):
+        def _offsets_to_doc_ids_tensor(offsets):
+            device = offsets.device
+            counts = offsets[1:] - offsets[:-1]
+            return torch.repeat_interleave(
+                torch.arange(len(counts), device=device, dtype=torch.int32), counts
+            )
+
+        def length_to_offsets(
+            lengths: List[int], device: Union[str, torch.device]
+        ) -> Tensor:
+            offsets = [0]
+            offsets.extend(lengths)
+            offsets = torch.tensor(offsets, device=device, dtype=torch.int32)
+            offsets = torch.cumsum(offsets, dim=-1)
+            return offsets
+
+        def generate_doc_mask_mod(offsets: Tensor) -> _mask_mod_signature:
+            document_id = _offsets_to_doc_ids_tensor(offsets)
+
+            def doc_mask_mod(b, h, q_idx, kv_idx):
+                same_doc = document_id[q_idx] == document_id[kv_idx]
+                return same_doc
+
+            return doc_mask_mod
+
+        random.seed(0)
+
+        def generate_random_lengths(total_length, num_documents):
+            lengths = [1] * num_documents
+            remaining_length = total_length - num_documents
+            for _ in range(remaining_length):
+                index = random.randint(0, num_documents - 1)
+                lengths[index] += 1
+            return lengths
+
+        device = "cuda"
+        max_seq_len, doc_count = 128, 4
+        B, H, SEQ_LEN, HEAD_DIM = 1, 1, max_seq_len, 8
+
+        lengths = generate_random_lengths(max_seq_len, doc_count)
+        offsets = length_to_offsets(lengths, device)
+
+        document_causal_mask = generate_doc_mask_mod(offsets)
+        block_mask_compiled = create_block_mask(
+            document_causal_mask,
+            1,
+            1,
+            SEQ_LEN,
+            SEQ_LEN,
+            device=device,
+            _compile=True,
+        )
+        block_mask = create_block_mask(
+            document_causal_mask,
+            1,
+            1,
+            SEQ_LEN,
+            SEQ_LEN,
+            device=device,
+            _compile=True,
+        )
+        self.assertEqual(block_mask_compiled.kv_indices, block_mask.kv_indices)
+        self.assertEqual(
+            block_mask_compiled.full_kv_indices, block_mask.full_kv_indices
+        )
+        for i in range(5):
+            lengths = generate_random_lengths(1024 + i, 5)
+            offsets = length_to_offsets(lengths, "cuda")
+            doc_ids = _offsets_to_doc_ids_tensor(offsets)
+            total_seq_len = 1024 + i
+
+            def doc_mask_mod(b, h, q_idx, kv_idx):
+                return (
+                    doc_ids[q_idx.clamp(0, doc_ids.shape[0] - 1)]
+                    == doc_ids[kv_idx.clamp(0, doc_ids.shape[0] - 1)]
+                )
+
+            q, k, v = (
+                torch.randn(1, 12, 1024 + i, 64, device=device) for _ in range(3)
+            )
+            block_mask = create_block_mask(doc_mask_mod, None, None, 1024 + i, 1024 + i)
+            torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
 
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
