@@ -2371,6 +2371,7 @@ bool THPVariable_initModule(PyObject* module) {
     return false;
   Py_INCREF(&THPVariableType);
   PyModule_AddObject(module, "TensorBase", (PyObject*)&THPVariableType);
+  Py_INCREF(&THPVariableType);
   PyModule_AddObject(module, "_TensorBase", (PyObject*)&THPVariableType);
   torch::autograd::initTorchFunctions(module);
   torch::autograd::initTensorImplConversion(module);
