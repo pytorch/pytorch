@@ -150,7 +150,7 @@ Tensor _remove_batch_dim(
       "Nested tensors can only be vmapped over dim=0, but got dim=",
       out_dim);
   if (!has_level(self, level)) {
-    auto self_sizes = self.sizes();
+    auto self_sizes = self.sym_sizes();
     VmapSymDimVector expanded_sizes(self_sizes.begin(), self_sizes.end());
     expanded_sizes.insert(expanded_sizes.begin() + out_dim, batch_size);
     auto result = self.expand_symint(expanded_sizes);
