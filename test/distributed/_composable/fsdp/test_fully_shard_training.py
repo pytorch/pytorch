@@ -4,9 +4,10 @@ import contextlib
 import copy
 import functools
 import itertools
+import threading
 import unittest
 from collections import defaultdict
-from typing import Iterable, List, Tuple, Union
+from typing import Iterable, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -230,6 +231,52 @@ class TestFullyShardCastAfterInit(FSDPTestMultiThread):
             for _optim in (ref_optim, optim):
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+
+
+class TestFullyShardUserTensorHooks(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_user_tensor_hooks(self):
+        """
+        Test that we del the unsharded parameter at the end of backward so that
+        user hooks do not accumulate across iterations.
+        """
+        tls = threading.local()
+        tls.param_name_to_hook_count = defaultdict(int)
+
+        def weight_hook(grad: Optional[torch.Tensor], param_name: str):
+            tls.param_name_to_hook_count[param_name] += 1
+            return grad
+
+        class Linear(nn.Module):
+            def __init__(self, dim: int, id: int):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn((dim, dim)))
+                self.bias = nn.Parameter(torch.randn((dim,)))
+                self.id = id
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                self.weight.register_hook(
+                    functools.partial(weight_hook, param_name=f"weight_{self.id}")
+                )
+                return nn.functional.linear(x, self.weight, self.bias)
+
+        model = nn.Sequential(Linear(4, 0), Linear(4, 1))
+        for linear in model:
+            fully_shard(linear)
+        fully_shard(model)
+        inp = torch.randn((2, 4), device="cuda")
+        model(inp).sum().backward()
+        for hook_count in tls.param_name_to_hook_count.values():
+            self.assertEqual(hook_count, 1)
+        tls.param_name_to_hook_count.clear()
+        model(inp).sum().backward()
+        # If we do not del the unsharded parameter, then the values would be 2
+        for hook_count in tls.param_name_to_hook_count.values():
+            self.assertEqual(hook_count, 1)
 
 
 class TestFullyShard1DTrainingCore(FSDPTest):
