@@ -21,6 +21,7 @@ IF(NOT APL_INCLUDE_DIR)
 ENDIF()
 
 # Check lib file
+# TODO: Add/test support for Linux
 FIND_PATH(APL_LIB_DIR NAMES libarmpl_lp64_mp.dll.lib libarmpl_lp64_mp PATHS ${APL_LIB_SEARCH_PATHS})
 IF(NOT APL_LIB_DIR)
     SET(APL_FOUND OFF)
@@ -29,11 +30,7 @@ ENDIF()
 
 IF(WIN32)
   set(APL_LIBRARIES
-    "${APL_LIB_DIR}/libarmpl_lp64_mp.dll.lib"
-    "${APL_LIB_DIR}/Fortran_main.static.lib"
-    "${APL_LIB_DIR}/FortranDecimal.static.lib"
-    "${APL_LIB_DIR}/FortranRuntime.static.lib"
-    "${APL_LIB_DIR}/libomp.dll.lib"
+    "${APL_LIB_DIR}/libarmpl_lp64_mp.lib"
   )
   message(STATUS "APL_LIBRARIES: ${APL_LIBRARIES}")
 ELSEIF(UNIX)

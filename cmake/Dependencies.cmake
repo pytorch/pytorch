@@ -232,7 +232,6 @@ elseif(BLAS STREQUAL "APL")
   set(BLAS_INFO "apl")
   set(BLAS_FOUND 1)
   set(BLAS_LIBRARIES ${APL_LIBRARIES})
-  list(APPEND Caffe2_DEPENDENCY_LIBS ${APL_LIBRARIES})
 elseif(BLAS STREQUAL "Generic")
   # On Debian family, the CBLAS ABIs have been merged into libblas.so
   if(ENV{GENERIC_BLAS_LIBRARIES} STREQUAL "")
