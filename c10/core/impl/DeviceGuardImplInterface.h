@@ -214,7 +214,7 @@ struct C10_API DeviceGuardImplInterface {
 
   /**
    * Wait (by blocking the calling thread) until all the work previously
-   * enqueued on the all streams has completed running on the device.
+   * enqueued on the device has been completed.
    */
   virtual void synchronizeDevice(const DeviceIndex /*device_index*/) const {
     TORCH_CHECK(
