@@ -3277,7 +3277,9 @@ fallback__unsafe_masked_index_put_accumulate = fallback_handler(
 
 @register_lowering(aten._unsafe_masked_index, type_promotion_kind=None)
 def _unsafe_masked_index(self, mask, indices, fill):
-    ranges, _, _unsafe_index_fn = index_impl_helper(self, indices, check=False, wrap_neg=False)
+    ranges, _, _unsafe_index_fn = index_impl_helper(
+        self, indices, check=False, wrap_neg=False
+    )
     mask_loader = mask.make_loader()
     self_loader = self.make_loader()
 
