@@ -1,7 +1,8 @@
 import dataclasses
 from dataclasses import field
 from types import CodeType, ModuleType
-from typing import Any, Dict
+from typing import Any, BinaryIO, Dict, IO
+from typing_extensions import Self
 
 from torch.utils._import_utils import import_dill
 
@@ -33,12 +34,12 @@ class ExecutionRecord:
     builtins: Dict[str, Any] = field(default_factory=dict)
     code_options: Dict[str, Any] = field(default_factory=dict)
 
-    def dump(self, f: Any) -> None:
+    def dump(self, f: IO[str]) -> None:
         assert dill is not None, "replay_record requires `pip install dill`"
         dill.dump(self, f)
 
     @classmethod
-    def load(cls, f: Any) -> "ExecutionRecord":
+    def load(cls, f: BinaryIO) -> Self:
         assert dill is not None, "replay_record requires `pip install dill`"
         return dill.load(f)
 
