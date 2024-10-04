@@ -199,8 +199,7 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
-    # TODO: Figure out how to avoid hard-coding these paths
-    export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-15/bin/llvm-symbolizer
+    export ASAN_SYMBOLIZER_PATH=$(which llvm-symbolizer)
     export TORCH_USE_RTLD_GLOBAL=1
     # NB: We load libtorch.so with RTLD_GLOBAL for UBSAN, unlike our
     # default behavior.
@@ -234,7 +233,7 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # have, and it applies to child processes.
 
     # TODO: get rid of the hardcoded path
-    export LD_PRELOAD=/usr/lib/llvm-15/lib/clang/15.0.7/lib/linux/libclang_rt.asan-x86_64.so
+    export LD_PRELOAD=$(clang-18 --print-file-name=libclang_rt.asan-x86_64.so)
     # Disable valgrind for asan
     export VALGRIND=OFF
 
