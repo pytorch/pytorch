@@ -11,10 +11,9 @@ from torch.testing._internal import common_utils
 @common_utils.instantiate_parametrized_tests
 class DynamoExporterTest(common_utils.TestCase):
     def test_insert_flatten_between_transpose_and_view(self):
-        class DummyModel(torch.nn.Module):
-            def __init__(self, enable_math: bool):
+        class Model(torch.nn.Module):
+            def __init__(self):
                 super().__init__()
-                self.enable_math = False
 
             def forward(self, query, key, value):
                 res = torch.nn.functional.scaled_dot_product_attention(
@@ -24,7 +23,7 @@ class DynamoExporterTest(common_utils.TestCase):
                 final = rest.view(8, 32, 128 * 64)
                 return final
 
-        model = DummyModel(False)
+        model = Model()
         device = "cpu"
 
         query = torch.rand(32, 8, 128, 64, dtype=torch.float16, device=device)
