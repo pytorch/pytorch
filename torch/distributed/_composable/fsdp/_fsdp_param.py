@@ -240,6 +240,7 @@ class FSDPParam:
         self._init_extensions()
         self.all_gather_outputs: List[torch.Tensor] = []
         self.unsharded_accumulated_grad = None
+        self.unsharded_grad = None
         self._param_fqn: Optional[str] = None  # prefixed from root module
         # TODO: Remove this padding logic once DTensor pads the local tensor:
         # https://github.com/pytorch/pytorch/issues/113045
@@ -496,6 +497,9 @@ class FSDPParam:
             self._unsharded_param = nn.Parameter(
                 unsharded_param, requires_grad=self.sharded_param.requires_grad
             )
+        if self.unsharded_grad is not None:
+            self._unsharded_param.grad = self.unsharded_grad
+            self.unsharded_grad = None
 
     def _unflatten_all_gather_outputs(self) -> Tuple[torch.Tensor, ...]:
         return tuple(

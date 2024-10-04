@@ -413,6 +413,7 @@ class FSDPParamGroup:
         if self.is_sharded:
             for fsdp_param in self.fsdp_params:
                 if hasattr(fsdp_param, "_unsharded_param"):
+                    fsdp_param.unsharded_grad = fsdp_param._unsharded_param.grad
                     delattr(fsdp_param, "_unsharded_param")
         self._post_forward_indices.clear()
 
