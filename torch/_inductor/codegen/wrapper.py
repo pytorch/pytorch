@@ -1979,6 +1979,29 @@ class PythonWrapperCodegen(CodeGen):
             return self.declare + name
 
     def codegen_subgraph_prefix(self, subgraph, outer_inputs, outer_outputs):
+        def get_all_symbols(expr):
+            symbols = set()  # Use a set to avoid duplicates
+            if isinstance(expr, sympy.Symbol):
+                symbols.add(expr)
+            elif hasattr(expr, "args"):  # Recurse if it has further sub-expressions
+                for arg in expr.args:
+                    symbols.update(get_all_symbols(arg))
+            return symbols
+
+        subgraph_symbols = set()
+        for value in subgraph.graph.graph_inputs.values():
+            shapes = value.get_size()
+            for dim, shape in enumerate(shapes):
+                subgraph_symbols.update(get_all_symbols(shape))
+
+            strides = value.get_stride()
+            for dim, shape in enumerate(strides):
+                subgraph_symbols.update(get_all_symbols(shape))
+
+        # Add the extra symints in the subgraph
+        for symbol in subgraph_symbols:
+            subgraph.graph.add_symbol_graph_input(symbol)
+
         for inner_input, outer_input in zip(subgraph.graph.graph_inputs, outer_inputs):
             self.writeline(f"{self.declare}{inner_input} = {outer_input}{self.ending}")
 
@@ -1986,8 +2009,11 @@ class PythonWrapperCodegen(CodeGen):
         for inner_output, outer_output in zip(
             subgraph.graph.graph_outputs, outer_outputs
         ):
+            # For reinterpret_view, the subgraph launcher function returns the
+            # reinterpret_tensor
             self.writeline(
-                f"{outer_output} = {inner_output.codegen_reference()}{self.ending}"
+                f"{outer_output} = {inner_output.get_name()}{self.ending}"
+                # f"{outer_output} = {inner_output.codegen_reference()}{self.ending}"
             )
 
     def codegen_subgraph_call(self, subgraph, outer_inputs, outer_outputs):
@@ -2172,6 +2198,10 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
 
     def write_async_compile_wait(self):
         pass
+
+    def next_kernel_suffix(self) -> str:
+        # Ensures that subgraphs kernels do not clash with each other
+        return self.parent_wrapper.next_kernel_suffix()
 
     @cache_on_self
     def write_triton_header_once(self) -> None:

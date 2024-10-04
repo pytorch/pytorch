@@ -748,6 +748,9 @@ class GraphLowering(torch.fx.Interpreter):
 
         return None
 
+    def add_symbol_graph_input(self, symbol: sympy.Expr) -> None:
+        raise RuntimeError("Should not be called for the main graph")
+
     def get_buffer(self, buffer_name: str) -> Union[ir.TensorBox, ir.Buffer]:
         buf = self.try_get_buffer(buffer_name)
         if buf is not None:
@@ -2009,3 +2012,15 @@ class SubgraphLowering(GraphLowering):
             subgraph_name=self.name,
             parent_wrapper_code=self.parent.wrapper_code,
         )
+
+    def add_symbol_graph_input(self, symbol: sympy.Expr) -> None:
+        """
+        Add a symbol input to the graph after the GraphLowering object is
+        created. For subgraphs, we might have to pass on the symints from the
+        parent graph. This symints might not be present in the aten Fx graph and
+        therefore absent in the original graph inputs.
+        """
+        if symbol.name in self.graph_input_names:
+            return
+        self.graph_inputs[symbol.name] = symbol
+        self.graph_input_names.append(symbol.name)
