@@ -37,9 +37,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  get-label-type:
+    name: get-label-type
+    uses: ./.github/workflows/_runner-determinator.yml
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
   manywheel-py3_9-cpu-s390x-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -49,6 +58,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
@@ -59,7 +69,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-s390x-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_9-cpu-s390x-build
+    needs:
+      - manywheel-py3_9-cpu-s390x-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -70,6 +82,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-s390x
       build_environment: linux-s390x-binary-manywheel
@@ -92,6 +105,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
+      use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-s390x
     secrets:
@@ -103,6 +117,7 @@ jobs:
   manywheel-py3_10-cpu-s390x-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -112,6 +127,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
@@ -122,7 +138,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-s390x-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_10-cpu-s390x-build
+    needs:
+      - manywheel-py3_10-cpu-s390x-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -133,6 +151,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-s390x
       build_environment: linux-s390x-binary-manywheel
@@ -155,6 +174,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
+      use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-s390x
     secrets:
@@ -166,6 +186,7 @@ jobs:
   manywheel-py3_11-cpu-s390x-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -175,6 +196,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
@@ -185,7 +207,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-s390x-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_11-cpu-s390x-build
+    needs:
+      - manywheel-py3_11-cpu-s390x-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -196,6 +220,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-s390x
       build_environment: linux-s390x-binary-manywheel
@@ -218,6 +243,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
+      use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-s390x
     secrets:
@@ -229,6 +255,7 @@ jobs:
   manywheel-py3_12-cpu-s390x-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -238,6 +265,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
@@ -248,7 +276,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cpu-s390x-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_12-cpu-s390x-build
+    needs:
+      - manywheel-py3_12-cpu-s390x-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -259,6 +289,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu-s390x
       build_environment: linux-s390x-binary-manywheel
@@ -281,6 +312,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
+      use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu-s390x
     secrets:
@@ -292,6 +324,7 @@ jobs:
   manywheel-py3_13-cpu-s390x-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -301,6 +334,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
+      use_split_build: False
       DESIRED_PYTHON: "3.13"
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
@@ -311,7 +345,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cpu-s390x-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_13-cpu-s390x-build
+    needs:
+      - manywheel-py3_13-cpu-s390x-build
+      - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -322,6 +358,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
+      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu-s390x
       build_environment: linux-s390x-binary-manywheel
@@ -344,6 +381,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
       DOCKER_IMAGE: pytorch/manylinuxs390x-builder:cpu-s390x-main
+      use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu-s390x
     secrets:

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 from .graph_module import GraphModule
 from .graph import Graph
 from .node import Node
@@ -208,9 +207,11 @@ def replace_pattern(
 def replace_pattern_with_filters(
     gm: GraphModule,
     pattern: Union[Callable, Graph, GraphModule],
-    replacement: Union[Callable, Graph, GraphModule],
+    replacement: Union[Callable, Graph, GraphModule, None] = None,
     match_filters: Optional[List[Callable[["InternalMatch", Graph, Graph], bool]]] = None,
     ignore_literals: bool = False,
+    # Placed at the end to avoid breaking backward compatibility
+    replacement_callback: Optional[Callable[["InternalMatch", Graph, Graph], Graph]] = None,
 ) -> List[ReplacedPatterns]:
     """
     See replace_pattern for documentation. This function is an overload with an additional match_filter argument.
@@ -220,17 +221,22 @@ def replace_pattern_with_filters(
             (match: InternalMatch, original_graph: Graph, pattern_graph: Graph) and return a boolean indicating
             whether the match satisfies the condition.
             See matcher_utils.py for definition of InternalMatch.
+        ``replacement_callback``: A function that takes in a match and returns a
+            Graph to be used as the replacement. This allows you to construct a
+            replacement graph based on the match.
     """
 
-    return _replace_pattern(gm, pattern, replacement, match_filters, ignore_literals)
+    return _replace_pattern(gm, pattern, replacement, match_filters, ignore_literals, replacement_callback)
 
 
 def _replace_pattern(
     gm: GraphModule,
     pattern: Union[Callable, Graph, GraphModule],
-    replacement: Union[Callable, Graph, GraphModule],
+    replacement: Union[Callable, Graph, GraphModule, None] = None,
     match_filters: Optional[List[Callable[["InternalMatch", Graph, Graph], bool]]] = None,
     ignore_literals: bool = False,
+    # Placed at the end to avoid breaking backward compatibility
+    replacement_callback: Optional[Callable[["InternalMatch", Graph, Graph], Graph]] = None,
 ) -> List[ReplacedPatterns]:
 
     from torch.fx.passes.utils.matcher_utils import SubgraphMatcher, InternalMatch
@@ -248,13 +254,6 @@ def _replace_pattern(
     else:
         pattern_graph = symbolic_trace(pattern).graph
 
-    if isinstance(replacement, GraphModule):
-        replacement_graph = replacement.graph
-    elif isinstance(replacement, Graph):
-        replacement_graph = replacement
-    else:
-        replacement_graph = symbolic_trace(replacement).graph
-
     matcher = SubgraphMatcher(pattern_graph, match_output=False, match_placeholder=False,
                               remove_overlapping_matches=True, ignore_literals=ignore_literals)
     _matches: List[InternalMatch] = matcher.match(original_graph)
@@ -266,13 +265,27 @@ def _replace_pattern(
                for match_filter in match_filters)
     ]
 
-    replacement_placeholders = [n for n in replacement_graph.nodes if n.op == "placeholder"]
+    if isinstance(replacement, GraphModule):
+        common_replacement_graph = replacement.graph
+    elif isinstance(replacement, Graph):
+        common_replacement_graph = replacement
+    elif callable(replacement):
+        common_replacement_graph = symbolic_trace(replacement).graph
+    else:
+        assert replacement_callback is not None, "Must provide either a replacement GraphModule or a replacement callback"
+        common_replacement_graph = None
 
     # As we progressively replace nodes, we'll need to keep track of how the match results should change
     match_changed_node: Dict[Node, Node] = {}
 
     match_and_replacements = []
-    for match in _matches:
+    for i, match in enumerate(_matches):
+        if replacement_callback is not None:
+            replacement_graph = replacement_callback(match, original_graph, pattern_graph)
+        else:
+            assert common_replacement_graph is not None, "Must provide either a replacement GraphModule or a replacement callback"
+            replacement_graph = common_replacement_graph
+        replacement_placeholders = [n for n in replacement_graph.nodes if n.op == "placeholder"]
 
         # Build connecting between replacement graph's input and original graph input producer node
 
@@ -319,8 +332,8 @@ def _replace_pattern(
 
         # Hook the output Node of the replacement subgraph in to the
         # original Graph at the correct location
-        assert len(match.returning_nodes) == len(copied_returning_nodes)
-        for gn, copied_node in zip(match.returning_nodes, copied_returning_nodes):
+        assert len(match.returning_nodes) == len(copied_returning_nodes)  # type: ignore[arg-type]
+        for gn, copied_node in zip(match.returning_nodes, copied_returning_nodes):  # type: ignore[arg-type]
             gn.replace_all_uses_with(copied_node)
             match_changed_node[gn] = copied_node
         # Remove the original nodes

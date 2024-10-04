@@ -1029,6 +1029,41 @@ class TestOptimRenewed(TestCase):
             self.skipTest("MPS supports only torch.float16 and torch.float32")
         self._test_derived_optimizers(device, dtype, optim_info, "fused")
 
+    @optims(
+        [optim for optim in optim_db if "fused" in optim.supported_impls],
+        dtypes=(torch.float32,),
+    )
+    def test_fused_error_on_params_on_meta(self, device, dtype, optim_info):
+        if _get_device_type(device) not in optim_info.supports_fused_on:
+            self.skipTest(
+                f"{device} is not supported for fused on {optim_info.optim_cls.__name__}"
+            )
+
+        with torch.device("meta"):
+            model = torch.nn.Sequential(
+                torch.nn.Linear(2, 3),
+                torch.nn.Sigmoid(),
+                torch.nn.Linear(3, 1),
+                torch.nn.Sigmoid(),
+            ).to(dtype)
+
+        optimizer = optim_info.optim_cls(model.parameters(), fused=True)
+        with torch.device("meta"):
+            for p in model.parameters():
+                p.grad = torch.rand_like(p)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "`fused=True` requires all the params to be floating point Tensors",
+        ):
+            optimizer.step()
+
+        optimizer.zero_grad(set_to_none=True)
+        model.to_empty(device=device)
+        for p in model.parameters():
+            p.grad = torch.rand_like(p)
+        optimizer.step()
+
     @onlyNativeDeviceTypes
     @largeTensorTest("64GB")
     @optims(

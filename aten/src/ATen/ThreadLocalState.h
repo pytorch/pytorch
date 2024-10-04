@@ -78,6 +78,13 @@ class TORCH_API ThreadLocalState {
   // TLS for arbitrary python objects that is registered via hooks
   at::impl::ThreadLocalPythonObjects saved_objects_;
 
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE) && \
+    !defined(BUILD_LITE_INTERPRETER)
+  // TLS for autocast dtypes
+  std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES>
+      autocast_dtypes_;
+#endif
+
   friend class ThreadLocalStateGuard;
 };
 

@@ -73,7 +73,12 @@ def get_source_partitions(
         # function, or the type of module if the node is decomposed from a leaf
         # module
 
-        if (torch_fn := node.meta.get("torch_fn", None)) is not None:
+        # TODO: Bypass "torch_fn" when "source_fn_stack" because now "torch_fn" can
+        # be different from "source_fn_stack", for example for the add_ node
+        # decomposed from batch norm. We should remove the check on "source_fn_stack"
+        # after we fix "torch_fn". T199561090
+        if ((source_fn_st := node.meta.get("source_fn_stack", None)) is None and
+           (torch_fn := node.meta.get("torch_fn", None)) is not None):
             node_fqn, source_fn = torch_fn
             source_fn_name = source_fn.split(".")[1]
             if source_fn_name in wanted_sources:
