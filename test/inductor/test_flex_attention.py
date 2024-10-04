@@ -6,7 +6,7 @@ import random
 import string
 import unittest
 from collections import namedtuple
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from typing import Callable, List, Optional, Tuple, Union
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
@@ -975,6 +975,53 @@ class TestFlexAttention(InductorTestCase):
         self.run_test(bias_mod, dtype)
 
     @supported_platform
+    def test_load_from_view_buffer(self):
+        dtype = torch.float16
+        device = "cuda"
+        W = 8
+
+        class SimpleAttention(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rel_pos_h = torch.randn(2 * H - 1, D, device=device, dtype=dtype)
+
+            def forward(self, q, k, v):
+                q = q.view(B * H, H * W, -1)
+                score_mod = self.generate_score_mod(q)
+                q = q.view(B, H, H * W, -1)
+                return flex_attention(q, k, v, score_mod=score_mod)
+
+            def generate_score_mod(self, q):
+                rel_h = self.add_decomposed_rel_pos(q)
+                rel_h = rel_h.view(
+                    B, H, rel_h.size(1), rel_h.size(2), rel_h.size(3)
+                ).squeeze(-1)
+
+                def score_mod(score, batch, head, q_idx, k_idx):
+                    h_idx = k_idx // W
+                    return score + rel_h[batch, head, q_idx, h_idx]
+
+                return score_mod
+
+            @torch.no_grad()
+            def add_decomposed_rel_pos(self, q):
+                q_coords = torch.arange(H, device=self.rel_pos_h.device)[:, None]
+                k_coords = torch.arange(H, device=self.rel_pos_h.device)[None, :]
+                relative_coords = (q_coords - k_coords) + (H - 1)
+                Rh = self.rel_pos_h[relative_coords.long()]
+                r_q = q.reshape(B * H, H, W, D)
+                rel_h = torch.einsum("bhwc,hkc->bhwk", r_q, Rh)
+                return rel_h.reshape(B * H, H * W, H, 1)
+
+        m = SimpleAttention().to(device).eval()
+        m = torch.compile(m, mode="max-autotune", fullgraph=True)
+        q = torch.randn(B, H, H * W, D, device=device, dtype=dtype, requires_grad=True)
+        k = torch.randn(B, H, H * W, D, device=device, dtype=dtype, requires_grad=True)
+        v = torch.randn(B, H, H * W, D, device=device, dtype=dtype, requires_grad=True)
+        out = m(q, k, v)
+        out.sum().backward()
+
+    @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_load_from_bias_head_seq_batch(self, dtype):
         bias = torch.randn(B, H, S, S, device="cuda", dtype=dtype)
@@ -1340,17 +1387,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test(bias_mod)
 
-    # TODO this config segfaults with Triton without:
-    # https://github.com/triton-lang/triton/pull/4540
     @supported_platform
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("head_dims", [(D, D // 2), (D // 2, D)])
     def test_non_equal_head_dims(self, dtype, score_mod, head_dims):
         qk_d, v_d = head_dims
-        context = nullcontext() if qk_d > v_d else self.assertRaises(ValueError)
-        with context:
-            self.run_test(score_mod, dtype, B, H, S, qk_d, B, H, S, V_D=v_d)
+        self.run_test(score_mod, dtype, B, H, S, qk_d, B, H, S, V_D=v_d)
 
     @supported_platform
     def test_autograd_function_in_score_mod(self):
