@@ -17,7 +17,7 @@ import typing_extensions
 import warnings
 import weakref
 from collections import defaultdict
-from contextlib import contextmanager, ExitStack, nullcontext
+from contextlib import _GeneratorContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from typing import (
     Any,
@@ -47,6 +47,7 @@ import torch.utils._pytree as pytree
 from torch import SymBool, SymInt, Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._logging import trace_structured
 from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
     FakeTensor,
@@ -1084,38 +1085,43 @@ class PythonKeyTracer(Tracer):
             return e
 
 
-@contextmanager
-def _temp_remove_pre_dispatch_torch_function_mode() -> Generator[None, None, None]:
-    from torch.overrides import _len_torch_function_stack, _pop_mode, _push_mode
+def _make_temp_remove_mode_context_manager(
+    mode_ty: Type[TorchFunctionMode],
+) -> Callable[[], _GeneratorContextManager[Optional[TorchFunctionMode]]]:
+    @contextmanager
+    def context_manager_fn() -> Generator[Optional[TorchFunctionMode], None, None]:
+        from torch.overrides import _len_torch_function_stack, _pop_mode, _push_mode
 
-    temp_elements = []
-    pre_dispatch_mode = None
+        temp_elements = []
+        removed_mode = None
 
-    while _len_torch_function_stack() > 0:
-        mode = _pop_mode()
-        if isinstance(mode, PreDispatchTorchFunctionMode):
-            pre_dispatch_mode = mode
-            break
-        else:
-            temp_elements.append(mode)
+        while _len_torch_function_stack() > 0:
+            mode = _pop_mode()
+            if isinstance(mode, mode_ty):
+                removed_mode = mode
+                break
+            else:
+                temp_elements.append(mode)
 
-    for mode in reversed(temp_elements):
-        _push_mode(mode)
+        for mode in reversed(temp_elements):
+            _push_mode(mode)
 
-    try:
-        yield
+        try:
+            yield removed_mode
 
-    finally:
-        if pre_dispatch_mode is not None:
-            count = len(temp_elements)
-            while count > 0:
-                mode = _pop_mode()
-                count -= 1
+        finally:
+            if removed_mode is not None:
+                count = len(temp_elements)
+                while count > 0:
+                    mode = _pop_mode()
+                    count -= 1
 
-            temp_elements.append(pre_dispatch_mode)
+                temp_elements.append(removed_mode)
 
-            for mode in reversed(temp_elements):
-                _push_mode(mode)
+                for mode in reversed(temp_elements):
+                    _push_mode(mode)
+
+    return context_manager_fn
 
 
 @torch._disable_dynamo
@@ -1230,6 +1236,11 @@ class TorchFunctionMetadataMode(TorchFunctionMode):
         return func(*args, **kwargs)
 
 
+_temp_remove_metadata_torch_function_mode = _make_temp_remove_mode_context_manager(
+    TorchFunctionMetadataMode
+)
+
+
 # This mode is **only** used for pre_dispatch tracing.
 # In particular, we need to make sure that autograd/autocast API's
 # that do not desugar into dispatcher operators stay in the graph.
@@ -1249,13 +1260,23 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             # It's for passing the export verifier which needs to verify the meta['val']
             # TODO(tmanlaibaatar): we should systematically couple it with expoert verifier,
             # instead of hardcoding it here.
+            # T203648563
             node = self.tracer.create_node("call_function", func, args, {})  # type: ignore[arg-type]
-            if func is torch._C._set_grad_enabled:
+            if func in [
+                torch._C._set_grad_enabled,
+                torch.amp.autocast_mode._enter_autocast,
+                torch.amp.autocast_mode._exit_autocast,
+            ]:
                 node.meta["val"] = None
             return node
             # Don't actually run the function! We just want to trace the calls
             # into a graph. We don't actualy want to change global autograd state.
         return func(*args, **kwargs)
+
+
+_temp_remove_pre_dispatch_torch_function_mode = _make_temp_remove_mode_context_manager(
+    PreDispatchTorchFunctionMode
+)
 
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
@@ -1864,15 +1885,12 @@ class _MakefxTracer:
 
                 fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
                 if fake_tensor_mode is None:
-                    import torch._functorch.config as _config
-
-                    with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-                        fake_tensor_mode = FakeTensorMode(
-                            allow_fallback_kernels=True,
-                            allow_non_fake_inputs=self._allow_non_fake_inputs,
-                            shape_env=ShapeEnv(),
-                            static_shapes=True,
-                        )
+                    fake_tensor_mode = FakeTensorMode(
+                        allow_fallback_kernels=True,
+                        allow_non_fake_inputs=self._allow_non_fake_inputs,
+                        shape_env=ShapeEnv(),
+                        static_shapes=True,
+                    )
                 self.fake_tensor_mode = fake_tensor_mode
             elif self.tracing_mode == "symbolic":
                 import torch._dynamo
@@ -1880,14 +1898,12 @@ class _MakefxTracer:
                 fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
                 if fake_tensor_mode is None:
                     shape_env = ShapeEnv()
-                    import torch._functorch.config as _config
 
-                    with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-                        fake_tensor_mode = FakeTensorMode(
-                            allow_fallback_kernels=False,
-                            allow_non_fake_inputs=self._allow_non_fake_inputs,
-                            shape_env=shape_env,
-                        )
+                    fake_tensor_mode = FakeTensorMode(
+                        allow_fallback_kernels=False,
+                        allow_non_fake_inputs=self._allow_non_fake_inputs,
+                        shape_env=shape_env,
+                    )
                 assert (
                     fake_tensor_mode.shape_env is not None
                 ), "shape_env should be set if tracing with 'symbolic'"
@@ -2031,11 +2047,27 @@ class _MakefxTracer:
             stack.enter_context(_set_make_fx_tracer(self))
 
             assert self.fx_tracer is not None
-            t = dispatch_trace(
-                wrap_key(func, args, self.fx_tracer, self.pre_dispatch),
-                tracer=self.fx_tracer,
-                concrete_args=tuple(phs),
-            )
+            try:
+                t = dispatch_trace(
+                    wrap_key(func, args, self.fx_tracer, self.pre_dispatch),
+                    tracer=self.fx_tracer,
+                    concrete_args=tuple(phs),
+                )
+            except Exception:
+                trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "make_fx_fail_partial",
+                        "encoding": "string",
+                    },
+                    payload_fn=lambda: self.fx_tracer.graph.python_code(  # type: ignore[union-attr]
+                        root_module="self",
+                        verbose=True,
+                        include_stride=True,
+                        include_device=True,
+                    ).src,
+                )
+                raise
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way
         if self.tracing_mode == "symbolic":

@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 import torch.utils._pytree as pytree
 from torch._export.utils import _check_input_constraints_for_graph
-from torch.export.unflatten import _assign_attr, _AttrKind, _recursive_getattr
+from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from ._remove_effect_tokens_pass import _remove_effect_tokens
@@ -216,6 +216,9 @@ def _register_attrs_to_new_gm(
             attr_kind=_AttrKind.PARAMETER,
         )
 
+    # Technically this doesn't account for the aliased multiple constants but
+    # it is ok because we have a seperate pass later in the stack that populates
+    # the final gm.
     for name in chain(
         graph_signature.lifted_custom_objs, graph_signature.lifted_tensor_constants
     ):
@@ -258,7 +261,7 @@ def _create_stateful_graph_module(
     range_constraints,
     # TODO(suo) this should not be optional, but is since we still ahve
     # capture_pre_autograd_graph grr
-    graph_signature: Optional[ExportGraphSignature] = None,
+    ep: Optional[ExportedProgram] = None,
 ):
     stateful_gm = _StatefulGraphModule._create(
         plain_graph_module,
@@ -270,7 +273,7 @@ def _create_stateful_graph_module(
         _check_input_constraints_pre_hook, with_kwargs=True
     )
 
-    if graph_signature is None:
+    if ep is None:
         return stateful_gm
 
     # Fix up lifted tensor constants.
@@ -278,7 +281,7 @@ def _create_stateful_graph_module(
     # into a buffer in stateful_gm and creates an inconsistency with graph_signature.
     # We fix this by de-registering these buffers in lifted_tensor_constants
     # and call _assign_attr(attr_kind=CONSTANT) to register them as constants.
-    for constant_fqn in graph_signature.lifted_tensor_constants:
+    for constant_fqn in ep.graph_signature.lifted_tensor_constants:
         # Sometimes, the constant can require gradient, this is probably a bug in user code,
         # e.g. `self.const = torch.randn(2, 2, requires_grad=True)`.
         # We call detach on the constant_val since they're tensor contants and we don't need to
@@ -294,14 +297,25 @@ def _create_stateful_graph_module(
             )
             buffer = buffer.detach()
         *prefix, field = constant_fqn.rsplit(".")
-        submod = _recursive_getattr(stateful_gm, prefix)
+        submod = torch.fx.graph_module._get_attr_via_attr_list(stateful_gm, prefix)
         delattr(submod, field)
         _assign_attr(buffer, stateful_gm, constant_fqn, attr_kind=_AttrKind.CONSTANT)
+
+    # Constants are not preserved well when we create a new GraphModule unlike param/buffers
+    for const_name, value in ep.constants.items():
+        if not torch.fx.graph_module._has_attr(stateful_gm, const_name):
+            if isinstance(value, torch.Tensor):
+                _assign_attr(
+                    value,
+                    stateful_gm,
+                    const_name,
+                    attr_kind=_AttrKind.CONSTANT,
+                )
 
     # Fix up non-persistent buffers. torch.fx does not distinguish between
     # persistent and non-persistent buffers, so we must restore that distinction
     # here.
-    for buffer in graph_signature.non_persistent_buffers:
+    for buffer in ep.graph_signature.non_persistent_buffers:
         _assign_attr(
             plain_graph_module.get_buffer(buffer),
             stateful_gm,
@@ -354,8 +368,6 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
         ep.constants,
         forward_arg_names=forward_arg_names,
     )
-    unlift_gm = _create_stateful_graph_module(
-        new_gm, ep.range_constraints, ep.graph_signature
-    )
+    unlift_gm = _create_stateful_graph_module(new_gm, ep.range_constraints, ep)
     unlift_gm.meta.update(ep.graph_module.meta)
     return unlift_gm
