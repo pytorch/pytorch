@@ -5201,6 +5201,10 @@ class ExternKernelAlloc(ExternKernel):
             ordered_kwargs_for_cpp_kernel,
             op_overload,
         )
+        # We need output buffers for generating kernel arguments in the
+        # abi-compatible mode, where we retrieve outputs by pass each individual
+        # output through the abi-compatible interface.
+        self.outputs: Sequence[Any] = []
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
@@ -5783,10 +5787,6 @@ class FallbackKernel(ExternKernelAlloc):
             op_overload=kernel,
         )
 
-        # We need output buffers for generating kernel arguments in the
-        # abi-compatible mode, where we retrieve outputs by pass each individual
-        # output through the abi-compatible interface.
-        self.outputs: Sequence[Any] = []
         self.use_runtime_dispatch = False
         self.unbacked_bindings = unbacked_bindings
 
