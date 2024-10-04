@@ -621,6 +621,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
         ("cub/device/device_reduce.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("cub/device/device_scan.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("cub/device/device_select.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
+        ("nvtx3/nvtx3.hpp", ("roctracer/roctx.h", CONV_INCLUDE, API_ROCTX)),
         ("nvToolsExt.h", ("roctracer/roctx.h", CONV_INCLUDE, API_ROCTX)),
         ("nvml.h", ("rocm_smi/rocm_smi.h", CONV_INCLUDE, API_ROCMSMI)),
     ]
@@ -8567,6 +8568,7 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
 
 CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
     [
+        ("PYTORCH_NO_CUDA_MEMORY_CACHING", ("PYTORCH_NO_CUDA_MEMORY_CACHING", API_CAFFE2)),
         ("cuda_stream", ("hip_stream", API_CAFFE2)),
         # if the header is a native hip folder (under hip directory),
         # there is no need to add a hip path to it; the trie in hipify script

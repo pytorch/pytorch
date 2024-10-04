@@ -4,10 +4,10 @@ from typing import cast, List, Optional, Union
 
 import torch
 from torch import Tensor
-from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 
 from .optimizer import (
     _default_to_fused_or_foreach,
+    _device_dtype_check_for_fused,
     _differentiable_doc,
     _foreach_doc,
     _fused_doc,
@@ -15,6 +15,7 @@ from .optimizer import (
     _use_grad_for_differentiable,
     DeviceDict,
     Optimizer,
+    ParamsT,
 )
 
 
@@ -24,12 +25,12 @@ __all__ = ["SGD", "sgd"]
 class SGD(Optimizer):  # noqa: D101
     def __init__(
         self,
-        params,
+        params: ParamsT,
         lr: Union[float, Tensor] = 1e-3,
         momentum: float = 0,
         dampening: float = 0,
         weight_decay: float = 0,
-        nesterov=False,
+        nesterov: bool = False,
         *,
         maximize: bool = False,
         foreach: Optional[bool] = None,
@@ -62,17 +63,7 @@ class SGD(Optimizer):  # noqa: D101
 
         if fused:
             self._step_supports_amp_scaling = True
-
-            fused_supported_devices = _get_fused_kernels_supported_devices()
-            if not all(
-                p.device.type in fused_supported_devices and torch.is_floating_point(p)
-                for pg in self.param_groups
-                for p in pg["params"]
-            ):
-                raise RuntimeError(
-                    "`fused=True` requires all the params to be floating point Tensors of "
-                    f"supported devices: {fused_supported_devices}."
-                )
+            self._need_device_dtype_check_for_fused = True
             if differentiable:
                 raise RuntimeError("`fused` does not support `differentiable`")
             if foreach:
@@ -92,6 +83,11 @@ class SGD(Optimizer):  # noqa: D101
 
         for p in group["params"]:
             if p.grad is not None:
+                if group["fused"] and getattr(
+                    self, "_need_device_dtype_check_for_fused", True
+                ):
+                    _device_dtype_check_for_fused(p)
+                    self._need_device_dtype_check_for_fused = False
                 params.append(p)
                 grads.append(p.grad)
                 if p.grad.is_sparse:
