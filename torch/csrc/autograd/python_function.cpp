@@ -286,14 +286,6 @@ auto PyNode::name() const -> std::string {
   return name;
 }
 
-auto PyNode::compiled_autograd_should_lift() const -> bool {
-  pybind11::gil_scoped_acquire gil;
-  static PyObject* attr_name =
-      PyUnicode_InternFromString("_compiled_autograd_should_lift");
-  THPObjectPtr should_lift(PyObject_GetAttr(obj, attr_name));
-  return PyObject_IsTrue(should_lift.get()) == 1;
-}
-
 void PyNode::compiled_args(CompiledNodeArgs& args) {
   static PyObject* method_name =
       PyUnicode_InternFromString("_compiled_autograd_key");
@@ -338,11 +330,9 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   args.collect(f->output_info);
   args.collect(f->input_info);
 
-  if (compiled_autograd_should_lift()) {
-    Py_INCREF(obj);
-    _backward_idx =
-        args.add_backward(c10::SafePyObject(obj, getPyInterpreter()));
-  }
+  Py_INCREF(obj);
+  _backward_idx =
+      args.add_backward(c10::SafePyObject(obj, getPyInterpreter()));
 
   PyObject* bw_state = f->compiled_autograd_backward_state;
   if (args.cond(bw_state != nullptr)) {
@@ -364,28 +354,7 @@ variable_list PyNode::apply_with_saved(
   saved.before(f->output_info);
   saved.before(f->input_info);
   f->compiled_autograd_tracing = true;
-  variable_list result;
-  if (!compiled_autograd_should_lift()) {
-    if (_backward_state_idx.has_value()) {
-      PyObject* r = PyObject_CallMethod(
-          saved.get_py_compiler(),
-          "bind_backward_state",
-          "i",
-          *_backward_state_idx);
-      if (r == nullptr) {
-        throw python_error();
-      }
-      THPObjectPtr prior(f->compiled_autograd_backward_state);
-      f->compiled_autograd_backward_state = r;
-      result = apply(variable_list(inputs));
-      Py_CLEAR(f->compiled_autograd_backward_state);
-      f->compiled_autograd_backward_state = prior.release();
-    } else {
-      result = apply(variable_list(inputs));
-    }
-  } else {
-    result = defer_to_dynamo(variable_list(inputs), saved.get_py_compiler());
-  }
+  variable_list result = defer_to_dynamo(variable_list(inputs), saved.get_py_compiler());
   f->compiled_autograd_tracing = false;
   saved.after(f->compiled_autograd_symints);
   saved.after(f->saved_variables);
