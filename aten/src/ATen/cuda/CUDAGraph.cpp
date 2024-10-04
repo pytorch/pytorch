@@ -81,7 +81,9 @@ void CUDAGraph::register_generator_state(const at::Generator& generator) {
   cuda_gen->register_graph(this);
 }
 
-void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capture_mode) {
+std::atomic<size_t> captureUniqueToken{1};
+
+void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capture_mode, int sentinel_allocations_mode) {
   TORCH_CHECK(!has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "
               "To capture a new graph, create a new instance.");
@@ -131,6 +133,31 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
       return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == capture_id_;
   });
 
+  sentinelAllocationsMode = sentinel_allocations_mode;
+
+  if (sentinelAllocationsMode) {
+    sentinelCaptureUniqueToken = captureUniqueToken++;
+    sentinelAllocationIdx = 0;
+
+    // captures_underway is pretty complicated - no reason to duplicate that effort. let's call it regardless
+    // just let's also intercept the malloc calls
+    c10::cuda::CUDACachingAllocator::beginAllocateSentinelPointers(capture_dev_, [this](cudaStream_t stream) {
+        cudaStreamCaptureStatus status;
+        CaptureId_t stream_capture_id;
+        AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &stream_capture_id));
+        return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == capture_id_;
+    }, [this](size_t allocSz) {
+      allocationSizes.push_back(allocSz);
+      if (sentinelAllocationsMode == 1) {
+        std::cout << "intercepted alloc of size " << allocSz << " returning nullptr since mode=1" << std::endl;
+        return (void*)nullptr;
+      } else {
+        std::cout << "intercepted alloc of size " << allocSz << " returning allocIdx+1 since mode=2" << std::endl;
+        return (void*)((char*)nullptr + sentinelAllocationIdx++ + 1);
+      }
+    }, sentinelCaptureUniqueToken);
+  }
+
   // At this point, any NCCL watchdogs should be aware that we are in capture mode
   // and therefore should not enqueue any additional work that could be event-queried.
   // We still must wait on any existing work that has not been cleaned up.
@@ -160,6 +187,11 @@ void CUDAGraph::capture_end() {
   AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
 
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
+
+  if (sentinelAllocationsMode) {
+    c10::cuda::CUDACachingAllocator::endAllocateSentinelPointers(sentinelCaptureUniqueToken);
+    std::cout << "capture_end, recorded allocation sizes were: " << allocationSizes << std::endl;
+  }
 
   TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
   has_graph_ = true;
@@ -320,14 +352,26 @@ std::vector<std::vector<UpdateAndTensorOffset>> create_device_updates(
     CUDAGraph* graph1_ptr,
     const CUDAGraph& graph2,
     const std::vector<std::pair<at::Tensor, at::Tensor>>& input_pairs) {
-  CUDAGraph& graph1 = *graph1_ptr;
+  return {};
+}
+
+void CUDAGraph::compare_with_recapture(const CUDAGraph& graph2) {
   // Note: graph1 and graph2 should topologically be the same
   // they should have come from doing stream capture twice, on two separate
   // inputs TORCH_CHECK(graph1.descendent_graphs_.empty());
   // TORCH_CHECK(graph2.descendent_graphs_.empty());
 
+  TORCH_CHECK(sentinelAllocationsMode == 1, "This graph must have been captured with all allocations overridden to nullptr");
+  TORCH_CHECK(graph2.sentinelAllocationsMode == 2, "The other graph must have been captured with all allocations overridden to allocationIdx+1");
+  TORCH_CHECK(allocationSizes == graph2.allocationSizes, "Both graphs must have done the exact same allocations in the exact same order with the exact same sizes");
+  TORCH_CHECK(has_graph_, "must have graph");
+
+  CUDAGraph& graph1 = *this;
+
+  std::cout << "graph ptrs " << (void*)graph1.graph_ << " " << (void*)graph2.graph_ << std::endl;
   size_t num_nodes1;
   AT_CUDA_CHECK(cudaGraphGetNodes(graph1.graph_, nullptr, &num_nodes1));
+  std::cout << "number of nodes captured " << num_nodes1 << std::endl;
   std::vector<cudaGraphNode_t> nodes1(num_nodes1);
   AT_CUDA_CHECK(cudaGraphGetNodes(graph1.graph_, nodes1.data(), &num_nodes1));
 
@@ -338,8 +382,7 @@ std::vector<std::vector<UpdateAndTensorOffset>> create_device_updates(
 
   TORCH_CHECK_EQ(num_nodes1, num_nodes2);
 
-  std::vector<std::vector<UpdateAndTensorOffset>> arguments_to_updates(
-      input_pairs.size());
+
 
   for (size_t i = 0; i < num_nodes1; ++i) {
     cudaGraphNode_t node1 = nodes1[i];
@@ -374,38 +417,37 @@ std::vector<std::vector<UpdateAndTensorOffset>> create_device_updates(
         char** arg2_speculative_pointer =
             (char**)nodeParams2.kernelParams[param_index];
         // We are assuming that arg1 and arg2 are both pointer types.
-        std::cout << "GALVEZ: param_index=" << param_index << std::endl;
-        std::cout << "GALVEZ: param_size=" << param_size << std::endl;
+        
         for (size_t address_start = 0; param_size - address_start >= 8;
              address_start += 8) {
-          std::cout << "GALVEZ: address_start=" << address_start << std::endl;
+          
           char* arg1_value = arg1_speculative_pointer[address_start / 8];
           char* arg2_value = arg2_speculative_pointer[address_start / 8];
-          std::cout << "GALVEZ: arg1_value=" << (void*)arg1_value << std::endl;
-          std::cout << "GALVEZ: arg2_value=" << (void*)arg2_value << std::endl;
+          
 
-          if ((intptr_t)arg1_value % 8 == 0 && (intptr_t)arg2_value % 8 == 0) {
-            for (std::size_t j = 0; j < input_pairs.size(); ++j) {
-              // for (auto&& [input1, input2]: input_pairs) {
-              auto&& [input1, input2] = input_pairs[j];
-              long int input_diff = (char*)input1.const_data_ptr() -
-                  (char*)input2.const_data_ptr();
-              std::cout << "GALVEZ: arg_diff=" << arg1_value - arg2_value
-                        << std::endl;
-              std::cout << "GALVEZ: input_diff=" << input_diff << std::endl;
-              // we have verified that this is possibly a pointer
-              // argument now check whether this parameter is offset by
-              // the same amount
-              if (arg1_value - arg2_value // technically undefined behavior?
-                  ==
-                  // TODO: What is the type here?
-                  (char*)input1.const_data_ptr() -
-                      (char*)input2.const_data_ptr()) {
-                // match!
+          // wonder if it's possible to ask cudacachingallocation to assert that arg1_value must not be an existing tensor?
 
-                ptrdiff_t tensor_offset =
-                    arg1_value - (char*)input1.const_data_ptr();
-                assert(tensor_offset > 0);
+          // removed check for %8==0 because no longer true
+          // this is now the check:
+          if (arg2_value != arg1_value) {
+            std::cout << "GALVEZ: param_index=" << param_index << std::endl;
+            std::cout << "GALVEZ: param_size=" << param_size << std::endl;
+            std::cout << "GALVEZ: address_start=" << address_start << std::endl;
+            std::cout << "GALVEZ: arg1_value=" << (void*)arg1_value << std::endl;
+            std::cout << "GALVEZ: arg2_value=" << (void*)arg2_value << std::endl;
+              ptrdiff_t whichAlloc = arg2_value - arg1_value;
+              int64_t allocIdx = (int64_t)whichAlloc - 1;
+              std::cout << "LEIJURV: allocIdx=" << allocIdx << std::endl;
+              if (allocIdx < 0 || allocIdx >= allocationSizes.size()) {
+                std::cout << "LEIJURV: this isn't one of ours. the arg is different for some other reason :(" << std::endl;
+                continue;
+              }
+
+              size_t offset = (size_t) arg1_value;
+              if (offset >= allocationSizes[allocIdx]) {
+                std::cout << "LEIJURV: Hmmm, looks like the kernel was launched with a tensor offset that's larger than the size of the allocation? must not be one of ours" << std::endl;
+                continue;
+              }
 
                 cudaKernelNodeAttrValue attr_value = {
                     .deviceUpdatableKernelNode = {
@@ -416,35 +458,18 @@ std::vector<std::vector<UpdateAndTensorOffset>> create_device_updates(
                     node1,
                     cudaLaunchAttributeDeviceUpdatableKernelNode,
                     &attr_value));
-
-                AT_CUDA_CHECK(cudaGraphKernelNodeGetAttribute(
-                    node1,
-                    cudaLaunchAttributeDeviceUpdatableKernelNode,
-                    &attr_value));
                 TORCH_CHECK(
                     attr_value.deviceUpdatableKernelNode.devNode != nullptr);
+                std::cout << "the dev node is at " << (size_t)attr_value.deviceUpdatableKernelNode.devNode << std::endl;
 
-                cudaGraphKernelNodeUpdate update{};
-                update.node = attr_value.deviceUpdatableKernelNode.devNode;
-                update.field = cudaGraphKernelNodeFieldParam;
-                update.updateData.param.pValue =
-                    nullptr; // the user will have to provide this update. BUT:
-                             // it is not simply data_ptr(). It could be offset!
-                             // This is a bit tricky.
-                update.updateData.param.offset = param_offset + address_start;
-                update.updateData.param.size = 8;
-                // update.updateData.param.offset = param_offset;
-                // update.updateData.param.size = param_size;
-
-                // tensor_offset needed for setting pValue. See comment next to
-                // pValue
-                arguments_to_updates[j].push_back(
-                    UpdateAndTensorOffset{update, tensor_offset});
-
-                // Consider a pathalogical case: The same address gets passed
-                // twice to a kernel.
-              }
-            }
+                std::cout << "I have decided that " << address_start << " bytes into argument #" << param_index << " of kernel " << func_name << " is actually allocation " << allocIdx << " indexed to offset " << offset << std::endl;
+                kernelParamUpdates.push_back({
+                  .devNode = attr_value.deviceUpdatableKernelNode.devNode,
+                  .paramOffset = param_offset + address_start,
+                  .allocIdx = allocIdx,
+                  .offset = offset,
+                });
+                std::cout << "dev node " << attr_value.deviceUpdatableKernelNode.devNode << " param offset " << (param_offset + address_start) << " allocIdx "<< allocIdx << " offset " << offset << std::endl;
           }
         }
         param_index++;
@@ -459,8 +484,63 @@ std::vector<std::vector<UpdateAndTensorOffset>> create_device_updates(
       // device-side update API can't do that, unfortunately.
     }
   }
-  return arguments_to_updates;
+  hasComparedAgainstRecapture = true;
 }
+
+void CUDAGraph::replay_dynamic(std::vector<void*> prefilledDataPtrs, std::vector<size_t> prefilledLens) {
+  TORCH_CHECK(hasComparedAgainstRecapture, "Must compare against a pointer offsetted sentinel recapture");
+  TORCH_CHECK(has_graph_exec_,
+              "Called CUDAGraph::replay without a preceding successful capture.");
+  TORCH_CHECK(prefilledDataPtrs.size() <= allocationSizes.size());
+  TORCH_CHECK(prefilledLens.size() == prefilledDataPtrs.size());
+
+  std::vector<void*> actualDataPtrs;
+  std::vector<void*> freeTheseLater;
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  for (size_t i = 0; i < allocationSizes.size(); i++) {
+    if (i < prefilledDataPtrs.size()) {
+      TORCH_CHECK(prefilledLens[i] == allocationSizes[i], "Prefilled tensors must be same shape");
+      actualDataPtrs.push_back(prefilledDataPtrs[i]);
+    } else {
+      void* ptr;
+      AT_CUDA_CHECK(cudaMallocAsync(&ptr, allocationSizes[i], stream));
+      actualDataPtrs.push_back(ptr);
+      freeTheseLater.push_back(ptr);
+    }
+  }
+  std::cout << "actual data ptrs " << actualDataPtrs << std::endl;
+  c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
+
+  cudaGraphKernelNodeUpdate* hostUpdates = (cudaGraphKernelNodeUpdate*) malloc(kernelParamUpdates.size() * sizeof(cudaGraphKernelNodeUpdate));
+  for (size_t i = 0; i < kernelParamUpdates.size(); i++) {
+    auto update = kernelParamUpdates[i];
+    cudaGraphKernelNodeUpdate deviceUpdate = {
+      .node = update.devNode,
+      .field = cudaGraphKernelNodeFieldParam,
+      .updateData = {
+        .param = {
+          .pValue = (char*)actualDataPtrs[update.allocIdx] + update.offset, // the kernel will overwrite this to indirect it in GPU memory
+          .offset = update.paramOffset,
+          .size = sizeof(void*),
+        }
+      }
+    };
+    hostUpdates[i] = deviceUpdate;
+  }
+  cudaGraphKernelNodeUpdate* deviceUpdates;
+  AT_CUDA_CHECK(cudaMallocAsync(&deviceUpdates, kernelParamUpdates.size() * sizeof(cudaGraphKernelNodeUpdate), stream));
+  AT_CUDA_CHECK(cudaMemcpyAsync(deviceUpdates, hostUpdates, kernelParamUpdates.size() * sizeof(cudaGraphKernelNodeUpdate), cudaMemcpyHostToDevice, stream)); // yeah yeah not actually async whatever
+
+  dynamicGraphUpdater(deviceUpdates, kernelParamUpdates.size());
+
+  AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, stream));
+  free(hostUpdates);
+  AT_CUDA_CHECK(cudaFreeAsync(deviceUpdates, stream));
+  for (size_t i = 0; i < freeTheseLater.size(); i++) {
+    AT_CUDA_CHECK(cudaFreeAsync(freeTheseLater[i], stream));
+  }
+}
+
 
 // for (auto&& node : new_nodes) {
 //   cudaGraphNodeType type;

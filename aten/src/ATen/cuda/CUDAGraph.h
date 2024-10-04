@@ -18,9 +18,21 @@ namespace cuda {
 // to CUDAGraph::capture_begin
 TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
 
+void dynamicGraphUpdater(cudaGraphKernelNodeUpdate* updates, size_t numUpdates);
+
 struct UpdateAndTensorOffset {
   cudaGraphKernelNodeUpdate update;
   ptrdiff_t tensor_offset; // TODO: change to intptr_t
+};
+
+struct DynamicGraphKernelParamUpdate {
+  // in other words:
+  // devNode.params[paramOffset] = allocations[allocIdx] + offset
+
+  cudaGraphDeviceNode_t devNode;
+  size_t paramOffset; // which arg are we updating
+  size_t allocIdx; // which allocation is it
+  size_t offset; // how deep into the allocation?
 };
 
 struct TORCH_CUDA_CPP_API CUDAGraph {
@@ -35,13 +47,16 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void register_generator_state(const at::Generator& generator);
   void capture_begin(
       MempoolId_t pool = {0, 0},
-      cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal);
+      cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal,
+      int sentinel_allocations_mode = 0);
   void capture_end();
   void replay();
   void reset();
   MempoolId_t pool();
   void enable_debug_mode();
   void debug_dump(const std::string& debug_path);
+  void compare_with_recapture(const CUDAGraph& graph2);
+  void replay_dynamic(std::vector<void*> prefilledDataPtrs, std::vector<size_t> prefilledLens);
 
   friend std::vector<std::vector<UpdateAndTensorOffset>> create_device_updates(
       CUDAGraph* graph1_ptr,
@@ -65,6 +80,14 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // the ID assigned by cuda during graph capture,
   // used to identify when a stream is participating in capture
   CaptureId_t capture_id_ = -1;
+
+  size_t sentinelCaptureUniqueToken;
+  int sentinelAllocationsMode;
+  int sentinelAllocationIdx;
+  std::vector<size_t> allocationSizes;
+
+  std::vector<DynamicGraphKernelParamUpdate> kernelParamUpdates;
+  bool hasComparedAgainstRecapture = false;
 
   // uuid used to request a particular private mempool from CUDACachingAllocator.
   // By default, this will be set to {id_, 0}.

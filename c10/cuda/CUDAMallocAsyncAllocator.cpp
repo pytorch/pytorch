@@ -787,6 +787,17 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     capture_underway = true;
   }
 
+  void beginAllocateSentinelPointers(
+      c10::DeviceIndex device,
+      std::function<bool(cudaStream_t)> streamFilter,
+      std::function<void*(size_t)> allocatorOverride,
+      size_t captureUniqueToken
+  ) override {
+    TORCH_CHECK(false, "not supported");
+  }
+
+  void endAllocateSentinelPointers(size_t captureUniqueToken) override {}
+
   void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id)
       override {
     assertValidDevice(device);

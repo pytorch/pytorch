@@ -224,6 +224,13 @@ class CUDAAllocator : public Allocator {
       c10::DeviceIndex device,
       MempoolId_t mempool_id) = 0;
   virtual void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) = 0;
+  virtual void beginAllocateSentinelPointers(
+      c10::DeviceIndex device,
+      std::function<bool(cudaStream_t)> streamFilter,
+      std::function<void*(size_t)> allocatorOverride,
+      size_t captureUniqueToken
+  ) = 0;
+  virtual void endAllocateSentinelPointers(size_t captureUniqueToken) = 0;
   // returns true if the allocated blocks are equal to expected live allocations
   virtual bool checkPoolLiveAllocations(
       c10::DeviceIndex device,
@@ -384,6 +391,19 @@ inline void beginAllocateToPool(
     MempoolId_t mempool_id,
     std::function<bool(cudaStream_t)> filter) {
   get()->beginAllocateToPool(device, mempool_id, std::move(filter));
+}
+
+inline void beginAllocateSentinelPointers(
+  c10::DeviceIndex device,
+  std::function<bool(cudaStream_t)> streamFilter,
+  std::function<void*(size_t)> allocatorOverride,
+  size_t captureUniqueToken
+) {
+  get()->beginAllocateSentinelPointers(device, std::move(streamFilter), std::move(allocatorOverride), captureUniqueToken);
+}
+
+inline void endAllocateSentinelPointers(size_t captureUniqueToken) {
+  get()->endAllocateSentinelPointers(captureUniqueToken);
 }
 
 inline void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {

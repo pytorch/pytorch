@@ -49,6 +49,9 @@ using namespace c10::CachingDeviceAllocator;
 const size_t kLargeBuffer =
     20971520; // "large" allocations may be packed in 20 MiB blocks
 
+// sentinel values can only go up to this value. all real device ptrs are assumed to be greater than it.
+const size_t sentinelLimit = 1000000;
+
 namespace Native {
 
 //
@@ -3230,6 +3233,8 @@ class NativeCachingAllocator : public CUDAAllocator {
     return !device_allocator.empty();
   }
 
+  std::vector<std::tuple<c10::DeviceIndex, std::function<bool(cudaStream_t)>, std::function<void*(size_t)>, size_t>> sentinel_captures_underway;
+
   /** allocates a block which is safe to use from the provided stream */
   void malloc(
       void** devPtr,
@@ -3241,6 +3246,18 @@ class NativeCachingAllocator : public CUDAAllocator {
         "Allocator not initialized for device ",
         device,
         ": did you call init?");
+    for (auto& it : sentinel_captures_underway) {
+      if (device == std::get<0>(it)) {
+        auto filter = std::get<1>(it);
+        if (filter(stream)) {
+          auto callback = std::get<2>(it);
+          void* ptr = callback(size);
+          TORCH_CHECK((size_t) ptr < sentinelLimit, "need to be tell apart real from fake pointers");
+          *devPtr = ptr;
+          return;
+        }
+      }
+    }
     Block* block = device_allocator[device]->malloc(device, size, stream);
     add_allocated_block(block);
     *devPtr = (void*)block->ptr;
@@ -3256,6 +3273,10 @@ class NativeCachingAllocator : public CUDAAllocator {
       return;
     }
     Block* block = get_allocated_block(ptr, true /* remove */);
+    if ((size_t) ptr < sentinelLimit) {
+      TORCH_CHECK(!block, "oopsie, I don't know if this pointer is fake or real!");
+      return;
+    }
     if (!block) {
       TORCH_CHECK(false, "invalid device pointer: ", ptr);
     }
@@ -3541,6 +3562,25 @@ class NativeCachingAllocator : public CUDAAllocator {
     assertValidDevice(device);
     device_allocator[device]->beginAllocateToPool(
         std::move(mempool_id), std::move(filter));
+  }
+
+  void beginAllocateSentinelPointers(
+      c10::DeviceIndex device,
+      std::function<bool(cudaStream_t)> streamFilter,
+      std::function<void*(size_t)> allocatorOverride,
+      size_t captureUniqueToken
+  ) override {
+    assertValidDevice(device);
+    sentinel_captures_underway.emplace_back(device, std::move(streamFilter), std::move(allocatorOverride), captureUniqueToken);
+  }
+
+  void endAllocateSentinelPointers(size_t captureUniqueToken) {
+    for (auto it = sentinel_captures_underway.begin(); it != sentinel_captures_underway.end(); ++it) {
+      if (std::get<3>(*it) == captureUniqueToken) {
+        sentinel_captures_underway.erase(it);
+        return;
+      }
+    }
   }
 
   void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id)
