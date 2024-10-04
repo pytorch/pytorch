@@ -78,6 +78,33 @@ def _rebuild_from_type_v2(func, new_type, args, state):
 # torch/_C/__init__.pyi.in to add a type annotation for your method;
 # otherwise, it will not show up in autocomplete.
 class Tensor(torch._C.TensorBase):
+    def _clear_non_serializable_cached_data(self):
+        r"""Clears any data cached in the tensor's ``__dict__`` that would prevent the tensor
+        from being serialized.
+
+        For example, subclasses with custom dispatched sizes / strides cache this info in
+        non-serializable PyCapsules within the ``__dict__``, and this must be cleared out for
+        serialization to function.
+
+        Any subclass that overrides this MUST call ``super()._clear_non_serializable_cached_data().``
+        Additional data cleared within the override must be able to be re-cached transparently
+        to avoid breaking subclass functionality.
+        """
+        if has_torch_function_unary(self):
+            return handle_torch_function(
+                Tensor._clear_non_serializable_cached_data, (self,), self
+            )
+        # NB: Wrapper subclasses that implement custom-dispatched sizes / strides cache
+        # this info via non-serializable PyCapsules.
+        CACHED_SIZES_STRIDES_KEYS = [
+            "_sym_sizes_capsule",
+            "_sym_sizes_capsule_len",
+            "_sym_strides_capsule",
+            "_sym_strides_capsule_len",
+        ]
+        for key in CACHED_SIZES_STRIDES_KEYS:
+            self.__dict__.pop(key, None)
+
     def __deepcopy__(self, memo):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__deepcopy__, (self,), self, memo)
@@ -203,6 +230,8 @@ class Tensor(torch._C.TensorBase):
                     if hasattr(self, slot):
                         setattr(new_tensor, slot, deepcopy(getattr(self, slot), memo))
 
+            # don't try to deepcopy non-serializable cached data
+            self._clear_non_serializable_cached_data()
             new_tensor.__dict__ = deepcopy(self.__dict__, memo)
 
             memo[id(self)] = new_tensor
@@ -227,6 +256,9 @@ class Tensor(torch._C.TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__reduce_ex__, (self,), self, proto)
         func, args = self._reduce_ex_internal(proto)
+        # sizes / strides cache needs to be cleared here because it'll just be re-cached
+        # if cleared earlier. Note that state references the -actual- tensor dict.
+        self._clear_non_serializable_cached_data()
         return (_rebuild_from_type_v2, (func, type(self), args, state))
 
     def storage(self):
@@ -845,37 +877,6 @@ class Tensor(torch._C.TensorBase):
         from torch._linalg_utils import _symeig
 
         return _symeig(self, eigenvectors=eigenvectors)
-
-    def cumsum(
-        self,
-        dim=None,
-        *,
-        dtype=None,
-        out=None,
-        axis=None,
-    ):
-        r"""
-        cumsum(dim, dtype=None) -> Tensor
-
-        See :func:`torch.cumsum`
-        """
-        if axis is not None and dim is not None:
-            raise RuntimeError("expected either 'dim' or 'axis' to be given, not both")
-        elif axis is not None:
-            dim = axis
-        if has_torch_function_unary(self):
-            return handle_torch_function(
-                Tensor.cumsum,
-                (self,),
-                self,
-                dim,
-                dtype=dtype,
-                out=out,
-            )
-        if out is None:
-            return torch.cumsum(self, dim, dtype=dtype)
-        else:
-            return torch.cumsum(self, dim, dtype=dtype, out=out)
 
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
