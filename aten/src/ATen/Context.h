@@ -42,6 +42,7 @@ class TORCH_API Context {
     c10::DeviceType device_type = device.type();
     initCUDAIfNeeded(device_type);
     initHIPIfNeeded(device_type);
+    initHPUIfNeeded(device_type);
     if (device_type == at::kCPU) {
       return at::detail::getDefaultCPUGenerator();
     } else if (device_type == at::kCUDA) {
@@ -52,6 +53,8 @@ class TORCH_API Context {
       return at::detail::getXPUHooks().getDefaultXPUGenerator(device.index());
     } else if (device_type == at::kIPU) {
       return at::detail::getIPUHooks().getDefaultIPUGenerator(device.index());
+    } else if (device_type == at::kHPU) {
+      return at::detail::getHPUHooks().getDefaultHPUGenerator(device.index());
     } else if (device_type == at::kPrivateUse1) {
       return at::detail::getPrivateUse1Hooks().getDefaultGenerator(
           device.index());
@@ -87,12 +90,15 @@ class TORCH_API Context {
     initCUDAIfNeeded(device_type);
     initHIPIfNeeded(device_type);
     initXPUIfNeeded(device_type);
+    initHPUIfNeeded(device_type);
     if (device_type == at::kCPU) {
       return c10::DeviceType::CPU;
     } else if (device_type == at::kCUDA) {
       return at::detail::getCUDAHooks().getDeviceFromPtr(data);
     } else if (device_type == at::kXPU) {
       return at::detail::getXPUHooks().getDeviceFromPtr(data);
+    } else if (device_type == at::kHPU) {
+      return at::detail::getHPUHooks().getDeviceFromPtr(data);
     } else if (device_type == at::kPrivateUse1) {
       return at::detail::getPrivateUse1Hooks().getDeviceFromPtr(data);
     } else {
@@ -168,6 +174,9 @@ class TORCH_API Context {
   static bool hasMAIA() {
     return c10::impl::hasDeviceGuardImpl(c10::DeviceType::MAIA);
   }
+  static bool hasHPU() {
+    return detail::getHPUHooks().hasHPU();
+  }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
   void lazyInitCUDA() {
@@ -181,6 +190,9 @@ class TORCH_API Context {
   }
   void lazyInitMTIA() {
     c10::call_once(th_mtia_init, [&] { detail::getMTIAHooks().initMTIA(); });
+  }
+  void lazyInitHPU() {
+    c10::call_once(thhpu_init, [&] { detail::getHPUHooks().initHPU(); });
   }
   void lazyInitPrivateUse1() {
     c10::call_once(thp_init, [&] {
@@ -379,12 +391,18 @@ class TORCH_API Context {
       lazyInitXPU();
     }
   }
+  void initHPUIfNeeded(c10::DeviceType p) {
+    if (p == c10::DeviceType::HPU) {
+      lazyInitHPU();
+    }
+  }
   static bool checkCuBLASConfigDeterministic();
   c10::once_flag thc_init;
   c10::once_flag thh_init;
   c10::once_flag thx_init;
   c10::once_flag th_mtia_init;
   c10::once_flag thp_init;
+  c10::once_flag thhpu_init;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool deterministic_mkldnn = false;
@@ -502,6 +520,10 @@ inline bool hasMAIA() {
 
 inline bool hasXPU() {
   return globalContext().hasXPU();
+}
+
+inline bool hasHPU() {
+  return globalContext().hasHPU();
 }
 
 // Despite its name, this function returns the number of *CUDA* GPUs.

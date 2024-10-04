@@ -9,6 +9,22 @@ namespace at {
 struct TORCH_API HPUHooksInterface : AcceleratorHooksInterface {
   ~HPUHooksInterface() override = default;
 
+  virtual void initHPU() const {
+    TORCH_CHECK(false, "Cannot initialize HPU without HPU backend");
+  }
+
+  virtual bool hasHPU() const {
+    return false;
+  }
+  virtual const Generator& getDefaultHPUGenerator(
+      C10_UNUSED DeviceIndex device_index = -1) const {
+    TORCH_CHECK(false, "Cannot get default HPU generator without HPU backend");
+  }
+  virtual Device getDeviceFromPtr(void* /*data*/) const {
+    TORCH_CHECK(
+        false, "Cannot get device of pointer on HPU without HPU backend");
+  }
+
   virtual bool isPinnedPtr(const void*) const override {
     return false;
   }
