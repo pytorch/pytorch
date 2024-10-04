@@ -581,5 +581,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         else:
             return final_tmp_name
 
+
 class SubgraphCppWrapperCpuArrayRef(SubgraphCppWrapperCpu, CppWrapperCpuArrayRef):
     pass

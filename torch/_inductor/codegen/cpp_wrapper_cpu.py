@@ -1851,12 +1851,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 # (inner_input) in the nested scope. we can't std::move here, as the codegened
                 # outer input may be an expression / rvalue (e.g., reinterpret_view(x)), so we
                 # can't necessarily std::move it back to the origin (x).
-                self.writeline(f"AtenTensorHandle {inner_input}_handle;")
+                self.writeline(f"AtenTensorHandle {inner_input};")
+
+                # Since we use recursive codegen, we just pass on the
+                # ATenTensorHandle pointers to the subgraph call.
                 self.writeline(
-                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors_out({outer_input}, &{inner_input}_handle));"
-                )
-                self.writeline(
-                    f"RAIIAtenTensorHandle {inner_input}({inner_input}_handle);"
+                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors_out({outer_input}, &{inner_input}));"
                 )
             else:
                 self.writeline(
