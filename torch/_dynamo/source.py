@@ -272,7 +272,7 @@ class EphemeralSource(Source):
     def name(self):
         return f"<ephemeral{': ' + self.desc if self.desc is not None else ''}>"
 
-    def make_guard(self):
+    def make_guard(self, fn):
         raise NotImplementedError
 
     def is_ephemeral(self):
@@ -764,7 +764,3 @@ def is_from_defaults(source: Source):
     if isinstance(source, ChainedSource):
         return is_from_defaults(source.base)
     return False
-
-
-def is_cell_contents(source: Source):
-    return isinstance(source, AttrSource) and source.member == "cell_contents"
