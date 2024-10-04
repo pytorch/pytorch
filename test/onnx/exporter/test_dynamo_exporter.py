@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import torch
-from torch.testing._internal import common_utils
 from torch.onnx._internal.exporter import _testing as onnx_testing
+from torch.testing._internal import common_utils
 
 
 @common_utils.instantiate_parametrized_tests
