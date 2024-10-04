@@ -43,6 +43,7 @@ bool isAccelerator(c10::DeviceType d) {
     case at::kXPU:
     case at::kHIP:
     case at::kMPS:
+    case at::kHPU:
     case at::kPrivateUse1:
       return true;
     default:

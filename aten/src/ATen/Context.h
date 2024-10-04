@@ -11,6 +11,7 @@
 #include <ATen/detail/AcceleratorHooksInterface.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
+#include <ATen/detail/HPUHooksInterface.h>
 #include <ATen/detail/IPUHooksInterface.h>
 #include <ATen/detail/MAIAHooksInterface.h>
 #include <ATen/detail/MPSHooksInterface.h>
@@ -76,6 +77,8 @@ class TORCH_API Context {
       return at::detail::getMTIAHooks();
     } else if (device_type == at::kHIP) {
       return at::detail::getHIPHooks();
+    } else if (device_type == at::kHPU) {
+      return at::detail::getHPUHooks();
     } else {
       TORCH_CHECK(
           false,
