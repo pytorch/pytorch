@@ -2392,27 +2392,31 @@ class CUDAGraphTreeManager:
             # that does not repro. len(node.outputs_weakrefs) == len(node.stack_traces)
             # so, pessimistically assume that they might differ by doing the debug info
             # loop separately from the dealloc loop
+            if self.disable_invalidate_aliases:
+                continue
+
             for storage_ref, stack_trace in zip(
                 node.outputs_weakrefs, node.stack_traces
             ):
                 if not storage_ref:
                     continue
-                if dp := storage_ref():
-                    stor_stack_trace[dp] = stack_trace
+
+                stor_stack_trace[storage_ref.data_ptr()] = stack_trace
 
         deleted = set()
         for storage_ref in self.current_node.path_live_weakrefs():
             _storage_deref = storage_ref()
             if _storage_deref and storage_ref.data_ptr() not in deleted:
                 deleted.add(storage_ref.data_ptr())
+
+                msg = self.format_dealloc_msg(
+                    stor_stack_trace.get(storage_ref.data_ptr())
+                )
                 torch._C._free_And_Remove_DeleterFn(_storage_deref)
 
                 if self.disable_invalidate_aliases:
                     continue
 
-                msg = self.format_dealloc_msg(
-                    stor_stack_trace.get(storage_ref.data_ptr())
-                )
                 torch._C._set_storage_data_ptr_access_error_msg(_storage_deref, msg)
 
     def clear_current_path_state_and_set_to_none(self) -> None:

@@ -1652,16 +1652,12 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             out = foo(inp)
             out2 = foo(inp)
 
-            with self.assertRaisesRegex(
-                Exception, "overwritten by a subsequent forward run."
-            ):
+            with self.assertRaisesRegex(Exception, "overwritten by a subsequent"):
                 out + out
 
             foo(inp)
 
-            with self.assertRaisesRegex(
-                Exception, "overwritten by a subsequent forward run."
-            ):
+            with self.assertRaisesRegex(Exception, "overwritten by a subsequent"):
                 out2 + out2
 
         def test_error_on_dealloc_use2(self):
