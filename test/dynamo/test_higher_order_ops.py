@@ -2415,6 +2415,35 @@ class GraphModule(torch.nn.Module):
             """{'sum_1': ['sum_1'], 'sum_2': ['sum_2']}""",
         )
 
+    # https://github.com/pytorch/pytorch/issues/137061
+    def test_dynamic_shapes_over_vmap_batch_size(self):
+        def gn(a, b, c, d):
+            return a + b + c + d
+
+        def fn(func, a, b, c, d):
+            a = torch.arange(a)
+            b = torch.arange(b)
+            c = torch.arange(c)
+            d = torch.arange(d)
+            func = torch.vmap(func, in_dims=(0, None, None, None))
+            func = torch.vmap(func, in_dims=(None, 0, None, None))
+            func = torch.vmap(func, in_dims=(None, None, 0, None))
+            func = torch.vmap(func, in_dims=(None, None, None, 0))
+            return func(a, b, c, d)
+
+        cnt = CompileCounterWithBackend("inductor")
+        # We generate corresponding dynamic shapes test case at
+        # `test/dynamo/test_dynamic_shapes.py` automatically.
+        compiled_fn = torch.compile(fn, backend=cnt)
+        a, b, c, d = 2, 4, 8, 8
+        self.assertEqual(fn(gn, a, b, c, d), compiled_fn(gn, a, b, c, d))
+        self.assertEqual(cnt.frame_count, 1)
+
+        a, b, c, d = 4, 8, 16, 16
+        self.assertEqual(fn(gn, a, b, c, d), compiled_fn(gn, a, b, c, d))
+        # Ensure no recompile if dynamic shapes enabled.
+        self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
+
     def test_cond_pytree_operands(self):
         def _construct_pytree():
             a = torch.randn(3, 3)
@@ -2932,7 +2961,7 @@ class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
             warnings.warn(msg)
 
     def _compile_check(self, fn, inputs, fullgraph=True, graph_idx=0):
-        backend = EagerAndRecordGraphs()
+        backend = CompileCounterWithBackend("inductor")
         actual = fn(*inputs)
         expected = torch.compile(fn, backend=backend, fullgraph=fullgraph)(*inputs)
 
@@ -6227,7 +6256,7 @@ class GraphModule(torch.nn.Module):
         actual = opt(x, 0), opt(x, 1), opt(x, 2)
         self.assertEqual(expected, actual)
         self.assertEqual(cnt.frame_count, 3)
-        self.assertEqual(cnt.op_count, 21)
+        self.assertEqual(cnt.op_count, 18)
 
     def test_vmap_new_tensor_in_body(self):
         def fn(x):
