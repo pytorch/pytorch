@@ -20,8 +20,7 @@ class DynamoExporterTest(common_utils.TestCase):
                     query, key, value
                 )
                 rest = res.transpose(0, 1)
-                final = rest.view(8, 32, 128 * 64)
-                return final
+                return rest.view(8, 32, 128 * 64)
 
         model = Model()
 
