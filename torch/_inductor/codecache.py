@@ -2308,7 +2308,14 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             iss >> addr;
             _torchinductor_pyobject_tensor_data_ptr =
                 reinterpret_cast<decltype(_torchinductor_pyobject_tensor_data_ptr)>(addr);
-            return PyModule_Create(&py_module);
+            PyObject* module = PyModule_Create(&py_module);
+            if (module == NULL) {
+                return NULL;
+            }
+            #ifdef Py_GIL_DISABLED
+                PyUnstable_Module_SetGIL(mod, Py_MOD_GIL_NOT_USED);
+            #endif
+            return module;
         }
         """
     )
