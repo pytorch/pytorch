@@ -1518,8 +1518,6 @@ bool FunctionSignature::parse(
       }
       obj = PyTuple_GET_ITEM(args, arg_pos);
     } else if (kwargs) {
-      // Note that this call is NoGil safe as it works on kwargs which are local
-      // to the current function call.
       obj = PyDict_GetItem(kwargs, param.python_name);
       for (PyObject* numpy_name : param.numpy_python_names) {
         if (obj) {

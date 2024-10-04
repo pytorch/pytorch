@@ -820,15 +820,7 @@ static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
 }
 
 PyObject* torch_c_dynamo_compiled_autograd_init() {
-  PyObject* mod = PyModule_Create(&_module);
-  if (mod == nullptr) {
-    return nullptr;
-  }
-
-#ifdef Py_GIL_DISABLED
-  PyUnstable_Module_SetGIL(mod, Py_MOD_GIL_NOT_USED);
-#endif
-  return mod;
+  return PyModule_Create(&_module);
 }
 
 } // namespace torch::dynamo::autograd
