@@ -5,9 +5,7 @@
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <vector>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 // Used to propagate gradients from one node to another during a distributed
 // backwards pass. This RPC call is invoked when we hit a `recv` autograd
@@ -37,6 +35,4 @@ class TORCH_API PropagateGradientsReq : public rpc::RpcCommandBase {
   bool retainGraph_;
 };
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd
