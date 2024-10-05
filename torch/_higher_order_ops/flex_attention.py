@@ -69,7 +69,7 @@ def _permute_strides(out: torch.Tensor, query_strides: Tuple[int, ...]) -> torch
     return new_out
 
 
-@torch.library.custom_op("mylib::zeros_and_scatter", mutates_args=())
+@torch.library.custom_op("mylib::zeros_and_scatter", mutates_args=())  # type: ignore[misc]
 def zeros_and_scatter(
     shape: List[int],
     indices: List[Tensor],
@@ -84,7 +84,7 @@ def zeros_and_scatter(
     return torch.ops.aten.index_put(grad, indices, vals, accumulate=True)
 
 
-@zeros_and_scatter.register_fake
+@zeros_and_scatter.register_fake  # type: ignore[misc]
 def _(
     shape: List[int],
     indices: List[Tensor],
@@ -93,8 +93,8 @@ def _(
     return torch.empty(shape, device=vals.device)
 
 
-@zeros_and_scatter.register_vmap
-def _(info, in_dims, shape, indices, val) -> Tuple[Tensor, None]:
+@zeros_and_scatter.register_vmap  # type: ignore[misc]
+def _(info, in_dims, shape, indices, val):  # type: ignore[no-untyped-def]
     if len(indices) > 1:
         for i, idx in enumerate(indices):
             # TODO: Don't use is_batchedtensor API, use in_dims instead.
@@ -123,7 +123,7 @@ class ModIndex(torch.autograd.Function):
     generate_vmap_rule = True
 
     @staticmethod
-    def backward(ctx: Any, gradOut: Tensor) -> Any:
+    def backward(ctx, gradOut):  # type: ignore[no-untyped-def]
         indices = ctx.saved_tensors
         return (
             torch.ops.mylib.zeros_and_scatter(
