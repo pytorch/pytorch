@@ -975,6 +975,53 @@ class TestFlexAttention(InductorTestCase):
         self.run_test(bias_mod, dtype)
 
     @supported_platform
+    def test_load_from_view_buffer(self):
+        dtype = torch.float16
+        device = "cuda"
+        W = 8
+
+        class SimpleAttention(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rel_pos_h = torch.randn(2 * H - 1, D, device=device, dtype=dtype)
+
+            def forward(self, q, k, v):
+                q = q.view(B * H, H * W, -1)
+                score_mod = self.generate_score_mod(q)
+                q = q.view(B, H, H * W, -1)
+                return flex_attention(q, k, v, score_mod=score_mod)
+
+            def generate_score_mod(self, q):
+                rel_h = self.add_decomposed_rel_pos(q)
+                rel_h = rel_h.view(
+                    B, H, rel_h.size(1), rel_h.size(2), rel_h.size(3)
+                ).squeeze(-1)
+
+                def score_mod(score, batch, head, q_idx, k_idx):
+                    h_idx = k_idx // W
+                    return score + rel_h[batch, head, q_idx, h_idx]
+
+                return score_mod
+
+            @torch.no_grad()
+            def add_decomposed_rel_pos(self, q):
+                q_coords = torch.arange(H, device=self.rel_pos_h.device)[:, None]
+                k_coords = torch.arange(H, device=self.rel_pos_h.device)[None, :]
+                relative_coords = (q_coords - k_coords) + (H - 1)
+                Rh = self.rel_pos_h[relative_coords.long()]
+                r_q = q.reshape(B * H, H, W, D)
+                rel_h = torch.einsum("bhwc,hkc->bhwk", r_q, Rh)
+                return rel_h.reshape(B * H, H * W, H, 1)
+
+        m = SimpleAttention().to(device).eval()
+        m = torch.compile(m, mode="max-autotune", fullgraph=True)
+        q = torch.randn(B, H, H * W, D, device=device, dtype=dtype, requires_grad=True)
+        k = torch.randn(B, H, H * W, D, device=device, dtype=dtype, requires_grad=True)
+        v = torch.randn(B, H, H * W, D, device=device, dtype=dtype, requires_grad=True)
+        out = m(q, k, v)
+        out.sum().backward()
+
+    @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_load_from_bias_head_seq_batch(self, dtype):
         bias = torch.randn(B, H, S, S, device="cuda", dtype=dtype)
@@ -2392,6 +2439,32 @@ class TestBlockMask(InductorTestCase):
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((1, 1, 4)))
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((1, 1, 4, 4)))
+
+    @supported_platform
+    def test_compiling_create_block_mask_no_recompile(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        torch._dynamo.reset()
+        block_mask = create_block_mask(mask_mod, 2, 4, 1024, 1024, _compile=True)
+        self.assertIsInstance(block_mask, BlockMask)
+        self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((2, 4, 8)))
+        self.assertEqual(block_mask.kv_indices.shape, torch.Size((2, 4, 8, 8)))
+        self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 1)
+
+        # automatic dynamic shapes triggered and recompilation.
+        block_mask = create_block_mask(mask_mod, 4, 8, 2048, 2048, _compile=True)
+        self.assertIsInstance(block_mask, BlockMask)
+        self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((4, 8, 16)))
+        self.assertEqual(block_mask.kv_indices.shape, torch.Size((4, 8, 16, 16)))
+        self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
+
+        # no recompilation.
+        block_mask = create_block_mask(mask_mod, 6, 16, 3072, 3072, _compile=True)
+        self.assertIsInstance(block_mask, BlockMask)
+        self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((6, 16, 24)))
+        self.assertEqual(block_mask.kv_indices.shape, torch.Size((6, 16, 24, 24)))
+        self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
 
     @supported_platform
     def test_block_mask_viz(self):

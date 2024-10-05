@@ -718,6 +718,10 @@ class AOTInductorTestsTemplate:
     )
     @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     def test_fp8(self):
+        # cuda only
+        if self.device != "cuda":
+            return
+
         class Model(torch.nn.Module):
             def __init__(self, dtype):
                 super().__init__()
@@ -2999,6 +3003,10 @@ class AOTInductorTestsTemplate:
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
     def test_runtime_checks_fp8(self):
+        # cuda only
+        if self.device != "cuda":
+            return
+
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -3624,12 +3632,8 @@ def fail_non_abi_compatible_cuda(is_skip=False):
 
 # test_failures, xfail by default, set is_skip=True to skip
 CPU_TEST_FAILURES = {
-    # TODO: test_conv_freezing_abi_compatible_cpu fails,
-    #   AssertionError: None, i.e. optional output is not supported
-    "test_conv_freezing": fail_with_and_without_stack_allocation(is_skip=True),
-    # TODO: test_deconv_freezing_abi_compatible_cpu fails,
-    #   AssertionError: None, i.e. optional output is not supported
-    "test_deconv_freezing": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_conv_freezing": fail_minimal_arrayref_interface(is_skip=True),
+    "test_deconv_freezing": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: use of deleted function RAIIAtenTensorHandle
     "test_dup_unbacked_sym_decl": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: use of deleted function RAIIAtenTensorHandle
@@ -3643,12 +3647,8 @@ CPU_TEST_FAILURES = {
     "test_dynamic_scalar": fail_minimal_arrayref_interface(is_skip=True),
     # https://github.com/pytorch/pytorch/issues/122980
     "test_fft_c2c": fail_stack_allocation(is_skip=True),
-    # TODO: test_freezing_abi_compatible_cpu fails,
-    #   AssertionError: None, i.e. optional output is not supported
-    "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
-    # TODO: test_linear_freezing_abi_compatible_cpu fails,
-    #   AssertionError: None, i.e. optional output is not supported
-    "test_linear_freezing": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_freezing": fail_minimal_arrayref_interface(is_skip=True),
+    "test_linear_freezing": fail_minimal_arrayref_interface(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_missing_cubin": fail_with_and_without_stack_allocation(is_skip=True),
     # minimal arrayref interface only works with CPU; test crashes.
@@ -3706,8 +3706,6 @@ CUDA_TEST_FAILURES = {
     "test_quantized_linear": fail_cuda(is_skip=True),
     "test_quantized_int8_linear": fail_cuda(is_skip=True),
     "test_custom_op_add": fail_non_abi_compatible_cuda(is_skip=True),
-    # fp8 to be re-enabled for AOTI
-    "test_fp8": fail_cuda(is_skip=True),
     "test_custom_op_all_inputs": fail_non_abi_compatible_cuda(is_skip=True),
     "test_custom_op_with_multiple_outputs": fail_non_abi_compatible_cuda(is_skip=True),
 }
