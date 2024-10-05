@@ -274,7 +274,6 @@ class TestSwap(TestCase):
             swapped_gm.code.strip(),
             """\
 def forward(self, x, y):
-    x, y, = fx_pytree.tree_flatten_spec(([x, y], {}), self._in_spec)
     _spec_0 = self._spec_0
     _spec_3 = self._spec_3
     tree_unflatten = torch.utils._pytree.tree_unflatten([x, y], _spec_0);  x = y = _spec_0 = None
@@ -285,7 +284,7 @@ def forward(self, x, y):
     bar = self.bar(foo);  foo = None
     tree_flatten_spec_1 = torch.fx._pytree.tree_flatten_spec(bar, _spec_3);  bar = _spec_3 = None
     getitem_9 = tree_flatten_spec_1[0];  tree_flatten_spec_1 = None
-    return pytree.tree_unflatten((getitem_9,), self._out_spec)""",
+    return (getitem_9,)""",
         )
 
     @unittest.expectedFailure
