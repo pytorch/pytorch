@@ -9858,6 +9858,26 @@ def ___make_guard_fn():
 
         self.assertEqual(actual, expected)
 
+    def test_cxx_pytree_tree_leaves(self):
+        import torch.utils._cxx_pytree as pytree
+
+        def fn(x):
+            tree = {
+                "a": [x, x - 1],
+                "b": x + 2,
+                "c": (x, 3.0),
+                "d": {"e": [2 * x, torch.ones(1, 1)]},
+            }
+            leaves = pytree.tree_leaves(tree)
+            return sum(leaves)
+
+        x = torch.randn(3, 2)
+        expected = fn(x)
+        fn_opt = torch.compile(fullgraph=True)(fn)
+        actual = fn_opt(x)
+
+        self.assertEqual(actual, expected)
+
     def test_shape_env_no_recording(self):
         main = ShapeEnv(should_record_events=False)
 
