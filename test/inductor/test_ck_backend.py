@@ -3,10 +3,12 @@ import logging
 import os
 import unittest
 
+
 try:
     from .test_aot_inductor_utils import AOTIRunnerUtil
 except ImportError:
     from test_aot_inductor_utils import AOTIRunnerUtil
+
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
@@ -109,10 +111,12 @@ class TestCKBackend(TestCase):
                     example_inputs=(a, b),
                 )
             else:
+
                 @torch.compile(dynamic=False)
                 def compiled_mm(x, w):
                     return mm(x, w)
                 Y_compiled = compiled_mm(a, b)
+
             Y = mm(a=a, b=b)
             torch.testing.assert_close(Y_compiled, Y)
 
