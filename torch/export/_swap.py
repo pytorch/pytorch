@@ -151,7 +151,7 @@ def _try_remove_connecting_pytrees(curr_module_node: torch.fx.Node) -> None:
     next_module_node.args = (curr_module_node,)
 
 
-def _remove_extraneous_pytrees(gm):
+def _remove_extraneous_pytrees(gm: torch.fx.GraphModule) -> None:
     """
     Remove extraneous pytree flatten/unflatten calls.
 
@@ -345,7 +345,7 @@ def _swap_module_helper(
     return gm
 
 
-def _custom_forward(self, *args, **kwargs):
+def _custom_forward(self, *args, **kwargs):  # type: ignore[no-untyped-def]
     """
     Custom forward function for the swapped module. If `run_with_interpreter` is
     specified from the swap API, then we will run the graph using
@@ -374,7 +374,7 @@ def _custom_forward(self, *args, **kwargs):
         )
 
     if torch.compiler.is_dynamo_compiling() and not self.run_with_interpreter:
-        flat_out = type(self).forward(self, *args, **kwargs)
+        flat_out = type(self).forward(self, *flat_args)
     else:
         flat_out = torch.fx.Interpreter(self, graph=self.graph).run(
             *flat_args, enable_io_processing=False
@@ -384,11 +384,7 @@ def _custom_forward(self, *args, **kwargs):
 
 
 def _swap_modules(
-    ep: ExportedProgram,
-    modules_to_swap: Dict[str, torch.nn.Module],
-    *,
-    check_input_constraints: bool = True,
-    run_with_interpreter: bool = True,
+    ep: ExportedProgram, modules_to_swap: Dict[str, torch.nn.Module]
 ) -> torch.fx.GraphModule:
     """
     Unlifts the given ExportedProgram into a fx.GraphModule, and then swaps
@@ -402,10 +398,6 @@ def _swap_modules(
             been specified in the `preserve_module_call_signature` argument to
             torch.export so that we know how to restore the calling convention
             to this argument.
-        check_input_constraints: Whether or not to register a hook which
-            compares input shapes/sizes to the ones used for tracing. Setting
-            this to True will help catch bugs since the exported graph
-            specializes on the given input shapes, but it will take up some QPS.
         run_with_interpreter: Whether or not to run the graph using
             fx.Interpreter. Setting to true will help result in better error
             messages and easier debugging, but it has found to result in a QPS
@@ -415,9 +407,7 @@ def _swap_modules(
         entry.fqn: entry.signature for entry in ep.module_call_graph if entry.signature
     }
 
-    from ._unlift import _unlift_exported_program_lifted_states
-
-    gm = _unlift_exported_program_lifted_states(ep, check_input_constraints)
+    gm = ep.module()
     gm.graph.eliminate_dead_code()
 
     # Unset the pytree codegen because we will take care of it with our own
@@ -425,8 +415,9 @@ def _swap_modules(
     gm.graph._codegen = torch.fx.graph.CodeGen()
 
     gm.module_call_graph = ep.module_call_graph
-    gm.run_with_interpreter = run_with_interpreter  # type: ignore[assignment]
     gm.forward = types.MethodType(_custom_forward, gm)
+    gm.train = types.MethodType(type(gm).train, gm)  # type: ignore[assignment]
+    gm.eval = types.MethodType(type(gm).eval, gm)  # type: ignore[assignment]
 
     assert isinstance(gm, torch.fx.GraphModule)
     gm = _swap_module_helper(gm, modules_to_swap, module_call_graph)

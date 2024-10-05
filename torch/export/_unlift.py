@@ -21,6 +21,9 @@ from .exported_program import (
 
 @torch._dynamo.disable
 def _check_input_constraints_pre_hook(self, *args, **kwargs):
+    if not self.validate_inputs:
+        return
+
     flat_args_with_path, received_spec = pytree.tree_flatten_with_path(args)
 
     if received_spec != self._in_spec:
@@ -31,7 +34,7 @@ def _check_input_constraints_pre_hook(self, *args, **kwargs):
             f"{received_spec}"
         )
 
-    return _check_input_constraints_for_graph(
+    _check_input_constraints_for_graph(
         [node for node in self.graph.nodes if node.op == "placeholder"],
         flat_args_with_path,
         self.range_constraints,
@@ -251,6 +254,7 @@ class _StatefulGraphModule(torch.fx.GraphModule, metaclass=_StatefulGraphModuleF
         super().__init__(root, graph)
         # Need to fix up non-persistent buffers.
         self.range_constraints = range_constraints or []
+        self.validate_inputs = True
 
 
 def _create_stateful_graph_module(
@@ -259,7 +263,6 @@ def _create_stateful_graph_module(
     # TODO(suo) this should not be optional, but is since we still ahve
     # capture_pre_autograd_graph grr
     graph_signature: Optional[ExportGraphSignature] = None,
-    _check_input_constraints: bool = True,
 ):
     stateful_gm = _StatefulGraphModule._create(
         plain_graph_module,
@@ -267,10 +270,9 @@ def _create_stateful_graph_module(
         range_constraints=range_constraints,
     )
 
-    if _check_input_constraints:
-        stateful_gm.register_forward_pre_hook(
-            _check_input_constraints_pre_hook, with_kwargs=True
-        )
+    stateful_gm.register_forward_pre_hook(
+        _check_input_constraints_pre_hook, with_kwargs=True
+    )
 
     if graph_signature is None:
         return stateful_gm
@@ -315,9 +317,7 @@ def _create_stateful_graph_module(
     return stateful_gm
 
 
-def _unlift_exported_program_lifted_states(
-    ep: ExportedProgram, _check_input_constraints: bool = True
-) -> torch.nn.Module:
+def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Module:
     ep = _remove_effect_tokens(ep)
     new_gm = torch.fx.GraphModule(ep.graph_module, copy.deepcopy(ep.graph))
     _register_attrs_to_new_gm(new_gm, ep.graph_signature, ep.state_dict, ep.constants)
@@ -359,10 +359,7 @@ def _unlift_exported_program_lifted_states(
         forward_arg_names=forward_arg_names,
     )
     unlift_gm = _create_stateful_graph_module(
-        new_gm,
-        ep.range_constraints,
-        ep.graph_signature,
-        _check_input_constraints,
+        new_gm, ep.range_constraints, ep.graph_signature
     )
     unlift_gm.meta.update(ep.graph_module.meta)
     return unlift_gm
