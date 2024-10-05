@@ -172,7 +172,7 @@ class TestCuda(TestCase):
         finally:
             torch.cuda.memory._set_allocator_settings(
                 "pinned_use_cuda_host_register:False"
-             )
+            )
 
     def test_cudart_register(self):
         t = torch.ones(20)
