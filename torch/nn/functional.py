@@ -2201,6 +2201,7 @@ def gumbel_softmax(
         .exponential_()
         .log()
     )  # ~Gumbel(0,1)
+    logits = logits.log_softmax(dim)
     gumbels = (logits + gumbels) / tau  # ~Gumbel(logits,tau)
     y_soft = gumbels.softmax(dim)
 
