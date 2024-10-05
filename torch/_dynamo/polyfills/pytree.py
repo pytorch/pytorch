@@ -4,7 +4,6 @@ Python polyfills for torch.utils.pytree
 
 from __future__ import annotations
 
-import builtins
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Literal, TYPE_CHECKING
 
@@ -14,6 +13,8 @@ from ..decorators import substitute_in_graph
 
 
 if TYPE_CHECKING:
+    import builtins
+
     from torch.utils._cxx_pytree import PyTree
 
 
