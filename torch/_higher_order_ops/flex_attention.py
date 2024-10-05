@@ -111,11 +111,11 @@ def _(info, in_dims, shape, indices, val):
 
 class ModIndex(torch.autograd.Function):
     @staticmethod
-    def forward(x: Tensor, indices: List[Tensor]):
+    def forward(x: Tensor, indices: List[Tensor]) -> Tensor:
         return torch.ops.aten.index(x, indices)
 
     @staticmethod
-    def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any):
+    def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> None:
         x, indices = inputs
         ctx.save_for_backward(*indices)
         ctx.input_shape = x.shape
@@ -123,7 +123,7 @@ class ModIndex(torch.autograd.Function):
     generate_vmap_rule = True
 
     @staticmethod
-    def backward(ctx: Any, gradOut: Tensor):
+    def backward(ctx: Any, gradOut: Tensor) -> Tuple[Optional[Tensor], ...]:
         indices = ctx.saved_tensors
         return (
             torch.ops.mylib.zeros_and_scatter(
