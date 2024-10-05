@@ -516,7 +516,20 @@ class TensorVariable(VariableTracker):
         if self.is_strict_mode(tx) and name in self._strict_mode_banned_ops():
             unimplemented(f"Illegal method invocation {name} in strict mode")
 
-        if can_dispatch_torch_function(tx, tuple([self] + list(args)), kwargs):
+        # Only override builtin tensor methods
+        # The user can manually add override handling
+        # with a decorator for other methods (e.g. a dispatch subclass with other methods)
+        has_torch_function_override = False
+        try:
+            inspect.getattr_static(torch.Tensor, name)
+            has_torch_function_override = True
+        except AttributeError:
+            has_torch_function_override = False
+
+        if (
+            can_dispatch_torch_function(tx, tuple([self] + list(args)), kwargs)
+            and has_torch_function_override
+        ):
             if self.source:
                 func_var = VariableBuilder(
                     tx, AttrSource(AttrSource(self.source, "__class__"), name)
