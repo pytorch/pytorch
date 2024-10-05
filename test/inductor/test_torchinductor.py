@@ -8625,7 +8625,6 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 0)
 
-    @xfail_if_triton_cpu
     @config.patch(search_autotune_cache=False)
     def test_mm_views(self):
         def fn(a, b):
@@ -9674,7 +9673,6 @@ class CommonTemplate:
         self.assertEqual(inductor_out, eager_out)
 
     @skipIfRocm
-    @xfail_if_triton_cpu
     def test_require_stride_expanded(self):
         def forward(arg6, arg7, arg16):
             convolution = torch.ops.aten.convolution(
@@ -11031,7 +11029,6 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     # We only support dtypeview for abi_conpatible aoti
-    @skip_if_triton_cpu("Compile time crash in Triton CPU CI")
     @torch._inductor.config.patch(abi_compatible=True)
     def test_dtypeview(self):
         if TEST_WITH_ASAN:
