@@ -1132,14 +1132,11 @@ PyObject* process_outputs(
     _save_variables(tensors_to_save, cdata, grad_fn);
   } else {
     // Remove unnecessary attributes
-    Py_XDECREF(grad_fn->to_save);
-    grad_fn->to_save = nullptr;
-    Py_XDECREF(grad_fn->non_differentiable);
-    grad_fn->non_differentiable = nullptr;
+    Py_CLEAR(grad_fn->to_save);
+    Py_CLEAR(grad_fn->non_differentiable);
   }
 
-  Py_XDECREF(grad_fn->saved_for_forward);
-  grad_fn->saved_for_forward = nullptr;
+  Py_CLEAR(grad_fn->saved_for_forward);
 
   // Unpack the output, unless .forward() returned a tuple
   if (unpack_output) {

@@ -398,11 +398,6 @@ class FSDPParam:
                 f"if using all-gather extensions: {inner_tensor}"
             )
         if has_fsdp_pre_all_gather:
-            if self.padded_sharded_param_size != self._sharded_local_tensor.size():
-                raise NotImplementedError(
-                    "FSDP all-gather extensions require even sharding on dim-0.\n"
-                    f"{self._orig_size} is not divisible by FSDP world size {self.mesh_info.mesh.size()}."
-                )
             self._extensions_data = ExtensionsData()
         self._unsharded_inner_tensors: List[torch.Tensor] = []
 
@@ -661,7 +656,7 @@ class FSDPParam:
                 # Old signature only passes mesh; keep for BC for now
                 assert num_fn_params in (
                     1,
-                    3,
+                    5,
                 ), (
                     f"Invalid fsdp_pre_all_gather: {pre_all_gather_signature}\n"
                     "Expects fsdp_pre_all_gather(self, mesh: DeviceMesh, "
@@ -678,9 +673,27 @@ class FSDPParam:
                         self._extensions_data.all_gather_metadata,
                     ) = sharded_local_tensor.fsdp_pre_all_gather(
                         self.mesh_info.mesh,
+                        self._orig_size,
+                        self._contiguous_orig_stride,
                         self._module_info.module,
                         self.mp_policy,
                     )
+                    if (
+                        sharded_local_tensor.size() != self.padded_sharded_param_size
+                        and any(
+                            all_gather_input.size() != self.padded_sharded_param_size
+                            for all_gather_input in all_gather_inputs
+                        )
+                    ):
+                        # NOTE: Since this error can only be raised on the
+                        # ranks that have padding, this can manifest as a NCCL
+                        # watchdog timeout, as the other ranks will not error.
+                        raise AssertionError(
+                            "When a parameter is unevenly sharded by FSDP "
+                            f"(orig size={self._orig_size}, FSDP world size={self.mesh_info.mesh.size()}), "
+                            "fsdp_pre_all_gather must return all-gather inputs with the padded sharded size "
+                            f"{self.padded_sharded_param_size} but got {[t.size() for t in all_gather_inputs]}"
+                        )
                 self._extensions_data.all_gather_input_sizes = [
                     t.size() for t in all_gather_inputs
                 ]
