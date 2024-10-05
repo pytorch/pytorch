@@ -9,7 +9,7 @@ import torch._ops
 from .. import config, ir
 from ..virtualized import V
 from .cpp_utils import cexpr, DTYPE_TO_CPP
-from .cpp_wrapper_cpu import CppWrapperCpu, SubgraphCppWrapperCpu
+from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import (
     EnterSubgraphLine,
     ExitSubgraphLine,
@@ -74,8 +74,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
     @staticmethod
     def create(is_subgraph, subgraph_name, parent_wrapper):
-        if is_subgraph:
-            return SubgraphCppWrapperCpuArrayRef(subgraph_name, parent_wrapper)
+        # TODO - support subgraph codegen by lifting functions
         return CppWrapperCpuArrayRef()
 
     def memory_plan(self):
@@ -580,7 +579,3 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 return final_tmp_name
         else:
             return final_tmp_name
-
-
-class SubgraphCppWrapperCpuArrayRef(SubgraphCppWrapperCpu, CppWrapperCpuArrayRef):
-    pass

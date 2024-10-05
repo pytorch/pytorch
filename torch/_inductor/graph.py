@@ -1853,24 +1853,24 @@ class GraphLowering(torch.fx.Interpreter):
         self.wrapper_code.pop_codegened_graph()
         return result
 
-    # def codegen_subgraph(self, parent_graph: "GraphLowering") -> None:
-    #     """
-    #     This is a more compact version of the `codegen()` above
-    #     where we codegen this graph as a subgraph of some parent
-    #     graph. The parent graph is passed as an argument: the
-    #     intention is to inline codegening of the subgraph in
-    #     the parent graph's wrapper code (including the generated
-    #     kerenls). The wrapper code is not finalized (via `.generate()`
-    #     call), as this will be done in the parent graph's `codegen()`.
-    #     """
-    #     from .scheduler import Scheduler
+    def codegen_subgraph(self, parent_graph: "GraphLowering") -> None:
+        """
+        This is a more compact version of the `codegen()` above
+        where we codegen this graph as a subgraph of some parent
+        graph. The parent graph is passed as an argument: the
+        intention is to inline codegening of the subgraph in
+        the parent graph's wrapper code (including the generated
+        kerenls). The wrapper code is not finalized (via `.generate()`
+        call), as this will be done in the parent graph's `codegen()`.
+        """
+        from .scheduler import Scheduler
 
-    #     self.wrapper_code = parent_graph.wrapper_code
-    #     self.device_ops = parent_graph.device_ops
-    #     self.cpp_wrapper = parent_graph.cpp_wrapper
+        self.wrapper_code = parent_graph.wrapper_code
+        self.device_ops = parent_graph.device_ops
+        self.cpp_wrapper = parent_graph.cpp_wrapper
 
-    #     self.scheduler = Scheduler(self.operations)
-    #     self.scheduler.codegen()
+        self.scheduler = Scheduler(self.operations)
+        self.scheduler.codegen()
 
     def count_bytes(
         self,
