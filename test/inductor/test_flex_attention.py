@@ -6,7 +6,7 @@ import random
 import string
 import unittest
 from collections import namedtuple
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from typing import Callable, List, Optional, Tuple, Union
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
@@ -634,6 +634,11 @@ class TestFlexAttention(InductorTestCase):
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_dynamic(self, dtype: torch.dtype, score_mod: Callable):
+        if score_mod.__name__ == "_alibi_bias":
+            # TODO
+            self.skipTest(
+                "Alibi bias broken with dynamic shapes since we don't support capturing dynamic shapes"
+            )
         self.run_dynamic_test(score_mod, dtype)
 
     @supported_platform
@@ -968,6 +973,53 @@ class TestFlexAttention(InductorTestCase):
             return score + bias[b, q, kv]
 
         self.run_test(bias_mod, dtype)
+
+    @supported_platform
+    def test_load_from_view_buffer(self):
+        dtype = torch.float16
+        device = "cuda"
+        W = 8
+
+        class SimpleAttention(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rel_pos_h = torch.randn(2 * H - 1, D, device=device, dtype=dtype)
+
+            def forward(self, q, k, v):
+                q = q.view(B * H, H * W, -1)
+                score_mod = self.generate_score_mod(q)
+                q = q.view(B, H, H * W, -1)
+                return flex_attention(q, k, v, score_mod=score_mod)
+
+            def generate_score_mod(self, q):
+                rel_h = self.add_decomposed_rel_pos(q)
+                rel_h = rel_h.view(
+                    B, H, rel_h.size(1), rel_h.size(2), rel_h.size(3)
+                ).squeeze(-1)
+
+                def score_mod(score, batch, head, q_idx, k_idx):
+                    h_idx = k_idx // W
+                    return score + rel_h[batch, head, q_idx, h_idx]
+
+                return score_mod
+
+            @torch.no_grad()
+            def add_decomposed_rel_pos(self, q):
+                q_coords = torch.arange(H, device=self.rel_pos_h.device)[:, None]
+                k_coords = torch.arange(H, device=self.rel_pos_h.device)[None, :]
+                relative_coords = (q_coords - k_coords) + (H - 1)
+                Rh = self.rel_pos_h[relative_coords.long()]
+                r_q = q.reshape(B * H, H, W, D)
+                rel_h = torch.einsum("bhwc,hkc->bhwk", r_q, Rh)
+                return rel_h.reshape(B * H, H * W, H, 1)
+
+        m = SimpleAttention().to(device).eval()
+        m = torch.compile(m, mode="max-autotune", fullgraph=True)
+        q = torch.randn(B, H, H * W, D, device=device, dtype=dtype, requires_grad=True)
+        k = torch.randn(B, H, H * W, D, device=device, dtype=dtype, requires_grad=True)
+        v = torch.randn(B, H, H * W, D, device=device, dtype=dtype, requires_grad=True)
+        out = m(q, k, v)
+        out.sum().backward()
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1335,17 +1387,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test(bias_mod)
 
-    # TODO this config segfaults with Triton without:
-    # https://github.com/triton-lang/triton/pull/4540
     @supported_platform
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("head_dims", [(D, D // 2), (D // 2, D)])
     def test_non_equal_head_dims(self, dtype, score_mod, head_dims):
         qk_d, v_d = head_dims
-        context = nullcontext() if qk_d > v_d else self.assertRaises(ValueError)
-        with context:
-            self.run_test(score_mod, dtype, B, H, S, qk_d, B, H, S, V_D=v_d)
+        self.run_test(score_mod, dtype, B, H, S, qk_d, B, H, S, V_D=v_d)
 
     @supported_platform
     def test_autograd_function_in_score_mod(self):
@@ -1391,6 +1439,24 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         attention = functools.partial(flex_attention, block_mask=block_mask)
 
         self.run_test_with_call(attention)
+
+    @supported_platform
+    def test_new_empty_mask_mod(self):
+        S = 128
+        q, k, v = (torch.randn(4, 1, S, 64, device="cuda") for _ in range(3))
+
+        attn_mask = torch.ones(4, 1, S, S, dtype=torch.bool, device="cuda").tril()
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            h_ = h.new_zeros(h.shape)
+            return score + attn_mask[b, h_, q_idx, kv_idx]
+
+        def causal(b, h, q_idx, kv_idx):
+            h_ = h.new_zeros(h.shape)
+            return attn_mask[b, h_, q_idx, kv_idx]
+
+        block_mask = create_block_mask(causal, B=4, H=None, Q_LEN=S, KV_LEN=S)
+        torch.compile(flex_attention)(q, k, v, score_mod, block_mask=block_mask)
 
     @supported_platform
     def test_GQA_causal_mask(self):
@@ -2375,6 +2441,32 @@ class TestBlockMask(InductorTestCase):
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((1, 1, 4, 4)))
 
     @supported_platform
+    def test_compiling_create_block_mask_no_recompile(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        torch._dynamo.reset()
+        block_mask = create_block_mask(mask_mod, 2, 4, 1024, 1024, _compile=True)
+        self.assertIsInstance(block_mask, BlockMask)
+        self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((2, 4, 8)))
+        self.assertEqual(block_mask.kv_indices.shape, torch.Size((2, 4, 8, 8)))
+        self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 1)
+
+        # automatic dynamic shapes triggered and recompilation.
+        block_mask = create_block_mask(mask_mod, 4, 8, 2048, 2048, _compile=True)
+        self.assertIsInstance(block_mask, BlockMask)
+        self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((4, 8, 16)))
+        self.assertEqual(block_mask.kv_indices.shape, torch.Size((4, 8, 16, 16)))
+        self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
+
+        # no recompilation.
+        block_mask = create_block_mask(mask_mod, 6, 16, 3072, 3072, _compile=True)
+        self.assertIsInstance(block_mask, BlockMask)
+        self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((6, 16, 24)))
+        self.assertEqual(block_mask.kv_indices.shape, torch.Size((6, 16, 24, 24)))
+        self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
+
+    @supported_platform
     def test_block_mask_viz(self):
         def causal_mask(b, h, q, kv):
             return q >= kv
@@ -2601,7 +2693,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         torch.testing.assert_close(causal_mask_out, sdpa_mask_out, atol=5e-3, rtol=0.0)
 
     @supported_platform
-    def test_compiled_block_mask(self):
+    def test_doc_mask_clamped_repro(self):
         def _offsets_to_doc_ids_tensor(offsets):
             device = offsets.device
             counts = offsets[1:] - offsets[:-1]
@@ -2644,10 +2736,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         lengths = generate_random_lengths(max_seq_len, doc_count)
         offsets = length_to_offsets(lengths, device)
 
-        def make_tensor():
-            return torch.ones(B, H, SEQ_LEN, HEAD_DIM, device=device)
-
-        query, key = make_tensor(), make_tensor()
         document_causal_mask = generate_doc_mask_mod(offsets)
         block_mask_compiled = create_block_mask(
             document_causal_mask,
@@ -2655,7 +2743,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             1,
             SEQ_LEN,
             SEQ_LEN,
-            device=query.device,
+            device=device,
             _compile=True,
         )
         block_mask = create_block_mask(
@@ -2664,13 +2752,30 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             1,
             SEQ_LEN,
             SEQ_LEN,
-            device=query.device,
+            device=device,
             _compile=True,
         )
         self.assertEqual(block_mask_compiled.kv_indices, block_mask.kv_indices)
         self.assertEqual(
             block_mask_compiled.full_kv_indices, block_mask.full_kv_indices
         )
+        for i in range(5):
+            lengths = generate_random_lengths(1024 + i, 5)
+            offsets = length_to_offsets(lengths, "cuda")
+            doc_ids = _offsets_to_doc_ids_tensor(offsets)
+            total_seq_len = 1024 + i
+
+            def doc_mask_mod(b, h, q_idx, kv_idx):
+                return (
+                    doc_ids[q_idx.clamp(0, doc_ids.shape[0] - 1)]
+                    == doc_ids[kv_idx.clamp(0, doc_ids.shape[0] - 1)]
+                )
+
+            q, k, v = (
+                torch.randn(1, 12, 1024 + i, 64, device=device) for _ in range(3)
+            )
+            block_mask = create_block_mask(doc_mask_mod, None, None, 1024 + i, 1024 + i)
+            torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
 
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)

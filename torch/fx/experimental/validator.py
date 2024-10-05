@@ -508,7 +508,7 @@ try:
                 log.debug("add source guard: %s", z3str(e))
             self._source_exprs.add(e)
 
-        def add_target_expr(self, e: sympy.Expr) -> None:
+        def add_target_expr(self, e: "sympy.logic.boolalg.Boolean") -> None:
             self._check_freesymbols(e)
             z3expr = self.to_z3_boolean_expr(e)
             if e not in self._target_exprs:
