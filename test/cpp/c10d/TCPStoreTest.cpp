@@ -2,10 +2,7 @@
 #include "StoreTestCommon.hpp"
 
 #include <cstdlib>
-#include <future>
-#include <iostream>
 #include <string>
-#include <system_error>
 #include <thread>
 
 #include <gtest/gtest.h>
@@ -105,7 +102,7 @@ void testHelper(bool useLibUV, const std::string& prefix = "") {
 
   for (const auto i : c10::irange(numThreads)) {
     threads.emplace_back(
-        std::thread([=, &sem1, &sem2, &clientStores, &expectedCounterRes] {
+        [=, &sem1, &sem2, &clientStores, &expectedCounterRes] {
           for (C10_UNUSED const auto j : c10::irange(numIterations)) {
             clientStores[i]->add("counter", 1);
           }
@@ -130,7 +127,7 @@ void testHelper(bool useLibUV, const std::string& prefix = "") {
             std::string val = "thread_val_" + std::to_string(numIterations - 1);
             c10d::test::check(*clientStores[i], key, val);
           }
-        }));
+        });
   }
 
   sem1.wait(numThreads);

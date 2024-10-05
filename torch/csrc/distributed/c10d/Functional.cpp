@@ -418,7 +418,7 @@ class AllToAllSingle : public torch::autograd::Function<AllToAllSingle> {
 
   static torch::autograd::variable_list backward(
       torch::autograd::AutogradContext* ctx,
-      torch::autograd::variable_list grad_out_list) {
+      const torch::autograd::variable_list& grad_out_list) {
     const std::vector<int64_t>& output_split_sizes =
         ctx->saved_data["output_split_sizes"].toIntVector();
     const std::vector<int64_t>& input_split_sizes =
@@ -476,12 +476,12 @@ class ReduceScatterTensor
 
   static torch::autograd::variable_list backward(
       torch::autograd::AutogradContext* ctx,
-      torch::autograd::variable_list grad_out_list) {
+      const torch::autograd::variable_list& grad_out_list) {
     const int64_t group_size = ctx->saved_data["group_size"].toInt();
     const std::string& group_name = ctx->saved_data["group_name"].toStringRef();
 
     DCHECK(grad_out_list.size() == 1);
-    auto grad_out = grad_out_list[0];
+    const auto& grad_out = grad_out_list[0];
 
     auto out =
         c10::Dispatcher::singleton()
@@ -532,12 +532,12 @@ class AllGatherIntoTensor
 
   static torch::autograd::variable_list backward(
       torch::autograd::AutogradContext* ctx,
-      torch::autograd::variable_list grad_out_list) {
+      const torch::autograd::variable_list& grad_out_list) {
     const int64_t group_size = ctx->saved_data["group_size"].toInt();
     const std::string& group_name = ctx->saved_data["group_name"].toStringRef();
 
     DCHECK(grad_out_list.size() == 1);
-    auto grad_out = grad_out_list[0];
+    const auto& grad_out = grad_out_list[0];
 
     auto out =
         c10::Dispatcher::singleton()

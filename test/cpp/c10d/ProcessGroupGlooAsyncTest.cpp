@@ -35,10 +35,7 @@ class AsyncTest {
  public:
   AsyncTest(std::string path) : path_(std::move(path)) {}
 
-  AsyncTest(AsyncTest&& other) {
-    path_ = std::move(other.path_);
-    pg_ = std::move(other.pg_);
-  }
+  AsyncTest(AsyncTest&& other) noexcept = default;
 
   ::c10d::ProcessGroupGloo& getProcessGroup() {
     return *pg_;
@@ -53,8 +50,7 @@ class AsyncTest {
     options->devices.push_back(
         ::c10d::ProcessGroupGloo::createDeviceForHostname("127.0.0.1"));
 
-    pg_ = std::unique_ptr<::c10d::ProcessGroupGloo>(
-        new ::c10d::ProcessGroupGloo(store, rank, size, options));
+    pg_ = std::make_unique<::c10d::ProcessGroupGloo>(store, rank, size, options);
   }
 
  protected:
