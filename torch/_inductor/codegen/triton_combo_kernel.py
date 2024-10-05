@@ -570,7 +570,7 @@ class ComboKernel(Kernel):
     def select_heuristics(self, sub_kernel: TritonKernel) -> Tuple[str, List[int]]:
         size_hints = [
             next_power_of_2(V.graph.sizevars.size_hint(numel))
-            for numel in sub_kernel.numels
+            for numel in sub_kernel.numels.values()
         ]
         if sub_kernel.persistent_reduction:
             assert sub_kernel.inside_reduction
@@ -730,16 +730,18 @@ class ComboKernel(Kernel):
 
     def codegen_blocks(self, code: IndentedBuffer) -> None:
         for block in self.block_args:
-            assert (
-                block in TritonSymbols.block_types
-            ), f"{block} is not supported without autotuning"
+            assert block in {
+                "XBLOCK",
+                "YBLOCK",
+                "R0_BLOCK",
+            }, f"{block} is not supported without autotuning"
         if "YBLOCK" in self.block_args:
             code.splice(f"XBLOCK: tl.constexpr = {self.block_size_2d}")
             code.splice(f"YBLOCK: tl.constexpr = {self.block_size_2d}")
         else:
             code.splice(f"XBLOCK: tl.constexpr = {self.block_size_1d}")
         if self.reduction_block_arg is not None:
-            code.splice(f"RBLOCK: tl.constexpr = {self.block_size_reduce}")
+            code.splice(f"R0_BLOCK: tl.constexpr = {self.block_size_reduce}")
             code.splice(
                 f"{self.reduction_block_arg}: tl.constexpr = {self.block_size_reduce}"
             )
