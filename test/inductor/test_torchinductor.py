@@ -7472,7 +7472,6 @@ class CommonTemplate:
         self.common(fn, [a, b])
 
     @with_tf32_off
-    @xfail_if_triton_cpu
     def test_slice_scatter_reinplace(self):
         class M(nn.Module):
             def __init__(self, device):
