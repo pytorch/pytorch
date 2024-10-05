@@ -9,6 +9,7 @@ from torch._C import (
     _pop_torch_function_stack,
     _push_on_torch_function_stack,
 )
+from torch._dynamo.utils import counters
 from torch.overrides import _get_current_function_mode_stack, BaseTorchFunctionMode
 from torch.utils._device import DeviceContext
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -65,6 +66,10 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
                     self.funcs.append(func.__name__)
                 return func(*args, **kwargs)
 
+            @classmethod
+            def is_infra_mode(cls):
+                return True
+
         class MLP(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -85,13 +90,20 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
         inp = torch.rand(4, 4, device="cuda")
         custom_mode = CustomMode()
         with custom_mode:
-            model(inp)
+            out_ref = model(inp)
         self.assertEqual(len(custom_mode.funcs), 3)
 
         custom_mode.funcs.clear()
+        counters.clear()
         with custom_mode:
-            torch.compile(model)(inp)
+            out_compiled, triton_codes = run_and_get_code(
+                lambda: torch.compile(model)(inp)
+            )
+        self.assertEqual(out_ref, out_compiled)
         self.assertEqual(len(custom_mode.funcs), 1)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertIn("relu_graph_break", list(counters["graph_break"].keys())[0])
+        self.assertEqual(len(triton_codes), 2)
 
 
 class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
