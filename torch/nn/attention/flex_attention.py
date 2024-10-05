@@ -200,7 +200,7 @@ def _adjust_num_blocks_and_indices(
     indices = indices[:, :, :new_num_rows, :new_num_cols]
     num_blocks = num_blocks[:, :, :new_num_rows]
     num_blocks = torch.where(num_blocks < new_num_cols, num_blocks, new_num_cols)
-    num_blocks = torch.sum(indices < num_blocks[:, :, :, None], dim=-1)
+    num_blocks = torch.sum(indices < num_blocks[:, :, :, None], dim=-1).to(torch.int32)
     return num_blocks, indices
 
 
@@ -499,6 +499,9 @@ class BlockMask:
                 new_num_rows,
                 new_num_cols,
             )
+        else:
+            new_full_kv_num_blocks = None
+            new_full_kv_indices = None
         return self.from_kv_blocks(
             new_kv_num_blocks,
             new_kv_indices,
@@ -1049,7 +1052,7 @@ def flex_attention(
     if block_mask is None:
         block_mask = _create_empty_block_mask(query, key)
     elif (
-        query.size(-2) < block_mask.kv_indices.size(-2) * block_mask.BLOCK_SIZE[0]
+        query.size(-2) < block_mask.kv_num_blocks.size(-1) * block_mask.BLOCK_SIZE[0]
         or key.size(-2) < block_mask.kv_indices.size(-1) * block_mask.BLOCK_SIZE[1]
     ):
         new_q_len = _round_up_to_multiple(query.size(-2), block_mask.BLOCK_SIZE[0])
@@ -1058,10 +1061,10 @@ def flex_attention(
     if scale is None:
         scale = 1.0 / math.sqrt(query.size(-1))
 
-    if query.device != block_mask.kv_num_blocks.device:
+    if query.device != block_mask.kv_num_blocks.device:  # type: ignore[union-attr]
         raise RuntimeError(
             f"Expect q/k/v and block_mask to be on the same device "
-            f"but got {query.device} and {block_mask.kv_num_blocks.device}."
+            f"but got {query.device} and {block_mask.kv_num_blocks.device}."  # type: ignore[union-attr]
         )
 
     kernel_options = _apply_kernel_options(
@@ -1078,7 +1081,7 @@ def flex_attention(
             torch._dynamo.mark_static(x, -3)
             torch._dynamo.mark_static(x, -1)
         out, lse = flex_attention_hop(
-            query, key, value, score_mod, block_mask.as_tuple(), scale, kernel_options
+            query, key, value, score_mod, block_mask.as_tuple(), scale, kernel_options  # type: ignore[union-attr]
         )
         if return_lse:
             return out, lse * math.log(2)
@@ -1114,7 +1117,7 @@ def flex_attention(
                         key,
                         value,
                         score_mod,
-                        block_mask.as_tuple(),
+                        block_mask.as_tuple(),  # type: ignore[union-attr]
                         scale,
                         kernel_options,
                     )
