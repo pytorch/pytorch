@@ -9935,7 +9935,7 @@ def ___make_guard_fn():
                     ("c", (y, 3.0)),
                     ("a", [y, y + 1]),
                     ("b", y + 2),
-                    ("d", collections.defaultdict([("e", [2 * y, torch.zeros(1, 1)])])),
+                    ("d", collections.defaultdict(int, {"e": [2 * y, torch.zeros(1, 1)]})),
                 ]
             )
             return pytree.tree_map(lambda u, v: (u, v), tree1, tree2)
