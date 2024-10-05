@@ -82,7 +82,7 @@ from .utils import (
     clone_preserve_strides,
     copy_misaligned_inputs,
     get_cloned_parameter_buffer_name,
-    has_incompatible_cudagraph_ops,
+    get_first_incompatible_cudagraph_node,
     maybe_get_suppress_shape_guards_ctx,
     output_node,
     remove_unaligned_input_idxs,
@@ -284,11 +284,17 @@ def _recursive_joint_graph_passes(gm):
     joint_graph_passes(gm)
 
 
-def _recursive_post_grad_passes(gm, is_inference: bool = False):
+def _recursive_post_grad_passes(
+    gm, is_inference: bool = False, example_inputs=None, fake_mode=None
+):
     for subgraph_name in _get_subgraph_names(gm):
         subgraph = getattr(gm, subgraph_name)
-        _recursive_post_grad_passes(subgraph, is_inference)
-    post_grad_passes(gm, is_inference)
+        _recursive_post_grad_passes(
+            subgraph, is_inference, example_inputs=example_inputs, fake_mode=fake_mode
+        )
+    post_grad_passes(
+        gm, is_inference, example_inputs=example_inputs, fake_mode=fake_mode
+    )
 
 
 def split_const_gm(
@@ -598,7 +604,6 @@ def _compile_fx_inner(
 
                 cudagraph_tests = [
                     (not has_mutation, "mutated inputs"),
-                    (not has_incompatible_cudagraph_ops(gm), "incompatible ops"),
                     (not complex_memory_overlap_inputs, "complex memory overlap"),
                     (
                         all(
@@ -770,7 +775,12 @@ def fx_codegen_and_compile(
 
         with V.set_fake_mode(fake_mode):
             # has some issues with memory in training
-            _recursive_post_grad_passes(gm, is_inference=is_inference)
+            _recursive_post_grad_passes(
+                gm,
+                is_inference=is_inference,
+                example_inputs=example_inputs,
+                fake_mode=fake_mode,
+            )
             V.debug.fx_graph_transformed(gm, example_inputs)
             post_grad_graphs_log.debug(
                 "%s",
@@ -889,6 +899,16 @@ def fx_codegen_and_compile(
                     else:
                         disable = f"{disable}\n"
                     V.graph.disable_cudagraphs_reason = disable
+
+                if cudagraphs and not V.graph.disable_cudagraphs_reason:
+                    maybe_incompat_node = get_first_incompatible_cudagraph_node(gm)
+                    if maybe_incompat_node:
+                        disable = f"disabling cudagraphs due to incompatible op {maybe_incompat_node.target}"
+                        if stack_trace := maybe_incompat_node.meta.get(
+                            "stack_trace", None
+                        ):
+                            disable = f"{disable} Found from {stack_trace}\n"
+                        V.graph.disable_cudagraphs_reason = disable
 
                 if V.aot_compilation is True:
                     return compiled_fn
@@ -1296,16 +1316,23 @@ def compile_fx(
                         for node in model_.graph.nodes
                         if node.op == "placeholder"
                     ]
+                    # Replace non-tensor (constant) inputs with Nones, since these are not being
+                    # used anyways by the graph
+                    fake_inputs = [
+                        inp if isinstance(inp, torch.Tensor) else None
+                        for inp in fake_inputs
+                    ]
+
                     if all(v is not None for v in fake_inputs):
                         # Validate devices before switching to fake tensors.
                         for idx, fi, i in zip(count(), fake_inputs, inputs_):
-                            if fi.device != i.device:
+                            if fi is not None and fi.device != i.device:
                                 raise ValueError(
                                     f"Device mismatch between fake input and example input at position #{idx}: "
                                     f"{fi.device} vs {i.device}. If the model was exported via torch.export(), "
                                     "make sure torch.export() and torch.aot_compile() run on the same device."
                                 )
-                        inputs_ = fake_inputs
+                        inputs_ = fake_inputs  # type: ignore[assignment]
                 return compile_fx(
                     model_,
                     inputs_,
