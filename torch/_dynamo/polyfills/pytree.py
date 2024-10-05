@@ -79,7 +79,7 @@ if python_pytree._cxx_pytree_exists:
         _type: builtins.type | None
         _metadata: Any
         _entries: tuple[Any] | None
-        _unflatten_func: Callable
+        _unflatten_func: Callable[[Any | None, Iterable[PyTree]], PyTree] | None
 
         num_nodes: int = field(init=False)
         num_leaves: int = field(init=False)
@@ -87,18 +87,26 @@ if python_pytree._cxx_pytree_exists:
         none_is_leaf: bool = field(init=False)
         namespace: str = field(init=False)
 
-        def __post_init__(self):
+        def __post_init__(self) -> None:
             if self._type is None:
+                assert len(self._children) == 0
+                assert self._metadata is None
+                assert self._entries is None
+                assert self._unflatten_func is None
                 object.__setattr__(self, "num_nodes", 1)
                 object.__setattr__(self, "num_leaves", 1)
                 object.__setattr__(self, "num_children", 0)
             else:
+                assert callable(self._unflatten_func)
                 num_nodes = sum((spec.num_nodes for spec in self._children), start=1)
                 num_leaves = sum(spec.num_leaves for spec in self._children)
                 num_children = len(self._children)
                 object.__setattr__(self, "num_nodes", num_nodes)
                 object.__setattr__(self, "num_leaves", num_leaves)
                 object.__setattr__(self, "num_children", num_children)
+
+            object.__setattr__(self, "none_is_leaf", True)
+            object.__setattr__(self, "namespace", "torch")
 
         @property
         def type(self) -> builtins.type | None:
@@ -142,16 +150,17 @@ if python_pytree._cxx_pytree_exists:
                 subtrees.append(subspec.unflatten(leaves[start:end]))
                 start = end
 
+            assert callable(self._unflatten_func)
             return self._unflatten_func(self._metadata, subtrees)
 
-    leafspec = PyTreeSpec([], None, None, None, lambda x: x)
+    leafspec = PyTreeSpec([], None, None, None, None)
 
-    @substitute_in_graph(cxx_pytree.tree_flatten, can_constant_fold_through=False)
+    @substitute_in_graph(cxx_pytree.tree_flatten, can_constant_fold_through=False)  # type: ignore[arg-type]
     def tree_flatten(
         tree: PyTree,
         is_leaf: Callable[[PyTree], bool] | None = None,
     ) -> tuple[list[Any], PyTreeSpec]:
-        def helper(node, leaves):
+        def helper(node: PyTree, leaves: list[Any]) -> PyTreeSpec:
             if node is None or (is_leaf is not None and is_leaf(node)):
                 leaves.append(node)
                 return leafspec
@@ -173,16 +182,16 @@ if python_pytree._cxx_pytree_exists:
                 namespace="torch",
             )
 
-            treespecs = [helper(child, leaves) for child in children]
-            return PyTreeSpec(treespecs, node_type, metadata, entries, unflatten_func)
+            subspecs = [helper(child, leaves) for child in children]
+            return PyTreeSpec(subspecs, node_type, metadata, entries, unflatten_func)  # type: ignore[arg-type]
 
-        leaves = []
+        leaves: list[Any] = []
         treespec = helper(tree, leaves)
         return leaves, treespec
 
     __all__ += ["tree_flatten"]
 
-    @substitute_in_graph(cxx_pytree.tree_unflatten, can_constant_fold_through=False)
+    @substitute_in_graph(cxx_pytree.tree_unflatten, can_constant_fold_through=False)  # type: ignore[arg-type]
     def tree_unflatten(leaves: Iterable[Any], treespec: PyTreeSpec) -> PyTree:
         if not isinstance(treespec, PyTreeSpec):
             raise TypeError(
