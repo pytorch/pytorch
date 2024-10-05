@@ -97,6 +97,7 @@ def _(
 def _(info, in_dims, shape, indices, val):
     if len(indices) > 1:
         for i, idx in enumerate(indices):
+            # TODO: Don't use is_batchedtensor API, use in_dims instead.
             if torch._C._functorch.is_batchedtensor(idx):
                 indices[i] = idx.unsqueeze(-1)
 
@@ -110,11 +111,11 @@ def _(info, in_dims, shape, indices, val):
 
 class ModIndex(torch.autograd.Function):
     @staticmethod
-    def forward(x, indices):
+    def forward(x: Tensor, indices: List[Tensor]):
         return torch.ops.aten.index(x, indices)
 
     @staticmethod
-    def setup_context(ctx, inputs, outputs):
+    def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any):
         x, indices = inputs
         ctx.save_for_backward(*indices)
         ctx.input_shape = x.shape
@@ -122,7 +123,7 @@ class ModIndex(torch.autograd.Function):
     generate_vmap_rule = True
 
     @staticmethod
-    def backward(ctx, gradOut):
+    def backward(ctx: Any, gradOut: Tensor):
         indices = ctx.saved_tensors
         return (
             torch.ops.mylib.zeros_and_scatter(
