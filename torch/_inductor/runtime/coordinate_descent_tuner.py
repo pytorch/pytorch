@@ -60,7 +60,7 @@ class CoordescTuner:
         have_size_hint = (
             self.size_hints is not None
             and len(self.size_hints) > 0
-            (
+            and (
                 len(self.size_hints) > size_hint_idx
                 if size_hint_idx > 0
                 else len(self.size_hints) >= -size_hint_idx
