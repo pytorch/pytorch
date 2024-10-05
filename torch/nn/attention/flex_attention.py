@@ -845,7 +845,7 @@ def create_block_mask(
         Q_LEN = _round_up_to_multiple(Q_LEN, Q_BLOCK_SIZE)
     KV_LEN = _round_up_to_multiple(KV_LEN, KV_BLOCK_SIZE)
     if _compile:
-        inner_func = torch.compile(inner_func, fullgraph=True, dynamic=False)
+        inner_func = torch.compile(inner_func, fullgraph=True)
     with TransformGetItemToIndex():
         partial_block_mask, full_block_mask = inner_func(
             mask_mod, B, H, Q_LEN, KV_LEN, device, Q_BLOCK_SIZE, KV_BLOCK_SIZE
@@ -905,11 +905,6 @@ def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
         raise ValueError(
             f"NYI: Currently non power of 2 embedding dimension are not supported. "
             f"Got E={query.size(-1)} and Ev={value.size(-1)}."
-        )
-    if value.size(-1) > query.size(-1):
-        raise ValueError(
-            f"NYI: Currently value embedding dimension must be less than or equal to query embedding dimension. "
-            f"Got Ev={value.size(-1)} and E={query.size(-1)}."
         )
 
 
