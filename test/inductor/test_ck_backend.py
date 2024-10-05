@@ -115,6 +115,7 @@ class TestCKBackend(TestCase):
                 @torch.compile(dynamic=False)
                 def compiled_mm(x, w):
                     return mm(x, w)
+
                 Y_compiled = compiled_mm(a, b)
 
             Y = mm(a=a, b=b)
