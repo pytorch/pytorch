@@ -317,6 +317,15 @@ manual_torch_name_rule_map = {
     f"torch/testing/_internal/distributed/_tensor/common_dtensor.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
     "torch/testing/_internal/common_distributed.py#forward": UserFunctionVariable,
     f"torch/testing/_internal/common_distributed.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
+    # CXX pytree
+    "optree.is_namedtuple": PolyfilledFunctionVariable,
+    "optree.is_namedtuple_class": PolyfilledFunctionVariable,
+    "optree.is_namedtuple_instance": PolyfilledFunctionVariable,
+    "optree.is_structseq": PolyfilledFunctionVariable,
+    "optree.is_structseq_class": PolyfilledFunctionVariable,
+    "optree.is_structseq_instance": PolyfilledFunctionVariable,
+    "optree.namedtuple_fields": PolyfilledFunctionVariable,
+    "optree.structseq_fields": PolyfilledFunctionVariable,
 }
 
 
@@ -3273,6 +3282,7 @@ MOD_INLINELIST = [
     "torch.testing",
     "torch.utils._content_store",
     "torch.utils._contextlib",
+    "torch.utils._cxx_pytree",
     "torch.utils._device",
     "torch.utils._foreach_utils",
     "torch.utils._python_dispatch",
