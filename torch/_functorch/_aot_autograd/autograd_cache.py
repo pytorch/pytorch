@@ -57,6 +57,37 @@ class FXGraphCacheMiss(BypassAOTAutogradCache):
     pass
 
 
+def should_use_remote_autograd_cache():
+    if torch._inductor.config.force_disable_caches:
+        return False
+    if config.enable_remote_autograd_cache is not None:
+        return config.enable_remote_autograd_cache
+    if not config.is_fbcode():
+        return False
+
+    if torch._utils_internal.is_fb_unit_test():
+        return False
+
+    try:
+        from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
+    except ModuleNotFoundError:
+        return False
+
+    jk_name = "pytorch/remote_cache:aot_autograd_cache_version"
+
+    return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(jk_name)
+
+
+def should_use_local_autograd_cache():
+    if torch._inductor.config.force_disable_caches:
+        return False
+    return config.enable_autograd_cache
+
+
+def autograd_cache_enabled():
+    return should_use_local_autograd_cache() or should_use_remote_autograd_cache()
+
+
 def check_node_safe(node: Node):
     """
     Checks that the node only uses supported operators. We are starting with very
@@ -143,7 +174,9 @@ def check_cacheable(gm: torch.fx.GraphModule):
             "Cannot cache a graph with compiled autograd enabled"
         )
 
-    if not torch._inductor.config.fx_graph_cache:
+    if not (
+        torch._inductor.config.fx_graph_cache or should_use_remote_fx_graph_cache()
+    ):
         raise BypassAOTAutogradCache("FX graph cache is not enabled")
 
     tracing_context = torch._guards.TracingContext.try_get()
@@ -489,6 +522,8 @@ class AOTAutogradCache:
         args,
         aot_config: AOTConfig,
         cudagraphs: BoxedBool,
+        local: bool,
+        remote: bool,
     ) -> Callable:
         """
         Load a result from the cache, and reconstruct a runtime wrapper around the object
@@ -544,6 +579,7 @@ class AOTAutogradCache:
             if cache_key is not None:
                 aot_config.cache_info = AOTAutogradCacheInfo(cache_key, time.time_ns())
             compiled_fn = dispatch_and_compile()
+
         cache_info.update(
             {
                 "key": cache_key,
