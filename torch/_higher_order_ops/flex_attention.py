@@ -94,7 +94,7 @@ def _(
 
 
 @zeros_and_scatter.register_vmap
-def _(info, in_dims, shape, indices, val):
+def _(info, in_dims, shape, indices, val) -> Tuple[Tensor, None]:
     if len(indices) > 1:
         for i, idx in enumerate(indices):
             # TODO: Don't use is_batchedtensor API, use in_dims instead.
@@ -123,7 +123,7 @@ class ModIndex(torch.autograd.Function):
     generate_vmap_rule = True
 
     @staticmethod
-    def backward(ctx: Any, gradOut: Tensor) -> Tuple[Optional[Tensor], ...]:
+    def backward(ctx: Any, gradOut: Tensor) -> Any:
         indices = ctx.saved_tensors
         return (
             torch.ops.mylib.zeros_and_scatter(
