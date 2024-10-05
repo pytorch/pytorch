@@ -1260,8 +1260,13 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             # It's for passing the export verifier which needs to verify the meta['val']
             # TODO(tmanlaibaatar): we should systematically couple it with expoert verifier,
             # instead of hardcoding it here.
+            # T203648563
             node = self.tracer.create_node("call_function", func, args, {})  # type: ignore[arg-type]
-            if func is torch._C._set_grad_enabled:
+            if func in [
+                torch._C._set_grad_enabled,
+                torch.amp.autocast_mode._enter_autocast,
+                torch.amp.autocast_mode._exit_autocast,
+            ]:
                 node.meta["val"] = None
             return node
             # Don't actually run the function! We just want to trace the calls
@@ -1880,15 +1885,12 @@ class _MakefxTracer:
 
                 fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
                 if fake_tensor_mode is None:
-                    import torch._functorch.config as _config
-
-                    with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-                        fake_tensor_mode = FakeTensorMode(
-                            allow_fallback_kernels=True,
-                            allow_non_fake_inputs=self._allow_non_fake_inputs,
-                            shape_env=ShapeEnv(),
-                            static_shapes=True,
-                        )
+                    fake_tensor_mode = FakeTensorMode(
+                        allow_fallback_kernels=True,
+                        allow_non_fake_inputs=self._allow_non_fake_inputs,
+                        shape_env=ShapeEnv(),
+                        static_shapes=True,
+                    )
                 self.fake_tensor_mode = fake_tensor_mode
             elif self.tracing_mode == "symbolic":
                 import torch._dynamo
@@ -1896,14 +1898,12 @@ class _MakefxTracer:
                 fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
                 if fake_tensor_mode is None:
                     shape_env = ShapeEnv()
-                    import torch._functorch.config as _config
 
-                    with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-                        fake_tensor_mode = FakeTensorMode(
-                            allow_fallback_kernels=False,
-                            allow_non_fake_inputs=self._allow_non_fake_inputs,
-                            shape_env=shape_env,
-                        )
+                    fake_tensor_mode = FakeTensorMode(
+                        allow_fallback_kernels=False,
+                        allow_non_fake_inputs=self._allow_non_fake_inputs,
+                        shape_env=shape_env,
+                    )
                 assert (
                     fake_tensor_mode.shape_env is not None
                 ), "shape_env should be set if tracing with 'symbolic'"

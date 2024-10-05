@@ -1935,6 +1935,15 @@ class AotCodeCompiler:
                 "darwin": _compile_consts_darwin,
             }[sys.platform](aot_constants)
 
+            kernels_o = []
+            gpu_codecache: Union[ROCmCodeCache, CUDACodeCache] = (
+                ROCmCodeCache() if torch.version.hip else CUDACodeCache()
+            )
+            for entry in gpu_codecache.cache.values():
+                if entry.output_path.endswith(".o"):
+                    kernels_o.append(entry.output_path)
+            kernels_o = " ".join(kernels_o)
+
             output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
             so_build_options = CppTorchDeviceOptions(
                 vec_isa=picked_vec_isa,
@@ -1944,7 +1953,7 @@ class AotCodeCompiler:
             )
             so_builder = CppBuilder(
                 name=output_name,
-                sources=[output_o, consts_o],
+                sources=[output_o, consts_o, kernels_o],
                 output_dir=output_dir,
                 BuildOption=so_build_options,
             )
