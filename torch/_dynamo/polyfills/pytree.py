@@ -191,6 +191,15 @@ if python_pytree._cxx_pytree_exists:
 
     __all__ += ["tree_flatten"]
 
+    @substitute_in_graph(cxx_pytree.tree_structure, can_constant_fold_through=False)  # type: ignore[arg-type]
+    def tree_structure(
+        tree: PyTree,
+        is_leaf: Callable[[PyTree], bool] | None = None,
+    ) -> PyTreeSpec:
+        return tree_flatten(tree, is_leaf=is_leaf)[1]  # type: ignore[return-value]
+
+    __all__ += ["tree_structure"]
+
     @substitute_in_graph(cxx_pytree.tree_unflatten, can_constant_fold_through=False)  # type: ignore[arg-type]
     def tree_unflatten(leaves: Iterable[Any], treespec: PyTreeSpec) -> PyTree:
         if not isinstance(treespec, PyTreeSpec):
