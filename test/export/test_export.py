@@ -791,8 +791,8 @@ graph():
                 # z = 4
                 return x + y + z + w2
 
-        ep = torch.export.export(M(), (torch.randn(2, 3),), strict=False)
-        self.assertEqual(ep.graph_signature.buffers_to_mutate, {"add_2": "buf"})
+        ep = export(M(), (torch.randn(2, 3),), strict=False)
+        self.assertEqual(list(ep.graph_signature.buffers_to_mutate.values()), ["buf"])
         self.assertTrue(
             torch.allclose(ep.module()(torch.ones(2, 3) + 1), torch.ones(2, 3) * 12)
         )
@@ -815,7 +815,7 @@ graph():
             ValueError,
             "The tensor attribute self.buf was assigned during export",
         ):
-            torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+            export(M(), (torch.randn(2, 3),), strict=False)
 
         class M(torch.nn.Module):  # complex with register buffer
             def __init__(self) -> None:
@@ -840,9 +840,9 @@ graph():
                 # z = 3 + 3
                 return x + y + z
 
-        ep = torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+        ep = export(M(), (torch.randn(2, 3),), strict=False)
         self.assertEqual(
-            ep.graph_signature.buffers_to_mutate, {"add_1": "buf_0", "add_2": "buf_1"}
+            list(ep.graph_signature.buffers_to_mutate.values()), ["buf_0", "buf_1"]
         )
         self.assertTrue(
             torch.allclose(ep.module()(torch.ones(2, 3) + 1), torch.ones(2, 3) * 10)
@@ -873,7 +873,7 @@ graph():
             ValueError,
             "The tensor attributes self.tensors\\[0\\], self.tensors\\[1\\] were assigned during export",
         ):
-            torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+            export(M(), (torch.randn(2, 3),), strict=False)
 
     def test_state_primitives(self):
         class M(torch.nn.Module):
@@ -4193,6 +4193,35 @@ def forward(self, x):
             )
         )
 
+    def test_cleanup_dynamic_markers(self) -> None:
+        class Foo(torch.nn.Module):
+            def forward(self, inputs):
+                x, y = inputs["x"], inputs["y"]
+                return x + y
+
+        inputs = (
+            {
+                "x": torch.randn(4, 8),
+                "y": torch.randn(4, 8),
+            },
+        )
+        shapes = {
+            "inputs": {
+                "x": (Dim.AUTO, Dim.STATIC),
+                "y": (Dim.DYNAMIC, Dim.STATIC),
+            },
+        }
+        ep = export(Foo(), inputs, dynamic_shapes=shapes)
+        for tensor in inputs[0].values():
+            for attr in [
+                "_dynamo_weak_dynamic_indices",
+                "_dynamo_dynamic_indices",
+                "_dynamo_dynamic_range",
+                "_dynamo_static_indices",
+                "_dynamo_unbacked_indices",
+            ]:
+                self.assertFalse(hasattr(tensor, attr))
+
     def test_constrain_decomp(self) -> None:
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -6554,6 +6583,34 @@ def forward(self, x, b_t, y):
                 ep.graph_module.code,
             )
 
+    # T203671967
+    @testing.expectedFailureRetraceability  # autocast nodes not created after re-tracing
+    def test_export_with_autocast(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                with torch.autocast(
+                    device_type="cuda", dtype=torch.int16, enabled=True
+                ):
+                    y = x.sin().sum()
+                with torch.autocast(
+                    device_type="cpu", dtype=torch.float64, enabled=True
+                ):
+                    z = y.sin().sum()
+                return z
+
+        model = Model()
+        ep = export(model, (torch.randn(4, 4),), {})
+        # _export_for_traininig is using pre_dispatch=False
+        # Therefore the autocast calls are not replaced with a hop.
+        # non_strict doesn't have autocast nodes
+        if not is_non_strict_test(self._testMethodName) and not is_training_ir_test(
+            self._testMethodName
+        ):
+            self.assertIn(
+                "torch.ops.higher_order.wrap_with_autocast",
+                ep.graph_module.code,
+            )
+
     def test_export_as_backend(self):
         def f(x, y):
             return x + y
@@ -7311,7 +7368,7 @@ def forward(self, x, y):
         m2 = M2()
         m1 = M1(m2, m2.foo)
         inps = (torch.ones(3, 3),)
-        ep = torch.export.export(m1, inps, strict=False)
+        ep = export(m1, inps, strict=False)
         # check both constants appear in list
         self.assertEqual(sorted(list(ep.constants)), ["foo", "m2.foo"])
         # check only one input spec exists
