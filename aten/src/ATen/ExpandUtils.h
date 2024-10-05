@@ -420,15 +420,15 @@ inline c10::MaybeOwned<Tensor> expand_size(
 inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
   // expands a list of Tensors; ignores undefined (null) tensors
   bool first = true;
-  DimVector sizes;
+  SymDimVector sizes;
   for (const auto i : c10::irange(to_expand.size())) {
     if (!to_expand[i].defined()) {
       continue;
     } else if (first) {
-      sizes = to_expand[i].sizes();
+      sizes = to_expand[i].sym_sizes();
       first = false;
     } else {
-      sizes = infer_size_dimvector(sizes, to_expand[i].sizes());
+      sizes = infer_size_symdimvector(sizes, to_expand[i].sym_sizes());
     }
   }
 
@@ -436,10 +436,10 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
   for (const auto i : c10::irange(to_expand.size())) {
     if (!to_expand[i].defined()) {
       continue;
-    } else if (to_expand[i].sizes().equals(sizes)) {
+    } else if (to_expand[i].sym_sizes().equals(sizes)) {
       result[i] = to_expand[i];
     } else {
-      result[i] = to_expand[i].expand(sizes);
+      result[i] = to_expand[i].expand_symint(sizes);
     }
   }
   return result;
