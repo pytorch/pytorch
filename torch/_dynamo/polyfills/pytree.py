@@ -93,7 +93,7 @@ if python_pytree._cxx_pytree_exists:
             if self._type is None:
                 assert len(self._children) == 0
                 assert self._metadata is None
-                assert self._entries is None
+                assert self._entries == ()
                 assert self._unflatten_func is None
                 object.__setattr__(self, "num_nodes", 1)
                 object.__setattr__(self, "num_leaves", 1)
@@ -251,7 +251,7 @@ if python_pytree._cxx_pytree_exists:
             assert callable(self._unflatten_func)
             return self._unflatten_func(self._metadata, subtrees)
 
-    leafspec = PyTreeSpec((), None, None, None, None)
+    leafspec = PyTreeSpec((), None, None, (), None)
 
     @substitute_in_graph(cxx_pytree.tree_flatten, can_constant_fold_through=False)  # type: ignore[arg-type]
     def tree_flatten(
