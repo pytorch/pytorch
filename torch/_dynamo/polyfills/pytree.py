@@ -75,10 +75,10 @@ if python_pytree._cxx_pytree_exists:
 
     @dataclass(frozen=True)
     class PyTreeSpec:
-        _children: list[PyTreeSpec]
+        _children: tuple[PyTreeSpec, ...]
         _type: builtins.type | None
         _metadata: Any
-        _entries: tuple[Any] | None
+        _entries: tuple[Any, ...]
         _unflatten_func: Callable[[Any | None, Iterable[PyTree]], PyTree] | None
 
         num_nodes: int = field(init=False)
@@ -116,18 +116,16 @@ if python_pytree._cxx_pytree_exists:
             return self.num_nodes == 1 and self.num_leaves == 1
 
         def children(self) -> list[PyTreeSpec]:
-            return self._children.copy()
+            return list(self._children)
 
         def child(self, index: int) -> PyTreeSpec:
             return self._children[index]
 
         def entries(self) -> list[Any]:
-            if self._entries is None:
-                return list(range(self.num_children))
             return list(self._entries)
 
         def entry(self, index: int) -> Any:
-            return self.entries()[index]
+            return self._entries[index]
 
         def unflatten(self, leaves: Iterable[Any]) -> PyTree:
             if not isinstance(leaves, (list, tuple)):
@@ -182,7 +180,7 @@ if python_pytree._cxx_pytree_exists:
                 namespace="torch",
             )
 
-            subspecs = [helper(child, leaves) for child in children]
+            subspecs = tuple(helper(child, leaves) for child in children)
             return PyTreeSpec(subspecs, node_type, metadata, entries, unflatten_func)  # type: ignore[arg-type]
 
         leaves: list[Any] = []
