@@ -1623,19 +1623,12 @@ def _custom_forward(self, *args, **kwargs):
 
 
 def _swap_modules(
-    ep: ExportedProgram,
-    modules_to_swap: Dict[str, torch.nn.Module],
-    *,
-    check_input_constraints: bool = True,
-    run_with_interpreter: bool = True,
+    ep: ExportedProgram, modules_to_swap: Dict[str, torch.nn.Module]
 ) -> torch.fx.GraphModule:
     module_call_graph = {
         entry.fqn: entry.signature for entry in ep.module_call_graph if entry.signature
     }
-
-    from ._unlift import _unlift_exported_program_lifted_states
-
-    gm = _unlift_exported_program_lifted_states(ep, check_input_constraints)
+    gm = ep.module()
     gm.graph.eliminate_dead_code()
 
     # Unset the pytree codegen because we will take care of it with our own
@@ -1643,7 +1636,6 @@ def _swap_modules(
     gm.graph._codegen = torch.fx.graph.CodeGen()
 
     gm.module_call_graph = ep.module_call_graph
-    gm.run_with_interpreter = run_with_interpreter  # type: ignore[assignment]
     gm.forward = types.MethodType(_custom_forward, gm)
 
     assert isinstance(gm, torch.fx.GraphModule)
