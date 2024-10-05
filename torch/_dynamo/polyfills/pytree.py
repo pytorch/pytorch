@@ -151,7 +151,7 @@ if python_pytree._cxx_pytree_exists:
             assert callable(self._unflatten_func)
             return self._unflatten_func(self._metadata, subtrees)
 
-    leafspec = PyTreeSpec([], None, None, None, None)
+    leafspec = PyTreeSpec((), None, None, None, None)
 
     @substitute_in_graph(cxx_pytree.tree_flatten, can_constant_fold_through=False)  # type: ignore[arg-type]
     def tree_flatten(
