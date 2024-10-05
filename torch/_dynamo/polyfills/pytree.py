@@ -311,7 +311,7 @@ if python_pytree._cxx_pytree_exists:
 
     __all__ += ["tree_unflatten"]
 
-    @substitute_in_graph(cxx_pytree.tree_map, can_constant_fold_through=True)
+    @substitute_in_graph(cxx_pytree.tree_map, can_constant_fold_through=False)
     def tree_map(
         func: Callable[..., Any],
         tree: PyTree,
@@ -324,7 +324,7 @@ if python_pytree._cxx_pytree_exists:
 
     __all__ += ["tree_map"]
 
-    @substitute_in_graph(cxx_pytree.tree_map_, can_constant_fold_through=True)
+    @substitute_in_graph(cxx_pytree.tree_map_, can_constant_fold_through=False)
     def tree_map_(
         func: Callable[..., Any],
         tree: PyTree,
