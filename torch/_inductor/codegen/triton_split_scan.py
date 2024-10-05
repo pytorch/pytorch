@@ -52,17 +52,18 @@ class TritonSplitScanKernel(TritonKernel):
         return False
 
     def initialize_range_tree(self, pid_cache):
-        prefixes = "yxr"
+        prefixes = ["y", "x", "r0_"]
         assert len(self.numels) <= len(
             prefixes
         ), "z dimension not supported for split scan"
         active_prefixes = prefixes[len(prefixes) - len(self.numels) :]
 
-        grid_dims = "rxy"
-        for numel, prefix in zip(self.numels, active_prefixes):
-            is_reduction = prefix == "r"
+        grid_dims = ["r0_", "x", "y"]
+        for prefix in active_prefixes:
+            numel = self.numels[prefix]
+            is_reduction = prefix[0] == "r"
             tensor_dim = 0 if is_reduction else None
-            grid_dim = grid_dims.find(prefix)
+            grid_dim = grid_dims.index(prefix)
             self.range_trees.append(
                 IterationRangesRoot(
                     f"{prefix}index",
