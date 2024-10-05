@@ -852,8 +852,8 @@ class _ModuleFrame:
             with self.parent.graph.inserting_before(self.parent_call_module):
                 input_nodes: List[Optional[torch.fx.Node]] = []
                 for input in signature.inputs:
-                    if isinstance(input, ConstantArgument) and input.value is None:
-                        input_nodes.append(None)
+                    if isinstance(input, ConstantArgument):
+                        input_nodes.append(input.value)  # type: ignore[arg-type]
                     elif input.name not in self.seen_nodes:
                         input_nodes.append(None)
                     else:
