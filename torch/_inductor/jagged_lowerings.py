@@ -59,8 +59,13 @@ def get_inverse_offsets(
         idx = index[0]
         bucket = ops.bucketize(
             values=ops.index_expr(idx, dtype),
-            offsets_name=offsets.get_name(),
-            offsets_size=offsets.get_size()[0],
+            boundaries=(
+                offsets.get_name(),
+                offsets.get_size()[-1],
+                offsets.get_size()[0] * offsets.get_stride()[0],
+                offsets.get_stride()[-1],
+            ),
+            boundary_indices=0,
             indexing_dtype=dtype,
             right=True,
         )
