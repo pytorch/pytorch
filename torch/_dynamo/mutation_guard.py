@@ -1,6 +1,6 @@
 import functools
 import weakref
-from typing import Any, List
+from typing import Any, List, Type
 
 import torch.nn
 from torch.nn import Module
@@ -13,7 +13,7 @@ unpatched_nn_module_init = torch.nn.Module.__init__
 
 
 class MutationTracker:
-    db: ExactWeakKeyDictionary
+    db: ExactWeakKeyDictionary = ExactWeakKeyDictionary()
 
     def __init__(self) -> None:
         self.mutation_count: int = 0
@@ -28,9 +28,7 @@ class MutationTracker:
             if guarded is not None:
                 guarded.invalidate(ref)
 
-    def track(
-        self, guarded_code: Any
-    ) -> None:  # guarded_code's exact type is unclear, so using Any
+    def track(self, guarded_code: Any) -> None:
         self.watchers.append(weakref.ref(guarded_code))
 
 
@@ -62,15 +60,15 @@ def ensure_patched(cls: Any) -> None:
 
 class GenerationTracker:
     generation: int = 0
-    dynamic_classes: ExactWeakKeyDictionary
-    generation_values: ExactWeakKeyDictionary
+    dynamic_classes: ExactWeakKeyDictionary = ExactWeakKeyDictionary()
+    generation_values: ExactWeakKeyDictionary = ExactWeakKeyDictionary()
 
     @classmethod
     def tag(cls, obj: Any) -> None:
         cls.generation_values[obj] = cls.generation
 
     @staticmethod
-    def mark_class_dynamic(cls: type) -> None:
+    def mark_class_dynamic(cls: Type[torch.nn.Module]) -> None:
         assert issubclass(cls, torch.nn.Module)
         GenerationTracker.dynamic_classes[cls] = True
 
