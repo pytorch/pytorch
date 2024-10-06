@@ -16,8 +16,6 @@
 #include <iterator>
 #include <sstream>
 #include <string>
-#include <unordered_map>
-#include <utility>
 #include <vector>
 
 int THPUtils_getCallable(PyObject* arg, PyObject** result) {
@@ -274,7 +272,8 @@ char* tensor_repr(at::Tensor tensor) {
   // observed that sometimes gdb passes the outer Tensor address exactly as is
   // into this function.
   // See https://github.com/pytorch/pytorch/issues/134762
-  pytensor = THPVariable_Wrap(std::move(tensor));
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
+  pytensor = THPVariable_Wrap(tensor);
   if (!pytensor)
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     goto error;
