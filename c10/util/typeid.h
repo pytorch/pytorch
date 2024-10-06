@@ -328,6 +328,7 @@ class C10_API TypeMeta final {
    * type, use TypeMeta::Make<T>().
    */
   TypeMeta() noexcept;
+  ~TypeMeta() = default;
 
   /**
    * Copy constructor.
@@ -339,6 +340,7 @@ class C10_API TypeMeta final {
    */
   TypeMeta& operator=(const TypeMeta& src) noexcept = default;
 
+  TypeMeta& operator=(TypeMeta&& src) noexcept = default;
   TypeMeta(TypeMeta&& rhs) noexcept = default;
 
   inline TypeMeta& operator=(ScalarType scalar_type) noexcept {

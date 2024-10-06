@@ -147,6 +147,7 @@ struct CUDAStreamGuard {
   /// stream, and set the current CUDA stream on that device to the passed
   /// stream. Errors if the Stream is not a CUDA stream.
   explicit CUDAStreamGuard(Stream stream) : guard_(stream) {}
+  ~CUDAStreamGuard() = default;
 
   /// Copy is disallowed
   CUDAStreamGuard(const CUDAStreamGuard&) = delete;

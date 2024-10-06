@@ -15,6 +15,7 @@ struct C10_API DisablePythonDispatcher {
   DisablePythonDispatcher() : old_(PythonDispatcherTLS::get_state()) {
     PythonDispatcherTLS::set_state({});
   }
+
   ~DisablePythonDispatcher() {
     PythonDispatcherTLS::set_state(old_);
   }
