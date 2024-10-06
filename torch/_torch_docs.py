@@ -3998,10 +3998,14 @@ equal(input, other) -> bool
 
 ``True`` if two tensors have the same size and elements, ``False`` otherwise.
 
+Note that tensors containing NaNs are never equal to each other.
+
 Example::
 
     >>> torch.equal(torch.tensor([1, 2]), torch.tensor([1, 2]))
     True
+    >>> torch.equal(torch.tensor([3, torch.nan]), torch.tensor([3, torch.nan]))
+    False
 """,
 )
 
