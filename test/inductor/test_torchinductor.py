@@ -7502,7 +7502,6 @@ class CommonTemplate:
         self.common(fn, [a, b])
 
     @with_tf32_off
-    @xfail_if_triton_cpu
     def test_slice_scatter_reinplace(self):
         class M(nn.Module):
             def __init__(self, device):
@@ -8655,7 +8654,6 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 0)
 
-    @xfail_if_triton_cpu
     @config.patch(search_autotune_cache=False)
     def test_mm_views(self):
         def fn(a, b):
@@ -8743,7 +8741,6 @@ class CommonTemplate:
         self.assertTrue(same(r2, r3))
         self.assertTrue(same(g2, g3))
 
-    @xfail_if_triton_cpu
     @config.patch(search_autotune_cache=False)
     def test_dropout3(self):
         m = torch.nn.Sequential(
@@ -9705,7 +9702,6 @@ class CommonTemplate:
         self.assertEqual(inductor_out, eager_out)
 
     @skipIfRocm
-    @xfail_if_triton_cpu
     def test_require_stride_expanded(self):
         def forward(arg6, arg7, arg16):
             convolution = torch.ops.aten.convolution(

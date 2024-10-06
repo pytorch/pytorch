@@ -111,7 +111,7 @@ class TestFullyShardCompile(FSDPTest):
             (torch.nn.Linear(1, 1),),  # module: Tuple[nn.Module, ...],
             None,  # mesh_info: FSDPMeshInfo,
             None,  # post_forward_mesh_info: Optional[FSDPMeshInfo],
-            None,  # device: torch.device,
+            torch.device("cuda"),  # device: torch.device,
             None,  # mp_policy: MixedPrecisionPolicy,
             None,  # offload_policy: OffloadPolicy,
         )
