@@ -100,19 +100,19 @@ def _reexport(func: Callable[_P, _T]) -> Callable[_P, _T]:
     return exported
 
 
-tree_all = _reexport(implementation.module.tree_all)  # noqa: F811
-tree_all_only = _reexport(implementation.module.tree_all_only)  # noqa: F811
-tree_any = _reexport(implementation.module.tree_any)  # noqa: F811
-tree_any_only = _reexport(implementation.module.tree_any_only)  # noqa: F811
 tree_flatten = _reexport(implementation.module.tree_flatten)  # noqa: F811
+tree_unflatten = _reexport(implementation.module.tree_unflatten)  # noqa: F811
 tree_iter = _reexport(implementation.module.tree_iter)  # noqa: F811
 tree_leaves = _reexport(implementation.module.tree_leaves)  # noqa: F811
+tree_structure = _reexport(implementation.module.tree_structure)  # noqa: F811
 tree_map = _reexport(implementation.module.tree_map)  # noqa: F811
 tree_map_ = _reexport(implementation.module.tree_map_)  # noqa: F811
 tree_map_only = _reexport(implementation.module.tree_map_only)  # noqa: F811
 tree_map_only_ = _reexport(implementation.module.tree_map_only_)  # noqa: F811
-tree_structure = _reexport(implementation.module.tree_structure)  # noqa: F811
-tree_unflatten = _reexport(implementation.module.tree_unflatten)  # noqa: F811
+tree_all = _reexport(implementation.module.tree_all)  # noqa: F811
+tree_any = _reexport(implementation.module.tree_any)  # noqa: F811
+tree_all_only = _reexport(implementation.module.tree_all_only)  # noqa: F811
+tree_any_only = _reexport(implementation.module.tree_any_only)  # noqa: F811
 treespec_pprint = _reexport(implementation.module.treespec_pprint)  # noqa: F811
 
 
