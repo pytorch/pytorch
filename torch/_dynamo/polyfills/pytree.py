@@ -68,12 +68,7 @@ if python_pytree._cxx_pytree_exists:
                 yield curr
                 continue
 
-            (
-                children,
-                metadata,
-                entries,
-                unflatten_func,
-            ) = optree.tree_flatten_one_level(
+            children, *_ = optree.tree_flatten_one_level(
                 curr,
                 is_leaf=is_leaf,
                 none_is_leaf=True,
