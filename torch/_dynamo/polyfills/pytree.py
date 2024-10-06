@@ -35,7 +35,7 @@ if python_pytree._cxx_pytree_exists:
             "because the original function will be called in the constant fold path."
         )
 
-    name = ''
+    name = ""
     for name in (
         "is_namedtuple",
         "is_namedtuple_class",
