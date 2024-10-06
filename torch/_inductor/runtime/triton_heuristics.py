@@ -855,7 +855,9 @@ class CachingAutotuner(KernelInterface):
             )
         return config2launcher.get(best_config)
 
-    def run(self, *args, grid, stream, **kwargs):  # type:ignore[override]
+    def run(
+        self, *args, grid, stream, benchmark_run=False, **kwargs
+    ):  # type:ignore[override]
         if len(self.launchers) != 1:
             if len(self.launchers) == 0:
                 start_time = time.time_ns()
@@ -874,7 +876,7 @@ class CachingAutotuner(KernelInterface):
             ]
 
         (launcher,) = self.launchers
-        if launcher.store_cubin:
+        if launcher.store_cubin and (not benchmark_run or not self.cuda_kernel_saved):
             self.save_gpu_kernel(grid, stream, launcher)
 
         if os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_PARAMS", 0) == "1":
@@ -986,12 +988,12 @@ class DebugAutotuner(CachingAutotuner):
         super().__init__(*args, **kwargs)
         self.cached = None
 
-    def run(self, *args, grid, stream):  # type: ignore[override]
+    def run(self, *args, grid, stream, **kwargs):
         possible_names = _find_names(self)
         kernel_name = f"{max(possible_names, key=len)}"
         if not re.match(self.regex_filter, kernel_name):
             return
-        super().run(*args, grid=grid, stream=stream)
+        super().run(*args, grid=grid, stream=stream, **kwargs)
         (launcher,) = self.launchers
 
         if self.cached is None:
