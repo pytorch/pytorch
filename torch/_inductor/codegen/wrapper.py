@@ -2014,29 +2014,7 @@ class PythonWrapperCodegen(CodeGen):
             self.pop_codegened_graph()
 
     def codegen_subgraph_prefix(self, subgraph, outer_inputs, outer_outputs):
-        def get_all_symbols(expr):
-            symbols = set()  # Use a set to avoid duplicates
-            if isinstance(expr, sympy.Symbol):
-                symbols.add(expr)
-            elif hasattr(expr, "args"):  # Recurse if it has further sub-expressions
-                for arg in expr.args:
-                    symbols.update(get_all_symbols(arg))
-            return symbols
-
-        subgraph_symbols = set()
-        for value in subgraph.graph.graph_inputs.values():
-            shapes = value.get_size()
-            for dim, shape in enumerate(shapes):
-                subgraph_symbols.update(get_all_symbols(shape))
-
-            strides = value.get_stride()
-            for dim, shape in enumerate(strides):
-                subgraph_symbols.update(get_all_symbols(shape))
-
-        # Add the extra symints in the subgraph
-        for symbol in subgraph_symbols:
-            subgraph.graph.add_symbol_graph_input(symbol)
-
+        subgraph.graph.add_symbol_graph_inputs()
         for inner_input, outer_input in zip(subgraph.graph.graph_inputs, outer_inputs):
             self.writeline(f"{self.declare}{inner_input} = {outer_input}{self.ending}")
 

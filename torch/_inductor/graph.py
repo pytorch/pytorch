@@ -2013,14 +2013,44 @@ class SubgraphLowering(GraphLowering):
             parent_wrapper_code=self.parent.wrapper_code,
         )
 
-    def add_symbol_graph_input(self, symbol: sympy.Expr) -> None:
+    def add_symbol_graph_inputs(self) -> None:
         """
-        Add a symbol input to the graph after the GraphLowering object is
-        created. For subgraphs, we might have to pass on the symints from the
-        parent graph. This symints might not be present in the aten Fx graph and
-        therefore absent in the original graph inputs.
+        For subgraphs, it is possible that the aten graph does not have a symint
+        associated with the shape of the input tensors. To ensure that the
+        shape/stride symbol is available for the subgraph code (e.g. for
+        allocating intermediate tensor), we collect all the symbols from input
+        tensors and add them as extra inputs to the subgraph.
+
+        The parent wrapper `subgraph_codegen` then ensures to pass on the
+        corresponding symints from the parent function to the lifted subgraph
+        function.
         """
-        if symbol.name in self.graph_input_names:
-            return
-        self.graph_inputs[symbol.name] = symbol
-        self.graph_input_names.append(symbol.name)
+
+        def get_all_symbols(expr: sympy.Expr) -> OrderedSet[sympy.Symbol]:
+            # expr can be s0 + s1, recurse to get s0 and s1
+            symbols: OrderedSet[
+                sympy.Symbol
+            ] = OrderedSet()  # Use a set to avoid duplicates
+            if isinstance(expr, sympy.Symbol):
+                symbols.add(expr)
+            elif hasattr(expr, "args"):  # Recurse if it has further sub-expressions
+                for arg in expr.args:
+                    symbols.update(get_all_symbols(arg))
+            return symbols
+
+        subgraph_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
+        for value in self.graph_inputs.values():
+            shapes = value.get_size()
+            for dim, shape in enumerate(shapes):
+                subgraph_symbols.update(get_all_symbols(shape))
+
+            strides = value.get_stride()
+            for dim, shape in enumerate(strides):
+                subgraph_symbols.update(get_all_symbols(shape))
+
+        # Add the extra symints in the subgraph
+        for symbol in subgraph_symbols:
+            if symbol.name in self.graph_input_names:
+                return
+            self.graph_inputs[symbol.name] = symbol
+            self.graph_input_names.append(symbol.name)
