@@ -392,7 +392,10 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   // Extract the `obj.__cuda_array_interface__['shape']` attribute
   std::vector<int64_t> sizes;
   {
-    PyObject* py_shape = PyDict_GetItemString(cuda_dict, "shape");
+    PyObject* py_shape = nullptr;
+    if (PyDict_GetItemStringRef(cuda_dict, "shape", &py_shape) < 0) {
+      throw python_error();
+    }
     if (py_shape == nullptr) {
       throw TypeError("attribute `shape` must exist");
     }
@@ -405,7 +408,10 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int dtype_size_in_bytes;
   {
-    PyObject* py_typestr = PyDict_GetItemString(cuda_dict, "typestr");
+    PyObject* py_typestr = nullptr;
+    if (PyDict_GetItemStringRef(cuda_dict, "typestr", &py_typestr) < 0) {
+      throw python_error();
+    }
     if (py_typestr == nullptr) {
       throw TypeError("attribute `typestr` must exist");
     }
@@ -426,7 +432,10 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   void* data_ptr;
   {
-    PyObject* py_data = PyDict_GetItemString(cuda_dict, "data");
+    PyObject* py_data = nullptr;
+    if (PyDict_GetItemStringRef(cuda_dict, "data", &py_data) < 0) {
+      throw python_error();
+    }
     if (py_data == nullptr) {
       throw TypeError("attribute `shape` data exist");
     }
@@ -450,7 +459,10 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   // Extract the `obj.__cuda_array_interface__['strides']` attribute
   std::vector<int64_t> strides;
   {
-    PyObject* py_strides = PyDict_GetItemString(cuda_dict, "strides");
+    PyObject* py_strides = nullptr;
+    if (PyDict_GetItemStringRef(cuda_dict, "strides", &py_strides) < 0) {
+      throw python_error();
+    }
     if (py_strides != nullptr && py_strides != Py_None) {
       if (PySequence_Length(py_strides) == -1 ||
           static_cast<size_t>(PySequence_Length(py_strides)) != sizes.size()) {
@@ -480,7 +492,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
     if (data_ptr != nullptr) {
       return {};
     } else {
-      const auto current_device = at::detail::getCUDAHooks().current_device();
+      const auto current_device = at::detail::getCUDAHooks().getCurrentDevice();
       return Device(
           kCUDA,
           static_cast<DeviceIndex>(current_device > -1 ? current_device : 0));
