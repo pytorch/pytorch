@@ -338,7 +338,7 @@ namespace detail {
 struct noop_gil_scoped_release {
   // user-defined constructor (i.e. not defaulted) to avoid
   // unused-variable warnings at usage sites of this class
-  noop_gil_scoped_release() {}
+  noop_gil_scoped_release() = default;
 };
 
 template <bool release_gil>
