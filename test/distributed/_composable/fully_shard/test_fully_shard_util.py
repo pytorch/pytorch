@@ -76,6 +76,7 @@ class TestUtils(FSDPTest):
         # Test nested fully_shard
         new_model = CompositeModel(torch.device("cuda"))
         fully_shard(new_model.u1)
+        # dummy
         fully_shard(new_model)
         (
             sharded_tree_info,
