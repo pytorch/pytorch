@@ -419,8 +419,9 @@ class DefaultDictVariable(ConstDictVariable):
     @staticmethod
     def is_supported_arg(arg):
         if isinstance(arg, variables.BuiltinVariable):
-            return arg.fn in (list, tuple, dict, set, int, float, str)
-        return isinstance(arg, variables.functions.BaseUserFunctionVariable)
+            return arg.fn in (list, tuple, dict, set)
+        else:
+            return isinstance(arg, variables.functions.BaseUserFunctionVariable)
 
     def call_method(
         self,
