@@ -32,11 +32,32 @@ if python_pytree._cxx_pytree_exists:
         optree._C.is_dict_insertion_ordered,
         can_constant_fold_through=True,
     )
-    def always_true(*args: Any, **kwargs: Any) -> Literal[True]:
+    def _(*args: Any, **kwargs: Any) -> Literal[True]:
         # In namespace 'torch', the dictionary is always traversed in insertion order.
-        return True
+        # This function returns True.
+        raise ValueError(
+            "Should not be called directly "
+            "because the original function will be called in the constant fold path."
+        )
 
-    @substitute_in_graph(cxx_pytree.tree_iter)
+    name, func = None, None
+    for name in (
+        "is_namedtuple",
+        "is_namedtuple_class",
+        "is_namedtuple_instance",
+        "is_structseq",
+        "is_structseq_class",
+        "is_structseq_instance",
+        "namedtuple_fields",
+        "structseq_fields",
+    ):
+        func = getattr(optree, name)
+        substitute_in_graph(func, can_constant_fold_through=True)(
+            func.__python_implementation__
+        )
+    del func, name
+
+    @substitute_in_graph(cxx_pytree.tree_iter, can_constant_fold_through=False)
     def tree_iter(
         tree: PyTree,
         is_leaf: Callable[[PyTree], bool] | None = None,
