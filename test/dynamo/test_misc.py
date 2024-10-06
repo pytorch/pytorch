@@ -9870,8 +9870,7 @@ def ___make_guard_fn():
                     3.0,
                     collections.deque([0.0, -x]),
                 ),
-                "d": collections.defaultdict(
-                    int,
+                "d": collections.OrderedDict(
                     {
                         "e": ((2 * x, None)),
                         "f": mytuple(x, x + 1, torch.zeros(4, 3)),
