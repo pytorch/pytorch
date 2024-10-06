@@ -16,6 +16,7 @@ from ..decorators import substitute_in_graph
 
 if TYPE_CHECKING:
     import builtins
+    from typing_extensions import Self
 
     from torch.utils._cxx_pytree import PyTree
 
@@ -97,6 +98,16 @@ if python_pytree._cxx_pytree_exists:
 
     __all__ += ["tree_leaves"]
 
+    class _Asterisk(str):
+        def __new__(cls) -> Self:
+            return super().__new__(cls, "*")
+
+        def __repr__(self) -> str:
+            return "*"  # no quotes
+
+    _asterisk = _Asterisk()
+    del _Asterisk
+
     @dataclass(frozen=True)
     class PyTreeSpec:
         _children: tuple[PyTreeSpec, ...]
@@ -131,6 +142,38 @@ if python_pytree._cxx_pytree_exists:
 
             object.__setattr__(self, "none_is_leaf", True)
             object.__setattr__(self, "namespace", "torch")
+
+        def __repr__(self) -> str:
+            def helper(treespec: PyTreeSpec) -> str:
+                if treespec.is_leaf():
+                    assert treespec.type is None
+                    return _asterisk
+
+                assert treespec.type is not None
+                assert callable(treespec._unflatten_func)
+                children_representations = [
+                    helper(subspec) for subspec in treespec._children
+                ]
+                if (
+                    treespec.type in BUILTIN_TYPES
+                    or optree.is_namedtuple_class(treespec.type)
+                    or optree.is_structseq_class(treespec.type)
+                ):
+                    return treespec._unflatten_func(
+                        treespec._metadata,
+                        children_representations,
+                    )
+                return (
+                    f"CustomTreeNode({treespec.type.__name__}[{treespec._metadata!r}], "
+                    f"[{', '.join(children_representations)}])"
+                )
+
+            return (
+                f"PyTreeSpec({helper(self)}, NoneIsLeaf, namespace={self.namespace!r})"
+            )
+
+        def __len__(self) -> int:
+            return self.num_leaves
 
         @property
         def type(self) -> builtins.type | None:
