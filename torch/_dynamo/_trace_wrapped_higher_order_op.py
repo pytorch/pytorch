@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -12,6 +12,9 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_ten
 from torch.overrides import TorchFunctionMode
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 from torch.utils._pytree import tree_map_only
+
+
+Tensor = torch.Tensor
 
 
 __all__ = ["trace_wrapped"]
@@ -47,6 +50,35 @@ __all__ = ["trace_wrapped"]
 # compiled autograd do we inline into the function.
 
 
+class ModIndex(torch.autograd.Function):
+    @staticmethod
+    def forward(x: Tensor, indices: List[Tensor]) -> Tensor:
+        return torch.ops.aten.index(x, indices)
+
+    @staticmethod
+    def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> None:
+        x, indices = inputs
+        ctx.save_for_backward(*indices)
+        ctx.input_shape = x.shape
+
+    generate_vmap_rule = True
+
+    @staticmethod
+    def backward(ctx, gradOut):  # type: ignore[no-untyped-def]
+        indices = ctx.saved_tensors
+        return (
+            torch.ops.mylib.zeros_and_scatter(
+                ctx.input_shape,
+                indices,
+                gradOut,
+            ),
+            None,
+        )
+
+
+mod_index = ModIndex.apply
+
+
 class TransformGetItemToIndex(TorchFunctionMode):
     # This is needed since we want to support calling
     # A[q_idx], where q_idx is a scalar tensor in score_mod.
@@ -64,7 +96,7 @@ class TransformGetItemToIndex(TorchFunctionMode):
         if func == torch.Tensor.__getitem__:
             index_args = pytree.tree_leaves(args[1])
             if all(isinstance(x, torch.Tensor) for x in index_args):
-                return torch.ops.aten.index(args[0], index_args)
+                return mod_index(args[0], index_args)
         return func(*args, **(kwargs or {}))
 
 
