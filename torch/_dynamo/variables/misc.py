@@ -724,6 +724,8 @@ class AutogradFunctionVariable(VariableTracker):
             source = None
 
         fn = self.fn_cls.forward
+        ctx = AutogradFunctionContextVariable.create(tx, args, kwargs)
+        args = [ctx, *args]
         if isinstance(fn, types.FunctionType):
             return variables.UserFunctionVariable(fn, source=source).call_function(
                 tx, args, kwargs
