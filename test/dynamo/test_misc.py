@@ -9865,11 +9865,21 @@ def ___make_guard_fn():
             tree = {
                 "a": [x, x - 1],
                 "b": x + 2,
-                "c": (x, 3.0),
-                "d": {"e": [2 * x, torch.ones(1, 1)]},
+                "c": (
+                    x,
+                    3.0,
+                    collections.deque([0.0, -x]),
+                ),
+                "d": collections.defaultdict(
+                    int,
+                    {
+                        "e": ((2 * x, None)),
+                        "f": mytuple(x, x + 1, torch.zeros(4, 3)),
+                    },
+                ),
             }
             leaves = pytree.tree_leaves(tree)
-            return sum(leaves)
+            return leaves
 
         x = torch.randn(3, 2)
         expected = fn(x)
