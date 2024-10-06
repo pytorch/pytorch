@@ -1089,7 +1089,6 @@
     "to_dlpack"
   ],
   "torch.utils.pytree": [
-    "PyTreeImplementation",
     "python",
     "cxx",
     "tree_flatten",

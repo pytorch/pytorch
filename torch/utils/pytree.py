@@ -117,3 +117,4 @@ treespec_pprint = _reexport(implementation.module.treespec_pprint)  # noqa: F811
 
 
 del _reexport
+del PyTreeImplementation
