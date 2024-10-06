@@ -3634,12 +3634,8 @@ def fail_non_abi_compatible_cuda(is_skip=False):
 CPU_TEST_FAILURES = {
     # TODO: error: ‘complex64’ was not declared in this scope
     "test_add_complex": fail_minimal_arrayref_interface(is_skip=True),
-    # TODO: test_conv_freezing_abi_compatible_cpu fails,
-    #   AssertionError: None, i.e. optional output is not supported
-    "test_conv_freezing": fail_with_and_without_stack_allocation(is_skip=True),
-    # TODO: test_deconv_freezing_abi_compatible_cpu fails,
-    #   AssertionError: None, i.e. optional output is not supported
-    "test_deconv_freezing": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_conv_freezing": fail_minimal_arrayref_interface(is_skip=True),
+    "test_deconv_freezing": fail_minimal_arrayref_interface(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_duplicate_constant_folding": fail_with_and_without_stack_allocation(
         is_skip=True
