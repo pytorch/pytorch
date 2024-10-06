@@ -367,11 +367,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif (
             self.value is collections.defaultdict
-            and len(args) <= 1
+            and len(args) >= 1
             and DefaultDictVariable.is_supported_arg(args[0])
         ):
+            dict_variable = BuiltinVariable.call_custom_dict(
+                tx, dict, *args[1:], **kwargs
+            )
             return DefaultDictVariable(
-                {},
+                dict_variable.items,
                 collections.defaultdict,
                 args[0],
                 mutable_local=MutableLocal(),
