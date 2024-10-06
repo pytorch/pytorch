@@ -86,8 +86,8 @@ class NCCLTest : public NCCLTestBase {
     for (const auto i : c10::irange(numDevices_)) {
       deviceGuard.set_index(static_cast<c10::DeviceIndex>(rank_));
       tensors_[i] = at::empty({inputDim, inputDim}, at::kCUDA);
-      inputs_[i].resize(static_cast<size_t>(worldSize_ * numDevices_));
-      outputs_[i].resize(static_cast<size_t>(worldSize_ * numDevices_));
+      inputs_[i].resize(static_cast<size_t>(worldSize_) * numDevices_);
+      outputs_[i].resize(static_cast<size_t>(worldSize_) * numDevices_);
       for (auto j = 0; j < worldSize_ * numDevices_; ++j) {
         inputs_[i][j] = at::empty({inputDim, inputDim}, at::kCUDA);
         outputs_[i][j] = at::empty({inputDim, inputDim}, at::kCUDA);
