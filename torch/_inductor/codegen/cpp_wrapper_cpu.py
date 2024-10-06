@@ -70,7 +70,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     @staticmethod
     def create(is_subgraph, subgraph_name, parent_wrapper):
-        # TODO - support subgraph codegen by lifting functions
+        # TODO - support subgraph codegen by lifting functions. Check the
+        # comment at CppWrapperCpu `codegen_subgraph` function.
         return CppWrapperCpu()
 
     def generate_kernel_call(
@@ -1898,6 +1899,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.writeline("}")
 
     def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
+        # TODO (desertfire) - This function is the old way of supporting
+        # subgraph codegen by inlining subgraphs in the output code. For python
+        # wrapper, we have moved to lifting subgraphs as functions, supported by
+        # PythonWrapperCode `codegen_subgraph` function. We should perhaps
+        # support lifting of subgraphs as functions for cpp wrapper as well.
         try:
             self.push_codegened_graph(subgraph.graph)
             self.writeline(f"{self.comment} subgraph: {subgraph.name}")

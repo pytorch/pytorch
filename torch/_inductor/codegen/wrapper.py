@@ -607,17 +607,13 @@ class PythonWrapperCodegen(CodeGen):
             """
         )
 
-    def triton_header_str(self) -> str:
+    @cache_on_self
+    def write_triton_header_once(self) -> None:
         import_str = f"""
             import triton
             import triton.language as tl
             from {triton_heuristics.__name__} import grid, split_scan_grid, grid_combo_kernels, start_graph, end_graph
             """
-        return import_str
-
-    @cache_on_self
-    def write_triton_header_once(self) -> None:
-        import_str = self.triton_header_str()
         self.imports.splice(import_str, strip=True)
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.splice(import_str)
@@ -753,7 +749,6 @@ class PythonWrapperCodegen(CodeGen):
             self.kernel_autotune_calls.writeline(
                 V.graph.device_ops.set_device(device_idx)
             )
-            self.write_get_raw_stream_header_once()
             self.kernel_autotune_calls.writeline(
                 f"stream{device_idx} = get_raw_stream({device_idx})"
             )
@@ -1979,7 +1974,18 @@ class PythonWrapperCodegen(CodeGen):
             return self.declare + name
 
     def codegen_subgraph_by_inlining(self, subgraph, outer_inputs, outer_outputs):
-        def codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs):
+        # TODO (desertfire) - This function is the old way of supporting
+        # subgraph codegen by inlining subgraphs in the output code. For python
+        # wrapper, we have moved to lifting subgraphs as functions, supported by
+        # `codegen_subgraph` function.
+        #
+        # However this does not work with cpp wrapper. With cpp wrapper, we make
+        # two passes and the kernels are shared from the first pass to the next.
+        # Therefore, both the Python and CppWrapper need to share the some
+        # codegen infra for cpp_wrapper=True case. Therefore for cpp_wrapper, we
+        # fallback to the old way of inlining subgraphs in the output code. Once
+        # we update CppWrapperCpu, we can remove this function.
+        def _codegen_subgraph_prefix():
             for inner_input, outer_input in zip(
                 subgraph.graph.graph_inputs, outer_inputs
             ):
@@ -1987,7 +1993,7 @@ class PythonWrapperCodegen(CodeGen):
                     f"{self.declare}{inner_input} = {outer_input}{self.ending}"
                 )
 
-        def codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs):
+        def _codegen_subgraph_suffix():
             for inner_output, outer_output in zip(
                 subgraph.graph.graph_outputs, outer_outputs
             ):
@@ -1998,13 +2004,13 @@ class PythonWrapperCodegen(CodeGen):
         try:
             self.push_codegened_graph(subgraph.graph)
             self.writeline(f"{self.comment} subgraph: {subgraph.name}")
-            codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
+            _codegen_subgraph_prefix()
             parent_graph = V.graph
             with V.set_graph_handler(subgraph.graph):
                 subgraph.graph.codegen_subgraph(
                     parent_graph=parent_graph,
                 )
-            codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
+            _codegen_subgraph_suffix()
         finally:
             self.pop_codegened_graph()
 
@@ -2037,14 +2043,9 @@ class PythonWrapperCodegen(CodeGen):
 
     def codegen_subgraph_suffix(self, subgraph, outer_inputs, outer_outputs):
         for inner_output, outer_output in zip(
-            subgraph.graph.graph_outputs, outer_outputs
+            subgraph.graph.get_output_names(), outer_outputs
         ):
-            # For reinterpret_view, the subgraph launcher function returns the
-            # reinterpret_tensor
-            self.writeline(
-                f"{outer_output} = {inner_output.get_name()}{self.ending}"
-                # f"{outer_output} = {inner_output.codegen_reference()}{self.ending}"
-            )
+            self.writeline(f"{outer_output} = {inner_output}{self.ending}")
 
     def codegen_subgraph_call(self, subgraph, outer_inputs, outer_outputs):
         # Get the input and output names of the subgraph
@@ -2061,6 +2062,8 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(f"({inner_outputs}) = {subgraph.graph.name}([{inner_inputs}])")
 
     def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
+        # Codegen subgraph by recursively calling the codegen for the subgraph.
+        # This lifts the subgraph as a function in the output code.
         if V.graph.aot_mode:
             self.codegen_subgraph_by_inlining(subgraph, outer_inputs, outer_outputs)
             return
@@ -2069,7 +2072,6 @@ class PythonWrapperCodegen(CodeGen):
             self.writeline(f"{self.comment} subgraph: {subgraph.name}")
             self.codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
 
-            # TODO - Need to set the cpp_wrapper manually here. Is there a better way?
             parent_graph = V.graph
             subgraph.graph.cpp_wrapper = parent_graph.cpp_wrapper
 
@@ -2238,15 +2240,19 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
 
     @cache_on_self
     def write_triton_header_once(self) -> None:
-        import_str = self.triton_header_str()
-        if config.triton.autotune_at_compile_time:
-            self.kernel_autotune_calls.splice(import_str)
+        # TODO: Uncomment in future. This will be needed to support subgraph
+        # codegen for cpp wrapper.
+        # import_str = self.triton_header_str()
+        # if config.triton.autotune_at_compile_time:
+        #     self.kernel_autotune_calls.splice(import_str)
         self.parent_wrapper.write_triton_header_once()
 
     @cache_on_self
     def write_get_raw_stream_header_once(self) -> None:
-        if config.triton.autotune_at_compile_time:
-            self.kernel_autotune_calls.writeline(
-                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
-            )
+        # TODO: Uncomment in future. This will be needed to support subgraph
+        # codegen for cpp wrapper.
+        # if config.triton.autotune_at_compile_time:
+        #     self.kernel_autotune_calls.writeline(
+        #         V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
+        #     )
         self.parent_wrapper.write_get_raw_stream_header_once()

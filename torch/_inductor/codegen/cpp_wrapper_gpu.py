@@ -173,7 +173,8 @@ class CppWrapperGpu(CppWrapperCpu):
 
     @staticmethod
     def create(is_subgraph, subgraph_name, parent_wrapper):
-        # TODO - support subgraph codegen by lifting functions
+        # TODO - support subgraph codegen by lifting functions. Check the
+        # comment at CppWrapperCpu `codegen_subgraph` function.
         return CppWrapperGpu()
 
     def write_header(self):
