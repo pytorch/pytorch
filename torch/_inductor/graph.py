@@ -382,6 +382,7 @@ class GraphLowering(torch.fx.Interpreter):
             const_module.constants if const_module else {}
         )
         self.torchbind_constants: Dict[str, torch._C.ScriptObject] = {}
+        self.seen_subgraphs: Dict[str, ir.Subgraph] = {}
         self.constant_reprs: Dict[str, str] = {}
         self.removed_operations: OrderedSet[str] = OrderedSet()
         self.removed_buffers: OrderedSet[str] = OrderedSet()
@@ -1044,7 +1045,13 @@ class GraphLowering(torch.fx.Interpreter):
         value = getattr_recursive(self.module, target)  # type: ignore[arg-type]
 
         if isinstance(value, torch.fx.GraphModule):
-            return ir.Subgraph(name=target, graph_module=value)
+            # Reuse the existing subgraph if we have seen it before already.
+            if target in self.seen_subgraphs:
+                return self.seen_subgraphs[target]
+
+            out = ir.Subgraph(name=target, graph_module=value)
+            self.seen_subgraphs[target] = out
+            return out
 
         if isinstance(value, torch._C.ScriptObject):
             self.torchbind_constants[target] = value
