@@ -74,12 +74,7 @@ if python_pytree._cxx_pytree_exists:
                 yield curr
                 continue
 
-            (
-                children,
-                metadata,
-                entries,
-                unflatten_func,
-            ) = optree.tree_flatten_one_level(
+            children, *_ = optree.tree_flatten_one_level(
                 curr,
                 is_leaf=is_leaf,
                 none_is_leaf=True,
@@ -198,7 +193,9 @@ if python_pytree._cxx_pytree_exists:
 
         def flatten_up_to(self, tree: PyTree) -> list[PyTree]:
             def helper(
-                treespec: PyTreeSpec, node: PyTree, subtrees: list[PyTree]
+                treespec: PyTreeSpec,
+                node: PyTree,
+                subtrees: list[PyTree],
             ) -> None:
                 if treespec.is_leaf():
                     subtrees.append(node)
@@ -213,12 +210,7 @@ if python_pytree._cxx_pytree_exists:
                             f"expected {treespec.type!r}, but got {node_type!r}.",
                         )
 
-                    (
-                        children,
-                        metadata,
-                        entries,
-                        unflatten_func,
-                    ) = optree.tree_flatten_one_level(
+                    children, metadata, *_ = optree.tree_flatten_one_level(
                         node,
                         none_is_leaf=True,
                         namespace="torch",
@@ -267,12 +259,7 @@ if python_pytree._cxx_pytree_exists:
                             raise ValueError(f"Node keys mismatch{message}.")
                         children = [node[key] for key in expected_keys]
                     else:
-                        (
-                            children,
-                            metadata,
-                            entries,
-                            unflatten_func,
-                        ) = optree.tree_flatten_one_level(
+                        children, metadata, *_ = optree.tree_flatten_one_level(
                             node,
                             none_is_leaf=True,
                             namespace="torch",
@@ -287,8 +274,8 @@ if python_pytree._cxx_pytree_exists:
                                 f"expected {treespec._metadata!r}, but got {metadata!r}.",  # namedtuple type mismatch
                             )
 
-                for child_pytree, child_spec in zip(children, treespec._children):
-                    helper(child_spec, child_pytree, subtrees)
+                for subtree, subspec in zip(children, treespec._children):
+                    helper(subspec, subtree, subtrees)
 
             subtrees: list[PyTree] = []
             helper(self, tree, subtrees)
