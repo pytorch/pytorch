@@ -88,9 +88,7 @@ from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.logging_utils import logs_to_string
 
 
-HAS_OPTREE = importlib.util.find_spec("optree")
-if HAS_OPTREE:
-    import optree
+HAS_OPTREE = pytree._cxx_pytree_exists
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 T = typing.TypeVar("T")
@@ -292,6 +290,8 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
     @unittest.skipIf(not HAS_OPTREE, "missing optree package")
     def test_optree_graph_break_message(self):
+        import optree
+
         @torch.compile(
             backend="eager",
         )
@@ -305,7 +305,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         first_graph_break = list(counters["graph_break"].keys())[0]
         self.assertExpectedInline(
             first_graph_break,
-            "Graph break for an optree C/C++ function optree._C.PyCapsule.flatten. Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py",
+            "Graph break for an optree C/C++ function optree._C.PyCapsule.flatten. Consider using torch.utils.pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/pytree.py",
         )
 
     def test_scalar_device_movement(self):
@@ -9865,11 +9865,21 @@ def ___make_guard_fn():
             tree = {
                 "a": [x, x - 1],
                 "b": x + 2,
-                "c": (x, 3.0),
-                "d": {"e": [2 * x, torch.ones(1, 1)]},
+                "c": (
+                    x,
+                    3.0,
+                    collections.deque([0.0, -x]),
+                ),
+                "d": collections.defaultdict(
+                    int,
+                    {
+                        "e": ((2 * x, None)),
+                        "f": mytuple(x, x + 1, torch.zeros(4, 3)),
+                    },
+                ),
             }
             leaves = pytree.tree_leaves(tree)
-            return sum(leaves)
+            return leaves
 
         x = torch.randn(3, 2)
         expected = fn(x)
@@ -9885,11 +9895,21 @@ def ___make_guard_fn():
             tree = {
                 "a": [x, x - 1],
                 "b": x + 2,
-                "c": (x, 3.0),
-                "d": {"e": [2 * x, torch.ones(1, 1)]},
+                "c": (
+                    x,
+                    3.0,
+                    collections.deque([0.0, -x]),
+                ),
+                "d": collections.defaultdict(
+                    int,
+                    {
+                        "e": (2 * x, None),
+                        "f": mytuple(x, x + 1, torch.zeros(4, 3)),
+                    },
+                ),
             }
             leaves = pytree.tree_flatten(tree)[0]
-            return sum(leaves)
+            return leaves
 
         x = torch.randn(3, 2)
         expected = fn(x)
@@ -9905,11 +9925,33 @@ def ___make_guard_fn():
             tree = {
                 "a": [x, x - 1],
                 "b": x + 2,
-                "c": (x, 3.0),
-                "d": {"e": [2 * x, torch.ones(1, 1)]},
+                "c": (
+                    x,
+                    3.0,
+                    [0.0, -x],
+                ),
+                "d": collections.OrderedDict(
+                    {
+                        "e": (2 * x, None),
+                        "f": mytuple(x, x + 1, torch.zeros(4, 3)),
+                    },
+                ),
             }
             treespec = pytree.tree_flatten(tree)[1]
-            leaves = [x - 1, y, x * y, 3.0, y - 2, torch.zeros(2, 2), 2 * y]
+            leaves = [
+                x - 1,
+                y,
+                x * y,
+                3.0,
+                y - 2,
+                torch.zeros(2, 2),
+                2 * y,
+                -y,
+                x + y,
+                x - y,
+                torch.ones(3, 2),
+                1,
+            ]
             return pytree.tree_unflatten(leaves, treespec)
 
         x = torch.randn(3, 2)
@@ -9927,16 +9969,31 @@ def ___make_guard_fn():
             tree1 = {
                 "a": [x, x - 1],
                 "b": x + 2,
-                "c": (x, 3.0),
-                "d": {"e": [2 * x, torch.ones(1, 1)]},
+                "c": (
+                    x,
+                    3.0,
+                    [0.0, -x],
+                ),
+                "d": collections.OrderedDict(
+                    {
+                        "e": (2 * x, None),
+                        "f": mytuple(x, x + 1, torch.zeros(4, 3)),
+                    },
+                ),
             }
             tree2 = collections.OrderedDict(
                 [
-                    ("c", (y, 3.0)),
+                    ("c", (y, 3.0, [-y, 10.0])),
                     ("a", [y, y + 1]),
                     ("b", y + 2),
-                    ("d", {"e": [2 * y, torch.zeros(1, 1)]}),
-                ]
+                    (
+                        "d",
+                        {
+                            "f": mytuple(torch.ones(4, 3), -y, y + 1),
+                            "e": (2 * y, None),
+                        },
+                    ),
+                ],
             )
             return pytree.tree_map(lambda u, v: (u, v), tree1, tree2)
 
