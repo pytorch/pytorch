@@ -43,6 +43,7 @@ __all__ = ["trace_wrapped"]
 # the function call as is in the graph, and only when we Dynamo through the backward graph in
 # compiled autograd do we inline into the function.
 
+
 def trace_wrapped(*args: Any, **kwargs: Any) -> Any:
     with torch.no_grad():
         return _trace_wrapped_op(*args, **kwargs)
@@ -60,7 +61,6 @@ class TraceWrapped(HigherOrderOperator):
 _trace_wrapped_op = TraceWrapped()
 
 
-# Updated function with type annotations
 def _assert_meta(
     grad: torch.Tensor,
     size: Tuple[int, ...],
@@ -73,7 +73,6 @@ def _assert_meta(
     return grad
 
 
-# Updated function with type annotations
 @_trace_wrapped_op.py_impl(ProxyTorchDispatchMode)
 def inner_trace(
     mode: ProxyTorchDispatchMode,
@@ -115,13 +114,11 @@ def inner_trace(
     return grad
 
 
-# Updated function with type annotations
 @_trace_wrapped_op.py_impl(FakeTensorMode)
 def inner_fake(*args: Any, **kwargs: Any) -> None:
     raise RuntimeError("This op should never be invoked here")
 
 
-# Updated function with type annotations
 @_trace_wrapped_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def _trace_wrapped_op_dense(*args: Any, fn: Any, **kwargs: Any) -> Any:
     mode = _get_current_dispatch_mode()
@@ -134,7 +131,6 @@ _trace_wrapped_op.py_impl(DispatchKey.Autograd)(
 )
 
 
-# Updated function with type annotations
 @_trace_wrapped_op.py_functionalize_impl
 def _trace_wrapped_functionalized(ctx: Any, *args: Any, **kwargs: Any) -> Any:
     unwrapped_args = ctx.unwrap_tensors(args)
