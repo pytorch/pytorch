@@ -1978,6 +1978,36 @@ class PythonWrapperCodegen(CodeGen):
             self.unbacked_symbol_decls.add(name)
             return self.declare + name
 
+    def codegen_subgraph_by_inlining(self, subgraph, outer_inputs, outer_outputs):
+        def codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs):
+            for inner_input, outer_input in zip(
+                subgraph.graph.graph_inputs, outer_inputs
+            ):
+                self.writeline(
+                    f"{self.declare}{inner_input} = {outer_input}{self.ending}"
+                )
+
+        def codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs):
+            for inner_output, outer_output in zip(
+                subgraph.graph.graph_outputs, outer_outputs
+            ):
+                self.writeline(
+                    f"{outer_output} = {inner_output.codegen_reference()}{self.ending}"
+                )
+
+        try:
+            self.push_codegened_graph(subgraph.graph)
+            self.writeline(f"{self.comment} subgraph: {subgraph.name}")
+            codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
+            parent_graph = V.graph
+            with V.set_graph_handler(subgraph.graph):
+                subgraph.graph.codegen_subgraph(
+                    parent_graph=parent_graph,
+                )
+            codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
+        finally:
+            self.pop_codegened_graph()
+
     def codegen_subgraph_prefix(self, subgraph, outer_inputs, outer_outputs):
         def get_all_symbols(expr):
             symbols = set()  # Use a set to avoid duplicates
@@ -2031,6 +2061,9 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(f"({inner_outputs}) = {subgraph.graph.name}([{inner_inputs}])")
 
     def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
+        if V.graph.aot_mode:
+            self.codegen_subgraph_by_inlining(subgraph, outer_inputs, outer_outputs)
+            return
         try:
             self.push_codegened_graph(subgraph.graph)
             self.writeline(f"{self.comment} subgraph: {subgraph.name}")
@@ -2040,7 +2073,7 @@ class PythonWrapperCodegen(CodeGen):
             parent_graph = V.graph
             subgraph.graph.cpp_wrapper = parent_graph.cpp_wrapper
 
-            if True or subgraph.graph.name not in self.already_codegened_subgraphs:
+            if subgraph.graph.name not in self.already_codegened_subgraphs:
                 # If its codegened, the parent wrapper already has subgraph fn by name subgraph.graph.name
                 with V.set_graph_handler(subgraph.graph):
                     # Call the codegen of subgraph recursively
