@@ -149,6 +149,7 @@ TORCH_API void THP_decodeBuffer<c10::Half, bool>(
     bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint16_t x;
       c10::Half f;
@@ -191,6 +192,7 @@ TORCH_API void THP_decodeBuffer<float, bool>(
     bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint32_t x;
       float f;
@@ -208,6 +210,7 @@ TORCH_API void THP_decodeBuffer<double, bool>(
     bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint64_t x;
       double d;
@@ -225,10 +228,12 @@ TORCH_API void THP_decodeBuffer<c10::complex<float>, bool>(
     bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint32_t x;
       float re;
     };
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint32_t y;
       float im;
@@ -250,10 +255,12 @@ TORCH_API void THP_decodeBuffer<c10::complex<double>, bool>(
     bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint64_t x;
       double re;
     };
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint64_t y;
       double im;

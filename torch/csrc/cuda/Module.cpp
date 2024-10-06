@@ -1266,8 +1266,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
   m.def(
       "_tensors_data_ptrs_at_indices_equal",
       [](py::list& tensors, py::list& data_ptrs, py::list& indices) {
-        for (size_t i = 0, end = indices.size(); i < end; ++i) {
-          auto index = indices[i].cast<int64_t>();
+        for (auto index : indices) {
           auto t = tensors[index].cast<at::Tensor>();
           auto data_ptr = data_ptrs[index].cast<int64_t>();
           if (reinterpret_cast<int64_t>(t.data_ptr()) != data_ptr) {
