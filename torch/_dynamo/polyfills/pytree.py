@@ -40,7 +40,6 @@ if python_pytree._cxx_pytree_exists:
             "because the original function will be called in the constant fold path."
         )
 
-    name, func = None, None
     for name in (
         "is_namedtuple",
         "is_namedtuple_class",
@@ -55,7 +54,7 @@ if python_pytree._cxx_pytree_exists:
         substitute_in_graph(func, can_constant_fold_through=True)(
             func.__python_implementation__
         )
-    del func, name
+        del func
 
     @substitute_in_graph(cxx_pytree.tree_iter, can_constant_fold_through=False)
     def tree_iter(
