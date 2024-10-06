@@ -159,7 +159,17 @@ def get_overridable_functions():
 
     from torch.overrides import get_overridable_functions as get_overridable_functions_
 
-    return set(chain(*get_overridable_functions_().values()))
+    funcs = set(chain(*get_overridable_functions_().values()))
+    more = {
+        torch.ones,
+        torch.ones_like,
+        torch.zeros,
+        torch.zeros_like,
+        torch.empty,
+        torch.full,
+    }
+    funcs.update(more)
+    return funcs
 
 
 class BaseTorchVariable(VariableTracker):
@@ -835,6 +845,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 len(tx.symbolic_torch_function_state.mode_stack)
             )
 
+        @register(torch._C._get_function_stack_at)
+        def handle_get_stack_at(self, tx: "InstructionTranslator", *args, **kwargs):
+            assert len(args) == 1 and not kwargs
+            ind = args[0].as_python_constant()
+            assert ind >= 0 and ind < len(tx.symbolic_torch_function_state.mode_stack)
+            return tx.symbolic_torch_function_state.mode_stack[ind]
+
         @register(torch.set_default_device)
         def handle_set_default_device(
             self, tx: "InstructionTranslator", *args, **kwargs
@@ -852,7 +869,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             else:
                 TorchFunctionModeStackVariable.register_device_context_insertion(tx)
 
-            return None
+            return ConstantVariable.create(None)
 
         return handlers
 
