@@ -145,6 +145,10 @@ def check_if_torch_exportable():
     return False
 
 
+def export_training_ir_rollout_check() -> bool:
+    return False
+
+
 def log_torch_jit_trace_exportability(
     api: str,
     type_of_export: str,
