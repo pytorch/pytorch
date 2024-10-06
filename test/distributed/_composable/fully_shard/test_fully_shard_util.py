@@ -11,17 +11,11 @@ from torch.distributed.fsdp._debug_utils import (
     _get_sharded_module_tree_with_module_name_to_fqns,
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+from torch.testing._internal.common_cuda import SM89OrLater
 from torch.testing._internal.common_dist_composable import CompositeModel, UnitModule
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TEST_WITH_DEV_DBG_ASAN,
-    TestCase,
-)
-
-
-is_cuda_8_9 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 9)
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
 
 if not dist.is_available():
@@ -120,9 +114,8 @@ class TestUtils(FSDPTest):
             ],
         )
 
-
-class TestUtilsSingleDevice(TestCase):
-    @pytest.mark.skipif(not is_cuda_8_9, reason="requires SM89 compatible machine")
+    @skip_if_lt_x_gpu(2)
+    @pytest.mark.skipif(not SM89OrLater, reason="requires SM89+ compatible machine")
     def test_foreach_copy_float8(self):
         for dtype in [
             torch.float8_e4m3fn,
