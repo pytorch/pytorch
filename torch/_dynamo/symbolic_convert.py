@@ -267,13 +267,12 @@ class BlockStackEntry:
         else:
             return ReenterWith(self.stack_index)
 
-    def exit(self, tx):
-        if hasattr(self, "graph_break") and isinstance(
-            self.with_context, TorchFunctionModeVariable
-        ):
-            return
+    def exit(self, tx, is_graph_break):
         assert self.with_context is not None
-        return self.with_context.exit(tx)
+        if (
+            is_graph_break and self.with_context.exit_on_graph_break()
+        ) or not is_graph_break:
+            return self.with_context.exit(tx)
 
 
 class ReturnValueOp(Exception):
@@ -639,10 +638,17 @@ def break_graph_if_unsupported(*, push):
             cleanup: List[Instruction] = []
             # Reconstruct the context variable CLASS in the block stack
             for b in self.block_stack:
+                # Don't exit any modes we have entered,
+                # output bytecode will mutate the tf mode stack accordingly
+                if isinstance(b.with_context, TorchFunctionModeVariable):
+                    cg.extend_output(
+                        b.resume_fn().try_except_torch_function_mode(
+                            cg.code_options, cleanup
+                        )
+                    )
+                    continue
                 assert b.with_context is not None
-                assert isinstance(
-                    b.with_context, (ContextWrappingVariable, TorchFunctionModeVariable)
-                )
+                assert isinstance(b.with_context, (ContextWrappingVariable))
                 b.with_context.reconstruct_type(cg)
                 cg.extend_output(b.resume_fn().try_finally(cg.code_options, cleanup))
             self.output.add_output_instructions(cg.get_instructions())
@@ -2295,7 +2301,10 @@ class InstructionTranslatorBase(
         ):
             unimplemented(f"{inst.opname} {ctx}")
 
-        if isinstance(ctx, GenericContextWrappingVariable):
+        if (
+            isinstance(ctx, GenericContextWrappingVariable)
+            and not ctx.supports_graph_breaks()
+        ):
             self.generic_context_manager_depth += 1
 
         # Need this redundant check for mypy
@@ -2668,6 +2677,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 local_scope=f_locals,
                 global_scope=f_globals,
                 f_code=f_code,
+                torch_function_mode_stack=torch_function_mode_stack,
             ),
             instructions=instructions,
             f_locals=f_locals,
