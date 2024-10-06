@@ -95,6 +95,7 @@ def _reexport(func: Callable[_P, _T]) -> Callable[_P, _T]:
     def exported(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         return getattr(implementation.module, name)(*args, **kwargs)
 
+    exported.__module__ = __name__
     return exported
 
 
