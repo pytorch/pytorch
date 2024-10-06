@@ -110,6 +110,8 @@ if python_pytree._cxx_pytree_exists:
 
     @dataclass(frozen=True)
     class PyTreeSpec:
+        """Analog for :class:`optree.PyTreeSpec` in Python."""
+
         _children: tuple[PyTreeSpec, ...]
         _type: builtins.type | None
         _metadata: Any
@@ -119,8 +121,8 @@ if python_pytree._cxx_pytree_exists:
         num_nodes: int = field(init=False)
         num_leaves: int = field(init=False)
         num_children: int = field(init=False)
-        none_is_leaf: bool = field(init=False)
-        namespace: str = field(init=False)
+        none_is_leaf: Literal[True] = field(init=False)
+        namespace: Literal["torch"] = field(init=False)
 
         def __post_init__(self) -> None:
             if self._type is None:
@@ -128,18 +130,18 @@ if python_pytree._cxx_pytree_exists:
                 assert self._metadata is None
                 assert self._entries == ()
                 assert self._unflatten_func is None
-                object.__setattr__(self, "num_nodes", 1)
-                object.__setattr__(self, "num_leaves", 1)
-                object.__setattr__(self, "num_children", 0)
+                num_nodes = 1
+                num_leaves = 1
+                num_children = 0
             else:
                 assert callable(self._unflatten_func)
                 num_nodes = sum((spec.num_nodes for spec in self._children), start=1)
                 num_leaves = sum(spec.num_leaves for spec in self._children)
                 num_children = len(self._children)
-                object.__setattr__(self, "num_nodes", num_nodes)
-                object.__setattr__(self, "num_leaves", num_leaves)
-                object.__setattr__(self, "num_children", num_children)
 
+            object.__setattr__(self, "num_nodes", num_nodes)
+            object.__setattr__(self, "num_leaves", num_leaves)
+            object.__setattr__(self, "num_children", num_children)
             object.__setattr__(self, "none_is_leaf", True)
             object.__setattr__(self, "namespace", "torch")
 
@@ -374,7 +376,7 @@ if python_pytree._cxx_pytree_exists:
 
     __all__ += ["tree_unflatten"]
 
-    @substitute_in_graph(cxx_pytree.tree_map, can_constant_fold_through=False)
+    @substitute_in_graph(cxx_pytree.tree_map, can_constant_fold_through=True)
     def tree_map(
         func: Callable[..., Any],
         tree: PyTree,
