@@ -1516,11 +1516,6 @@ class TestOptimRenewed(TestCase):
 
             # old_state_dict has all new flags del'd
             old_state_dict = deepcopy(optimizer.state_dict())
-            old_state_dict_pg = old_state_dict["param_groups"]
-            for group in old_state_dict_pg:
-                for flag in optim_info.not_og_supported_flags:
-                    if flag in group:
-                        del group[flag]
 
             params_to_optimizer2 = model.named_parameters() if is_named_optim1 else model.parameters()
             optimizer2 = optim_cls(params_to_optimizer2, **optim_input.kwargs)

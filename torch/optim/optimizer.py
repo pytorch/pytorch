@@ -653,7 +653,7 @@ class Optimizer:
             parameter group is a Dict. Each parameter group contains metadata
             specific to the optimizer, such as learning rate and weight decay,
             as well as a List of parameter IDs of the parameters in the group.
-            if a param group was initiated with ``named_parameters()`` the names
+            If a param group was initialized with ``named_parameters()`` the names
             content will also be saved in the state dict.
 
         NOTE: The parameter IDs may look like indices but they are just IDs
@@ -838,18 +838,21 @@ class Optimizer:
     @torch._disable_dynamo
     def load_state_dict(self, state_dict: StateDict) -> None:
         r"""Load the optimizer state.
-        The names of the parameters (if they exist in :meth:`state_dict`) will not affect the loading process.
-        To use the parameters names for custom cases (such as when the parameters in the loaded state dict
-         differ from those initialized in the optimizer),
-        a custom ``register_load_state_dict_pre_hook`` should be implemented to adapt the loaded dict
-         accordingly.
-         If ``param_names`` exist in loaded state dict ``param_groups`` they will be saved or will override
-         the current names, if present, in the optimizer state. If they do not exist in loaded state dict,
-         the optimizer ``param_names`` will remain unchanged.
 
         Args:
             state_dict (dict): optimizer state. Should be an object returned
                 from a call to :meth:`state_dict`.
+
+        .. note::
+            The names of the parameters (if they exist under the "param_names" key of each param group in :meth:`state_dict`) will not affect the loading process.
+            To use the parameters' names for custom cases (such as when the parameters in the loaded state dict
+             differ from those initialized in the optimizer),
+            a custom ``register_load_state_dict_pre_hook`` should be implemented to adapt the loaded dict
+             accordingly.
+             If ``param_names`` exist in loaded state dict ``param_groups`` they will be saved and override
+             the current names, if present, in the optimizer state. If they do not exist in loaded state dict,
+             the optimizer ``param_names`` will remain unchanged.
+
         """
         # shallow copy, to be consistent with module API
         state_dict = state_dict.copy()

@@ -13,8 +13,8 @@ Constructing it
 ^^^^^^^^^^^^^^^
 
 To construct an :class:`Optimizer` you have to give it an iterable containing the
-parameters (all should be :class:`~torch.nn.Parameter` s) to optimize or named parameters
-(tuples of (str, :class:`~torch.nn.Parameter`)). Then,
+parameters (all should be :class:`~torch.nn.Parameter` s) or named parameters
+(tuples of (str, :class:`~torch.nn.Parameter`)) to optimize. Then,
 you can specify optimizer-specific options such as the learning rate, weight decay, etc.
 
 Example::
@@ -315,7 +315,7 @@ algorithms.
     lr_scheduler.CosineAnnealingWarmRestarts
 
 How to utilize named parameters to load optimizer state dict
---------------------------------------------
+------------------------------------------------------------
 
 The function :func:`~Optimizer.load_state_dict` store the optional ``param_names``content in the
 loaded state dict if present. However, the process of loading the optimizer state is not affected,
@@ -323,7 +323,7 @@ as the order of the parameters matters to maintain compatibility (in case of dif
 To utilize the loaded parameters names from the loaded state dict, a custom ``register_load_state_dict_pre_hook``
 needs to be implemented according to the desired behavior.
 
-This can be useful, for instance, when the model architecture changes, but the weights and states need to
+This can be useful, for instance, when the model architecture changes, but the weights and optimizer states need to
 remain unchanged. The following example demonstrates how to implement this customization.
 
 Example::
@@ -341,8 +341,11 @@ Example::
     # training..
     torch.save(optimizer.state_dict(), PATH)
 
-Assuming that for the following ``model2`` we wish to create 2 layers identical to ``fc`` and to load the states
-of ``model`` into both ``fc1`` and ``fc2`` of ``model2``::
+Assuming that ``model`` implements an expert (MoE) and we want to duplicate it and resume training
+for two experts, both initialized same as the ``fc`` layer.
+For the following ``model2`` we create two layers identical to ``fc`` and resume training by loading the model weights
+and optimizer states from ``model`` into both ``fc1`` and ``fc2`` of ``model2``
+(and adjust them accordingly)::
 
     class TwoLayerModel(nn.Module):
         def __init__(self):
@@ -354,10 +357,12 @@ of ``model`` into both ``fc1`` and ``fc2`` of ``model2``::
             return (self.fc1(x) + self.fc2(x)) / 2
 
     model2 = TwoLayerModel()
+    # adapt and load model weights..
     optimizer2 = optim.SGD(model2.named_parameters(), lr=0.01, momentum=0.9)
 
 To load the state dict for ``optimizer2`` with the state dict of the previous optimizer such that both
-``fc1`` and ``fc2`` will be initialized as ``fc`` states, we need the following hook::
+``fc1`` and ``fc2`` will be initialized with a copy of ``fc`` optimizer states
+(to resume training for each layer from ``fc``), we need the following hook::
 
     def adapt_state_dict_ids(optimizer, state_dict):
         adapted_state_dict = deepcopy(optimizer.state_dict())
@@ -372,7 +377,7 @@ To load the state dict for ``optimizer2`` with the state dict of the previous op
             'fc2.weight': 'fc.weight',
             'fc2.bias': 'fc.bias'
         }
-
+        clone_deepcopy = lambda d: {k: (v.clone() if isinstance(v, torch.Tensor) else deepcopy(v)) for k, v in d.items()}
         for param_id, param_name in zip(
                 optimizer.state_dict()['param_groups'][0]['params'],
                 optimizer.state_dict()['param_groups'][0]['param_names']):
@@ -381,7 +386,7 @@ To load the state dict for ``optimizer2`` with the state dict of the previous op
             id_in_loaded = state_dict['param_groups'][0]['params'][index_in_loaded_list]
             # Copy the state of the corresponding parameter
             if id_in_loaded in state_dict['state']:
-                adapted_state_dict['state'][param_id] = deepcopy(state_dict['state'][id_in_loaded])
+                adapted_state_dict['state'][param_id] = clone_deepcopy(state_dict['state'][id_in_loaded])
 
         return adapted_state_dict
 
@@ -393,7 +398,14 @@ during model loading.
 Note that this code is designed specifically for this example (e.g., assuming a single parameter group),
 and other cases might require different adaptations.
 
-Additional example to overcome missing parameters in the loaded state dict::
+The following example shows how to handle missing parameters in a loaded
+``state dict`` when the model structure changes.
+The ``Model_bypass`` adds a new ``bypass`` layer, which is not present in the original ``Model1``.
+To resume training, a custom ``adapt_state_dict_missing_param`` hook is used to adapt the optimizer's ``state_dict``,
+ensuring existing parameters are mapped correctly, while missing ones (like the bypass layer) remain unchanged
+(as initialized in this example).
+This approach enables smooth loading and resuming of the optimizer state despite model changes.
+The new bypass layer will be trained from scratch::
 
     class Model1(nn.Module):
         def __init__(self):
@@ -410,14 +422,14 @@ Additional example to overcome missing parameters in the loaded state dict::
     torch.save(optimizer.state_dict(), PATH)
 
     class Model_bypass(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.fc = nn.Linear(5, 5)
-        self.bypass = nn.Linear(5, 5, bias=False)
-        torch.nn.init.eye_(self.bypass.weight)
+        def __init__(self):
+            super().__init__()
+            self.fc = nn.Linear(5, 5)
+            self.bypass = nn.Linear(5, 5, bias=False)
+            torch.nn.init.eye_(self.bypass.weight)
 
-    def forward(self, x):
-        return self.fc(x) + self.bypass(x)
+        def forward(self, x):
+            return self.fc(x) + self.bypass(x)
 
     model2 = Model_bypass()
     optimizer2 = optim.SGD(model2.named_parameters(), lr=0.01, momentum=0.9)
@@ -435,6 +447,7 @@ Additional example to overcome missing parameters in the loaded state dict::
             'bypass.weight': None,
         }
 
+        clone_deepcopy = lambda d: {k: (v.clone() if isinstance(v, torch.Tensor) else deepcopy(v)) for k, v in d.items()}
         for param_id, param_name in zip(
                 optimizer.state_dict()['param_groups'][0]['params'],
                 optimizer.state_dict()['param_groups'][0]['param_names']):
@@ -444,7 +457,7 @@ Additional example to overcome missing parameters in the loaded state dict::
                 id_in_loaded = state_dict['param_groups'][0]['params'][index_in_loaded_list]
                 # Copy the state of the corresponding parameter
                 if id_in_loaded in state_dict['state']:
-                    adapted_state_dict['state'][param_id] = deepcopy(state_dict['state'][id_in_loaded])
+                    adapted_state_dict['state'][param_id] = clone_deepcopy(state_dict['state'][id_in_loaded])
 
         return adapted_state_dict
 
@@ -454,7 +467,7 @@ Additional example to overcome missing parameters in the loaded state dict::
 
 
 Instead of loading a state according to the order of parameters (the default approach),
-this hook can be used to load according to the parameters names::
+this hook can be used to load according to the parameters' names::
 
     def names_matching(optimizer, state_dict):
         assert len(state_dict['param_groups']) == len(optimizer.state_dict()['param_groups'])
