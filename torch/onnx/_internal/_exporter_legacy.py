@@ -401,12 +401,10 @@ def enable_fake_mode():
         ...     def forward(self, x):
         ...         out = self.linear(x)
         ...         return out
-        >>> with torch.onnx.enable_fake_mode() as fake_context:
+        >>> with torch.onnx.enable_fake_mode():
         ...     my_nn_module = MyModel()
         ...     arg1 = torch.randn(2, 2, 2)  # positional input 1
-        >>> export_options = torch.onnx.ExportOptions(fake_context=fake_context)
         >>> onnx_program = torch.onnx.export(my_nn_module, (arg1,), dynamo=True)
-        >>> onnx_program.apply_weights(MyModel().state_dict())
         >>> # Saving model WITHOUT initializers
         >>> onnx_program.save(
         ...     "my_model_without_initializers.onnx",
@@ -414,6 +412,7 @@ def enable_fake_mode():
         ...     keep_initializers_as_inputs=True,
         ... )
         >>> # Saving model WITH initializers
+        >>> onnx_program.apply_weights(MyModel().state_dict())
         >>> onnx_program.save("my_model_with_initializers.onnx")
 
     .. warning::
