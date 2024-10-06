@@ -62,14 +62,14 @@ __all__ = [
 PYTORCH_USE_CXX_PYTREE: bool = os.getenv("PYTORCH_USE_CXX_PYTREE", "0") not in {"0", ""}
 
 
-class Implementation(NamedTuple):
+class PyTreeImplementation(NamedTuple):
     """The underlying implementation for PyTree utilities."""
 
     module: "ModuleType"
     name: str
 
 
-implementation = Implementation(module=python, name="python")
+implementation = PyTreeImplementation(module=python, name="python")
 if PYTORCH_USE_CXX_PYTREE:
     if not python._cxx_pytree_exists:
         raise ImportError(
@@ -79,7 +79,7 @@ if PYTORCH_USE_CXX_PYTREE:
 
     import torch.utils._cxx_pytree as cxx  # noqa: F811
 
-    implementation = Implementation(module=cxx, name="cxx")
+    implementation = PyTreeImplementation(module=cxx, name="cxx")
 
 
 _P = ParamSpec("_P")
@@ -93,7 +93,8 @@ def _reexport(func: Callable[_P, _T]) -> Callable[_P, _T]:
 
     @functools.wraps(func)
     def exported(*args: _P.args, **kwargs: _P.kwargs) -> _T:
-        return getattr(implementation.module, name)(*args, **kwargs)
+        impl: Callable[_P, _T] = getattr(implementation.module, name)
+        return impl(*args, **kwargs)
 
     exported.__module__ = __name__
     return exported
