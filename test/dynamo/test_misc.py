@@ -9865,11 +9865,21 @@ def ___make_guard_fn():
             tree = {
                 "a": [x, x - 1],
                 "b": x + 2,
-                "c": (x, 3.0),
-                "d": {"e": [2 * x, torch.ones(1, 1)]},
+                "c": (
+                    x,
+                    3.0,
+                    collections.deque([0.0, -x]),
+                ),
+                "d": collections.defaultdict(
+                    int,
+                    {
+                        "e": ((2 * x, None)),
+                        "f": mytuple(x, x + 1, torch.zeros(4, 3)),
+                    },
+                ),
             }
             leaves = pytree.tree_leaves(tree)
-            return sum(leaves)
+            return leaves
 
         x = torch.randn(3, 2)
         expected = fn(x)
@@ -9885,11 +9895,21 @@ def ___make_guard_fn():
             tree = {
                 "a": [x, x - 1],
                 "b": x + 2,
-                "c": (x, 3.0),
-                "d": {"e": [2 * x, torch.ones(1, 1)]},
+                "c": (
+                    x,
+                    3.0,
+                    collections.deque([0.0, -x]),
+                ),
+                "d": collections.defaultdict(
+                    int,
+                    {
+                        "e": (2 * x, None),
+                        "f": mytuple(x, x + 1, torch.zeros(4, 3)),
+                    },
+                ),
             }
             leaves = pytree.tree_flatten(tree)[0]
-            return sum(leaves)
+            return leaves
 
         x = torch.randn(3, 2)
         expected = fn(x)
@@ -9905,11 +9925,33 @@ def ___make_guard_fn():
             tree = {
                 "a": [x, x - 1],
                 "b": x + 2,
-                "c": (x, 3.0),
-                "d": {"e": [2 * x, torch.ones(1, 1)]},
+                "c": (
+                    x,
+                    3.0,
+                    [0.0, -x],
+                ),
+                "d": collections.OrderedDict(
+                    {
+                        "e": (2 * x, None),
+                        "f": mytuple(x, x + 1, torch.zeros(4, 3)),
+                    },
+                ),
             }
             treespec = pytree.tree_flatten(tree)[1]
-            leaves = [x - 1, y, x * y, 3.0, y - 2, torch.zeros(2, 2), 2 * y]
+            leaves = [
+                x - 1,
+                y,
+                x * y,
+                3.0,
+                y - 2,
+                torch.zeros(2, 2),
+                2 * y,
+                -y,
+                x + y,
+                x - y,
+                torch.ones(3, 2),
+                1,
+            ]
             return pytree.tree_unflatten(leaves, treespec)
 
         x = torch.randn(3, 2)

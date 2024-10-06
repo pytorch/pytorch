@@ -65,16 +65,16 @@ if python_pytree._cxx_pytree_exists:
     ) -> Iterable[Any]:
         stack = [tree]
         while stack:
-            curr = stack.pop()
-            if curr is None or (is_leaf is not None and is_leaf(curr)):
-                yield curr
+            node = stack.pop()
+            if node is None or (is_leaf is not None and is_leaf(node)):
+                yield node
                 continue
-            if optree.register_pytree_node.get(type(curr), namespace="torch") is None:  # type: ignore[attr-defined]
-                yield curr
+            if optree.register_pytree_node.get(type(node), namespace="torch") is None:  # type: ignore[attr-defined]
+                yield node
                 continue
 
             children, *_ = optree.tree_flatten_one_level(
-                curr,
+                node,
                 is_leaf=is_leaf,
                 none_is_leaf=True,
                 namespace="torch",
