@@ -520,6 +520,43 @@ namespace c10::detail {
 
 } // namespace c10::detail
 
+#ifdef STANDALONE_TORCH_HEADER
+
+// TORCH_CHECK throws std::runtime_error instead of c10::Error which is
+// useful when certain headers are used in a libtorch-independent way,
+// e.g. when Vectorized<T> is used in AOTInductor generated code.
+#ifdef STRIP_ERROR_MESSAGES
+#define TORCH_CHECK(cond, ...)                \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
+    throw std::runtime_error(TORCH_CHECK_MSG( \
+        cond,                                 \
+        "",                                   \
+        __func__,                             \
+        ", ",                                 \
+        __FILE__,                             \
+        ":",                                  \
+        __LINE__,                             \
+        ", ",                                 \
+        __VA_ARGS__));                        \
+  }
+#else
+#define TORCH_CHECK(cond, ...)                \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
+    throw std::runtime_error(TORCH_CHECK_MSG( \
+        cond,                                 \
+        "",                                   \
+        __func__,                             \
+        ", ",                                 \
+        __FILE__,                             \
+        ":",                                  \
+        __LINE__,                             \
+        ", ",                                 \
+        ##__VA_ARGS__));                      \
+  }
+#endif
+
+#else
+
 #ifdef STRIP_ERROR_MESSAGES
 #define TORCH_CHECK(cond, ...)                   \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {          \
@@ -540,36 +577,6 @@ namespace c10::detail {
   }
 #endif
 
-// TORCH_CHECK_STD_ERROR throws std::runtime_error instead of c10::Error which
-// is useful when AOTInductor generates ABI-compatible code
-#ifdef STRIP_ERROR_MESSAGES
-#define TORCH_CHECK_STD_ERROR(cond, ...)      \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
-    throw std::runtime_error(TORCH_CHECK_MSG( \
-        cond,                                 \
-        "",                                   \
-        __func__,                             \
-        ", ",                                 \
-        __FILE__,                             \
-        ":",                                  \
-        __LINE__,                             \
-        ", ",                                 \
-        __VA_ARGS__));                        \
-  }
-#else
-#define TORCH_CHECK_STD_ERROR(cond, ...)      \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
-    throw std::runtime_error(TORCH_CHECK_MSG( \
-        cond,                                 \
-        "",                                   \
-        __func__,                             \
-        ", ",                                 \
-        __FILE__,                             \
-        ":",                                  \
-        __LINE__,                             \
-        ", ",                                 \
-        ##__VA_ARGS__));                      \
-  }
 #endif
 
 // An utility macro that does what `TORCH_CHECK` does if compiled in the host
