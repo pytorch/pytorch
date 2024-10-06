@@ -108,35 +108,6 @@ def _(info, in_dims, shape, indices, val):  # type: ignore[no-untyped-def]
     return out, None
 
 
-class ModIndex(torch.autograd.Function):
-    @staticmethod
-    def forward(x: Tensor, indices: List[Tensor]) -> Tensor:
-        return torch.ops.aten.index(x, indices)
-
-    @staticmethod
-    def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> None:
-        x, indices = inputs
-        ctx.save_for_backward(*indices)
-        ctx.input_shape = x.shape
-
-    generate_vmap_rule = True
-
-    @staticmethod
-    def backward(ctx, gradOut):  # type: ignore[no-untyped-def]
-        indices = ctx.saved_tensors
-        return (
-            torch.ops.mylib.zeros_and_scatter(
-                ctx.input_shape,
-                indices,
-                gradOut,
-            ),
-            None,
-        )
-
-
-mod_index = ModIndex.apply
-
-
 class FlexAttentionHOP(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("flex_attention", cacheable=True)
