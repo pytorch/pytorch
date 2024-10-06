@@ -49,7 +49,8 @@ class AsyncTest {
     options->devices.push_back(
         ::c10d::ProcessGroupGloo::createDeviceForHostname("127.0.0.1"));
 
-    pg_ = std::make_unique<::c10d::ProcessGroupGloo>(store, rank, size, options);
+    pg_ =
+        std::make_unique<::c10d::ProcessGroupGloo>(store, rank, size, options);
   }
 
  protected:

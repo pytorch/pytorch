@@ -161,8 +161,8 @@ class CollectiveTest {
       pg_ = std::make_unique<::c10d::ProcessGroupGloo>(
           store, rank, size, options);
     } else {
-      pg_ = std::make_unique<ProcessGroupGlooDelayed>(
-          store, rank, size, options);
+      pg_ =
+          std::make_unique<ProcessGroupGlooDelayed>(store, rank, size, options);
     }
   }
 
@@ -282,8 +282,7 @@ void testAllreduce(
   auto outputs = waitFuture(work);
 
   auto event_lists = disableProfilerLegacy();
-  checkProfiledEvents(
-      event_lists, GLOO_ALLREDUCE_STR, size, allShapes);
+  checkProfiledEvents(event_lists, GLOO_ALLREDUCE_STR, size, allShapes);
 
   // Verify outputs
   const auto expected = (size * (size - 1)) / 2;
@@ -328,8 +327,7 @@ void testAllreduceUsingWorkAPI(
   auto outputs = waitWork(work);
 
   auto event_lists = disableProfilerLegacy();
-  checkProfiledEvents(
-      event_lists, GLOO_ALLREDUCE_STR, size, allShapes);
+  checkProfiledEvents(event_lists, GLOO_ALLREDUCE_STR, size, allShapes);
 
   // Verify outputs
   const auto expected = (size * (size - 1)) / 2;
@@ -365,7 +363,8 @@ void testBroadcast(
         at::OptionalDeviceGuard deviceGuard;
         for (const auto l : c10::irange(stride)) {
           if (b == at::DeviceType::CUDA) {
-            deviceGuard.reset_device(at::Device(at::kCUDA, static_cast<c10::DeviceIndex>(l)));
+            deviceGuard.reset_device(
+                at::Device(at::kCUDA, static_cast<c10::DeviceIndex>(l)));
           }
           inputs[k][l] =
               at::ones(shapes, at::dtype(dtype).device(b)) * (k * stride + l);
@@ -390,8 +389,7 @@ void testBroadcast(
       auto outputs = waitFuture(work);
 
       auto event_lists = disableProfilerLegacy();
-      checkProfiledEvents(
-          event_lists, GLOO_BROADCAST_STR, size, allShapes);
+      checkProfiledEvents(event_lists, GLOO_BROADCAST_STR, size, allShapes);
 
       // Verify outputs
       const auto expected = (i * stride + j);
@@ -422,7 +420,8 @@ void testAlltoall(const std::string& path, const at::DeviceType b) {
   };
   for (const auto rank : c10::irange(size)) {
     std::vector<int32_t>& blob = blobs[rank];
-    inputs[rank] = at::from_blob(blob.data(), static_cast<int64_t>(blob.size())).to(b);
+    inputs[rank] =
+        at::from_blob(blob.data(), static_cast<int64_t>(blob.size())).to(b);
   }
 
   // Allocate outputs
@@ -549,8 +548,7 @@ void testMonitoredBarrier(const std::string& path) {
   };
   threads.clear();
   for (const auto r : c10::irange(size)) {
-    threads.emplace_back(
-        [=]() { runMonitoredBarrierWithException(r); });
+    threads.emplace_back([=]() { runMonitoredBarrierWithException(r); });
   }
   for (auto& t : threads) {
     t.join();

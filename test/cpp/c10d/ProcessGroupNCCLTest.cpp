@@ -21,7 +21,7 @@ using at::cuda::CUDAStream;
 class NCCLTestBase {
  public:
   NCCLTestBase(
-      std::string  path,
+      std::string path,
       const std::chrono::milliseconds pgTimeout =
           c10d::kProcessGroupNCCLDefaultTimeout)
       : path_(std::move(path)), pgTimeout_(pgTimeout) {}
@@ -73,9 +73,7 @@ class NCCLTest : public NCCLTestBase {
       std::chrono::milliseconds pgTimeout =
           c10d::kProcessGroupNCCLDefaultTimeout,
       int inputDim = 3)
-      : NCCLTestBase(path, pgTimeout),
-        rank_(rank),
-        worldSize_(worldSize) {
+      : NCCLTestBase(path, pgTimeout), rank_(rank), worldSize_(worldSize) {
     // Each device has a single tensor to perf the NCCL op
     ::at::globalContext().lazyInitCUDA();
     tensors_.resize(numDevices_);
@@ -144,7 +142,8 @@ class NCCLTest : public NCCLTestBase {
       std::vector<std::vector<at::Tensor>>& tensor_lists) {
     std::vector<std::vector<at::Tensor>> outputs(numDevices_);
     for (auto& output : outputs) {
-      output = std::vector<at::Tensor>(static_cast<size_t>(worldSize_ * numDevices_));
+      output = std::vector<at::Tensor>(
+          static_cast<size_t>(worldSize_ * numDevices_));
     }
 
     // For the duration of this function, make THC use our streams

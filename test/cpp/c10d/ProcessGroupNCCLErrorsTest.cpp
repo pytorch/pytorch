@@ -120,8 +120,7 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
       int rank,
       int size,
       c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts)
-      : ProcessGroupNCCLSimulateErrors(store, rank, size, std::move(opts))
-        {}
+      : ProcessGroupNCCLSimulateErrors(store, rank, size, std::move(opts)) {}
 
   c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       at::Device& device,
@@ -177,8 +176,7 @@ class ProcessGroupNCCLNoHeartbeatCaught
       int rank,
       int size,
       c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts)
-      : ProcessGroupNCCLTimedOutErrors(store, rank, size, std::move(opts))
-        {}
+      : ProcessGroupNCCLTimedOutErrors(store, rank, size, std::move(opts)) {}
 
   std::mutex& getWatchdogMutex() {
     return workMetaListMutex_;
