@@ -494,51 +494,52 @@ def insert_deferred_runtime_asserts(
                             torch._check_is_size, (expr_to_proxy[i0].node,)
                         )
 
-                vr = shape_env.var_to_range[i0]
-                if vr.is_int and vr.upper == sys.maxsize - 1:
-                    # treat upper bound == sys.maxsize - 1 for int symbols as +oo
-                    # to avoid redundant runtime assert
-                    vr = ValueRanges(vr.lower, int_oo)
-                if not shape_env._default_unspecified_value_range().issubset(vr):
-                    # The runtime range is constrained, so add a runtime
-                    # assert and also explicitly refine the range
-                    # (refinement should not be necessary once runtime
-                    # asserts cause refinement, but that's NYI)
-                    def convert(s):
-                        if s in (int_oo, -int_oo):
-                            return None
-                        try:
-                            return int(s)
-                        except TypeError:
-                            return None
+                vr = shape_env.var_to_range.get(i0, None)
+                if vr:
+                    if vr.is_int and vr.upper == sys.maxsize - 1:
+                        # treat upper bound == sys.maxsize - 1 for int symbols as +oo
+                        # to avoid redundant runtime assert
+                        vr = ValueRanges(vr.lower, int_oo)
+                    if not shape_env._default_unspecified_value_range().issubset(vr):
+                        # The runtime range is constrained, so add a runtime
+                        # assert and also explicitly refine the range
+                        # (refinement should not be necessary once runtime
+                        # asserts cause refinement, but that's NYI)
+                        def convert(s):
+                            if s in (int_oo, -int_oo):
+                                return None
+                            try:
+                                return int(s)
+                            except TypeError:
+                                return None
 
-                    if (
-                        expr_to_proxy[i0].node.target
-                        != cast_symbool_to_symint_guardless
-                    ):
-                        # TODO(pianpwk): calling sym_constrain_range_for_size or adding bound asserts
-                        # raises AOTAutograd errors on cast_symbool_to_symint_guardless
+                        if (
+                            expr_to_proxy[i0].node.target
+                            != cast_symbool_to_symint_guardless
+                        ):
+                            # TODO(pianpwk): calling sym_constrain_range_for_size or adding bound asserts
+                            # raises AOTAutograd errors on cast_symbool_to_symint_guardless
 
-                        if (min_val := convert(vr.lower)) is not None:
-                            ge = _sympy_interp(expr_to_proxy, i0 >= min_val).node
-                            graph.call_function(
-                                torch.ops.aten._assert_scalar.default,
-                                (
-                                    ge,
-                                    f"Runtime assertion failed for expression {i0 >= min_val} on node '{ge}'",
-                                ),
-                            )
-                            added_asserts.add(i0 >= min_val)
-                        if (max_val := convert(vr.upper)) is not None:
-                            le = _sympy_interp(expr_to_proxy, i0 <= max_val).node
-                            graph.call_function(
-                                torch.ops.aten._assert_scalar.default,
-                                (
-                                    le,
-                                    f"Runtime assertion failed for expression {i0 <= max_val} on node '{le}'",
-                                ),
-                            )
-                            added_asserts.add(i0 <= max_val)
+                            if (min_val := convert(vr.lower)) is not None:
+                                ge = _sympy_interp(expr_to_proxy, i0 >= min_val).node
+                                graph.call_function(
+                                    torch.ops.aten._assert_scalar.default,
+                                    (
+                                        ge,
+                                        f"Runtime assertion failed for expression {i0 >= min_val} on node '{ge}'",
+                                    ),
+                                )
+                                added_asserts.add(i0 >= min_val)
+                            if (max_val := convert(vr.upper)) is not None:
+                                le = _sympy_interp(expr_to_proxy, i0 <= max_val).node
+                                graph.call_function(
+                                    torch.ops.aten._assert_scalar.default,
+                                    (
+                                        le,
+                                        f"Runtime assertion failed for expression {i0 <= max_val} on node '{le}'",
+                                    ),
+                                )
+                                added_asserts.add(i0 <= max_val)
 
                 constrained_unbacked_symbols.add(i0)
                 add_runtime_asserts(ras)

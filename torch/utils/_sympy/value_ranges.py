@@ -1041,6 +1041,13 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
 def bound_sympy(
     expr: sympy.Expr, ranges: Optional[Dict[sympy.Symbol, ValueRanges]] = None
 ) -> ValueRanges:
+    # TODO(soulitzer): double check if we need
+    from torch.utils._sympy.singleton_int import SingletonInt
+
+    if isinstance(expr, (sympy.Eq, sympy.Ne, sympy.Ge, sympy.Le)) and isinstance(expr.lhs, SingletonInt) and isinstance(expr.rhs, SingletonInt):
+        # Return the expression as-is
+        return ValueRanges(0, 1)
+
     log.debug(
         "bound_sympy(%s)%s",
         expr,

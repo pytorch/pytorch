@@ -884,7 +884,7 @@ def unsqueeze_default(func, *args, **kwargs):
     return NestedTensor(func(values, **new_kwargs), **extract_kwargs(inp))
 
 
-@register_jagged_func(torch.ops.aten.cat.default, "tensors: any, dim: any")
+@register_jagged_func(torch.ops.aten.cat.default, "tensors: any, dim: any?")
 def cat_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -899,11 +899,20 @@ def cat_default(func, *args, **kwargs):
     tensors = [t if t.is_nested else t.expand_as(first) for t in tensors]
 
     # Account for collapsed jagged dim
-    dim = new_kwargs["dim"]
-    new_kwargs["dim"] = _wrap_jagged_dim(len(first.shape), dim, "cat")
+    dim = new_kwargs.get("dim", 0)
+
+    new_kwargs["dim"] = _wrap_jagged_dim(len(first.shape), dim, "cat", allow_batch_dim=True)
+
+    out_kwargs = extract_kwargs(tensors[0])
+    if dim == 0:
+        in_lengths = [t._offsets.diff() for t in tensors]
+        out_lengths = func(in_lengths)
+        out_offsets = F.pad(out_lengths.cumsum(dim=0), (1, 0))
+        # TODO: Cache the lengths, but don't populate lengths
+        out_kwargs["offsets"] = out_offsets
 
     return NestedTensor(
-        func([t._values for t in tensors], **new_kwargs), **extract_kwargs(tensors[0])
+        func([t._values for t in tensors], **new_kwargs), **out_kwargs
     )
 
 
@@ -1599,10 +1608,10 @@ def masked_select_default(func, *args, **kwargs):
 
     if inp.ndim > 2:
         raise RuntimeError("masked_select only support 2-D selections currently")
-    elif inp.shape != mask.shape:
-        raise RuntimeError(
-            f"Mask with shape {mask.shape} is not compatible with input's shape {inp.shape}"
-        )
+
+    # Need to use a custom function since we're inside.
+    # torch._check(inp.shape[1] == mask.shape[1], lambda: f"Mask with shape {mask.shape} is not compatible with input's shape {inp.shape}")
+
     res_values = inp._values.masked_select(mask.values())
     mask_cumsum = F.pad(mask.values().cumsum(dim=0), (1, 0))  # type: ignore[arg-type]
 

@@ -394,6 +394,12 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
     if isinstance(expr, (sympy.And, sympy.Or)):
         return type(expr)(*map(canonicalize_bool_expr, expr.args))
 
+    from torch.utils._sympy.singleton_int import SingletonInt
+
+    if isinstance(expr, (sympy.Eq, sympy.Ne, sympy.Ge, sympy.Le)) and isinstance(expr.lhs, SingletonInt) and isinstance(expr.rhs, SingletonInt):
+        # Return the expression as-is
+        return expr
+
     opposite = {sympy.Gt: sympy.Lt, sympy.Ge: sympy.Le}
     if isinstance(expr, tuple(opposite.keys())):
         rhs = expr.lhs - expr.rhs
@@ -601,7 +607,8 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None, 
         return
     fs = shape_env.pending_fresh_unbacked_symbols
     pending = set(fs)
-    if pending:
+    # TODO(soulitzer): add to pending symbols instead
+    if pending or True:
         if not peek:
             log.info("compute_unbacked_bindings %s", fs)
             fs.clear()
@@ -618,31 +625,37 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None, 
                             real=real[i] if real is not None else None
                         )
                     )
-            elif is_traceable_wrapper_subclass(a):
-                # TODO: Determine if this is correct
-                attrs, _ = a.__tensor_flatten__()
-                for attr in attrs:
-                    sub = getattr(a, attr)
-                    r.update(
-                        free_unbacked_symbols_with_path(sub, path + (InnerTensorKey(attr),))
-                    )
             elif isinstance(a, torch.Tensor):
+                if is_traceable_wrapper_subclass(a):
+                    # TODO: Determine if this is correct
+                    attrs, _ = a.__tensor_flatten__()
+                    for attr in attrs:
+                        sub = getattr(a, attr)
+                        r.update(
+                            free_unbacked_symbols_with_path(sub, path + (InnerTensorKey(attr),))
+                        )
+                    real_size, real_stride, real_storage_offset = None, None, None
+                else:
+                    real_size = a.real_tensor.size() if a.real_tensor is not None else None
+                    real_stride = a.real_tensor.stride() if a.real_tensor is not None else None
+                    real_storage_offset = a.real_tensor.storage_offset() if a.real_tensor is not None else None
+
                 r.update(
                     free_unbacked_symbols_with_path(
                         a.size(), path + (CallMethodKey("size"),),
-                        real=a.real_tensor.size() if a.real_tensor is not None else None
+                        real=real_size
                     )
                 )
                 r.update(
                     free_unbacked_symbols_with_path(
                         a.stride(), path + (CallMethodKey("stride"),),
-                        real=a.real_tensor.stride() if a.real_tensor is not None else None
+                        real=real_stride
                     )
                 )
                 r.update(
                     free_unbacked_symbols_with_path(
                         a.storage_offset(), path + (CallMethodKey("storage_offset"),),
-                        real=a.real_tensor.storage_offset() if a.real_tensor is not None else None
+                        real=real_storage_offset
                     )
                 )
 
@@ -690,6 +703,14 @@ def compute_unbacked_bindings(shape_env, example_value, old_example_value=None, 
                 if real is not None:
                     shape_env.set_unbacked_var_to_val(s, int(real))
                 pending.remove(s.lhs)
+            elif (
+                # TODO(soulitzer): are we relying on this?
+                isinstance(a, torch.SymInt)
+                and isinstance(a.node._expr, sympy.Symbol)
+                and isinstance(a.node._hint, torch.SymInt)
+                and isinstance(a.node._hint.node, NestedIntNode)
+            ):
+                r[s] = path
 
             return r
 
@@ -2720,8 +2741,8 @@ class ShapeEnv:
     def _rename_unbacked_to(self, orig_s: sympy.Symbol, new_s: sympy.Symbol):
         assert isinstance(orig_s, sympy.Symbol), orig_s
         assert isinstance(new_s, sympy.Symbol), new_s
-        assert free_unbacked_symbols(new_s), new_s
-        assert free_unbacked_symbols(orig_s), orig_s
+        # assert free_unbacked_symbols(new_s), new_s
+        # assert free_unbacked_symbols(orig_s), orig_s
         if self._ignore_fresh_unbacked_symbols_tls():
             return
         dest = self.replacements.get(orig_s)
@@ -4513,6 +4534,12 @@ class ShapeEnv:
         else:
             var_ranges = dict(var_to_range)
 
+        from torch.utils._sympy.singleton_int import SingletonInt
+
+        # TODO(soulitzer): is this the right place to intercept?
+        if isinstance(expr, (sympy.Eq, sympy.Ne, sympy.Ge, sympy.Le)) and isinstance(expr.lhs, SingletonInt) and isinstance(expr.rhs, SingletonInt):
+            # Return the expression as-is
+            return None
         expr = self.simplify(expr)
 
         if compute_hint:
@@ -5461,7 +5488,10 @@ class ShapeEnv:
             stack = CapturedTraceback.extract(skip=1)
             ra = RuntimeAssert(expr, msg, stack)
             # TODO: Do this in a way that is less janky than int(s.name[1:])
-            cands = sorted((s for s in expr.free_symbols if symbol_is_type(s, SymT.UNBACKED_INT)), key=lambda s: int(s.name[1:]))
+            # TODO(soulitzer): fix sorting between u's and s's
+            from torch.utils._sympy.singleton_int import SingletonInt
+
+            cands = sorted((s for s in expr.free_symbols if (symbol_is_type(s, SymT.UNBACKED_INT) or isinstance(self.var_to_val.get(s, None), SingletonInt))), key=lambda s: int(s.name[1:]))
             # Is None when prefer_deferred_runtime_asserts_over_guards=True
             # and the guard in question has no unbacked SymInts in front
             ix = cands[-1] if cands else None

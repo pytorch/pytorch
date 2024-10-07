@@ -176,6 +176,7 @@ def run_functionalized_fw_and_collect_metadata(
             # Also, prevent memoization from applying.
             if (fake_mode := detect_fake_mode()) and (shape_env := fake_mode.shape_env):
                 shape_env.pending_fresh_unbacked_symbols.clear()
+                shape_env.pending_fresh_nested_int_symbols.clear()
                 fake_mode.epoch += 1
                 fake_mode.reset_union_find()
 

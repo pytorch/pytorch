@@ -522,38 +522,60 @@ class SymNode:
         return False
 
 
-def _tid_eq(a, b):
+def _is_same_raggedness(lhs, rhs) -> Optional[bool]:
+    from torch._subclasses.fake_tensor import FakeTensor
+
+    assert isinstance(lhs, NestedIntNode) and isinstance(rhs, NestedIntNode)
+    if lhs.tensor is rhs.tensor:
+        return True
+    lhs_fake, rhs_fake = isinstance(lhs.tensor, FakeTensor), isinstance(rhs.tensor, FakeTensor)
+    if lhs_fake or rhs_fake:
+        # Consider just keeping concrete tensors around?
+        assert lhs_fake and rhs_fake
+        return None
+    else:
+        # Requires tensors to be on cpu
+        return torch.eq(lhs.tensor, rhs.tensor).all().item()
+
+# NestedInt eq can return True/False/None
+def _eq(lhs, rhs) -> Optional[bool]:
+    if (
+        isinstance(lhs, NestedIntNode) and isinstance(rhs, NestedIntNode) and
+        lhs.coeff == rhs.coeff
+    ):
+        return _is_same_raggedness(lhs, rhs)
+    else:
+        return False
+
+def _ge(lhs, rhs, op_name) -> bool:
     from torch.nested._internal import union_find
-    uf = union_find.get_union_find()
-    a_canonical = uf._union_find_int.find(a)
-    b_canonical = uf._union_find_int.find(b)
-    return a_canonical == b_canonical
 
-
-def _eq(lhs, rhs) -> bool:
-    return (
-        isinstance(lhs, NestedIntNode)
-        and isinstance(rhs, NestedIntNode)
-        and _tid_eq(lhs.t_id, rhs.t_id)
-        and lhs.coeff == rhs.coeff
-    )
-
-
-def _ge(lhs, rhs) -> bool:
     if isinstance(rhs, NestedIntNode) and isinstance(lhs, NestedIntNode):
-        if _tid_eq(lhs.t_id, rhs.t_id):
+        # is it possible to return None?
+        is_same_raggedness = _is_same_raggedness(lhs, rhs)
+        if is_same_raggedness is None:
+            return None
+        if is_same_raggedness:
             return lhs.coeff >= rhs.coeff
-        raise ValueError("ge: relation is indeterminate")
+        raise ValueError(f"{op_name}: relation is indeterminate")
     elif isinstance(lhs, NestedIntNode):
         if rhs.is_constant() and rhs.constant_int() <= 2:
             return True
-        raise ValueError("ge: relation is indeterminate")
+        raise ValueError(f"{op_name}: relation is indeterminate")
     elif isinstance(rhs, NestedIntNode):
         if lhs.is_constant() and lhs.constant_int() < 2:
             return False
-        raise ValueError("ge: relation is indeterminate")
+        raise ValueError(f"{op_name}: relation is indeterminate")
     else:
-        raise ValueError(f"inputs unsupported")
+        raise ValueError(f"{op_name}: inputs unsupported")
+
+
+def mb_wrap_constant_bool(ret, *, negate=False):
+    if ret is not None:
+        if negate:
+            ret = not ret
+        return torch._C._get_constant_bool_symnode(ret)
+    return None
 
 
 class NestedIntNode:
@@ -608,23 +630,24 @@ class NestedIntNode:
             raise ValueError(f"unsupported: {type(other)}")
         return NestedIntNode(self.t_id, self.tensor, coeff=self.coeff * other)
 
-    def eq(self, other) -> "SymNode":
-        return torch._C._get_constant_bool_symnode(_eq(self, other))
+    # TODO(soulitzer): does SymNode returning None work for cpp.
+    def eq(self, other) -> Optional["SymNode"]:
+        return mb_wrap_constant_bool(_eq(self, other))
 
-    def ne(self, other) -> "SymNode":
-        return torch._C._get_constant_bool_symnode(not _eq(self, other))
+    def ne(self, other) -> Optional["SymNode"]:
+        return mb_wrap_constant_bool(_eq(self, other), negate=True)
 
-    def gt(self, other) -> "SymNode":
-        return torch._C._get_constant_bool_symnode(not _ge(other, self))
+    def gt(self, other) -> Optional["SymNode"]:
+        return mb_wrap_constant_bool(_ge(other, self, "gt"), negate=True)
 
-    def lt(self, other) -> "SymNode":
-        return torch._C._get_constant_bool_symnode(not _ge(self, other))
+    def lt(self, other) -> Optional["SymNode"]:
+        return mb_wrap_constant_bool(_ge(self, other, "lt"), negate=True)
 
-    def le(self, other) -> "SymNode":
-        return torch._C._get_constant_bool_symnode(_ge(other, self))
+    def le(self, other) -> Optional["SymNode"]:
+        return mb_wrap_constant_bool(_ge(other, self, "le"))
 
-    def ge(self, other) -> "SymNode":
-        return torch._C._get_constant_bool_symnode(_ge(self, other))
+    def ge(self, other) -> Optional["SymNode"]:
+        return mb_wrap_constant_bool(_ge(self, other, "ge"))
 
     def neg(self) -> "SymNode":
         return self._neg()  # type: ignore[attr-defined]

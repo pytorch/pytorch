@@ -2130,8 +2130,18 @@ def handle_sym_dispatch(func: Callable[_P, R], args: _P.args, kwargs: _P.kwargs)
     """
     mode = get_proxy_mode()
     assert mode
-    # Have to do it manually, because we're not doing the normal torch
-    # dispatch machinery which disables it for us
+
+    if any(isinstance(x, torch.SymInt) and isinstance(x.node._hint, torch.SymInt) for x in args):
+        if "eq" in str(func) and isinstance(args[0].node._hint, torch.SymInt) and isinstance(args[1].node._hint, torch.SymInt):
+            from torch.fx.experimental.sym_node import NestedIntNode
+
+            lhs, rhs = args[0].node._hint.node, args[1].node._hint.node
+            assert isinstance(lhs, NestedIntNode) and isinstance(rhs, NestedIntNode)
+            # TODO(soulitzer): handle coeff
+            if lhs.tensor is rhs.tensor:
+                return True
+            return torch.eq(lhs.tensor, rhs.tensor).all().item()
+
     with disable_proxy_modes_tracing():
         # TODO: properly compute types
         types: List[Type] = []

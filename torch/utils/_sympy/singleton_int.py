@@ -25,11 +25,13 @@ class SingletonInt(sympy.AtomicExpr):
     # See NOTE [ Inequalities with nested int ]
     def _eval_Eq(self, other):
         if (
-            isinstance(other, SingletonInt)
-            and other._val == self._val
-            and self._coeff == other._coeff
+            isinstance(other, SingletonInt) and
+            self._coeff == other._coeff
         ):
-            return sympy.true
+            if other._val == self._val:
+                return sympy.true
+            else:
+                return None
         else:
             return sympy.false
 
@@ -59,9 +61,11 @@ class SingletonInt(sympy.AtomicExpr):
         raise NotImplementedError("NYI")
 
     def __sub__(self, other):
+        return self
         raise NotImplementedError("NYI")
 
     def __truediv__(self, other):
+        return self
         raise NotImplementedError("NYI")
 
     def __floordiv__(self, other):
