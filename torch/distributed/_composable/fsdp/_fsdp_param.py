@@ -372,16 +372,12 @@ class FSDPParam:
         self.contiguous_sharded_stride = make_contiguous_strides_for(self.sharded_size)
         padded_sharded_size = chunks[0].size()  # 0th always padded
         self.padded_sharded_param_size = padded_sharded_size
-        if shard_dim == 0:
-            # Pre-pad the sharded parameter to avoid padding before all-gather
-            padded_sharded_param = param_data.new_zeros(padded_sharded_size)
-            if sharded_param.numel() > 0:
-                padded_sharded_param.narrow(
-                    dim=shard_dim, start=0, length=sharded_param.size(shard_dim)
-                ).copy_(sharded_param)
-        else:
-            assert padded_sharded_size == sharded_param.size()
-            padded_sharded_param = sharded_param.contiguous()
+        # Pre-pad the sharded parameter to avoid padding before all-gather
+        padded_sharded_param = param_data.new_zeros(padded_sharded_size)
+        if sharded_param.numel() > 0:
+            padded_sharded_param.narrow(
+                dim=shard_dim, start=0, length=sharded_param.size(shard_dim)
+            ).copy_(sharded_param)
         if self.offload_to_cpu and not padded_sharded_param.is_meta:
             padded_sharded_param = padded_sharded_param.cpu()
             if self.pin_memory:

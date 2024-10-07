@@ -276,7 +276,7 @@ def foreach_all_gather_copy_out(
             fsdp_param.alloc_all_gather_outputs()
     all_gather_output = all_gather_output.view(world_size, -1)
 
-    gen: List[torch.Tensor] = []
+    gen: List[torch.Tensor] = []  # TODO: make this var name more descriptive
     copy_infos: List[Tuple[FSDPParam, List[torch.Tensor]]] = []
     for fsdp_param in fsdp_params:
         if fsdp_param.fsdp_placement.dim == 0:
@@ -433,7 +433,7 @@ def foreach_reduce(
         for padded_unsharded_size, fsdp_param in zip(
             padded_unsharded_sizes, fsdp_params
         ):
-            # Assume even sharding for Shard(i), i > 1; otherwise would require
+            # Assume even sharding for Shard(i), i > 0; otherwise would require
             # copy-out for contiguous strides
             new_sharded_grad = torch.as_strided(
                 reduce_output,

@@ -1049,6 +1049,22 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
             self.assertEqual(full_param, ref_param)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_init_1d_transformer_shard_dim_neg1(self):
+        model, ref_model = self._init_models()
+
+        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+            # Check that FSDP will normalize this dim to non-negative
+            return Shard(-1)
+
+        for layer in model.layers:
+            fully_shard(layer, shard_placement_fn=shard_placement_fn)
+        fully_shard(model, shard_placement_fn=shard_placement_fn)
+
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            full_param = param.full_tensor()
+            self.assertEqual(full_param, ref_param)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_init_2d_transformer_shard_diff_dim(self):
         model, ref_model = self._init_models()
 
