@@ -3001,7 +3001,8 @@ such as `dist.all_reduce(tensor, async_op=True)`.
 
               .. warning ::
                   In normal cases, users do not need to set the timeout.
-                  calling wait() is the same as calling synchronize().
+                  calling wait() is the same as calling synchronize():
+                  Letting the current stream block on the completion of the NCCL work.
                   However, if timeout is set, it will block the CPU thread until the NCCL work is completed
                   or timed out. If timeout, exception will be thrown.
             )")
@@ -3394,3 +3395,4 @@ PyMethodDef* python_functions() {
 }
 
 } // namespace torch::distributed::c10d
+ 
