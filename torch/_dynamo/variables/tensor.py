@@ -765,7 +765,7 @@ class TensorVariable(VariableTracker):
         unimplemented("Tensor.backward")
 
     def method_data_ptr(self, *args, **kwargs):
-        unimplemented("Tensor.data_ptr")
+        return DataPtrVariable(self)
 
     def method_item(self, *args, **kwargs):
         if not config.capture_scalar_outputs:
@@ -1396,3 +1396,8 @@ class UntypedStorageVariable(VariableTracker):
         codegen(self.from_tensor)
         codegen.load_method("untyped_storage")
         codegen.call_method(0)
+
+
+class DataPtrVariable(VariableTracker):
+    def __init__(self, tensor: TensorVariable) -> None:
+        self.tensor = tensor
