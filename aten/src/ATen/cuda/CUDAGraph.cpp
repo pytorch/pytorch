@@ -83,6 +83,8 @@ void CUDAGraph::register_generator_state(const at::Generator& generator) {
 
 std::atomic<size_t> captureUniqueToken{1};
 
+constexpr int kAllocationStride = 1024;
+
 void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capture_mode, int sentinel_allocations_mode) {
   TORCH_CHECK(!has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "
@@ -153,7 +155,12 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
         return (void*)nullptr;
       } else {
         std::cout << "intercepted alloc of size " << allocSz << " returning allocIdx+1 since mode=2" << std::endl;
-        return (void*)((char*)nullptr + sentinelAllocationIdx++ + 1);
+        // I think that alignment is causing issues... The kernels can
+        // inspect the alignment to decide what amount of
+        // vectorization is possible in the loads and stores, etc. We
+        // want to make sure that the alignment is always "large
+        // enough". Use 1024 for now...
+        return (void*)((char*)nullptr + kAllocationStride * (1 + sentinelAllocationIdx++));
       }
     }, sentinelCaptureUniqueToken);
   }
@@ -443,8 +450,12 @@ void CUDAGraph::compare_with_recapture(const CUDAGraph& graph2) {
             std::cout << "GALVEZ: address_start=" << address_start << std::endl;
             std::cout << "GALVEZ: arg1_value=" << (void*)arg1_value << std::endl;
             std::cout << "GALVEZ: arg2_value=" << (void*)arg2_value << std::endl;
-              ptrdiff_t whichAlloc = arg2_value - arg1_value;
-              int64_t allocIdx = (int64_t)whichAlloc - 1;
+              int64_t whichAlloc = (int64_t)(arg2_value - arg1_value);
+              if (whichAlloc % kAllocationStride != 0) {
+                std::cout << "the allocation strided by " << whichAlloc << " which is not divisible by our stride " << kAllocationStride << " so this is not one of ours :(" << std::endl;
+                continue;
+              }
+              int64_t allocIdx = whichAlloc / kAllocationStride - 1;
               std::cout << "LEIJURV: allocIdx=" << allocIdx << std::endl;
               if (allocIdx < 0 || allocIdx >= allocationSizes.size()) {
                 std::cout << "LEIJURV: this isn't one of ours. the arg is different for some other reason :(" << std::endl;
