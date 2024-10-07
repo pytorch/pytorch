@@ -800,9 +800,9 @@ def compiled_fx_graph_hash(
 
 
 def cudagraph_post_compile(
-    gm: torch.fx.GraphModule,
     example_inputs: List[Any],
     compiled_graph: CompiledFxGraph,
+    constants: Dict[str, torch.Tensor],
     cudagraphs: BoxedBool,
 ) -> None:
     """
@@ -849,7 +849,7 @@ def cudagraph_post_compile(
             stack_traces=stack_traces,
             is_backward=is_backward,
             is_inference=is_inference,
-            constants=tuple(compiled_graph.get_constants_from_gm(gm).values()),
+            constants=tuple(constants.values()),
             placeholders=placeholders,
             mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
         )
@@ -1140,7 +1140,7 @@ class FxGraphCache:
     @staticmethod
     def post_compile(
         compiled_graph: CompiledFxGraph,
-        gm: torch.fx.GraphModule,
+        constants: Dict[str, torch.Tensor],
         example_inputs: List[torch.Tensor],
         cudagraphs: BoxedBool,
     ) -> CompiledFxGraph:
@@ -1169,9 +1169,9 @@ class FxGraphCache:
                 BoxedBool.disable(cudagraphs)
             else:
                 cudagraph_post_compile(
-                    gm,
                     example_inputs,
                     compiled_graph,
+                    constants,
                     cudagraphs,
                 )
         inputs_to_check = compiled_graph.inputs_to_check
@@ -1468,14 +1468,15 @@ class FxGraphCache:
         torch._logging.trace_structured(
             "artifact",
             metadata_fn=lambda: {
-                "name": "fx_graph_cache_hash",
+                "name": f"fx_graph_cache_{cache_state}",
                 "encoding": "json",
             },
             payload_fn=lambda: json.dumps(cache_info),
         )
         # Use the passed in cudagraphs so that we mutate the BoxedBool correctly
+        constants = compiled_graph.get_constants_from_gm(gm)
         FxGraphCache.post_compile(
-            compiled_graph, gm, example_inputs, fx_kwargs["cudagraphs"]
+            compiled_graph, constants, example_inputs, fx_kwargs["cudagraphs"]
         )
         return compiled_graph
 
