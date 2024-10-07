@@ -5,7 +5,17 @@ import functools
 import itertools
 import re
 from enum import auto, Enum
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Tuple,
+    TypeVar,
+)
 
 import sympy
 
@@ -18,6 +28,9 @@ from . import config, dependencies
 from .codegen.common import index_prevent_reordering
 from .utils import cache_on_self, sympy_index_symbol_with_prefix, sympy_subs
 from .virtualized import ops, V
+
+
+T = TypeVar("T")
 
 
 class InterpreterShim(torch.fx.Interpreter):
@@ -479,17 +492,51 @@ class LoopBodyBlock:
 
             def bucketize(
                 self,
-                values,
-                offsets_name: str,
-                offsets_size: sympy.Expr,
+                values: T,
+                boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+                boundary_indices: T,
                 indexing_dtype: torch.dtype,
                 right: bool,
-            ):
-                offsets_size = add_index(
-                    offsets_size, MemoryUsageType.BUCKETIZE, buffer_name=offsets_name
+                sorter: Optional[Tuple[str, sympy.Expr]] = None,
+                sorter_indices: Optional[T] = None,
+            ) -> T:
+                """
+                See [Note: Inductor bucketize op]
+                """
+                boundaries = (
+                    boundaries[0],
+                    add_index(
+                        boundaries[1],
+                        MemoryUsageType.BUCKETIZE,
+                        buffer_name=boundaries[0],
+                    ),
+                    add_index(
+                        boundaries[2],
+                        MemoryUsageType.BUCKETIZE,
+                        buffer_name=boundaries[0],
+                    ),
+                    add_index(
+                        boundaries[3],
+                        MemoryUsageType.BUCKETIZE,
+                        buffer_name=boundaries[0],
+                    ),
                 )
+                if sorter is not None:
+                    sorter = (
+                        sorter[0],
+                        add_index(
+                            sorter[1], MemoryUsageType.BUCKETIZE, buffer_name=sorter[0]
+                        ),
+                    )
+
                 return self._inner.bucketize(
-                    values, offsets_name, offsets_size, indexing_dtype, right
+                    values,
+                    boundaries,
+                    boundary_indices,
+                    indexing_dtype,
+                    right,
+                    sorter,
+                    sorter_indices,
                 )
 
             @staticmethod

@@ -665,7 +665,7 @@ class TestMaxAutotune(TestCase):
             out, code = run_and_get_code(m, input_tensor)
             self.assertEqual(out, m(input_tensor))
 
-            FileCheck().check("triton_poi_fused_cat_2.run").run(out[0])
+            FileCheck().check("triton_poi_fused_cat_2.run").run(code[0])
 
     def test_conv3d(self):
         fn = torch.nn.functional.conv3d

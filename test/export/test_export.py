@@ -791,8 +791,8 @@ graph():
                 # z = 4
                 return x + y + z + w2
 
-        ep = torch.export.export(M(), (torch.randn(2, 3),), strict=False)
-        self.assertEqual(ep.graph_signature.buffers_to_mutate, {"add_2": "buf"})
+        ep = export(M(), (torch.randn(2, 3),), strict=False)
+        self.assertEqual(list(ep.graph_signature.buffers_to_mutate.values()), ["buf"])
         self.assertTrue(
             torch.allclose(ep.module()(torch.ones(2, 3) + 1), torch.ones(2, 3) * 12)
         )
@@ -815,7 +815,7 @@ graph():
             ValueError,
             "The tensor attribute self.buf was assigned during export",
         ):
-            torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+            export(M(), (torch.randn(2, 3),), strict=False)
 
         class M(torch.nn.Module):  # complex with register buffer
             def __init__(self) -> None:
@@ -840,9 +840,9 @@ graph():
                 # z = 3 + 3
                 return x + y + z
 
-        ep = torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+        ep = export(M(), (torch.randn(2, 3),), strict=False)
         self.assertEqual(
-            ep.graph_signature.buffers_to_mutate, {"add_1": "buf_0", "add_2": "buf_1"}
+            list(ep.graph_signature.buffers_to_mutate.values()), ["buf_0", "buf_1"]
         )
         self.assertTrue(
             torch.allclose(ep.module()(torch.ones(2, 3) + 1), torch.ones(2, 3) * 10)
@@ -873,7 +873,7 @@ graph():
             ValueError,
             "The tensor attributes self.tensors\\[0\\], self.tensors\\[1\\] were assigned during export",
         ):
-            torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+            export(M(), (torch.randn(2, 3),), strict=False)
 
     def test_state_primitives(self):
         class M(torch.nn.Module):
@@ -4193,6 +4193,35 @@ def forward(self, x):
             )
         )
 
+    def test_cleanup_dynamic_markers(self) -> None:
+        class Foo(torch.nn.Module):
+            def forward(self, inputs):
+                x, y = inputs["x"], inputs["y"]
+                return x + y
+
+        inputs = (
+            {
+                "x": torch.randn(4, 8),
+                "y": torch.randn(4, 8),
+            },
+        )
+        shapes = {
+            "inputs": {
+                "x": (Dim.AUTO, Dim.STATIC),
+                "y": (Dim.DYNAMIC, Dim.STATIC),
+            },
+        }
+        ep = export(Foo(), inputs, dynamic_shapes=shapes)
+        for tensor in inputs[0].values():
+            for attr in [
+                "_dynamo_weak_dynamic_indices",
+                "_dynamo_dynamic_indices",
+                "_dynamo_dynamic_range",
+                "_dynamo_static_indices",
+                "_dynamo_unbacked_indices",
+            ]:
+                self.assertFalse(hasattr(tensor, attr))
+
     def test_constrain_decomp(self) -> None:
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -5974,6 +6003,43 @@ graph():
 
         self.assertEqual(gm_flat_non_strict(*inp), gm_flat_strict(*inp))
 
+    def test_preserve_module_call_signature_unflatten_specialization(self):
+        class N(torch.nn.Module):
+            def forward(self, x, b):
+                if b:
+                    return x + 1
+                else:
+                    return x + 2
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n = N()
+
+            def forward(self, x):
+                x0 = x + 3
+                x1 = self.n(x0, True)
+                return x1 + 4
+
+        inp = (torch.ones(1),)
+        m = M()
+        eager_result = m(*inp)
+
+        if not is_retracebility_test(self._testMethodName):
+            ep = export(M(), inp, preserve_module_call_signature=("n",))
+            epm = ep.module()
+            ufm = torch.export.unflatten(ep)
+
+            exported_result = epm(*inp)
+            self.assertTrue(torch.allclose(exported_result, eager_result))
+
+            unflattened_result = ufm(*inp)
+            self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
+            ufm.set_submodule("n", N())
+            unflattened_result = ufm(*inp)
+            self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
     def test_unflatten_multiple_graphs_preserve_signature_error(self):
         class N(torch.nn.Module):
             def forward(self, x, b):
@@ -6551,6 +6617,34 @@ def forward(self, x, b_t, y):
         if not is_training_ir_test(self._testMethodName):
             self.assertIn(
                 "torch.ops.higher_order.wrap_with_set_grad_enabled",
+                ep.graph_module.code,
+            )
+
+    # T203671967
+    @testing.expectedFailureRetraceability  # autocast nodes not created after re-tracing
+    def test_export_with_autocast(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                with torch.autocast(
+                    device_type="cuda", dtype=torch.int16, enabled=True
+                ):
+                    y = x.sin().sum()
+                with torch.autocast(
+                    device_type="cpu", dtype=torch.float64, enabled=True
+                ):
+                    z = y.sin().sum()
+                return z
+
+        model = Model()
+        ep = export(model, (torch.randn(4, 4),), {})
+        # _export_for_traininig is using pre_dispatch=False
+        # Therefore the autocast calls are not replaced with a hop.
+        # non_strict doesn't have autocast nodes
+        if not is_non_strict_test(self._testMethodName) and not is_training_ir_test(
+            self._testMethodName
+        ):
+            self.assertIn(
+                "torch.ops.higher_order.wrap_with_autocast",
                 ep.graph_module.code,
             )
 
@@ -7311,7 +7405,7 @@ def forward(self, x, y):
         m2 = M2()
         m1 = M1(m2, m2.foo)
         inps = (torch.ones(3, 3),)
-        ep = torch.export.export(m1, inps, strict=False)
+        ep = export(m1, inps, strict=False)
         # check both constants appear in list
         self.assertEqual(sorted(list(ep.constants)), ["foo", "m2.foo"])
         # check only one input spec exists
