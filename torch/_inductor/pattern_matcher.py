@@ -1616,7 +1616,26 @@ def is_start_of_fx_graph(graph: torch.fx.Graph, node: torch.fx.Node) -> bool:
 _mutation_op_re = re.compile(r"(?<!_)(_$|_[.]|(\b|_)(set|enter|exit|seed)(\b|_))(?!_)")
 
 
+def incorrect_inductor_schema_op(op: torch._ops.OpOverload):
+    if op.namespace != "inductor":
+        return False
+
+    # TODO - fix schema
+    return op in (
+        torch.ops.inductor.accumulate_grad_.default,
+        torch.ops.inductor.resize_storage_bytes_.default,
+    )
+
+
 def is_mutation_op(node: torch.fx.Node) -> bool:
+    if isinstance(
+        node.target, torch._ops.OpOverload
+    ) and not incorrect_inductor_schema_op(node.target):
+        return node.target._schema.is_mutable
+    elif isinstance(
+        node.target, torch._higher_order_ops.auto_functionalize.AutoFunctionalized
+    ):
+        return False
     if node.op == "call_function":
         if _mutation_op_re.search(node.target.__name__):  # type: ignore[union-attr]
             return True
