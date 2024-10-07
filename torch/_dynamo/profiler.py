@@ -15,7 +15,7 @@ class ProfileMetrics:
     fusions: int = 0
     graphs: int = 0
 
-    def __iadd__(self, other: "ProfileMetrics") -> Self:
+    def __iadd__(self, other: Self) -> Self:
         self.microseconds += other.microseconds
         self.operators += other.operators
         self.fusions += other.fusions
@@ -53,7 +53,7 @@ class ProfileResult:
         self.total: ProfileMetrics = total or ProfileMetrics()
         self.unique_graphs: int = unique_graphs
 
-    def __iadd__(self, other: "ProfileResult") -> Self:
+    def __iadd__(self, other: Self) -> Self:
         self.captured += other.captured
         self.total += other.total
         self.unique_graphs += other.unique_graphs
