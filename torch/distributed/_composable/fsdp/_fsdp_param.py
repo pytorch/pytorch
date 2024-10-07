@@ -364,7 +364,6 @@ class FSDPParam:
                 f"FSDP does not support uneven sharding on dim {shard_dim}: {param_data.size()}"
             )
         chunks = _chunk_with_empty(param_data, shard_world_size, dim=shard_dim)
-        self._shard_chunk_sizes = [c.size() for c in chunks]
         sharded_param = chunks[shard_rank]
         self.sharded_size = _get_dim_chunked_size(
             sharded_param, param_data.size(), dim=shard_dim
