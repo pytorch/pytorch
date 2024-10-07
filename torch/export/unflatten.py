@@ -269,9 +269,7 @@ class UnflattenedModule(torch.nn.Module):
 
         non_persistent_buffers = set(self.graph_signature.non_persistent_buffers)
         assigned_buffers: Set[str] = set()  # tracking unused buffers
-        id_to_buffer: Dict[
-            int, Tuple[torch.nn.Parameter, bool]
-        ] = {}  # handle weight-sharing
+        id_to_buffer: Dict[int, Tuple[torch.nn.Parameter, bool]] = {}
         for name in self.graph_signature.buffers:  # this loop adds used buffers
             if name in non_persistent_buffers:
                 persistent = False
@@ -854,8 +852,8 @@ class _ModuleFrame:
             with self.parent.graph.inserting_before(self.parent_call_module):
                 input_nodes: List[Optional[torch.fx.Node]] = []
                 for input in signature.inputs:
-                    if isinstance(input, ConstantArgument) and input.value is None:
-                        input_nodes.append(None)
+                    if isinstance(input, ConstantArgument):
+                        input_nodes.append(input.value)  # type: ignore[arg-type]
                     elif input.name not in self.seen_nodes:
                         input_nodes.append(None)
                     else:
@@ -1214,9 +1212,9 @@ def _deduplicate_modules(partitions):
                         # So we remove the current module from the hierarchy and replace
                         # the current call name with the seen call name in the parent graph.
                         *prefix, name = target.split(".")
-                        _recursive_getattr(entry.parent_module, prefix)._modules.pop(
-                            name
-                        )
+                        _get_attr_via_attr_list(
+                            entry.parent_module, prefix
+                        )._modules.pop(name)
                         seen_child_fqn = _call_name(seen.fqn, seen.call_idx)
                         seen_target = _compute_accessor(
                             entry.parent_fqn, seen_child_fqn
