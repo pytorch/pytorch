@@ -85,17 +85,17 @@ def write_view_information_to_args(
             kwargs[f"{prefix}_base_index"] = None
         else:
             base = get_base(tensor)
+            kwargs[f"{prefix}_base_index"] = base_index
             if base is None:
-                kwargs[f"{prefix}_base_index"] = base_index
+                # no need to add anything else other than _base_index
+                return
             elif (
                 base.size() == tensor.size()
                 and base.stride() == tensor.stride()
                 and base.storage_offset() == tensor.storage_offset()
             ):
-                kwargs[f"{prefix}_base_index"] = base_index
-                kwargs[f"{prefix}_alias"] = base_index
+                kwargs[f"{prefix}_alias"] = True
             else:
-                kwargs[f"{prefix}_base_index"] = base_index
                 kwargs[f"{prefix}_size"] = tensor.size()
                 kwargs[f"{prefix}_stride"] = tensor.stride()
                 kwargs[f"{prefix}_storage_offset"] = tensor.storage_offset()
