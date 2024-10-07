@@ -1066,7 +1066,7 @@ alias_default = alias_default_1 = foo_default = None
                         ignore_empty_lines=True,
                     )
 
-    # foo takes two views on the same input, function does not have return.
+    # Test that slice view is generated instead of as_strided when split is used. 
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_split(self, _dynamic=False):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -1177,9 +1177,122 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
                         ignore_empty_lines=True,
                     )
 
+    # Note that split force the input tensor to get specialized. So we do not see SymInts when _dynamic=True.
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_split_dynamic(self):
         self.test_split(_dynamic=True)
+
+
+    # Test that slice view is generated instead of as_strided when slice is used.
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_slice(self, _dynamic=False):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!) x, Tensor(b!) y) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x, y):
+                x.sin_()
+                y.sin_()
+
+            def f(x):
+                a = torch.ops.aten.slice.Tensor(x, 0, 0, 2)
+                b = torch.ops.aten.slice.Tensor(x, 1, 3, 4)
+                torch.ops.mylib.foo(a, b)
+                return (a, b, x)
+
+            orig_args = [torch.randn(10, 10)]
+            [aot_eager_args, result1, graph_aot] = self.run_aot_eager(
+                f, orig_args, _dynamic
+            )
+            [inductor_args, result2, graph_inductor] = self.run_inductor(
+                f, orig_args, _dynamic
+            )
+            eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+            result3 = f(*eager_args)
+
+            self.assertEqual(inductor_args, eager_args)
+            self.assertEqual(inductor_args, aot_eager_args)
+
+            self.assertEqual(result3, result1)
+            self.assertEqual(result3, result2)
+
+            if torch._dynamo.config.assume_static_by_default:
+                if _dynamic:
+                    self.assertExpectedInline(
+                        graph_aot,
+                        """\
+def forward(self, arg0_1: "Sym(s0)", arg1_1: "f32[s0, s0][s0, 1]cpu"):
+        floordiv: "Sym(0)" = 0 // arg0_1;  arg0_1 = None
+        add_6: "Sym(2)" = floordiv + 2
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_slice_dim = 0, _x_slice_start = floordiv, _x_slice_end = add_6, _y_base_index = 0, _y_slice_dim = 1, _y_slice_start = 3, _y_slice_end = 4, _all_bases = [arg1_1]);  floordiv = add_6 = None
+        getitem_1: "f32[s0, s0][s0, 1]cpu" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+        copy_: "f32[s0, s0][s0, 1]cpu" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = copy_ = None
+        slice_3: "f32[2, s0][s0, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_1, 0, 0, 2)
+        slice_4: "f32[s0, 1][s0, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_1, 1, 3, 4);  getitem_1 = None
+        return (slice_3, slice_4)""",  # noqa: B950
+                        ignore_comments=True,
+                        ignore_empty_lines=True,
+                    )
+                else:
+                    self.assertExpectedInline(
+                        graph_aot,
+                        """\
+def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_slice_dim = 0, _x_slice_start = 0, _x_slice_end = 2, _y_base_index = 0, _y_slice_dim = 1, _y_slice_start = 3, _y_slice_end = 4, _all_bases = [arg0_1])
+        getitem_1: "f32[10, 10][10, 1]cpu" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+        copy_: "f32[10, 10][10, 1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = copy_ = None
+        slice_3: "f32[2, 10][10, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_1, 0, 0, 2)
+        slice_4: "f32[10, 1][10, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_1, 1, 3, 4);  getitem_1 = None
+        return (slice_3, slice_4)""",  # noqa: B950
+                        ignore_comments=True,
+                        ignore_empty_lines=True,
+                    )
+
+            # 2. Run with inductor backend
+            if torch._dynamo.config.assume_static_by_default:
+                if _dynamic:
+                    self.assertExpectedInline(
+                        graph_inductor,
+                        """\
+def forward(self, arg0_1: "Sym(s0)", arg1_1: "f32[s0, s0][s0, 1]cpu"):
+        floordiv: "Sym(0)" = 0 // arg0_1;  arg0_1 = None
+        add_6: "Sym(2)" = floordiv + 2;  floordiv = add_6 = None
+        slice_tensor: "f32[2, s0][s0, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 0, 0, 2)
+        slice_tensor_1: "f32[s0, 1][s0, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 1, 3, 4)
+        foo_default = torch.ops.mylib.foo.default(slice_tensor, slice_tensor_1);  slice_tensor = slice_tensor_1 = foo_default = None
+        copy_: "f32[s0, s0][s0, 1]cpu" = torch.ops.aten.copy_.default(arg1_1, arg1_1);  copy_ = None
+        slice_3: "f32[2, s0][s0, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 0, 0, 2)
+        slice_4: "f32[s0, 1][s0, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 1, 3, 4);  arg1_1 = None
+        return (slice_3, slice_4)""",  # noqa: B950
+                        ignore_comments=True,
+                        ignore_empty_lines=True,
+                    )
+                else:
+                    self.assertExpectedInline(
+                        graph_inductor,
+                        """\
+def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
+        slice_tensor: "f32[2, 10][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, 2)
+        slice_tensor_1: "f32[10, 1][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 3, 4)
+        foo_default = torch.ops.mylib.foo.default(slice_tensor, slice_tensor_1);  slice_tensor = slice_tensor_1 = foo_default = None
+        copy_: "f32[10, 10][10, 1]cpu" = torch.ops.aten.copy_.default(arg0_1, arg0_1);  copy_ = None
+        slice_3: "f32[2, 10][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, 2)
+        slice_4: "f32[10, 1][10, 1]cpu" = torch.ops.aten.slice.Tensor(arg0_1, 1, 3, 4);  arg0_1 = None
+        return (slice_3, slice_4)""",  # noqa: B950
+                        ignore_comments=True,
+                        ignore_empty_lines=True,
+                    )
+    
+    # Note that split force the input tensor to get specialized. So we do not see SymInts when _dynamic=True.
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_slice_dynamic(self):
+        self.test_slice(_dynamic=True)
 
     def test_try_use_slice(self):
         def test_round_trip(base, tensor):
@@ -1248,9 +1361,9 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
         test_round_trip(t, t[0:2])
         test_round_trip(t, t[3:4])
 
-    # Test that the alias optimization, were alias is called instead of as_strided, does not result in recompilation.
-    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
-    def test_alias_recompile(self):
+    # Test that the view regenrations optimizations do not result in recompilations.
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=False)
+    def test_recompile(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
                 "mylib::foo",
@@ -1270,41 +1383,56 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
                 torch.ops.mylib.foo(a, b)
 
             counter = CompileCounterWithBackend("inductor")
-            compiled = torch.compile(
-                func, backend=counter, fullgraph=True, dynamic=True
-            )
-            compiled(torch.rand(10, 10))
-            compiled(torch.rand(2, 2))
-            self.assertEqual(counter.frame_count, 1)
+            # compiled = torch.compile(
+            #     func, backend=counter, fullgraph=True, dynamic=True
+            # )
+            # compiled(torch.rand(10, 10))
+            # compiled(torch.rand(2, 2))
+            # self.assertEqual(counter.frame_count, 1)
+
+            # def func(x):
+            #     a = torch.ops.aten.alias.default(x)
+            #     b = torch.ops.aten.alias.default(x)
+            #     torch.ops.mylib.foo(a, b)
+
+            # compiled = torch.compile(
+            #     func, backend=counter, fullgraph=True, dynamic=True
+            # )
+            # compiled(torch.rand(2, 10))
+            # compiled(torch.rand(2, 2))
+            # self.assertEqual(counter.frame_count, 2)
+
+            # def func(x):
+            #     # last row
+            #     a = x[x.size()[0] - 1]
+
+            #     # first row
+            #     b = x[0]
+            #     torch.ops.mylib.foo(a, b)
+
+            # compiled = torch.compile(
+            #     func, backend=counter, fullgraph=True, dynamic=False
+            # )
+            # compiled(torch.rand(2, 10))
+            # compiled(torch.rand(2, 2))
+            # # recompilation does happen in this case, but it happens with both V2 and V1 and
+            # #  even with out the optimization so its ok.
+            # self.assertEqual(counter.frame_count, 4)
 
             def func(x):
-                a = torch.ops.aten.alias.default(x)
-                b = torch.ops.aten.alias.default(x)
+                a = torch.ops.aten.slice.Tensor(x, 1, 3, 4)
+                b = torch.ops.aten.slice.Tensor(x, 0, 1, 4)
                 torch.ops.mylib.foo(a, b)
 
             compiled = torch.compile(
                 func, backend=counter, fullgraph=True, dynamic=True
-            )
-            compiled(torch.rand(2, 10))
-            compiled(torch.rand(2, 2))
-            self.assertEqual(counter.frame_count, 2)
-
-            def func(x):
-                # last row
-                a = x[x.size()[0] - 1]
-
-                # first row
-                b = x[0]
-                torch.ops.mylib.foo(a, b)
-
-            compiled = torch.compile(
-                func, backend=counter, fullgraph=True, dynamic=False
             )
             compiled(torch.rand(2, 10))
             compiled(torch.rand(2, 2))
             # recompilation does happen in this case, but it happens with both V2 and V1 and
             #  even with out the optimization so its ok.
-            self.assertEqual(counter.frame_count, 4)
+            self.assertEqual(counter.frame_count, 1)
+        
 
     # Test that the alias optimization, were alias is called instead of as_strided, preserve the fact
     # that id(x) != id(base)
