@@ -4046,11 +4046,27 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         layout: Layout,
         inputs: List[IRNode],
         choice_timings: Callable[[], Dict[ChoiceCaller, float]],
+        unfiltered_choices: List[ChoiceCaller],
     ):
         super().__init__(layout=layout, inputs=inputs, make_kernel_render=None)
         self._choice_timings_fn = choice_timings
         self._choice_timings: Optional[Dict[ChoiceCaller, float]] = None
         self.original_inputs = inputs
+        self._output_plannable = all(
+            isinstance(choice, TritonTemplateCallerBase)
+            or (
+                isinstance(choice, torch._inductor.select_algorithm.ExternKernelCaller)
+                and choice.has_out_variant
+            )
+            for choice in unfiltered_choices
+        )
+
+    @property
+    def output_plannable(self) -> bool:
+        """
+        Are all possible choices TritonTemplates or Extern Kernels with out variants
+        """
+        return self._output_plannable
 
     @property
     def choice_timings(self) -> Dict[ChoiceCaller, float]:
@@ -4269,10 +4285,31 @@ class ConcatKernel(NopKernel):
         return kernel
 
     @classmethod
-    def can_realize_into_without_copy(cls, src):
+    def can_realize_into_without_copy(cls, src, dst=None):
         if isinstance(src, TensorBox):
             # unwrap a TensorBox
-            return cls.can_realize_into_without_copy(src.data)
+            return cls.can_realize_into_without_copy(src.data, dst)
+
+        if isinstance(src.data, MultiTemplateBuffer):
+            if (
+                not isinstance(src.data.layout, FixedLayout)
+                or not src.data.output_plannable
+            ):
+                return False
+
+            # we call can_realize_into_without_copy in cat lowering before we've decided
+            # on output format, optimistically assume layout matches
+            if dst is None:
+                return True
+
+            # otherwise, check equality of layouts
+            if not len(src.get_stride()) == len(dst.get_stride()):
+                return False
+
+            return all(
+                V.graph.sizevars.statically_known_equals(s1, s2)
+                for s1, s2 in zip(src.get_stride(), dst.get_stride())
+            )
 
         return isinstance(src.data.layout, FlexibleLayout) and not isinstance(
             src.data, ExternKernelAlloc
@@ -4291,11 +4328,12 @@ class ConcatKernel(NopKernel):
         if isinstance(src, TensorBox):
             # unwrap a TensorBox
             return cls.realize_into(src.data, dst)
+
         if isinstance(src, StorageBox):
             src.realize()
             # ExternKernelAlloc has specific requirements for output layout, should create a copy
             assert hasattr(src.data, "layout")
-            if cls.can_realize_into_without_copy(src):
+            if cls.can_realize_into_without_copy(src, dst):
                 src.data.layout = NonOwningLayout(dst)
                 return src.data
         # introduce a copy
