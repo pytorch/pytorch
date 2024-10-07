@@ -401,6 +401,8 @@ def get_pip_packages(run_lambda, patterns=None):
     # But here it is invoked as `python -mpip`
     def run_with_pip(pip):
         out = run_and_read_all(run_lambda, pip + ["list", "--format=freeze"])
+        if out is None:
+            return ""
         return "\n".join(
             line
             for line in out.splitlines()
