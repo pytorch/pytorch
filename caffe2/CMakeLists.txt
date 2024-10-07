@@ -891,9 +891,9 @@ if(USE_ROCM)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
   list(APPEND Caffe2_HIP_SRCS ${GENERATED_CXX_TORCH_CUDA})
   hip_add_library(torch_hip ${Caffe2_HIP_SRCS})
-  if(USE_FLASH_ATTENTION)
-    target_link_libraries(torch_hip PRIVATE __caffe2_aotriton)
-  endif()
+#  if(USE_FLASH_ATTENTION)
+#    target_link_libraries(torch_hip PRIVATE __caffe2_aotriton)
+#  endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_hip)  # see cmake/public/utils.cmake
   # TODO: Not totally sure if this is live or not
