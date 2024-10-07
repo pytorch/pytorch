@@ -81,6 +81,13 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
     cusparseLtMatDescriptor_t sparse_input_descriptor;
     cudaDataType type;
     auto compression_factor = 9;
+#ifdef USE_ROCM
+    int device_index = at::cuda::current_device();
+    TORCH_CHECK(isHipSparseLtSupported(device_index), 
+                "hipSPARSELt is not supported on this device. ",
+                "Supported architectures are: gfx940, gfx941, gfx942, gfx1200, gfx1201. ",
+                "Also, ROCm version must be >= 6.2.0");
+#endif
 
     switch(
         sparse_input.scalar_type()
