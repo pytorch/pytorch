@@ -106,7 +106,7 @@ class TritonSplitScanKernel(TritonKernel):
         assert len(self.numels) == 2, "Unexpected tiling"
         min_rblock = config.triton.min_split_scan_rblock
         rnumel = self.numels["r0_"]
-        max_blocks = prod(rnumel) * CeilDiv(rnumel, min_rblock)
+        max_blocks = rnumel * CeilDiv(rnumel, min_rblock)
         nbytes = scratch_nbytes_per_block * max_blocks
         scratch_base, offset = self.args.workspace(nbytes=nbytes, zero_fill=True)
         if offset != 0:
