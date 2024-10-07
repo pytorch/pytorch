@@ -124,7 +124,7 @@ inline aotriton::TensorView<0> mk_aoscalartensor(const at::Tensor& q)
 inline aotriton::TensorView<0> mk_philoxtensor(const int64_t* ptr)
 {
   return aotriton::TensorView<0>(reinterpret_cast<intptr_t>(ptr),
-                                 aotriton::DType::kUInt64);  // AOTriton excepts unsigned int64
+                                 aotriton::DType::kUInt64);  // AOTriton accepts unsigned int64
 }
 
 } // namespace aotriton_adapter

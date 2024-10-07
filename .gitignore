@@ -123,6 +123,10 @@ torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h
 torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h
 torch/version.py
 minifier_launcher.py
+# Generated CK kernels
+aten/src/ATen/native/transformers/hip/flash_attn/fmha_*
+aten/src/ATen/native/transformers/hip/flash_attn/fwd_blob*
+aten/src/ATen/native/transformers/hip/flash_attn/bwd_blob*
 # Root level file used in CI to specify certain env configs.
 # E.g., see .circleci/config.yaml
 env
