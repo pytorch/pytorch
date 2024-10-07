@@ -2540,6 +2540,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.memory._snapshot",
         "torch.cuda.memory.caching_allocator_alloc",
         "torch.cuda.memory.caching_allocator_delete",
+        "torch.cuda.memory.caching_allocator_enable",
         "torch.cuda.memory.change_current_allocator",
         "torch.cuda.memory.empty_cache",
         "torch.cuda.memory.get_allocator_backend",
