@@ -343,6 +343,18 @@ void Context::setBlasPreferredBackend(at::BlasBackend b) {
 #endif
 }
 
+at::ROCmFABackend Context::getROCmFAPreferredBackend() const {
+  return rocm_fa_preferred_backend;
+}
+
+void Context::setROCmFAPreferredBackend(at::ROCmFABackend b) {
+  // TODO: add plumbing for hasCK for validity checking
+  TORCH_CHECK((b != at::ROCmFABackend::Ck) || hasROCM(),
+      "Cannot set preferred flash attention backend to Ck if PyTorch has not been compiled for ROCm.");
+  rocm_fa_preferred_backend = b;
+}
+
+
 bool Context::allowFP16ReductionCuBLAS() const {
   return allow_fp16_reduction_cublas;
 }
