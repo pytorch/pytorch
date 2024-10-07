@@ -1131,7 +1131,8 @@ alias_default = alias_default_1 = foo_default = None
             #  even with out the optimization so its ok.
             self.assertEqual(counter.frame_count, 4)
 
-    # Test that the alias optimization, were alias is called instead of as_strided, does not result in recompilation.
+    # Test that the alias optimization, were alias is called instead of as_strided, preserve the fact
+    # that id(x) != id(base)
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     @unittest.skip(
         reason="This test fails because something else in inductor optimize out the alias. issue #137434"

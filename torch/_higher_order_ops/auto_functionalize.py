@@ -92,7 +92,6 @@ def write_view_information_to_args(
                 and base.stride() == tensor.stride()
                 and base.storage_offset() == tensor.storage_offset()
             ):
-                # if the tensor is the base (not view), for simplicity we do not serialize view meta.
                 kwargs[f"{prefix}_base_index"] = base_index
                 kwargs[f"{prefix}_alias"] = base_index
             else:
