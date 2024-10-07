@@ -1,5 +1,7 @@
 # Owner(s): ["module: functionalization"]
 
+import unittest
+
 import numpy as np
 
 import torch
@@ -9,6 +11,7 @@ import torch._inductor.test_case
 import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
 from torch import Tensor
+from torch._dynamo.testing import CompileCounterWithBackend
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -937,7 +940,6 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
     def test_dynamic3_v2(self):
         self.test_auto_functionalize_extra2(_dynamic=True)
 
-    # foo takes two views on the same input, function does not have return.
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_graph_input_is_view(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -964,7 +966,6 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             # to clone not-inplaced args.
             f(x[1])
 
-    # foo takes two views on the same input, function does not have return.
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_alias(self, _dynamic=False):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -1009,8 +1010,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                         graph_aot,
                         """\
 def forward(self, arg0_1: "Sym(s0)", arg1_1: "f32[s0][1]cpu"):
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, \
-_x_base_index = 0, _y_base_index = 0, _all_bases = [arg1_1])
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_alias = True, _y_base_index = 0, _y_alias = True, _all_bases = [arg1_1])
         getitem_1: "f32[s0][1]cpu" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
         copy_: "f32[s0][1]cpu" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = copy_ = None
         alias_2: "f32[s0][1]cpu" = torch.ops.aten.alias.default(getitem_1)
@@ -1024,8 +1024,7 @@ _x_base_index = 0, _y_base_index = 0, _all_bases = [arg1_1])
                         graph_aot,
                         """\
 def forward(self, arg0_1: "f32[2][1]cpu"):
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, \
-_x_base_index = 0, _y_base_index = 0, _all_bases = [arg0_1])
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_alias = True, _y_base_index = 0, _y_alias = True, _all_bases = [arg0_1])
         getitem_1: "f32[2][1]cpu" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
         copy_: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = copy_ = None
         alias_2: "f32[2][1]cpu" = torch.ops.aten.alias.default(getitem_1)
@@ -1042,7 +1041,10 @@ _x_base_index = 0, _y_base_index = 0, _all_bases = [arg0_1])
                         graph_inductor,
                         """\
 def forward(self, arg0_1: "Sym(s0)", arg1_1: "f32[s0][1]cpu"):
-        foo_default = torch.ops.mylib.foo.default(arg1_1, arg1_1);  foo_default = None
+        alias_default: "f32[s0][1]cpu" = torch.ops.aten.alias.default(arg1_1)
+        alias_default_1: "f32[s0][1]cpu" = torch.ops.aten.alias.default(arg1_1)
+        foo_default = torch.ops.mylib.foo.default(alias_default, alias_default_1);  \
+alias_default = alias_default_1 = foo_default = None
         copy_: "f32[s0][1]cpu" = torch.ops.aten.copy_.default(arg1_1, arg1_1);  copy_ = None
         return (arg1_1, arg1_1)""",  # noqa: B950
                         ignore_comments=True,
@@ -1053,7 +1055,10 @@ def forward(self, arg0_1: "Sym(s0)", arg1_1: "f32[s0][1]cpu"):
                         graph_inductor,
                         """\
 def forward(self, arg0_1: "f32[2][1]cpu"):
-        foo_default = torch.ops.mylib.foo.default(arg0_1, arg0_1);  foo_default = None
+        alias_default: "f32[2][1]cpu" = torch.ops.aten.alias.default(arg0_1)
+        alias_default_1: "f32[2][1]cpu" = torch.ops.aten.alias.default(arg0_1)
+        foo_default = torch.ops.mylib.foo.default(alias_default, alias_default_1);  \
+alias_default = alias_default_1 = foo_default = None
         copy_: "f32[2][1]cpu" = torch.ops.aten.copy_.default(arg0_1, arg0_1);  copy_ = None
         return (arg0_1, arg0_1)""",  # noqa: B950
                         ignore_comments=True,
@@ -1063,6 +1068,91 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_alias_dynamic(self):
         self.test_alias(_dynamic=True)
+
+    # Test that the alias optimization, were alias is called instead of as_strided, does not result in recompilation.
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_alias_recompile(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!) x, Tensor(b!) y) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x, y):
+                pass
+
+            def func(x):
+                a = x[0]
+                b = x[1]
+                torch.ops.mylib.foo(a, b)
+
+            counter = CompileCounterWithBackend("inductor")
+            compiled = torch.compile(
+                func, backend=counter, fullgraph=True, dynamic=True
+            )
+            compiled(torch.rand(10, 10))
+            compiled(torch.rand(2, 2))
+            self.assertEqual(counter.frame_count, 1)
+
+            def func(x):
+                a = torch.ops.aten.alias.default(x)
+                b = torch.ops.aten.alias.default(x)
+                torch.ops.mylib.foo(a, b)
+
+            compiled = torch.compile(
+                func, backend=counter, fullgraph=True, dynamic=True
+            )
+            compiled(torch.rand(2, 10))
+            compiled(torch.rand(2, 2))
+            self.assertEqual(counter.frame_count, 2)
+
+            def func(x):
+                # last row
+                a = x[x.size()[0] - 1]
+
+                # first row
+                b = x[0]
+                torch.ops.mylib.foo(a, b)
+
+            compiled = torch.compile(
+                func, backend=counter, fullgraph=True, dynamic=False
+            )
+            compiled(torch.rand(2, 10))
+            compiled(torch.rand(2, 2))
+            # recompilation does happen in this case, but it happens with both V2 and V1 and
+            #  even with out the optimization so its ok.
+            self.assertEqual(counter.frame_count, 4)
+
+    # Test that the alias optimization, were alias is called instead of as_strided, preserve the fact
+    # that id(x) != id(base)
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    @unittest.skip(
+        reason="This test fails because something else in inductor optimize out the alias. issue #137434"
+    )
+    def test_alias_id(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::not_eq",
+                "(Tensor(a!) x, Tensor(b!) y) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::not_eq", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def not_eq_impl(x, y):
+                self.assertNotEqual(id(x), id(y))
+
+            def func(x):
+                a = torch.ops.aten.alias.default(x)
+                torch.ops.mylib.not_eq(a, x)
+
+            compiled = torch.compile(func, backend="inductor", fullgraph=True)
+            compiled(torch.rand(2, 2))
 
 
 if __name__ == "__main__":
