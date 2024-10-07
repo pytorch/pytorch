@@ -29,7 +29,6 @@ namespace at::native {
 thread_local cusparseLtHandle_t handle;
 thread_local bool handle_initialized = false;
 
-// Look-up table for HIPSPARSELT data types
 #ifdef USE_ROCM
 const static std::unordered_map<hipDataType, hipsparseLtDatatype_t> sparseLtDataTypes = {
     {HIP_R_8I, HIPSPARSELT_R_8I},
@@ -58,7 +57,6 @@ static bool isHipSparseLtSupported(int idx) {
         std::string_view baseArch = (colonPos != std::string_view::npos) ? gcnArchName.substr(0, colonPos) : gcnArchName;
         result = (supported_archs.count(std::string(baseArch)) > 0);
     } catch (const std::exception&) {
-        // If an exception occurs, we assume it's not supported
     }
 
     {
@@ -210,7 +208,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         break;
 
 // cuSPARSELt v0.5.2 onwards changes CUSPARSE_COMPUTE_TF32, CUSPARSE_COMPUT_16F to CUSPARSE_COMPUTE_32F
-#if ((defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 502) || defined(USE_ROCM))
+#if ((defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 502) || (defined(USE_ROCM) && ROCM_VERSION >= 60200))
     case at::ScalarType::Half:
         input_type = CUDA_R_16F;
         output_type = CUDA_R_16F;
