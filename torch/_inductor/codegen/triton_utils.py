@@ -9,7 +9,7 @@ from .. import config
 from ..runtime.hints import instance_descriptor
 from ..utils import _type_of
 from ..virtualized import V
-from .common import KernelArgType, SizeArg, TensorArg, WorkspaceArg
+from .common import KernelArgType, SizeArg, TensorArg, TMADescriptorArg, WorkspaceArg
 
 
 def should_unwrap_unspec_arg(name: str):
@@ -61,6 +61,8 @@ def signature_of(arg: KernelArgType, *, size_dtype: str) -> str:
             raise NotImplementedError(f"unhandled size_dtype {size_dtype}")
     if isinstance(arg, WorkspaceArg):
         return "*i8"
+    if isinstance(arg, TMADescriptorArg):
+        return "nvTmaDesc"
     raise NotImplementedError(f"unhandled {type(arg)}: {arg}")
 
 
@@ -139,6 +141,8 @@ def config_of(
             return V.graph.sizevars.statically_known_multiple_of(x.expr, alignment)  # type: ignore[arg-type]
         if isinstance(x, WorkspaceArg):
             return V.graph.sizevars.statically_known_multiple_of(x.nbytes, alignment)  # type: ignore[arg-type]
+        if isinstance(x, TMADescriptorArg):
+            return False
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
     if config.triton.divisible_by_16:

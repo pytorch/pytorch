@@ -207,9 +207,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         )
         if fn.__kwdefaults__:
             kwdefaults_sources = {
-                k: None
-                if self.source is None
-                else DefaultsSource(self.source, k, is_kw=True)
+                k: (
+                    None
+                    if self.source is None
+                    else DefaultsSource(self.source, k, is_kw=True)
+                )
                 for k in fn.__kwdefaults__
             }
             fake_func.__kwdefaults__ = {
@@ -1067,7 +1069,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
         grid = grid.call_function(tx, [meta], {})
         return grid
 
-    def call_HOP(self, variable, grids, combined_args_raw, tx):
+    def call_HOP(self, variable, grids, tma_descriptor_metadata, combined_args_raw, tx):
         from .constant import ConstantVariable
         from .dicts import ConstDictVariable
 
@@ -1105,6 +1107,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
                 "kernel_idx": variable.kernel_idx,
                 "constant_args_idx": constant_args_idx,
                 "grid": grids,
+                "tma_descriptor_metadata": tma_descriptor_metadata,
                 "kwargs": meta.as_proxy(),
             },
         )
@@ -1155,3 +1158,62 @@ class TritonKernelVariable(VariableTracker):
         if isinstance(arg, SymNodeVariable):
             return ConstantVariable.create(arg.evaluate_expr())
         return arg
+
+
+class TMADescriptorVariable(VariableTracker):
+    def __init__(
+        self,
+        data_ptr: "variables.DataPtrVariable",
+        dims: "List[ConstantVariable]",
+        block_dims: "List[ConstantVariable]",
+        element_size: "ConstantVariable",
+    ):
+        self.data_ptr = data_ptr
+        self.dims = dims
+        self.block_dims = block_dims
+        self.element_size = element_size
+
+    def to_metadata(self):
+        return (
+            [dim.as_proxy() for dim in self.dims],
+            [dim.as_proxy() for dim in self.block_dims],
+            self.element_size.as_proxy(),
+        )
+
+
+class CreateTMADescriptorVariable(VariableTracker):
+    def __init__(self, rank: int) -> None:
+        assert rank in (1, 2)
+        self.rank = rank
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        ptr = kwargs["ptr"] if "ptr" in kwargs else args[0]
+        if self.rank == 1:
+            dims = [
+                kwargs["dim"] if "dim" in kwargs else args[1],
+            ]
+            block_dims = [
+                kwargs["block_dim"] if "block_dim" in kwargs else args[2],
+            ]
+        else:
+            dims = [
+                kwargs["dim1"] if "dim1" in kwargs else args[1],
+                kwargs["dim0"] if "dim0" in kwargs else args[2],
+            ]
+            block_dims = [
+                kwargs["block_dim1"] if "block_dim1" in kwargs else args[3],
+                kwargs["block_dim2"] if "block_dim2" in kwargs else args[4],
+            ]
+        element_size = kwargs["ptr"] if "ptr" in kwargs else args[-1]
+
+        return TMADescriptorVariable(
+            data_ptr=ptr,  # pyre-ignore[6]
+            dims=dims,  # pyre-ignore[6]
+            block_dims=block_dims,  # pyre-ignore[6]
+            element_size=element_size,  # pyre-ignore[6]
+        )
