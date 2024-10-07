@@ -1048,7 +1048,9 @@ except RuntimeError as e:
             return torch.stack([t1, t2]).unique().shape[0]
 
         # Use CPU as reference. The results should not deviate too much.
-        self.assertTrue(abs(run(torch.device("cuda")) - run(torch.device("cpu"))) < 10_000)
+        self.assertTrue(
+            abs(run(torch.device("cuda")) - run(torch.device("cpu"))) < 10_000
+        )
 
     @parametrize("dtype", [torch.float32, torch.double])
     def test_random_no_reused_random_states(self, dtype: torch.dtype) -> None:
@@ -1760,11 +1762,13 @@ torch.cuda.synchronize()
             expected_size_diff = 2 * 512 * num_generators  # Each block's size is 512
 
             self.assertEqual(
-                (num_blocks - baseline_num_blocks), expected_blocks_diff,
+                (num_blocks - baseline_num_blocks),
+                expected_blocks_diff,
                 "Unexpected number of active blocks.",
             )
             self.assertEqual(
-                (total_size - baseline_total_size), expected_size_diff,
+                (total_size - baseline_total_size),
+                expected_size_diff,
                 "Unexpected total memory size.",
             )
 
@@ -1776,7 +1780,8 @@ torch.cuda.synchronize()
 
             # Assert that memory stats return to baseline after cleanup
             self.assertEqual(
-                get_memory_stats(), baseline,
+                get_memory_stats(),
+                baseline,
                 "Memory stats do not match baseline after cleanup.",
             )
 
@@ -3520,7 +3525,7 @@ class TestCudaMallocAsync(TestCase):
                 thefree()
                 ss = json.dumps(torch.cuda.memory._snapshot())
                 self.assertEqual(("thefree" in ss), (context == "all"))
-                self.assertEqual(("thealloc" in ss),(context != "state"))
+                self.assertEqual(("thealloc" in ss), (context != "state"))
             finally:
                 torch.cuda.memory._record_memory_history(None)
 
