@@ -10,7 +10,7 @@ from torch.testing._internal import common_utils
 
 @common_utils.instantiate_parametrized_tests
 class DynamoExporterTest(common_utils.TestCase):
-    def test_insert_flatten_between_transpose_and_view(self):
+    def test_insert_contiguous_between_transpose_and_view(self):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
