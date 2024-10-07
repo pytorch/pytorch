@@ -9914,7 +9914,7 @@ def ___make_guard_fn():
                         "d": collections.OrderedDict(
                             {
                                 "e": (2 * x, None),
-                                "f": mytuple(x, x + 1, torch.zeros(4, 3)),
+                                "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
                             },
                         ),
                     }
@@ -9964,7 +9964,7 @@ def ___make_guard_fn():
                         "d": collections.OrderedDict(
                             {
                                 "e": (2 * x, None),
-                                "f": mytuple(x, x + 1, torch.zeros(4, 3)),
+                                "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
                             },
                         ),
                     }
@@ -9976,13 +9976,13 @@ def ___make_guard_fn():
                             (
                                 "d",
                                 {
-                                    "f": mytuple(torch.ones(4, 3), -y, y + 1),
+                                    "f": MyTuple(torch.ones(4, 3), -y, y + 1),
                                     "e": (2 * y, None),
                                 },
                             ),
                         ],
                     )
-                    return pytree.tree_map(lambda u, v: (u, v), tree1, tree2)
+                    return module.tree_map(lambda u, v: (u, v), tree1, tree2)
 
                 x = torch.randn(3, 2)
                 y = torch.randn(3, 2)
