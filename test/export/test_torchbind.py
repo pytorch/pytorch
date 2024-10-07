@@ -738,8 +738,8 @@ def forward(self, token, p_linear_weight, p_linear_bias, tq, x):
 def forward(self, L_safe_obj_ : torch.ScriptObject):
     l_safe_obj_ = L_safe_obj_
     call_torchbind = torch.ops.higher_order.call_torchbind(l_safe_obj_, 'get');  l_safe_obj_ = None
-    sin = call_torchbind.sin();  call_torchbind = None
-    return (sin,)""",
+    r = call_torchbind.sin();  call_torchbind = None
+    return (r,)""",
         )
 
         with enable_torchbind_tracing():
