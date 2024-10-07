@@ -1108,6 +1108,7 @@ alias_default = alias_default_1 = foo_default = None
 
             if torch._dynamo.config.assume_static_by_default:
                 if _dynamic:
+                    # split forces a specialization on size so we dont see arg0_1 dynamic anymore.
                     self.assertExpectedInline(
                         graph_aot,
                         """\
@@ -1143,6 +1144,7 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
             # 2. Run with inductor backend
             if torch._dynamo.config.assume_static_by_default:
                 if _dynamic:
+                    # split forces a specialization on size so we dont see arg0_1 dynamic anymore.
                     self.assertExpectedInline(
                         graph_inductor,
                         """\
