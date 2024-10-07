@@ -12,6 +12,8 @@
 #include <cstdint>
 #include <unordered_map>
 #include <set>
+#include <mutex>
+#include <string_view>
 
 #if AT_CUSPARSELT_ENABLED()
 
@@ -35,16 +37,35 @@ const static std::unordered_map<hipDataType, hipsparseLtDatatype_t> sparseLtData
     {HIP_R_16BF, HIPSPARSELT_R_16BF},
 };
 
-static std::unordered_map<int, bool> cache;
-const static std::set<std::string> supported_archs = {"gfx940", "gfx941", "gfx942", "gfx1200", "gfx1201"};
+std::mutex g_hipSparseLtSupportCacheMutex;
+static std::unordered_map<int, bool> g_hipSparseLtSupportCache;
+const static std::unordered_set<std::string> supported_archs = {"gfx940", "gfx941", "gfx942", "gfx1200", "gfx1201"};
+
 static bool isHipSparseLtSupported(int idx) {
-    if (cache.find(idx) != cache.end()) {
-        return cache[idx];
+    {
+        std::lock_guard<std::mutex> lock(g_hipSparseLtSupportCacheMutex);
+        auto it = g_hipSparseLtSupportCache.find(idx);
+        if (it != g_hipSparseLtSupportCache.end()) {
+            return it->second;
+        }
     }
-    std::unique_ptr<hipDeviceProp_t> prop(at::cuda::getDeviceProperties(idx));
-    std::string arch{prop->gcnArchName};
-    bool result = (supported_archs.find(arch) != supported_archs.end()) && (ROCM_VERSION >= 61000);
-    cache[idx] = result;
+
+    bool result = false;
+    try {
+        auto prop = at::cuda::getDeviceProperties(idx);
+        std::string_view gcnArchName(prop->gcnArchName);
+        size_t colonPos = gcnArchName.find(':');
+        std::string_view baseArch = (colonPos != std::string_view::npos) ? gcnArchName.substr(0, colonPos) : gcnArchName;
+        result = (supported_archs.count(std::string(baseArch)) > 0);
+    } catch (const std::exception&) {
+        // If an exception occurs, we assume it's not supported
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(g_hipSparseLtSupportCacheMutex);
+        g_hipSparseLtSupportCache[idx] = result;
+    }
+
     return result;
 }
 #endif
