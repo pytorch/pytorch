@@ -88,11 +88,13 @@ from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.logging_utils import logs_to_string
 
 
-HAS_OPTREE = importlib.util.find_spec("optree")
+HAS_OPTREE = pytree._cxx_pytree_exists
 if HAS_OPTREE:
-    import optree
+    import torch.utils._cxx_pytree as cxx_pytree
+else:
+    cxx_pytree = None
 
-mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
+MyTuple = collections.namedtuple("MyTuple", ["a", "b", "ab"])
 T = typing.TypeVar("T")
 
 
@@ -292,9 +294,9 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
     @unittest.skipIf(not HAS_OPTREE, "missing optree package")
     def test_optree_graph_break_message(self):
-        @torch.compile(
-            backend="eager",
-        )
+        import optree
+
+        @torch.compile(backend="eager")
         def fn(x):
             d = {"a": 1}
             optree.tree_flatten(d)
@@ -1656,8 +1658,8 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_namedtuple1(self):
         def fn(a, b):
-            tmp = mytuple(a, b, a + b)
-            return mytuple(tmp.a, tmp[1], tmp.ab + b)
+            tmp = MyTuple(a, b, a + b)
+            return MyTuple(tmp.a, tmp[1], tmp.ab + b)
 
         v1 = torch.Tensor([10])
         v2 = torch.Tensor([20])
@@ -1680,19 +1682,19 @@ utils_device.CURRENT_DEVICE == None""".split(
         v3 = torch.Tensor([3])
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
-        self.assertEqual(opt_fn(mytuple(v1, v2, v3))[0], 7)
+        self.assertEqual(opt_fn(MyTuple(v1, v2, v3))[0], 7)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
 
     def test_namedtuple3(self):
         def fn(x, packed):
-            if isinstance(packed, mytuple):
+            if isinstance(packed, MyTuple):
                 return x + 1
             else:
                 return x - 1
 
         x = torch.rand([2, 3])
-        packed = mytuple(1, 2, 3)
+        packed = MyTuple(1, 2, 3)
         ref = fn(x, packed)
         opt_fn = torch._dynamo.optimize("eager")(fn)
         res = opt_fn(x, packed)
@@ -9857,6 +9859,40 @@ def ___make_guard_fn():
         expected = fn(*inps)
 
         self.assertEqual(actual, expected)
+
+    def test_pytree_tree_leaves(self):
+        implemtations = [("python", pytree)]
+        if cxx_pytree is not None:
+            implemtations.append(("cxx", cxx_pytree))
+
+        for name, module in implemtations:
+            with self.subTest(f"pytree implement: {name}"):
+
+                def fn(x):
+                    tree = {
+                        "a": [x, x - 1],
+                        "b": x + 2,
+                        "c": (
+                            x,
+                            3.0,
+                            collections.deque([0.0, -x]),
+                        ),
+                        "d": collections.OrderedDict(
+                            {
+                                "e": ((2 * x, None)),
+                                "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
+                            },
+                        ),
+                    }
+                    leaves = module.tree_leaves(tree)
+                    return leaves
+
+                x = torch.randn(3, 2)
+                expected = fn(x)
+                fn_opt = torch.compile(fullgraph=True)(fn)
+                actual = fn_opt(x)
+
+                self.assertEqual(actual, expected)
 
     def test_shape_env_no_recording(self):
         main = ShapeEnv(should_record_events=False)
