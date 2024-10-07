@@ -940,7 +940,6 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
     def test_dynamic3_v2(self):
         self.test_auto_functionalize_extra2(_dynamic=True)
 
-    # foo takes two views on the same input, function does not have return.
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_graph_input_is_view(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -967,7 +966,6 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             # to clone not-inplaced args.
             f(x[1])
 
-    # foo takes two views on the same input, function does not have return.
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_alias(self, _dynamic=False):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
