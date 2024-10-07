@@ -2305,7 +2305,6 @@ namespace {
 template <bool has_relu>
 void apply_dynamic_out_functor(
     c10::intrusive_ptr<LinearPackedParamsBase> packed_weight,
-    const at::Tensor& unpacked_weight,
     const at::Tensor& input,
     at::Tensor& out,
     bool reduce_range);
@@ -2313,33 +2312,22 @@ void apply_dynamic_out_functor(
 template <>
 void apply_dynamic_out_functor<false>(
     c10::intrusive_ptr<LinearPackedParamsBase> packed_weight,
-    const at::Tensor& unpacked_weight,
     const at::Tensor& input,
     at::Tensor& out,
     bool reduce_range) {
-  // TODO: is input.sizes()[1] == 1 an interesting case? probably, right?
-  if (input.dim() == 2 && input.sizes()[0] == 1) {
-    hack_fp16_gemv_transb_out(input, unpacked_weight, out);
-  } else {
-    packed_weight->apply_dynamic_out(input, out, reduce_range);
-  }
+  packed_weight->apply_dynamic_out(input, out, reduce_range);
 }
 
 template <>
 void apply_dynamic_out_functor<true>(
     c10::intrusive_ptr<LinearPackedParamsBase> packed_weight,
-    const at::Tensor& unpacked_weight,
     const at::Tensor& input,
     at::Tensor& out,
     bool reduce_range) {
   // The implementation of PackedLinearWeightFp16::apply_dynamic_impl does not
   // handle relu. Currently, it ignores the `ReluFused` template parameter.
   // So, we explicitly do the relu here.
-  if (input.dim() == 2 && input.sizes()[0] == 1) {
-    hack_fp16_gemv_transb_out(input, unpacked_weight, out);
-  } else {
-    packed_weight->apply_dynamic_out(input, out, reduce_range);
-  }
+  packed_weight->apply_dynamic_out(input, out, reduce_range);
   out.relu_();
 }
 
@@ -2351,9 +2339,7 @@ SROperator quantized_linear_dynamic_fp16_impl(Node* n) {
     packed_weight = weight->toCustomClass<LinearPackedParamsBase>();
   }
   if (packed_weight) {
-    // XXX: unpacking converts to float unnecessarily, could be more efficient.
-    const auto [unpacked_weight, _] = packed_weight->unpack().to(at::kHalf);
-    return [packed_weight, unpacked_weight=std::move(unpacked_weight)](ProcessedNode* p_node) {
+    return [packed_weight](ProcessedNode* p_node) {
       const auto& input = p_node->Input(0).toTensor();
       if (p_node->Output(0).isNone()) {
         p_node->Output(0) = create_empty_from(input, at::kFloat);
