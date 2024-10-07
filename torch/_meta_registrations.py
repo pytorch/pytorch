@@ -519,6 +519,7 @@ def meta__cslt_sparse_mm(
     alpha: Optional[Tensor] = None,
     out_dtype: Optional[torch.dtype] = None,
     transpose_result: bool = False,
+    alg_id =0,
 ):
     assert dense_B.dtype in {
         torch.float32,

@@ -191,7 +191,7 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
         class Model(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.linear = nn.Linear(128, 128)
+                self.linear = nn.Linear(128, 256)
 
             def forward(self, x):
                 x = self.linear(x)
@@ -244,18 +244,17 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
     @unittest.skipIf("cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS, "cusparselt not supported on this machine")
     def test_sp24_compile(self) -> None:
         x = torch.randn([1024, 512], device="cuda", dtype=torch.float16, requires_grad=True)
-        e = torch.eye(x.shape[0], x.shape[0], device="cuda", dtype=torch.float16)
 
-        def fn(x, e):
+        def fn(x):
             y = SparseSemiStructuredTensorCUSPARSELT.prune_dense_static_sort(x)
             y = y.t()
             return x @ y
 
         # Eager
-        output = fn(x, e)
+        output = fn(x)
         output.backward(output)
         # Torch compile
-        output = torch.compile(fn)(x, e)
+        output = torch.compile(fn)(x)
         output.backward(output)
 
 class TestSparseSemiStructured(TestCase):

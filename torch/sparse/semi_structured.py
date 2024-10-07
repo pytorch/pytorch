@@ -647,6 +647,8 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
                 f"`{self.__class__.__name__}` matmul: operation is not supported"
             )
         else:
+            if torch._dynamo.is_compiling():
+                breakpoint()
             res = torch._cslt_sparse_mm(
                 self.packed,
                 B,
