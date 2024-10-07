@@ -63,17 +63,9 @@ class ViewInfo:
                 bases_list[self.base_index], *self.slice_info
             )
 
+        assert self.as_strided_info is not None
         return torch.as_strided(
             bases_list[self.base_index],
-            *self.as_strided_info,
-        )
-
-        assert self.stride is not None
-        assert self.size is not None
-        assert self.storage_offset is not None
-
-        return torch.as_strided(
-            base,
             *self.as_strided_info,
         )
 

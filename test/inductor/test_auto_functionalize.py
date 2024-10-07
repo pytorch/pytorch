@@ -1066,7 +1066,7 @@ alias_default = alias_default_1 = foo_default = None
                         ignore_empty_lines=True,
                     )
 
-    # Test that slice view is generated instead of as_strided when split is used. 
+    # Test that slice view is generated instead of as_strided when split is used.
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_split(self, _dynamic=False):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -1182,7 +1182,6 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
     def test_split_dynamic(self):
         self.test_split(_dynamic=True)
 
-
     # Test that slice view is generated instead of as_strided when slice is used.
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_slice(self, _dynamic=False):
@@ -1288,7 +1287,7 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
                         ignore_comments=True,
                         ignore_empty_lines=True,
                     )
-    
+
     # Note that split force the input tensor to get specialized. So we do not see SymInts when _dynamic=True.
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_slice_dynamic(self):
@@ -1361,8 +1360,9 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
         test_round_trip(t, t[0:2])
         test_round_trip(t, t[3:4])
 
-    # Test that the view regenrations optimizations do not result in recompilations.
-    @torch._inductor.config.patch(enable_auto_functionalized_v2=False)
+    # Test that the view regenrations optimizations do not result in recompilations. By comparing re-compilation in eager backend
+    # with recompilation in inductor backend.
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_recompile(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -1377,62 +1377,56 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
             def foo_impl(x, y):
                 pass
 
+            counter_inductor = CompileCounterWithBackend("inductor")
+            counter_eager = CompileCounterWithBackend("eager")
+
+            def run_and_compare(func):
+                inputs = [torch.rand(10, 10), torch.rand(2, 10), torch.rand(100, 100)]
+                inductor = torch.compile(
+                    func, backend=counter_inductor, fullgraph=True, dynamic=True
+                )
+
+                eager = torch.compile(
+                    func, backend=counter_eager, fullgraph=True, dynamic=True
+                )
+                for input in inputs:
+                    inductor(input)
+                    eager(input)
+
+                self.assertEqual(counter_eager.frame_count, counter_eager.frame_count)
+
             def func(x):
                 a = x[0]
                 b = x[1]
                 torch.ops.mylib.foo(a, b)
 
-            counter = CompileCounterWithBackend("inductor")
-            # compiled = torch.compile(
-            #     func, backend=counter, fullgraph=True, dynamic=True
-            # )
-            # compiled(torch.rand(10, 10))
-            # compiled(torch.rand(2, 2))
-            # self.assertEqual(counter.frame_count, 1)
+            run_and_compare(func)
 
-            # def func(x):
-            #     a = torch.ops.aten.alias.default(x)
-            #     b = torch.ops.aten.alias.default(x)
-            #     torch.ops.mylib.foo(a, b)
+            def func(x):
+                a = torch.ops.aten.alias.default(x)
+                b = torch.ops.aten.alias.default(x)
+                torch.ops.mylib.foo(a, b)
 
-            # compiled = torch.compile(
-            #     func, backend=counter, fullgraph=True, dynamic=True
-            # )
-            # compiled(torch.rand(2, 10))
-            # compiled(torch.rand(2, 2))
-            # self.assertEqual(counter.frame_count, 2)
+            run_and_compare(func)
 
-            # def func(x):
-            #     # last row
-            #     a = x[x.size()[0] - 1]
+            def func(x):
+                # last row
+                a = x[x.size()[0] - 1]
 
-            #     # first row
-            #     b = x[0]
-            #     torch.ops.mylib.foo(a, b)
+                # first row
+                b = x[0]
+                torch.ops.mylib.foo(a, b)
 
-            # compiled = torch.compile(
-            #     func, backend=counter, fullgraph=True, dynamic=False
-            # )
-            # compiled(torch.rand(2, 10))
-            # compiled(torch.rand(2, 2))
-            # # recompilation does happen in this case, but it happens with both V2 and V1 and
-            # #  even with out the optimization so its ok.
-            # self.assertEqual(counter.frame_count, 4)
+            # recompilation does happen in this case, but it happens with both V2 and V1 and
+            #  even with out the optimization so its ok.
+            run_and_compare(func)
 
             def func(x):
                 a = torch.ops.aten.slice.Tensor(x, 1, 3, 4)
                 b = torch.ops.aten.slice.Tensor(x, 0, 1, 4)
                 torch.ops.mylib.foo(a, b)
 
-            compiled = torch.compile(
-                func, backend=counter, fullgraph=True, dynamic=True
-            )
-            compiled(torch.rand(2, 10))
-            compiled(torch.rand(2, 2))
-            # recompilation does happen in this case, but it happens with both V2 and V1 and
-            #  even with out the optimization so its ok.
-            self.assertEqual(counter.frame_count, 1)
-        
+            run_and_compare(func)
 
     # Test that the alias optimization, were alias is called instead of as_strided, preserve the fact
     # that id(x) != id(base)
