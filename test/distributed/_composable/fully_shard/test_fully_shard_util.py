@@ -1,8 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-
-import pytest
+import unittest
 
 import torch
 import torch.distributed as dist
@@ -15,7 +14,11 @@ from torch.testing._internal.common_cuda import SM89OrLater
 from torch.testing._internal.common_dist_composable import CompositeModel, UnitModule
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+    TestCase,
+)
 
 
 if not dist.is_available():
@@ -114,8 +117,9 @@ class TestUtils(FSDPTest):
             ],
         )
 
-    @skip_if_lt_x_gpu(2)
-    @pytest.mark.skipif(not SM89OrLater, reason="requires SM89+ compatible machine")
+
+class TestUtilsSingleDevice(TestCase):
+    @unittest.skipIf(not SM89OrLater, "requires SM89+ compatible machine")
     def test_foreach_copy_float8(self):
         for dtype in [
             torch.float8_e4m3fn,
