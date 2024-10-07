@@ -334,12 +334,12 @@ static float fp16_dot_with_fp16_arith(const float16_t* x, const float16_t* a, in
       sum[k] = f16_fma(sum[k], temp_x, temp_a);
     }
   }
-  auto reducedSum = reduce(sum);
+  auto reduced_sum = reduce(sum);
 
   for (int j = len_aligned; j < len; ++j) {
-    reducedSum += x[j] * a[j];
+    reduced_sum += x[j] * a[j];
   }
-  return reducedSum;
+  return reduced_sum;
 }
 
 // Rather than unrolling to process multiple rows (transposed columns)
@@ -440,11 +440,11 @@ static C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop_no_bfdot(
 static C10_ALWAYS_INLINE void dot_with_fp32_arith_vectorized_tail_inner_loop(
   const float16_t* vec1,
   const float16_t* vec2,
-  float32x4_t* tailSum,
+  float32x4_t* tail_sum,
   int idx) {
   const auto temp_vec1 = vld1_f16(&vec1[idx]);
   const auto temp_vec2 = vld1_f16(&vec2[idx]);
-  *tailSum = f32_fma_f16(*tailSum, temp_vec1, temp_vec2);
+  *tail_sum = f32_fma_f16(*tail_sum, temp_vec1, temp_vec2);
 }
 
 static C10_ALWAYS_INLINE float32x4_t to_bfloat16(uint16x4_t u16) {
@@ -515,11 +515,11 @@ static C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop_no_bfdot(
 static C10_ALWAYS_INLINE void dot_with_fp32_arith_vectorized_tail_inner_loop(
   const at::BFloat16* vec1,
   const at::BFloat16* vec2,
-  float32x4_t* tailSum,
+  float32x4_t* tail_sum,
   int idx) {
   const auto temp_vec1 = vld1_u16(reinterpret_cast<const uint16_t*>(&vec1[idx]));
   const auto temp_vec2 = vld1_u16(reinterpret_cast<const uint16_t*>(&vec2[idx]));
-  *tailSum = f32_fma_bf16(*tailSum, temp_vec1, temp_vec2);
+  *tail_sum = f32_fma_bf16(*tail_sum, temp_vec1, temp_vec2);
 }
 
 namespace {
@@ -588,25 +588,25 @@ dot_with_fp32_arith_main_loop_no_bfdot(
   /* First-tier tail fixup: make sure we handle workloads that can */   \
   /* benefit from vectorization, but don't fit into our fully unrolled */ \
   /* loop above. */                                                     \
-  float32x4_t tailSum = vdupq_n_f32(0);                                 \
+  float32x4_t tail_sum = vdupq_n_f32(0);                                \
   const auto len_aligned = len & ~(kF32ElementsPerIteration - 1);       \
   const auto len_aligned_4 = len & ~3;                                  \
   for (int j = len_aligned; j < len_aligned_4; j += 4) {                \
-    dot_with_fp32_arith_vectorized_tail_inner_loop(vec1, vec2, &tailSum, j); \
+    dot_with_fp32_arith_vectorized_tail_inner_loop(vec1, vec2, &tail_sum, j); \
   }                                                                     \
-  auto reducedTail = vpaddq_f32(tailSum, tailSum);                      \
-  reducedSum += vgetq_lane_f32(vpaddq_f32(reducedTail, reducedTail), 0); \
+  auto reduced_tail = vpaddq_f32(tail_sum, tail_sum);                   \
+  reduced_sum += vgetq_lane_f32(vpaddq_f32(reduced_tail, reduced_tail), 0); \
                                                                         \
   /* Second-tier tail fixup: handle all workloads. */                   \
   for (int j = len_aligned_4; j < len; ++j) {                           \
-    reducedSum += vec1[j] * vec2[j];                                    \
+    reduced_sum += vec1[j] * vec2[j];                                   \
   }                                                                     \
-  return reducedSum
+  return reduced_sum
 
 #if COMPILER_SUPPORTS_BF16_TARGET
 TARGET_ARM_BF16_ATTRIBUTE float
 dot_with_fp32_arith_bfdot(const BFloat16* vec1, const BFloat16* vec2, int64_t len) {
-  auto reducedSum = dot_with_fp32_arith_main_loop_bfdot(vec1, vec2, len);
+  auto reduced_sum = dot_with_fp32_arith_main_loop_bfdot(vec1, vec2, len);
   DOT_WITH_FP32_ARITH_TAIL_AFTER_MAIN_LOOP_BODY();
 }
 #endif // COMPILER_SUPPORTS_BF16_TARGET
@@ -614,7 +614,7 @@ dot_with_fp32_arith_bfdot(const BFloat16* vec1, const BFloat16* vec2, int64_t le
 template <typename T>
 C10_ALWAYS_INLINE float
 dot_with_fp32_arith_no_bfdot(const T* vec1, const T* vec2, int64_t len) {
-  auto reducedSum = dot_with_fp32_arith_main_loop_no_bfdot(vec1, vec2, len);
+  auto reduced_sum = dot_with_fp32_arith_main_loop_no_bfdot(vec1, vec2, len);
   DOT_WITH_FP32_ARITH_TAIL_AFTER_MAIN_LOOP_BODY();
 }
 
