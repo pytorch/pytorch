@@ -2,7 +2,6 @@
 # mypy: allow-untyped-defs
 import math
 from enum import Enum
-from functools import wraps
 from typing import List, Optional, Sequence, Tuple, Union
 
 import torch
@@ -6248,6 +6247,36 @@ def meta_searchsorted(
     side=None,
     sorter=None,
 ):
+    # If the sorted_sequence is not one-dimensional, its shape must match that of values
+    # in all but the last dimension.
+    torch._check(
+        len(sorted_sequence.shape) <= 1
+        or sorted_sequence.shape[:-1] == self.shape[:-1],
+        lambda: (
+            "torch.searchsorted(): boundaries tensor should be 1 dimension or the "
+            "first N-1 dimensions of boundaries tensor and input value tensor must "
+            f"match, but we got boundaries tensor {list(sorted_sequence.shape)} and "
+            f"input value tensor {list(self.shape)}"
+        ),
+    )
+
+    # If a sorter array is provided, its dimensions must exactly match sorted_sequence.
+    torch._check(
+        sorter is None or sorted_sequence.shape == sorter.shape,
+        lambda: (
+            "torch.searchsorted(): boundary and sorter must have the same size, but "
+            f"got boundary tensor {list(sorted_sequence.shape)} and got sorter tensor "
+            f"{list(sorter.shape) if sorter is not None else []}"
+        ),
+    )
+
+    # Per the docs, if side == "left" and right is True, we error.
+    torch._check(
+        side != "left" or not right,
+        "torch.searchsorted(): side and right can't be set to opposites, got side of "
+        "left while right was True",
+    )
+
     dtype = torch.int32 if out_int32 else torch.int64
     if isinstance(self, torch.Tensor):
         return torch.empty_like(self, dtype=dtype).contiguous()
@@ -6450,76 +6479,6 @@ _create_binary_float_meta_func(aten.special_hermite_polynomial_h)
 _create_binary_float_meta_func(aten.special_hermite_polynomial_he)
 _create_binary_float_meta_func(aten.special_laguerre_polynomial_l)
 _create_binary_float_meta_func(aten.special_legendre_polynomial_p)
-
-
-def _register_inplace_meta(fn):
-    @wraps(fn)
-    def _fn(self, *args, **kwargs):
-        out = fn(self, *args, **kwargs)
-        check_inplace_broadcast(self.shape, out.shape)
-        return self
-
-    inplace_name = f"{fn.__name__}_"
-    _fn.__name__ = inplace_name
-    _fn = register_meta(getattr(aten, inplace_name))(_fn)  # type: ignore[assignment]
-
-    return _fn
-
-
-@register_meta(aten.lerp)
-@out_wrapper()
-def lerp(start, end, weight):
-    torch._check(
-        start.dtype == end.dtype,
-        lambda: f"expected dtype {start.dtype} for `end`, but got dtype {end.dtype}",
-    )
-    args = [start, end]
-    if isinstance(weight, TensorLike):
-        torch._check(
-            start.dtype == weight.dtype,
-            lambda: f"expected dtype {start.dtype} for `weight`, but got dtype {weight.dtype}",
-        )
-        args.append(weight)
-    return elementwise_meta(
-        *args, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-    )
-
-
-@register_meta(aten.addcmul)
-@out_wrapper()
-def addcmul(input, tensor1, tensor2, *, value=1):
-    return elementwise_meta(
-        input, tensor1, tensor2, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-    )
-
-
-@register_meta(aten.addcdiv)
-@out_wrapper()
-def addcdiv(input, tensor1, tensor2, *, value=1):
-    torch._check(
-        not (
-            utils.is_integer_dtype(tensor1.dtype)
-            and utils.is_integer_dtype(tensor2.dtype)
-        ),
-        lambda: (
-            "Integer division with addcdiv is no longer supported, and in a future ",
-            "release addcdiv will perform a true division of tensor1 and tensor2. ",
-            "The historic addcdiv behavior can be implemented as ",
-            "(input + value * torch.trunc(tensor1 / tensor2)).to(input.dtype) ",
-            "for integer inputs and as ",
-            "(input + value * tensor1 / tensor2) for float inputs. ",
-            "The future addcdiv behavior is just the latter implementation: ",
-            "(input + value * tensor1 / tensor2), for all dtypes.",
-        ),
-    )
-    return elementwise_meta(
-        input, tensor1, tensor2, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-    )
-
-
-lerp_ = _register_inplace_meta(aten.lerp)
-addcmul_ = _register_inplace_meta(aten.addcmul)
-addcdiv_ = _register_inplace_meta(aten.addcdiv)
 
 
 # We must also trigger meta registrations from PrimTorch ref
