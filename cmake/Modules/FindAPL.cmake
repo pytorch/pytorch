@@ -31,7 +31,11 @@ ENDIF()
 IF (APL_FOUND)
   IF(WIN32)
     set(APL_LIBRARIES
-      "${APL_LIB_DIR}/armpl_lp64_mp.lib"
+      "${APL_LIB_DIR}/libarmpl_lp64_mp.dll.lib"
+      "${APL_LIB_DIR}/Fortran_main.static.lib"
+      "${APL_LIB_DIR}/FortranDecimal.static.lib"
+      "${APL_LIB_DIR}/FortranRuntime.static.lib"
+      "${APL_LIB_DIR}/libomp.dll.lib"
     )
   ELSEIF(UNIX)
     # TODO: Add/test support for Linux
