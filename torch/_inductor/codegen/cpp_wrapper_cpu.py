@@ -18,7 +18,7 @@ from .. import config, ir
 from ..utils import _align, ALIGN_BYTES, cache_on_self, normalize_name, sympy_product
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
-from .common import IndentedBuffer
+from .common import IndentedBuffer, Kernel
 from .cpp_utils import (
     cexpr,
     DEVICE_TO_ATEN,
@@ -66,6 +66,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
+        # For GEMM kernels that must be initialized and are resolved at linking.
+        self.initialized_kernels: Dict[str, Kernel] = {}
         self.expr_printer = cexpr
 
     def generate_kernel_call(
@@ -667,11 +669,22 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def codegen_model_kernels(self):
         self.prefix.writeline("namespace {")
+
+        # Tell compiler we need to link with the non-mangled symbols
+        for kernel in self.initialized_kernels.values():
+            assert hasattr(
+                kernel, "get_signature"
+            ), f"{kernel} must have get_signature implemented"
+            signature = kernel.get_signature()
+            self.prefix.writeline(f'extern "C" {signature};')
+
         self.prefix.writeline(
             "class AOTInductorModelKernels : public AOTInductorModelKernelsBase {"
         )
         self.prefix.writeline("  public:")
-        declare_kernel = set(self.src_to_kernel.values())
+        declare_kernel = set(self.src_to_kernel.values()) - set(
+            self.initialized_kernels.keys()
+        )
         declare_kernel.update(
             entry[0] for entry in self.user_defined_kernel_cache.values()
         )
@@ -683,6 +696,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.prefix.writeline(
                 maybe_hipify_code_wrapper(f"    CUfunction {kernel}{{nullptr}};")
             )
+        for name, kernel in self.initialized_kernels.items():
+            assert hasattr(
+                kernel, "get_signature"
+            ), f"{kernel} must have get_signature implemented"
+            kernel_ptr = f"(*{name})"
+            signature = kernel.get_signature().replace(name, kernel_ptr)
+            self.prefix.writeline(f"    {signature} = torch::aot_inductor::{name};")
         self.prefix.writeline("};")
         self.prefix.writeline("}  // namespace")
 
@@ -1275,7 +1295,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def generate_extern_kernel_alloc(self, extern_kernel, args):
         if config.abi_compatible:
-            if hasattr(extern_kernel, "outputs"):
+            if getattr(extern_kernel, "outputs", None):
                 # ir.ExternKernelAlloc may have outputs if it returns a tuple
                 self.generate_c_shim_fallback_kernel(extern_kernel, args)
             else:
@@ -2112,20 +2132,18 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 raise AssertionError(f"Unexpected output: {type(out)}")
 
         # output_args has the same pytree structure as outputs
-        output_args = None
-        if config.abi_compatible:
-            if outputs is None:
-                # outputs is not specified, the default is to write to buf_name
-                output_args = [buf_name]
-            else:
-                output_args = extract_output_name(outputs)
-                if isinstance(output_args, str):
-                    output_args = [output_args]
+        if outputs is None:
+            # outputs is not specified, the default is to write to buf_name
+            output_args = [buf_name]
+        else:
+            output_args = extract_output_name(outputs)
+            if isinstance(output_args, str):
+                output_args = [output_args]
 
         if V.graph.aot_mode and config.abi_compatible:
             assert op_overload is not None
             assert raw_args is not None
-            assert outputs is not None
+            assert output_args is not None
 
             return self.generate_extern_kernel_alloc_and_find_schema_if_needed_with_proxy_executor(
                 cpp_kernel_key,
@@ -2416,9 +2434,7 @@ if (py_{buf_name}.get() == NULL) {{
         elif isinstance(type_, torch.NumberType):
             if isinstance(val, bool):
                 return "int32_t"
-            elif isinstance(val, int):
-                return "int64_t"
-            elif isinstance(val, float):
+            elif isinstance(val, (int, float)):
                 return "double"
             elif val is None:
                 # This could happen when val is an optional value
