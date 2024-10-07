@@ -2916,6 +2916,7 @@ known_failing_tests = {
     "test_grad_mode_restored_reentrant",  # hangs with graph breaks
     "test_no_grad_copy",  # setting static member in lifted backward
     "test_no_grad_copy_sparse",  # setting static member in lifted backward
+    "test_node_ordering_when_none_returned",  # torch._dynamo.exc.Unsupported: TypeError <built-in method clone
     "test_reentrant_priority",  # hangs with graph breaks
     "test_reentrant_with_callbacks_both_depths",  # hangs with graph breaks
     "test_reentrant_with_callbacks_depth_0",  # probably hangs with graph breaks

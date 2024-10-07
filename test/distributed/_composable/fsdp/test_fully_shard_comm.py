@@ -235,7 +235,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         orig_params = self._init_params(param_sizes)
         fsdp_param_group = self._init_fsdp_param_group(orig_params, True)
         fsdp_params = fsdp_param_group.fsdp_params
-        fsdp_param_group.comm_ctx.lazy_init()
+        fsdp_param_group.comm_ctx.lazy_init(self.device)
 
         # Run one unshard to initialize metadata
         fsdp_param_group.unshard()
