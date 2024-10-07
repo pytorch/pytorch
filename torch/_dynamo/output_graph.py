@@ -78,7 +78,6 @@ from .utils import (
     get_instruction_source_311,
     get_locals_to_steal,
     get_static_address_type,
-    get_torch_function_mode_stack,
     graph_break_reasons,
     increment_op_count,
     lazy_format_graph_code,
@@ -250,6 +249,7 @@ class OutputGraph:
         local_scope: Scope,
         global_scope: Scope,
         f_code,
+        torch_function_mode_stack,
     ):
         super().__init__()
         self.tracers = [SubgraphTracer(self, export_root=export)]
@@ -304,13 +304,15 @@ class OutputGraph:
 
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
+        import torch._functorch.config as _config
 
-        fake_mode = torch._subclasses.FakeTensorMode(
-            shape_env=shape_env,
-            # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
-            allow_non_fake_inputs=True if self.export else False,
-            export=self.export,
-        )
+        with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+            fake_mode = torch._subclasses.FakeTensorMode(
+                shape_env=shape_env,
+                # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
+                allow_non_fake_inputs=True if self.export else False,
+                export=self.export,
+            )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
         self.init_ambient_guards()
 
@@ -366,7 +368,7 @@ class OutputGraph:
         # This returns false if TF Overall (both mode and subclass) is disabled OR that TF Mode stack is empty
         self.torch_function_mode_enabled = torch._C._is_torch_function_mode_enabled()
         # This records the initial torch function mode stack for guarding
-        self.torch_function_mode_stack = get_torch_function_mode_stack()
+        self.torch_function_mode_stack = torch_function_mode_stack
 
         # Tracks if the output graph has a user defined allowed function in the
         # graph. This is used later to determine if we should fallback to eager
@@ -1019,7 +1021,7 @@ class OutputGraph:
             prefix_insts.clear()
 
         for block in reversed(tx.block_stack):
-            block.exit(tx)
+            block.exit(tx, is_graph_break=reason.graph_break)
 
         self.cleanup_graph()
         tx.prune_dead_locals()
@@ -1352,10 +1354,13 @@ class OutputGraph:
             self.call_cleanup_hooks()
             old_fake_mode = self.tracing_context.fake_mode
             if not self.export:
-                # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
-                backend_fake_mode = torch._subclasses.FakeTensorMode(
-                    shape_env=old_fake_mode.shape_env,
-                )
+                import torch._functorch.config as _config
+
+                with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+                    # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
+                    backend_fake_mode = torch._subclasses.FakeTensorMode(
+                        shape_env=old_fake_mode.shape_env,
+                    )
                 # TODO(voz): Ostensibily, this should be scoped and
                 # restore back to old_fake_mode, but doing so currently violates
                 # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode

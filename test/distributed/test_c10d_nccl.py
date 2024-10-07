@@ -4286,6 +4286,9 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
         os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "1"
         # restore this env var to its prior default in case another test changed it
         os.environ["TORCH_NCCL_COORD_CHECK_MILSEC"] = "1000"
+        prev_nccl_async_error_handling = os.environ.get(
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING", None
+        )
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
 
         if self.rank == self.MAIN_PROCESS_RANK:
@@ -4323,6 +4326,9 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
                 # Force rank 1 to idle so that it will eventually timeout as well after
                 # getting the global signal to dump the debugging info.
                 time.sleep(600)
+
+        if prev_nccl_async_error_handling is not None:
+            os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = prev_nccl_async_error_handling
 
 
 @skip_but_pass_in_sandcastle
