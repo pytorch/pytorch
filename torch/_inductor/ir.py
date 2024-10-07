@@ -845,6 +845,13 @@ class Reduction(Loops):
         reduction_numel_hint = V.graph.sizevars.symbolic_hint(reduction_numel)
         numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
 
+        print("reduction_numel_hint", reduction_numel_hint)
+        print("numel_hint", numel_hint)
+        
+        import traceback
+
+        traceback.print_stack()
+
         should_split = (
             not V.graph.has_feature(device, BackendFeature.REDUCE_TO_SINGLE_ELEMENT)
             and reduction_type
@@ -857,6 +864,11 @@ class Reduction(Loops):
             and _is_static(reduction_numel_hint)
             and _is_static(numel_hint)
         )
+
+        # TODO: add a config option to skip reducton split
+        # Defer the reduction splitting, will split in the scheduler
+        should_split = False
+
         if not should_split:
             return ReductionHint.DEFAULT, 1
 

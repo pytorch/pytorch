@@ -210,9 +210,9 @@ def _unlift_graph(mod, gm, graph_signature):
         elif node_name in graph_signature.inputs_to_buffers:
             buffer_name = graph_signature.inputs_to_buffers[node_name]
             lifted_inputs.append(buffer_name)
-            gm.meta[
-                get_cloned_parameter_buffer_name(buffer_name)
-            ] = clone_preserve_strides(state_dict[buffer_name])
+            gm.meta[get_cloned_parameter_buffer_name(buffer_name)] = (
+                clone_preserve_strides(state_dict[buffer_name])
+            )
         else:
             assert node_name in graph_signature.user_inputs
             lifted_inputs.append(None)
@@ -859,6 +859,7 @@ def fx_codegen_and_compile(
 
                 _check_triton_bf16_support(graph)
                 compiled_fn = graph.compile_to_fn()
+                print("graph", graph)
                 num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
                 metrics.num_bytes_accessed += num_bytes
                 metrics.node_runtimes += node_runtimes
@@ -1044,11 +1045,11 @@ def cudagraphify_impl(
 
     # allocate static tensor inputs
     static_inputs = [
-        x
-        if not isinstance(x, torch.Tensor)
-        else static_input(x)
-        if idx not in static_input_idxs
-        else x.detach()
+        (
+            x
+            if not isinstance(x, torch.Tensor)
+            else static_input(x) if idx not in static_input_idxs else x.detach()
+        )
         for idx, x in enumerate(inputs)
     ]
 
@@ -1263,9 +1264,11 @@ def fw_compiler_freezing(
 def get_cpp_wrapper_config():
     return {
         # Set autotune_at_compile_time to True as default if the option is not explicitly set
-        "triton.autotune_at_compile_time": config.triton.autotune_at_compile_time
-        if config.triton.autotune_at_compile_time is not None
-        else True,
+        "triton.autotune_at_compile_time": (
+            config.triton.autotune_at_compile_time
+            if config.triton.autotune_at_compile_time is not None
+            else True
+        ),
         "triton.autotune_cublasLt": False,
         "triton.cudagraphs": False,  # TODO: to be removed
         "triton.store_cubin": True,
@@ -1493,9 +1496,11 @@ def compile_fx(
                         n.name for n in model_outputs if isinstance(n, torch.fx.Node)
                     )
                 fixed = count_tangents(model)
-                with config.patch(
-                    get_cpp_wrapper_config()
-                ) if config.cpp_wrapper else contextlib.nullcontext():
+                with (
+                    config.patch(get_cpp_wrapper_config())
+                    if config.cpp_wrapper
+                    else contextlib.nullcontext()
+                ):
                     return inner_compile(
                         model,
                         example_inputs,

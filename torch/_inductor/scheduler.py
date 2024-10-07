@@ -179,9 +179,9 @@ class BaseSchedulerNode:
     def _init_from_node(self, node: ir.Operation) -> None:
         self.node: Optional[ir.Operation] = node
         self.ancestors: OrderedSet[str] = OrderedSet()
-        self.last_usage: OrderedSet[
-            str
-        ] = OrderedSet()  # buffers that won't be used after this kernel
+        self.last_usage: OrderedSet[str] = (
+            OrderedSet()
+        )  # buffers that won't be used after this kernel
         self.written = False
         self.outputs: List[SchedulerBuffer] = [
             SchedulerBuffer(
@@ -470,9 +470,9 @@ class BaseSchedulerNode:
                         # update last usage of reused node
                         self.last_usage.discard(input_buf.get_name())
 
-                        V.kernel.inplace_update_buffers[
-                            buf.get_name()
-                        ] = input_buf.get_name()
+                        V.kernel.inplace_update_buffers[buf.get_name()] = (
+                            input_buf.get_name()
+                        )
                         break
 
     def codegen_originating_info(
@@ -734,6 +734,10 @@ class WhyNoFuse:
         self.reason = reason
         self.args = args
         fusion_log.debug(self)
+
+        import traceback
+
+        traceback.print_stack()
 
     def __str__(self) -> str:
         return f"cannot fuse {self.node1.get_name()} with {self.node2.get_name()}: " + (
@@ -2087,9 +2091,9 @@ class Scheduler:
                 for alt_name in buf.get_mutations():
                     self.mutation_renames[rename(alt_name)] = buf.get_name()
                     self.mutation_renames[alt_name] = buf.get_name()
-                    self.mutation_real_name[
-                        buf.get_name()
-                    ] = self.mutation_real_name.get(alt_name, alt_name)
+                    self.mutation_real_name[buf.get_name()] = (
+                        self.mutation_real_name.get(alt_name, alt_name)
+                    )
 
         # make sure outputs aren't dead-code-eliminated
         for buf_name in V.graph.get_output_names():
@@ -2296,6 +2300,11 @@ class Scheduler:
         """
         Combine eligible nodes into FusedSchedulerNodes.
         """
+
+        import traceback
+
+        traceback.print_stack()
+
         for i in range(10):
             old_len = len(nodes)
             fusion_log.debug(
@@ -2797,9 +2806,9 @@ class Scheduler:
             rhs_dep = node2_name2dep[buf_name]
 
             if lhs_dep.get_numel() != rhs_dep.get_numel():
-                reasons[
-                    buf_name
-                ] = f"different numel: {lhs_dep.get_numel()} v.s. {rhs_dep.get_numel()}"
+                reasons[buf_name] = (
+                    f"different numel: {lhs_dep.get_numel()} v.s. {rhs_dep.get_numel()}"
+                )
                 continue
 
             # same numel but different MemoryDep.size. Should be broadcasting
@@ -2808,9 +2817,9 @@ class Scheduler:
                 continue
 
             if not isinstance(lhs_dep, MemoryDep) or not isinstance(rhs_dep, MemoryDep):
-                reasons[
-                    buf_name
-                ] = f"not MemoryDep: {type(lhs_dep)} v.s. {type(rhs_dep)}"
+                reasons[buf_name] = (
+                    f"not MemoryDep: {type(lhs_dep)} v.s. {type(rhs_dep)}"
+                )
                 continue
 
             lhs_off = lhs_dep.get_offset()
@@ -2830,9 +2839,9 @@ class Scheduler:
                 continue
 
             # Add more rules here
-            reasons[
-                buf_name
-            ] = f"Unknown reason: {lhs_dep} v.s. {rhs_dep}. Layout: {buf.layout}"
+            reasons[buf_name] = (
+                f"Unknown reason: {lhs_dep} v.s. {rhs_dep}. Layout: {buf.layout}"
+            )
 
         return str(reasons)
 
@@ -2973,6 +2982,8 @@ class Scheduler:
         del device2
 
         no_shared_data = self.score_fusion_memory(node1, node2) == 0
+        print("node1", node1, node2, no_shared_data)
+
         if no_shared_data:
             no_shared_data = not self.has_shared_data_after_reordering_loop(
                 node1, node2
@@ -3209,6 +3220,31 @@ class Scheduler:
         node1_dep_len = len(node1.read_writes.reads) + len(node1.read_writes.writes)
         node2_dep_len = len(node1.read_writes.reads) + len(node2.read_writes.writes)
 
+        print("node1", node1)
+        print(
+            "node1.read_writes.reads",
+            len(node1.read_writes.reads),
+            node1.read_writes.reads,
+        )
+        print(
+            "node1.read_writes.writes",
+            len(node1.read_writes.writes),
+            node1.read_writes.writes,
+        )
+        print("node1.node1_dep_len", node1_dep_len)
+        print("node2", node2)
+        print(
+            "node2.read_writes.reads",
+            len(node1.read_writes.reads),
+            node2.read_writes.reads,
+        )
+        print(
+            "node2.read_writes.writes",
+            len(node2.read_writes.writes),
+            node2.read_writes.writes,
+        )
+        print("node2.node2_dep_len", node2_dep_len)
+
         # optimization: iter over smaller set
         if max(node1_dep_len, node2_dep_len) * 4 > min(node1_dep_len, node2_dep_len):
             if node1_dep_len > node2_dep_len:
@@ -3220,8 +3256,17 @@ class Scheduler:
             for dep in node1.read_writes.reads | node1.read_writes.writes:
                 if dep in node2.read_writes.reads or dep in node2.read_writes.writes:
                     deps.append(dep)
+                else:
+                    print("???", node1, node2, dep, node2.read_writes.writes | node2.read_writes.reads)
 
             return sum(self.dep_size_hint(dep) for dep in deps)
+
+        print("node1", node1)
+        print("node1.read_writes.reads", node1.read_writes.reads)
+        print("node1.read_writes.writes", node1.read_writes.writes)
+        print("node2", node1)
+        print("node2.read_writes.reads", node2.read_writes.reads)
+        print("node2.read_writes.writes", node2.read_writes.writes)
 
         common_memory_deps = (node1.read_writes.reads | node1.read_writes.writes) & (
             node2.read_writes.reads | node2.read_writes.writes
