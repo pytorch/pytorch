@@ -27,11 +27,12 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 static_inputs_log = torch._logging.getArtifactLogger(
     __name__, "cudagraph_static_inputs"
 )
-
 from . import config
 from ._aot_autograd.autograd_cache import (  # noqa: F401
     AOTAutogradCache,
     autograd_cache_key,
+    should_use_local_autograd_cache,
+    should_use_remote_autograd_cache,
 )
 from ._aot_autograd.collect_metadata_analysis import (  # noqa: F401
     run_functionalized_fw_and_collect_metadata,
@@ -1069,9 +1070,18 @@ def aot_module_simplified(
         return compiled_fn
 
     # Autograd cache stuff
-    if config.enable_autograd_cache and not torch._inductor.config.force_disable_caches:
+    remote = should_use_remote_autograd_cache()
+    local = should_use_local_autograd_cache()
+
+    if local or remote:
         compiled_fn = AOTAutogradCache.load(
-            dispatch_and_compile, mod, fake_flat_args, aot_config, cudagraphs
+            dispatch_and_compile,
+            mod,
+            fake_flat_args,
+            aot_config,
+            cudagraphs,
+            local,
+            remote,
         )
     else:
         compiled_fn = dispatch_and_compile()
