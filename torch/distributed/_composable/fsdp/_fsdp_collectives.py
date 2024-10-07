@@ -212,7 +212,7 @@ def _get_param_all_gather_inputs(
                 all_gather_input = cast(
                     torch.Tensor, fsdp_param._sharded_post_forward_param_data
                 )
-            assert all_gather_input.ndim == 1, f"{all_gather_input.shape}"
+            assert all_gather_input.ndim == 1, f"{all_gather_input.shape=}"
             foreach_copy_inputs.append(all_gather_input)
             foreach_copy_input_numels.append(all_gather_input.numel())
         else:
@@ -254,79 +254,65 @@ def foreach_all_gather_copy_out(
     if isinstance(all_gather_work, dist.distributed_c10d.Work):  # async op
         all_gather_work.wait()
     world_size, device = group.size(), all_gather_output.device
+
+    split_with_sizes_out: List[torch.Tensor] = []
+    shard_i_copy_infos: List[Tuple[FSDPParam, List[torch.Tensor]]] = []
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
         param_all_gather_input_numels, param_all_gather_input_dtypes, fsdp_params
     ):
-        if ca.compiled_autograd_enabled:
-            fsdp_param.init_all_gather_outputs(
-                all_gather_input_numels,
-                all_gather_input_dtypes,
-                world_size,
-                device,
-                # NOTE: Under compile, make sure we always recreate all_gather_outputs
-                # per AllGather. See [Note: Invariants for torch.compile Traceable FSDP2].
-                force_recreate=True,
-            )
-        else:
-            # TODO: May need to defer this for parameters not sharded on dim-0
-            # until after initial copy-out since we will hold extra memory.
-            fsdp_param.init_all_gather_outputs(
-                all_gather_input_numels, all_gather_input_dtypes, world_size, device
-            )  # no-op after 1st call
+        # NOTE: Under compile, make sure we always recreate all_gather_outputs
+        # per AllGather. See [Note: Invariants for torch.compile Traceable FSDP2].
+        force_recreate = ca.compiled_autograd_enabled
+        fsdp_param.init_all_gather_outputs(
+            all_gather_input_numels,
+            all_gather_input_dtypes,
+            world_size,
+            device,
+            force_recreate=force_recreate,
+        )
+        if not force_recreate:
             fsdp_param.alloc_all_gather_outputs()
-    all_gather_output = all_gather_output.view(world_size, -1)
-
-    gen: List[torch.Tensor] = []  # TODO: make this var name more descriptive
-    copy_infos: List[Tuple[FSDPParam, List[torch.Tensor]]] = []
-    for fsdp_param in fsdp_params:
-        if fsdp_param.fsdp_placement.dim == 0:
-            gen.extend(fsdp_param.all_gather_outputs)
-        else:
+        param_all_gather_outputs = fsdp_param.all_gather_outputs
+        if fsdp_param.fsdp_placement.dim != 0:
+            # Copy to a temporary and then chunk-cat into the final all-gather
+            # output tensors
             param_all_gather_outputs = [
-                torch.empty_like(t) for t in fsdp_param.all_gather_outputs
+                torch.empty_like(t) for t in param_all_gather_outputs
             ]
-            gen.extend(param_all_gather_outputs)
-            copy_infos.append((fsdp_param, param_all_gather_outputs))
+            shard_i_copy_infos.append((fsdp_param, param_all_gather_outputs))
+        split_with_sizes_out.extend(param_all_gather_outputs)
 
+    all_gather_output = all_gather_output.view(world_size, -1)
     if all_gather_output.dtype == torch.uint8:
-        out = [t.view(world_size, -1).view(torch.uint8) for t in gen]
+        out = [t.view(world_size, -1).view(torch.uint8) for t in split_with_sizes_out]
     else:
-        out = [t.view(world_size, -1) for t in gen]
+        out = [t.view(world_size, -1) for t in split_with_sizes_out]
     torch.ops.fsdp.split_with_sizes_copy(
         all_gather_output, all_gather_input_split_sizes, dim=1, out=out
     )
-    for fsdp_param, param_all_gather_outputs in copy_infos:
+
+    for fsdp_param, param_all_gather_outputs in shard_i_copy_infos:
+        # Chunk-cat from the temporary to the final all-gather output tensors
         shard_dim = fsdp_param.fsdp_placement.dim
         for param_all_gather_output, target_all_gather_output in zip(
             param_all_gather_outputs, fsdp_param.all_gather_outputs
         ):
-            # TODO: This shape is wrong for the SHARDED_POST_FORWARD case.
-            pre_param_size = list(fsdp_param.padded_sharded_param_size)
+            padded_sharded_size = (
+                fsdp_param.padded_sharded_param_size
+                if fsdp_param.sharded_state == ShardedState.SHARDED
+                else cast(
+                    torch.Tensor, fsdp_param._sharded_post_forward_param_data
+                ).size()
+            )
+            pre_param_size = list(padded_sharded_size)
             pre_param_size[0] *= world_size
             chunks = torch.chunk(
                 param_all_gather_output.view(pre_param_size), world_size, dim=0
             )
-            post_param_size = list(fsdp_param.padded_sharded_param_size)
+            post_param_size = list(padded_sharded_size)
             post_param_size[shard_dim] *= world_size
-            unpadded_chunks = []
-            for chunk, chunk_size in zip(chunks, fsdp_param._shard_chunk_sizes):
-                if chunk.size() == chunk_size:
-                    unpadded_chunk = chunk
-                else:
-                    unpadded_chunk = chunk.narrow(
-                        dim=shard_dim,
-                        start=0,
-                        length=chunk_size[shard_dim] if chunk_size.numel() > 0 else 0,
-                    )
-                unpadded_chunks.append(unpadded_chunk)
-            cat_out = target_all_gather_output.view(post_param_size).narrow(
-                dim=shard_dim,
-                start=0,
-                length=sum(
-                    t.size(shard_dim) if t.numel() > 0 else 0 for t in unpadded_chunks
-                ),
-            )
-            torch.cat(unpadded_chunks, dim=shard_dim, out=cat_out)
+            cat_out = target_all_gather_output.view(post_param_size)
+            torch.cat(chunks, dim=shard_dim, out=cat_out)
             torch._C._autograd._unsafe_set_version_counter(
                 target_all_gather_output, target_all_gather_output._version - 1
             )
