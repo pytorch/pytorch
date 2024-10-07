@@ -20,11 +20,11 @@ class CustomGraphPass(ABC):
     textual reprensentation of the implementation. In that case, we recommend using the
     'get_hash_for_files' helper below to compute a unique hash from the contents of a
     static list of source files, i.e., the source(s) containing the custom pass
-    implementation. That approach so ensures that any change to the implementation will
+    implementation. That approach ensures that any change to the implementation will
     mean a new uuid.
 
-    ** IMPORTANT ** If your custom pass behaves differently based on some external state,
-    then you'll need to implement something more complicated (or disable caching).
+    ** IMPORTANT ** If your custom pass's behavior depends on some external state, then
+    you'll need to implement something more complicated (or disable caching).
 
     EXAMPLE:
 
@@ -35,6 +35,7 @@ class CustomGraphPass(ABC):
 
         def uuid(self) -> Optional[Any]:
             return get_hash_for_files((__file__,))
+
     """
 
     @abstractmethod
