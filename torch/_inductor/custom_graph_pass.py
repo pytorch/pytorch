@@ -2,6 +2,7 @@ import hashlib
 from abc import ABC, abstractmethod
 from functools import lru_cache
 from typing import Any, Callable, Optional, Tuple, Union
+from typing_extensions import TypeAlias
 
 import torch.fx.graph
 
@@ -52,7 +53,7 @@ class CustomGraphPass(ABC):
         """
 
 
-CustomGraphPassType = Optional[
+CustomGraphPassType: TypeAlias = Optional[
     Union[CustomGraphPass, Callable[[torch.fx.graph.Graph], None]]
 ]
 
