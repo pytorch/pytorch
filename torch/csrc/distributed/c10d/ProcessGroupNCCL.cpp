@@ -645,7 +645,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
   synchronizeStream();
 
   // Device synchronize only after we've completed timeout checks.
-  // TODO: Is this necessary for barrier if we already block the cpu thread till
+  // TODO: Is this necessary for barrier if we block the cpu thread till
   // the completion of the work?
   if (barrierTensor_.defined()) {
     // If we use the work to do barrier, we should block here
@@ -694,7 +694,7 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
 
   // In case of blockingWait or a timeout value is specified by the user, we
   // block the CPU thread until the work is completed or timed out.
-  if (blockingWait_ || timeout != kNoTimeout || barrierTensor_.defined()) {
+  if (blockingWait_ || timeout != kNoTimeout) {
     while (!isCompleted()) {
       bool timedOut = checkTimeout(
           timeout == kNoTimeout ? std::nullopt : std::make_optional(timeout));
