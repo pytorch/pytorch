@@ -361,7 +361,7 @@ class BlockPtrOptions:
 
         Args:
             name: variable name for pointer
-            roffset: should roffset be included in offsets=..., for use with tl.advance()
+            roffset: should rn_offset be included in offsets=..., for use with tl.advance()
 
         Returns:
             "tl.make_block_ptr(...)"
@@ -1363,6 +1363,10 @@ class TritonKernel(SIMDKernel):
                     f"{tree.prefix}base = {self.iteration_ranges_ranges_code(tree)}"
                 )
 
+        # Compute linear reduction indices.
+        if self.inside_reduction:
+            self.codegen_reduction_inds(self.body)
+
     def need_numel_args(self):
         r"""
         Indicate whether we need provide numel as arguments for the generated
@@ -1982,25 +1986,6 @@ class TritonKernel(SIMDKernel):
         value,  # value: Union[CSEVariable, Tuple[CSEVariable, ...]],
     ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
         assert self.inside_reduction
-
-        # rindex = r0_index * r1_numel * ... * rn_numel + ... + rn_index
-        rprefixes = [
-            prefix_str[symt]
-            for symt in list(TritonSymbols.reduction_types)[: self.num_reduction_dims]
-        ]
-        rnumels = [
-            sympy.Symbol(f"{prefix}numel", integer=True, positive=True)
-            for prefix in rprefixes
-        ]
-        rn_inds = [
-            sympy.Symbol(f"{prefix}index", integer=True, nonnegative=True)
-            for prefix in rprefixes
-        ]
-        ridx_coeffs = [
-            sympy_product(rnumels[idx + 1 :]) for idx in range(len(rprefixes) - 1)
-        ] + [sympy.Integer(1)]
-        rindex = sympy_dot(ridx_coeffs, rn_inds)
-        self.indexing_code.splice(f"rindex = {rindex}")
 
         # rmask = r0_mask & ... & rn_mask
         masks = self.get_active_masks()
@@ -3144,6 +3129,47 @@ class TritonKernel(SIMDKernel):
         return self.filter_masks(
             sorted(f"{tree.prefix}mask" for tree in self.range_trees)
         )
+
+    def get_reduction_prefixes(self) -> List[str]:
+        return [
+            prefix_str[symt]
+            for symt in list(TritonSymbols.reduction_types)[: self.num_reduction_dims]
+        ]
+
+    def codegen_reduction_inds(self, buffer) -> None:
+        """
+        Converts ND reduction indices into rindex, rbase, roffset, etc.
+        """
+        rprefixes = self.get_reduction_prefixes()
+        if len(rprefixes) < 1:
+            return
+
+        def get_rsymbols(suffix: str, **kwargs) -> List[sympy.Symbol]:
+            return [sympy.Symbol(f"{prefix}{suffix}", **kwargs) for prefix in rprefixes]
+
+        # Gather relevant numels, indices, etc.
+        rnumels = get_rsymbols("numel", integer=True, positive=True)
+        rn_bases = get_rsymbols("base", integer=True, nonnegative=True)
+        rn_offsets = get_rsymbols("offset", integer=True, nonnegative=True)
+        rn_inds = get_rsymbols("index", integer=True, nonnegative=True)
+
+        # Compute coefficients to convert ND indices to linear.
+        # For example:
+        #   rindex = r0_index * r1_numel * ... * rn_numel + ... + rn_index.
+        ridx_coeffs = [
+            sympy_product(rnumels[idx + 1 :]) for idx in range(len(rprefixes) - 1)
+        ] + [sympy.Integer(1)]
+
+        # Compute roffset and rindex.
+        roffset = sympy_dot(ridx_coeffs, rn_offsets)
+        self.indexing_code.splice(f"roffset = {self.index_to_str(roffset)}")
+        rindex = sympy_dot(ridx_coeffs, rn_inds)
+        self.indexing_code.splice(f"rindex = {self.index_to_str(rindex)}")
+
+        # If inside a loop, compute rbase.
+        if any(tree.is_loop for tree in self.range_trees):
+            rbase = sympy_dot(ridx_coeffs, rn_bases)
+            self.indexing_code.splice(f"rbase = {self.index_to_str(rbase)}")
 
     def iteration_ranges_codegen_header(self, entry: IterationRangesRoot, code):
         x = entry.prefix
