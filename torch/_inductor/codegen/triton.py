@@ -2962,19 +2962,16 @@ class TritonKernel(SIMDKernel):
         if self.inside_reduction:
             # rnumel = r0_numel * ... * r(n-1)_numel
             reduction_trees = [tree for tree in self.range_trees if tree.is_reduction]
-            rnumel = int(
-                V.graph.sizevars.simplify(
-                    sympy_product(tree.numel for tree in reduction_trees)
-                )
+            rnumel = V.graph.sizevars.simplify(
+                sympy_product(tree.numel for tree in reduction_trees)
             )
-            if is_static_integer(rnumel):
-                code.writeline(f"rnumel = {int(rnumel)}")
+            code.writeline(f"rnumel = {self.index_to_str(rnumel)}")
 
             # RBLOCK = R0_BLOCK * ... * R(N-1)_BLOCK
             rblock = sympy_product(
                 TritonSymbols.block_sizes[tree.symt] for tree in reduction_trees
             )
-            code.writeline(f"RBLOCK: tl.constexpr = {rblock}")
+            code.writeline(f"RBLOCK: tl.constexpr = {self.kexpr(rblock)}")
 
     def _get_grid_fn_str(self):
         return "grid"
