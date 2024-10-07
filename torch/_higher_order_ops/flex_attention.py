@@ -1201,7 +1201,10 @@ def flex_attention_backward_fake_tensor_mode(
         grad_key = torch.empty_like(key)
         grad_value = torch.empty_like(value)
         grad_score_mod_captured = tuple(
-            [torch.empty_like(buffer) if buffer.requires_grad else None for buffer in score_mod_other_buffers]
+            [
+                torch.empty_like(buffer) if buffer.requires_grad else None
+                for buffer in score_mod_other_buffers
+            ]
         )
         return grad_query, grad_key, grad_value, grad_score_mod_captured
 
