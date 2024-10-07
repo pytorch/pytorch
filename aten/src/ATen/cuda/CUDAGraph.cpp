@@ -557,6 +557,7 @@ void CUDAGraph::replay_dynamic(std::vector<void*> prefilledDataPtrs, std::vector
   dynamicGraphUpdater(deviceUpdates, kernelParamUpdates.size());
 
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, stream));
+  AT_CUDA_CHECK(cudaStreamSynchronize(stream));
   free(hostUpdates);
   AT_CUDA_CHECK(cudaFreeAsync(deviceUpdates, stream));
   for (size_t i = 0; i < freeTheseLater.size(); i++) {
