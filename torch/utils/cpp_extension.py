@@ -2024,7 +2024,10 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
             if arch not in arch_list:
                 arch_list.append(arch)
         arch_list = sorted(arch_list)
-        arch_list[-1] += '+PTX'
+        if arch_list:
+            arch_list[-1] += '+PTX'
+        else:
+            warnings.warn("arch_list is empty; no architectures will be included for compilation.")
     else:
         # Deal with lists that are ' ' separated (only deal with ';' after)
         _arch_list = _arch_list.replace(' ', ';')
