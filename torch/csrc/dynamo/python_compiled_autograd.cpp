@@ -521,7 +521,8 @@ CacheNode* _compiled_autograd_impl(
     THPObjectPtr* graph_arg_sizes,
     THPObjectPtr* graph_arg_ivalue_args,
     THPObjectPtr* graph_arg_hooks) {
-  std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
+  // copy
+  std::unordered_map<Node*, int> dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
   AutogradCompilerCall compiler_call;
 
@@ -593,6 +594,14 @@ CacheNode* _compiled_autograd_impl(
     }
     i++;
   }
+
+  // cleanup
+  ClosingTHPObjectPtr self(check(PyObject_CallNoArgs((the_autograd_compiler))));
+  static PyObject* method_name =
+      PyUnicode_InternFromString("fallback_to_eager");
+  check(PyObject_CallMethodNoArgs(self, method_name));
+  std::cout << "Falling back to eager autograd to measure hot path CA overhead." << std::endl;
+  throw EagerFallbackException(std::runtime_error("test"));
 
   // TODO(jansel): some dynamic sizes seem to be ints not symints
   if (!cache->check_dynamic_sizes(compiler_call, vlogger)) {

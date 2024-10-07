@@ -513,6 +513,11 @@ class AutogradCompilerInstance:
         )
         set_stack_trace(new_stack_trace)
 
+    def fallback_to_eager(self):
+        reset()
+        global fellback
+        fellback = True
+
 
 # state of the autograd engine dispatch, kept in sync by enable/disable context managers
 compiled_autograd_enabled = False
@@ -520,9 +525,15 @@ compiled_autograd_enabled = False
 # global flag to check if we are processing graphs produced from a compiled autograd graph
 in_compiled_autograd_region = False
 
+fellback = False
+
 
 @contextlib.contextmanager
 def enable(compiler_fn):
+    if fellback:
+        yield
+        return
+
     # we need to import this, because user might not have imported it if they directly use this context manager
     # we need to lazily import it, because of circular dependencies
     import torch._inductor.cudagraph_trees
@@ -538,6 +549,8 @@ def enable(compiler_fn):
         with torch.autograd.set_multithreading_enabled(False):
             yield
     finally:
+        if fellback:
+            return
         if not prior:
             compiled_autograd_enabled = False
         torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
@@ -558,7 +571,10 @@ def disable():
 
 # return to starting state of a new process
 def reset() -> None:
-    compiled_autograd_enable = False
+    global compiled_autograd_enabled
+    global in_compiled_autograd_region
+    compiled_autograd_enabled = False
+    in_compiled_autograd_region = False
     assert not in_compiled_autograd_region
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
     torch._C._dynamo.compiled_autograd.set_verbose_logger(None)

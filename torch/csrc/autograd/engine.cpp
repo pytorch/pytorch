@@ -1261,8 +1261,14 @@ auto Engine::execute(
     TORCH_CHECK(
         !AnomalyMode::is_enabled(),
         "compiled_autograd does not support AnomalyMode")
-    return (*compiled_autograd)(
-        graph_root, *graph_task, accumulate_grad, outputs);
+    // return (*compiled_autograd)(
+    //     graph_root, *graph_task, accumulate_grad, outputs);
+    try {
+      return (*compiled_autograd)(
+          graph_root, *graph_task, accumulate_grad, outputs);
+    } catch (const dynamo::autograd::EagerFallbackException& e) {
+      TORCH_INTERNAL_ASSERT(the_compiled_autograd == nullptr);
+    }
   }
 
   // Queue the root

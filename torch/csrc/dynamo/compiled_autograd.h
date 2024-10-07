@@ -17,6 +17,20 @@
 namespace torch::dynamo::autograd {
 using namespace torch::autograd;
 
+class EagerFallbackException : public std::exception {
+ public:
+  EagerFallbackException() = delete;
+  EagerFallbackException(const std::exception& orig)
+      : msg(std::string(orig.what())) {}
+
+  const char* what() const noexcept override {
+    return msg.c_str();
+  }
+
+ private:
+  std::string msg;
+};
+
 struct SizeInput {
   // Note: int value is still needed when dynamic to pass as an arg
   enum DynType : uint8_t { STATIC = 0, DYNAMIC = 1 };
