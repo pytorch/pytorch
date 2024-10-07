@@ -11,10 +11,8 @@ import torch._C
 import torch._refs
 import torch.fx
 import torch.nn
-import torch.onnx.operators
 from torch._guards import TracingContext
 from torch._logging import warning_once
-from torch._streambase import _StreamBase
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
 from .. import config, polyfills, variables
@@ -97,7 +95,6 @@ supported_ctx_manager_classes = dict.fromkeys(
 
 REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
     [
-        torch.onnx.operators.shape_as_tensor,
         torch._shape_as_tensor,
     ]
 )
@@ -162,17 +159,7 @@ def get_overridable_functions():
 
     from torch.overrides import get_overridable_functions as get_overridable_functions_
 
-    funcs = set(chain(*get_overridable_functions_().values()))
-    more = {
-        torch.ones,
-        torch.ones_like,
-        torch.zeros,
-        torch.zeros_like,
-        torch.empty,
-        torch.full,
-    }
-    funcs.update(more)
-    return funcs
+    return set(chain(*get_overridable_functions_().values()))
 
 
 class BaseTorchVariable(VariableTracker):
@@ -279,7 +266,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             assert len(args) <= 1 and len(kwargs) == 0
             inf_mode = args[0].as_python_constant() if len(args) == 1 else True
             return InferenceModeVariable.create(tx, inf_mode)
-        elif inspect.isclass(self.value) and issubclass(self.value, _StreamBase):
+        elif inspect.isclass(self.value) and issubclass(self.value, torch.Stream):
             from torch._dynamo.variables.builder import wrap_fx_proxy_cls
 
             return wrap_fx_proxy_cls(
@@ -313,7 +300,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             assert len(args) == 2
             return VmapIncrementNestingCtxManagerVariable.create(
                 tx,
-                [guard_if_dyn(x) for x in args],
+                args,
             )
         elif self.value is torch._functorch.eager_transforms.jvp_increment_nesting:
             assert len(args) == 0
@@ -848,13 +835,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 len(tx.symbolic_torch_function_state.mode_stack)
             )
 
-        @register(torch._C._get_function_stack_at)
-        def handle_get_stack_at(self, tx: "InstructionTranslator", *args, **kwargs):
-            assert len(args) == 1 and not kwargs
-            ind = args[0].as_python_constant()
-            assert ind >= 0 and ind < len(tx.symbolic_torch_function_state.mode_stack)
-            return tx.symbolic_torch_function_state.mode_stack[ind]
-
         @register(torch.set_default_device)
         def handle_set_default_device(
             self, tx: "InstructionTranslator", *args, **kwargs
@@ -872,7 +852,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             else:
                 TorchFunctionModeStackVariable.register_device_context_insertion(tx)
 
-            return ConstantVariable.create(None)
+            return None
 
         return handlers
 
