@@ -42,9 +42,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         use_shard_placement_fn,
     ):
         torch.manual_seed(42)
-        model = nn.Sequential(
-            *[MLP(16, torch.device("cpu"), dim_multiplier=3) for _ in range(3)]
-        )
+        model = nn.Sequential(*[MLP(16, torch.device("cpu")) for _ in range(3)])
         ref_model = copy.deepcopy(model).cuda()
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 

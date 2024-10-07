@@ -32,8 +32,8 @@ from ._fsdp_common import (
 FSDP considers the following tensors:
 - Original parameter: parameter passed to :class:`FSDPParam`, i.e. the one
   on the module when applying FSDP
-- Sharded parameter: sharding the original parameter on dim-0 as a DTensor
-  over the main mesh
+- Sharded parameter: sharding the original parameter on dim-0 (or a
+  user-specified dim) as a DTensor over the main mesh
 - All-gather inputs: the ``torch.Tensor`` or ``Tensor`` s passed to all-gather,
   derived from the sharded parameter
 - All-gather output: the ``torch.Tensor`` or ``Tensor`` s resulting from
@@ -196,11 +196,11 @@ class FSDPParam:
     reduce_dtype: Optional[torch.dtype]
     _orig_size: torch.Size  # ND
     sharded_size: torch.Size  # ND
-    contiguous_sharded_stride: Tuple[int, ...]  # only Shard(0) or no padding
+    contiguous_sharded_stride: Tuple[int, ...]
     padded_sharded_param_size: torch.Size  # ND
     sharded_post_forward_size: torch.Size  # ND
     contiguous_sharded_post_forward_stride: Tuple[int, ...]
-    _sharded_param_data: torch.Tensor  # 1D, only Shard(0)
+    _sharded_param_data: torch.Tensor  # 1D
     sharded_param: nn.Parameter  # ND
     _sharded_post_forward_param_data: Optional[torch.Tensor]  # 1D
     _sharded_post_forward_param: Optional[nn.Parameter]  # ND
@@ -268,6 +268,8 @@ class FSDPParam:
         fsdp_placement = shard_placement_fn(param) if shard_placement_fn else None
         if fsdp_placement is None:
             fsdp_placement = Shard(0)
+        elif fsdp_placement.dim < 0:
+            fsdp_placement = Shard(fsdp_placement.dim + param.ndim)
         assert isinstance(fsdp_placement, Shard), f"{fsdp_placement}"
         self.fsdp_placement = fsdp_placement
         shard_dim = fsdp_placement.dim
@@ -353,6 +355,14 @@ class FSDPParam:
         self._contiguous_orig_stride = make_contiguous_strides_for(self._orig_size)
         shard_rank = self.mesh_info.shard_mesh_rank
         shard_world_size = self.mesh_info.shard_mesh_size
+        if shard_dim > 0 and param_data.size(shard_dim) % shard_world_size != 0:
+            # If sharding on nonzero dim, require even sharding for now because
+            # the uneven sharding (1) requires extra copies before/after FSDP
+            # collectives and (2) introduces extra complexity to handle padding
+            # and unpadding
+            raise NotImplementedError(
+                f"FSDP does not support uneven sharding on dim {shard_dim}: {param_data.size()}"
+            )
         chunks = _chunk_with_empty(param_data, shard_world_size, dim=shard_dim)
         self._shard_chunk_sizes = [c.size() for c in chunks]
         sharded_param = chunks[shard_rank]
@@ -370,8 +380,7 @@ class FSDPParam:
                     dim=shard_dim, start=0, length=sharded_param.size(shard_dim)
                 ).copy_(sharded_param)
         else:
-            # Skip the pre-pad because then the sharded parameter no longer has
-            # contiguous strides, which may break some optimizers
+            assert padded_sharded_size == sharded_param.size()
             padded_sharded_param = sharded_param.contiguous()
         if self.offload_to_cpu and not padded_sharded_param.is_meta:
             padded_sharded_param = padded_sharded_param.cpu()
@@ -379,8 +388,7 @@ class FSDPParam:
                 padded_sharded_param = padded_sharded_param.pin_memory(
                     device=self.device
                 )
-        if shard_dim == 0:
-            self._sharded_param_data = padded_sharded_param.view(-1)
+        self._sharded_param_data = padded_sharded_param.view(-1)
         if padded_sharded_param.numel() > 0:
             length = sharded_param.size(shard_dim) if sharded_param.numel() > 0 else 0
             sharded_param = padded_sharded_param.narrow(
@@ -500,23 +508,12 @@ class FSDPParam:
             # gives the unsharded parameter data directly
             assert len(self.all_gather_outputs) == 1, f"{len(self.all_gather_outputs)}"
             unsharded_tensor = self.all_gather_outputs[0]
-        shard_dim = self.fsdp_placement.dim
-        if shard_dim == 0:
-            unsharded_param = torch.as_strided(
-                unsharded_tensor,
-                self._orig_size,
-                self._contiguous_orig_stride,
-                storage_offset=0,
-            )
-        else:
-            padded_unsharded_size = list(self.padded_sharded_param_size)
-            world_size = (
-                unsharded_tensor.numel() // self.padded_sharded_param_size.numel()
-            )
-            padded_unsharded_size[shard_dim] *= world_size
-            unsharded_param = unsharded_tensor.view(padded_unsharded_size).narrow(
-                dim=shard_dim, start=0, length=self._orig_size[shard_dim]
-            )
+        unsharded_param = torch.as_strided(
+            unsharded_tensor,
+            self._orig_size,
+            self._contiguous_orig_stride,
+            storage_offset=0,
+        )
         if self.is_dtensor:
             unsharded_param = _from_local_no_grad(unsharded_param, self._tp_spec)
         if hasattr(self, "_unsharded_param"):
@@ -741,22 +738,12 @@ class FSDPParam:
                     t.size() for t in all_gather_inputs
                 ]
                 return [t.view(-1) for t in all_gather_inputs]
-            shard_dim = self.fsdp_placement.dim
-            if shard_dim == 0:
-                sharded_param_data = self._sharded_param_data
-            else:
-                sharded_param_data = self._sharded_local_tensor
+            sharded_param_data = self._sharded_param_data
             if self.offload_to_cpu:
                 sharded_param_data = sharded_param_data.to(
                     self.device, non_blocking=True
                 )
-            sharded_param_data = _to_dtype_if_needed(
-                sharded_param_data, self.param_dtype
-            )
-            sharded_param_data = self._pad_sharded_param_if_needed(
-                sharded_param_data
-            ).view(-1)
-            return [sharded_param_data]
+            return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             if not ca.compiled_autograd_enabled and hasattr(
                 self._sharded_local_tensor, "fsdp_pre_all_gather"
@@ -768,17 +755,6 @@ class FSDPParam:
             )
             return [all_gather_input]
         return [torch.empty(0)]  # mypy
-
-    def _pad_sharded_param_if_needed(self, sharded_param: torch.Tensor) -> torch.Tensor:
-        shard_dim = self.fsdp_placement.dim
-        if shard_dim == 0 or sharded_param.size() == self.padded_sharded_param_size:
-            return sharded_param
-        padded_sharded_param = sharded_param.new_empty(self.padded_sharded_param_size)
-        if sharded_param.numel() > 0:
-            padded_sharded_param.narrow(
-                shard_dim, 0, sharded_param.size(shard_dim)
-            ).copy_(sharded_param)
-        return padded_sharded_param
 
     @property
     def unsharded_param(self) -> nn.Parameter:  # ND
@@ -841,7 +817,10 @@ class FSDPParam:
         padded_sharded_size = self.padded_sharded_param_size
         shard_dim = self.fsdp_placement.dim
         length = local_tensor.size(shard_dim) if local_tensor.numel() > 0 else 0
-        if local_tensor.size() != padded_sharded_size and shard_dim == 0:
+        if local_tensor.size() != padded_sharded_size:
+            assert (
+                shard_dim == 0
+            ), f"Shard({shard_dim}) requires even sharding: {local_tensor.size()=}"
             padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
             padded_local_tensor.narrow(dim=shard_dim, start=0, length=length).copy_(
                 local_tensor
@@ -851,14 +830,14 @@ class FSDPParam:
         if self.pin_memory and not local_tensor.is_pinned():
             local_tensor = local_tensor.cpu().pin_memory(device=self.device)
             updated_local_tensor = True
-        if shard_dim == 0:
-            self._sharded_param_data = local_tensor.view(-1)
+        self._sharded_param_data = local_tensor.view(-1)
         assert isinstance(self.sharded_param, DTensor)  # mypy
         if updated_local_tensor:
             # Only change the local tensor object if needed
             self.sharded_param._local_tensor = local_tensor.narrow(
                 dim=shard_dim, start=0, length=length
             )
+            assert self.sharded_param._local_tensor.is_contiguous()
 
     def __repr__(self):
         return f"FSDPParam(fqn={self._param_fqn}, orig_size={self._orig_size})"

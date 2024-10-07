@@ -6,7 +6,7 @@ import functools
 import itertools
 import unittest
 from collections import defaultdict
-from typing import Iterable, List, Optional, Tuple, Union
+from typing import Any, Iterable, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -238,8 +238,11 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         return min(8, torch.cuda.device_count())
 
     @skip_if_lt_x_gpu(2)
-    def test_train_parity_single_group(self):
-        """Tests train parity with DDP for a single FSDP group."""
+    def test_train_parity_single_group_shard_dim0(self):
+        """
+        Tests train parity with DDP for a single FSDP group when sharding
+        parameters on dim-0.
+        """
         self.run_subtests(
             {
                 "lin_shapes": [
@@ -247,7 +250,22 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                     [(7, 15), (15, 3)],
                     [(16, 17), (17, 8)],
                 ],
-                "use_shard_placement_fn": [False, True],
+                "use_shard_placement_fn": [False],
+            },
+            self._test_train_parity_single_group,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_train_parity_single_group_shard_largest_dim(self):
+        """
+        Tests train parity with DDP for a single FSDP group when sharding
+        parameters on their largest dim.
+        """
+        self.run_subtests(
+            {
+                # Sharding on nonzero dim requires even sharding
+                "lin_shapes": [[(32, 16), (16, 8)]],
+                "use_shard_placement_fn": [True],
             },
             self._test_train_parity_single_group,
         )
@@ -786,8 +804,8 @@ class TestFullyShardShardPlacementFnMultiThread(FSDPTestMultiThread):
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_shard_placement_fn_contiguous_params_grads(self):
-        dim = 5
-        model = MLP(dim=dim, dim_multiplier=3)
+        dim = 4
+        model = MLP(dim=dim)
 
         def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
             if param.ndim > 1:
@@ -797,6 +815,13 @@ class TestFullyShardShardPlacementFnMultiThread(FSDPTestMultiThread):
         fully_shard(model.in_proj, shard_placement_fn=shard_placement_fn)
         fully_shard(model.out_proj, shard_placement_fn=shard_placement_fn)
         fully_shard(model, shard_placement_fn=shard_placement_fn)
+
+        def assert_contiguous_params(module: nn.Module, args: Any):
+            for param in module.parameters():
+                self.assertTrue(param.is_contiguous())
+
+        model.in_proj.register_forward_pre_hook(assert_contiguous_params)
+        model.out_proj.register_forward_pre_hook(assert_contiguous_params)
 
         for param in model.parameters():
             self.assertTrue(param.is_contiguous())

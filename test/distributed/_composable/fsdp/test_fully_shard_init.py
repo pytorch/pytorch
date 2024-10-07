@@ -1102,9 +1102,6 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
     def test_init_1d_uneven_shard_largest_dim(self):
         torch.manual_seed(42)
         model = nn.Sequential(nn.Linear(16, 17), nn.Linear(17, 8))
-        for param in model.parameters():
-            dist.broadcast(param.detach(), src=0)
-        ref_model = copy.deepcopy(model).cuda()
 
         def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
             largest_dim = -1
@@ -1117,22 +1114,14 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
             assert largest_dim < param.ndim, f"{largest_dim=} {param.shape}"
             return Shard(largest_dim)
 
-        fully_shard(model, shard_placement_fn=shard_placement_fn)
-
-        any_shard_dim1 = False
-        for param in model.parameters():
-            self.assertEqual(len(param.placements), 1)
-            self.assertIsInstance(param.placements[0], Shard)
-            any_shard_dim1 |= param.placements[0].dim == 1
-        self.assertTrue(any_shard_dim1)
-
-        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
-            full_param = param.full_tensor()
-            self.assertEqual(full_param, ref_param)
+        with self.assertRaisesRegex(
+            NotImplementedError, "FSDP does not support uneven sharding on dim 1"
+        ):
+            fully_shard(model, shard_placement_fn=shard_placement_fn)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_invalid_shard_dim(self):
-        model = nn.Sequential(nn.Linear(16, 17), nn.Linear(17, 8))
+        model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 8))
 
         def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
             return Shard(1)

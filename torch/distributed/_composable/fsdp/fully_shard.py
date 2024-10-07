@@ -111,7 +111,10 @@ def fully_shard(
             This callable can be used to override the sharding placement for a
             parameter to shard a parameter on a dimension other than dim-0. If
             this callable returns a ``Shard`` placement (not ``None``), then
-            we will respect that placement (e.g. ``Shard(1)``).
+            FSDP will shard according to that placement (e.g. ``Shard(1)``).
+            If sharding on a nonzero dim, we currently require even sharding,
+            i.e. the tensor dim size on that dim must be divisible by the FSDP
+            shard mesh size.
         mp_policy (MixedPrecisionPolicy): This controls the mixed precision
             policy, which offers parameter/reduction mixed precision for this
             module. See :class:`MixedPrecisionPolicy` for details.
