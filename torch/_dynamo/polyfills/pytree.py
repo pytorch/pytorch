@@ -4,11 +4,12 @@ Python polyfills for torch.utils.pytree
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Literal, TYPE_CHECKING
 
 import torch.utils._pytree as python_pytree
-from torch.utils._pytree import BUILTIN_TYPES
+from torch.utils._pytree import BUILTIN_TYPES, STANDARD_DICT_TYPES
 
 from ..decorators import substitute_in_graph
 
@@ -190,6 +191,96 @@ if python_pytree._cxx_pytree_exists:
         def entry(self, index: int) -> Any:
             return self._entries[index]
 
+        def flatten_up_to(self, tree: PyTree) -> list[PyTree]:
+            def helper(
+                treespec: PyTreeSpec,
+                node: PyTree,
+                subtrees: list[PyTree],
+            ) -> None:
+                if treespec.is_leaf():
+                    subtrees.append(node)
+                    return
+
+                node_type = type(node)
+                if treespec.type not in BUILTIN_TYPES:
+                    # Always require custom node types to match exactly
+                    if node_type != treespec.type:
+                        raise ValueError(
+                            f"Type mismatch; "
+                            f"expected {treespec.type!r}, but got {node_type!r}.",
+                        )
+
+                    children, metadata, *_ = optree.tree_flatten_one_level(
+                        node,
+                        none_is_leaf=True,
+                        namespace="torch",
+                    )
+                    if len(children) != treespec.num_children:
+                        raise ValueError(
+                            f"Node arity mismatch; "
+                            f"expected {treespec.num_children}, but got {len(children)}.",
+                        )
+                    if metadata != treespec._metadata:
+                        raise ValueError(
+                            f"Node context mismatch for custom node type {treespec.type!r}.",
+                        )
+                else:
+                    # For builtin dictionary types, we allow some flexibility
+                    # Otherwise, we require exact matches
+                    both_standard_dict = (
+                        treespec.type in STANDARD_DICT_TYPES
+                        and node_type in STANDARD_DICT_TYPES
+                    )
+                    if node_type != treespec.type and not both_standard_dict:
+                        raise ValueError(
+                            f"Node type mismatch; "
+                            f"expected {treespec.type!r}, but got {node_type!r}.",
+                        )
+                    if len(node) != treespec.num_children:
+                        raise ValueError(
+                            f"Node arity mismatch; "
+                            f"expected {treespec.num_children}, but got {len(node)}.",
+                        )
+
+                    if (
+                        both_standard_dict
+                    ):  # dictionary types are compatible with each other
+                        expected_keys = treespec.entries()
+                        got_key_set = set(node)
+                        expected_key_set = set(expected_keys)
+                        if got_key_set != expected_key_set:
+                            missing_keys = expected_key_set.difference(got_key_set)
+                            extra_keys = got_key_set.difference(expected_key_set)
+                            message = ""
+                            if missing_keys:
+                                message += f"; missing key(s): {missing_keys}"
+                            if extra_keys:
+                                message += f"; extra key(s): {extra_keys}"
+                            raise ValueError(f"Node keys mismatch{message}.")
+                        children = [node[key] for key in expected_keys]
+                    else:
+                        children, metadata, *_ = optree.tree_flatten_one_level(
+                            node,
+                            none_is_leaf=True,
+                            namespace="torch",
+                        )
+                        if (
+                            metadata != treespec._metadata
+                            and treespec.type
+                            is not deque  # ignore mismatch of `maxlen` for deque
+                        ):
+                            raise ValueError(
+                                f"Node metadata mismatch for node type {treespec.type!r}; "
+                                f"expected {treespec._metadata!r}, but got {metadata!r}.",  # namedtuple type mismatch
+                            )
+
+                for subtree, subspec in zip(children, treespec._children):
+                    helper(subspec, subtree, subtrees)
+
+            subtrees: list[PyTree] = []
+            helper(self, tree, subtrees)
+            return subtrees
+
         def unflatten(self, leaves: Iterable[Any]) -> PyTree:
             if not isinstance(leaves, (list, tuple)):
                 leaves = list(leaves)
@@ -271,3 +362,30 @@ if python_pytree._cxx_pytree_exists:
         return treespec.unflatten(leaves)
 
     __all__ += ["tree_unflatten"]
+
+    @substitute_in_graph(cxx_pytree.tree_map, can_constant_fold_through=True)
+    def tree_map(
+        func: Callable[..., Any],
+        tree: PyTree,
+        *rests: PyTree,
+        is_leaf: Callable[[PyTree], bool] | None = None,
+    ) -> PyTree:
+        leaves, treespec = tree_flatten(tree, is_leaf=is_leaf)
+        flat_args = [leaves] + [treespec.flatten_up_to(r) for r in rests]
+        return treespec.unflatten(map(func, *flat_args))
+
+    __all__ += ["tree_map"]
+
+    @substitute_in_graph(cxx_pytree.tree_map_, can_constant_fold_through=False)
+    def tree_map_(
+        func: Callable[..., Any],
+        tree: PyTree,
+        *rests: PyTree,
+        is_leaf: Callable[[PyTree], bool] | None = None,
+    ) -> PyTree:
+        leaves, treespec = tree_flatten(tree, is_leaf=is_leaf)
+        flat_args = [leaves] + [treespec.flatten_up_to(r) for r in rests]
+        deque(map(func, *flat_args), maxlen=0)  # consume and exhaust the iterable
+        return tree
+
+    __all__ += ["tree_map_"]
