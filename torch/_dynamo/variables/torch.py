@@ -1183,7 +1183,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             inspect.ismethoddescriptor(self.get_function())
             and hasattr(self.get_function(), "__objclass__")
             and self.get_function().__objclass__ == torch._C.TensorBase
-        )
+        ) or self.get_function() is torch.Tensor.__contains__
 
     def torch_function_override_enabled(self, tx, args, kwargs):
         return (
