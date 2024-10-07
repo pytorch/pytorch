@@ -307,7 +307,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         first_graph_break = list(counters["graph_break"].keys())[0]
         self.assertExpectedInline(
             first_graph_break,
-            "Graph break for an optree C/C++ function optree._C.PyCapsule.flatten. Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py",
+            "Graph break for an optree C/C++ function optree._C.PyCapsule.flatten. Consider using torch.utils.pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/pytree.py",
         )
 
     def test_scalar_device_movement(self):
