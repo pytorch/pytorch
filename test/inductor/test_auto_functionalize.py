@@ -1119,7 +1119,7 @@ alias_default = alias_default_1 = foo_default = None
                 torch.ops.mylib.foo(a, b)
 
             compiled = torch.compile(
-                func, backend=counter, fullgraph=True, dynamic=False
+                func, backend=counter, fullgraph=True, dynamic=True
             )
             compiled(torch.rand(2, 10))
             compiled(torch.rand(2, 2))
