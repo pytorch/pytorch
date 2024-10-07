@@ -791,8 +791,8 @@ graph():
                 # z = 4
                 return x + y + z + w2
 
-        ep = torch.export.export(M(), (torch.randn(2, 3),), strict=False)
-        self.assertEqual(ep.graph_signature.buffers_to_mutate, {"add_2": "buf"})
+        ep = export(M(), (torch.randn(2, 3),), strict=False)
+        self.assertEqual(list(ep.graph_signature.buffers_to_mutate.values()), ["buf"])
         self.assertTrue(
             torch.allclose(ep.module()(torch.ones(2, 3) + 1), torch.ones(2, 3) * 12)
         )
@@ -815,7 +815,7 @@ graph():
             ValueError,
             "The tensor attribute self.buf was assigned during export",
         ):
-            torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+            export(M(), (torch.randn(2, 3),), strict=False)
 
         class M(torch.nn.Module):  # complex with register buffer
             def __init__(self) -> None:
@@ -840,9 +840,9 @@ graph():
                 # z = 3 + 3
                 return x + y + z
 
-        ep = torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+        ep = export(M(), (torch.randn(2, 3),), strict=False)
         self.assertEqual(
-            ep.graph_signature.buffers_to_mutate, {"add_1": "buf_0", "add_2": "buf_1"}
+            list(ep.graph_signature.buffers_to_mutate.values()), ["buf_0", "buf_1"]
         )
         self.assertTrue(
             torch.allclose(ep.module()(torch.ones(2, 3) + 1), torch.ones(2, 3) * 10)
@@ -873,7 +873,7 @@ graph():
             ValueError,
             "The tensor attributes self.tensors\\[0\\], self.tensors\\[1\\] were assigned during export",
         ):
-            torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+            export(M(), (torch.randn(2, 3),), strict=False)
 
     def test_state_primitives(self):
         class M(torch.nn.Module):
@@ -6002,6 +6002,43 @@ graph():
         gm_flat_strict = ep_strict.module()
 
         self.assertEqual(gm_flat_non_strict(*inp), gm_flat_strict(*inp))
+
+    def test_preserve_module_call_signature_unflatten_specialization(self):
+        class N(torch.nn.Module):
+            def forward(self, x, b):
+                if b:
+                    return x + 1
+                else:
+                    return x + 2
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n = N()
+
+            def forward(self, x):
+                x0 = x + 3
+                x1 = self.n(x0, True)
+                return x1 + 4
+
+        inp = (torch.ones(1),)
+        m = M()
+        eager_result = m(*inp)
+
+        if not is_retracebility_test(self._testMethodName):
+            ep = export(M(), inp, preserve_module_call_signature=("n",))
+            epm = ep.module()
+            ufm = torch.export.unflatten(ep)
+
+            exported_result = epm(*inp)
+            self.assertTrue(torch.allclose(exported_result, eager_result))
+
+            unflattened_result = ufm(*inp)
+            self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
+            ufm.set_submodule("n", N())
+            unflattened_result = ufm(*inp)
+            self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
     def test_unflatten_multiple_graphs_preserve_signature_error(self):
         class N(torch.nn.Module):
