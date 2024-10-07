@@ -115,10 +115,16 @@ def build_subgraph_buffer(
             elif node.op == "call_function":
                 # For call_function we use the default lowerings and pass in the
                 # already created TensorBoxes as args
-
                 args, kwargs = tree_map(
                     lambda x: env[x] if x in env else x, (node.args, node.kwargs)
                 )
+
+                if node.target._opname == "zeros_and_scatter":
+                    # TODO
+                    import fbvscode
+
+                    fbvscode.set_trace()
+
                 env[node] = lowerings[node.target](*args, **kwargs)
             elif node.op == "output":
 
