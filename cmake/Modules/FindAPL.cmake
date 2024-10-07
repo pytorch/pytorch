@@ -22,7 +22,7 @@ ENDIF()
 
 # Check lib file
 # TODO: Add/test support for Linux
-FIND_PATH(APL_LIB_DIR NAMES armpl_lp64_mp.lib armpl_lp64_mp PATHS ${APL_LIB_SEARCH_PATHS})
+FIND_PATH(APL_LIB_DIR NAMES armpl_lp64_mp.dll.lib armpl_lp64_mp PATHS ${APL_LIB_SEARCH_PATHS})
 IF(NOT APL_LIB_DIR)
     SET(APL_FOUND OFF)
     MESSAGE(STATUS "Could not verify APL lib directory. Turning APL_FOUND off")
@@ -38,7 +38,9 @@ IF (APL_FOUND)
   ELSEIF(UNIX)
     # TODO: Add/test support for Linux
     set(APL_LIBRARIES
-      "${APL_LIB_DIR}/armpl_lp64_mp"
+      "${APL_LIB_DIR}/armpl_lp64_mp.lib"
+      "${APL_LIB_DIR}/amath.lib"
+      "${APL_LIB_DIR}/libomp.lib"
     )
   ENDIF()
   MESSAGE(STATUS "Found APL header: ${APL_INCLUDE_DIR}")
