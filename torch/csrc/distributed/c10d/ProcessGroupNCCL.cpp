@@ -892,8 +892,12 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   }
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
+// no need for watchdog thread if blockingWait_ is true
+if (!blockingWait_) {
   ncclCommWatchdogThread_ =
       std::thread(&ProcessGroupNCCL::ncclCommWatchdog, this);
+}
+  
 #endif
 
   init();
@@ -1262,6 +1266,8 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 
   // Wait for all threads to finish before returning
 #ifdef ENABLE_NCCL_ERROR_CHECKING
+// no watchdog thread in blockingWait_ mode
+if (!blockingWait_) {
   if (ncclCommWatchdogThread_.joinable()) {
     ncclCommWatchdogThread_.join();
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
@@ -1271,6 +1277,8 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
     LOG(INFO) << logPrefix()
               << "ProcessGroupNCCL heart beat monitor thread joined.";
   }
+}
+ 
 #endif
   if (onCompletionHookThread_.joinable()) {
     onCompletionHookThread_.join();
