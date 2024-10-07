@@ -301,7 +301,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     bool isSuccess() const override;
 
-    // Same as calling synchronize() for NCCL work.
+    // Same as calling synchronize() for NCCL work if timeout is not set.
+    // Otherwise, it will block the CPU thread until the NCCL work is completed
+    // or timed out. If timeout, exception will be thrown.
     bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
 
     void abort() override;
