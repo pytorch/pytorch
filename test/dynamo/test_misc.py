@@ -9914,7 +9914,7 @@ def ___make_guard_fn():
                         "d": collections.OrderedDict(
                             {
                                 "e": (2 * x, None),
-                                "f": mytuple(x, x + 1, torch.zeros(4, 3)),
+                                "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
                             },
                         ),
                     }
