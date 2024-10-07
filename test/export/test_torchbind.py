@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfCrossRef,
     skipIfTorchDynamo,
     TestCase,
 )
@@ -720,6 +721,7 @@ def forward(self, token, p_linear_weight, p_linear_bias, tq, x):
         self.assertTrue(tq.pop() is a)
         self.assertTrue(tq.pop() is b)
 
+    @skipIfCrossRef  # arg names change with torch function mode
     def test_safe_to_trace_with_real(self):
         x = torch.randn(3, 3)
         safe_obj = torch.classes._TorchScriptTesting._ConstantTensorContainer(x)
@@ -738,8 +740,8 @@ def forward(self, token, p_linear_weight, p_linear_bias, tq, x):
 def forward(self, L_safe_obj_ : torch.ScriptObject):
     l_safe_obj_ = L_safe_obj_
     call_torchbind = torch.ops.higher_order.call_torchbind(l_safe_obj_, 'get');  l_safe_obj_ = None
-    r = call_torchbind.sin();  call_torchbind = None
-    return (r,)""",
+    sin = call_torchbind.sin();  call_torchbind = None
+    return (sin,)""",
         )
 
         with enable_torchbind_tracing():
