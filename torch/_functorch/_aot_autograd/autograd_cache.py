@@ -285,6 +285,9 @@ def autograd_cache_key(
 @dataclass
 class FXGraphCacheLoadable:
     fx_graph_cache_key: str
+    # The print_readable() of the aot_graph passed to FXGraphCache
+    # Used only for properly logging outputs
+    aot_graph_str: str
 
     def is_backward(self):
         return False
@@ -363,6 +366,10 @@ class AOTAutogradCacheEntry:
     compiled_fw: CompiledForward
     compiled_bw: Optional[CompiledBackward]
 
+    # Code of the joint graph using print_readable()
+    # Used for logging purposes
+    aot_joint_graph_str: Optional[str]
+
     # Runtime_metadata saved right before compilation
     runtime_metadata: ViewAndMutationMeta
 
@@ -405,6 +412,26 @@ class AOTAutogradCacheEntry:
 
         Which we'll handle separately later on, if necessary.
         """
+
+        # Log the output of AOTAutogradCache
+        if aot_config.enable_log:
+            # TODO: maybe also log to aot_graphs_log
+            # Unfortunately aot_graphs_log uses
+            # slightly different formatting though
+            if self.aot_joint_graph_str is not None:
+                torch._logging.trace_structured(
+                    "aot_joint_graph", payload_fn=lambda: self.aot_joint_graph_str
+                )
+
+            torch._logging.trace_structured(
+                "aot_forward_graph", payload_fn=lambda: self.compiled_fw.aot_graph_str
+            )
+
+            if (bw_info := self.compiled_bw) is not None:
+                torch._logging.trace_structured(
+                    "aot_backward_graph", payload_fn=lambda: bw_info.aot_graph_str
+                )
+
         compiled_fw_func = self.compiled_fw.load(args, fx_config)
         compiled_bw_func = None
         if self.compiled_bw is not None:

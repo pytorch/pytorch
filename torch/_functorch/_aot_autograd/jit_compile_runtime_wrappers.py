@@ -199,9 +199,13 @@ def aot_dispatch_base(
     if autograd_cache_enabled() and cache_info:
         if fw_key := getattr(compiled_fw, "_fx_graph_cache_key", None):
             time_taken_ns = time.time_ns() - cache_info.start_time_ns
+            aot_forward_graph_str = fw_module.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            )
             entry = AOTAutogradCacheEntry(
-                compiled_fw=CompiledForward(fw_key),
+                compiled_fw=CompiledForward(fw_key, aot_forward_graph_str),
                 compiled_bw=None,
+                aot_joint_graph_str=None,
                 runtime_metadata=fw_metadata,
                 dispatch_wrappers=wrappers,
                 maybe_subclass_meta=maybe_subclass_meta,
@@ -759,11 +763,24 @@ def aot_dispatch_autograd(
                 # It's possible this changes in the future, in which case we should
                 # update backward_time_taken_ns to be more inclusive
                 backward_time_taken_ns = getattr(compiled_bw_func, "_time_taken_ns", 0)
+                aot_forward_graph_str = fw_module.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                )
+                aot_backward_graph_str = bw_module.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                )
+                aot_joint_graph_str = fx_g.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                )
                 entry = AOTAutogradCacheEntry(
-                    CompiledForward(fw_key),
+                    CompiledForward(fw_key, aot_forward_graph_str),
                     CompiledBackward(
-                        bw_key, backward_state_indices, num_symints_saved_for_bw
+                        bw_key,
+                        aot_backward_graph_str,
+                        backward_state_indices,
+                        num_symints_saved_for_bw,
                     ),
+                    aot_joint_graph_str,
                     _fw_metadata,
                     wrappers,
                     maybe_subclass_meta,
