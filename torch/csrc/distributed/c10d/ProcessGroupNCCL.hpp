@@ -306,9 +306,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     void abort() override;
 
-    // Let current stream wait on the completing of the NCCL work
-    // Throws on exceptions. Blocking operation, which will wait for work
-    // completion.
+    // Let current stream wait on the completion of the NCCL work
+    // Throws on exceptions.
     void synchronize() override;
 
     // Synchronize streams by blocking each on the NCCL stream
