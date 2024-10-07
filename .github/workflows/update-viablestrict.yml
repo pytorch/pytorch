@@ -16,6 +16,7 @@ jobs:
       id-token: write
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-20.04
+    environment: ${{ (github.event_name == 'schedule') && 'mergebot' || 'mergebot' }}
     steps:
       - name: Update viable/strict
         uses: pytorch/test-infra/.github/actions/update-viablestrict@csl/viable_strict_dedup
@@ -24,8 +25,8 @@ jobs:
           repository: pytorch/pytorch
           stable-branch: viable/strict
           requires: '[\"pull\", \"trunk\", \"lint\", \"linux-binary\"]'
-          secret-bot-token: ${{ secrets.GITHUB_TOKEN }}
-          rockset-api-key: ''
+          secret-bot-token: ${{ secrets.MERGEBOT_TOKEN }}
+          rockset-api-key: ${{ secrets.ROCKSET_API_KEY }}
 
       # - name: Authenticate to AWS with OIDC
       #   uses: aws-actions/configure-aws-credentials@v4
