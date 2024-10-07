@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
+import math
 from typing import Dict, Optional
 
 import sympy
@@ -9,7 +10,6 @@ from torch._inductor import config
 from torch._inductor.codegen.simd import IterationRangesRoot
 from torch._inductor.codegen.triton import triton_compute_type, TritonKernel
 from torch._inductor.runtime.triton_heuristics import split_scan_grid
-from torch._prims_common import prod
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv
 
@@ -105,8 +105,18 @@ class TritonSplitScanKernel(TritonKernel):
 
         assert len(self.numels) == 2, "Unexpected tiling"
         min_rblock = config.triton.min_split_scan_rblock
-        rnumel = self.numels["r0_"]
-        max_blocks = rnumel * CeilDiv(rnumel, min_rblock)
+        is_reduction_dim = [var[0] == "r" for var in self.numels]
+        reduction_numel = math.prod(
+            numel
+            for is_reduction, (var, numel) in zip(is_reduction_dim, self.numels.items())
+            if is_reduction
+        )
+        pointwise_numel = math.prod(
+            numel
+            for is_reduction, (var, numel) in zip(is_reduction_dim, self.numels.items())
+            if not is_reduction
+        )
+        max_blocks = pointwise_numel * CeilDiv(reduction_numel, min_rblock)
         nbytes = scratch_nbytes_per_block * max_blocks
         scratch_base, offset = self.args.workspace(nbytes=nbytes, zero_fill=True)
         if offset != 0:
