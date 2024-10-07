@@ -1080,10 +1080,10 @@ def _get_module_call_graph(
     for fqn, specs in module_call_specs.items():
         mod_fqn = _strip_root(fqn) if not strict_mode_export else fqn
         module_call_signatures[mod_fqn] = ModuleCallSignature(
-            inputs=[], 
+            inputs=[],
             outputs=[],
             in_spec=specs["in_spec"],
-            out_spec=specs["out_spec"], 
+            out_spec=specs["out_spec"],
             forward_arg_names=None,  # we only propage forward_arg_names for the top level module
         )
 
