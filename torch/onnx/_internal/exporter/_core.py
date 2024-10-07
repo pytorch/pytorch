@@ -423,7 +423,7 @@ def _handle_call_function_node_with_lowering(
     constant_farm: dict[Any, ir.Value],
     registry: _registration.ONNXRegistry,
     opset: onnxscript.values.Opset,
-    local_functions: dict[str, torch.fx.GraphModule],
+    local_functions: dict[str, torch.fx.Graph],
 ) -> None:
     if node.target == operator.getitem:
         source = node.all_input_nodes[0]
@@ -562,7 +562,7 @@ def _handle_placeholder_node(
     input_.meta["node"] = node
     _set_shape_type(input_, node.meta["val"], complex_to_float=lower != "none")
     node_name_to_values[name] = input_
-    # The inputs will be added to the graph late
+    # The inputs will be added to the graph later
 
 
 def _add_nodes(
@@ -574,7 +574,7 @@ def _add_nodes(
     node_name_to_values: dict[str, ir.Value | Sequence[ir.Value]] = {}
     constant_farm: dict[Any, ir.Value] = {}
     opset = _get_onnxscript_opset(registry.opset_version)
-    local_functions: dict[str, torch.fx.GraphModule] = {}
+    local_functions: dict[str, torch.fx.Graph] = {}
     for node in exported_program.graph.nodes:
         logger.debug(
             "%s", (node.name, node.args, node.target, node.op, node.type, node.kwargs)
