@@ -105,7 +105,7 @@ TORCH_LIBRARY_FRAGMENT(inductor, m) {
           c10::DispatchKey::CompositeExplicitAutograd, _reinterpret_tensor),
       {at::Tag::pt2_compliant_tag});
   m.def(
-      "accumulate_grad_(Tensor variable, Tensor new_grad) -> ()",
+      "accumulate_grad_(Tensore(!) variable, Tensor new_grad) -> ()",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, accumulate_grad_),
       {at::Tag::pt2_compliant_tag});
 }
