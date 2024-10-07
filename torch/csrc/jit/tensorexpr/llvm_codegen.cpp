@@ -2754,7 +2754,7 @@ void LLVMCodeGenImpl::optimize(llvm::Module& M) {
   // options.
   llvm::PassBuilder PB(&TM);
 
-#if LLVM_VERSION_MAJOR >= 18
+#if LLVM_VERSION_MAJOR >= 18 && LLVM_VERSION_MAJOR < 19
   TM.registerPassBuilderCallbacks(PB, false /* PopulateClassToPassNames */);
 #else
   TM.registerPassBuilderCallbacks(PB);
