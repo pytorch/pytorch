@@ -509,10 +509,10 @@ def _make_module_call_graph(
     ]
     assert ret[0].fqn == ""
     ret[0].signature = ModuleCallSignature(
-        inputs=[], 
-        outputs=[], 
-        in_spec=in_spec, 
-        out_spec=out_spec, 
+        inputs=[],
+        outputs=[],
+        in_spec=in_spec,
+        out_spec=out_spec,
         forward_arg_names=forward_arg_names,
     )
     return ret
@@ -1769,9 +1769,12 @@ def _export_for_training(
     )
     # The returned the gm is in-place modified
     gm, module_call_graph = _get_module_call_graph(
-        export_artifact, orig_in_spec, preserve_module_call_signature, strict, forward_arg_names
+        export_artifact,
+        orig_in_spec,
+        preserve_module_call_signature,
+        strict,
+        forward_arg_names,
     )
-
 
     _verify_nn_module_stack(gm)
     _verify_stack_trace(gm)
@@ -1901,7 +1904,11 @@ def _export(
         dynamic_shapes,
     )
     gm, module_call_graph = _get_module_call_graph(
-        export_artifact, original_in_spec, preserve_module_call_signature, strict, forward_arg_names
+        export_artifact,
+        original_in_spec,
+        preserve_module_call_signature,
+        strict,
+        forward_arg_names,
     )
 
     _verify_nn_module_stack(gm)
