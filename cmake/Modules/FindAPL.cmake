@@ -22,28 +22,26 @@ ENDIF()
 
 # Check lib file
 # TODO: Add/test support for Linux
-FIND_PATH(APL_LIB_DIR NAMES libarmpl_lp64_mp.dll.lib libarmpl_lp64_mp PATHS ${APL_LIB_SEARCH_PATHS})
+FIND_PATH(APL_LIB_DIR NAMES armpl_lp64_mp.lib armpl_lp64_mp PATHS ${APL_LIB_SEARCH_PATHS})
 IF(NOT APL_LIB_DIR)
     SET(APL_FOUND OFF)
     MESSAGE(STATUS "Could not verify APL lib directory. Turning APL_FOUND off")
 ENDIF()
 
-IF(WIN32)
-  set(APL_LIBRARIES
-    "${APL_LIB_DIR}/libarmpl_lp64_mp.lib"
-  )
-  message(STATUS "APL_LIBRARIES: ${APL_LIBRARIES}")
-ELSEIF(UNIX)
-  # TODO: Add/test support for Linux
-  set(APL_LIBRARIES
-    "${APL_LIB_DIR}/libarmpl_lp64_mp"
-  )
-ENDIF()
-
-
 IF (APL_FOUND)
+  IF(WIN32)
+    set(APL_LIBRARIES
+      "${APL_LIB_DIR}/armpl_lp64_mp.lib"
+    )
+  ELSEIF(UNIX)
+    # TODO: Add/test support for Linux
+    set(APL_LIBRARIES
+      "${APL_LIB_DIR}/armpl_lp64_mp"
+    )
+  ENDIF()
   MESSAGE(STATUS "Found APL header: ${APL_INCLUDE_DIR}")
   MESSAGE(STATUS "Found APL library: ${APL_LIB_DIR}")
+  message(STATUS "APL_LIBRARIES: ${APL_LIBRARIES}")
   SET(CMAKE_REQUIRED_LIBRARIES ${APL_LIBRARIES})
   CHECK_C_SOURCE_RUNS("
 #include <stdlib.h>
