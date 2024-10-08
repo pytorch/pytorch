@@ -656,7 +656,15 @@ def _convert_mask_to_block_mask(
 ) -> Tuple[Tensor, Optional[Tensor]]:
     assert mask.dtype == torch.bool
     mask = _broadcast_to_dim(mask, 4)
-    mask = torch.nn.functional.pad(mask, (0, Q_BLOCK_SIZE - (mask.shape[-2] % Q_BLOCK_SIZE), 0, KV_BLOCK_SIZE - (mask.shape[-1] % KV_BLOCK_SIZE)))
+    mask = torch.nn.functional.pad(
+        mask,
+        (
+            0,
+            Q_BLOCK_SIZE - (mask.shape[-2] % Q_BLOCK_SIZE),
+            0,
+            KV_BLOCK_SIZE - (mask.shape[-1] % KV_BLOCK_SIZE),
+        ),
+    )
     B, H, Q, KV = mask.shape
     assert Q % Q_BLOCK_SIZE == 0
     assert KV % KV_BLOCK_SIZE == 0

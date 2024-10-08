@@ -2071,12 +2071,18 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_block_mask_non_divisible(self):
-        seq = torch.arange(1023, device='cuda') // 128
-        def mod(b, h, q, kv): 
+        seq = torch.arange(1023, device="cuda") // 128
+
+        def mod(b, h, q, kv):
             return seq[q] == seq[kv]
-        block_mask = create_block_mask(mod, None, None, 1023, 1023, device='cuda')
-        torch.compile(create_block_mask)(mod, None, None, 1023, 1023, device='cuda')
-        self.run_test_with_call(lambda q, k, v: flex_attention(q, k, v, block_mask=block_mask), Q_S=1023, KV_S=1023)
+
+        block_mask = create_block_mask(mod, None, None, 1023, 1023, device="cuda")
+        torch.compile(create_block_mask)(mod, None, None, 1023, 1023, device="cuda")
+        self.run_test_with_call(
+            lambda q, k, v: flex_attention(q, k, v, block_mask=block_mask),
+            Q_S=1023,
+            KV_S=1023,
+        )
 
     @supported_platform
     def test_comparison_vs_sdpa_with_learnable_bias(self):
