@@ -3,9 +3,11 @@ from __future__ import annotations
 import gzip
 import io
 import json
+import math
 import os
 import time
 import zipfile
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -15,7 +17,12 @@ import rockset  # type: ignore[import]
 
 
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
-S3_RESOURCE = boto3.resource("s3")
+
+
+@lru_cache
+def get_s3_resource() -> Any:
+    return boto3.resource("s3")
+
 
 # NB: In CI, a flaky test is usually retried 3 times, then the test file would be rerun
 # 2 more times
@@ -82,7 +89,7 @@ def _download_artifact(
 def download_s3_artifacts(
     prefix: str, workflow_run_id: int, workflow_run_attempt: int
 ) -> list[Path]:
-    bucket = S3_RESOURCE.Bucket("gha-artifacts")
+    bucket = get_s3_resource().Bucket("gha-artifacts")
     objs = bucket.objects.filter(
         Prefix=f"pytorch/pytorch/{workflow_run_id}/{workflow_run_attempt}/artifact/{prefix}"
     )
@@ -171,7 +178,7 @@ def upload_to_s3(
         json.dump(doc, body)
         body.write("\n")
 
-    S3_RESOURCE.Object(
+    get_s3_resource().Object(
         f"{bucket_name}",
         f"{key}",
     ).put(
@@ -188,7 +195,8 @@ def read_from_s3(
 ) -> list[dict[str, Any]]:
     print(f"Reading from s3://{bucket_name}/{key}")
     body = (
-        S3_RESOURCE.Object(
+        get_s3_resource()
+        .Object(
             f"{bucket_name}",
             f"{key}",
         )
@@ -197,6 +205,23 @@ def read_from_s3(
     )
     results = gzip.decompress(body).decode().split("\n")
     return [json.loads(result) for result in results if result]
+
+
+def remove_nan_inf(old: Any) -> Any:
+    # Casta NaN, inf, -inf to string from float since json.dumps outputs invalid
+    # json with them
+    def _helper(o: Any) -> Any:
+        if isinstance(o, float) and (math.isinf(o) or math.isnan(o)):
+            return str(o)
+        if isinstance(o, list):
+            return [_helper(v) for v in o]
+        if isinstance(o, dict):
+            return {_helper(k): _helper(v) for k, v in o.items()}
+        if isinstance(o, tuple):
+            return tuple(_helper(v) for v in o)
+        return o
+
+    return _helper(old)
 
 
 def upload_workflow_stats_to_s3(

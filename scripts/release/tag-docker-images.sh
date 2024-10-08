@@ -12,7 +12,7 @@
 #  git submodule update --init --recursive
 #
 # Usage (run from root of project):
-#  DRY_RUN=disabled ./scripts/release/tag_docker_images.sh
+#  DRY_RUN=disabled ./scripts/release/tag-docker-images.sh
 #
 
 set -eou pipefail

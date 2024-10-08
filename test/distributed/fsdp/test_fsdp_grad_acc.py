@@ -15,7 +15,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
-    CUDAInitMode,
+    DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
     TransformerWithSharedParams,
@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfRocm,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
@@ -128,7 +129,7 @@ class TestGradAcc(FSDPTest):
         fsdp_model: FSDP = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             fsdp_kwargs,
             deterministic=True,
             add_bn=False,  # disable BN since the test uses varying batch sizes
@@ -274,6 +275,7 @@ class TestGradAcc(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
+    @skipIfRocm
     @parametrize("use_orig_params", [False, True])
     def test_grad_acc_cpu_offload(
         self,

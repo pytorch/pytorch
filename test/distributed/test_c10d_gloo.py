@@ -2177,7 +2177,6 @@ class ReducerTest(TestCase):
             os.remove(self.file.name)
         except OSError as e:
             print(str(e))
-            pass
 
     @requires_gloo()
     def test_single_dtype_single_bucket(self):

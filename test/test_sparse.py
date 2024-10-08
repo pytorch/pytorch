@@ -4415,7 +4415,6 @@ class TestSparseMeta(TestCase):
 
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
-    @skipIfTorchDynamo("TODO(pearu,sparse-team) : investigate dynamo fail")
     def test_to_meta(self, dtype, layout):
         index_dtype = torch.int64
         device = 'cpu'
@@ -4426,7 +4425,6 @@ class TestSparseMeta(TestCase):
 
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
-    @skipIfTorchDynamo("TODO(pearu,sparse-team) : investigate dynamo fail")
     def test_zeros_like_meta(self, dtype, layout):
         index_dtype = torch.int64
         device = 'cpu'
@@ -4437,7 +4435,6 @@ class TestSparseMeta(TestCase):
 
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
-    @skipIfTorchDynamo("TODO(pearu,sparse-team) : investigate dynamo fail")
     def test_fake(self, dtype, layout):
         from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
         fake_mode = FakeTensorMode()
@@ -4454,7 +4451,6 @@ class TestSparseMeta(TestCase):
 
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
-    @skipIfTorchDynamo("TODO(pearu,sparse-team) : investigate dynamo fail")
     def test_zeros_like_fake(self, dtype, layout):
         from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
         from torch.utils._mode_utils import no_dispatch
@@ -4483,7 +4479,6 @@ class TestSparseMeta(TestCase):
 
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
-    @skipIfTorchDynamo("TODO(pearu,sparse-team) : investigate dynamo fail")
     def test_add_meta(self, dtype, layout):
         device = 'cpu'
         index_dtype = torch.int64
