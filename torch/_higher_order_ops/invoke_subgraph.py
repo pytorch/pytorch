@@ -144,6 +144,7 @@ def invoke_subgraph_autograd(subgraph, identifier, operands):
             return invoke_subgraph(subgraph, identifier, operands)
 
     fw_graph, bw_graph = create_fw_bw_graph(subgraph, operands)
+    # TODO(anijain2305) - Implement caching of autograd function op.
     return InvokeSubgraphAutogradOp.apply(fw_graph, bw_graph, identifier, *operands)
 
 
