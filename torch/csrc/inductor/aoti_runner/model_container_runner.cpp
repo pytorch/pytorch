@@ -5,6 +5,9 @@
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
+#ifndef _WIN32
+#include <sys/stat.h>
+#else
 // TODO: Investigate why this is necessary, but fixes build problems in FRL
 #if __has_include("filesystem")
 #include <filesystem>
@@ -13,9 +16,6 @@ namespace fs = std::filesystem;
 #include <experimental/filesystem>
 namespace fs = std::experimental::filesystem;
 #endif
-
-#ifndef _WIN32
-#include <sys/stat.h>
 #endif
 
 namespace {
@@ -23,7 +23,7 @@ bool file_exists(std::string& path) {
 #ifdef _WIN32
   return fs::exists(path);
 #else
-  struct stat rc;
+  struct stat rc {};
   return lstat(path.c_str(), &rc) == 0;
 #endif
 }
