@@ -520,6 +520,8 @@ def meta__cslt_sparse_mm(
     out_dtype: Optional[torch.dtype] = None,
     transpose_result: bool = False,
     alg_id =0,
+    split_k=1,
+    split_k_one_kernel=False,
 ):
     assert dense_B.dtype in {
         torch.float32,

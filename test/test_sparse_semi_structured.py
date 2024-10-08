@@ -1155,8 +1155,8 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         B = torch.ones((128, 128), device=device).to(dtype)
 
         A_compressed = torch._cslt_compress(A)
-        alg_id = torch._cslt_sparse_mm_search(A_compressed, B.t())
-        sparse_result = torch._cslt_sparse_mm(A_compressed, B.t(), alg_id=alg_id)
+        alg_id, split_k, split_k_one_kernel = torch._cslt_sparse_mm_search(A_compressed, B.t())
+        sparse_result = torch._cslt_sparse_mm(A_compressed, B.t(), alg_id=alg_id, split_k=split_k, split_k_one_kernel=split_k_one_kernel)
 
         dense_result = torch.mm(A.to(torch.float32), B.to(torch.float32))
         dense_result = dense_result.to(dtype)
