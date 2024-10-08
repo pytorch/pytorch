@@ -737,8 +737,12 @@ static void _wrap_outputs(
         // should be used instead. To construct these for NJT, zeros_like() must
         // be used until we have factory function support.
         // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-        bool use_zeros_like =
-            num_outputs > 1 && wrapped_outputs[i]->is_nested();
+        bool is_differentiable =
+            (non_differentiable.count(
+                 wrapped_outputs[i]->unsafeGetTensorImpl()) == 0 &&
+             isDifferentiableType(wrapped_outputs[i]->scalar_type()));
+        bool use_zeros_like = is_differentiable && num_outputs > 1 &&
+            wrapped_outputs[i]->is_nested();
         // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         self->output_info.emplace_back(*wrapped_outputs[i], use_zeros_like);
       }
@@ -1797,7 +1801,8 @@ static struct PyMethodDef THPFunction_methods[] = {
     {nullptr}};
 
 PyTypeObject THPFunctionType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C._FunctionBase", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._FunctionBase", /* tp_name */
     sizeof(THPFunction), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)THPFunction_dealloc, /* tp_dealloc */

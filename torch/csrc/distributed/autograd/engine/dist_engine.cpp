@@ -10,9 +10,7 @@
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 using torch::autograd::AccumulateGrad;
 using torch::autograd::edge_list;
@@ -639,6 +637,4 @@ std::unordered_map<std::string, int> DistEngine::getDebugInfo() const {
   return debugInfo;
 }
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd
