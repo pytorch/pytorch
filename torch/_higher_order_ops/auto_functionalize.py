@@ -92,6 +92,7 @@ def write_view_information_to_args(
             elif (  # we do the checks in this order to minimize adding guards.
                 base.storage_offset() == tensor.storage_offset()
                 and base.stride() == tensor.stride()
+                and len(base.size()) == len(tensor.size())
                 and base.size() == tensor.size()
             ):
                 kwargs[f"{prefix}_alias"] = True
