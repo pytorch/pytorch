@@ -206,13 +206,11 @@ def _get_param_all_gather_inputs(
     for i, fsdp_param in enumerate(fsdp_params):
         if use_foreach_copy(fsdp_param):
             foreach_copy_indices.append(i)
-            if fsdp_param.sharded_state == ShardedState.SHARDED:
-                all_gather_input = fsdp_param._sharded_param_data
-            else:
-                all_gather_input = cast(
-                    torch.Tensor, fsdp_param._sharded_post_forward_param_data
-                )
-            assert all_gather_input.ndim == 1, f"{all_gather_input.shape=}"
+            all_gather_input = (
+                fsdp_param._sharded_param_data
+                if fsdp_param.sharded_state == ShardedState.SHARDED
+                else cast(torch.Tensor, fsdp_param._sharded_post_forward_param_data)
+            )
             foreach_copy_inputs.append(all_gather_input)
             foreach_copy_input_numels.append(all_gather_input.numel())
         else:

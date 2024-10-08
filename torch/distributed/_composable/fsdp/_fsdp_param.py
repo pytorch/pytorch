@@ -384,13 +384,10 @@ class FSDPParam:
                     device=self.device
                 )
         self._sharded_param_data = padded_sharded_param.view(-1)
-        if padded_sharded_param.numel() > 0:
-            length = sharded_param.size(shard_dim) if sharded_param.numel() > 0 else 0
-            sharded_param = padded_sharded_param.narrow(
-                dim=shard_dim, start=0, length=length
-            )
-        else:
-            sharded_param = padded_sharded_param.view(self.sharded_size)
+        length = sharded_param.size(shard_dim) if sharded_param.numel() > 0 else 0
+        sharded_param = padded_sharded_param.narrow(
+            dim=shard_dim, start=0, length=length
+        )
         assert sharded_param.is_contiguous(), f"{self.fsdp_placement=}"
         self.sharded_param = nn.Parameter(self.to_sharded_dtensor(sharded_param))
         self.sharded_param.requires_grad_(param.requires_grad)

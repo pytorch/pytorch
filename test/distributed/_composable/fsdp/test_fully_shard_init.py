@@ -1024,8 +1024,7 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
         model, ref_model = self._init_models()
 
         def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
-            largest_dim = -1
-            largest_dim_size = -1
+            largest_dim = largest_dim_size = -1
             for dim, dim_size in enumerate(param.shape):
                 if dim_size > largest_dim_size:
                     largest_dim = dim
