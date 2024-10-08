@@ -673,7 +673,10 @@ class FakeTensor(Tensor):
             dispatch_device=True,
             device_for_backend_keys=device,
         )
-        torch._C._set_throw_on_mutable_data_ptr(self)
+        if not fake_mode._allow_unsafe_data_ptr_access:
+            torch._C._set_throw_on_mutable_data_ptr(self)
+        else:
+            torch._C._set_warn_deprecated_on_mutable_data_ptr(self)
 
         assert elem.device.type == "meta", elem.device.type
         device = device if isinstance(device, torch.device) else torch.device(device)
@@ -1129,6 +1132,9 @@ class FakeTensorMode(TorchDispatchMode):
         # places where we unconditionally allow scalar outputs, TO BE REMOVED
         self.allow_scalar_outputs = False
 
+        self._allow_unsafe_data_ptr_access = (
+            torch._functorch.config.fake_tensor_allow_unsafe_data_ptr_access
+        )
         self.allow_meta = torch._functorch.config.fake_tensor_allow_meta
         self.cache_enabled = (
             torch._dynamo.config.fake_tensor_cache_enabled
@@ -1986,6 +1992,11 @@ class FakeTensorMode(TorchDispatchMode):
                 return maybe_propagate_real_tensors(
                     func.prim_meta_impl(*args, **kwargs)
                 )
+
+        profiles = torch._dynamo.config._custom_ops_profile
+        if profiles is not None:
+            if func in profiles.data:
+                return profiles.generic_fake_kernel(func, self, *args, **kwargs)
 
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.

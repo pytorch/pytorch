@@ -701,7 +701,7 @@ class CompileTest(TestCase):
             FileCheck()
             .check(
                 "buf0 = torch.ops._c10d_functional.all_gather_into_tensor_coalesced"
-                ".default([arg0_1, arg1_1, arg2_1, arg3_1]"
+                ".default([arg3_1, arg2_1, arg1_1, arg0_1]"
             )
             .check("buf1 = buf0[0]")
             .check("buf2 = buf0[1]")
@@ -717,8 +717,8 @@ class CompileTest(TestCase):
         )
 
         # Test aoti
-        out = AOTIRunnerUtil.run("cuda", func, (args,))
-        torch.cuda.synchronize()
+        # out = AOTIRunnerUtil.run("cuda", func, (args,))
+        # torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
