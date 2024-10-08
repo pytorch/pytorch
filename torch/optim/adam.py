@@ -255,7 +255,7 @@ Adam.__doc__ = (
             &\textbf{input}      : \gamma \text{ (lr)}, \beta_1, \beta_2
                 \text{ (betas)},\theta_0 \text{ (params)},f(\theta) \text{ (objective)}          \\
             &\hspace{13mm}      \lambda \text{ (weight decay)},  \: \textit{amsgrad},
-                \:\textit{maximize}                                                              \\
+                \:\textit{maximize},  \: \epsilon \text{ (epsilon)}                              \\
             &\textbf{initialize} :  m_0 \leftarrow 0 \text{ ( first moment)},
                 v_0\leftarrow 0 \text{ (second moment)},\: \widehat{v_0}^{max}\leftarrow 0\\[-1.ex]
             &\rule{110mm}{0.4pt}                                                                 \\
