@@ -8,6 +8,7 @@ import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.testing._internal import common_utils
 
+
 @contextlib.contextmanager
 def bypass_export_jit_isinstance():
     """
