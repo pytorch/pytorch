@@ -338,6 +338,11 @@ class FunctionalTensorMode(TorchDispatchMode):
         # discovery. This flag distinguishes between the two stages.
         self._allow_token_discovery = _allow_token_discovery
 
+        # When true, FunctionalTensorMode will not actually functionalize anything
+        # (this is used during joint graph tracing, when we want to delay functionalization
+        # of the backward graph)
+        self.is_nop = False
+
         self._storage_to_base: weakref.WeakKeyDictionary[
             torch.storage.UntypedStorage, Optional[FunctionalTensor]
         ] = weakref.WeakKeyDictionary()
@@ -443,6 +448,15 @@ class FunctionalTensorMode(TorchDispatchMode):
                 r = func.decompose(*args, **kwargs)
                 if r is not NotImplemented:
                     return r
+
+        if self.is_nop:
+            # "no-op" here basically just means unwrap to the underlying FakeTensor, run the op, and wrap the output.
+            args_, kwargs_ = pytree.tree_map_only(
+                FunctionalTensor,
+                lambda x: torch._from_functional_tensor(x.elem),
+                (args, kwargs),
+            )
+            return func(*args_, **kwargs)
 
         def wrap(x):
             # Only wrap our outputs in subclasses if the inner functionalization call

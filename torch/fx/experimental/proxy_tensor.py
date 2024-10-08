@@ -51,6 +51,7 @@ from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorMode,
+    get_plain_tensors,
     is_fake,
     unset_fake_temporarily,
 )
@@ -237,6 +238,9 @@ def set_proxy_slot(
                 tracer.sympy_expr_tracker[obj.node.expr] = proxy
 
 
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+
 def has_proxy_slot(obj: Tensor, tracer: _ProxyTracer) -> bool:
     assert isinstance(obj, (Tensor, SymNode)), type(obj)
     return bool(get_proxy_slot(obj, tracer, False, lambda _: True))
@@ -346,6 +350,8 @@ def get_proxy_slot(
 
     if obj not in tracker:
         # Last ditch
+        if isinstance(obj, torch._subclasses.functional_tensor.FunctionalTensor):
+            return get_proxy_slot(torch._from_functional_tensor(obj.elem), tracer)
         if isinstance(obj, py_sym_types) and obj.node.expr in tracer.sympy_expr_tracker:
             value = tracer.sympy_expr_tracker[obj.node.expr]
         else:
@@ -358,6 +364,54 @@ def get_proxy_slot(
         value = tracker[obj]
     res = transform(value)
     return res
+
+
+def is_subclass_untracked_but_inner_tensors_tracked(obj, tracer):
+    if not is_traceable_wrapper_subclass(obj):
+        return False
+    inner_tensors = get_plain_tensors(obj)
+    inner_tensors_tracked = all([has_proxy_slot(x) for x in inner_tensors])
+    subclass_tracked = has_proxy_slot(obj)
+    return inner_tensors_tracked and not subclass_tracked
+
+
+# This function is used during join graph tracing. In particular, suppose we have an arg
+# that is a tensor subclass:
+#     arg = TwoTensor(arg_a, arg_b)
+# If during tracing, we see that:
+# - arg does not have a proxy associated with it
+# - arg_a and arg_b  both have proxies
+# Then we will generate a fresh proxy on the fly for the subclass in our graph:
+#     arg = wrap_subclass(arg_a, arg_b, ...)
+def maybe_track_subclass(obj, tracer):
+    if has_proxy_slot(obj, tracer):
+        return get_proxy_slot(obj, tracer, default=None)
+    if not is_traceable_wrapper_subclass(obj):
+        return None
+    inner_attrs = obj.__tensor_flatten__()[0]
+    inner_tensor_proxies = [
+        maybe_track_subclass(getattr(obj, attr), tracer) for attr in inner_attrs
+    ]
+    if any(x is None for x in inner_tensor_proxies):
+        # Only create a proxy for our subclass arg if all of its inner tensors have proxies
+        return None
+    inner_tensor_proxies = [x.proxy for x in inner_tensor_proxies]
+    from torch._functorch._aot_autograd import subclass_utils as aot_subclass_utils
+
+    func, proxy_args, proxy_kwargs = aot_subclass_utils.prepare_wrap_subclass(
+        obj, inner_tensor_proxies
+    )
+    proxy_out = tracer.create_proxy(
+        "call_function",
+        func,
+        proxy_args,
+        proxy_kwargs,
+        name=tracer.graph._target_to_str(func.overloadpacket.__name__),
+    )
+    track_tensor(obj, proxy_out, constant=None, tracer=tracer)
+    set_meta(proxy_out, obj)
+    assert has_proxy_slot(obj, tracer)
+    return get_proxy_slot(obj, tracer)
 
 
 def snapshot_fake(val: Tensor) -> Optional[Tensor]:
@@ -491,6 +545,11 @@ def set_meta(proxy: Proxy, val: _ExtractValType) -> Proxy:
             proxy.node.meta["tensor_meta"] = _extract_tensor_metadata(val)
         elif isinstance(val, Tensor) and not val.is_sparse:
             proxy.node.meta["tensor_meta"] = _extract_tensor_metadata(val)
+        if any(
+            "tangent_compute" in x.meta for x in pytree.tree_leaves(proxy.node.args)
+        ):
+            proxy.node.meta["tangent_compute"] = True
+
     return proxy
 
 
@@ -774,6 +833,22 @@ def proxy_call(
         if not r:
             unrecognized_types.append(type(x))
         return r
+
+    # During joint graph tracing, we run the backward portion of the joint in pre-dispatch.
+    # However: any compute that happens during the backward that does *not* depend on tangents should be traced directly in post-dispatch ATen.
+    if proxy_mode.pre_dispatch and proxy_mode.pre_dispatch_joint_tracing:
+        flat_args_kwargs = pytree.tree_flatten((args, kwargs))[0]
+        if not any(
+            has_proxy_slot(x, proxy_mode.tracer)
+            and "tangent_compute"
+            in get_proxy_slot(x, proxy_mode.tracer).proxy.node.meta
+            for x in flat_args_kwargs
+        ):
+            with proxy_mode.reenter_post_dispatch():
+                return func(*args, **kwargs)
+        # During pre-dispatch joint tracing, track proxies for subclasses that have inner tensor proxies.
+        for a in flat_args_kwargs:
+            maybe_track_subclass(a, proxy_mode.tracer)
 
     # If there are any tensor subclasses, we need to handle those tensor subclasses first
     # TODO: we could use types to test this
@@ -1292,6 +1367,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.tracer = tracer
         self.tracing_mode = tracing_mode
         self.pre_dispatch = pre_dispatch
+        self.pre_dispatch_joint_tracing = False
         self._allow_fake_constant = _allow_fake_constant
         self._error_on_data_dependent_ops = _error_on_data_dependent_ops
         # Indicates to our torch_dispatch dispatching infra that
@@ -1346,6 +1422,52 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
     @classmethod
     def is_infra_mode(cls) -> bool:
         return True
+
+    @contextmanager
+    def reenter_post_dispatch(self):
+        assert self.pre_dispatch
+        assert self.pre_dispatch_joint_tracing
+        assert self._dispatch_key == torch._C.DispatchKey.PreDispatch
+
+        self.pre_dispatch = False
+        self._dispatch_key = None
+        try:
+            with self:
+                yield
+        finally:
+            self.pre_dispatch = True
+            self._dispatch_key = torch._C.DispatchKey.PreDispatch
+
+    @contextmanager
+    def move_to_pre_dispatch_for_joint_tracing(self, tangents):
+        assert torch._ops._len_torch_dispatch_stack_pre_dispatch() == 0
+        assert torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY) is self
+        assert not self.pre_dispatch
+        assert not self.pre_dispatch_joint_tracing
+        not hasattr(self, "_dispatch_key") or self._dispatch_key is None
+
+        self.pre_dispatch = True
+        self.pre_dispatch_joint_tracing = True
+        self._dispatch_key = torch._C.DispatchKey.PreDispatch
+        # Mark all tangent input nodes as participating in tangent-only compute
+        for tangent in tangents:
+            self.tracer.tensor_tracker[tangent].proxy.node.meta[
+                "tangent_compute"
+            ] = True
+        try:
+            # move proxy mode from normal mode stack to pre-dispatch mode stack
+            torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
+            torch.utils._python_dispatch._push_mode(self)
+            yield
+        finally:
+            proxy_mode_ = torch.utils._python_dispatch._pop_mode(
+                torch._C.DispatchKey.PreDispatch
+            )
+            assert proxy_mode_ is self
+            self.pre_dispatch = False
+            self.pre_dispatch_joint_tracing = False
+            self._dispatch_key = None
+            torch._C._set_dispatch_mode(self)
 
     def _compute_proxy(
         self, func: OpOverload, args: Tuple[object, ...], out: PySymType

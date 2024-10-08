@@ -15,8 +15,11 @@ from functools import wraps
 from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Union
 
 import torch
+import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
+from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.utils import lazy_format_graph_code
 from torch._guards import (
     compile_context,
     CompileContext,
@@ -25,15 +28,18 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
+from torch._logging import getArtifactLogger
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
+from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental._backward_state import BackwardState
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
-from .functional_utils import gen_alias_from_base
+from .functional_utils import from_fun, gen_alias_from_base, to_fun
 from .input_output_analysis import (
     compute_overlapping_inputs,
     create_synthetic_base_metadata,
@@ -51,6 +57,7 @@ from .schemas import (
     ViewAndMutationMeta,
 )
 from .subclass_utils import (
+    create_subclass_meta,
     get_types_for_subclass,
     requires_subclass_dispatch,
     unwrap_tensor_subclasses,
@@ -65,6 +72,8 @@ from .utils import (
     strict_zip,
 )
 
+
+aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 zip = strict_zip
 
@@ -1739,6 +1748,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # There are tests that count these calls, saving to var.
                 ctx_saved_tensors = ctx.saved_tensors
                 num_ctx_saved_tensors = len(ctx_saved_tensors)
+                tangents_start_idx = len(ctx.symints) + len(ctx_saved_tensors)
                 all_args = [
                     *ctx.symints,
                     *ctx_saved_tensors,
@@ -1945,6 +1955,85 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         saved_context = lazy_backward_info.saved_context
                         saved_compile_context = lazy_backward_info.saved_compile_context
 
+                        if config.predispatch_backward:
+                            nonlocal tangents
+                            fake_mode = detect_fake_mode(placeholder_list)
+                            for i, tangent in enumerate(tangents):
+                                placeholder_tangent = placeholder_list[
+                                    tangents_start_idx + i
+                                ]
+                                # Assumption for now: tangents will always have static shape
+                                # if we've delayed compilation to backwrad
+                                fake_tangent = fake_mode.from_tensor(tangent)
+                                placeholder_list[tangents_start_idx + i] = fake_tangent
+
+                            tangent_subclass_meta = create_subclass_meta(
+                                placeholder_list
+                            )
+
+                            # TODO: refactor so I can re-use the equivalent trace-time utils
+                            def create_bw_module_no_subclasses(fn):
+                                def inner(*args):
+                                    wrapped_args = wrap_tensor_subclasses(
+                                        args, subclass_metas=tangent_subclass_meta
+                                    )
+                                    wrapped_outs = fn(*wrapped_args)
+                                    outs = unwrap_tensor_subclasses(
+                                        wrapped_outs, is_joint_structure=False
+                                    )
+                                    return outs
+
+                                return inner
+
+                            # TODO: properly handle backward mutations / effect tokens
+                            def create_bw_module_functionalized(fn):
+                                # See Note [Disabling Functionalize TLS Above Python Functionalization]
+                                def inner(*args):
+                                    disable_above = torch._C._ExcludeDispatchKeyGuard(
+                                        torch._C.DispatchKeySet(
+                                            torch._C.DispatchKey.Functionalize
+                                        )
+                                    )
+                                    with disable_above:
+                                        f_args = pytree.tree_map(to_fun, args)
+                                        f_outs = fn(*f_args)
+                                        return pytree.tree_map(from_fun, f_outs)
+
+                                return inner
+
+                            placeholders_no_subclasses = unwrap_tensor_subclasses(
+                                placeholder_list, is_joint_structure=False
+                            )
+                            bw_module_no_subclasses = create_bw_module_no_subclasses(
+                                bw_module
+                            )
+                            bw_module_functionalized = create_bw_module_functionalized(
+                                bw_module_no_subclasses
+                            )
+
+                            with enable_python_dispatcher(), FunctionalTensorMode():
+                                bw_module_retraced = make_fx(
+                                    bw_module_functionalized,
+                                    decomposition_table=aot_config.decompositions,
+                                    record_module_stack=True,
+                                )(*placeholders_no_subclasses)
+
+                            # TODO: log to tlparse as well
+                            aot_graphs_log.info(
+                                "%s",
+                                lazy_format_graph_code(
+                                    "Backward graph (retraced with runtime tangents)",
+                                    bw_module,
+                                    CompiledFunction._aot_id,
+                                    include_stride=True,
+                                    include_device=True,
+                                    colored=True,
+                                ),
+                            )
+                        else:
+                            bw_module_retraced = bw_module
+                            placeholders_no_subclasses = placeholder_list
+
                         context = (
                             torch._C._DisableAutocast if disable_amp else nullcontext
                         )
@@ -1952,7 +2041,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             saved_compile_context
                         ), context(), track_graph_compiling(aot_config, "backward"):
                             CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                                bw_module, placeholder_list
+                                bw_module_retraced, placeholders_no_subclasses
                             )
                             # Maybe save cache entry
                             if try_save_cache_entry is not None:

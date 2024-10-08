@@ -8,9 +8,11 @@ and this includes tensor subclasses that implement __torch_dispatch__.
 import typing
 from typing import Any, List, Optional, Tuple, Union
 
+import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._subclasses.fake_tensor import get_plain_tensors
+from torch.library import Library
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .schemas import MutationType, SubclassCreationMeta, ViewAndMutationMeta
@@ -345,3 +347,74 @@ def compute_inner_mutated_inp_indices_from_subclass_meta(
         for i, inp in enumerate(updated_input_info)
         if inp.mutation_type == MutationType.MUTATED_OUT_GRAPH
     ]
+
+
+_lib = Library("subclass_utils", "FRAGMENT")
+
+
+def _unwrap_subclass_impl(x):
+    attrs = x.__tensor_flatten__()[0]
+    tensors = [getattr(x, a) for a in attrs]
+    for t in tensors:
+        assert not is_traceable_wrapper_subclass(
+            t
+        ), "Not supported nested subclass tangents for now"
+    return tensors
+
+
+_subclass_meta_dict = {}
+
+
+def _wrap_subclass_impl(
+    inner_tensors,
+    *,
+    inner_tensor_names,
+    outer_size,
+    outer_stride,
+    subclass_module_name,
+    subclass_name,
+    metadata_hash,
+):
+    import importlib
+
+    module = importlib.import_module(subclass_module_name)
+    subclass_type = getattr(module, subclass_name)
+    metadata = _subclass_meta_dict[metadata_hash]
+    inner_tensor_dict = {k: v for k, v in zip(inner_tensor_names, inner_tensors)}
+    return subclass_type.__tensor_unflatten__(
+        inner_tensor_dict, metadata, outer_size, outer_stride
+    )
+
+
+_lib.define("unwrap_subclass(Tensor x) -> Tensor[]")
+_lib.impl("unwrap_subclass", _unwrap_subclass_impl, "Autograd")
+_lib.impl("unwrap_subclass", _unwrap_subclass_impl, "Python")
+_lib.define(
+    "wrap_subclass(Tensor[] inner_tensors, *, str[] inner_tensor_names, SymInt[] outer_size, SymInt[] outer_stride, str subclass_module_name, str subclass_name, int metadata_hash) -> Tensor"
+)
+_lib.impl("wrap_subclass", _wrap_subclass_impl, "Autograd")
+_lib.impl("wrap_subclass", _wrap_subclass_impl, "Python")
+
+
+# Used during proxy tracing, when we need to construct a proxy that represents wrapping inner tensor into a subclass.
+# Given the raw subclass we want to wrap, and proxies for its inner tensors, we:
+# (1) Return the (func, args, kwargs) needed to generate a proxy
+# (2) Update a global dict that hashes every subclass metadata that we encounter.
+#     We do this because we are not able to represent subclass metadata as direct operator args to FX nodes.
+def prepare_wrap_subclass(tensor, inner_tensor_proxies):
+    inner_attrs, subclass_meta = tensor.__tensor_flatten__()
+    # hash and store subclass metadata
+    metadata_hash = hash(subclass_meta)
+    _subclass_meta_dict[metadata_hash] = subclass_meta
+    # return the func/args/kwargs needed to generate a proxy call to `wrap_subclass`
+    proxy_args = (inner_tensor_proxies,)
+    proxy_kwargs = {
+        "inner_tensor_names": inner_attrs,
+        "outer_size": tensor.size(),
+        "outer_stride": tensor.stride(),
+        "subclass_module_name": tensor.__module__,
+        "subclass_name": type(tensor).__name__,
+        "metadata_hash": metadata_hash,
+    }
+    func = torch.ops.subclass_utils.wrap_subclass.default
+    return (func, proxy_args, proxy_kwargs)

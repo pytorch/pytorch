@@ -5455,6 +5455,34 @@ def forward(self, tangents_1, tangents_2):
         ):
             (out_test[0] + out_test[1]).sum().backward()
 
+    @torch._functorch.config.patch({"predispatch_backward": True})
+    def test_aot_dispatch_intermediate_activations_and_subclass_tangents(self):
+        # a is a subclass, b is not
+        def f(a):
+            return a.sin().sin().sin()
+
+        a1_ref = torch.ones(3, 3, requires_grad=True)
+        a2_ref = torch.ones(3, 3, requires_grad=True)
+        a_ref = TwoTensor(a1_ref, a2_ref)
+
+        a1_test = a1_ref.clone().detach().requires_grad_(True)
+        a2_test = a2_ref.clone().detach().requires_grad_(True)
+        a_test = TwoTensor(a1_test, a2_test)
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        out_ref = f(a_ref)
+        out_test = compiled_f(a_test)
+        # First out is a TwoTensor, second is an ordinary tensor
+        self.assertEqual(out_ref.a, out_test.a)
+        self.assertEqual(out_ref.b, out_test.b)
+
+        out_test.sum().backward()
+
     def test_aot_dispatch_output_alias(self):
         # a is a tensor, b is a TwoTensor
         def f(a, b):
