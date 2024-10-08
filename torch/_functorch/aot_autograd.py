@@ -1271,6 +1271,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
         )
     if trace_joint:
 
+        @wraps(functional_call)
         def flattened_joint(*args):
             # The idea here is that the joint graph that AOTAutograd creates has some strict properties:
             # (1) It accepts two arguments (primals, tangents), and pytree_flattens them
@@ -1311,7 +1312,7 @@ https://github.com/pytorch/pytorch/issues/101192
                     assert grad is None
             return *fw_outs, *output_gradients
 
-        fx_g = make_fx(flattened_joint)(*full_args)
+        fx_g = make_fx(flattened_joint, record_module_stack=True)(*full_args)
 
     user_args_flat = pytree.arg_tree_leaves(*args, **kwargs)
     return fx_g, create_graph_signature(
