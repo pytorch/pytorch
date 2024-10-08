@@ -1266,7 +1266,7 @@ class LinearUnary(ExternKernelAlloc):
             constant_args.insert(0, None)
 
         packed = LinearUnary(
-            layout=FlexibleLayout(
+            layout=FixedLayout(
                 device=x.get_device(),
                 dtype=x.get_dtype(),
                 size=output_size,
@@ -1347,7 +1347,7 @@ class LinearBinary(ExternKernelAlloc):
             constant_args.insert(0, B)
 
         packed = LinearBinary(
-            layout=FlexibleLayout(
+            layout=FixedLayout(
                 device=x.get_device(),
                 dtype=x.get_dtype(),
                 size=output_size,
