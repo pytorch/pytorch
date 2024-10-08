@@ -43,7 +43,9 @@ jobs:
       python-version: 3.9.12
       test-matrix: |
         { include: [
-          { config: "mps_perf_all", shard: 1, num_shards: 1, runner: "macos-m1-14" },
+          { config: "perf_torchbench", shard: 1, num_shards: 1, runner: "macos-m1-14" },
+          { config: "perf_hf", shard: 1, num_shards: 1, runner: "macos-m1-14" },
+          { config: "perf_timm", shard: 1, num_shards: 1, runner: "macos-m1-14" },
         ]}
 
   macos-perf-py3-arm64-test:
