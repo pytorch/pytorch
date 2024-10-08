@@ -246,7 +246,6 @@ exclude_patterns = [
     'torch/csrc/inductor/aoti_torch/c/shim.h',
     'torch/csrc/jit/**/*',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
-    'torch/csrc/lazy/**/*',
 ]
 init_command = [
     'python3',
@@ -1255,7 +1254,6 @@ exclude_patterns = [
     'torch/fx/experimental/refinement_types.py',
     'torch/fx/experimental/rewriter.py',
     'torch/fx/experimental/schema_type_annotation.py',
-    'torch/fx/experimental/symbolic_shapes.py',
     'torch/fx/experimental/unification/__init__.py',
     'torch/fx/experimental/unification/core.py',
     'torch/fx/experimental/unification/dispatch.py',
@@ -1271,7 +1269,6 @@ exclude_patterns = [
     'torch/fx/experimental/unification/utils.py',
     'torch/fx/experimental/unification/variable.py',
     'torch/fx/experimental/unify_refinements.py',
-    'torch/fx/experimental/validator.py',
     'torch/fx/graph.py',
     'torch/fx/graph_module.py',
     'torch/fx/interpreter.py',
