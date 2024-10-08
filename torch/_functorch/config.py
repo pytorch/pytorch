@@ -11,6 +11,8 @@ import os
 import sys
 from typing import TYPE_CHECKING
 
+from torch._utils_internal import JustKnobsConfig
+
 
 # Converts torch rng ops to their functional philox rng equivalents. Note that
 # we functionalize only CUDA rng ops today.
@@ -195,7 +197,9 @@ strict_autograd_cache = False
 
 # Fx pass used to tensorify python scalars. Part of the rollout for supporting
 # dynamic float arguments in PT2.
-tensorify_python_scalars = True
+tensorify_python_scalars = JustKnobsConfig(
+    name="tensorify_python_scalars", env_name="TENSORIFY_PYTHON_SCALARS", default=True
+)
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
