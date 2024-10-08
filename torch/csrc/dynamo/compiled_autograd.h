@@ -272,6 +272,8 @@ struct AutogradCompilerCall {
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type = SizeInput::STATIC;
   const bool opaque_cpp_node;
+
+  // stateful, false if we can't safely fallback to eager
   bool fallback_on_error;
 
   // Currently, these lift untraceable CppNodes as one-time use custom ops

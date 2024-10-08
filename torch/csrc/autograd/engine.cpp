@@ -1256,12 +1256,16 @@ auto Engine::execute(
   if (compiled_autograd != nullptr) {
     // see [Note: Compiled Autograd]
     _thread_check.release();
+    auto start = std::chrono::high_resolution_clock::now();
     try {
       return (*compiled_autograd)(
           graph_root, *graph_task, accumulate_grad, create_graph, outputs);
     } catch (const dynamo::autograd::EagerFallbackException& e) {
-      TORCH_INTERNAL_ASSERT(compiled_autograd == nullptr);
+      // continue with eager autograd engine
     }
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::micro> duration = end - start;
+    std::cout << "Compiled autograd time taken: " << duration.count() << " us" << std::endl;
   }
 
   // Queue the root

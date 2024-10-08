@@ -51,6 +51,17 @@ Notes:
   - We require non-hook autograd nodes to be tracable.
 */
 
+/*
+[Note: Eager Autograd Fallback]
+
+By default, compiled autograd will fall back to eager autograd if it encounters
+a recoverable error. As compiled autograd tries to compile the graph, we track
+whether we are in a recoverable state. As of the time of writing, some
+non-recoverable states would be:
+- fired unpack tensor hooks
+- started tracing (can be relaxed further)
+*/
+
 namespace torch::dynamo::autograd {
 using c10::SymInt;
 
@@ -736,6 +747,7 @@ CacheNode* _compiled_autograd_impl(
     bool accumulate_grad,
     bool create_graph,
     const edge_list& output_edges,
+    std::optional<VerboseLogger>& vlogger,
     THPObjectPtr* graph_arg_inputs,
     THPObjectPtr* graph_arg_sizes,
     THPObjectPtr* graph_arg_ivalue_args,
@@ -749,7 +761,8 @@ CacheNode* _compiled_autograd_impl(
       "TorchDispatchMode not yet implemented for compiled autograd");
 
   custom_op_impls->reset();
-  std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
+  // copy this in case we need to fallback
+  std::unordered_map<Node*, int> dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
 
   // bind methods with python deps
@@ -769,7 +782,6 @@ CacheNode* _compiled_autograd_impl(
       check_exec_info ? graph_task.exec_info_.size() : dependencies.size() + 1);
 
   int i = 0;
-  std::optional<VerboseLogger> vlogger = VerboseLogger::maybe_create();
   while (!worklist.empty()) {
     std::shared_ptr<Node> fn = std::move(worklist.back());
     worklist.pop_back();
@@ -824,7 +836,7 @@ CacheNode* _compiled_autograd_impl(
     }
     i++;
   }
-  // TODO(xmfan): identify all side effects and relax this constraint
+  // TODO(xmfan): we relax this constraint if we identify all side effects
   compiler_call.fallback_on_error = false;
 
   // TODO(jansel): some dynamic sizes seem to be ints not symints
@@ -1008,6 +1020,8 @@ variable_list compiled_autograd(
   CacheNode* cache = nullptr;
   {
     AutogradCompilerCall compiler_call(opaque_cpp_node, fallback_on_error);
+    auto vlogger = VerboseLogger::maybe_create();
+    // See [Note: Eager Autograd Fallback]
     try {
       cache = _compiled_autograd_impl(
           compiler_call,
@@ -1016,19 +1030,21 @@ variable_list compiled_autograd(
           accumulate_grad,
           create_graph,
           output_edges,
+          vlogger,
           &inputs,
           &sizes,
           &ivalue_args,
           &hooks);
+    } catch (const EagerFallbackException& e) {
+      TORCH_INTERNAL_ASSERT(false, "Unexpected usage of EagerFallbackException.");
     } catch (const std::exception& e) {
       if (!compiler_call.fallback_on_error) {
-        // error was unrecoverable
+        // error is unrecoverable
         throw;
       }
-
-      TORCH_WARN_ONCE(
-          "Falling back to eager autograd. Exception thrown during Compiled Autograd tracing: " +
-          std::string(e.what()));
+      if (vlogger.has_value()) {
+        vlogger->verbose_log_fn("Falling back to eager autograd. Exception thrown during Compiled Autograd tracing: " + std::string(e.what()));
+      }
       throw EagerFallbackException(e);
     }
   }

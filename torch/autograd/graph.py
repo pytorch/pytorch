@@ -821,10 +821,15 @@ def _engine_run_backward(
     attach_logging_hooks = log.getEffectiveLevel() <= logging.DEBUG
     if attach_logging_hooks:
         unregister_hooks = _register_logging_hooks_on_whole_graph(t_outputs)
+    import time
+    start = time.perf_counter()
     try:
         return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
             t_outputs, *args, **kwargs
         )  # Calls into the C++ engine to run the backward pass
     finally:
+        end = time.perf_counter()
+        duration_microseconds = (end - start) * 1_000_000
+        print(f"Whole backward time taken: {duration_microseconds:.2f} microseconds")
         if attach_logging_hooks:
             unregister_hooks()  # type: ignore[possibly-undefined]
