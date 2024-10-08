@@ -182,6 +182,7 @@ test_torchbench_perf() {
   print_cmake_info
 
   echo "Launching torchbench setup"
+  conda_benchmark_deps
   torchbench_setup_macos
 
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
@@ -204,6 +205,7 @@ test_hf_perf() {
   print_cmake_info
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir $TEST_REPORTS_DIR
+  conda_benchmark_deps
 
   echo "Launching HuggingFace training perf run"
   python $(pwd)/benchmarks/dynamo/huggingface.py --backend eager --device mps --performance --training --output=${TEST_REPORTS_DIR}/hf_training.csv
@@ -222,6 +224,7 @@ test_timm_perf() {
   print_cmake_info
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir $TEST_REPORTS_DIR
+  conda_benchmark_deps
 
   echo "Launching timm training perf run"
   python $(pwd)/benchmarks/dynamo/timm_models.py --backend eager --device mps --performance --training --output=${TEST_REPORTS_DIR}/timm_training.csv
