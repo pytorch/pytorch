@@ -89,10 +89,10 @@ def write_view_information_to_args(
             if base is None:
                 # no need to add anything else other than _base_index
                 return
-            elif (
-                base.size() == tensor.size()
+            elif (  # we do the checks in this order to minimize adding guards.
+                base.storage_offset() == tensor.storage_offset()
                 and base.stride() == tensor.stride()
-                and base.storage_offset() == tensor.storage_offset()
+                and base.size() == tensor.size()
             ):
                 kwargs[f"{prefix}_alias"] = True
             else:

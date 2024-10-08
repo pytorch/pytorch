@@ -1066,12 +1066,15 @@ alias_default = alias_default_1 = foo_default = None
                     )
 
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    @torch.fx.experimental._config.patch(use_duck_shape=False)
     def test_alias_dynamic(self):
         self.test_alias(_dynamic=True)
 
     # Test that the alias optimization, were alias is called instead of as_strided, does not result in recompilation.
-    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
-    def test_alias_recompile(self):
+
+    # Test that the view regenration optimizations do not result in recompilations. By comparing re-compilation in eager backend
+    # with recompilation in inductor backend.
+    def test_recompile(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
                 "mylib::foo",
@@ -1085,30 +1088,53 @@ alias_default = alias_default_1 = foo_default = None
             def foo_impl(x, y):
                 pass
 
+            torch.fx.experimental._config.use_duck_shape = False
+
+            def run_and_compare(func, expected=1):
+                counter_v2 = CompileCounterWithBackend("inductor")
+                counter_v1 = CompileCounterWithBackend("inductor")
+                v1 = torch.compile(
+                    func, backend=counter_v1, fullgraph=True, dynamic=True
+                )
+
+                v2 = torch.compile(
+                    func, backend=counter_v2, fullgraph=True, dynamic=True
+                )
+
+                inputs = [
+                    torch.rand(10, 10),
+                    torch.rand(100, 100),
+                    torch.rand(10, 2),
+                    torch.rand(1000, 1000),
+                ]
+
+                with torch._inductor.config.patch(enable_auto_functionalized_v2=True):
+                    for input in inputs:
+                        v2(input)
+
+                torch._dynamo.reset()
+
+                with torch._inductor.config.patch(enable_auto_functionalized_v2=False):
+                    for input in inputs:
+                        v1(input)
+
+                self.assertEqual(counter_v2.frame_count, counter_v1.frame_count)
+
+                self.assertEqual(counter_v1.frame_count, expected)
+
             def func(x):
                 a = x[0]
                 b = x[1]
                 torch.ops.mylib.foo(a, b)
 
-            counter = CompileCounterWithBackend("inductor")
-            compiled = torch.compile(
-                func, backend=counter, fullgraph=True, dynamic=True
-            )
-            compiled(torch.rand(10, 10))
-            compiled(torch.rand(2, 2))
-            self.assertEqual(counter.frame_count, 1)
+            run_and_compare(func)
 
             def func(x):
                 a = torch.ops.aten.alias.default(x)
                 b = torch.ops.aten.alias.default(x)
                 torch.ops.mylib.foo(a, b)
 
-            compiled = torch.compile(
-                func, backend=counter, fullgraph=True, dynamic=True
-            )
-            compiled(torch.rand(2, 10))
-            compiled(torch.rand(2, 2))
-            self.assertEqual(counter.frame_count, 2)
+            run_and_compare(func)
 
             def func(x):
                 # last row
@@ -1118,14 +1144,17 @@ alias_default = alias_default_1 = foo_default = None
                 b = x[0]
                 torch.ops.mylib.foo(a, b)
 
-            compiled = torch.compile(
-                func, backend=counter, fullgraph=True, dynamic=True
-            )
-            compiled(torch.rand(2, 10))
-            compiled(torch.rand(2, 2))
-            # recompilation does happen in this case, but it happens with both V2 and V1 and
-            #  even with out the optimization so its ok.
-            self.assertEqual(counter.frame_count, 4)
+            run_and_compare(func)
+
+            def func(x):
+                a = torch.ops.aten.slice.Tensor(x, 1, 3, 4)
+                b = torch.ops.aten.slice.Tensor(x, 0, 1, 4)
+                torch.ops.mylib.foo(a, b)
+
+            # recompile here is not triggered by auto_functionalize
+            # [__recompiles]     - 0/0: 4 <= L['x'].size()[1]  # a = torch.ops.aten.slice.Tensor(x, 1, 3, 4)
+            # test/inductor/test_auto_functionalize.py:1160 in func (_decomp/decompositions.py:781 in slice_forward)
+            run_and_compare(func, 2)
 
     # Test that the alias optimization, were alias is called instead of as_strided, preserve the fact
     # that id(x) != id(base)
