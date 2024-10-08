@@ -35,6 +35,7 @@ from .autograd_cache import (
     autograd_cache_enabled,
     CompiledBackward,
     CompiledForward,
+    should_use_remote_autograd_cache,
 )
 from .dispatch_and_compile_graph import (
     aot_dispatch_autograd_graph,
@@ -210,7 +211,9 @@ def aot_dispatch_base(
                 forward_time_taken_ns=time_taken_ns,
                 backward_time_taken_ns=0,
             )
-            AOTAutogradCache.save(cache_info.cache_key, entry)
+            AOTAutogradCache.save(
+                cache_info.cache_key, entry, remote=should_use_remote_autograd_cache()
+            )
 
     compiled_fw = fakified_out_wrapper.post_compile(
         compiled_fw,
@@ -772,7 +775,8 @@ def aot_dispatch_autograd(
                     forward_time_taken_ns,
                     backward_time_taken_ns,
                 )
-                AOTAutogradCache.save(cache_info.cache_key, entry)
+                remote = should_use_remote_autograd_cache()
+                AOTAutogradCache.save(cache_info.cache_key, entry, remote)
 
         if compiled_bw_func is not None:
             # If we already compiled it we can just run it right now without waiting

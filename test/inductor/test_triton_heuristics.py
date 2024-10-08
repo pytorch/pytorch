@@ -126,6 +126,7 @@ class TestTritonHeuristics(TestCase):
             "configs": configs,
             "save_cache_hook": False,
             "mutated_arg_names": [],
+            "optimize_mem": True,
             "heuristic_type": HeuristicType.POINTWISE,
             "inductor_meta": inductor_meta,
         }
