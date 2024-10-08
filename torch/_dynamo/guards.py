@@ -2362,7 +2362,6 @@ class CheckFunctionManager:
 
             self.guard_manager.root.add_torch_function_mode_stack_guard(
                 self.torch_function_mode_stack,
-                list(),
                 ["___check_torch_function_mode_stack()"],
             )
             # Clear references to torch_function modes held in the list
