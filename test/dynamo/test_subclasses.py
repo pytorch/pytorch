@@ -672,7 +672,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         wrapped2 = y.as_subclass(SigmoidToExpSubclass)
 
         def fn(w):
-            return w.sigmoid()
+            return w.exp()
 
         fn_opt = compile_full_eager(fn)
 
@@ -682,6 +682,38 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(res_exp, res_act)
         self.assertEqual(res_exp, res_exp2)
+
+    def test_torch_function_call_on_method_arg(self):
+        class LocalSubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if func == torch._C.TensorBase.add_:
+                    func = torch._C.TensorBase.sub_
+
+                if kwargs is None:
+                    kwargs = {}
+                return super().__torch_function__(func, types, args, kwargs)
+
+            def sigmoid(self):
+                return None
+
+        x = torch.ones(2, 2)
+        y = torch.ones(2, 2)
+        z = torch.ones(2, 2)
+        wrapped = y.as_subclass(LocalSubclass)
+        wrapped2 = z.as_subclass(LocalSubclass)
+
+        def fn(a, w):
+            a.add_(w)
+            return a
+
+        fn_opt = torch.compile(fn)
+
+        with torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}):
+            res_exp = fn(x, wrapped)
+            res_act = fn_opt(y, wrapped2)
+
+        self.assertEqual(res_exp, res_act)
 
     def test_user_overidden_method_unsupported(self):
         class LocalSubclass(torch.Tensor):
