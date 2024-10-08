@@ -2,6 +2,7 @@
 """Unit tests for the _tensors module."""
 
 from __future__ import annotations
+
 import contextlib
 
 import torch
