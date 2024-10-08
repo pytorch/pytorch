@@ -124,3 +124,6 @@
 	path = third_party/cpp-httplib
 	url = https://github.com/yhirose/cpp-httplib.git
 	branch = v0.15.3
+[submodule "third_party/NVTX"]
+	path = third_party/NVTX
+	url = https://github.com/NVIDIA/NVTX.git

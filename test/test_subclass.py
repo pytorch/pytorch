@@ -86,7 +86,8 @@ class TestSubclass(TestCase):
                 x = nn.Parameter(x)
             torch.save(x, f)
             f.seek(0)
-            x_loaded = torch.load(f)
+            with torch.serialization.safe_globals([tensor_cls]):
+                x_loaded = torch.load(f)
 
             self.assertEqual(x, x_loaded)
             self.assertIsNot(x, x_loaded)

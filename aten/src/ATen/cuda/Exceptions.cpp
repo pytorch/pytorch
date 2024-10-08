@@ -64,4 +64,23 @@ C10_EXPORT const char* cusolverGetErrorMessage(cusolverStatus_t status) {
 } // namespace solver
 #endif
 
+#if defined(USE_CUDSS)
+namespace cudss {
+
+C10_EXPORT const char* cudssGetErrorMessage(cudssStatus_t status) {
+  switch (status) {
+    case CUDSS_STATUS_SUCCESS:                     return "CUDSS_STATUS_SUCCESS";
+    case CUDSS_STATUS_NOT_INITIALIZED:             return "CUDSS_STATUS_NOT_INITIALIZED";
+    case CUDSS_STATUS_ALLOC_FAILED:                return "CUDSS_STATUS_ALLOC_FAILED";
+    case CUDSS_STATUS_INVALID_VALUE:               return "CUDSS_STATUS_INVALID_VALUE";
+    case CUDSS_STATUS_NOT_SUPPORTED:               return "CUDSS_STATUS_NOT_SUPPORTED";
+    case CUDSS_STATUS_EXECUTION_FAILED:            return "CUDSS_STATUS_EXECUTION_FAILED";
+    case CUDSS_STATUS_INTERNAL_ERROR:              return "CUDSS_STATUS_INTERNAL_ERROR";
+    default:                                       return "Unknown cudss error number";
+  }
+}
+
+} // namespace cudss
+#endif
+
 } // namespace at::cuda

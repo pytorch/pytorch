@@ -1,6 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, cast, Dict, List, Optional, Union
 
 import torch
 from torch import Tensor
@@ -329,15 +329,20 @@ def _multi_tensor_adadelta(
         return
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, square_avgs, acc_deltas, state_steps]
+        [params, grads, square_avgs, acc_deltas, state_steps]  # type: ignore[list-item]
     )
     for (
-        device_params,
-        device_grads,
-        device_square_avgs,
-        device_acc_deltas,
-        device_state_steps,
+        device_params_,
+        device_grads_,
+        device_square_avgs_,
+        device_acc_deltas_,
+        device_state_steps_,
     ), _ in grouped_tensors.values():
+        device_params = cast(List[Tensor], device_params_)
+        device_grads = cast(List[Tensor], device_grads_)
+        device_square_avgs = cast(List[Tensor], device_square_avgs_)
+        device_acc_deltas = cast(List[Tensor], device_acc_deltas_)
+        device_state_steps = cast(List[Tensor], device_state_steps_)
         if has_complex:
             _view_as_real(
                 device_params, device_grads, device_square_avgs, device_acc_deltas
