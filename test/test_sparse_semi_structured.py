@@ -46,12 +46,12 @@ SEMI_STRUCTURED_SUPPORTED_BACKENDS = dict()
 
 _IS_SM8X = False
 _IS_SM9X = False
+_IS_MI300x = False
 
 if torch.cuda.is_available():
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
     _IS_SM9X = torch.cuda.get_device_capability(0)[0] == 9
     _IS_MI300x = torch.version.hip is not None and GFX942_Exact
-    SEMI_STRUCTURED_SUPPORTED_BACKENDS["cutlass"] = SparseSemiStructuredTensorCUTLASS
     if _IS_MI300x:
         SEMI_STRUCTURED_SUPPORTED_BACKENDS["cusparselt"] = SparseSemiStructuredTensorCUSPARSELT
 
@@ -578,8 +578,8 @@ def create_random_mask(shape) -> torch.Tensor:
 class TestSparseSemiStructuredTraining(TestCase):
 
     def setUp(self):
-        if not _IS_SM8X and not _IS_MI300x:
-            self.skipTest('Only runs on SM80/MI300x')
+        if not _IS_SM8X:
+            self.skipTest('Only runs on SM80')
         if IS_WINDOWS:
             self.skipTest('CUTLASS not supported on windows')
 
