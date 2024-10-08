@@ -20,22 +20,21 @@ if(NOT __AOTRITON_INCLUDED)
   # AOTriton package information from GitHub Release Pages
   # Replaces .ci/docker/aotriton_version.txt
   set(__AOTRITON_VER "0.7b")
-  list(JOIN
-       "manylinux_2_17"  # rocm6.1
-       "manylinux_2_17"  # rocm6.2
-       ";"
-       __AOTRITON_MANYLINUX_LIST)
-  list(JOIN
-       "rocm6.1"
-       "rocm6.2"
-       ";"
-       __AOTRITON_ROCM_LIST)
+  string(JOIN ";"
+         __AOTRITON_MANYLINUX_LIST
+         "manylinux_2_17"  # rocm6.1
+         "manylinux_2_17"  # rocm6.2
+         )
+  string(JOIN ";"
+         __AOTRITON_ROCM_LIST
+         "rocm6.1"
+         "rocm6.2")
   set(__AOTRITON_CI_COMMIT "9be04068c3c0857a4cfd17d7e39e71d0423ebac2")
-  list(JOIN
-       "006f4d982c9a9c768f31f0095128705fecb792136827e2456241fe79764de7a4"  # rocm6.1
-       "3e9e1959d23b93d78a08fcc5f868125dc3854dece32fd9458be9ef4467982291"  # rocm6.2
-       ";"
-       __AOTRITON_SHA256_LIST)
+  string(JOIN ";"
+         __AOTRITON_SHA256_LIST
+         "006f4d982c9a9c768f31f0095128705fecb792136827e2456241fe79764de7a4"  # rocm6.1
+         "3e9e1959d23b93d78a08fcc5f868125dc3854dece32fd9458be9ef4467982291"  # rocm6.2
+         )
   set(__AOTRITON_Z "gz")
 
   # Note it is INSTALL"ED"
