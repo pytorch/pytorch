@@ -1,4 +1,4 @@
-from typing import Any, Union, Optional
+from typing import Union, Optional
 import torch
 from torch import device as _device
 
