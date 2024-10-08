@@ -80,6 +80,14 @@ class LazyVariableTracker(VariableTracker):
             self.realize()
         return VariableTracker.clone(self.unwrap(), **kwargs)
 
+    def peek_type(self) -> type[Any]:
+        assert not self.is_realized()
+        return type(self._cache.value)
+
+    def peek_value(self) -> Any:
+        assert not self.is_realized()
+        return self._cache.value
+
     def __str__(self) -> str:
         if self.is_realized():
             return self.unwrap().__str__()
