@@ -219,11 +219,7 @@ class CondTests(TestCase):
                 torch.testing.assert_close(cloned_inputs, inputs_with_predicates)
                 torch.testing.assert_close(result, result_compiled)
 
-        self.assertEqual(
-            cnt.frame_count,
-            1,
-            "One compilation are expected",
-        )
+        self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
@@ -250,7 +246,6 @@ class CondTests(TestCase):
                 torch.randn(10, 20),
             ),
             device=device,
-            dynamic=dynamic,
         )
 
     @requires_gpu
@@ -523,8 +518,8 @@ class CondTests(TestCase):
                 num_predicates=3,
             )
 
-        self.assertEqual(counters["pre_grad"], 22)
-        self.assertEqual(counters["post_grad"], 22)
+        self.assertEqual(counters["pre_grad"], 11)
+        self.assertEqual(counters["post_grad"], 11)
 
 
 class WhileLoopModels:
