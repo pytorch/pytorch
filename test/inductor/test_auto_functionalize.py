@@ -1311,7 +1311,6 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
         for dim in range(-1, 1):
             f = t.split(1, dim)
             test_round_trip(t, f[0])
-            print(dim)
             test_round_trip(t, f[1])
 
         t = torch.randint(1, 10, (3, 3, 3))
@@ -1362,7 +1361,7 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
         test_round_trip(t, t[0:2])
         test_round_trip(t, t[3:4])
 
-    # Test that the view regenrations optimizations do not result in recompilations. By comparing re-compilation in eager backend
+    # Test that the view regenration optimizations do not result in recompilations. By comparing re-compilation in eager backend
     # with recompilation in inductor backend.
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_recompile(self):
@@ -1379,11 +1378,16 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
             def foo_impl(x, y):
                 pass
 
-            counter_inductor = CompileCounterWithBackend("inductor")
-            counter_eager = CompileCounterWithBackend("eager")
+            def run_and_compare(func, expected):
+                counter_inductor = CompileCounterWithBackend("inductor")
+                counter_eager = CompileCounterWithBackend("eager")
+                # using 10, 100 and 1000 and avoiding using sizes 1 and 2 to avoid specializations.
+                inputs = [
+                    torch.rand(10, 10),
+                    torch.rand(100, 100),
+                    torch.rand(1000, 1000),
+                ]
 
-            def run_and_compare(func):
-                inputs = [torch.rand(10, 10), torch.rand(2, 10), torch.rand(100, 100)]
                 inductor = torch.compile(
                     func, backend=counter_inductor, fullgraph=True, dynamic=True
                 )
@@ -1391,25 +1395,31 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
                 eager = torch.compile(
                     func, backend=counter_eager, fullgraph=True, dynamic=True
                 )
+
                 for input in inputs:
                     inductor(input)
+
+                for input in inputs:
                     eager(input)
 
-                self.assertEqual(counter_eager.frame_count, counter_eager.frame_count)
+                self.assertEqual(
+                    counter_eager.frame_count, counter_inductor.frame_count
+                )
+                self.assertEqual(counter_eager.frame_count, expected)
 
             def func(x):
                 a = x[0]
                 b = x[1]
                 torch.ops.mylib.foo(a, b)
 
-            run_and_compare(func)
+            run_and_compare(func, 1)
 
             def func(x):
                 a = torch.ops.aten.alias.default(x)
                 b = torch.ops.aten.alias.default(x)
                 torch.ops.mylib.foo(a, b)
 
-            run_and_compare(func)
+            run_and_compare(func, 1)
 
             def func(x):
                 # last row
@@ -1419,16 +1429,14 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
                 b = x[0]
                 torch.ops.mylib.foo(a, b)
 
-            # recompilation does happen in this case, but it happens with both V2 and V1 and
-            #  even with out the optimization so its ok.
-            run_and_compare(func)
+            run_and_compare(func, 1)
 
             def func(x):
                 a = torch.ops.aten.slice.Tensor(x, 1, 3, 4)
                 b = torch.ops.aten.slice.Tensor(x, 0, 1, 4)
                 torch.ops.mylib.foo(a, b)
 
-            run_and_compare(func)
+            run_and_compare(func, 1)
 
     # Test that the alias optimization, were alias is called instead of as_strided, preserve the fact
     # that id(x) != id(base)
