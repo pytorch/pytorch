@@ -274,6 +274,9 @@ at::Tensor multimem_one_shot_all_reduce(
   return output;
 }
 
+// One-shot all-reduce is register-intensive because it stages values loaded
+// from peers in registers before performing reduction. Setting the thread
+// count to 512 to prevent/alleviate register spill.
 constexpr size_t one_shot_all_reduce_max_num_blocks = 8;
 constexpr size_t one_shot_all_reduce_max_num_threads = 512;
 
@@ -374,9 +377,103 @@ at::Tensor one_shot_all_reduce(
   return one_shot_all_reduce_out(input, reduce_op, group_name, out);
 }
 
+constexpr size_t two_shot_all_reduce_max_num_blocks = 24;
+constexpr size_t two_shot_all_reduce_max_num_threads = 512;
+
+template <typename T, int alignment, int k_world_size>
+static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
+    void two_shot_all_reduce_kernel(
+        T** input_ptrs,
+        size_t input_offset,
+        size_t numel,
+        uint32_t** signal_pads,
+        size_t rank,
+        size_t world_size) {
+  static_assert(alignment % sizeof(T) == 0);
+  constexpr size_t numel_per_thread = alignment / sizeof(T);
+
+  sync_remote_blocks<MemOpSem::Relaxed>(signal_pads, rank, world_size);
+  __syncthreads();
+
+  const size_t numel_per_rank =
+      at::round_up(numel, alignment * world_size) / world_size;
+  const size_t start = numel_per_rank * rank;
+
+  auto offset = (blockDim.x * blockIdx.x + threadIdx.x) * numel_per_thread;
+  auto stride = blockDim.x * gridDim.x * numel_per_thread;
+  for (size_t i = offset; i < numel_per_rank; i += stride) {
+    if (start + i >= numel) {
+      continue;
+    }
+    auto vec = load_and_reduce<T, alignment, k_world_size>(
+        input_ptrs, rank, world_size, input_offset + start + i);
+    for (size_t step = 0; step < world_size; ++step) {
+      size_t remote_rank = (rank + step) % world_size;
+      st_vec<alignment>(
+          input_ptrs[remote_rank] + input_offset + start + i, vec);
+    }
+  }
+
+  __syncthreads();
+  sync_remote_blocks<MemOpSem::AcqRel>(signal_pads, rank, world_size);
+}
+
+at::Tensor two_shot_all_reduce_(
+    at::Tensor input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(
+      input.is_contiguous(), "two_shot_all_reduce: input must be contiguous.");
+  TORCH_CHECK(
+      reduce_op == "sum",
+      "two_shot_all_reduce: only sum is supported for now.");
+
+  auto symm_mem = c10d::symmetric_memory::rendezvous(input);
+  TORCH_CHECK(
+      symm_mem != nullptr,
+      "two_shot_all_reduce: input must be allocated with empty_strided_p2p().");
+
+  const size_t alignment =
+      get_and_verify_alignment(input, "two_shot_all_reduce");
+
+  int num_blocks = 0, num_threads = 0;
+  init_elementwise_launch_config(
+      input.numel(),
+      input.element_size(),
+      alignment,
+      symm_mem->get_world_size(),
+      two_shot_all_reduce_max_num_blocks,
+      two_shot_all_reduce_max_num_threads,
+      num_blocks,
+      num_threads);
+
+  AT_DISPATCH_FLOAT_AND_BFLOAT16(
+      input.scalar_type(), "two_shot_all_reduce", [&]() {
+        DISPATCH_ALIGNMENTS_16_8_4(alignment, [&]() {
+          DISPATCH_WORLD_SIZES(symm_mem->get_world_size(), [&]() {
+            two_shot_all_reduce_kernel<scalar_t, k_alignment, k_world_size>
+                <<<num_blocks,
+                   num_threads,
+                   0,
+                   at::cuda::getCurrentCUDAStream()>>>(
+                    reinterpret_cast<scalar_t**>(
+                        symm_mem->get_buffer_ptrs_dev()),
+                    input.storage_offset(),
+                    input.numel(),
+                    reinterpret_cast<uint32_t**>(
+                        symm_mem->get_signal_pad_ptrs_dev()),
+                    symm_mem->get_rank(),
+                    symm_mem->get_world_size());
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
+          });
+        });
+      });
+  return input;
+}
+
 TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def(
-      "multimem_all_reduce_(Tensor input, str reduce_op, str group_name) -> Tensor",
+      "multimem_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)",
       torch::dispatch(c10::DispatchKey::CUDA, ::multimem_all_reduce_),
       {at::Tag::pt2_compliant_tag});
 
@@ -393,6 +490,11 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def(
       "one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)",
       torch::dispatch(c10::DispatchKey::CUDA, ::one_shot_all_reduce_out),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "two_shot_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)",
+      torch::dispatch(c10::DispatchKey::CUDA, ::two_shot_all_reduce_),
       {at::Tag::pt2_compliant_tag});
 }
 
