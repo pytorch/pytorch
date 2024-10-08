@@ -1,11 +1,10 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-import functools
 import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING, Union
+from typing import Any, Dict, List, Optional, Set
 
 import torch
 import torch._inductor as inductor
@@ -22,6 +21,7 @@ from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 
 from .. import config, ir, pattern_matcher
 from ..codegen.common import BackendFeature, has_backend_feature
+from ..comms import remove_fsdp2_unsharded_param_graph_input_usage
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
@@ -53,10 +53,6 @@ from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
 
 
-if TYPE_CHECKING:
-    from sympy import Expr
-
-
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -76,6 +72,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     The IR here has been normalized and functionalized.
     """
+    if not torch._dynamo.config.skip_fsdp_hooks:
+        remove_fsdp2_unsharded_param_graph_input_usage(gm.graph)
+
     if config.dce:
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
@@ -207,6 +206,9 @@ def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
 
 
 def is_valid_mm_plus_mm(match: Match):
+    if not torch._inductor.utils.use_max_autotune():
+        return False
+
     *b1, m1, k1 = match.kwargs["mat1"].meta.get("tensor_meta").shape
     *b2, k2, n1 = match.kwargs["mat2"].meta.get("tensor_meta").shape
     if k1 != k2:
@@ -458,90 +460,6 @@ def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype,
     match.replace_by_example(repl, list(shape))
 
 
-def shape_of_mm(a, b):
-    m, _ = a.get_size()
-    _, n = b.get_size()
-    return [m, n]
-
-
-@register_lowering_pattern(
-    CallFunction(aten.cat, ListOf(CallFunction(aten.mm, Arg(), Arg())), Arg()),
-)
-def cat_mm(match, inputs, dim):
-    return cat_tuned_op(match, inputs, dim, op=L[aten.mm], shape_of=shape_of_mm)
-
-
-@register_lowering_pattern(
-    CallFunction(
-        aten.cat, ListOf(CallFunction(aten.addmm, Arg(), Arg(), Arg())), Arg()
-    ),
-)
-def cat_addmm(match, inputs, dim):
-    def shape_of(bias, a, b):
-        m, _ = a.get_size()
-        _, n = b.get_size()
-        return [m, n]
-
-    return cat_tuned_op(match, inputs, dim, op=L[aten.addmm], shape_of=shape_of)
-
-
-def cat_tuned_op(match, inputs, dim, *, op, shape_of):
-    """
-    Memory planning to remove cat. We can't use the stock memory
-    planner since autotuning matmuls needs to know the output layout.
-    """
-    if len(inputs) == 1:
-        return op(*inputs[0])
-
-    # TODO(jansel): rewrite this as a bmm?
-    if dim < 0:
-        dim += len(shape_of(*inputs[0]))
-    assert dim in (0, 1)
-    notdim = 1 - dim
-
-    new_size: Optional[Union[List[Expr], List[int]]] = None
-    offsets_start = []
-    offsets_end = []
-
-    # compute output sizes
-    for i in range(len(inputs)):
-        shape = shape_of(*inputs[i])
-        if new_size is None:
-            new_size = shape
-        else:
-            new_size[notdim] = V.graph.sizevars.guard_equals(  # type: ignore[call-overload]
-                shape[notdim], new_size[notdim]
-            )
-            new_size[dim] += shape[dim]
-        offsets_start.append(new_size[dim] - shape[dim])
-        offsets_end.append(new_size[dim])
-
-    assert new_size is not None
-    dtype = functools.reduce(
-        torch.promote_types,
-        [x.get_dtype() for x in itertools.chain.from_iterable(inputs)],
-    )
-    device = inputs[0][0].get_device()
-    kernel = ir.ConcatKernel(
-        name=None,
-        layout=ir.FixedLayout(device, dtype, new_size),
-        inputs=[],
-    )
-    kernel_tensor = ir.TensorBox.create(kernel)
-
-    for i in range(len(inputs)):
-        dst = ir.SliceView.create(kernel_tensor, dim, offsets_start[i], offsets_end[i])
-        src = op(*inputs[i], layout=dst.get_layout()).data.data
-        assert isinstance(src, (ir.ExternKernelOut, ir.TemplateBuffer))
-        src.layout = ir.NonOwningLayout(dst)
-        kernel.inputs.append(src)
-
-    kernel.name = V.graph.register_buffer(kernel)
-    kernel.inputs = ir.ConcatKernel.unwrap_storage(kernel.inputs)
-    V.graph.register_operation(kernel)
-    return kernel_tensor
-
-
 _cat_1 = CallFunction(aten.cat, Arg(), 1, _users=2)
 
 
@@ -704,7 +622,7 @@ def convert_element_type_noop(x, dtype: torch.dtype):
 
 
 @register_noop_decomp(torch.ops.prims.device_put)
-def device_put_noop(x, device):
+def device_put_noop(x, device, non_blocking=True):
     return x.device == decode_device(device)
 
 
@@ -811,7 +729,7 @@ def decompose_auto_functionalized(graph):
         CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized),
         pass_dict=graph_pass,
     )
-    def replacement(match: Match, *args, **kwargs):
+    def _(match: Match, *args, **kwargs):
         from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
 
         only_clone_these_tensors = tuple(
@@ -825,7 +743,9 @@ def decompose_auto_functionalized(graph):
         # tracing a function with kwargs.
         def decomp(*flat_args):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
-            return auto_functionalized_dense(*args, only_clone_these_tensors, **kwargs)
+            assert len(args) == 1
+            mode = args[0]
+            return auto_functionalized_dense(mode, only_clone_these_tensors, **kwargs)
 
         match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
@@ -849,11 +769,46 @@ def decompose_auto_functionalized(graph):
 
         match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
+    @register_graph_pattern(
+        CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized_v2),
+        pass_dict=graph_pass,
+    )
+    def _(match: Match, *args, **kwargs):
+        from torch._higher_order_ops.auto_functionalize import (
+            auto_functionalized_v2_dense,
+        )
+
+        only_clone_these_bases = tuple(
+            match.nodes[0].meta.get("only_clone_these_tensors", [])
+        )
+
+        flat_args, spec = pytree.tree_flatten((args, kwargs))
+
+        # NB: we combine (args, kwargs) into flat args for replacing.
+        # This is replace_by_example uses make_fx which does not support
+        # tracing a function with kwargs.
+        def decomp(*flat_args):
+            args, kwargs = pytree.tree_unflatten(flat_args, spec)
+            assert len(args) == 1
+            mutable_op = args[0]
+            return auto_functionalized_v2_dense(
+                mutable_op, only_clone_these_bases, **kwargs
+            )
+
+        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+
     graph_pass.apply(graph)
+
     for node in graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.auto_functionalized
     ):
         raise AssertionError("auto_functionalized was not removed")
+
+    for node in graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.auto_functionalized_v2
+    ):
+        raise AssertionError("auto_functionalized_v2 was not removed")
+
     for node in graph.find_nodes(
         op="call_function",
         target=torch.ops.higher_order.triton_kernel_wrapper_functional,

@@ -1,6 +1,6 @@
-# mypy: allow-untyped-defs
 import itertools
 import logging
+from typing import Any, Callable, List
 
 from torch.hub import _Faketqdm, tqdm
 
@@ -10,7 +10,7 @@ disable_progress = True
 
 
 # Return all loggers that torchdynamo/torchinductor is responsible for
-def get_loggers():
+def get_loggers() -> List[logging.Logger]:
     return [
         logging.getLogger("torch.fx.experimental.symbolic_shapes"),
         logging.getLogger("torch._dynamo"),
@@ -45,7 +45,7 @@ if not disable_progress:
     pbar = tqdm(total=num_steps, desc="torch.compile()", delay=0)
 
 
-def get_step_logger(logger):
+def get_step_logger(logger: logging.Logger) -> Callable[..., None]:
     if not disable_progress:
         pbar.update(1)
         if not isinstance(pbar, _Faketqdm):
@@ -53,7 +53,7 @@ def get_step_logger(logger):
 
     step = next(_step_counter)
 
-    def log(level, msg, **kwargs):
+    def log(level: int, msg: str, **kwargs: Any) -> None:
         logger.log(level, "Step %s: %s", step, msg, **kwargs)
 
     return log

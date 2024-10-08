@@ -30,10 +30,9 @@ pip_install \
 
 pip_install coloredlogs packaging
 
-pip_install onnxruntime==1.18
-pip_install onnx==1.16.0
-# pip_install "onnxscript@git+https://github.com/microsoft/onnxscript@3e869ef8ccf19b5ebd21c10d3e9c267c9a9fa729" --no-deps
-pip_install onnxscript==0.1.0.dev20240613 --no-deps
+pip_install onnxruntime==1.18.1
+pip_install onnx==1.16.2
+pip_install onnxscript==0.1.0.dev20240831 --no-deps
 # required by onnxscript
 pip_install ml_dtypes
 

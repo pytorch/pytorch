@@ -51,6 +51,8 @@
 #endif // _WIN32
 #endif // __GNUC__
 
+// The following files are implemented in a header-only way and are guarded by
+// test/cpp/aoti_abi_check
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/complex.h>
@@ -94,6 +96,7 @@ using AOTITorchError = int32_t;
 // desired for perf reasons.)
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cpu();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cuda();
+AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_privateuse1();
 
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e5m2();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e4m3fn();
@@ -493,7 +496,7 @@ aoti_torch_cpu_wrapped_fbgemm_pack_gemm_matrix_fp16(
 
 // This will soon be deprecated after ao_quantization is complete.
 // Please refrain from using this or increasing callsites.
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_wrapped_linear_prepack(
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__wrapped_linear_prepack(
     AtenTensorHandle weight,
     AtenTensorHandle weight_scale,
     AtenTensorHandle weight_zero_point,
@@ -513,7 +516,7 @@ aoti_torch_cpu_wrapped_fbgemm_linear_fp16_weight(
 // This will soon be deprecated after ao_quantization is complete.
 // Please refrain from using this or increasing callsites.
 AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_cpu_wrapped_quantized_linear_prepacked(
+aoti_torch_cpu__wrapped_quantized_linear_prepacked(
     AtenTensorHandle input,
     AtenTensorHandle input_scale,
     AtenTensorHandle input_zero_point,
@@ -525,6 +528,8 @@ aoti_torch_cpu_wrapped_quantized_linear_prepacked(
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_nonzero(AtenTensorHandle self, AtenTensorHandle* out);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_zero_(AtenTensorHandle self);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_repeat_interleave_Tensor(
     AtenTensorHandle repeats,
@@ -612,7 +617,7 @@ aoti_torch_delete_cuda_stream_guard(CUDAStreamGuardHandle guard);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_current_cuda_stream(int32_t device_index, void** ret_stream);
 
-#endif
+#endif // USE_CUDA
 
 // See `ProxyExecutor Design Note` in ir.py for more details
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_proxy_executor_call_function(

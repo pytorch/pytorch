@@ -11,8 +11,7 @@
 #include <pthread.h>
 #endif
 
-namespace torch {
-namespace mtia {
+namespace torch::mtia {
 
 static bool in_bad_fork = false; // True for children forked after mtia init
 
@@ -80,7 +79,12 @@ void initModule(PyObject* module) {
         at::detail::getMTIAHooks().memoryStats(device_index);
     return py::reinterpret_steal<py::object>(raw_pyobject);
   });
+
+  m.def("_mtia_getDeviceCapability", [](c10::DeviceIndex device_index) {
+    PyObject* raw_pyobject =
+        at::detail::getMTIAHooks().getDeviceCapability(device_index);
+    return py::reinterpret_steal<py::object>(raw_pyobject);
+  });
 }
 
-} // namespace mtia
-} // namespace torch
+} // namespace torch::mtia

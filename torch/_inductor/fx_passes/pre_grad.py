@@ -12,7 +12,6 @@ from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
 )
-from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
@@ -101,6 +100,10 @@ def stack_to_unsqueeze_pass(graph):
     return None
 
 
+def merge_concats_pass(graph):
+    return None
+
+
 @init_once_fakemode
 def lazy_init():
     from . import efficient_conv_bn_eval, split_cat  # noqa: F401  # noqa: F401
@@ -169,10 +172,6 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 example_inputs,
                 "[Pre grad(predispatch IR)] Apply group_batch_fusion",
             )
-            # update node.meta after group batch fusion
-            FakeTensorProp(module=gm, mode=detect_fake_mode(example_inputs)).propagate(
-                *example_inputs
-            )
             pass_execution_and_save(
                 normalize_node_kwargs_pass,
                 gm,
@@ -184,6 +183,12 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 gm,
                 example_inputs,
                 "[Pre grad(predispatch IR)] Apply fuse_chunk_squeeze_cat_pass",
+            )
+            pass_execution_and_save(
+                merge_concats_pass,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)] Apply merge_concats_pass",
             )
             pass_execution_and_save(
                 fuse_split_linear_add_pass.apply,
