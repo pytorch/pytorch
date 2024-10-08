@@ -144,6 +144,12 @@ aten__sparse_semi_structured_mm = ExternKernelChoice(
     has_out_variant=False,
 )
 
+aten__cslt_sparse_mm = ExternKernelChoice(
+    torch._cslt_sparse_mm,
+    "at::_cslt_sparse_mm",
+    has_out_variant=False,
+)
+
 
 def _is_int8_mat(mat):
     return mat.get_dtype() in (torch.int8, torch.uint8)
@@ -519,6 +525,64 @@ def tuned_sparse_semi_structured_mm(
     return autotune_select_algorithm(
         "sparse_semi_structured_mm", choices, [mat1, mat1_meta, mat2], layout
     )
+
+@register_lowering(aten._cslt_sparse_mm, type_promotion_kind=None)
+def tuned_cslt_sparse_mm(
+    mat1_compressed, mat2, bias=None, alpha=None, out_dtype=None, alg_id=0, split_k=1, split_k_one_kernel=True, transpose_result=False, layout=None
+):
+    from torch._inductor.select_algorithm import realize_inputs
+    mat1_compressed, mat2 = realize_inputs(mat1_compressed, mat2)
+    input_nodes = (mat1_compressed, mat2)
+    k, n = mat2.get_size()
+
+    is_int8_input_type = mat1_compressed.dtype == torch.int8
+    compression_factor = 10 if is_int8_input_type else 9
+    m = (mat1_compressed.get_numel() * 16) // (compression_factor * k)
+
+    from torch._inductor.ir import FixedLayout
+
+    layout = FixedLayout(
+        mat2.get_device(),
+        out_dtype if out_dtype else mat2.get_dtype(),
+        [m, n],
+        [n, 1],
+    )
+    # workaround for Inductor not supporting optional tensor input arguments
+    if bias is not None:
+        bias = realize_inputs(bias)
+        input_nodes = input_nodes + (bias, )
+
+    if alpha is not None:
+        alpha = realize_inputs(alpha)
+        input_nodes = input_nodes + (alpha, )
+
+    from torch._inductor.select_algorithm import AlgorithmSelectorCache
+
+    # alg_id search
+    searched_alg_id, searched_split_k, searched_split_k_one_kernel = torch._cslt_sparse_mm_search(
+        AlgorithmSelectorCache.benchmark_example_value(mat1_compressed),
+        AlgorithmSelectorCache.benchmark_example_value(mat2),
+        AlgorithmSelectorCache.benchmark_example_value(bias) if bias is not None else None,
+        AlgorithmSelectorCache.benchmark_example_value(alpha) if alpha is not None else None,
+        out_dtype=out_dtype,
+        transpose_result=transpose_result
+    )
+
+    choices = []
+
+    option = aten__cslt_sparse_mm.bind(
+        input_nodes, layout, out_dtype=out_dtype, alg_id=searched_alg_id, split_k=searched_split_k, split_k_one_kernel=searched_split_k_one_kernel, transpose_result=transpose_result,
+    )
+    option.debug_extra=f"ALG_ID: {searched_alg_id} SPLIT_K: {searched_split_k} SPLIT_K_ONE_KERNEL: {searched_split_k_one_kernel} TRANSPOSE_RESULT: {transpose_result}"
+    choices.append(option)
+
+    baseline = aten__cslt_sparse_mm.bind(
+        input_nodes, layout, out_dtype=out_dtype, alg_id=0, split_k=1, split_k_one_kernel=True, transpose_result=transpose_result,
+    )
+    baseline.debug_extra=f"ALG_ID: 0 SPLIT_K: 1 SPLIT_K_ONE_KERNEL: True TRANSPOSE_RESULT: {transpose_result}"
+    choices.append(baseline)
+    
+    return autotune_select_algorithm("_cslt_sparse_mm", choices, input_nodes, layout)
 
 
 def fallback_mixed_mm(mat1, mat2, *, out):

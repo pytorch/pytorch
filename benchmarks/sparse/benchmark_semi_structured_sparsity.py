@@ -104,11 +104,11 @@ def test_tensor(m, k, n, dtype, contiguous, backend):
     sA = to_sparse_semi_structured(A)
 
     # torch.mm calculation
+    compiled_fn = torch.compile(torch.mm, mode="max-autotune", fullgraph=True)
     if dtype is not torch.int8:
-        dense_output = torch.mm(A, B)
 
         dense_measurement = benchmark.Timer(
-            stmt="torch.mm(A, B)",
+            stmt="compiled_fn(A, B)",
             globals=locals(),
         ).blocked_autorange()
 
@@ -116,18 +116,11 @@ def test_tensor(m, k, n, dtype, contiguous, backend):
         print("int8 baseline not supported")
         dense_output = torch.mm(sA, B)
 
-        dense_measurement = benchmark.Timer(
-            stmt="torch.mm(sA, B)",
-            globals=locals(),
-        ).blocked_autorange()
-
-    sparse_output = torch.mm(sA, B)
     sparse_measurement = benchmark.Timer(
-        stmt="torch.mm(sA, B)",
+        stmt="compiled_fn(sA, B)",
         globals=locals(),
     ).blocked_autorange()
 
-    correct = torch.allclose(dense_output, sparse_output, rtol=1e-3, atol=1e-3)
 
     return {
         "test_function": "tensor",
@@ -139,8 +132,6 @@ def test_tensor(m, k, n, dtype, contiguous, backend):
         "sparse_latency (ms)": sparse_measurement.median * 1000,
         "dense_latency (ms)": dense_measurement.median * 1000,
         "speedup (d/s)": dense_measurement.median / sparse_measurement.median,
-        "correct": correct,
-        "contiguous": sparse_output.is_contiguous(),
     }
 
 

@@ -191,7 +191,7 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
         class Model(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.linear = nn.Linear(128, 128)
+                self.linear = nn.Linear(128, 256)
 
             def forward(self, x):
                 x = self.linear(x)
@@ -244,18 +244,17 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
     @unittest.skipIf("cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS, "cusparselt not supported on this machine")
     def test_sp24_compile(self) -> None:
         x = torch.randn([1024, 512], device="cuda", dtype=torch.float16, requires_grad=True)
-        e = torch.eye(x.shape[0], x.shape[0], device="cuda", dtype=torch.float16)
 
-        def fn(x, e):
+        def fn(x):
             y = SparseSemiStructuredTensorCUSPARSELT.prune_dense_static_sort(x)
             y = y.t()
             return x @ y
 
         # Eager
-        output = fn(x, e)
+        output = fn(x)
         output.backward(output)
         # Torch compile
-        output = torch.compile(fn)(x, e)
+        output = torch.compile(fn)(x)
         output.backward(output)
 
 class TestSparseSemiStructured(TestCase):
@@ -1156,8 +1155,8 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         B = torch.ones((128, 128), device=device).to(dtype)
 
         A_compressed = torch._cslt_compress(A)
-        alg_id = torch._cslt_sparse_mm_search(A_compressed, B.t())
-        sparse_result = torch._cslt_sparse_mm(A_compressed, B.t(), alg_id=alg_id)
+        alg_id, split_k, split_k_one_kernel = torch._cslt_sparse_mm_search(A_compressed, B.t())
+        sparse_result = torch._cslt_sparse_mm(A_compressed, B.t(), alg_id=alg_id, split_k=split_k, split_k_one_kernel=split_k_one_kernel)
 
         dense_result = torch.mm(A.to(torch.float32), B.to(torch.float32))
         dense_result = dense_result.to(dtype)
