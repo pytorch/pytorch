@@ -506,7 +506,7 @@ class SymmMemAllReduceTest(MultiProcessTestCase):
             dtype=dtype,
             device=self.device,
             group_name=group_name,
-        ).fill_(1)
+        ).fill_(0)
 
         self.assertTrue(t.data_ptr() % 16 == 0)
         self.assertTrue(align_bytes % t.element_size() == 0)
@@ -514,14 +514,17 @@ class SymmMemAllReduceTest(MultiProcessTestCase):
 
         shift = align_bytes // t.element_size()
         numel = size_bytes // t.element_size()
-        x = t[shift : shift + numel]
+        res = t[shift : shift + numel]
+        res.normal_()
+        inp = res.clone()
 
-        torch.ops.symm_mem.multimem_all_reduce_(x, "sum", group_name)
-        self.assertTrue(x.eq(self.world_size).all().item())
+        torch.ops.symm_mem.multimem_all_reduce_(res, "sum", group_name)
 
         # Head and tail should not be written
-        self.assertTrue(t[:shift].eq(1).all().item())
-        self.assertTrue(t[shift + numel :].eq(1).all().item())
+        self.assertTrue(t[:shift].eq(0).all().item())
+        self.assertTrue(t[shift + numel :].eq(0).all().item())
+        self._verify_all_reduce_result(inp, res)
+
         dist.destroy_process_group()
 
     @skip_if_lt_x_gpu(4)
@@ -569,6 +572,43 @@ class SymmMemAllReduceTest(MultiProcessTestCase):
         ).normal_()
 
         res = torch.ops.symm_mem.one_shot_all_reduce(inp, "sum", group_name)
+        self._verify_all_reduce_result(inp, res)
+
+        dist.destroy_process_group()
+
+    @skip_if_lt_x_gpu(4)
+    @parametrize("dtype", [torch.float, torch.bfloat16])
+    @parametrize("align_bytes", [4, 8, 16])
+    @parametrize("size_bytes", [4, 8192, 8196])
+    def test_two_shot_all_reduce(
+        self, dtype: torch.dtype, size_bytes: int, align_bytes: int
+    ) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        t = _SymmetricMemory.empty_strided_p2p(
+            size=(16384,),
+            stride=(1,),
+            dtype=dtype,
+            device=self.device,
+            group_name=group_name,
+        ).fill_(0)
+
+        self.assertTrue(t.data_ptr() % 16 == 0)
+        self.assertTrue(align_bytes % t.element_size() == 0)
+        self.assertTrue(size_bytes % t.element_size() == 0)
+
+        shift = align_bytes // t.element_size()
+        numel = size_bytes // t.element_size()
+        res = t[shift : shift + numel]
+        res.normal_()
+        inp = res.clone()
+
+        torch.ops.symm_mem.two_shot_all_reduce_(res, "sum", group_name)
+
+        # Head and tail should not be written
+        self.assertTrue(t[:shift].eq(0).all().item())
+        self.assertTrue(t[shift + numel :].eq(0).all().item())
         self._verify_all_reduce_result(inp, res)
 
         dist.destroy_process_group()
