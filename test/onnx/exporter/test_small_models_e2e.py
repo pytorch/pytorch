@@ -12,9 +12,6 @@ from torch.testing._internal import common_utils
 class DynamoExporterTest(common_utils.TestCase):
     def test_insert_contiguous_between_transpose_and_view(self):
         class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, query, key, value):
                 res = torch.nn.functional.scaled_dot_product_attention(
                     query, key, value
@@ -28,8 +25,8 @@ class DynamoExporterTest(common_utils.TestCase):
         key = torch.rand(32, 8, 128, 64, dtype=torch.float16)
         value = torch.rand(32, 8, 128, 64, dtype=torch.float16)
 
-        exp = torch.export.export(model, (query, key, value), strict=False)
-        self.assertNotIn("call_method", str(exp.graph))
+        ep = torch.export.export(model, (query, key, value), strict=False)
+        self.assertNotIn("call_method", str(ep.graph))
 
         onnx_program = torch.onnx.export(
             model, (query, key, value), dynamo=True, fallback=False
