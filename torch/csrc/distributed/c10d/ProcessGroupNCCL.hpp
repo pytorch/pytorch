@@ -363,7 +363,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::shared_ptr<NCCLComm> ncclComm_;
 
     // Tensors used for barrier op
-    at::Tensor barrierTensor_;
+    bool isBarrierOp_ = false;
 
     // Clone of blockingWait_ from ProcessGroupNCCL.
     bool blockingWait_ = false;
