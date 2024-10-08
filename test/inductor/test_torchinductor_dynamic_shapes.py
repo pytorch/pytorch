@@ -951,6 +951,15 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([5] * 320))
 
+    def test_mark_unbacked_slice(self):
+        @torch.compile(backend="inductor", mode="reduce-overhead", fullgraph=True)
+        def f(x):
+            return x.sum()
+
+        x = torch.empty_strided((1, 4), (5, 1), device="cuda")
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        f(x)
+
     def test_sort_dynamic_shape_with_check(self, device):
         if TEST_WITH_ROCM or torch.device(device).type != GPU_TYPE:
 
