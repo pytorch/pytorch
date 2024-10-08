@@ -4,6 +4,7 @@
 #include <ATen/detail/AcceleratorHooksInterface.h>
 
 #include <c10/core/Allocator.h>
+#include <c10/core/Device.h>
 #include <c10/util/Registry.h>
 
 namespace at {
