@@ -9,7 +9,7 @@ Global flags for aot autograd
 """
 import os
 import sys
-from typing import TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 from torch._utils_internal import JustKnobsConfig
 
@@ -45,7 +45,19 @@ static_weight_shapes = True
 cse = True
 
 
-enable_autograd_cache = os.environ.get("ENABLE_AOT_AUTOGRAD_CACHE", "0") == "1"
+enable_autograd_cache = os.environ.get("TORCHINDUCTOR_AUTOGRAD_CACHE", "0") == "1"
+
+
+def remote_autograd_cache_default() -> Optional[bool]:
+    if os.environ.get("TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE") == "1":
+        return True
+    if os.environ.get("TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE") == "0":
+        return False
+    return None
+
+
+enable_remote_autograd_cache = remote_autograd_cache_default()
+
 
 # When AOTAutograd regenerates aliased graph outputs,
 # attempt to use functionalization's view-replay logic
@@ -198,7 +210,9 @@ strict_autograd_cache = False
 # Fx pass used to tensorify python scalars. Part of the rollout for supporting
 # dynamic float arguments in PT2.
 tensorify_python_scalars = JustKnobsConfig(
-    name="tensorify_python_scalars", env_name="TENSORIFY_PYTHON_SCALARS", default=True
+    name="pytorch/compiler:tensorify_python_scalars",
+    env_name="TENSORIFY_PYTHON_SCALARS",
+    default=True,
 )
 
 if TYPE_CHECKING:
