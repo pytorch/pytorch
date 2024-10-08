@@ -451,6 +451,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 joint_loss_index if joint_loss_index is not None else None
             ),
         )
+        gm.graph.eliminate_dead_code()
 
     # Update the signatures with the new placeholder names in case they
     # changed when calling aot_export
