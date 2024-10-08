@@ -23,6 +23,7 @@ env:
   DOCKER_REGISTRY: "docker.io"
   DOCKER_BUILDKIT: 1
   WITH_PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release')) }}
+  WITH_PUSH_ROCM: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/2.5') }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -65,7 +66,7 @@ jobs:
         run: |
           .ci/docker/libtorch/build.sh libtorch-cxx11-builder:cuda${{matrix.cuda_version}}
   build-docker-rocm:
-    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
+    environment: ${{ github.ref == 'refs/heads/release/2.5' && 'docker-build' || '' }}
     runs-on: linux.9xlarge.ephemeral
     strategy:
       matrix:
@@ -79,25 +80,26 @@ jobs:
         with:
           submodules: false
       - name: Calculate docker image
-        if: env.WITH_PUSH == 'false'
+        if: env.WITH_PUSH_ROCM == 'false'
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.5
         with:
             docker-image-name: libtorch-cxx11-builder-rocm${{matrix.rocm_version}}
             docker-build-dir:  .ci/docker/libtorch
             always-rebuild: true
             push: true
-      - name: Authenticate if WITH_PUSH
-        if: env.WITH_PUSH == 'true'
+      - name: Authenticate if WITH_PUSH_ROCM
+        if: env.WITH_PUSH_ROCM == 'true'
         env:
           DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
           DOCKER_ID: ${{ secrets.DOCKER_ID }}
         run: |
-          if [[ "${WITH_PUSH}" == true ]]; then
+          if [[ "${WITH_PUSH_ROCM}" == true ]]; then
             echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
           fi
       - name: Build Docker Image
-        if: env.WITH_PUSH == 'true'
+        if: env.WITH_PUSH_ROCM == 'true'
         run: |
+          export WITH_PUSH=true
           .ci/docker/libtorch/build.sh libtorch-cxx11-builder:rocm${{matrix.rocm_version}}
   build-docker-cpu:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
