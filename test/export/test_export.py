@@ -773,6 +773,26 @@ graph():
         )
         torch.export.export(M(), args)
 
+    def test_cond_int_closure(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.num = 4
+
+            def forward(self, a, x):
+                def true_fn(x):
+                    return x * self.num
+
+                def false_fn(x):
+                    return x + self.num
+
+                r = torch.cond(a, true_fn, false_fn, (x,))
+                return r * 2
+
+        args = (torch.tensor(True), torch.randn(10))
+        ep = torch.export.export(M(), args)
+        self.assertEqual(ep.module()(*args), M()(*args))
+
     def test_state_tensors(self):
         class M(torch.nn.Module):  # simple with register buffer
             def __init__(self) -> None:

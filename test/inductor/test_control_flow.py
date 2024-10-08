@@ -44,6 +44,19 @@ class CondModels:
 
             return torch.cond(p, true_fn, false_fn, [a, b])
 
+    class SimpleWithIntClosure(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.num = 3
+
+        def forward(self, p, a, b):
+            return torch.cond(
+                pred=p,
+                true_fn=lambda a, b: [a + b + self.num],
+                false_fn=lambda a, b: [a - b - self.num],
+                operands=(a, b),
+            )
+
     class Nested(torch.nn.Module):
         def forward(self, p0, p1, p2, a, b, c):
             def true_fn(x0, y0, z0):
@@ -206,7 +219,11 @@ class CondTests(TestCase):
                 torch.testing.assert_close(cloned_inputs, inputs_with_predicates)
                 torch.testing.assert_close(result, result_compiled)
 
-        self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
+        self.assertEqual(
+            cnt.frame_count,
+            1,
+            "One compilation are expected",
+        )
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
@@ -215,6 +232,19 @@ class CondTests(TestCase):
         # cond control flow without nesting
         self._run_test(
             model=CondModels.Simple(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_simple_with_int_closure(self, device, dynamic):
+        self._run_test(
+            model=torch.compile(CondModels.SimpleWithIntClosure(), dynamic=True),
             inputs=(
                 torch.randn(10, 20),
                 torch.randn(10, 20),
@@ -493,8 +523,8 @@ class CondTests(TestCase):
                 num_predicates=3,
             )
 
-        self.assertEqual(counters["pre_grad"], 11)
-        self.assertEqual(counters["post_grad"], 11)
+        self.assertEqual(counters["pre_grad"], 22)
+        self.assertEqual(counters["post_grad"], 22)
 
 
 class WhileLoopModels:

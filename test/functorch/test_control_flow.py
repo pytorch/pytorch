@@ -5304,6 +5304,45 @@ def forward(self, l_inp_, l_tmp_):
         )
         self.assertEqual(out, f(inp, tmp))
 
+    @parametrize("requires_grad", [True, False])
+    def test_cond_symint_operands(self, requires_grad):
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        backend = EagerAndRecordGraphs()
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.num = 3
+
+            def forward(self, a, b):
+                return torch.cond(
+                    pred=torch.tensor([True]),
+                    true_fn=lambda a, b: a + b + self.num,
+                    false_fn=lambda a, b: a - b - self.num,
+                    operands=(a, b),
+                )
+
+        a = torch.ones(3, 3, requires_grad=requires_grad)
+        b = torch.ones(3, 3, requires_grad=requires_grad)
+        out = torch.compile(Mod(), backend=backend, dynamic=True)(a, b)
+        self.assertEqual(out, Mod()(a, b))
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertExpectedInline(
+            backend.graphs[0].code.strip(),
+            """\
+def forward(self, s0 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, L_self_num : torch.SymInt):
+    l_a_ = L_a_
+    l_b_ = L_b_
+    l_self_num = L_self_num
+    tensor = torch.tensor([True])
+    cond_true_0 = self.cond_true_0
+    cond_false_0 = self.cond_false_0
+    cond = torch.ops.higher_order.cond(tensor, cond_true_0, cond_false_0, [l_a_, l_b_, l_self_num]);  tensor = cond_true_0 = cond_false_0 = l_a_ = l_b_ = l_self_num = None
+    getitem = cond[0];  cond = None
+    return (getitem,)""",  # noqa: B950
+        )
+
     def test_two_hops_not_sharing_code_obj(self):
         pred, args = torch.tensor(True), (torch.ones(3, 3),)
 
