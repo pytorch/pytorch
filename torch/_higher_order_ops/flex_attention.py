@@ -90,7 +90,7 @@ def _(
     indices: List[Tensor],
     vals: Tensor,
 ) -> Tensor:
-    return torch.empty(shape, device=vals.device)
+    return vals.new_empty(shape)
 
 
 @zeros_and_scatter.register_vmap  # type: ignore[misc]

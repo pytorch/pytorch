@@ -351,7 +351,7 @@ class TritonTemplateKernel(TritonKernel):
             return ", ".join([texpr(self.rename_indexing(i)) for i in val])
 
     def modification(
-        self, subgraph_number: int, output_name: str, **fixed_inputs
+        self, subgraph_number: int, output_name: str, **fixed_inputs,
     ) -> str:
         """This creates a modification function for a subgraph.
         To use this inside a template, the first argument should specify which subgraph to codegen for
@@ -395,6 +395,11 @@ class TritonTemplateKernel(TritonKernel):
 
                 def indirect_indexing(self, index_var, size, check, wrap_neg=True):
                     return sympy_index_symbol(str(index_var))
+                
+                def store(self, name, index, value, mode):
+                    print("storing")
+                    add_input(name)
+                    return self._inner.store(name, index, value, mode)
 
             with V.set_ops_handler(PlaceholderSubstitution(V.ops)):
                 assert isinstance(
