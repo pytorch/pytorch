@@ -772,7 +772,7 @@ class TensorVariable(VariableTracker):
             self._warn_capture_scalar_outputs()
             unimplemented("Tensor.item")
 
-    def method___getitem__(self, *args, **kwargs):
+    def method_getitem(self, *args, **kwargs):
         from ..symbolic_convert import InstructionTranslator
         from .builder import wrap_fx_proxy
 
