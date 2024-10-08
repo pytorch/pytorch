@@ -206,6 +206,7 @@ test_hf_perf() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir $TEST_REPORTS_DIR
   conda_benchmark_deps
+  torchbench_setup_macos
 
   echo "Launching HuggingFace training perf run"
   python $(pwd)/benchmarks/dynamo/huggingface.py --backend eager --device mps --performance --training --output=${TEST_REPORTS_DIR}/hf_training.csv
@@ -225,6 +226,7 @@ test_timm_perf() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir $TEST_REPORTS_DIR
   conda_benchmark_deps
+  torchbench_setup_macos
 
   echo "Launching timm training perf run"
   python $(pwd)/benchmarks/dynamo/timm_models.py --backend eager --device mps --performance --training --output=${TEST_REPORTS_DIR}/timm_training.csv
