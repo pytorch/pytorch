@@ -507,7 +507,6 @@ def _make_module_call_graph(
     in_spec: TreeSpec,
     out_spec: TreeSpec,
     module_call_signatures: Dict[str, ModuleCallSignature],
-    forward_arg_names: Optional[List[str]] = None,
 ) -> List[ModuleCallEntry]:
     ret = [
         ModuleCallEntry(fqn=fqn, signature=module_call_signatures.get(fqn))
@@ -515,11 +514,7 @@ def _make_module_call_graph(
     ]
     assert ret[0].fqn == ""
     ret[0].signature = ModuleCallSignature(
-        inputs=[],
-        outputs=[],
-        in_spec=in_spec,
-        out_spec=out_spec,
-        forward_arg_names=forward_arg_names,
+        inputs=[], outputs=[], in_spec=in_spec, out_spec=out_spec
     )
     return ret
 
@@ -1068,7 +1063,6 @@ def _get_module_call_graph(
     original_in_spec: TreeSpec,
     preserve_module_call_signature: Tuple[str, ...],
     strict_mode_export: bool,
-    forward_arg_names: Optional[List[str]] = None,
 ):
     """
     In-place modify the graph module in export_artifact, remove _export_tracepoint nodes and
@@ -1086,11 +1080,7 @@ def _get_module_call_graph(
     for fqn, specs in module_call_specs.items():
         mod_fqn = _strip_root(fqn) if not strict_mode_export else fqn
         module_call_signatures[mod_fqn] = ModuleCallSignature(
-            inputs=[],
-            outputs=[],
-            in_spec=specs["in_spec"],
-            out_spec=specs["out_spec"],
-            forward_arg_names=None,  # we only propage forward_arg_names for the top level module
+            inputs=[], outputs=[], **specs
         )
 
     if len(preserve_module_call_signature) > 0:
@@ -1106,7 +1096,6 @@ def _get_module_call_graph(
         original_in_spec,
         out_spec,
         module_call_signatures,
-        forward_arg_names,
     )
     return gm, module_call_graph
 
@@ -1818,12 +1807,11 @@ def _export_for_training(
     )
     # The returned the gm is in-place modified
     gm, module_call_graph = _get_module_call_graph(
-        export_artifact,
-        orig_in_spec,
-        preserve_module_call_signature,
-        strict,
-        forward_arg_names,
+        export_artifact, orig_in_spec, preserve_module_call_signature, strict
     )
+
+    # Add forward args metadata.
+    gm.meta["forward_arg_names"] = forward_arg_names
 
     _verify_nn_module_stack(gm)
     _verify_stack_trace(gm)
@@ -1965,12 +1953,11 @@ def _export(
         dynamic_shapes,
     )
     gm, module_call_graph = _get_module_call_graph(
-        export_artifact,
-        original_in_spec,
-        preserve_module_call_signature,
-        strict,
-        forward_arg_names,
+        export_artifact, original_in_spec, preserve_module_call_signature, strict
     )
+
+    # Add forward args metadata.
+    gm.meta["forward_arg_names"] = forward_arg_names
 
     _verify_nn_module_stack(gm)
     _verify_stack_trace(gm)
