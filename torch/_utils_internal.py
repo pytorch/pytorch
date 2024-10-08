@@ -132,12 +132,20 @@ def log_trace_structured_event(*args, **kwargs) -> None:
     pass
 
 
+def log_cache_bypass(*args, **kwargs) -> None:
+    pass
+
+
 def log_torchscript_usage(api: str, **kwargs):
     _ = api
     return
 
 
 def check_if_torch_exportable():
+    return False
+
+
+def export_training_ir_rollout_check() -> bool:
     return False
 
 

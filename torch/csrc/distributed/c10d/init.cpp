@@ -1060,6 +1060,11 @@ This class does not support ``__members__`` property.)");
             return reinterpret_cast<uintptr_t>(
                 symm_mem->get_signal_pad_ptrs_dev());
           })
+      .def_property_readonly(
+          "multicast_ptr",
+          [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
+            return reinterpret_cast<uintptr_t>(symm_mem->get_multicast_ptr());
+          })
       .def_property_readonly("buffer_size", &SymmetricMemory::get_buffer_size)
       .def_property_readonly(
           "signal_pad_size", &SymmetricMemory::get_signal_pad_size)
@@ -1080,7 +1085,12 @@ This class does not support ``__members__`` property.)");
           "wait_signal",
           &SymmetricMemory::wait_signal,
           py::arg("src_rank"),
-          py::arg("channel") = 0);
+          py::arg("channel") = 0)
+      .def(
+          "stream_write_value32",
+          &SymmetricMemory::stream_write_value32,
+          py::arg("addr"),
+          py::arg("val"));
 
   auto store =
       py::class_<::c10d::Store, c10::intrusive_ptr<::c10d::Store>, PythonStore>(
@@ -1552,15 +1562,10 @@ Example::
           py::arg("master_listen_fd") = py::none(),
           py::arg("use_libuv") = true,
           py::call_guard<py::gil_scoped_release>())
-      .def(
-          "collect_client_counters",
-          &::c10d::TCPStore::collectClientCounters,
-          "Return a dict of counters for tcp store client")
       .def_property_readonly(
           "host",
           &::c10d::TCPStore::getHost,
           R"(Gets the hostname on which the store listens for requests.)")
-
       .def_property_readonly(
           "port",
           &::c10d::TCPStore::getPort,
@@ -1588,7 +1593,16 @@ Arguments:
     prefix (str): The prefix string that is prepended to each key before being inserted into the store.
     store (torch.distributed.store): A store object that forms the underlying key-value store.
       )")
-      .def(py::init<const std::string&, c10::intrusive_ptr<::c10d::Store>>())
+      .def(
+          py::init([](const std::string& prefix,
+                      c10::intrusive_ptr<::c10d::Store> store) {
+            if (!store) {
+              throw py::value_error("store argument cannot be None");
+            }
+            return new ::c10d::PrefixStore(prefix, store);
+          }),
+          py::arg("prefix"),
+          py::arg("store"))
       .def_property_readonly(
           "underlying_store",
           &::c10d::PrefixStore::getUnderlyingStore,
