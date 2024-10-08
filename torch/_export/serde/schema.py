@@ -345,7 +345,7 @@ class ModuleCallSignature:
     in_spec: str
     out_spec: str
 
-    # This field is used to prettify the graph placeholders 
+    # This field is used to prettify the graph placeholders
     # after we ser/der and retrace
     forward_arg_names: Optional[List[str]] = None
 
