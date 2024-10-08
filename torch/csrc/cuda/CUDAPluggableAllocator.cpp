@@ -271,10 +271,19 @@ void CUDAPluggableAllocator::beginAllocateSentinelPointers(
       std::function<void*(size_t)> allocatorOverride,
       size_t captureUniqueToken
 ) {
-  TORCH_CHECK(false, "not supported");
+  TORCH_CHECK(
+    false,
+    "CUDAPluggableAllocator does not yet support beginAllocateSentinelPointers. "
+    "If you need it, please file an issue describing your use case.");
 }
 
-void CUDAPluggableAllocator::endAllocateSentinelPointers(size_t captureUniqueToken) {}
+void CUDAPluggableAllocator::endAllocateSentinelPointers(size_t captureUniqueToken) {
+  TORCH_CHECK(
+    false,
+    "CUDAPluggableAllocator does not yet support endAllocateSentinelPointers. "
+    "If you need it, please file an issue describing your use case.");
+}
+
 
 void CUDAPluggableAllocator::endAllocateToPool(
     c10::DeviceIndex device,

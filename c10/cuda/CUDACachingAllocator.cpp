@@ -3255,14 +3255,16 @@ class NativeCachingAllocator : public CUDAAllocator {
         "Allocator not initialized for device ",
         device,
         ": did you call init?");
-    for (auto& it : sentinel_captures_underway) {
-      if (device == it.device) {
-        if (it.streamFilter(stream)) {
-          void* ptr = it.allocatorOverride(size);
-          // note that "ptr" is a totally fake ptr, there is no Block* tracking it or anything
-          TORCH_CHECK((size_t) ptr < sentinelLimit, "need to be able to tell apart real from fake pointers");
-          *devPtr = ptr;
-          return;
+    if (C10_UNLIKELY(!sentinel_captures_underway.empty())) {
+      for (auto& it : sentinel_captures_underway) {
+        if (device == it.device) {
+          if (it.streamFilter(stream)) {
+            void* ptr = it.allocatorOverride(size);
+            // note that "ptr" is a totally fake ptr, there is no Block* tracking it or anything
+            TORCH_CHECK((size_t) ptr < sentinelLimit, "need to be able to tell apart real from fake pointers");
+            *devPtr = ptr;
+            return;
+          }
         }
       }
     }
@@ -3587,7 +3589,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     });
   }
 
-  void endAllocateSentinelPointers(size_t captureUniqueToken) {
+  void endAllocateSentinelPointers(size_t captureUniqueToken) override {
     for (auto it = sentinel_captures_underway.begin(); it != sentinel_captures_underway.end(); ++it) {
       if ((*it).captureUniqueToken == captureUniqueToken) {
         sentinel_captures_underway.erase(it);

@@ -365,13 +365,6 @@ CUDAGraph::~CUDAGraph() {
   reset();
 }
 
-std::vector<std::vector<UpdateAndTensorOffset>> create_device_updates(
-    CUDAGraph* graph1_ptr,
-    const CUDAGraph& graph2,
-    const std::vector<std::pair<at::Tensor, at::Tensor>>& input_pairs) {
-  return {};
-}
-
 void CUDAGraph::compare_with_recapture(const CUDAGraph& graph2) {
   // Note: graph1 and graph2 should topologically be the same
   // they should have come from doing stream capture twice, on two separate

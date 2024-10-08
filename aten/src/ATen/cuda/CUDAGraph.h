@@ -20,13 +20,6 @@ TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
 
 void dynamicGraphUpdater(cudaGraphKernelNodeUpdate* updates, size_t numUpdates);
 
-int graphTestMain();
-
-struct UpdateAndTensorOffset {
-  cudaGraphKernelNodeUpdate update;
-  ptrdiff_t tensor_offset; // TODO: change to intptr_t
-};
-
 struct DynamicGraphKernelParamUpdate {
   // in other words:
   // devNode.params[paramOffset] = allocations[allocIdx] + offset
@@ -64,14 +57,9 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void debug_dump(const std::string& debug_path);
   void compare_with_recapture(const CUDAGraph& graph2);
   void replay_dynamic(std::vector<void*> prefilledDataPtrs, std::vector<size_t> prefilledLens);
-  void instantiate_graph_exec();
-
-  friend std::vector<std::vector<UpdateAndTensorOffset>> create_device_updates(
-      CUDAGraph* graph1_ptr,
-      const CUDAGraph& graph2,
-      const std::vector<std::pair<at::Tensor, at::Tensor>>& input_pairs);
 
  protected:
+  void instantiate_graph_exec();
   cudaGraph_t graph_ = nullptr;
   cudaGraphExec_t graph_exec_ = nullptr;
 
@@ -126,12 +114,6 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // captures if needed.
   int capture_dev_{};
 };
-
-TORCH_CUDA_CPP_API std::vector<std::vector<UpdateAndTensorOffset>>
-create_device_updates(
-    CUDAGraph* graph1_ptr,
-    const CUDAGraph& graph2,
-    const std::vector<std::pair<at::Tensor, at::Tensor>>& input_pairs);
 
 } // namespace cuda
 } // namespace at
