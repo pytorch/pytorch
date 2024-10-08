@@ -23,7 +23,6 @@ def make_dynamic(func):
             g2.enable_debug_mode()
             with torch.cuda.graph(g2, sentinel_allocations_mode=2):
                 func(*[torch.empty_like(arg) for arg in args])
-            print("lets just make sure torch still works:", torch.arange(10).sum())
             g1.compare_with_recapture(g2) # Investigate the graphs and determine which allocation is which
             graph = g1
             initialized = True
@@ -40,15 +39,20 @@ def myFunc(a, b, c):
     temp = torch.ones_like(c) # we can even allocate :)
     temp += 1
     a += temp
-    #a[:] = c
+    a[5:] += 2
+    a[4] += 1000
+    c = torch.clamp(c, min=2, max=5)
+    a += c
 
 myFuncWrapped = make_dynamic(myFunc)
 
+ensure_ptrs_change = []
 for i in range(10):
     a = torch.ones(8)
     b = torch.full((3,), i)
     c = torch.arange(8)
-    print("in", a, b, c)
+    print("inputs:", a, b, c, a.data_ptr(), b.data_ptr(), c.data_ptr())
+    ensure_ptrs_change.append((a, b, c)) # don't let them get GC'd and possibly reused
 
     a1 = a.clone()
     myFunc(a1, b, c)
@@ -57,4 +61,4 @@ for i in range(10):
     a2 = a.clone()
     myFuncWrapped(a2, b, c)
     print("out actually is", a2)
-    print(a1 == a2)
+    assert torch.equal(a1, a2)

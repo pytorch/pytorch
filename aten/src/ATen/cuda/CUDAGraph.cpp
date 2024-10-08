@@ -151,8 +151,8 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
     }, [this](size_t allocSz) {
       allocationSizes.push_back(allocSz);
       if (sentinelAllocationsMode == 1) {
-        std::cout << "intercepted alloc of size " << allocSz << " returning nullptr since mode=1" << std::endl;
-        return (void*)nullptr;
+        std::cout << "intercepted alloc of size " << allocSz << " returning " << kAllocationStride << " since mode=1" << std::endl;
+        return (void*)((char*)nullptr + kAllocationStride);
       } else {
         std::cout << "intercepted alloc of size " << allocSz << " returning allocIdx+1 since mode=2" << std::endl;
         // I think that alignment is causing issues... The kernels can
@@ -160,7 +160,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
         // vectorization is possible in the loads and stores, etc. We
         // want to make sure that the alignment is always "large
         // enough". Use 1024 for now...
-        return (void*)((char*)nullptr + kAllocationStride * (1 + sentinelAllocationIdx++));
+        return (void*)((char*)nullptr + kAllocationStride * (2 + sentinelAllocationIdx++));
       }
     }, sentinelCaptureUniqueToken);
   }
@@ -397,6 +397,29 @@ void CUDAGraph::compare_with_recapture(const CUDAGraph& graph2) {
 
   TORCH_CHECK_EQ(num_nodes1, num_nodes2);
 
+  auto checkAllocation = [this](void* ptr1, void* ptr2, const char* ptrType) -> std::optional<std::tuple<int64_t, size_t>> {
+    int64_t whichAlloc = (int64_t)((char*)ptr2 - (char*)ptr1);
+    if (whichAlloc % kAllocationStride != 0) {
+      std::cout << "MISMATCH the allocation strided by " << whichAlloc 
+                << " which is not divisible by our stride " << kAllocationStride 
+                << " so this is not one of ours :(" << std::endl;
+      return std::nullopt;
+    }
+    
+    int64_t allocIdx = whichAlloc / kAllocationStride - 1;
+    if (allocIdx < 0 || allocIdx >= allocationSizes.size()) {
+      std::cout << "LEIJURV: MISMATCH this isn't one of ours. the " << ptrType << " is different for some other reason :(" << std::endl;
+      return std::nullopt;
+    }
+
+    size_t offset = (size_t)ptr1 - kAllocationStride;
+    if (offset >= allocationSizes[allocIdx]) {
+      std::cout << "LEIJURV: MISMATCH Hmmm, looks like the " << ptrType << " was with an offset that's larger than the size of the allocation? must not be one of ours" << std::endl;
+      return std::nullopt;
+    }
+    return std::make_tuple(allocIdx, offset);
+  };
+
 
 
   for (size_t i = 0; i < num_nodes1; ++i) {
@@ -438,36 +461,30 @@ void CUDAGraph::compare_with_recapture(const CUDAGraph& graph2) {
           
           char* arg1_value = arg1_speculative_pointer[address_start / 8];
           char* arg2_value = arg2_speculative_pointer[address_start / 8];
-          
 
-          // wonder if it's possible to ask cudacachingallocation to assert that arg1_value must not be an existing tensor?
-
-          // removed check for %8==0 because no longer true
-          // this is now the check:
           if (arg2_value != arg1_value) {
-            std::cout << "GALVEZ: param_index=" << param_index << std::endl;
-            std::cout << "GALVEZ: param_size=" << param_size << std::endl;
-            std::cout << "GALVEZ: address_start=" << address_start << std::endl;
-            std::cout << "GALVEZ: arg1_value=" << (void*)arg1_value << std::endl;
-            std::cout << "GALVEZ: arg2_value=" << (void*)arg2_value << std::endl;
-              int64_t whichAlloc = (int64_t)(arg2_value - arg1_value);
-              if (whichAlloc % kAllocationStride != 0) {
-                std::cout << "the allocation strided by " << whichAlloc << " which is not divisible by our stride " << kAllocationStride << " so this is not one of ours :(" << std::endl;
-                continue;
-              }
-              int64_t allocIdx = whichAlloc / kAllocationStride - 1;
-              std::cout << "LEIJURV: allocIdx=" << allocIdx << std::endl;
-              if (allocIdx < 0 || allocIdx >= allocationSizes.size()) {
-                std::cout << "LEIJURV: this isn't one of ours. the arg is different for some other reason :(" << std::endl;
-                continue;
-              }
-
-              size_t offset = (size_t) arg1_value;
-              if (offset >= allocationSizes[allocIdx]) {
-                std::cout << "LEIJURV: Hmmm, looks like the kernel was launched with a tensor offset that's larger than the size of the allocation? must not be one of ours" << std::endl;
-                continue;
-              }
-
+            std::cout << "param_index " << param_index << " param_size " << param_size << " address_start " << address_start << " arg1_value " << (void*) arg1_value << " arg2_value " << (void*)arg2_value << std::endl;
+            if (auto result = checkAllocation(arg1_value, arg2_value, "kernel parameter")) {
+              auto [allocIdx, offset] = *result;
+              std::cout << "LEIJURV: I have decided that " << address_start << " bytes into argument #" << param_index << " of kernel " << func_name << " is actually allocation " << allocIdx << " indexed to offset " << offset << std::endl;
+              if (true){
+                graphNodeParamUpdates.push_back({
+                  .node = node1,
+                  .computeNewParams = [nodeParams1, param_index, address_start, allocIdx, offset](std::vector<void*> actualDataPtrs) {
+                    cudaGraphNodeParams updatedParams = {};
+                    updatedParams.type = cudaGraphNodeTypeKernel;
+                    updatedParams.kernel.func = nodeParams1.func;
+                    updatedParams.kernel.gridDim = nodeParams1.gridDim;
+                    updatedParams.kernel.blockDim = nodeParams1.blockDim;
+                    updatedParams.kernel.sharedMemBytes = nodeParams1.sharedMemBytes;
+                    updatedParams.kernel.kernelParams = nodeParams1.kernelParams;
+                    updatedParams.kernel.extra = nodeParams1.extra;
+                    char** updatedArg = (char**)updatedParams.kernel.kernelParams[param_index];
+                    updatedArg[address_start / 8] = (char*)actualDataPtrs[allocIdx] + offset;
+                    return updatedParams;
+                  },
+                });
+              }else{
                 cudaKernelNodeAttrValue attr_value = {
                     .deviceUpdatableKernelNode = {
                         .deviceUpdatable = 1,
@@ -481,7 +498,6 @@ void CUDAGraph::compare_with_recapture(const CUDAGraph& graph2) {
                     attr_value.deviceUpdatableKernelNode.devNode != nullptr);
                 std::cout << "the dev node is at " << (size_t)attr_value.deviceUpdatableKernelNode.devNode << std::endl;
 
-                std::cout << "I have decided that " << address_start << " bytes into argument #" << param_index << " of kernel " << func_name << " is actually allocation " << allocIdx << " indexed to offset " << offset << std::endl;
                 kernelParamUpdates.push_back({
                   .devNode = attr_value.deviceUpdatableKernelNode.devNode,
                   .paramOffset = param_offset + address_start,
@@ -489,18 +505,117 @@ void CUDAGraph::compare_with_recapture(const CUDAGraph& graph2) {
                   .offset = offset,
                 });
                 std::cout << "dev node " << attr_value.deviceUpdatableKernelNode.devNode << " param offset " << (param_offset + address_start) << " allocIdx "<< allocIdx << " offset " << offset << std::endl;
+              }
+            }
           }
         }
         param_index++;
       }
 
     } else if (type1 == cudaGraphNodeTypeMemcpy) {
-      // Do graph surgery to change this memory copy node and replace
-      // it with a kernel doing memory copy instead.
-      throw std::runtime_error("graph node Type not supported yet.");
+      cudaMemcpy3DParms memcpyParams1, memcpyParams2;
+      AT_CUDA_CHECK(cudaGraphMemcpyNodeGetParams(node1, &memcpyParams1));
+      AT_CUDA_CHECK(cudaGraphMemcpyNodeGetParams(node2, &memcpyParams2));
+      TORCH_CHECK(memcpyParams1.extent.width == memcpyParams2.extent.width &&
+                  memcpyParams1.extent.height == memcpyParams2.extent.height &&
+                  memcpyParams1.extent.depth == memcpyParams2.extent.depth,
+                  "Memcpy extent mismatch between graphs");
+      TORCH_CHECK(memcpyParams1.kind == memcpyParams2.kind, "Memcpy kind mismatch between graphs");
+      if (memcpyParams1.srcPtr.ptr == memcpyParams2.srcPtr.ptr) {
+        continue; // unchanged
+      }
+      auto srcPtrResult = checkAllocation(memcpyParams1.srcPtr.ptr, memcpyParams2.srcPtr.ptr, "memcpy source");
+      auto dstPtrResult = checkAllocation(memcpyParams1.dstPtr.ptr, memcpyParams2.dstPtr.ptr, "memcpy destination");
+      
+      
+      graphNodeParamUpdates.push_back({
+        .node = node1,
+        .computeNewParams = [memcpyParams1, srcPtrResult, dstPtrResult](std::vector<void*> actualDataPtrs) {
+          void* srcPtr = memcpyParams1.srcPtr.ptr;
+          void* dstPtr = memcpyParams1.dstPtr.ptr;
+
+          if (srcPtrResult) {
+            auto [allocIdx, offset] = *srcPtrResult;
+            srcPtr = (char*)actualDataPtrs[allocIdx] + offset;
+          }
+          if (dstPtrResult) {
+            auto [allocIdx, offset] = *dstPtrResult;
+            dstPtr = (char*)actualDataPtrs[allocIdx] + offset;
+          }
+
+          cudaGraphNodeParams nodeParams = {};
+          nodeParams.type = cudaGraphNodeTypeMemcpy;
+          cudaMemcpy3DParms updatedMemcpyParams = {
+            .srcArray = memcpyParams1.srcArray,
+            .srcPos = memcpyParams1.srcPos,
+            .srcPtr = {srcPtr, memcpyParams1.srcPtr.pitch, memcpyParams1.srcPtr.xsize, memcpyParams1.srcPtr.ysize},
+            .dstArray = memcpyParams1.dstArray,
+            .dstPos = memcpyParams1.dstPos,
+            .dstPtr = {dstPtr, memcpyParams1.dstPtr.pitch, memcpyParams1.dstPtr.xsize, memcpyParams1.dstPtr.ysize},
+            .extent = memcpyParams1.extent,
+            .kind = memcpyParams1.kind
+          };
+          nodeParams.memcpy.copyParams = updatedMemcpyParams;
+          return nodeParams;
+        },
+      });
+    } else if (type1 == cudaGraphNodeTypeMemset) {
+      cudaMemsetParams memsetParams1, memsetParams2;
+      AT_CUDA_CHECK(cudaGraphMemsetNodeGetParams(node1, &memsetParams1));
+      AT_CUDA_CHECK(cudaGraphMemsetNodeGetParams(node2, &memsetParams2));
+      
+      TORCH_CHECK(memsetParams1.value == memsetParams2.value, "Memset value mismatch between graphs");
+      TORCH_CHECK(memsetParams1.elementSize == memsetParams2.elementSize, "Memset element size mismatch between graphs");
+      TORCH_CHECK(memsetParams1.width == memsetParams2.width, "Memset width mismatch between graphs");
+      TORCH_CHECK(memsetParams1.height == memsetParams2.height, "Memset height mismatch between graphs");
+
+      if (memsetParams1.dst == memsetParams2.dst) {
+        continue; // unchanged
+      }
+      
+      auto dstPtrResult = checkAllocation(memsetParams1.dst, memsetParams2.dst, "memset destination");
+      
+      graphNodeParamUpdates.push_back({
+        .node = node1,
+        .computeNewParams = [memsetParams1, dstPtrResult](std::vector<void*> actualDataPtrs) {
+          void* dstPtr = memsetParams1.dst;
+
+          if (dstPtrResult) {
+            auto [allocIdx, offset] = *dstPtrResult;
+            dstPtr = (char*)actualDataPtrs[allocIdx] + offset;
+          }
+
+          cudaGraphNodeParams nodeParams = {};
+          nodeParams.type = cudaGraphNodeTypeMemset;
+          cudaMemsetParamsV2 updatedMemsetParams = {
+            .dst = dstPtr,
+            .pitch = memsetParams1.pitch,
+            .value = memsetParams1.value,
+            .elementSize = memsetParams1.elementSize,
+            .width = memsetParams1.width,
+            .height = memsetParams1.height
+          };
+          nodeParams.memset = updatedMemsetParams;
+          return nodeParams;
+        },
+      });
+    } else if (type1 == cudaGraphNodeTypeGraph || type1 == cudaGraphNodeTypeConditional) {
+      throw std::runtime_error("horrible. please don't make me support these.");
       assert(false);
-      // cudaGraphNodeSetParams can modify memory copy nodes, but the
-      // device-side update API can't do that, unfortunately.
+    } else if (
+      type1 == cudaGraphNodeTypeEmpty ||
+      type1 == cudaGraphNodeTypeWaitEvent ||
+      type1 == cudaGraphNodeTypeHost ||
+      type1 == cudaGraphNodeTypeEventRecord ||
+      type1 == cudaGraphNodeTypeExtSemaphoreSignal ||
+      type1 == cudaGraphNodeTypeExtSemaphoreWait ||
+      type1 == cudaGraphNodeTypeMemAlloc ||
+      type1 == cudaGraphNodeTypeMemFree
+    ) {
+      // this is fine
+    } else {
+      throw std::runtime_error("graph node type unknown");
+      assert(false);
     }
   }
   instantiate_graph_exec(); // must do this after cudaGraphKernelNodeSetAttribute
@@ -508,9 +623,9 @@ void CUDAGraph::compare_with_recapture(const CUDAGraph& graph2) {
 }
 
 void CUDAGraph::replay_dynamic(std::vector<void*> prefilledDataPtrs, std::vector<size_t> prefilledLens) {
-  std::cout << "launching graph test main" << std::endl;
-  graphTestMain();
-  cudaDeviceSynchronize();
+  //std::cout << "launching graph test main" << std::endl;
+  //graphTestMain();
+  //cudaDeviceSynchronize();
   TORCH_CHECK(hasComparedAgainstRecapture, "Must compare against a pointer offsetted sentinel recapture");
   TORCH_CHECK(has_graph_exec_,
               "Called CUDAGraph::replay without a preceding successful capture.");
@@ -531,35 +646,43 @@ void CUDAGraph::replay_dynamic(std::vector<void*> prefilledDataPtrs, std::vector
       freeTheseLater.push_back(ptr);
     }
   }
-  std::cout << "actual data ptrs " << actualDataPtrs << std::endl;
+  //std::cout << "actual data ptrs " << actualDataPtrs << std::endl;
   c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
-
-  cudaGraphKernelNodeUpdate* hostUpdates = (cudaGraphKernelNodeUpdate*) malloc(kernelParamUpdates.size() * sizeof(cudaGraphKernelNodeUpdate));
-  for (size_t i = 0; i < kernelParamUpdates.size(); i++) {
-    auto update = kernelParamUpdates[i];
-    cudaGraphKernelNodeUpdate deviceUpdate = {
-      .node = update.devNode,
-      .field = cudaGraphKernelNodeFieldParam,
-      .updateData = {
-        .param = {
-          .pValue = (char*)actualDataPtrs[update.allocIdx] + update.offset, // the kernel will overwrite this to indirect it in GPU memory
-          .offset = update.paramOffset,
-          .size = sizeof(void*),
+  if (true){
+    //std::cout << "doing it the simpler way" << std::endl;
+    for (auto& update : graphNodeParamUpdates) {
+      cudaGraphNodeParams newParams = update.computeNewParams(actualDataPtrs);
+      AT_CUDA_CHECK(cudaGraphExecNodeSetParams(graph_exec_, update.node, &newParams));
+    }
+    
+  } else {
+    cudaGraphKernelNodeUpdate* hostUpdates = (cudaGraphKernelNodeUpdate*) malloc(kernelParamUpdates.size() * sizeof(cudaGraphKernelNodeUpdate));
+    for (size_t i = 0; i < kernelParamUpdates.size(); i++) {
+      auto update = kernelParamUpdates[i];
+      cudaGraphKernelNodeUpdate deviceUpdate = {
+        .node = update.devNode,
+        .field = cudaGraphKernelNodeFieldParam,
+        .updateData = {
+          .param = {
+            .pValue = (char*)actualDataPtrs[update.allocIdx] + update.offset, // the kernel will overwrite this to indirect it in GPU memory
+            .offset = update.paramOffset,
+            .size = sizeof(void*),
+          }
         }
-      }
-    };
-    hostUpdates[i] = deviceUpdate;
-  }
-  cudaGraphKernelNodeUpdate* deviceUpdates;
-  AT_CUDA_CHECK(cudaMallocAsync(&deviceUpdates, kernelParamUpdates.size() * sizeof(cudaGraphKernelNodeUpdate), stream));
-  AT_CUDA_CHECK(cudaMemcpyAsync(deviceUpdates, hostUpdates, kernelParamUpdates.size() * sizeof(cudaGraphKernelNodeUpdate), cudaMemcpyHostToDevice, stream)); // yeah yeah not actually async whatever
+      };
+      hostUpdates[i] = deviceUpdate;
+    }
+    cudaGraphKernelNodeUpdate* deviceUpdates;
+    AT_CUDA_CHECK(cudaMallocAsync(&deviceUpdates, kernelParamUpdates.size() * sizeof(cudaGraphKernelNodeUpdate), stream));
+    AT_CUDA_CHECK(cudaMemcpyAsync(deviceUpdates, hostUpdates, kernelParamUpdates.size() * sizeof(cudaGraphKernelNodeUpdate), cudaMemcpyHostToDevice, stream)); // yeah yeah not actually async whatever
 
-  dynamicGraphUpdater(deviceUpdates, kernelParamUpdates.size());
+    dynamicGraphUpdater(deviceUpdates, kernelParamUpdates.size());
+  }
 
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, stream));
-  AT_CUDA_CHECK(cudaStreamSynchronize(stream));
-  free(hostUpdates);
-  AT_CUDA_CHECK(cudaFreeAsync(deviceUpdates, stream));
+  //AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+  //free(hostUpdates);
+  //AT_CUDA_CHECK(cudaFreeAsync(deviceUpdates, stream));
   for (size_t i = 0; i < freeTheseLater.size(); i++) {
     AT_CUDA_CHECK(cudaFreeAsync(freeTheseLater[i], stream));
   }

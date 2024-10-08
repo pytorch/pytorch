@@ -37,6 +37,11 @@ struct DynamicGraphKernelParamUpdate {
   size_t offset; // how deep into the allocation?
 };
 
+struct DynamicGraphOtherNodeUpdate {
+  cudaGraphNode_t node;
+  std::function<cudaGraphNodeParams(std::vector<void*>)> computeNewParams;
+};
+
 struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph();
   ~CUDAGraph();
@@ -90,6 +95,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   std::vector<size_t> allocationSizes;
 
   std::vector<DynamicGraphKernelParamUpdate> kernelParamUpdates;
+  std::vector<DynamicGraphOtherNodeUpdate> graphNodeParamUpdates;
   bool hasComparedAgainstRecapture = false;
 
   // uuid used to request a particular private mempool from CUDACachingAllocator.
