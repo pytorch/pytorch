@@ -682,21 +682,32 @@ namespace {
             createDefaultBinaryTestCase<vec>(TestSeed()),
                 RESOLVE_OVERLOAD(filter_sub_overflow));
     }
-/*Disabling this test only for SVE128 (Fail due to accuracy mismatch after 3rd decimal place only for complex dtype)
+/*The below two tests need to be compiled without SIMD with gcc compiler to avoid failures due to
+accuracy mismatch after 3rd decimal place for complex dtype.
 Arithmetics/2.Multiplication, where TypeParam = at::vec::SVE128::Vectorized<c10::complex<float>>
 Arithmetics/3.Multiplication, where TypeParam = at::vec::SVE128::Vectorized<c10::complex<double>>
 */
-#if !defined(CPU_CAPABILITY_SVE128)
+#if defined(__GNUC__) && defined(CPU_CAPABILITY_SVE128)
+#define SIMD_OPTIMIZED __attribute__((optimize("no-tree-vectorize")))
+#else
+#define SIMD_OPTIMIZED
+#endif
+
+// Separate function to handle multiplication
+template<typename vec>
+SIMD_OPTIMIZED
+vec multiply(const vec& v0, const vec& v1) {
+    return v0 * v1;
+}
     TYPED_TEST(Arithmetics, Multiplication) {
         using vec = TypeParam;
         test_binary<vec>(
             NAME_INFO(mult),
             RESOLVE_OVERLOAD(local_multiply),
-            [](const vec& v0, const vec& v1) { return v0 * v1; },
+            multiply<vec>,
             createDefaultBinaryTestCase<vec>(TestSeed(), false, true),
             RESOLVE_OVERLOAD(filter_mult_overflow));
     }
-#endif
     TYPED_TEST(Arithmetics, Division) {
         using vec = TypeParam;
         TestSeed seed;

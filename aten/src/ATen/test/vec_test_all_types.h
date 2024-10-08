@@ -16,12 +16,10 @@
 #include <float.h>
 #include <algorithm>
 
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_SVE512)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_SVE)
 #define CACHE_LINE 64
-#elif !defined(CPU_CAPABILITY_SVE128)
-#define CACHE_LINE 32
 #else
-#define CACHE_LINE 16
+#define CACHE_LINE 32
 #endif
 
 #if defined(__GNUC__)
@@ -31,7 +29,7 @@
 #define CACHE_ALIGN __declspec(align(CACHE_LINE))
 #define not_inline __declspec(noinline)
 #else
-CACHE_ALIGN #define
+#define CACHE_ALIGN
 #define not_inline
 #endif
 #if defined(CPU_CAPABILITY_DEFAULT) || defined(_MSC_VER)

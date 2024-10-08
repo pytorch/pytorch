@@ -262,14 +262,8 @@ inline void convert(const int32_t *src, int64_t *dst, int64_t n) {
   const int64_t fraction = n % Vectorized<int64_t>::size();
   svbool_t pg_32 = svwhilelt_b32(0ull, Vectorized<int64_t>::size());
   svbool_t pg_64 = svwhilelt_b64(0ull, Vectorized<int64_t>::size());
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
   for (int64_t i = 0; i < n - fraction; i += Vectorized<int64_t>::size())
     svst1_s64(pg_64, dst + i, svunpklo_s64(svldnt1_s32(pg_32, src + i)));
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
   for (int64_t i = n - fraction; i < n; i += Vectorized<int64_t>::size()) {
     pg_32 = svwhilelt_b32(i, n);
     pg_64 = svwhilelt_b64(i, n);
@@ -282,17 +276,11 @@ inline void convert(const int64_t *src, float *dst, int64_t n) {
   const int64_t fraction = n % Vectorized<int64_t>::size();
   svbool_t pg_32 = svwhilelt_b32(0ull, Vectorized<int64_t>::size());
   svbool_t pg_64 = svwhilelt_b64(0ull, Vectorized<int64_t>::size());
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
   for (int64_t i = 0; i < n - fraction; i += Vectorized<int64_t>::size()) {
     svint64_t src_vec_s64 = svldnt1_s64(pg_64, src + i);
     svfloat32_t src_vec_f32 = svuzp1_f32(svcvt_f32_s64_x(pg_64, src_vec_s64), ZERO_F32);
     svst1_f32(pg_32, dst + i, src_vec_f32);
   }
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
   for (int64_t i = n - fraction; i < n; i += Vectorized<int64_t>::size()) {
     pg_32 = svwhilelt_b32(i, n);
     pg_64 = svwhilelt_b64(i, n);
@@ -306,16 +294,10 @@ template <>
 inline void convert(const int32_t *src, float *dst, int64_t n) {
   const int64_t fraction = n % Vectorized<int32_t>::size();
   svbool_t pg = svwhilelt_b32(0ull, Vectorized<int32_t>::size());
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
   for (int64_t i = 0; i < n - fraction; i += Vectorized<int32_t>::size()) {
     svint32_t src_vec = svldnt1_s32(pg, src + i);
     svst1_f32(pg, dst + i, svcvt_f32_s32_x(pg, src_vec));
   }
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
   for (int64_t i = n - fraction; i < n; i += Vectorized<int32_t>::size()) {
     pg = svwhilelt_b32(i, n);
     svint32_t src_vec = svldnt1_s32(pg, src + i);
@@ -328,18 +310,12 @@ inline void convert(const bool *src, int64_t *dst, int64_t n) {
   const int64_t fraction = n % Vectorized<int64_t>::size();
   svbool_t pg_8 = svwhilelt_b8(0ull, Vectorized<int64_t>::size());
   svbool_t pg_64 = svwhilelt_b64(0ull, Vectorized<int64_t>::size());
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
   for (int64_t i = 0; i < n - fraction; i += Vectorized<int64_t>::size()) {
     svuint8_t src_vec_u8 = svldnt1_u8(pg_8, reinterpret_cast<const uint8_t*>(src) + i);
     svuint64_t src_vec_u64 = svunpklo_u64(svunpklo_u32(svunpklo_u16(src_vec_u8)));
     svbool_t mask = svcmpne_u64(pg_64, src_vec_u64, ZERO_U64);
     svst1_s64(pg_64, dst + i, svsel_s64(mask, ONE_S64, ZERO_S64));
   }
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
   for (int64_t i = n - fraction; i < n; i += Vectorized<int64_t>::size()) {
     pg_8 = svwhilelt_b8(i, n);
     pg_64 = svwhilelt_b64(i, n);
@@ -355,18 +331,12 @@ inline void convert(const bool *src, int32_t *dst, int64_t n) {
   const int64_t fraction = n % Vectorized<int32_t>::size();
   svbool_t pg_8 = svwhilelt_b8(0ull, Vectorized<int32_t>::size());
   svbool_t pg_32 = svwhilelt_b32(0ull, Vectorized<int32_t>::size());
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
   for (int64_t i = 0; i < n - fraction; i += Vectorized<int32_t>::size()) {
     svuint8_t src_vec_u8 = svldnt1_u8(pg_8, reinterpret_cast<const uint8_t*>(src) + i);
     svuint32_t src_vec_u32 = svunpklo_u32(svunpklo_u16(src_vec_u8));
     svbool_t mask = svcmpne_u32(pg_32, src_vec_u32, ZERO_U32);
     svst1_s32(pg_32, dst + i, svsel_s32(mask, ONE_S32, ZERO_S32));
   }
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
   for (int64_t i = n - fraction; i < n; i += Vectorized<int32_t>::size()) {
     pg_8 = svwhilelt_b8(i, n);
     pg_32 = svwhilelt_b32(i, n);
@@ -381,17 +351,11 @@ template <>
 inline void convert(const uint8_t *src, bool *dst, int64_t n) {
   const int64_t fraction = n % Vectorized<uint8_t>::size();
   svbool_t pg = svwhilelt_b8(0ull, Vectorized<uint8_t>::size());
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
   for (int64_t i = 0; i < n - fraction; i += Vectorized<uint8_t>::size()) {
     svbool_t mask = svcmpne_u8(pg, svldnt1_u8(pg, src + i), ZERO_U8);
     svst1_u8(pg, reinterpret_cast<uint8_t*>(dst) + i,
             svsel_u8(mask, ALL_U8_TRUE_MASK, ALL_U8_FALSE_MASK));
   }
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
   for (int64_t i = n - fraction; i < n; i += Vectorized<uint8_t>::size()) {
     pg = svwhilelt_b8(i, n);
     svbool_t mask = svcmpne_u8(pg, svldnt1_u8(pg, src + i), ZERO_U8);
