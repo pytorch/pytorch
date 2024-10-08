@@ -233,7 +233,7 @@ class FSDPParam:
         self.pin_memory = (
             self.offload_to_cpu and cast(CPUOffloadPolicy, offload_policy).pin_memory
         )
-        self.grad_offload_event: Optional[torch.cuda.Event] = None
+        self.grad_offload_event: Optional[torch.Event] = None
         self._init_sharded_param(param, device)
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
@@ -355,7 +355,9 @@ class FSDPParam:
         if self.offload_to_cpu and not padded_sharded_param.is_meta:
             padded_sharded_param = padded_sharded_param.cpu()
             if self.pin_memory:
-                padded_sharded_param = padded_sharded_param.pin_memory()
+                padded_sharded_param = padded_sharded_param.pin_memory(
+                    device=self.device
+                )
         self._sharded_param_data = padded_sharded_param.view(-1)
         self.sharded_param = nn.Parameter(
             self.to_sharded_dtensor(padded_sharded_param[: sharded_param.size(0)])
@@ -666,13 +668,13 @@ class FSDPParam:
                     (
                         all_gather_inputs,
                         self._extensions_data.all_gather_metadata,
-                    ) = sharded_local_tensor.fsdp_pre_all_gather(self.mesh_info.mesh)
+                    ) = sharded_local_tensor.fsdp_pre_all_gather(self.shard_mesh)
                 else:
                     (
                         all_gather_inputs,
                         self._extensions_data.all_gather_metadata,
                     ) = sharded_local_tensor.fsdp_pre_all_gather(
-                        self.mesh_info.mesh,
+                        self.shard_mesh,
                         self._orig_size,
                         self._contiguous_orig_stride,
                         self._module_info.module,
@@ -751,6 +753,16 @@ class FSDPParam:
     def _sharded_local_tensor(self) -> torch.Tensor:
         return cast(DTensor, self.sharded_param)._local_tensor
 
+    @property
+    def shard_mesh(self):
+        mesh = self.mesh_info.mesh
+        if mesh.ndim == 1:
+            return mesh
+        elif mesh.ndim == 2:
+            assert mesh.mesh_dim_names is not None
+            return mesh[mesh.mesh_dim_names[-1]]
+        raise ValueError(f"Invalid mesh: {mesh}")
+
     def _assert_in_states(self, *states: ShardedState) -> None:
         if self.sharded_state not in states:
             _raise_assert_with_print(
@@ -781,7 +793,7 @@ class FSDPParam:
             local_tensor = padded_local_tensor
             updated_local_tensor = True
         if self.pin_memory and not local_tensor.is_pinned():
-            local_tensor = local_tensor.cpu().pin_memory()
+            local_tensor = local_tensor.cpu().pin_memory(device=self.device)
             updated_local_tensor = True
         self._sharded_param_data = local_tensor.view(-1)
         assert isinstance(self.sharded_param, DTensor)  # mypy
