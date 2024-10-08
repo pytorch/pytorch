@@ -1066,12 +1066,12 @@ alias_default = alias_default_1 = foo_default = None
                     )
 
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
-    @torch.fx.experimental._config.patch(use_duck_shape=False)
     def test_alias_dynamic(self):
         self.test_alias(_dynamic=True)
 
     # Test that the view regenration optimizations do not result in recompilations. By comparing re-compilation in eager backend
     # with recompilation in inductor backend.
+    @torch.fx.experimental._config.patch(use_duck_shape=False)
     def test_recompile(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -1085,8 +1085,6 @@ alias_default = alias_default_1 = foo_default = None
             @torch._dynamo.disable
             def foo_impl(x, y):
                 pass
-
-            torch.fx.experimental._config.use_duck_shape = False
 
             def run_and_compare(func, expected=1):
                 counter_v2 = CompileCounterWithBackend("inductor")
