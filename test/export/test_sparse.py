@@ -65,6 +65,16 @@ class EltwiseNet(torch.nn.Module):
         return torch.nn.functional.relu(2 * torch.abs(-x))
 
 
+class ToDenseNet(torch.nn.Module):
+    def forward(self, x):
+        return x.to_dense()
+
+
+class AddNet(torch.nn.Module):
+    def forward(self, x, y):
+        return torch.add(x, y)
+
+
 class SparseActivationCOO(torch.nn.Module):
     def forward(self, x):
         return [xi.to_sparse() for xi in x]
@@ -81,6 +91,9 @@ class SparseActivationCSR(torch.nn.Module):
 
 
 @unittest.skipIf(is_fbcode(), "See torch._dynamo.config")
+@unittest.skipIf(
+    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+)
 class TestSparseProp(TestCase):
     def setUp(self):
         TestCase.setUp(self)
@@ -116,9 +129,6 @@ class TestSparseProp(TestCase):
             self.assertEqual(x_meta2, y_meta2, exact_layout=True)
             self.assertEqual(x.values(), y.values(), exact_layout=True)
 
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     @parametrize("dtype", DTYPES)
     @parametrize("itype", ITYPES)
     @all_sparse_layouts("layout")
@@ -140,9 +150,6 @@ class TestSparseProp(TestCase):
                 else:
                     self.assertEqual(meta, None)
 
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     @parametrize("dtype", DTYPES)
     @parametrize("itype", ITYPES)
     @all_sparse_layouts("layout")
@@ -167,9 +174,6 @@ class TestSparseProp(TestCase):
                 else:
                     self.assertEqual(meta, None)
 
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     @parametrize("dtype", DTYPES)
     @parametrize("itype", ITYPES)
     @all_sparse_layouts("layout")
@@ -192,9 +196,58 @@ class TestSparseProp(TestCase):
                 else:
                     self.assertEqual(meta, None)
 
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
+    @parametrize("dtype", DTYPES)
+    @parametrize("itype", ITYPES)
+    @all_sparse_layouts("layout")
+    def test_todensenet(self, dtype, itype, layout):
+        net = ToDenseNet()
+        for sparse_input in self.generate_simple_inputs(
+            layout,
+            device="cpu",
+            dtype=dtype,
+            index_dtype=itype,
+        ):
+            result = net(sparse_input)
+            # Build the traced graph.
+            prog = torch.export.export(net, (sparse_input,))
+            # Test arg/todense/output.
+            for i, node in enumerate(prog.graph.nodes):
+                meta = node.meta.get("val", None)
+                if i == 0:
+                    self.assertEqualMeta(meta, sparse_input)
+                elif i == 1:
+                    self.assertEqualMeta(meta, result)
+                else:
+                    self.assertEqual(meta, None)
+
+    def test_add(self):
+        net = AddNet()
+        Y = torch.arange(16, 32, dtype=torch.float32).view(4, 4)
+        A = torch.tensor(
+            [
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 2.0],
+                [0.0, 0.0, 1.0, 1.0],
+                [3.0, 0.0, 3.0, 0.0],
+            ],
+            dtype=torch.float32,
+        )
+        S = A.to_sparse_csr()
+        result = net(S, Y)
+        # Build the traced graph.
+        prog = torch.export.export(net, (S, Y))
+        # Test args/add/output.
+        for i, node in enumerate(prog.graph.nodes):
+            meta = node.meta.get("val", None)
+            if i == 0:
+                self.assertEqualMeta(meta, S)
+            elif i == 1:
+                self.assertEqualMeta(meta, Y)
+            elif i == 2:
+                self.assertEqualMeta(meta, result)
+            else:
+                self.assertEqual(meta, None)
+
     def test_activation_coo(self):
         net = SparseActivationCOO()
         x = [torch.randn(3, 3) for _ in range(3)]
@@ -211,9 +264,6 @@ class TestSparseProp(TestCase):
             else:
                 self.assertEqual(meta, None)
 
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     def test_activation_csr(self):
         net = SparseActivationCSR()
         x = [torch.randn(3, 3) for _ in range(3)]

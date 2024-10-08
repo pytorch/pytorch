@@ -4,10 +4,12 @@ import dataclasses
 import functools
 import inspect
 import itertools
+import random
 import re
 import sys
 import types
-from typing import Dict, List, TYPE_CHECKING
+import warnings
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch._C
 import torch._numpy as tnp
@@ -34,12 +36,22 @@ from ..utils import (
     set_example_value,
 )
 from .base import VariableTracker
-from .functions import NestedUserFunctionVariable, UserFunctionVariable, wrap_bound_arg
-from .user_defined import is_standard_setattr, UserDefinedObjectVariable
+from .functions import (
+    NestedUserFunctionVariable,
+    UserFunctionVariable,
+    UserMethodVariable,
+    wrap_bound_arg,
+)
+from .nn_module import UnspecializedNNModuleVariable
+from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
+
+
+class NO_SUCH_SUBOBJ:
+    pass
 
 
 class SuperVariable(VariableTracker):
@@ -92,22 +104,34 @@ class SuperVariable(VariableTracker):
             type_to_use_source = self.objvar.source
 
         source = None
-        if self.objvar.source is not None:
-            # Walk the mro tuple to find out the actual class where the
-            # attribute resides.
-            search_mro = type_to_use.__mro__
-            start_index = search_mro.index(search_type) + 1
-            for index in range(start_index, len(search_mro)):
-                if hasattr(search_mro[index], name):
-                    # Equivalent of something like type(L['self']).__mro__[1].attr_name
-                    source = AttrSource(
-                        GetItemSource(AttrSource(type_to_use_source, "__mro__"), index),
-                        name,
-                    )
-                    break
+        resolved_class = None
+        resolved_attr = None
+        search_mro = type_to_use.__mro__
 
-        # TODO(jansel): there is a small chance this could trigger user code, prevent that
-        return getattr(super(search_type, type_to_use), name), source
+        try:
+            start_index = search_mro.index(search_type) + 1
+        except ValueError:
+            # Corner case where the typevar is not in the mro of the objvar
+            # https://github.com/python/cpython/blob/3.11/Objects/typeobject.c#L8843-L8844
+            return getattr(super(search_type, type_to_use), name), None
+        # Implemented based on https://github.com/python/cpython/blob/3.11/Objects/typeobject.c#L8812
+        # super has its getattro implementation. The key point is that instead of calling getattr, it checks the
+        # attribute in the class __dict__
+        for index in range(start_index, len(search_mro)):
+            # Dont call getattr, just check the __dict__ of the class
+            if resolved_getattr := search_mro[index].__dict__.get(name, NO_SUCH_SUBOBJ):
+                if resolved_getattr is not NO_SUCH_SUBOBJ:
+                    # Equivalent of something like type(L['self']).__mro__[1].attr_name
+                    if type_to_use_source:
+                        source = AttrSource(
+                            GetItemSource(
+                                AttrSource(type_to_use_source, "__mro__"), index
+                            ),
+                            name,
+                        )
+                    return resolved_getattr, source
+
+        unimplemented("Unable to resolve super getattr")
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         # Check if getattr is a constant. If not, delay the actual work by
@@ -151,6 +175,22 @@ class SuperVariable(VariableTracker):
                     ).call_function(tx, [self.objvar] + args, kwargs)
             else:
                 unimplemented("super() nn.Module.__init__")
+        elif self.objvar.source and inner_fn is object.__new__:
+            return tx.output.side_effects.track_object_new_from_user_defined_class(
+                self.objvar
+            )
+        elif isinstance(inner_fn, staticmethod) and isinstance(
+            inner_fn.__func__, types.FunctionType
+        ):
+            return variables.UserFunctionVariable(
+                inner_fn.__func__, source=source
+            ).call_function(tx, args, kwargs)
+        elif isinstance(inner_fn, classmethod) and isinstance(
+            inner_fn.__func__, types.FunctionType
+        ):
+            return variables.UserMethodVariable(
+                inner_fn.__func__, self.objvar, source=source
+            ).call_function(tx, args, kwargs)
         elif isinstance(inner_fn, types.FunctionType):
             return variables.UserFunctionVariable(
                 inner_fn, source=source
@@ -339,6 +379,7 @@ class InspectSignatureVariable(VariableTracker):
 
     _nonvar_fields = {
         "signature",
+        "parameters",
         *VariableTracker._nonvar_fields,
     }
 
@@ -354,18 +395,29 @@ class InspectSignatureVariable(VariableTracker):
         super().__init__(**kwargs)
         self.inspected = inspected
 
-        if isinstance(self.inspected, UserFunctionVariable):
-            self.fn = self.inspected.get_function()
-        else:
-            self.fn = self.inspected.as_python_constant()
+        try:
+            if hasattr(self.inspected, "get_function"):
+                self.fn = self.inspected.get_function()
+            elif isinstance(self.inspected, UnspecializedNNModuleVariable):
+                self.fn = self.inspected.value
+            else:
+                self.fn = self.inspected.as_python_constant()
+        except NotImplementedError:
+            unimplemented("inspect.signature with non-constant function")
+
         self.signature = inspect.signature(self.fn)
+        self.parameters = list(self.signature.parameters.items())
+        if isinstance(self.inspected, UserMethodVariable):
+            self.parameters = self.parameters[1:]
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if name == "parameters":
             return variables.ConstDictVariable(
                 {
-                    variables.ConstantVariable.create(name): InspectParameterVariable()
-                    for name in self.inspected.inspect_parameter_names()
+                    variables.ConstantVariable.create(
+                        param[0]
+                    ): InspectParameterVariable(param[1])
+                    for param in self.parameters
                 },
                 user_cls=dict,
             )
@@ -390,9 +442,11 @@ class InspectSignatureVariable(VariableTracker):
             if self.fn.__kwdefaults__:
                 wrap = functools.partial(wrap_bound_arg, tx=tx)
                 kwdefaults_sources = {
-                    k: None
-                    if self.source is None
-                    else DefaultsSource(self.source, k, is_kw=True)
+                    k: (
+                        None
+                        if self.source is None
+                        else DefaultsSource(self.source, k, is_kw=True)
+                    )
                     for k in self.fn.__kwdefaults__
                 }
                 defaults = {
@@ -421,9 +475,24 @@ class InspectSignatureVariable(VariableTracker):
 
 
 class InspectParameterVariable(VariableTracker):
-    """This is not implemented, if used will graph break."""
+    """represents inspect.Parameter(...)"""
 
-    pass
+    def __init__(self, value, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.value = value
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+        from .builder import SourcelessBuilder, VariableBuilder
+
+        try:
+            attr_value = getattr(self.value, name)
+            if self.source:
+                attr_source = AttrSource(self.source, name)
+                return VariableBuilder(tx, attr_source)(attr_value)
+            else:
+                return SourcelessBuilder.create(tx, attr_value)
+        except AttributeError:
+            unimplemented(f"getattr({self.value}, {name})")
 
 
 class InspectBoundArgumentsVariable(VariableTracker):
@@ -592,11 +661,12 @@ class AutogradFunctionVariable(VariableTracker):
 
         VariableTracker.visit(visit, (args, kwargs))
 
-        if (
-            requires_grad
-            and torch.is_grad_enabled()
-            and config.capture_autograd_function
-        ):
+        if requires_grad and torch.is_grad_enabled():
+            if config.capture_autograd_function:
+                warnings.warn(
+                    "The config.capture_autograd_function flag is deprecated, it's now always true."
+                )
+
             from torch._functorch.autograd_function import (
                 autograd_function_forward_rewritten,
             )
@@ -766,6 +836,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         proxy=None,
         saved_tensors=None,
         needs_input_grad=None,
+        non_differentiable=None,
         **kwargs,
     ) -> None:
         super().__init__(value=value, value_type=value_type, **kwargs)
@@ -773,6 +844,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self.proxy = proxy
         self.saved_tensors = saved_tensors
         self.needs_input_grad = needs_input_grad
+        self.non_differentiable = non_differentiable
 
     @staticmethod
     def create(tx: "InstructionTranslator", args=None, kwargs=None):
@@ -815,6 +887,11 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         if name == "__setattr__":
             return super().call_method(tx, name, args, kwargs)
+        elif name == "mark_non_differentiable":
+            assert len(kwargs) == 0
+            self.non_differentiable = proxy_args_kwargs(args, {})[0]
+            return variables.ConstantVariable.create(None)
+
         if name != "save_for_backward":
             unimplemented(f"autograd.Function context method: {name}")
         if self.saved_tensors is None:
@@ -834,7 +911,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         return variables.ConstantVariable.create(None)
 
     def var_getattr(self, tx: "InstructionTranslator", name):
-        if name == "save_for_backward":
+        if name in ["save_for_backward", "mark_non_differentiable"]:
             return LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
             )
@@ -873,7 +950,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "queue_callback":
-            if torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+            if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
                 assert (
                     tx.one_graph
                 ), "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
@@ -929,6 +1006,13 @@ class GetAttrVariable(VariableTracker):
 
     def as_proxy(self):
         return GetAttrVariable.create_getattr_proxy(self.obj.as_proxy(), self.name)
+
+    def as_python_constant(self):
+        constant = self.obj.as_python_constant()
+        try:
+            return getattr(constant, self.name)
+        except AttributeError:
+            raise NotImplementedError(f"{self} is not a constant") from None
 
     def const_getattr(self, tx: "InstructionTranslator", name):
         if not isinstance(self.obj, variables.NNModuleVariable):
@@ -1092,7 +1176,10 @@ class PythonModuleVariable(VariableTracker):
 
         from .builder import SourcelessBuilder, VariableBuilder
 
-        attr_value = getattr(self.value, name)
+        if self.is_torch or name not in self.value.__dict__:
+            attr_value = getattr(self.value, name)
+        else:
+            attr_value = self.value.__dict__[name]
 
         if self.source:
             new_source = AttrSource(self.source, name)
@@ -1118,9 +1205,6 @@ class TypingVariable(VariableTracker):
                 self.value[args[0].as_python_constant()],
             )
         unimplemented("typing")
-
-    def python_type(self):
-        return type(self.value)
 
     def as_python_constant(self):
         return self.value
@@ -1238,9 +1322,6 @@ class NumpyVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         unimplemented("numpy")
-
-    def python_type(self):
-        return type(self.value)
 
     def as_python_constant(self):
         return self.value
@@ -1416,9 +1497,6 @@ class ConstantLikeVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
 
-    def python_type(self):
-        return type(self.value)
-
     def as_python_constant(self):
         return self.value
 
@@ -1497,3 +1575,163 @@ np_constant_collections_map = {
     tnp.iinfo: NumpyTypeInfoVariable,
     tnp.dtype: NumpyDTypeVariable,
 }
+
+
+class RandomClassVariable(VariableTracker):
+    """random.Random"""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+
+    def call_function(self, tx: "InstructionTranslator", args, kwargs):
+        if len(args) > 1:
+            unimplemented("random.Random() with > 1 arg")
+        elif kwargs:
+            unimplemented("random.Random() with kwargs")
+        seed = variables.ConstantVariable.create(None) if len(args) == 0 else args[0]
+        return RandomVariable(seed=seed, mutable_local=variables.base.MutableLocal())
+
+
+class RandomVariable(VariableTracker):
+    """random.Random()
+
+    Implemented by wrapping a VariableTracker around a random.Random object.
+    The supported methods for the random.Random object cannot be overriden.
+    Assumes that random objects behave the same given a set seed or state.
+    """
+
+    _nonvar_fields = {
+        "random",
+        *VariableTracker._nonvar_fields,
+    }
+
+    _supported_fn_names = {
+        "random",
+        "randint",
+        "randrange",
+        "uniform",
+    }
+
+    def __init__(
+        self,
+        rand: Optional[random.Random] = None,
+        seed: Optional[VariableTracker] = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        if rand is not None:
+            assert self.is_supported_random_obj(rand)
+            self.random = random.Random()
+            self.random.setstate(rand.getstate())
+        else:
+            seed = seed.as_python_constant() if seed is not None else None
+            self.random = random.Random(seed)
+
+    def python_type(self):
+        return random.Random
+
+    def as_python_constant(self):
+        return self.random
+
+    @staticmethod
+    def is_supported_random_obj(val):
+        if type(val) is not random.Random:
+            return False
+        for name in itertools.chain(
+            RandomVariable._supported_fn_names, ("seed", "getstate", "setstate")
+        ):
+            if not hasattr(val, name):
+                return False
+            meth = getattr(val, name)
+            if inspect.isbuiltin(meth):
+                # e.g. random.Random.random
+                if meth != getattr(random.Random, name).__get__(val):
+                    return False
+            else:
+                if getattr(meth, "__func__", None) is not getattr(random.Random, name):
+                    return False
+        return True
+
+    @staticmethod
+    def check_state(state):
+        assert type(state) is tuple
+        assert type(state[0]) is int
+        assert type(state[1]) is tuple
+        assert all(type(x) is int for x in state[1])
+        assert state[2] is None or type(state[2]) is float
+
+    @staticmethod
+    def wrap_state(state):
+        RandomVariable.check_state(state)
+        return variables.TupleVariable(
+            [
+                variables.ConstantVariable.create(state[0]),
+                variables.TupleVariable(
+                    [variables.ConstantVariable.create(x) for x in state[1]]
+                ),
+                variables.ConstantVariable.create(state[2]),
+            ]
+        )
+
+    @staticmethod
+    def unwrap_state(state):
+        state_obj = state.as_python_constant()
+        RandomVariable.check_state(state_obj)
+        return state_obj
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "seed":
+            tx.output.side_effects.mutation(self)
+            self.random.seed(
+                *[x.as_python_constant() for x in args],
+                **{key: val.as_python_constant() for key, val in kwargs.items()},
+            )
+            return variables.ConstantVariable.create(None)
+        elif name == "getstate":
+            return self.wrap_state(self.random.getstate())
+        elif name == "setstate":
+            tx.output.side_effects.mutation(self)
+            self.random.setstate(self.unwrap_state(args[0]))
+            return variables.ConstantVariable.create(None)
+        elif name in self._supported_fn_names:
+            tx.output.side_effects.mutation(self)
+            state = self.random.getstate()
+
+            def call_random_meth(*args, **kwargs):
+                r = random.Random()
+                r.setstate(state)
+                return getattr(r, name)(*args, **kwargs)
+
+            # self.random state not actually updated by call_random_meth, so update here
+            # by calling the method
+            getattr(self.random, name)(
+                *[x.as_python_constant() for x in args],
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            )
+
+            return call_random_fn(tx, call_random_meth, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_python_module(random),
+                    codegen.create_load_attr("Random"),
+                ]
+            )
+        )
+        codegen.call_function(0, False)
+        # NOTE using add_push_null may result in NULL being duplicated
+        # so defer the push_null to call_function
+        codegen.dup_top()
+        codegen.load_attr("setstate")
+        codegen(self.wrap_state(self.random.getstate()))
+        codegen.call_function(1, True)
+        codegen.pop_top()

@@ -29,8 +29,7 @@
   }
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
 // Doesn't work on ROCm or Windows yet or old compiler
@@ -350,5 +349,4 @@ _mixed_dtypes_linear(const Tensor& input, const Tensor& weight,
 #endif
 }
 
-}  // namespace native
-}  // namespace at
+}  // namespace at::native
