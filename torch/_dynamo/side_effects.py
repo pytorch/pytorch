@@ -276,7 +276,13 @@ class SideEffects:
         elif issubclass(user_cls, torch.nn.Module):
             obj = nn_module_new(user_cls)
         else:
-            obj = object_new(user_cls)
+            try:
+                obj = object_new(user_cls)
+            except TypeError:
+                # TODO(anijain2305/jansel) - Even though object.__new__ is same
+                # as user_cls.__new__, calling object.__new__(user_cls) fails
+                # with TypeError.
+                unimplemented(f"Unable to construct the object of type {user_cls}")
         variable = variable_cls(
             obj,
             mutable_local=AttributeMutationNew(None, cls_source),
