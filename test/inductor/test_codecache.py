@@ -2,8 +2,9 @@
 import functools
 import os
 import pickle
+import tempfile
 import unittest
-from typing import List
+from typing import List, Optional, Union
 from unittest import mock
 
 import torch
@@ -20,6 +21,7 @@ from torch._inductor.codecache import (
     TensorMetadata,
     TensorMetadataAndValues,
 )
+from torch._inductor.custom_graph_pass import CustomGraphPass, get_hash_for_files
 from torch._inductor.graph import GraphLowering
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
@@ -804,6 +806,61 @@ class TestFxGraphCacheHashing(TestCase):
             FxGraphCachePickler.dumps(details3),
         )
 
+    def test_hash_custom_passes(self):
+        """
+        Test CustomGraphPass usage.
+        """
+
+        class TestCustomGraphPass(CustomGraphPass):
+            def __init__(self):
+                self._uuid = None
+
+            def __call__(self, graph: torch.fx.graph.Graph) -> None:
+                return None
+
+            def uuid(self) -> Optional[Union[bytes, str]]:
+                return self._uuid
+
+        custom_pass = TestCustomGraphPass()
+        with config.patch({"post_grad_custom_pre_pass": custom_pass}):
+            custom_pass._uuid = "1"
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+
+            custom_pass._uuid = "2"
+            details3 = FxGraphHashDetails(None, [], {}, [])
+
+            self.assertEqual(
+                FxGraphCachePickler.dumps(details1),
+                FxGraphCachePickler.dumps(details2),
+            )
+            self.assertNotEqual(
+                FxGraphCachePickler.dumps(details1),
+                FxGraphCachePickler.dumps(details3),
+            )
+
+    def test_get_hash_for_files(self):
+        """
+        Test the get_hash_for_files helper.
+        """
+        with tempfile.NamedTemporaryFile(delete=True) as temp:
+            temp.write(b"contents")
+            temp.flush()
+
+            hash1 = get_hash_for_files((temp.name,))
+            get_hash_for_files.cache_clear()
+            hash2 = get_hash_for_files((temp.name,))
+
+            temp.write(b" ")
+            temp.flush()
+            get_hash_for_files.cache_clear()
+            hash3 = get_hash_for_files((temp.name,))
+
+            self.assertEqual(hash1, hash2)
+            self.assertNotEqual(hash1, hash3)
+
+
+class TestCudaCompileCommand(TestCase):
     @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_cuda_compile_command(self):
@@ -886,6 +943,90 @@ class TestAutotuneCache(TestCase):
                 self.assertRegex(k, r"[0-9a-z]{52}\.py")
             for k in global_stats.triton.cache.keys():
                 self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c10")
+
+
+class TestRemoteAOTAutogradCache(TestCase):
+    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @unittest.skipIf(not SM80OrLater, "Requires SM80+")
+    @config.patch({"fx_graph_cache": False})
+    @config.patch({"fx_graph_remote_cache": True})
+    @torch._functorch.config.patch({"enable_autograd_cache": False})
+    @torch._functorch.config.patch({"enable_remote_autograd_cache": True})
+    def test_autograd_remote_cache(self):
+        def f(a, b):
+            return a + b
+
+        f_compiled = torch.compile(f)
+        a = torch.randn(101, 100, device="cuda", requires_grad=False)
+        b = torch.randn(101, 100, device="cuda", requires_grad=False)
+        with PatchCaches():
+            f_compiled(a, b)
+
+            self.assertEqual(global_stats.aot_autograd, Stats(1, 0, 1))
+            self.assertEqual(global_stats.fx_graph, Stats(1, 0, 1))
+
+            torch._dynamo.reset()
+
+            f_compiled(a, b)
+            self.assertEqual(global_stats.aot_autograd, Stats(1, 1, 1))
+            self.assertEqual(global_stats.fx_graph, Stats(1, 1, 1))
+
+        if config.is_fbcode():
+            # Check that the cache entries seem reasonable
+            for k in global_stats.aot_autograd.cache.keys():
+                self.assertRegex(k, r"pt2:autograd-experimental::[0-9a-z]{52}:c10")
+
+            for k in global_stats.fx_graph.cache.keys():
+                self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c10")
+
+    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @unittest.skipIf(not SM80OrLater, "Requires SM80+")
+    @config.patch({"fx_graph_cache": False})
+    @config.patch({"fx_graph_remote_cache": True})
+    @torch._functorch.config.patch({"enable_autograd_cache": False})
+    @torch._functorch.config.patch({"enable_remote_autograd_cache": True})
+    def test_autograd_remote_lazy_backward(self):
+        """
+        Lazily compile the backward, and lazily save to cache
+        """
+
+        def fn(a, b):
+            return a.cos() + b
+
+        with PatchCaches():
+            a = torch.randn(25, requires_grad=True)
+            b = torch.randn(25, requires_grad=True)
+            a2 = a.detach().clone().requires_grad_(True)
+            b2 = b.detach().clone().requires_grad_(True)
+            compiled_fn = torch.compile(fn, backend="inductor")
+            self.assertEqual(fn(a, b), compiled_fn(a2, b2))
+            self.assertEqual(global_stats.aot_autograd, Stats(0, 0, 1))
+
+            # Clear dynamo and run again. Should be a cache miss still, because backward hasn't run
+            torch._dynamo.reset()
+            self.assertEqual(fn(a, b), compiled_fn(a2, b2))
+            self.assertEqual(global_stats.aot_autograd, Stats(0, 0, 2))
+
+            # Now let's run the backward
+            fn(a, b).sum().backward()
+            compiled_fn(a2, b2).sum().backward()
+            self.assertEqual(a.grad, a2.grad)
+            self.assertEqual(b.grad, b2.grad)
+            self.assertEqual(global_stats.aot_autograd, Stats(1, 0, 2))
+
+            # Clear dynamo and rerun everything, now there should be a cache hit
+            torch._dynamo.reset()
+            a = torch.randn(25, requires_grad=True)
+            b = torch.randn(25, requires_grad=True)
+            a2 = a.detach().clone().requires_grad_(True)
+            b2 = b.detach().clone().requires_grad_(True)
+            self.assertEqual(fn(a, b), compiled_fn(a2, b2))
+            self.assertEqual(global_stats.aot_autograd, Stats(1, 1, 2))
+
+            fn(a, b).sum().backward()
+            compiled_fn(a2, b2).sum().backward()
+            self.assertEqual(a.grad, a2.grad)
+            self.assertEqual(b.grad, b2.grad)
 
 
 class TestUtils(TestCase):

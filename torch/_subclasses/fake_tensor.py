@@ -1993,6 +1993,11 @@ class FakeTensorMode(TorchDispatchMode):
                     func.prim_meta_impl(*args, **kwargs)
                 )
 
+        profiles = torch._dynamo.config._custom_ops_profile
+        if profiles is not None:
+            if func in profiles.data:
+                return profiles.generic_fake_kernel(func, self, *args, **kwargs)
+
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.
         maybe_fake_impl = torch._library.simple_registry.singleton.find(
