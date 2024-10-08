@@ -153,7 +153,8 @@ class InlineOptionalStreamGuard {
       : guard_(std::in_place, std::forward<Args>(args)...) {}
 
   InlineOptionalStreamGuard(const InlineOptionalStreamGuard<T>& other) = delete;
-  InlineOptionalStreamGuard& operator=(const InlineOptionalStreamGuard& other) = delete;
+  InlineOptionalStreamGuard& operator=(const InlineOptionalStreamGuard& other) =
+      delete;
   // See Note [Move construction for RAII guards is tricky]
   InlineOptionalStreamGuard(InlineOptionalStreamGuard<T>&& other) = delete;
 
