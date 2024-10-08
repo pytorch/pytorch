@@ -274,6 +274,9 @@ at::Tensor multimem_one_shot_all_reduce(
   return output;
 }
 
+// One-shot all-reduce is register-intensive because it stages values loaded
+// from peers in registers before performing reduction. Setting the thread
+// count to 512 to prevent/alleviate register spill.
 constexpr size_t one_shot_all_reduce_max_num_blocks = 8;
 constexpr size_t one_shot_all_reduce_max_num_threads = 512;
 
