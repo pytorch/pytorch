@@ -153,7 +153,7 @@ init_command = [
     'junitparser==2.1.1',
     'rich==10.9.0',
     'pyyaml==6.0.1',
-    'optree==0.12.1',
+    'optree==0.13.0',
 ]
 
 [[linter]]
@@ -216,6 +216,10 @@ include_patterns = [
     'torch/csrc/*.cpp',
     'torch/csrc/**/*.h',
     'torch/csrc/**/*.cpp',
+    'torch/csrc/distributed/autograd/**/*.cpp',
+    'torch/csrc/distributed/autograd/**/*.h',
+    'torch/csrc/distributed/rpc/**/*.cpp',
+    'torch/csrc/distributed/rpc/**/*.h',
     'torch/csrc/jit/serialization/*.h',
     'torch/csrc/jit/serialization/*.cpp',
 ]
