@@ -81,7 +81,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
     auto compression_factor = 9;
 #ifdef USE_ROCM
     int device_index = at::cuda::current_device();
-    TORCH_CHECK(isHipSparseLtSupported(device_index), 
+    TORCH_CHECK(isHipSparseLtSupported(device_index),
                 "hipSPARSELt is not supported on this device. ",
                 "Supported architectures are: gfx940, gfx941, gfx942, gfx1200, gfx1201. ",
                 "Also, ROCm version must be >= 6.2.0");
@@ -102,9 +102,10 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
             type = CUDA_R_16BF;
             break;
 #ifndef USE_ROCM
-    case at::ScalarType::Float:
+        case at::ScalarType::Float:
             type = CUDA_R_32F;
             break;
+#endif
 #if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602
         case at::ScalarType::Float8_e4m3fn:
             type = CUDA_R_8F_E4M3;
