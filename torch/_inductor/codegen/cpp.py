@@ -3369,7 +3369,7 @@ class TilingSelect:
                             group[tiling_indices[0]],
                         ]
                     )
-                    and group[tiling_indices[0]] < 4
+                    and group[tiling_indices[0]] < tiling_factor / 4
                 ):
                     # For case of Multi Thread AMP Static shape of pyhpc_isoneutral_mixing,
                     # the inner loop range doesn't have enough elements to do vectorization
