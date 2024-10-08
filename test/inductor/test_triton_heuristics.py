@@ -18,12 +18,17 @@ except ImportError:
 
 from torch._inductor import config
 from torch._inductor.runtime.hints import (
+    AutotuneHint,
     DeviceProperties,
     HeuristicType,
     TRITON_MAX_BLOCK,
 )
 from torch._inductor.runtime.triton_helpers import math as tl_math
-from torch._inductor.runtime.triton_heuristics import CachingAutotuner, triton_config
+from torch._inductor.runtime.triton_heuristics import (
+    autotune_hints_to_configs,
+    CachingAutotuner,
+    triton_config,
+)
 from torch._inductor.test_case import run_tests, TestCase
 
 
@@ -102,7 +107,7 @@ class TestTritonHeuristics(TestCase):
             tl.store(out_ptr0 + (x0), tmp1, xmask)
 
         triton_meta = {
-            "signature": {0: "*fp32", 1: "*fp32", 2: "i32"},
+            "signature": {"in_ptr0": "*fp32", "out_ptr0": "*fp32", "xnumel": "i32"},
             "device": DeviceProperties.create(torch.device("cuda")),
             "constants": {},
             "configs": [AttrsDescriptor(divisible_by_16=(0, 1, 2), equal_to_1=())],
@@ -121,6 +126,7 @@ class TestTritonHeuristics(TestCase):
             "configs": configs,
             "save_cache_hook": False,
             "mutated_arg_names": [],
+            "optimize_mem": True,
             "heuristic_type": HeuristicType.POINTWISE,
             "inductor_meta": inductor_meta,
         }
@@ -139,6 +145,36 @@ class TestTritonHeuristics(TestCase):
 
         with self.assertRaisesRegex(AssertionError, "pre_hook"):
             autotuner = CachingAutotuner(**args)
+
+    def test_autotune_hints_to_configs(self):
+        device_props = DeviceProperties.create(torch.device(GPU_TYPE))
+        device_props = device_props._replace(warp_size=8)
+
+        hints = {AutotuneHint.ONE_ELEMENT_PER_THREAD}
+        size_hints = (1024,)
+        block_size = 256
+
+        seen_num_elements_per_warp = set()
+
+        def mock_triton_config(
+            size_hints,
+            x,
+            y=None,
+            z=None,
+            num_stages=None,
+            num_elements_per_warp=None,
+            min_elem_per_thread=None,
+        ):
+            seen_num_elements_per_warp.add(num_elements_per_warp)
+            return None
+
+        with unittest.mock.patch(
+            "torch._inductor.runtime.triton_heuristics.triton_config",
+            mock_triton_config,
+        ):
+            _ = autotune_hints_to_configs(hints, size_hints, block_size, device_props)
+
+        self.assertTrue(8 in seen_num_elements_per_warp)
 
 
 if __name__ == "__main__":
