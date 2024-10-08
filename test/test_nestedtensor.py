@@ -5,6 +5,7 @@ import io
 import itertools
 import math
 import sys
+import tempfile
 import unittest
 from contextlib import nullcontext
 from functools import partial
@@ -897,6 +898,31 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         # wanted. detach() is an advanced option.
         self.assertEqual(a.grad, torch.ones(2, 4, device=device, dtype=dtype))
         self.assertEqual(b.grad, torch.ones(5, 4, device=device, dtype=dtype))
+
+    @dtypes(torch.float, torch.double, torch.half)
+    @parametrize("requires_grad", [False, True])
+    @parametrize("weights_only", [False, True])
+    def test_serialization(self, device, dtype, requires_grad, weights_only):
+        def compare_metadata(nt1, nt2):
+            self.assertEqual(nt1._nested_tensor_size(), nt2._nested_tensor_size())
+            self.assertEqual(nt1._nested_tensor_strides(), nt2._nested_tensor_strides())
+            self.assertEqual(
+                nt1._nested_tensor_storage_offsets(),
+                nt2._nested_tensor_storage_offsets(),
+            )
+
+        nt_contiguous, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7))
+        for a in [nt_contiguous, nt_noncontiguous]:
+            buffer = io.BytesIO()
+            serialized = torch.save(a, buffer)
+            buffer.seek(0)
+            b = torch.load(buffer, weights_only=weights_only)
+            # should be both conceptually equal and metadata equivalent
+            self.assertEqual(a, b)
+            compare_metadata(a, b)
+            # should be conceptually equal but not necessarily metadata equivalent
+            self.assertEqual(b, nt_contiguous)
+            self.assertEqual(b, nt_noncontiguous)
 
     @dtypes(torch.float, torch.float16, torch.double)
     def test_unbind_noncontiguous(self, device, dtype):
@@ -3621,6 +3647,70 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         return example_lists
 
+    @dtypes(torch.float32)
+    @parametrize(
+        "contiguity",
+        ["contig", "noncontig_transposed", "noncontig_with_holes"],
+        name_fn=lambda c: c,
+    )
+    def test_serialization(self, device, dtype, contiguity):
+        # Test with 3 cases:
+        # 1. contiguous
+        # 2. non-contiguous transposed
+        # 3. non-contiguous with holes
+        if contiguity == "contig":
+            nt = random_nt_from_dims(
+                [4, None, 10],
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+            )
+        elif contiguity == "noncontig_transposed":
+            nt = random_nt_from_dims(
+                [3, None, 5, 2],
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+            ).transpose(-3, -2)
+        elif contiguity == "noncontig_with_holes":
+            nt = torch.nested.nested_tensor_from_jagged(
+                values=torch.randn(10, 3, device=device, dtype=dtype),
+                offsets=torch.tensor([0, 3, 7, 10], device=device, dtype=torch.int64),
+                # these lengths specify holes
+                lengths=torch.tensor([1, 2, 3], device=device, dtype=torch.int64),
+            )
+        else:
+            raise ValueError("invalid contiguity specified for test_serialization()")
+
+        # Access sizes / strides to ensure cache doesn't break serialization.
+        # See https://github.com/pytorch/pytorch/issues/129366
+        nt.size()
+        nt.stride()
+
+        with tempfile.TemporaryFile() as f:
+            torch.save(nt, f)
+            f.seek(0)
+            nt_loaded = torch.load(f)
+
+            self.assertIsNot(nt, nt_loaded)
+            # we expect a new offsets tensor -> different nested int upon load
+            self.assertEqualIgnoringNestedInts(nt, nt_loaded)
+            self.assertEqual(nt._ragged_idx, nt_loaded._ragged_idx)
+            # ensure shapes are equal except nested int
+            nt_rest_of_shape = (
+                *nt.shape[: nt._ragged_idx],
+                *nt.shape[nt._ragged_idx + 1 :],
+            )
+            nt_loaded_rest_of_shape = (
+                *nt_loaded.shape[: nt_loaded._ragged_idx],
+                *nt_loaded.shape[nt_loaded._ragged_idx + 1 :],
+            )
+            self.assertEqual(nt_rest_of_shape, nt_loaded_rest_of_shape)
+            # ensure metadata cache is carried through serialization
+            self.assertEqual(nt._metadata_cache, nt_loaded._metadata_cache)
+            # ensure lengths are carried through if present
+            self.assertEqual(nt._lengths, nt_loaded._lengths)
+
     def test_tensor_attributes(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
@@ -5149,31 +5239,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                         out = torch.mean(nt, dim=reduce_dim, keepdim=keepdim)
                 else:
                     out = torch.mean(nt, dim=reduce_dim, keepdim=keepdim)
-
-    @dtypes(torch.float, torch.double, torch.half)
-    @parametrize("requires_grad", [False, True])
-    @parametrize("weights_only", [False, True])
-    def test_serialization(self, device, dtype, requires_grad, weights_only):
-        def compare_metadata(nt1, nt2):
-            self.assertEqual(nt1._nested_tensor_size(), nt2._nested_tensor_size())
-            self.assertEqual(nt1._nested_tensor_strides(), nt2._nested_tensor_strides())
-            self.assertEqual(
-                nt1._nested_tensor_storage_offsets(),
-                nt2._nested_tensor_storage_offsets(),
-            )
-
-        nt_contiguous, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7))
-        for a in [nt_contiguous, nt_noncontiguous]:
-            buffer = io.BytesIO()
-            serialized = torch.save(a, buffer)
-            buffer.seek(0)
-            b = torch.load(buffer, weights_only=weights_only)
-            # should be both conceptually equal and metadata equivalent
-            self.assertEqual(a, b)
-            compare_metadata(a, b)
-            # should be conceptually equal but not necessarily metadata equivalent
-            self.assertEqual(b, nt_contiguous)
-            self.assertEqual(b, nt_noncontiguous)
 
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
