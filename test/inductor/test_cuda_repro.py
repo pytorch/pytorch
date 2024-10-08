@@ -422,6 +422,7 @@ class CudaReproTests(TestCase):
                     configs=configs,
                     save_cache_hook=False,
                     mutated_arg_names=["in_out_ptr0"],
+                    optimize_mem=True,
                     heuristic_type=HeuristicType.POINTWISE,
                 )
 
@@ -1319,7 +1320,9 @@ class CudaReproTests(TestCase):
         self.assertEqual(expect, actual)
 
         # Expect the code iterates in contiguous order, and is not tiled
-        kernel_code = "\n".join(code[0].split("\n")[60:74])
+        lines = code[0].split("\n")
+        start = lines.index("@triton.jit")
+        kernel_code = "\n".join(lines[start : start + 14])
         self.assertExpectedInline(
             kernel_code,
             """\
