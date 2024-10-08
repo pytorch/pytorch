@@ -40,15 +40,15 @@ from torch.fx.experimental.symbolic_shapes import (
     RelaxedUnspecConstraint,
     ShapeEnv,
     StatelessSymbolicContext,
-    ValueRanges,
     ValueRangeError,
+    ValueRanges,
 )
 from torch.utils._pytree import (
     GetAttrKey,
     KeyPath,
+    keystr,
     MappingKey,
     SequenceKey,
-    keystr,
     tree_flatten_with_path,
     tree_map_with_path,
 )
@@ -249,7 +249,9 @@ def _flatten_dynamic_shapes(
         nonlocal flat_shapes
         flat_shapes.append(shape)
 
-    _tree_map_with_path(_tree_map_helper, combined_args, dynamic_shapes, tree_name="inputs")
+    _tree_map_with_path(
+        _tree_map_helper, combined_args, dynamic_shapes, tree_name="inputs"
+    )
     return flat_shapes
 
 
@@ -400,7 +402,9 @@ def make_constraints(
                         _min = dim.min or 0
                         _max = dim.max or int_oo
                         try:
-                            range_constraints[d.node.expr] &= ValueRanges(lower=_min, upper=_max)
+                            range_constraints[d.node.expr] &= ValueRanges(
+                                lower=_min, upper=_max
+                            )
                         except ValueRangeError as exc:
                             vr = range_constraints[d.node.expr]
                             raise UserError(

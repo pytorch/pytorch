@@ -8219,7 +8219,7 @@ def forward(self, x):
                     0: Dim.Auto(min=4, max=16),
                     1: Dim.Auto(min=4, max=16),
                 },
-            }
+            },
         )
         x, y = [node for node in ep.graph.nodes if node.op == "placeholder"]
         s0 = x.meta["val"].shape[0]
@@ -8240,7 +8240,7 @@ def forward(self, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             r".*user-specified range of 512 \<\= inputs.* \<\= int_oo, "
-            r"but tracing produced valid range of \[128, 256\]"
+            r"but tracing produced valid range of \[128, 256\]",
         ):
             export(
                 Baz(),
@@ -8252,7 +8252,7 @@ def forward(self, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             r".*user-specified range of 0 \<\= inputs.* \<\= 64, "
-            r"but tracing produced valid range of \[128, 256\]"
+            r"but tracing produced valid range of \[128, 256\]",
         ):
             export(
                 Baz(),
