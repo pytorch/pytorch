@@ -301,17 +301,17 @@ class ValueRanges(Generic[_T]):
         return self.lower == self.upper
 
     @staticmethod
-    @functools.cache
+    @functools.lru_cache(maxsize=None)
     def unknown() -> ValueRanges[sympy.Expr]:
         return ValueRanges(-sympy.oo, sympy.oo)
 
     @staticmethod
-    @functools.cache
+    @functools.lru_cache(maxsize=None)
     def unknown_int() -> ValueRanges[sympy.Expr]:
         return ValueRanges(-int_oo, int_oo)
 
     @staticmethod
-    @functools.cache
+    @functools.lru_cache(maxsize=None)
     def unknown_bool() -> ValueRanges[SympyBoolean]:
         return ValueRanges(sympy.false, sympy.true)
 
@@ -1069,24 +1069,26 @@ def bound_sympy(
     # If there's a tracing context, augment available constrained ranges.
     context = torch._guards.TracingContext.try_get()
     if context and context.fake_mode.shape_env:
-        if ranges:
-            ranges = {**context.fake_mode.shape_env.var_to_range, **ranges}
-        else:
-            ranges = context.fake_mode.shape_env.var_to_range
+        ranges = {**context.fake_mode.shape_env.var_to_range, **ranges}
 
-    def missing_handler(s):
-        if s.is_integer:  # type: ignore[attr-defined]
-            if s.is_positive:  # type: ignore[attr-defined]
-                vr = ValueRanges(1, int_oo)
-            elif s.is_nonnegative:  # type: ignore[attr-defined]
-                vr = ValueRanges(0, int_oo)
+    unbounded_vars = expr.free_symbols - ranges.keys()
+    if unbounded_vars:
+        # Give some bounds to the free variables via their SymPy assumptions
+        # TODO A better way of doing this would be to assign them a range upon creation, as
+        #      size variables can come with a lower bound of 2, as we specialize on 0 and 1
+        unbounded_ranges: Dict[sympy.Symbol, ValueRanges] = {}
+        for s in unbounded_vars:
+            if s.is_integer:  # type: ignore[attr-defined]
+                if s.is_positive:  # type: ignore[attr-defined]
+                    vr = ValueRanges(1, int_oo)
+                elif s.is_nonnegative:  # type: ignore[attr-defined]
+                    vr = ValueRanges(0, int_oo)
+                else:
+                    vr = ValueRanges.unknown_int()
             else:
-                vr = ValueRanges.unknown_int()
-        else:
-            # Don't bother trying very hard here
-            vr = ValueRanges.unknown()
-        return vr
+                # Don't bother trying very hard here
+                vr = ValueRanges.unknown()
+            unbounded_ranges[s] = vr  # type: ignore[index]
+        ranges = {**ranges, **unbounded_ranges}
 
-    return sympy_interp(
-        SymPyValueRangeAnalysis, ranges, expr, missing_handler=missing_handler
-    )
+    return sympy_interp(SymPyValueRangeAnalysis, ranges, expr)

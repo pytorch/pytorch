@@ -1060,6 +1060,11 @@ This class does not support ``__members__`` property.)");
             return reinterpret_cast<uintptr_t>(
                 symm_mem->get_signal_pad_ptrs_dev());
           })
+      .def_property_readonly(
+          "multicast_ptr",
+          [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
+            return reinterpret_cast<uintptr_t>(symm_mem->get_multicast_ptr());
+          })
       .def_property_readonly("buffer_size", &SymmetricMemory::get_buffer_size)
       .def_property_readonly(
           "signal_pad_size", &SymmetricMemory::get_signal_pad_size)
@@ -1080,7 +1085,12 @@ This class does not support ``__members__`` property.)");
           "wait_signal",
           &SymmetricMemory::wait_signal,
           py::arg("src_rank"),
-          py::arg("channel") = 0);
+          py::arg("channel") = 0)
+      .def(
+          "stream_write_value32",
+          &SymmetricMemory::stream_write_value32,
+          py::arg("addr"),
+          py::arg("val"));
 
   auto store =
       py::class_<::c10d::Store, c10::intrusive_ptr<::c10d::Store>, PythonStore>(
@@ -1583,7 +1593,16 @@ Arguments:
     prefix (str): The prefix string that is prepended to each key before being inserted into the store.
     store (torch.distributed.store): A store object that forms the underlying key-value store.
       )")
-      .def(py::init<const std::string&, c10::intrusive_ptr<::c10d::Store>>())
+      .def(
+          py::init([](const std::string& prefix,
+                      c10::intrusive_ptr<::c10d::Store> store) {
+            if (!store) {
+              throw py::value_error("store argument cannot be None");
+            }
+            return new ::c10d::PrefixStore(prefix, store);
+          }),
+          py::arg("prefix"),
+          py::arg("store"))
       .def_property_readonly(
           "underlying_store",
           &::c10d::PrefixStore::getUnderlyingStore,
@@ -2969,7 +2988,24 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           "wait",
           &::c10d::Work::wait,
           py::arg("timeout") = kNoTimeout,
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+              Returns:
+                  true/false.
+
+              Example::
+                 try:
+                     work.wait(timeout)
+                 except:
+                     # some handling
+
+              .. warning ::
+                  In normal cases, users do not need to set the timeout.
+                  calling wait() is the same as calling synchronize():
+                  Letting the current stream block on the completion of the NCCL work.
+                  However, if timeout is set, it will block the CPU thread until the NCCL work is completed
+                  or timed out. If timeout, exception will be thrown.
+            )")
       .def(
           "get_future",
           [](::c10d::Work& work) -> std::shared_ptr<jit::PythonFutureWrapper> {
