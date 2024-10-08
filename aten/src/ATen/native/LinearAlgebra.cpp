@@ -2893,6 +2893,7 @@ Tensor linalg_matrix_norm(
     bool keepdim,
     std::optional<ScalarType> opt_dtype) {
   // Check ord first as it will be used in the dtype check of A
+  TORCH_CHECK(!at::isComplexType(scalar_ord.type()), "linalg.matrix_norm: Expected a non-complex scalar as the order of norm.");
   auto ord = scalar_ord.toDouble();
   auto abs_ord = std::abs(ord);
   TORCH_CHECK(abs_ord == 2. || abs_ord == 1. || abs_ord == INFINITY, "linalg.matrix_norm: Order ", ord, " not supported.");
