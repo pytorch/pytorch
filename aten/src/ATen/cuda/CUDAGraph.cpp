@@ -648,13 +648,13 @@ void CUDAGraph::replay_dynamic(std::vector<void*> prefilledDataPtrs, std::vector
   }
   //std::cout << "actual data ptrs " << actualDataPtrs << std::endl;
   c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
-  if (true){
+  if (false) {
     //std::cout << "doing it the simpler way" << std::endl;
     for (auto& update : graphNodeParamUpdates) {
       cudaGraphNodeParams newParams = update.computeNewParams(actualDataPtrs);
       AT_CUDA_CHECK(cudaGraphExecNodeSetParams(graph_exec_, update.node, &newParams));
     }
-    
+
   } else {
     cudaGraphKernelNodeUpdate* hostUpdates = (cudaGraphKernelNodeUpdate*) malloc(kernelParamUpdates.size() * sizeof(cudaGraphKernelNodeUpdate));
     for (size_t i = 0; i < kernelParamUpdates.size(); i++) {
@@ -676,13 +676,15 @@ void CUDAGraph::replay_dynamic(std::vector<void*> prefilledDataPtrs, std::vector
     AT_CUDA_CHECK(cudaMallocAsync(&deviceUpdates, kernelParamUpdates.size() * sizeof(cudaGraphKernelNodeUpdate), stream));
     AT_CUDA_CHECK(cudaMemcpyAsync(deviceUpdates, hostUpdates, kernelParamUpdates.size() * sizeof(cudaGraphKernelNodeUpdate), cudaMemcpyHostToDevice, stream)); // yeah yeah not actually async whatever
 
+    AT_CUDA_CHECK(cudaGraphUpload(graph_exec_, stream));
+
     dynamicGraphUpdater(deviceUpdates, kernelParamUpdates.size());
   }
 
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, stream));
-  //AT_CUDA_CHECK(cudaStreamSynchronize(stream));
-  //free(hostUpdates);
-  //AT_CUDA_CHECK(cudaFreeAsync(deviceUpdates, stream));
+  AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+  free(hostUpdates);
+  AT_CUDA_CHECK(cudaFreeAsync(deviceUpdates, stream));
   for (size_t i = 0; i < freeTheseLater.size(); i++) {
     AT_CUDA_CHECK(cudaFreeAsync(freeTheseLater[i], stream));
   }
