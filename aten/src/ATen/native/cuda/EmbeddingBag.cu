@@ -541,8 +541,8 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
     return output;
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-    grad.scalar_type(), "_embedding_bag_per_sample_weights_backward_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+    at::ScalarType::Half, at::ScalarType::BFloat16, grad.scalar_type(), "_embedding_bag_per_sample_weights_backward_cuda", [&]() {
       AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "_embedding_bag_per_sample_weights_backward_cuda", [&]() {
         _embedding_bag_per_sample_weights_backward_kernel<scalar_t, index_t>
           <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
