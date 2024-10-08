@@ -112,6 +112,10 @@ def fully_shard(
     elif mesh.ndim == 1:
         mesh_info = FSDPMeshInfo(mesh, shard_mesh_dim=0)
     else:
+        if mesh.mesh_dim_names is None:
+            raise AssertionError(
+                "Please init the 2D mesh for HSDP with mesh_dim_names specified"
+            )
         mesh_info = HSDPMeshInfo(mesh, shard_mesh_dim=1, replicate_mesh_dim=0)
     device = _get_device_from_mesh(mesh)
     post_forward_mesh_info = _get_post_forward_mesh_info(
@@ -324,7 +328,7 @@ class FSDPModule:
             module._get_fsdp_state() for module in modules
         ]
 
-    def set_post_optim_event(self, event: torch.cuda.Event) -> None:
+    def set_post_optim_event(self, event: torch.Event) -> None:
         """
         Sets a post-optimizer-step event for the root FSDP module to wait the
         all-gather streams on.
@@ -338,7 +342,7 @@ class FSDPModule:
         called with a new event each iteration.
 
         Args:
-            event (torch.cuda.Event): Event recorded after the optimizer step
+            event (torch.Event): Event recorded after the optimizer step
                 to wait all-gather streams on.
         """
         self._get_fsdp_state()._state_ctx.post_optim_event = event

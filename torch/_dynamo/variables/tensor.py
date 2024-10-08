@@ -772,6 +772,30 @@ class TensorVariable(VariableTracker):
             self._warn_capture_scalar_outputs()
             unimplemented("Tensor.item")
 
+    def method_getitem(self, *args, **kwargs):
+        from ..symbolic_convert import InstructionTranslator
+        from .builder import wrap_fx_proxy
+
+        tx = InstructionTranslator.current_tx()
+        if isinstance(args[0], SymNodeVariable):
+            # Standard indexing will force specialization due to
+            # __index__.  Rewrite as a regular torch op which will
+            # trace fine
+            fn, args = torch.select, [
+                variables.ConstantVariable.create(0),
+                args[0],
+            ]
+        else:
+            fn = operator.getitem
+
+        proxy = tx.output.create_proxy(
+            "call_function",
+            fn,
+            *proxy_args_kwargs([self] + list(args), kwargs),
+        )
+
+        return wrap_fx_proxy(tx, proxy)
+
     @staticmethod
     @functools.lru_cache(None)
     def _warn_capture_scalar_outputs():
