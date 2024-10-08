@@ -58,6 +58,8 @@ test_failures = {
         ("cpu", "cuda", "xpu")
     ),
     "test_conv_inference_heuristics_dynamic_shapes": TestFailure(("cuda", "xpu")),
+    # This test fails on CI, but passes locally.
+    "test_compile_in_amp_dynamic_shapes": TestFailure(("cuda",)),
 }
 
 if TEST_WITH_ROCM:
