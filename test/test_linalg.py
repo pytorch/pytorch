@@ -1275,7 +1275,7 @@ class TestLinalg(TestCase):
             return result
 
         def run_test_case(input, ord, dim, keepdim, norm_dtype):
-            if ord.dtype.is_complex:
+            if isinstance(ord, complex):
                 error_msg = "Expected a non-complex scalar"
                 with self.assertRaisesRegex(RuntimeError, error_msg):
                     torch.linalg.vector_norm(input, ord, dim=dim, keepdim=keepdim, dtype=norm_dtype)
