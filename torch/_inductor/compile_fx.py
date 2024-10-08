@@ -33,7 +33,6 @@ from torch._dynamo.utils import (
     lazy_format_graph_code,
 )
 from torch._functorch import config as functorch_config
-from torch._functorch._aot_autograd.subclass_utils import unwrap_tensor_subclasses
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import (
     _StrideExprStr,
@@ -83,7 +82,7 @@ from .utils import (
     clone_preserve_strides,
     copy_misaligned_inputs,
     get_cloned_parameter_buffer_name,
-    has_incompatible_cudagraph_ops,
+    get_first_incompatible_cudagraph_node,
     maybe_get_suppress_shape_guards_ctx,
     output_node,
     remove_unaligned_input_idxs,
@@ -599,7 +598,6 @@ def _compile_fx_inner(
 
                 cudagraph_tests = [
                     (not has_mutation, "mutated inputs"),
-                    (not has_incompatible_cudagraph_ops(gm), "incompatible ops"),
                     (not complex_memory_overlap_inputs, "complex memory overlap"),
                     (
                         all(
@@ -642,7 +640,6 @@ def _compile_fx_inner(
                     and i in static_input_idxs
                 ):
                     input._is_inductor_static = True  # type: ignore[attr-defined]
-
             compiled_graph = FxGraphCache.load(
                 codegen_and_compile,
                 gm,
@@ -814,6 +811,7 @@ def fx_codegen_and_compile(
                     user_visible_outputs=user_visible_outputs,
                     extern_node_serializer=extern_node_serializer,
                     is_inference=is_inference,
+                    is_backward=is_backward,
                     is_const_graph=True,
                 )
                 with V.set_graph_handler(const_graph):
@@ -835,6 +833,7 @@ def fx_codegen_and_compile(
                 user_visible_outputs=user_visible_outputs,
                 extern_node_serializer=extern_node_serializer,
                 is_inference=is_inference,
+                is_backward=is_backward,
                 const_output_index=const_output_index,
                 const_code=const_code,
                 const_module=const_graph,
@@ -890,6 +889,16 @@ def fx_codegen_and_compile(
                     else:
                         disable = f"{disable}\n"
                     V.graph.disable_cudagraphs_reason = disable
+
+                if cudagraphs and not V.graph.disable_cudagraphs_reason:
+                    maybe_incompat_node = get_first_incompatible_cudagraph_node(gm)
+                    if maybe_incompat_node:
+                        disable = f"disabling cudagraphs due to incompatible op {maybe_incompat_node.target}"
+                        if stack_trace := maybe_incompat_node.meta.get(
+                            "stack_trace", None
+                        ):
+                            disable = f"{disable} Found from {stack_trace}\n"
+                        V.graph.disable_cudagraphs_reason = disable
 
                 if V.aot_compilation is True:
                     return compiled_fn
@@ -1194,12 +1203,8 @@ def fw_compiler_freezing(
     max_offset_idx = 0
     if tracing_context is not None:
         assert tracing_context.params_flat_unwrap_subclasses is not None
-        params_flat_unwrap = [
-            r() for r in tracing_context.params_flat_unwrap_subclasses
-        ]
-        assert params_flat_unwrap is not None
+        params_flat_unwrap = tracing_context.params_flat_unwrap_subclasses
         max_offset_idx = max(0, len(params_flat_unwrap) - 1)
-        assert params_flat_unwrap is not None
         preserved_indices_params_flat = set()
         unwrapped_idxs = tracing_context.params_unwrapped_to_flat_index
         assert unwrapped_idxs is not None
@@ -1244,12 +1249,10 @@ def fw_compiler_freezing(
         return optimized_function
 
     def wrapper(args):
-        args_unwrapped = unwrap_tensor_subclasses(args, is_joint_structure=False)
         args_new = [
-            args_unwrapped[i - unwrapped_args_offsets[min(i, max_offset_idx)]]
+            args[i - unwrapped_args_offsets[min(i, max_offset_idx)]]
             for i in preserved_arg_indices
         ]
-        args_unwrapped.clear()
         args.clear()
         return optimized_function(args_new)
 
@@ -1303,16 +1306,23 @@ def compile_fx(
                         for node in model_.graph.nodes
                         if node.op == "placeholder"
                     ]
+                    # Replace non-tensor (constant) inputs with Nones, since these are not being
+                    # used anyways by the graph
+                    fake_inputs = [
+                        inp if isinstance(inp, torch.Tensor) else None
+                        for inp in fake_inputs
+                    ]
+
                     if all(v is not None for v in fake_inputs):
                         # Validate devices before switching to fake tensors.
                         for idx, fi, i in zip(count(), fake_inputs, inputs_):
-                            if fi.device != i.device:
+                            if fi is not None and fi.device != i.device:
                                 raise ValueError(
                                     f"Device mismatch between fake input and example input at position #{idx}: "
                                     f"{fi.device} vs {i.device}. If the model was exported via torch.export(), "
                                     "make sure torch.export() and torch.aot_compile() run on the same device."
                                 )
-                        inputs_ = fake_inputs
+                        inputs_ = fake_inputs  # type: ignore[assignment]
                 return compile_fx(
                     model_,
                     inputs_,
