@@ -175,12 +175,12 @@ class TestSerialize(TestCase):
         orig_out = exp_program.module()(*orig_args, **orig_kwargs)
         loaded_out = loaded_model.module()(*loaded_args, **loaded_kwargs)
         self.assertEqual(orig_out, loaded_out)
-    
+
     def test_metadata_run_decomp_serder(self):
         class M(torch.nn.Module):
             def forward(self, x):
-                return x.sin() 
-        
+                return x.sin()
+
         exp_program = torch.export.export_for_training(M(), (torch.randn(4, 4),))
 
         output_buffer = io.BytesIO()

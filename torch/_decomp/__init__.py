@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import inspect
+import itertools
 from collections import defaultdict
 from functools import wraps
 from itertools import chain
@@ -276,242 +277,352 @@ import torch._decomp.decompositions
 import torch._refs
 
 
+aten = torch.ops.aten
+_PYTHON_DECOMP_ENTRIES = [
+    aten.addcdiv,
+    aten.addcdiv_,
+    aten.addcmul,
+    aten.addcmul_,
+    aten.addr,
+    aten.affine_grid_generator,
+    aten.alias_copy,
+    aten.all,
+    aten.aminmax,
+    aten.arange.default,
+    aten.arange.start,
+    aten.avg_pool2d_backward,
+    aten.baddbmm,
+    aten.binary_cross_entropy,
+    aten.binary_cross_entropy_backward,
+    aten.binary_cross_entropy_with_logits,
+    aten.block_diag,
+    aten.celu,
+    aten.celu_,
+    aten.channel_shuffle,
+    aten.clamp_max,
+    aten.clamp_min,
+    aten.col2im,
+    aten.count_nonzero,
+    aten.linalg_cross,
+    aten.cudnn_batch_norm,
+    aten.cudnn_batch_norm_backward,
+    aten.miopen_batch_norm_backward,
+    aten.deg2rad,
+    aten.deg2rad_,
+    aten.detach,
+    aten.diag_embed,
+    aten.diagonal_backward,
+    aten.dot,
+    aten.vdot,
+    aten.elu,
+    aten.elu_,
+    aten.elu_backward,
+    aten._embedding_bag,
+    aten.embedding_dense_backward,
+    aten.empty_like,
+    aten._euclidean_dist.default,
+    aten.expand_as,
+    aten.expand_copy,
+    aten.eye,
+    aten.fill,
+    aten.fill_,
+    aten.floor_divide,
+    aten.frac,
+    aten.frac_,
+    aten._fused_moving_avg_obs_fq_helper,
+    aten.gelu_,
+    aten.gelu_backward,
+    aten.glu,
+    aten.glu_backward,
+    aten.hardshrink,
+    aten.hardsigmoid,
+    aten.hardsigmoid_,
+    aten.hardsigmoid_backward,
+    aten.hardswish,
+    aten.hardswish_,
+    aten.hardswish_backward,
+    aten.hardtanh_,
+    aten.hardtanh_backward,
+    aten.heaviside,
+    aten.heaviside_,
+    aten.huber_loss,
+    aten.huber_loss_backward,
+    aten.im2col,
+    aten.index_add,
+    aten.index_add_,
+    aten.index_copy,
+    aten.index_copy_,
+    aten.index_fill,
+    aten.index_fill_,
+    aten.isin,
+    aten.isneginf,
+    aten.isposinf,
+    aten.l1_loss,
+    aten._lazy_clone,
+    aten._test_parallel_materialize,
+    aten.leaky_relu_,
+    aten.leaky_relu_backward,
+    aten.lerp,
+    aten.lerp_,
+    aten.linspace,
+    aten.logaddexp,
+    aten.logaddexp2,
+    aten.logit,
+    aten.logit_,
+    aten.logit_backward,
+    aten.log_sigmoid_backward,
+    aten.log_sigmoid_forward,
+    aten._log_softmax_backward_data,
+    aten.logspace,
+    aten.logsumexp.default,
+    aten.masked_fill,
+    aten.masked_fill_,
+    aten.max_unpool2d,
+    aten.max_unpool3d,
+    aten.mish,
+    aten.mish_,
+    aten.mse_loss,
+    aten.mse_loss_backward,
+    aten.multi_margin_loss,
+    aten.multilabel_margin_loss_forward,
+    aten.mv,
+    aten.mvlgamma,
+    aten.mvlgamma_,
+    aten.nansum,
+    aten.nan_to_num,
+    aten.nan_to_num_,
+    aten.narrow,
+    aten.native_batch_norm_backward,
+    aten.native_dropout_backward,
+    aten.native_group_norm_backward,
+    aten.native_layer_norm_backward,
+    aten.new_empty,
+    aten.new_full,
+    aten.new_ones,
+    aten.new_zeros,
+    aten.nll_loss2d_forward,
+    aten.nll_loss2d_backward,
+    aten.nll_loss_backward,
+    aten.nll_loss_forward,
+    aten.norm,
+    aten.ones,
+    aten.ones_like,
+    aten.pixel_shuffle,
+    aten.pixel_unshuffle,
+    aten._prelu_kernel,
+    aten._prelu_kernel_backward,
+    aten._reshape_alias,
+    aten.rad2deg,
+    aten.rad2deg_,
+    aten.reflection_pad1d,
+    aten.reflection_pad1d_backward,
+    aten.reflection_pad2d,
+    aten.reflection_pad2d_backward,
+    aten.reflection_pad3d,
+    aten.reflection_pad3d_backward,
+    aten.replication_pad1d,
+    aten.replication_pad2d,
+    aten.replication_pad3d,
+    aten.renorm,
+    aten.renorm_,
+    aten.replication_pad2d,
+    aten.resize_as,
+    aten.roll,
+    aten.rot90,
+    aten.rrelu_with_noise,
+    aten.rrelu_with_noise_,
+    aten.rsub,
+    aten._safe_softmax,
+    aten._scaled_dot_product_flash_attention_for_cpu.default,
+    aten.select_backward,
+    aten.select_scatter,
+    aten.sgn,
+    aten.sgn_,
+    aten.sigmoid_backward,
+    aten.silu,
+    aten.silu_,
+    aten.silu_backward,
+    aten.sinc,
+    aten.sinc_,
+    aten.slice_backward,
+    aten.smooth_l1_loss,
+    aten.smooth_l1_loss_backward,
+    aten.soft_margin_loss,
+    aten.soft_margin_loss_backward,
+    aten._softmax_backward_data,
+    aten.softplus,
+    aten.softplus_backward,
+    aten.softshrink,
+    aten.special_entr,
+    aten.special_log_ndtr,
+    aten.special_xlog1py,
+    aten.split.Tensor,
+    aten.split_with_sizes_copy,
+    aten.squeeze_copy,
+    aten.squeeze.default,
+    aten.squeeze.dim,
+    aten.std,
+    aten.std_mean,
+    aten.stack,
+    aten.sum.default,
+    aten.sum.out,
+    aten.t,
+    aten.t_copy,
+    aten.take,
+    aten.tanh_backward,
+    aten.threshold,
+    aten.threshold_,
+    aten.threshold_backward,
+    aten.trace,
+    aten.transpose.int,
+    aten.transpose_copy,
+    aten.tril,
+    aten.tril_,
+    aten.triu,
+    aten.triu_,
+    aten.unbind,
+    aten.unfold_backward,
+    aten.unfold_copy,
+    aten._unsafe_index,
+    aten._unsafe_index_put,
+    aten._unsafe_masked_index,
+    aten._unsafe_masked_index_put_accumulate,
+    aten.unsafe_split.Tensor,
+    aten.unsafe_split_with_sizes,
+    aten.unsqueeze_copy,
+    aten._unsafe_view,
+    aten.upsample_linear1d,
+    aten.upsample_bilinear2d,
+    aten.upsample_trilinear3d,
+    aten.upsample_nearest2d_backward,
+    aten.view_as_complex,
+    aten.xlogy,
+    aten.xlogy_,
+    aten.zero,
+    aten.zero_,
+    aten.zeros,
+    aten.zeros_like,
+    aten._chunk_cat,
+    aten._weight_norm_interface,
+]
+
+
 # See NOTE [Core ATen Ops]
 #
 # list was copied from torch/_inductor/decomposition.py
 # excluding decompositions that results in prim ops
 # Resulting opset of decomposition is core aten ops
-def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
-    aten = torch.ops.aten
+def core_aten_decompositions() -> "CustomDecompTableMapping[OperatorBase, Callable]":
+    return CustomDecompTableMapping()
 
-    decomp_table = get_decompositions(
-        [
-            aten.addcdiv,
-            aten.addcdiv_,
-            aten.addcmul,
-            aten.addcmul_,
-            aten.addr,
-            aten.affine_grid_generator,
-            aten.alias_copy,
-            aten.all,
-            aten.aminmax,
-            aten.arange.default,
-            aten.arange.start,
-            aten.avg_pool2d_backward,
-            aten.baddbmm,
-            aten.binary_cross_entropy,
-            aten.binary_cross_entropy_backward,
-            aten.binary_cross_entropy_with_logits,
-            aten.block_diag,
-            aten.celu,
-            aten.celu_,
-            aten.channel_shuffle,
-            aten.clamp_max,
-            aten.clamp_min,
-            aten.col2im,
-            aten.count_nonzero,
-            aten.linalg_cross,
-            aten.cudnn_batch_norm,
-            aten.cudnn_batch_norm_backward,
-            aten.miopen_batch_norm_backward,
-            aten.deg2rad,
-            aten.deg2rad_,
-            aten.detach,
-            aten.diag_embed,
-            aten.diagonal_backward,
-            aten.dot,
-            aten.vdot,
-            aten.elu,
-            aten.elu_,
-            aten.elu_backward,
-            aten._embedding_bag,
-            aten.embedding_dense_backward,
-            aten.empty_like,
-            aten._euclidean_dist.default,
-            aten.expand_as,
-            aten.expand_copy,
-            aten.eye,
-            aten.fill,
-            aten.fill_,
-            aten.floor_divide,
-            aten.frac,
-            aten.frac_,
-            aten._fused_moving_avg_obs_fq_helper,
-            aten.gelu_,
-            aten.gelu_backward,
-            aten.glu,
-            aten.glu_backward,
-            aten.hardshrink,
-            aten.hardsigmoid,
-            aten.hardsigmoid_,
-            aten.hardsigmoid_backward,
-            aten.hardswish,
-            aten.hardswish_,
-            aten.hardswish_backward,
-            aten.hardtanh_,
-            aten.hardtanh_backward,
-            aten.heaviside,
-            aten.heaviside_,
-            aten.huber_loss,
-            aten.huber_loss_backward,
-            aten.im2col,
-            aten.index_add,
-            aten.index_add_,
-            aten.index_copy,
-            aten.index_copy_,
-            aten.index_fill,
-            aten.index_fill_,
-            aten.isin,
-            aten.isneginf,
-            aten.isposinf,
-            aten.l1_loss,
-            aten._lazy_clone,
-            aten._test_parallel_materialize,
-            aten.leaky_relu_,
-            aten.leaky_relu_backward,
-            aten.lerp,
-            aten.lerp_,
-            aten.linspace,
-            aten.logaddexp,
-            aten.logaddexp2,
-            aten.logit,
-            aten.logit_,
-            aten.logit_backward,
-            aten.log_sigmoid_backward,
-            aten.log_sigmoid_forward,
-            aten._log_softmax_backward_data,
-            aten.logspace,
-            aten.logsumexp.default,
-            aten.masked_fill,
-            aten.masked_fill_,
-            aten.max_unpool2d,
-            aten.max_unpool3d,
-            aten.mish,
-            aten.mish_,
-            aten.mse_loss,
-            aten.mse_loss_backward,
-            aten.multi_margin_loss,
-            aten.multilabel_margin_loss_forward,
-            aten.mv,
-            aten.mvlgamma,
-            aten.mvlgamma_,
-            aten.nansum,
-            aten.nan_to_num,
-            aten.nan_to_num_,
-            aten.narrow,
-            aten.native_batch_norm_backward,
-            aten.native_dropout_backward,
-            aten.native_group_norm_backward,
-            aten.native_layer_norm_backward,
-            aten.new_empty,
-            aten.new_full,
-            aten.new_ones,
-            aten.new_zeros,
-            aten.nll_loss2d_forward,
-            aten.nll_loss2d_backward,
-            aten.nll_loss_backward,
-            aten.nll_loss_forward,
-            aten.norm,
-            aten.ones,
-            aten.ones_like,
-            aten.pixel_shuffle,
-            aten.pixel_unshuffle,
-            aten._prelu_kernel,
-            aten._prelu_kernel_backward,
-            aten._reshape_alias,
-            aten.rad2deg,
-            aten.rad2deg_,
-            aten.reflection_pad1d,
-            aten.reflection_pad1d_backward,
-            aten.reflection_pad2d,
-            aten.reflection_pad2d_backward,
-            aten.reflection_pad3d,
-            aten.reflection_pad3d_backward,
-            aten.replication_pad1d,
-            aten.replication_pad2d,
-            aten.replication_pad3d,
-            aten.renorm,
-            aten.renorm_,
-            aten.replication_pad2d,
-            aten.resize_as,
-            aten.roll,
-            aten.rot90,
-            aten.rrelu_with_noise,
-            aten.rrelu_with_noise_,
-            aten.rsub,
-            aten._safe_softmax,
-            aten._scaled_dot_product_flash_attention_for_cpu.default,
-            aten.select_backward,
-            aten.select_scatter,
-            aten.sgn,
-            aten.sgn_,
-            aten.sigmoid_backward,
-            aten.silu,
-            aten.silu_,
-            aten.silu_backward,
-            aten.sinc,
-            aten.sinc_,
-            aten.slice_backward,
-            aten.smooth_l1_loss,
-            aten.smooth_l1_loss_backward,
-            aten.soft_margin_loss,
-            aten.soft_margin_loss_backward,
-            aten._softmax_backward_data,
-            aten.softplus,
-            aten.softplus_backward,
-            aten.softshrink,
-            aten.special_entr,
-            aten.special_log_ndtr,
-            aten.special_xlog1py,
-            aten.split.Tensor,
-            aten.split_with_sizes_copy,
-            aten.squeeze.default,
-            aten.squeeze.dim,
-            aten.std,
-            aten.std_mean,
-            aten.stack,
-            aten.sum.default,
-            aten.sum.out,
-            aten.t,
-            aten.t_copy,
-            aten.take,
-            aten.tanh_backward,
-            aten.threshold,
-            aten.threshold_,
-            aten.threshold_backward,
-            aten.trace,
-            aten.transpose.int,
-            aten.transpose_copy,
-            aten.tril,
-            aten.tril_,
-            aten.triu,
-            aten.triu_,
-            aten.unbind,
-            aten.unfold_backward,
-            aten.unfold_copy,
-            aten._unsafe_index,
-            aten._unsafe_index_put,
-            aten._unsafe_masked_index,
-            aten._unsafe_masked_index_put_accumulate,
-            aten.unsafe_split.Tensor,
-            aten.unsafe_split_with_sizes,
-            aten.unsqueeze_copy,
-            aten._unsafe_view,
-            aten.upsample_linear1d,
-            aten.upsample_bilinear2d,
-            aten.upsample_trilinear3d,
-            aten.upsample_nearest2d_backward,
-            aten.view_as_complex,
-            aten.xlogy,
-            aten.xlogy_,
-            aten.zero,
-            aten.zero_,
-            aten.zeros,
-            aten.zeros_like,
-            aten._chunk_cat,
-            aten._weight_norm_interface,
-        ],
-        ignore_cia=True,
-    )
 
-    return decomp_table
+class CustomDecompTableMapping(Dict):
+    def __init__(self):
+        super().__init__()
+        self.aten_decomp_table = get_decompositions(
+            _PYTHON_DECOMP_ENTRIES, ignore_cia=True
+        )
+
+        from torch._export.utils import (
+            _collect_all_valid_cia_ops_for_aten_namespace,
+            _get_decomp_for_cia,
+        )
+
+        for op in _collect_all_valid_cia_ops_for_aten_namespace():
+            self.aten_decomp_table[op] = _get_decomp_for_cia(op)
+
+        self.deleted_custom_ops = set()
+        self.additional_custom_op_decomp = {}
+
+    def __getitem__(self, key):
+        from torch._export.utils import _get_decomp_for_cia, _is_preservable_cia_op
+
+        if key in self.aten_decomp_table:
+            return self.aten_decomp_table[key]
+
+        if key in self.additional_custom_op_decomp:
+            return self.additional_custom_op_decomp[key]
+
+        if not _is_preservable_cia_op(key):
+            raise KeyError(f"key {key} is not in the decomposition table")
+
+        if key in self.deleted_custom_ops:
+            raise KeyError("key is already deleted")
+
+        if key.name().split("::")[0] != "aten":
+            self.additional_custom_op_decomp[key] = _get_decomp_for_cia(key)
+            return self.additional_custom_op_decomp[key]
+
+        return self.aten_decomp_table[key]
+
+    def __setitem__(self, key, value):
+        if key.name().split("::")[0] == "aten":
+            self.aten_decomp_table[key] = value
+            return
+
+        self.additional_custom_op_decomp[key] = value
+
+        if key in self.deleted_custom_ops:
+            self.deleted_custom_ops.remove(key)
+
+    def keys(self):
+        return itertools.chain(
+            self.aten_decomp_table.keys(), self.additional_custom_op_decomp.keys()
+        )
+
+    def __delitem__(self, key):
+        from torch._export.utils import _is_preservable_cia_op
+
+        if key.name().split("::")[0] == "aten":
+            if key in self.aten_decomp_table:
+                del self.aten_decomp_table[key]
+                return
+
+        if key in self.additional_custom_op_decomp:
+            del self.additional_custom_op_decomp[key]
+            return
+
+        if key in self.deleted_custom_ops:
+            raise KeyError(f"{key} is already deleted")
+
+        if not _is_preservable_cia_op(key):
+            raise KeyError("Illegal op to the table")
+
+        self.deleted_custom_ops.add(key)
+
+    def __missing__(self, key):
+        return super(self).__missing__(key)
+
+    def __iter__(self):
+        return (
+            self.aten_decomp_table.__iter__()
+            + self.additional_custom_op_decomp.__iter__()
+        )
+
+    def __reverse__(self):
+        return super(self).__reverse__()
+
+    def copy(self):
+        new_dict = CustomDecompTableMapping()
+        new_dict.aten_decomp_table = self.aten_decomp_table.copy()
+        new_dict.additional_custom_op_decomp = self.additional_custom_op_decomp.copy()
+        new_dict.deleted_custom_ops = self.deleted_custom_ops.copy()
+        return new_dict
+
+    def items(self):
+        return itertools.chain(
+            self.aten_decomp_table.items(), self.additional_custom_op_decomp.items()
+        )
+
+    def materialize(self):
+        from torch._export.utils import _collect_all_valid_cia_ops, _get_decomp_for_cia
+
+        for op in _collect_all_valid_cia_ops():
+            if op.name().split("::")[0] == "aten":
+                continue
+            elif op in self.additional_custom_op_decomp:
+                continue
+            elif op not in self.deleted_custom_ops:
+                self.additional_custom_op_decomp[op] = _get_decomp_for_cia(op)
+
+        return {**self.aten_decomp_table, **self.additional_custom_op_decomp}
