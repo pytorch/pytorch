@@ -84,7 +84,8 @@ static __global__ void multimem_all_reduce_kernel(
   static_assert(alignment % sizeof(T) == 0);
   constexpr size_t numel_per_thread = alignment / sizeof(T);
 
-  barrier_and_acquire_previous_kernel_writes(signal_pads, rank, world_size);
+  sync_remote_blocks<MemOpSem::Relaxed>(signal_pads, rank, world_size);
+  __syncthreads();
 
   const size_t numel_per_rank =
       at::round_up(numel, alignment * world_size) / world_size;
@@ -99,11 +100,9 @@ static __global__ void multimem_all_reduce_kernel(
     auto vec = multimem_ld_reduce_add<alignment>(input_mc_ptr + start + i);
     multimem_st<alignment>(input_mc_ptr + start + i, vec);
   }
-  // Establish observation order - all writes are in-flight beyond this point.
-  barrier(signal_pads, rank, world_size);
-  // Establish causality order - all writes are visible to all devices beyond
-  // this point.
-  __threadfence_system();
+
+  __syncthreads();
+  sync_remote_blocks<MemOpSem::AcqRel>(signal_pads, rank, world_size);
 }
 
 at::Tensor multimem_all_reduce_(
@@ -177,7 +176,8 @@ static __global__ void multimem_one_shot_all_reduce_kernel(
   static_assert(alignment % sizeof(T) == 0);
   constexpr size_t numel_per_thread = alignment / sizeof(T);
 
-  barrier_and_acquire_previous_kernel_writes(signal_pads, rank, world_size);
+  sync_remote_blocks<MemOpSem::Relaxed>(signal_pads, rank, world_size);
+  __syncthreads();
 
   auto offset = (blockDim.x * blockIdx.x + threadIdx.x) * numel_per_thread;
   auto stride = blockDim.x * gridDim.x * numel_per_thread;
@@ -185,6 +185,9 @@ static __global__ void multimem_one_shot_all_reduce_kernel(
     auto vec = multimem_ld_reduce_add<alignment>(input_mc_ptr + i);
     *reinterpret_cast<decltype(vec.as_scalar)*>(output_ptr + i) = vec.as_scalar;
   }
+
+  __syncthreads();
+  sync_remote_blocks<MemOpSem::Relaxed>(signal_pads, rank, world_size);
 }
 
 at::Tensor multimem_one_shot_all_reduce(
