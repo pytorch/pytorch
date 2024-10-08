@@ -871,6 +871,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             return ConstantVariable.create(None)
 
+        @register(torch._C.TensorBase.__getitem__)
+        def handle_getitem(self, tx: "InstructionTranslator", *args, **kwargs):
+            return args[0].call_method(tx, "getitem", args[1:], kwargs)
+
         return handlers
 
     def call_function(
