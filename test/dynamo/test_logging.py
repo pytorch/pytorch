@@ -746,6 +746,40 @@ fn(torch.randn(5))
                     empty_line_normalizer(stderr.decode("utf-8")),
                 )
 
+    @make_settings_test("torch._dynamo.eval_frame")
+    def test_log_traced_frames(self, records):
+        # Test program
+        @torch.compile()
+        def foo():
+            x = torch.ones([10])
+
+            def bar():
+                y = x + x
+                torch._dynamo.graph_break()
+                z = y * x
+                return z
+
+            return bar(), bar
+
+        foo()
+
+        # `_log_traced_frames` is registered as an atexit callback, so we invoke
+        # it explicitly for testing.
+        torch._dynamo.eval_frame._log_traced_frames()
+
+        # Get the relevant log.
+        record = self.getRecord(records, "TorchDynamo attempted to trace")
+
+        # Check
+        self.assertExpectedInline(
+            munge_exc(record.getMessage()),
+            """\
+TorchDynamo attempted to trace the following frames: [
+  * foo test_logging.py:N
+  * bar test_logging.py:N
+]""",
+        )
+
 
 # single record tests
 exclusions = {
