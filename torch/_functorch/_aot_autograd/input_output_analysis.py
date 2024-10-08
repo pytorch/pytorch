@@ -20,7 +20,7 @@ from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 
 from .. import config
-from .collect_metadata_analysis import coerce_tangent
+from .collect_metadata_analysis import coerce_tangent_and_suggest_memory_format
 from .schemas import (
     BackwardSignature,
     GraphSignature,
@@ -49,12 +49,16 @@ def remove_dupe_metadata(
     other_traced_tangents = m.traced_tangents[num_data_mutations:]
     inp_traced_tangents = m.traced_tangents[:num_data_mutations]
     filtered_inp_traced_tangents = [
-        # See Note [Tangents must be contiguous]
+        # See Note [Tangents memory format]
         x
         for i, x in enumerate(inp_traced_tangents)
         if keep_arg_mask[m.mutated_inp_runtime_indices[i]]
     ]
     traced_tangents = filtered_inp_traced_tangents + other_traced_tangents
+    assert m.traced_tangent_memory_formats is not None
+    traced_tangent_memory_formats = [torch.contiguous_format] * len(
+        filtered_inp_traced_tangents
+    ) + m.traced_tangent_memory_formats[num_data_mutations:]
 
     return ViewAndMutationMeta(
         input_info=[x for i, x in enumerate(m.input_info) if keep_arg_mask[i]],
@@ -74,24 +78,13 @@ def remove_dupe_metadata(
         num_intermediate_bases=m.num_intermediate_bases,
         keep_input_mutations=m.keep_input_mutations,
         traced_tangents=traced_tangents,
+        traced_tangent_memory_formats=traced_tangent_memory_formats,
         # We are guaranteed not to get here, since dupes are not supported today with subclass inputs.
         subclass_inp_meta=[],
         subclass_fw_graph_out_meta=[],
         subclass_tangent_meta=[],
         is_train=m.is_train,
     )
-
-
-# Given our ViewAndMutation metadata, this fn constructs a new set of metadata,
-# after adding synthetic base arguments to the function.
-# Most of the work in this fn is slogging through all of the metadata corresponding to inputs,
-# and updating it with our synthetic base calling convention.
-#
-# When config.debug_assert is set, we automatically regenerate the metadata
-# and compare it to this output for sanity.
-#
-# In addition to the updated metadata, also return the list of input indices
-# that will need to be updated in the synthetic base epilogue
 
 
 # Given our ViewAndMutation metadata, this fn constructs a new set of metadata,
@@ -235,17 +228,26 @@ def create_synthetic_base_metadata(
             )
         )
 
-    inner_mutated_tangents = [
-        # See Note [Tangents must be contiguous]
-        coerce_tangent(x)
+    inner_mutated_tangents_and_memory_formats = [
+        # See Note [Tangents memory format]
+        coerce_tangent_and_suggest_memory_format(x)
         for inner_idx, x in enumerate(inner_args)
         if input_infos[inner_idx].mutates_data and input_infos[inner_idx].requires_grad
+    ]
+    inner_mutated_tangents = [x[0] for x in inner_mutated_tangents_and_memory_formats]
+    inner_mutated_tangents_memory_formats = [
+        x[1] for x in inner_mutated_tangents_and_memory_formats
     ]
 
     output_info = existing_output_infos + input_metadata_output_info
     # Regenerate traced tangents to include mutated inputs including synthetic bases
     traced_tangents = (
         inner_mutated_tangents + m.traced_tangents[len(inner_mutated_tangents) :]
+    )
+    assert m.traced_tangent_memory_formats is not None
+    traced_tangent_memory_formats = (
+        inner_mutated_tangents_memory_formats
+        + m.traced_tangent_memory_formats[len(inner_mutated_tangents) :]
     )
 
     return (
@@ -255,6 +257,7 @@ def create_synthetic_base_metadata(
             num_intermediate_bases=m.num_intermediate_bases,
             keep_input_mutations=m.keep_input_mutations,
             traced_tangents=traced_tangents,
+            traced_tangent_memory_formats=traced_tangent_memory_formats,
             # We are guaranteed not to get here, since synthetic_base codepaths are not supported today with subclass inputs.
             subclass_inp_meta=[],
             subclass_fw_graph_out_meta=[],

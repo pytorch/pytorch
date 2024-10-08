@@ -805,6 +805,8 @@ class CompilationMetrics:
     remote_cache_time_saved_s: Optional[float]
     structured_logging_overhead_s: Optional[float]
     config_suppress_errors: Optional[bool]
+    config_inline_inbuilt_nn_modules: Optional[bool]
+    specialize_float: Optional[bool]
 
 
 @dataclasses.dataclass
@@ -2333,9 +2335,7 @@ def tensor_always_has_static_shape(
 
     if (
         tensor_source.guard_source().is_specialized_nn_module()
-        # Marking the tensor attributes of nn modules static to keep the behavior same as before
-        # inline_inbuilt_nn_module flag was introduced.
-        or tensor_source.guard_source().is_unspecialized_nn_module()
+        or tensor_source.guard_source().is_unspecialized_builtin_nn_module()
     ) and config.force_nn_module_property_static_shapes:
         return True, TensorStaticReason.NN_MODULE_PROPERTY
 
@@ -2895,18 +2895,28 @@ def is_torch_function_object(value):
 
 
 def has_torch_function(vt: torch._dynamo.variables.base.VariableTracker) -> bool:
-    from torch._dynamo.variables import LazyVariableTracker, UserDefinedObjectVariable
+    from torch._dynamo.variables import UserDefinedObjectVariable
     from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 
-    if isinstance(vt, TensorWithTFOverrideVariable):
-        return True
+    # Note on lazy vars: The value will either be realized or not throughout the course of execution
+    # if the value has a torch function, it will eventually be realized so we can realize it here
+    # if the value does not have a torch function, it may or may not be realized
+    # if it is realized it will be used and guards will be installed properly
+    # if it is not used, guards won't be installed, and it doesn't matter
+    # if the value has a torch function or not, so we should *not* realize it.
+    # NB: We technically know that if is_realized is False, LazyVariableTracker has the peek_value method
+    # but mypy does not unfortunately
+    if vt.is_realized() or (
+        hasattr(vt, "peek_value") and hasattr(vt.peek_value(), "__torch_function__")
+    ):
+        if isinstance(vt, TensorWithTFOverrideVariable):
+            return True
 
-    if isinstance(vt, LazyVariableTracker):
-        LazyVariableTracker.realize(vt)
+        return isinstance(vt, UserDefinedObjectVariable) and hasattr(
+            vt.value, "__torch_function__"
+        )
 
-    return isinstance(vt, UserDefinedObjectVariable) and hasattr(
-        vt.value, "__torch_function__"
-    )
+    return False
 
 
 # see note [Tensor Fakification and Symbol Caching]

@@ -1088,9 +1088,9 @@ class PipelineScheduleMulti(_PipelineSchedule):
             stage.has_backward = self._has_backward
         self._stages_initialized = False
 
-        self._should_compute_loss = (
-            lambda stage: stage.is_last and self._loss_fn is not None
-        )
+        # avoid putting a reference to 'self' inside the lambda, it creates a ref cycle
+        has_loss: bool = self._loss_fn is not None
+        self._should_compute_loss = lambda stage: stage.is_last and has_loss
 
         # This will be set during init of derived schedules
         self.pipeline_order: Dict[int, List[Optional[_Action]]] = {}
@@ -2160,7 +2160,7 @@ class ScheduleInterleavedZeroBubble(ScheduleFlexibleInterleaved1F1B):
 
 def get_schedule_class(schedule_name: str):
     """
-    Maps a schedule name to its corresponding class object.
+    Maps a schedule name (case insensitive) to its corresponding class object.
 
     Args:
         schedule_name (str): The name of the schedule.
@@ -2175,6 +2175,10 @@ def get_schedule_class(schedule_name: str):
         "PipelineScheduleSingle": PipelineScheduleSingle,
         "PipelineScheduleMulti": PipelineScheduleMulti,
     }
-    if schedule_name not in schedule_map:
-        raise ValueError(f"Unknown schedule name: {schedule_name}")
-    return schedule_map[schedule_name]
+    lowercase_keys = {k.lower(): k for k in schedule_map.keys()}
+    lowercase_schedule_name = schedule_name.lower()
+    if lowercase_schedule_name not in lowercase_keys:
+        raise ValueError(
+            f"Unknown schedule name '{schedule_name}'. The valid options are {list(schedule_map.keys())}"
+        )
+    return schedule_map[lowercase_keys[lowercase_schedule_name]]
