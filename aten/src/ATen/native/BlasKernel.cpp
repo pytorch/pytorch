@@ -632,7 +632,7 @@ dot_with_fp32_arith_no_bfdot(const T* vec1, const T* vec2, int64_t len) {
   auto reduced_sum = dot_with_fp32_arith_main_loop_no_bfdot(vec1, vec2, len);
   DOT_WITH_FP32_ARITH_TAIL_AFTER_MAIN_LOOP_BODY(_no_bfdot);
 }
-
+#undef DOT_WITH_FP32_ARITH_TAIL_AFTER_MAIN_LOOP_BODY
 } // namespace
 
 float fp16_dot_with_fp32_arith(const float16_t* vec1, const float16_t* vec2, int64_t len) {
