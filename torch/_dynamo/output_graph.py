@@ -78,7 +78,6 @@ from .utils import (
     get_instruction_source_311,
     get_locals_to_steal,
     get_static_address_type,
-    get_torch_function_mode_stack,
     graph_break_reasons,
     increment_op_count,
     lazy_format_graph_code,
@@ -250,6 +249,7 @@ class OutputGraph:
         local_scope: Scope,
         global_scope: Scope,
         f_code,
+        torch_function_mode_stack,
     ):
         super().__init__()
         self.tracers = [SubgraphTracer(self, export_root=export)]
@@ -368,7 +368,7 @@ class OutputGraph:
         # This returns false if TF Overall (both mode and subclass) is disabled OR that TF Mode stack is empty
         self.torch_function_mode_enabled = torch._C._is_torch_function_mode_enabled()
         # This records the initial torch function mode stack for guarding
-        self.torch_function_mode_stack = get_torch_function_mode_stack()
+        self.torch_function_mode_stack = torch_function_mode_stack
 
         # Tracks if the output graph has a user defined allowed function in the
         # graph. This is used later to determine if we should fallback to eager
@@ -1021,7 +1021,7 @@ class OutputGraph:
             prefix_insts.clear()
 
         for block in reversed(tx.block_stack):
-            block.exit(tx)
+            block.exit(tx, is_graph_break=reason.graph_break)
 
         self.cleanup_graph()
         tx.prune_dead_locals()
