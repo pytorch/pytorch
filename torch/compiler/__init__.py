@@ -13,6 +13,7 @@ __all__ = [
     "substitute_in_graph",
     "list_backends",
     "disable",
+    "set_phase",
     "cudagraph_mark_step_begin",
     "wrap_numpy",
     "is_compiling",

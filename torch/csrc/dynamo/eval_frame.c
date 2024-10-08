@@ -16,7 +16,6 @@ const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
 static int active_dynamo_threads = 0;
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
-static _Thread_local bool eval_frame_callback_enabled = true;
 
 inline static PyObject* eval_frame_callback_get(void) {
   void* result = PyThread_tss_get(&eval_frame_callback_key);
@@ -509,7 +508,7 @@ static PyObject* _custom_eval_frame_shim(
   //  - Python callable(): enables TorchDynamo
   PyObject* callback = eval_frame_callback_get();
 
-  if (!eval_frame_callback_enabled || callback == Py_None) {
+  if (!eval_frame_callback_enabled_get() || callback == Py_None) {
     return eval_frame_default(tstate, frame, throw_flag);
   }
 
@@ -821,11 +820,11 @@ static PyObject* set_eval_frame_py(PyObject* dummy, PyObject* callback) {
 }
 
 static PyObject* set_eval_frame_callback_enabled(PyObject* dummy, PyObject* enabled) {
-  bool prior = eval_frame_callback_enabled;
+  bool prior = eval_frame_callback_enabled_get();
   if (enabled == Py_True) {
-    eval_frame_callback_enabled = true;
+    eval_frame_callback_enabled_set(true);
   } else if (enabled == Py_False) {
-    eval_frame_callback_enabled = false;
+    eval_frame_callback_enabled_set(false);
   } else {
     DEBUG_TRACE0("arg error");
     PyErr_SetString(PyExc_TypeError, "expected bool");
@@ -835,7 +834,7 @@ static PyObject* set_eval_frame_callback_enabled(PyObject* dummy, PyObject* enab
 }
 
 static PyObject* is_eval_frame_callback_enabled(PyObject* dummy, PyObject* args) {
-  return PyBool_FromLong(eval_frame_callback_enabled);
+  return PyBool_FromLong(eval_frame_callback_enabled_get());
 }
 
 static PyObject* reset_code(PyObject* dummy, PyObject* code) {
