@@ -27,11 +27,7 @@ def bypass_export_jit_isinstance():
 
 class SymbolicTensorTest(common_utils.TestCase):
     def test_jit_isinstance(self):
-
         class DummyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, a, b):
                 if torch.jit.isinstance(a, torch.Tensor):
                     return a.cos()
