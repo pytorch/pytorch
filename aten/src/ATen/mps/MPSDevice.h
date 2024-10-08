@@ -26,8 +26,7 @@ namespace at::mps {
 
 // Helper enum to check if a MPSGraph op is supported in a given macOS version
 enum class MacOSVersion : uint32_t {
-  MACOS_VER_13_0_PLUS = 0,
-  MACOS_VER_13_1_PLUS,
+  MACOS_VER_13_1_PLUS = 0,
   MACOS_VER_13_2_PLUS,
   MACOS_VER_13_3_PLUS,
   MACOS_VER_14_0_PLUS,
@@ -79,7 +78,7 @@ class TORCH_API MPSDevice {
 };
 
 TORCH_API bool is_available();
-TORCH_API bool is_macos_13_or_newer(MacOSVersion version = MacOSVersion::MACOS_VER_13_0_PLUS);
+TORCH_API bool is_macos_13_or_newer(MacOSVersion version);
 TORCH_API at::Allocator* GetMPSAllocator(bool useSharedAllocator = false);
 
 } // namespace at::mps

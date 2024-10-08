@@ -15,6 +15,7 @@ from unittest.mock import patch
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
+from torch._dynamo.trace_rules import _as_posix_path
 from torch.utils._traceback import report_compile_source_on_error
 
 
@@ -107,8 +108,9 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
                 log = logging.getLogger("torch._dynamo")
                 log.addHandler(log_handler)
                 try:
-                    prev_cwd = os.getcwd()
+                    prev_cwd = _as_posix_path(os.getcwd())
                     if cwd is not None:
+                        cwd = _as_posix_path(cwd)
                         os.chdir(cwd)
                     with patch("sys.argv", args), report_compile_source_on_error():
                         exec(code, {"__name__": "__main__", "__compile_source__": code})
@@ -135,6 +137,8 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
                 stderr.getvalue().encode("utf-8"),
             )
         else:
+            if cwd is not None:
+                cwd = _as_posix_path(cwd)
             return subprocess.run(args, capture_output=True, cwd=cwd, check=False)
 
     # Run `code` in a separate python process.
@@ -157,7 +161,7 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
     # Runs the minifier launcher script in `repro_dir`
     def _run_minifier_launcher(self, repro_dir, isolate, *, minifier_args=()):
         self.assertIsNotNone(repro_dir)
-        launch_file = os.path.join(repro_dir, "minifier_launcher.py")
+        launch_file = _as_posix_path(os.path.join(repro_dir, "minifier_launcher.py"))
         with open(launch_file) as f:
             launch_code = f.read()
         self.assertTrue(os.path.exists(launch_file))
@@ -176,7 +180,7 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
     # Runs the repro script in `repro_dir`
     def _run_repro(self, repro_dir, *, isolate=True):
         self.assertIsNotNone(repro_dir)
-        repro_file = os.path.join(repro_dir, "repro.py")
+        repro_file = _as_posix_path(os.path.join(repro_dir, "repro.py"))
         with open(repro_file) as f:
             repro_code = f.read()
         self.assertTrue(os.path.exists(repro_file))
@@ -196,11 +200,11 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
         return f"""\
 import torch
 import torch._dynamo
-{torch._dynamo.config.codegen_config()}
-{torch._inductor.config.codegen_config()}
+{_as_posix_path(torch._dynamo.config.codegen_config())}
+{_as_posix_path(torch._inductor.config.codegen_config())}
 torch._dynamo.config.repro_after = "{repro_after}"
 torch._dynamo.config.repro_level = {repro_level}
-torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
+torch._dynamo.config.debug_dir_root = "{_as_posix_path(self.DEBUG_DIR)}"
 {run_code}
 """
 

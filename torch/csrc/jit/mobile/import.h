@@ -8,8 +8,6 @@
 #include <caffe2/serialize/file_adapter.h>
 
 namespace torch::jit {
-using caffe2::serialize::FileAdapter;
-using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::ReadAdapterInterface;
 using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 

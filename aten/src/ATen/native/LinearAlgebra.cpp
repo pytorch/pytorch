@@ -19,6 +19,7 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mkldnn/Matmul.h>
+#include <ATen/native/mkldnn/Utils.h>
 #include <c10/core/GradMode.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
@@ -1358,13 +1359,8 @@ static inline int64_t get_mkldnn_matmul_min_dim() {
   static auto value = [&] {
     const int64_t default_min_dim = [&] {
       // Minimum dimension requirement for MKLDNN; derived based on experiments.
-      // By default, it's only enabled on Neoverse V1.
-#if !defined(__s390x__)  && !defined(__powerpc__)
-      if (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 && cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1) {
-        return 8;
-      }
-#endif
-      return 0;
+      //it's enabled on all Neoverse cpus.
+      return is_arm_neoverse() ? 8 : 0;
     }();
     const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_DIM");
     return ptr != nullptr ? std::atoi(ptr) : default_min_dim;
@@ -1377,13 +1373,8 @@ static inline int64_t get_mkldnn_matmul_min_size() {
   static auto value = [&] {
     const int64_t default_min_size = [&] {
       // Minimum size requirement for MKLDNN; derived based on experiments.
-      // By default, it's only enabled on Neoverse V1.
-#if !defined(__s390x__)  && !defined(__powerpc__)
-      if (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 && cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1) {
-        return 8 * 1024;
-      }
-#endif
-      return 0;
+      // it's enabled on all Neoverse cpus.
+      return is_arm_neoverse() ? 8 * 1024 : 0;
     }();
     const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_SIZE");
     return ptr != nullptr ? std::atoi(ptr) : default_min_size;
