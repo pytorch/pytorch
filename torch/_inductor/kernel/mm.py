@@ -526,39 +526,52 @@ def tuned_sparse_semi_structured_mm(
         "sparse_semi_structured_mm", choices, [mat1, mat1_meta, mat2], layout
     )
 
-# @register_lowering(aten._cslt_sparse_mm, type_promotion_kind=None)
-# def tuned_cslt_sparse_mm(
-#     mat1_compressed, mat2, bias, out_dtype=None, alg_id=0, transpose_result=False, layout=None
-# ):
-#     k, n = mat2.get_size()
+@register_lowering(aten._cslt_sparse_mm, type_promotion_kind=None)
+def tuned_cslt_sparse_mm(
+    mat1_compressed, mat2, bias=None, out_dtype=None, alg_id=0, transpose_result=False, layout=None
+):
+    from torch._inductor.select_algorithm import realize_inputs
+    mat1_compressed, mat2 = realize_inputs(mat1_compressed, mat2)
+    k, n = mat2.get_size()
 
-#     is_int8_input_type = mat1_compressed.dtype == torch.int8
-#     compression_factor = 10 if is_int8_input_type else 9
-#     m = (mat1_compressed.get_numel() * 16) // (compression_factor * k)
+    is_int8_input_type = mat1_compressed.dtype == torch.int8
+    compression_factor = 10 if is_int8_input_type else 9
+    m = (mat1_compressed.get_numel() * 16) // (compression_factor * k)
 
-#     from torch._inductor.ir import FixedLayout
+    from torch._inductor.ir import FixedLayout
 
-#     layout = FixedLayout(
-#         mat2.get_device(),
-#         out_dtype if out_dtype else mat2.get_dtype(),
-#         [m, n],
-#         [n, 1],
-#     )
+    layout = FixedLayout(
+        mat2.get_device(),
+        out_dtype if out_dtype else mat2.get_dtype(),
+        [m, n],
+        [n, 1],
+    )
+    # workaround for Inductor not supporting optional tensor input arguments
+    if bias is None:
+        input_nodes = (mat1_compressed, mat2)
+    else:
+        bias = realize_inputs(bias)
+        input_nodes = (mat1_compressed, mat2, bias)
 
-#     #allocate as proxy
-#     # compressed = torch.empty(mat1_compressed.get_numel(), dtype=mat2.dtype, device=mat2.get_device())
-#     # # mat2_new = torch.empty((k, n), dtype=mat2.dtype, device=mat2.get_device())
-#     # if bias is not None:
-#     #     bias_new = torch.empty(bias.get_size(), dtype=bias.dtype, device=bias.get_device())
-#     # else:
-#     #     bias_new = None
-#     # optimal_alg_id = torch._cslt_sparse_mm_search(compressed, mat2_new, bias=bias_new, out_dtype=out_dtype, transpose_result=transpose_result)
-#     optimal_alg_id = 0
+    # compressed = torch.empty(mat1_compressed.get_numel(), dtype=mat2.dtype, device=mat2.get_device())
+    # mat2_new = torch.empty(mat2.get_size(), dtype=mat2.dtype, device=mat2.get_device())
 
-#     return aten__cslt_sparse_mm.bind(
-#         (mat1_compressed, mat2, bias), layout, out_dtype=out_dtype, alg_id=optimal_alg_id, transpose_result=transpose_result
-#     ).output_node()
+    # if bias is not None:
+    #     bias_new = torch.empty(bias.get_size(), dtype=bias.dtype, device=bias.get_device())
+    # else:
+    #     bias_new = None
+    # optimal_alg_id = torch._cslt_sparse_mm_search(compressed, mat2_new, bias=bias_new, out_dtype=out_dtype, transpose_result=transpose_result)
 
+    choices = []
+
+    for alg_id_iter in range(44):
+        option = aten__cslt_sparse_mm.bind(
+            input_nodes, layout, out_dtype=out_dtype, alg_id=alg_id_iter, transpose_result=transpose_result,
+        )
+        option.debug_extra=f"alg_id: {alg_id_iter}"
+        choices.append(option)
+    
+    return autotune_select_algorithm("cslt_sparse_mm", choices, input_nodes, layout)
 
 
 def fallback_mixed_mm(mat1, mat2, *, out):

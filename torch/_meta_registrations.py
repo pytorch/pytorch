@@ -526,11 +526,12 @@ def meta__cslt_sparse_mm(
         torch.float16,
         torch.bfloat16,
         torch.int8,
+        torch.float8_e4m3fn,
     }, "_cslt_sparse_mm only supports fp16, bf16, and int8"
     assert compressed_A.dtype == dense_B.dtype, "inputs must have the same dtype"
     assert len(dense_B.shape) == 2, "_cslt_sparse_mm only supports 2d inputs"
 
-    is_int8_input_type = compressed_A.dtype == torch.int8
+    is_int8_input_type = (compressed_A.dtype in [torch.int8, torch.float8_e4m3fn])
     compression_factor = 10 if is_int8_input_type else 9
     k = dense_B.size(0)
     n = dense_B.size(1)
