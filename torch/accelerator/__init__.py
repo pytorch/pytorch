@@ -1,4 +1,8 @@
 # mypy: allow-untyped-defs
+r"""
+This package introduces support for the current :ref:`Accelerators<accelerator>` in python.
+"""
+
 from typing import Any
 
 import torch
@@ -79,14 +83,14 @@ class StreamGuard:
 
 
 __all__ = [
-    "current_accelerator",
-    "is_available",
-    "device_count",
-    "current_device",
-    "set_device",
-    "current_stream",
-    "set_stream",
-    "synchronize",
     "DeviceGuard",
     "StreamGuard",
+    "current_accelerator",
+    "current_device",
+    "current_stream",
+    "device_count",
+    "is_available",
+    "set_device",
+    "set_stream",
+    "synchronize",
 ]
