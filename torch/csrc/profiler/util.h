@@ -92,7 +92,7 @@ TORCH_API std::string shapesToStr(
 TORCH_API std::string strListToStr(const std::vector<std::string>& types);
 TORCH_API std::string inputOpIdsToStr(
     const std::list<std::pair<at::RecordFunctionHandle, int>>& input_op_ids);
-TORCH_API std::string ivalueToStr(const c10::IValue& val);
+TORCH_API std::string ivalueToStr(const c10::IValue& val, bool isString);
 TORCH_API std::string ivalueListToStr(const std::vector<c10::IValue>& list);
 TORCH_API std::vector<std::string> inputTypes(const at::RecordFunction& fn);
 

@@ -1,1 +1,1 @@
-from .package import load_package, package_aoti
+from .package import AOTICompiledModel, load_package, package_aoti

@@ -15,7 +15,7 @@ struct Params final {
   float eps;
 };
 
-void record_op(
+static void record_op(
     api::Context* const context,
     vTensor& v_output,
     const vTensor& v_input,

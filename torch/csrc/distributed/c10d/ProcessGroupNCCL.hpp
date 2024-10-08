@@ -63,6 +63,13 @@ static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
 static std::vector<std::string> TORCH_NCCL_DUMP_ON_TIMEOUT = {
     "TORCH_NCCL_DUMP_ON_TIMEOUT"};
 
+// TODO: remove this change after a safe rollout.
+// Control whether we sleep after an exception is thrown.
+// This change is temporary and is used to safely remove the current sleep that
+// exists after an exception is thrown.
+static std::vector<std::string> TORCH_NCCL_SLEEP_AFTER_EXCEPTION = {
+    "TORCH_NCCL_SLEEP_AFTER_EXCEPTION"};
+
 // Control whether Desync Debug is enabled. This variable must be set
 // together with TORCH_NCCL_ASYNC_ERROR_HANDLING.
 static std::vector<std::string> TORCH_NCCL_DESYNC_DEBUG = {
@@ -178,7 +185,7 @@ struct DumpPipe {
         getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) <= 0) {
       return;
     }
-    TORCH_CHECK(!fileStem.empty(), "TORCH_NCCL_DEBUG_INFO_TEMP_FILE is empty");
+    TORCH_CHECK(!fileStem.empty(), "TORCH_NCCL_DEBUG_INFO_PIPE_FILE is empty");
     std::string filename = c10::str(fileStem, rank, ".pipe");
     TORCH_CHECK(
         unlink(filename.c_str()) != -1 || errno == ENOENT,
@@ -449,7 +456,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     static CUDAEventCache& get();
 
    private:
-    std::timed_mutex cacheMutex_;
+    std::mutex cacheMutex_;
     // NOTE: We intentionaly store raw pointers so that
     // we do not attempt to destroy the event objects on process exit,
     // because cuda may be gone.
@@ -777,6 +784,18 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       bool avoidRecordStreams = false,
       bool nanCheck = true);
 
+  template <typename Fn, typename PreProcess, typename PostProcess>
+  c10::intrusive_ptr<Work> collective(
+      std::vector<at::Tensor>& inputs,
+      std::vector<at::Tensor>& outputs,
+      Fn fn,
+      PreProcess pre,
+      PostProcess post,
+      OpType opType,
+      const char* profilingTitle = nullptr,
+      bool avoidRecordStreams = false,
+      bool nanCheck = true);
+
   template <typename Fn>
   c10::intrusive_ptr<Work> collectiveCoalesced(
       std::vector<at::Tensor>& input,
@@ -890,7 +909,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::future<bool>& fut,
       const std::chrono::milliseconds& timeOutMilSec,
       const std::string& futDescription,
-      bool throwException = false);
+      bool throwException = false,
+      bool log = false);
 
   // When watchdog timeout, this function will be called and return debug info
   // for users. For now we only get information from retrieveDesyncReport.
@@ -920,7 +940,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // ephemeralTimeoutActive_/ephemeralTimeoutInflight_.
   // TODO(fduwjj): We need to have an audit on all mutexes we are adding here.
   // And consolidate them if possible.
-  std::timed_mutex mtxTimeoutExtension_;
+  std::mutex mtxTimeoutExtension_;
 
   // The ephemeral timeout added on top of existing timeout for works issued
   // before first work finishes.
@@ -980,7 +1000,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       inInitializationCommMap_;
 
   // Mutex to guard maps like devNCCLCommMap_.
-  std::timed_mutex mutex_;
+  std::mutex mutex_;
 
   // Heartbeat of watchdog thread.
   std::atomic_uint64_t heartbeat_;
@@ -1041,18 +1061,18 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   static std::atomic<bool> shouldDump_;
 
   // Mutex to Guard workMetaList_
-  std::timed_mutex workMetaListMutex_;
+  std::mutex workMetaListMutex_;
 
   // Mutex to Guard monitorWakeUpCV_
-  std::timed_mutex monitorMutex_;
+  std::mutex monitorMutex_;
 
   bool writeDebugInfo_ = false;
 
   // Condition Variable for watchdog thread sleep
-  std::condition_variable_any workMetaListCV_;
+  std::condition_variable workMetaListCV_;
 
   // Condition Variable for monitor thread to wake up early
-  std::condition_variable_any monitorWakeUpCV_;
+  std::condition_variable monitorWakeUpCV_;
 
   // Vector to Store WorkNCCL pointers
   std::list<ProcessGroupNCCL::WorkNCCL> workMetaList_;
@@ -1060,10 +1080,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::chrono::time_point<std::chrono::steady_clock> lastWorkListUpdateTime_;
 
   // Mutex to Guard workMetaList_
-  std::timed_mutex completedWorkListMutex_;
+  std::mutex completedWorkListMutex_;
 
   // Condition Variable for watchdog thread sleep
-  std::condition_variable_any completedWorkListCV_;
+  std::condition_variable completedWorkListCV_;
 
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList_;
 
@@ -1126,6 +1146,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not to dump debug info on exception including both watchdog
   // timeout and nccl errors.
   bool dumpOnTimeoutOrEx_;
+
+  // Whether or not to sleep after an exception is thrown in the watchdog.
+  bool sleepAfterException_;
 
   // Whether or not to enable nan check for input tensors to collectives.
   bool enableNanCheck_;
