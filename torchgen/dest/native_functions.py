@@ -4,7 +4,7 @@ import torchgen.api.meta as meta
 import torchgen.api.structured as structured
 from torchgen.api.types import kernel_signature
 from torchgen.context import with_native_function_and_index
-from torchgen.model import BackendIndex, NativeFunction, NativeFunctionsGroup
+from torchgen.model import BackendIndex, NativeFunction, NativeFunctionsGroup,DispatchKey
 from torchgen.utils import mapMaybe
 
 
@@ -29,6 +29,8 @@ def gen_structured(g: NativeFunctionsGroup, backend_index: BackendIndex) -> list
     if metadata is None:
         return []
     prefix = "" if backend_index.external else "TORCH_API "
+    if backend_index.dispatch_key == DispatchKey.XPU:
+        prefix = "TORCH_XPU_API "
     return [
         f"""\
 struct {prefix}structured_{metadata.kernel} : public at::meta::structured_{meta_name} {{
