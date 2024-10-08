@@ -28,6 +28,9 @@ class DynamoExporterTest(common_utils.TestCase):
         key = torch.rand(32, 8, 128, 64, dtype=torch.float16)
         value = torch.rand(32, 8, 128, 64, dtype=torch.float16)
 
+        exp = torch.export.export(model, (query, key, value), strict=False)
+        self.assertNotIn("call_method", str(exp.graph))
+
         onnx_program = torch.onnx.export(
             model, (query, key, value), dynamo=True, fallback=False
         )

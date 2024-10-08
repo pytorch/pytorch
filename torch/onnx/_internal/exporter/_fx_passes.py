@@ -59,7 +59,7 @@ def insert_contiguous_between_transpose_and_view(
     modified = False
     graph = exported_program.graph_module.graph
     for node in graph.nodes:
-        if (node.op != "call_method" or node.target != "transpose") and (
+        if (
             node.op != "call_function"
             or not hasattr(node.target, "name")
             or node.target.name() != "aten::transpose.int"
@@ -67,7 +67,7 @@ def insert_contiguous_between_transpose_and_view(
             continue
         insert = False
         for user in node.users:
-            if (user.op == "call_method" and user.target == "view") or (
+            if (
                 user.op == "call_function"
                 and hasattr(node.target, "name")
                 and user.target.name() == "aten::view"
