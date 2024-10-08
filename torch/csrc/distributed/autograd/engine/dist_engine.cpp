@@ -633,8 +633,8 @@ size_t DistEngine::numBackwardPasses() const {
 std::unordered_map<std::string, int64_t> DistEngine::getDebugInfo() const {
   std::unordered_map<std::string, int64_t> debugInfo;
   debugInfo[kNumBackwardPasses] = static_cast<int64_t>(numBackwardPasses());
-  debugInfo[kNumAutogradContexts] =
-      static_cast<int64_t>(DistAutogradContainer::getInstance().numAutogradContexts());
+  debugInfo[kNumAutogradContexts] = static_cast<int64_t>(
+      DistAutogradContainer::getInstance().numAutogradContexts());
   return debugInfo;
 }
 
