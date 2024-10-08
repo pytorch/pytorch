@@ -41,17 +41,15 @@ float halfbits2float(unsigned short h) {
 unsigned short float2halfbits(float src) {
   unsigned x = c10::detail::fp32_to_bits(src);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables,cppcoreguidelines-avoid-magic-numbers)
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   unsigned u = (x & 0x7fffffff), remainder, shift, lsb, lsb_s1, lsb_m1;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  unsigned sign, exponent, mantissa;
 
   // Get rid of +NaN/-NaN case first.
   if (u > 0x7f800000) {
     return 0x7fffU;
   }
 
-  sign = ((x >> 16) & 0x8000);
+  unsigned sign = ((x >> 16) & 0x8000);
 
   // Get rid of +Inf/-Inf, +0/-0.
   if (u > 0x477fefff) {
@@ -61,8 +59,8 @@ unsigned short float2halfbits(float src) {
     return (sign | 0x0000);
   }
 
-  exponent = ((u >> 23) & 0xff);
-  mantissa = (u & 0x7fffff);
+  unsigned exponent = ((u >> 23) & 0xff);
+  unsigned mantissa = (u & 0x7fffff);
 
   if (exponent > 0x70) {
     shift = 13;
