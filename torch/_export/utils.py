@@ -222,7 +222,7 @@ def _rename_without_collisions(
 
 def _check_input_constraints_for_graph(
     input_placeholders: List[torch.fx.Node], flat_args_with_path, range_constraints
-):
+) -> None:
     def get_keystr(key_path: KeyPath) -> str:
         """For a given index into the flat_args, return a human readable string
         describing how to access it, e.g. "*args["foo"][0].bar"
