@@ -847,7 +847,6 @@ def sdpa_dense_backward(
     actual_grad_query = torch.empty_like(query)
     actual_grad_key = torch.empty_like(key)
     actual_grad_value = torch.empty_like(value)
-    # TODO can this be based off if score_mod_other_buffers requires grad?
     actual_grad_score_mod_captured = [
         torch.empty_like(buffer) if buffer.requires_grad else None
         for buffer in score_mod_other_buffers
