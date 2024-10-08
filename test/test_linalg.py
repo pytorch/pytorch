@@ -1251,7 +1251,7 @@ class TestLinalg(TestCase):
         # have to use torch.randn(...).to(bfloat16) instead of
         # This test compares torch.linalg.vector_norm's output with
         # torch.linalg.norm given a flattened tensor
-        ord_vector = [0, 0.9, 1, 2, 3, inf, -0.5, -1, -2, -3, -inf]
+        ord_vector = [0, 0.9, 1, 2, 3, inf, -0.5, -1, -2, -3, -inf, 1 + 2j]
         input_sizes = [
             (1, ),
             (10, ),
@@ -1275,7 +1275,11 @@ class TestLinalg(TestCase):
             return result
 
         def run_test_case(input, ord, dim, keepdim, norm_dtype):
-            if (input.numel() == 0 and
+            if ord.dtype.is_complex:
+                error_msg = "Expected a non-complex scalar"
+                with self.assertRaisesRegex(RuntimeError, error_msg):
+                    torch.linalg.vector_norm(input, ord, dim=dim, keepdim=keepdim, dtype=norm_dtype)
+            elif (input.numel() == 0 and
                 (ord < 0. or ord == inf) and
                (dim is None or input.shape[dim] == 0)):
                 # The operation does not have an identity.
