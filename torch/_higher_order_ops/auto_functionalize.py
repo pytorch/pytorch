@@ -28,9 +28,20 @@ def get_base(tensor):
 @dataclass
 class ViewInfo:
     base_index: int
-    size: Optional[Sequence[Union[int, torch.SymInt]]] = None
-    stride: Optional[Sequence[Union[int, torch.SymInt]]] = None
-    storage_offset: Optional[int] = None
+    # size, stride, and storage_offset passed to as_strided.
+    as_strided_info: Optional[
+        tuple[
+            Sequence[Union[int, torch.SymInt]], Sequence[Union[int, torch.SymInt]], int
+        ]
+    ] = None
+
+    # dim, start, and end passed to slice.Tensor
+    slice_info: Optional[
+        tuple[
+            Union[int, torch.SymInt], Union[int, torch.SymInt], Union[int, torch.SymInt]
+        ]
+    ] = None
+
     # When is_view is false, the tensor is the base, and
     # size, stride and storage_offset are all None.
     is_view: bool = True
@@ -47,16 +58,47 @@ class ViewInfo:
         if self.is_alias:
             return torch.ops.aten.alias.default(base)
 
-        assert self.stride is not None
-        assert self.size is not None
-        assert self.storage_offset is not None
+        if self.slice_info is not None:
+            return torch.ops.aten.slice.Tensor(
+                bases_list[self.base_index], *self.slice_info
+            )
 
+        assert self.as_strided_info is not None
         return torch.as_strided(
-            base,
-            self.size,
-            self.stride,
-            self.storage_offset,
+            bases_list[self.base_index],
+            *self.as_strided_info,
         )
+
+
+# return None or (dim, start, end)
+def try_use_slice(base, tensor):
+    if (
+        base.storage_offset() == tensor.storage_offset()
+        and base.stride() == tensor.stride()
+        and base.size() == tensor.size()
+    ):
+        return (0, 0, base.size()[0])
+
+    # TODO can we relax this for better coverage?
+    if tensor.stride() != base.stride():
+        return None
+    if len(tensor.size()) != len(base.size()):
+        return None
+
+    dim = None
+    count = 0
+    for i in range(len(tensor.size())):
+        if base.size()[i] != tensor.size()[i]:
+            dim = i
+            count = count + 1
+    if count != 1:
+        return None
+
+    if tensor.storage_offset() % tensor.stride()[dim] != 0:
+        return None
+    start = tensor.storage_offset() // tensor.stride()[dim]
+    end = start + tensor.size()[dim]
+    return (dim, start, end)
 
 
 def write_view_information_to_args(
@@ -81,6 +123,24 @@ def write_view_information_to_args(
         assert f"{prefix}_stride" not in kwargs
         assert f"{prefix}_storage_offset" not in kwargs
 
+        assert f"{prefix}_slice_dim" not in kwargs
+        assert f"{prefix}_slice_start" not in kwargs
+        assert f"{prefix}_slice_end" not in kwargs
+
+        def use_as_strided(tensor):
+            kwargs[f"{prefix}_size"] = tensor.size()
+            kwargs[f"{prefix}_stride"] = tensor.stride()
+            kwargs[f"{prefix}_storage_offset"] = tensor.storage_offset()
+
+        def use_slice(dim, start, end):
+            kwargs[f"{prefix}_slice_dim"] = dim
+            kwargs[f"{prefix}_slice_start"] = start
+            kwargs[f"{prefix}_slice_end"] = end
+
+        def use_alias():
+            kwargs[f"{prefix}_alias"] = True
+
+        # The start if the function
         if tensor is None:
             kwargs[f"{prefix}_base_index"] = None
         else:
@@ -94,11 +154,11 @@ def write_view_information_to_args(
                 and base.stride() == tensor.stride()
                 and base.size() == tensor.size()
             ):
-                kwargs[f"{prefix}_alias"] = True
+                use_alias()
+            elif (slice_info := try_use_slice(base, tensor)) is not None:
+                use_slice(*slice_info)
             else:
-                kwargs[f"{prefix}_size"] = tensor.size()
-                kwargs[f"{prefix}_stride"] = tensor.stride()
-                kwargs[f"{prefix}_storage_offset"] = tensor.storage_offset()
+                use_as_strided(tensor)
 
     for arg_name, arg_type in zip(mutable_arg_names, mutable_arg_types):
         arg = kwargs[arg_name]
@@ -148,16 +208,22 @@ def read_view_information_from_args(
         elif f"{prefix}_alias" in kwargs:
             get_arg(f"{prefix}_alias")
             return ViewInfo(base_index, all_bases[base_index], is_alias=True)
-        elif f"{prefix}_size" not in kwargs:
-            assert f"{prefix}_stride" not in kwargs
-            assert f"{prefix}_storage_offset" not in kwargs
-            # This means that the argument is the base tensor
-            return ViewInfo(base_index, all_bases[base_index], is_view=False)
-        else:
+        elif f"{prefix}_storage_offset" in kwargs:
+            # The view is regenerated using as_strided.
             size = get_arg(f"{prefix}_size")
             stride = get_arg(f"{prefix}_stride")
             storage_offset = get_arg(f"{prefix}_storage_offset")
-            return ViewInfo(base_index, size, stride, storage_offset)
+            return ViewInfo(
+                base_index, as_strided_info=(size, stride, storage_offset), is_view=True
+            )
+        elif f"{prefix}_slice_dim" in kwargs:
+            dim = get_arg(f"{prefix}_slice_dim")
+            start = get_arg(f"{prefix}_slice_start")
+            end = get_arg(f"{prefix}_slice_end")
+            return ViewInfo(base_index, slice_info=(dim, start, end), is_view=True)
+        else:
+            # This means that the argument is the base tensor
+            return ViewInfo(base_index, all_bases[base_index], is_view=False)
 
     args_view_info: Dict[str, Any] = {}
     for arg_name, arg_type in zip(mutable_arg_names, mutable_arg_types):
