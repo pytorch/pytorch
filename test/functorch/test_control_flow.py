@@ -4902,7 +4902,6 @@ def forward(self, arg0_1, arg1_1):
     return [getitem]""",  # noqa: B950
         )
 
-    @skipIfCrossRef  # Arg order changes with crossref
     def test_cond_make_fx_preserve_stack_trace_for_nodes_in_subgraph(self):
         def true_fn(x):
             return x + x.cos()
@@ -5253,7 +5252,6 @@ def forward(self, arg0_1):
         ):
             torch.cond(inp.sum() > 0, f, f, (inp, tmp))
 
-    @skipIfCrossRef  # Arg order changes with crossref
     def test_cond_trace_set__and_mutate_intermediate(self):
         def f(a, tmp):
             a = a.clone()
