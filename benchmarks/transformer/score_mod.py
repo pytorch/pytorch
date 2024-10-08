@@ -5,7 +5,7 @@ import random
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from functools import partial
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple, Union
 
 import numpy as np
 from tabulate import tabulate
@@ -124,6 +124,66 @@ def generate_inputs(
     return query, key, value
 
 
+def extend_offsets(offsets, B):
+    batch_lengths = offsets[-1]
+    offsets_ref = offsets[:-1]
+    offsets = [offsets_ref + batch_lengths * i for i in range(B)]
+    offsets.append(
+        torch.tensor(
+            [batch_lengths * B], device=offsets_ref.device, dtype=offsets_ref.dtype
+        )
+    )
+    offsets = torch.cat(offsets, dim=0)
+    return offsets
+
+
+def generate_jagged_inputs(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    offsets: torch.Tensor,
+):
+    B, Hq, M, D = query.shape
+    _, Hkv, N, _ = key.shape
+
+    def offsets_to_lengths(
+        offsets: torch.Tensor, device: Union[str, torch.device]
+    ) -> torch.tensor:
+        """Converts a list of offsets to a list of lengths. Reverse op of attn_gym.masks.document_mask.length_to_offsets
+
+        Args:
+            offsets: A 1D tensor of offsets
+            device: The device to place the output tensor on
+        """
+        lengths = offsets[1:] - offsets[:-1]
+        return lengths
+
+    offsets = extend_offsets(offsets, B)
+
+    flatten_q = query.transpose(1, 2).flatten(start_dim=0, end_dim=1)
+    flatten_k = key.transpose(1, 2).flatten(start_dim=0, end_dim=1)
+    flatten_v = value.transpose(1, 2).flatten(start_dim=0, end_dim=1)
+
+    q_list = [
+        flatten_q[offsets[i] : offsets[i + 1]].clone().detach().to(query.dtype)
+        for i in range(len(offsets) - 1)
+    ]
+    q = torch.nested.as_nested_tensor(q_list, device=query.device)
+
+    k_list = [
+        flatten_k[offsets[i] : offsets[i + 1]].clone().detach().to(key.dtype)
+        for i in range(len(offsets) - 1)
+    ]
+    k = torch.nested.as_nested_tensor(k_list, device=key.device)
+    v_list = [
+        flatten_v[offsets[i] : offsets[i + 1]].clone().detach().to(value.dtype)
+        for i in range(len(offsets) - 1)
+    ]
+    v = torch.nested.as_nested_tensor(v_list, device=value.device)
+
+    return q, k, v
+
+
 def query_key_value_clones(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -161,17 +221,15 @@ def run_single_experiment(
     )
     is_decoding = q_seq_len == 1
 
-    q_eager, k_eager, v_eager = query_key_value_clones(query, key, value)
-    q_FA, k_FA, v_FA = query_key_value_clones(query, key, value)
-    q_FA, k_FA, v_FA = q_FA.transpose(1, 2), k_FA.transpose(1, 2), v_FA.transpose(1, 2)
-
     score_mod = generate_score_mod(config.attn_type, config.shape)
     block_mask, mask_kwargs = generate_block_mask(config.attn_type, config.shape)
     if run_FA:
         FA = (
             generate_FD_callable(config.attn_type, config.shape, config.dtype)
             if is_decoding
-            else generate_FA_callable(config.attn_type, config.shape, config.dtype)
+            else generate_FA_callable(
+                config.attn_type, config.shape, config.dtype, **mask_kwargs
+            )
         )
     else:
         FA = None
@@ -194,8 +252,22 @@ def run_single_experiment(
     else:
         compiled_sdpa = torch.compile(flex_attention, dynamic=dynamic)
 
-    # print("shape", config.shape)
-    # print(str(block_mask))
+    if config.attn_type == "document_mask":
+        q_eager, k_eager, v_eager = generate_jagged_inputs(
+            query, key, value, **mask_kwargs
+        )
+        q_eager = q_eager.transpose(1, 2).requires_grad_(query.requires_grad)
+        k_eager = k_eager.transpose(1, 2).requires_grad_(key.requires_grad)
+        v_eager = v_eager.transpose(1, 2).requires_grad_(value.requires_grad)
+    else:
+        q_eager, k_eager, v_eager = query_key_value_clones(query, key, value)
+
+    q_FA, k_FA, v_FA = query_key_value_clones(query, key, value)
+    q_FA, k_FA, v_FA = q_FA.transpose(1, 2), k_FA.transpose(1, 2), v_FA.transpose(1, 2)
+    if config.attn_type == "document_mask":
+        q_FA = q_FA.flatten(start_dim=0, end_dim=1)
+        k_FA = k_FA.flatten(start_dim=0, end_dim=1)
+        v_FA = v_FA.flatten(start_dim=0, end_dim=1)
 
     out_compile = compiled_sdpa(
         query=query,
@@ -208,15 +280,30 @@ def run_single_experiment(
 
     if eager_sdpa:
         out_eager = eager_sdpa(query=q_eager, key=k_eager, value=v_eager)
-        if not (
+        if config.attn_type in ["document_mask"]:
+            flatten_o_eager = torch.cat(torch.unbind(out_eager.transpose(1, 2)))
+            flatten_o_compile = out_compile.transpose(1, 2).flatten(
+                start_dim=0, end_dim=1
+            )
+            torch.testing.assert_close(
+                flatten_o_eager, flatten_o_compile, atol=1e-2, rtol=1e-2
+            )
+        elif not (
             config.attn_type in ["rel", "alibi"]
             and config.dtype in [torch.float16, torch.bfloat16]
         ):  # rel has accuracy issue with 16bit floats
             torch.testing.assert_close(out_eager, out_compile, atol=1e-2, rtol=1e-2)
 
     if FA:
-        out_FA = FA(q=q_FA, k=k_FA, v=v_FA).transpose(1, 2)
-        torch.testing.assert_close(out_FA, out_compile, atol=1e-2, rtol=1e-2)
+        out_FA = FA(q=q_FA, k=k_FA, v=v_FA)
+        if config.attn_type in ["document_mask"]:
+            B, Hq, M, Hkv, N, D = config.shape
+            out_FA_updated = out_FA.reshape(B, -1, Hq, D)
+        else:
+            out_FA_updated = out_FA
+        torch.testing.assert_close(
+            out_FA_updated, out_compile.transpose(1, 2), atol=1e-2, rtol=1e-2
+        )
 
     if eager_sdpa:
         forward_eager_time = benchmark_torch_function_in_microseconds(
@@ -242,8 +329,9 @@ def run_single_experiment(
         forward_FA_time = float("nan")
 
     if config.calculate_bwd_time:
-        if eager_sdpa:
-            dOut = torch.randn_like(out_eager)
+        # TODO: debug backward pass for njt
+        if eager_sdpa and not config.attn_type == "document_mask":
+            dOut = torch.randn_like(out_eager.transpose(1, 2)).transpose(1, 2)
             backward_eager_time = benchmark_torch_function_in_microseconds(
                 out_eager.backward, dOut, retain_graph=True
             )
@@ -565,6 +653,8 @@ def generate_block_mask(attn_type: str, shape: Tuple[int]):
         return modalities.long()
 
     mask_mod_kwargs = {}
+
+    assert attn_type != "document_mask" or not is_decoding
     if attn_type == "document_mask":
         random.seed(0)
         lengths = generate_random_lengths(N, 4)
@@ -613,11 +703,11 @@ def generate_block_mask(attn_type: str, shape: Tuple[int]):
 
 
 def generate_FA_callable(
-    attn_type: str, shape: Tuple[int], dtype: torch.dtype
+    attn_type: str, shape: Tuple[int], dtype: torch.dtype, **kwargs
 ) -> Callable | None:
     if dtype not in [torch.float16, torch.bfloat16]:
         return None
-    from flash_attn import flash_attn_func
+    from flash_attn import flash_attn_func, flash_attn_varlen_func
 
     B, Hq, M, Hkv, N, D = shape
 
@@ -626,6 +716,21 @@ def generate_FA_callable(
         h = torch.arange(Hq, dtype=torch.float32, device="cuda")
         alibi_slopes = -torch.exp2(-((h + 1) * 8.0 / Hq))
         FA_kwargs = dict(alibi_slopes=alibi_slopes)
+    elif attn_type == "document_mask":
+        extended_offsets = extend_offsets(kwargs["offsets"], B)
+        FA_kwargs["cu_seqlens_q"] = extended_offsets.to(torch.int32)
+        FA_kwargs["cu_seqlens_k"] = extended_offsets.to(torch.int32)
+
+        def offsets_to_lengths(
+            offsets: torch.Tensor, device: Union[str, torch.device]
+        ) -> torch.tensor:
+            lengths = offsets[1:] - offsets[:-1]
+            return lengths
+
+        lengths = offsets_to_lengths(kwargs["offsets"], "cpu")
+        max_length = torch.max(lengths)
+        FA_kwargs["max_seqlen_q"] = max_length
+        FA_kwargs["max_seqlen_k"] = max_length
 
     FA_dict = {
         "noop": partial(flash_attn_func, causal=False),
@@ -636,9 +741,9 @@ def generate_FA_callable(
         "sliding_window": partial(
             flash_attn_func, window_size=(sliding_window_size, 0), causal=True
         ),
-        "document_mask": None,  # via Mahabar
+        "document_mask": partial(flash_attn_varlen_func, causal=True, **FA_kwargs),
         "prefix_lm": None,
-        "softcap": None,
+        "softcap": partial(flash_attn_func, softcap=softcap_value, causal=True),
         "transfusion": None,
     }
 
@@ -686,15 +791,15 @@ def generate_FD_callable(
 
 
 def generate_eager_sdpa(
-    attn_type: str, shape: Tuple[int], dtype: torch.dtype, block_mask: BlockMask
+    attn_type: str,
+    shape: Tuple[int],
+    dtype: torch.dtype,
+    block_mask: BlockMask,
+    **kwargs,
 ) -> Callable | None:
     B, Hq, M, Hkv, N, D = shape
     is_decoding = M == 1
-    if (
-        attn_type == "sliding_window"
-        or attn_type == "document_mask"
-        or attn_type == "prefix_ml"
-    ):
+    if attn_type == "sliding_window" or attn_type == "prefix_ml":
         attn_mask = create_mask(block_mask.mask_mod, 1, 1, M, N, device="cuda")
     elif attn_type == "rel":
         m = torch.arange(M, dtype=int, device="cuda")
@@ -737,8 +842,10 @@ def generate_eager_sdpa(
             F.scaled_dot_product_attention, is_causal=False, enable_gqa=(Hq != Hkv)
         ),
         "document_mask": partial(
-            F.scaled_dot_product_attention, is_causal=False, enable_gqa=(Hq != Hkv)
-        ),
+            F.scaled_dot_product_attention, is_causal=True, enable_gqa=(Hq != Hkv)
+        )
+        if Hq == Hkv
+        else None,
         "prefix_lm": partial(
             F.scaled_dot_product_attention, is_causal=False, enable_gqa=(Hq != Hkv)
         ),
