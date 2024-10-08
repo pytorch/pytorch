@@ -905,13 +905,20 @@ class ChromiumEventLogger:
         :param time_ns Timestamp in nanoseconds
         :param metadata: Any extra metadata associated with this event
         """
+
+        # Add compile id to metadata
+        if metadata is None:
+            metadata = {}
+        compile_id = str(torch._guards.CompileContext.current_compile_id())
+        metadata["compile_id"] = compile_id
+
         event = self._log_timed_event(
             event_name,
             time_ns,
             "B",
             metadata,
         )
-        log_chromium_event_internal(event, self.get_stack(), self.id_)
+        log_chromium_event_internal(event, self.get_stack(), compile_id, self.id_)
         self.get_stack().append(event_name)
 
     def reset(self) -> None:
@@ -935,6 +942,12 @@ class ChromiumEventLogger:
         :param time_ns: Timestamp in nanoseconds
         :param metadata: Any extra metadata associated with this event
         """
+        # Add compile id to metadata
+        if metadata is None:
+            metadata = {}
+        compile_id = str(torch._guards.CompileContext.current_compile_id())
+        metadata["compile_id"] = compile_id
+
         # These stack health checks currently never happen,
         # but they're written this way to future proof any weird event
         # overlaps in the future.
@@ -961,7 +974,7 @@ class ChromiumEventLogger:
             )
             stack.pop()
 
-        log_chromium_event_internal(event, stack, self.id_, start_time_ns)
+        log_chromium_event_internal(event, stack, compile_id, self.id_, start_time_ns)
         # Finally pop the actual event off the stack
         stack.pop()
 
@@ -1006,6 +1019,10 @@ class ChromiumEventLogger:
         :param Optional[Dict[str, Any]] metadata: Any extra metadata associated with this event
         :param str cname optional color for the arrow in the trace
         """
+        if metadata is None:
+            metadata = {}
+        compile_id = str(torch._guards.CompileContext.current_compile_id())
+        metadata["compile_id"] = compile_id
         event = {
             "name": event_name,
             "ts": time_ns / 1000,
@@ -1024,7 +1041,7 @@ class ChromiumEventLogger:
             expect_trace_id=True,
         )
         # Log an instant event with the same start and end time
-        log_chromium_event_internal(event, self.get_stack(), self.id_)
+        log_chromium_event_internal(event, self.get_stack(), compile_id, self.id_)
 
 
 CHROMIUM_EVENT_LOG: Optional[ChromiumEventLogger] = None
@@ -3099,10 +3116,16 @@ def is_parameter_freezing():
     return torch._inductor.config.freezing and not torch.is_grad_enabled()
 
 
-def get_torch_function_mode_stack():
-    return [
+def get_torch_function_mode_stack(filter_ignored=True):
+    from .variables.torch_function import IGNORED_MODES
+
+    stack = [
         get_torch_function_mode_stack_at(i) for i in range(_len_torch_function_stack())
     ]
+    if filter_ignored:
+        stack = [mode for mode in stack if type(mode) not in IGNORED_MODES]
+
+    return stack
 
 
 def get_torch_function_mode_stack_at(ind):
