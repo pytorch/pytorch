@@ -841,7 +841,6 @@ class LOBPCG:
         compiling functions using lobpcg.
         """
         # do nothing when in TorchScript mode
-        pass
 
     # Internal methods
 

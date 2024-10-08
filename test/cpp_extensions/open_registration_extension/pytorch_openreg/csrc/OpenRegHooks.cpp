@@ -11,10 +11,6 @@ namespace {
 // Python dictionary where real implementations can be found
 PyObject* py_registry;
 
-py::function get_method(const char* name) {
-    return  py::cast<py::dict>(py_registry)[name];
-}
-
 // C++ hooks implementation
 struct OpenRegHooksArgs : public at::PrivateUse1HooksArgs {};
 
@@ -199,7 +195,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * Wait (by blocking the calling thread) until all the work previously
    * enqueued on the stream has completed running on the device.
    */
-  virtual void synchronizeStream(const c10::Stream& stream) const {
+  virtual void synchronizeStream(const c10::Stream& stream) const override {
     py::gil_scoped_acquire acquire;
     get_method("synchronizeStream")(stream);
   }
@@ -242,5 +238,13 @@ C10_REGISTER_GUARD_IMPL(PrivateUse1, OpenRegGuardImpl);
 // Setter for the python dictionary with implementations
 void set_impl_registry(PyObject* registry) {
     py_registry = registry;
+}
+
+py::function get_method(const char* name) {
+    auto dict = py::cast<py::dict>(py_registry);
+    TORCH_CHECK(dict.contains(name), "OpenReg registry does not contain ",
+        "an implementation for '", name, "' make sure to add it in the __init__.py "
+        "file and register it.")
+    return dict[name];
 }
 } // openreg

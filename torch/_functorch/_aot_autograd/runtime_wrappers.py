@@ -167,8 +167,7 @@ def _identity(x):
 
 class AliasOfInputHandler:
     def __init__(self, info, runtime_metadata, trace_joint):
-        num_tokens = len(runtime_metadata.tokens)
-        self.base_idx = info.base_idx + num_tokens
+        self.base_idx = info.base_idx
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
         self.requires_grad = info.requires_grad
         self.functional_tensor = info.functional_tensor
@@ -187,8 +186,7 @@ class AliasOfInputHandler:
 
 class IsInputHandler:
     def __init__(self, info, runtime_metadata, trace_joint):
-        num_tokens = len(runtime_metadata.tokens)
-        self.base_idx = info.base_idx + num_tokens
+        self.base_idx = info.base_idx
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
 
     def __call__(self, orig_inputs, fw_outs, out):
@@ -265,17 +263,16 @@ def _create_runtime_wrapper(
     #       and doing so requires us accessing the corresponding input after the compiled artifact has run.
     epilogue_args_idx = []
     epilogue_args_idx.extend(runtime_metadata.mutated_inp_runtime_indices)
-    num_tokens = len(runtime_metadata.tokens)
     for info in runtime_metadata.output_info:
         if (
             info.output_type == OutputType.alias_of_input
             or info.output_type == OutputType.is_input
         ):
             assert isinstance(info.base_idx, int)
-            epilogue_args_idx.append(info.base_idx + num_tokens)
+            epilogue_args_idx.append(info.base_idx)
 
     if config.unlift_effect_tokens:
-        assert num_tokens == 0
+        assert len(runtime_metadata.tokens) == 0
 
     replay_views = config.view_replay_for_aliased_outputs
     if runtime_metadata.num_outputs_aliased > 0:
@@ -285,12 +282,6 @@ def _create_runtime_wrapper(
         )
 
     def runtime_wrapper(args: List[Any]):
-        if num_tokens > 0:
-            # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
-            old_args = args
-            args = [[None] * num_tokens, *args]
-            old_args.clear()
-
         # stash a ref to each input tensor we plan to use after the compiled function
         orig_inputs = {i: args[i] for i in epilogue_args_idx}
 
@@ -343,11 +334,7 @@ def _create_runtime_wrapper(
             == num_mutated_runtime_inps
             + runtime_metadata.num_outputs
             + num_intermediate_bases
-            + num_tokens
         )
-
-        # Toss out the effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
-        all_outs = all_outs[num_tokens:]
 
         # Step 3: After running the compiled fw, apply updates to mutated inputs
         num_mutations_to_apply = runtime_metadata.num_mutated_inp_runtime_indices
@@ -652,6 +639,38 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
                 is_runtime=True,
             )
             return wrapped_outs
+
+        # box it
+        inner_fn._boxed_call = True  # type: ignore[attr-defined]
+        return inner_fn
+
+
+@dataclass
+class EffectTokensWrapper(CompilerWrapper):
+    def post_compile(
+        self,
+        compiled_fn,
+        _aot_config,
+        *,
+        runtime_metadata: ViewAndMutationMeta,
+    ):
+        num_tokens = len(runtime_metadata.tokens)
+
+        @wraps(compiled_fn)
+        def inner_fn(args: List[Any]):
+            if num_tokens > 0:
+                # Pass in forward effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
+                old_args = args
+                args = [*([None] * num_tokens), *args]
+                old_args.clear()
+
+            outs = compiled_fn(args)
+
+            # Inductor cache DummyModule can return None
+            if outs is None:
+                return None
+            # Toss out the effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
+            return outs[num_tokens:] if num_tokens != 0 else outs
 
         # box it
         inner_fn._boxed_call = True  # type: ignore[attr-defined]
@@ -1419,19 +1438,29 @@ class AutogradLazyBackwardCompileInfo:
 # No need to make it into an actual CompilerWrapper because it doesn't fit the abstract as cleanly
 class AOTDispatchAutograd:
     @staticmethod
-    def _force_contiguous(x):
+    def coerce_runtime_tangent_tracing_memory_format(x, memory_format):
         if not isinstance(x, torch.Tensor):
             return x
-        x = x.contiguous()
-        if not is_traceable_wrapper_subclass(x):
+
+        is_subclass: bool = is_traceable_wrapper_subclass(x)
+        mem_format = memory_format[0] if is_subclass else memory_format
+
+        if not x.is_contiguous(memory_format=mem_format):
+            x = x.contiguous(memory_format=mem_format)
+
+        if not is_subclass:
             return x
-        for attr in x.__tensor_flatten__()[0]:  # type: ignore[attr-defined]
+        for i, attr in enumerate(x.__tensor_flatten__()[0]):  # type: ignore[attr-defined]
             elem = getattr(x, attr)
-            if not elem.is_contiguous():
-                setattr(x, attr, elem.contiguous())
+            new_elem = AOTDispatchAutograd.coerce_runtime_tangent_tracing_memory_format(
+                elem, memory_format[1 + i]
+            )
+            if new_elem is not elem:
+                setattr(x, attr, new_elem)
+
         return x
 
-    # See Note [Tangents must be contiguous, Part 2]
+    # See Note [Tangents memory format, Part 2]
     @staticmethod
     def coerce_runtime_tangent(x, metadata):
         if not isinstance(x, torch.Tensor):
@@ -1481,6 +1510,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             maybe_subclass_metadata: Optional[SubclassMeta] = maybe_subclass_meta
             num_symints_saved_for_bw = num_symints_saved_for_bw_
             _compiled_autograd_should_lift = False
+            _aot_id = aot_config.aot_id
+            _lazy_backward_info = lazy_backward_info
 
             @staticmethod
             def _compiled_autograd_key(ctx):
@@ -1512,7 +1543,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 num_mutated_runtime_inps = (
                     CompiledFunction.metadata.num_mutated_inp_runtime_indices
                 )
-                num_tokens = len(CompiledFunction.metadata.tokens)
                 num_forward_returns = CompiledFunction.metadata.num_forward_returns
 
                 # Partitioners must put symint arguments at the end separate from tensor arguments
@@ -1550,7 +1580,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         # (instead of looping over inputs with either data or metadata mutations), but there shouldn't be many.
                         info = CompiledFunction.metadata.input_info[idx]
                         if info.mutates_metadata and not info.mutates_data:
-                            raw_return_idx = num_tokens + i
+                            raw_return_idx = i
                             raw_returns[raw_return_idx] = TensorAlias(
                                 raw_returns[raw_return_idx]
                             )
@@ -1568,7 +1598,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 if CompiledFunction.metadata.num_unsafe_view_outputs > 0:
                     for idx in CompiledFunction.metadata.unsafe_view_out_indices:
-                        raw_return_idx = num_tokens + num_mutated_runtime_inps + idx
+                        raw_return_idx = num_mutated_runtime_inps + idx
                         o = raw_returns[raw_return_idx]
                         raw_returns[raw_return_idx] = torch.ops.aten._unsafe_view(
                             o, o.shape
@@ -1576,14 +1606,14 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 if num_outputs_aliased > 0:
                     for idx in CompiledFunction.metadata.aliased_out_indices:
-                        raw_return_idx = num_tokens + num_mutated_runtime_inps + idx
+                        raw_return_idx = num_mutated_runtime_inps + idx
                         raw_returns[raw_return_idx] = TensorAlias(
                             raw_returns[raw_return_idx]
                         )
 
                     if config.debug_assert:
                         intermediates_raw = raw_returns[
-                            num_tokens + num_mutated_runtime_inps + num_outputs :
+                            num_mutated_runtime_inps + num_outputs :
                         ]
                         assert not any(
                             isinstance(x, TensorAlias) for x in intermediates_raw
@@ -1592,7 +1622,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # invariant: intermediate bases always require gradients, so we don't have to
                 # consider marking them as non-differentiable.
                 raw_returns_not_including_intermediate_bases = raw_returns[
-                    : num_mutated_runtime_inps + num_outputs + num_tokens
+                    : num_mutated_runtime_inps + num_outputs
                 ]
                 raw_returns_meta = [
                     x
@@ -1603,7 +1633,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 fw_outs_not_requiring_grad = [
                     x
                     for (i, x) in enumerate(
-                        raw_returns_not_including_intermediate_bases[num_tokens:]
+                        raw_returns_not_including_intermediate_bases
                     )
                     if isinstance(x, torch.Tensor)
                     and not raw_returns_meta[i].requires_grad
@@ -1629,12 +1659,10 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 num_mutated_runtime_inps = (
                     CompiledFunction.metadata.num_mutated_inp_runtime_indices
                 )
-                num_tokens = len(CompiledFunction.metadata.tokens)
                 expected_grad_outs = (
                     CompiledFunction.metadata.num_outputs
                     + num_mutated_runtime_inps
                     + num_intermediate_bases
-                    + num_tokens
                 )
                 deterministic = CompiledFunction.metadata.deterministic
                 global_deterministic = torch.are_deterministic_algorithms_enabled()
@@ -1653,16 +1681,13 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 out_info = CompiledFunction.metadata.output_info
 
                 inp_tangents, out_tangents, intermediate_base_tangents = (
-                    flat_args[num_tokens:num_mutated_runtime_inps],
+                    flat_args[:num_mutated_runtime_inps],
                     flat_args[
-                        num_tokens
-                        + num_mutated_runtime_inps : num_tokens
-                        + num_mutated_runtime_inps
+                        num_mutated_runtime_inps : num_mutated_runtime_inps
                         + CompiledFunction.metadata.num_outputs
                     ],
                     flat_args[
-                        num_tokens
-                        + num_mutated_runtime_inps
+                        num_mutated_runtime_inps
                         + CompiledFunction.metadata.num_outputs :
                     ],
                 )
@@ -1715,20 +1740,23 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     # Add the seed and offset to args
                     rng_args = CUDARngStateHelper.get_torch_state_as_tuple()
 
+                bw_tokens = [None] * CompiledFunction.metadata.num_backward_tokens
+
                 # - note: donated buffer logic requires (*ctx.symints, *ctx.saved_tensors) showing up first
                 #   in the bw output order.
+
+                # Every dereference of ctx.saved_tensors incurs saved_tensors_hooks calls
+                # There are tests that count these calls, saving to var.
+                ctx_saved_tensors = ctx.saved_tensors
+                num_ctx_saved_tensors = len(ctx_saved_tensors)
                 all_args = [
                     *ctx.symints,
-                    *ctx.saved_tensors,
+                    *ctx_saved_tensors,
                     *flat_bw_args_with_grads,
+                    *bw_tokens,
                     *rng_args,
                 ]
-                del flat_bw_args_with_grads
-
-                tangents_start_idx = (
-                    len(all_args) - num_flat_bw_args_with_grads - len(rng_args)
-                )
-                tangents_end_idx = len(all_args) - len(rng_args)
+                del ctx_saved_tensors
 
                 # Note: [AOTAutograd Backward Guards]
                 # During AOTDispatch, we eagerly create and trace out a joint fw-bw graph.
@@ -1756,9 +1784,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     len(CompiledFunction.metadata.output_types)
                     == num_flat_bw_args_with_grads
                 )
-                grad_output_types = [
-                    type(x) for x in all_args[-num_flat_bw_args_with_grads:]
-                ]
+
+                grad_output_types = [type(x) for x in flat_bw_args_with_grads]
                 # In general, we can add more asserts/guards here for when we partitioned
                 # with incorrect assumptions about the grad_outputs.
                 # Normalize FakeTensor -> torch.Tensor
@@ -1775,6 +1802,17 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
     If you run into this error, please file an issue.
     Expected grad_output types: {str(CompiledFunction.metadata.output_types)}
     Got grad_output types: {str(grad_output_types)}"""
+
+                del flat_bw_args_with_grads
+
+                tangents_start_idx = (
+                    len(all_args)
+                    - num_flat_bw_args_with_grads
+                    - len(rng_args)
+                    - len(bw_tokens)
+                )
+                assert tangents_start_idx == len(ctx.symints) + num_ctx_saved_tensors
+                tangents_end_idx = len(all_args) - len(rng_args) - len(bw_tokens)
 
                 # TODO: figure out how to refactor the backward properly
                 # so I can use aot_dispatch_subclass_wrapper() here.
@@ -1837,29 +1875,53 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         )
                         for i, t in enumerate(all_args)
                     ]
+                    # Coercing tangents memory format before unwrapping tensor subclasses,
+                    # As we have to coerce Subclass tangent first and then its Tensor attributes.
+                    assert (
+                        CompiledFunction.metadata.traced_tangent_memory_formats
+                        is not None
+                    )
+                    all_args = [
+                        (
+                            AOTDispatchAutograd.coerce_runtime_tangent_tracing_memory_format(
+                                t,
+                                CompiledFunction.metadata.traced_tangent_memory_formats[
+                                    i - tangents_start_idx
+                                ],
+                            )
+                            if tangents_start_idx <= i < tangents_end_idx
+                            else t
+                        )
+                        for i, t in enumerate(all_args)
+                    ]
                     all_args = unwrap_tensor_subclasses(
                         all_args, is_joint_structure=False
                     )
-                    tangents_start_idx = len(all_args) - len_tangents - len(rng_args)
-                    tangents_end_idx = tangents_start_idx + len_tangents
-
-                # Make the tangents contiguous. Note that we must do this after subclass desugaring
-                # because inputs to inductor have to be contiguous
-                all_args = [
-                    (
-                        AOTDispatchAutograd._force_contiguous(t)
-                        if (tangents_start_idx <= i < tangents_end_idx)
-                        else t
+                else:
+                    assert (
+                        CompiledFunction.metadata.traced_tangent_memory_formats
+                        is not None
                     )
-                    for i, t in enumerate(all_args)
-                ]
+                    all_args = [
+                        (
+                            AOTDispatchAutograd.coerce_runtime_tangent_tracing_memory_format(
+                                t,
+                                CompiledFunction.metadata.traced_tangent_memory_formats[
+                                    i - tangents_start_idx
+                                ],
+                            )
+                            if (tangents_start_idx <= i < tangents_end_idx)
+                            else t
+                        )
+                        for i, t in enumerate(all_args)
+                    ]
 
                 def call_compiled_backward():
                     if ctx._is_compiled_autograd_tracing():
                         if lazy_backward_info is None:
                             raise RuntimeError(
                                 """This compiled backward function was saved by AOTAutogradCache, which does not support
-                            compiled autograd. Please turn off AOTAutogradCache using `ENABLE_AOT_AUTOGRAD_CACHE=0` to continue."""
+                            compiled autograd. Please turn off AOTAutogradCache using `TORCHINDUCTOR_AUTOGRAD_CACHE=0`."""
                             )
                         bw_module = lazy_backward_info.bw_module
                         # For compiled autograd, run raw FX graph so that it can be inlined into the larger graph
@@ -1927,7 +1989,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             # Maybe save cache entry
                             if try_save_cache_entry is not None:
                                 try_save_cache_entry(
-                                    CompiledFunction.compiled_bw, fw_metadata
+                                    CompiledFunction.compiled_bw,
+                                    fw_metadata,
+                                    aot_config,
                                 )
 
                     if (
@@ -1953,6 +2017,12 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         steal_args=True,
                         disable_amp=disable_amp,
                     )
+
+                    # Toss out the backward output tokens
+                    num_bw_tokens = CompiledFunction.metadata.num_backward_tokens
+                    if num_bw_tokens > 0:
+                        out = out[:-num_bw_tokens]
+
                     # TODO: replace this with FunctionalizedRngRuntimeWrapper.post_compile
                     out = FunctionalizedRngRuntimeWrapper()._functionalized_rng_runtime_epilogue(
                         CompiledFunction.metadata, out, offset_index=len(out) - 1
@@ -1977,6 +2047,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     class CompiledFunctionBackward(torch.autograd.Function):
                         # CompiledFunctionBackward is not yet supported in dynamo skipfiles
                         _compiled_autograd_should_lift = False
+                        _aot_id = aot_config.aot_id
 
                         @staticmethod
                         def forward(ctx, *unused_args):
@@ -2020,8 +2091,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         out,
                         subclass_metas=CompiledFunction.maybe_subclass_metadata.grad_input_metas,
                     )
-                    return (*[None] * num_tokens, *outs_wrapped)
-                return (*[None] * num_tokens, *out)
+                    return outs_wrapped
+                return out
 
         compiled_function = RuntimeWrapper(
             indices_of_inps_to_detach=indices_of_inps_to_detach,

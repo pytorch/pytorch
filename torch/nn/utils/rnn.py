@@ -285,10 +285,10 @@ def pack_padded_sequence(
 ) -> PackedSequence:
     r"""Packs a Tensor containing padded sequences of variable length.
 
-    :attr:`input` can be of size ``T x B x *`` where ``T`` is the length of the
-    longest sequence, ``B`` is the batch size, and ``*`` is any number of dimensions
-    (including 0). If :attr:`batch_first` is ``False``, ``T x B x *`` :attr:`input` is expected,
-    ``B x T x *`` otherwise.
+    :attr:`input` can be of size ``T x B x *`` (if :attr:`batch_first` is ``False``)
+    or ``B x T x *`` (if :attr:`batch_first` is ``True``) where ``T`` is the length
+    of the longest sequence, ``B`` is the batch size, and ``*`` is any number of dimensions
+    (including 0).
 
     For unsorted sequences, use `enforce_sorted = False`. If :attr:`enforce_sorted` is
     ``True``, the sequences should be sorted by length in a decreasing order, i.e.

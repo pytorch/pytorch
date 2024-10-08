@@ -23,7 +23,6 @@ from torch.distributed._tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed._tensor.placement_types import _StridedShard
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp._init_utils import (
     _init_inter_node_process_group,
@@ -34,6 +33,7 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_fsdp import FSDPTestMultiThread, MLP
 from torch.testing._internal.common_utils import run_tests
@@ -382,6 +382,18 @@ class TestFullyShardShardedParameterTensor(FSDPTestMultiThread):
             ValueError, "Change scalar_p to a 1D tensor with numel equal to 1."
         ):
             fully_shard(model)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_raise_noncontiguous_parameter(self):
+        """
+        Tests raising an exception when the model has non-contiguous
+        parameters. This is due to lack of implementation support.
+        """
+        conv2d = nn.Conv2d(8, 8, 3).to(memory_format=torch.channels_last)
+        with self.assertRaisesRegex(
+            NotImplementedError, "FSDP does not support non-contiguous parameters"
+        ):
+            fully_shard(conv2d)
 
 
 class TestFullyShardShardedParameterDTensor(FSDPTestMultiThread):

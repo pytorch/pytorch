@@ -34,15 +34,11 @@
 
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstdint>
 #include <functional>
-#include <iostream>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <queue>
-#include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_set>
@@ -649,8 +645,7 @@ void Engine::reentrant_thread_init() {
 }
 
 void Engine::thread_on_exception(
-    // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    std::shared_ptr<GraphTask> graph_task,
+    const std::shared_ptr<GraphTask>& graph_task,
     const std::shared_ptr<Node>& fn,
     std::exception& e) {
   graph_task->set_exception(std::current_exception(), fn);
@@ -824,9 +819,15 @@ static variable_list call_tensor_pre_hooks(Node& fn, variable_list inputs) {
 static variable_list call_post_hooks(
     Node& fn,
     variable_list outputs,
-    const variable_list& inputs) {
+    const variable_list& inputs,
+    const bool had_post_hooks) {
   for (const auto& hook : fn.post_hooks()) {
-    outputs = (*hook)(outputs, inputs);
+    if (had_post_hooks) {
+      outputs = (*hook)(outputs, inputs);
+    } else {
+      variable_list null_inputs;
+      outputs = (*hook)(outputs, null_inputs);
+    }
   }
   return outputs;
 }
@@ -981,11 +982,8 @@ static variable_list call_function(
     return ss.str();
   });
 
-  if (has_post_hooks) {
-    // NOLINTNEXTLINE(bugprone-use-after-move)
-    return call_post_hooks(fn, std::move(outputs), inputs);
-  }
-  return outputs;
+  // NOLINTNEXTLINE(bugprone-use-after-move)
+  return call_post_hooks(fn, std::move(outputs), inputs, has_post_hooks);
 }
 
 void Engine::evaluate_function(
@@ -1112,7 +1110,7 @@ void Engine::evaluate_function(
           next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
 
       if (is_ready) {
-        auto queue = ready_queue(cpu_ready_queue, input_buffer.device());
+        auto queue = ready_queue(cpu_ready_queue, next.function->device());
         queue->push(
             NodeTask(graph_task, next.function, std::move(input_buffer)));
       } else {
@@ -1127,7 +1125,7 @@ void Engine::evaluate_function(
       input_buffer.add(
           next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
       if (is_ready) {
-        auto queue = ready_queue(cpu_ready_queue, input_buffer.device());
+        auto queue = ready_queue(cpu_ready_queue, next.function->device());
         queue->push(
             NodeTask(graph_task, next.function, std::move(input_buffer)));
         not_ready.erase(not_ready_it);
@@ -1312,7 +1310,7 @@ c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
   // Lock mutex for GraphTask.
   std::unique_lock<std::mutex> lock(graph_task->mutex_);
 
-  auto queue = ready_queue(graph_task->cpu_ready_queue_, input_buffer.device());
+  auto queue = ready_queue(graph_task->cpu_ready_queue_, graph_root->device());
 
   // worker_device == NO_DEVICE it's a CPU thread and it's trying to drive the
   // autograd engine with corresponding GraphTask, and its NOT a re-entrant call

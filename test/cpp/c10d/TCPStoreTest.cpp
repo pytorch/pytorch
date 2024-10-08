@@ -178,11 +178,12 @@ TEST(TCPStoreTest, testCleanShutdown) {
 
   auto serverTCPStore = std::make_unique<c10d::TCPStore>(
       "127.0.0.1",
-      0,
-      numWorkers,
-      true,
-      std::chrono::seconds(defaultTimeout),
-      /* wait */ false);
+      c10d::TCPStoreOptions{
+          /* port */ 0,
+          /* isServer */ true,
+          numWorkers,
+          /* waitWorkers */ false,
+          /* timeout */ std::chrono::seconds(defaultTimeout)});
   c10d::test::set(*serverTCPStore, "key", "val");
 
   auto clientTCPStore = c10::make_intrusive<c10d::TCPStore>(
