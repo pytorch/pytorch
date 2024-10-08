@@ -4833,7 +4833,6 @@ class TestLinalg(TestCase):
 
         # tuning the untuned GEMMs in file
         os.putenv('PYTORCH_TUNABLEOP_ENABLED', '1')
-        os.putenv('PYTORCH_TUNABLEOP_VERBOSE', '0')
         os.putenv('PYTORCH_TUNABLEOP_TUNING', '1')
         
         # set these to single iterations to keep it short but still exercise the code
