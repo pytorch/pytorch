@@ -671,7 +671,7 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
       -1,
       static_cast<int>(1)); // number of device?
 
-  // syncrhoize() will block the current stream on the NCCL stream
+  // synchronize() will block the current stream on the NCCL stream
   synchronize();
 
   // In case of blockingWait or a timeout value is specified by the user, we
