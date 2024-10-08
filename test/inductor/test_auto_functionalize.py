@@ -1070,8 +1070,6 @@ alias_default = alias_default_1 = foo_default = None
     def test_alias_dynamic(self):
         self.test_alias(_dynamic=True)
 
-    # Test that the alias optimization, were alias is called instead of as_strided, does not result in recompilation.
-
     # Test that the view regenration optimizations do not result in recompilations. By comparing re-compilation in eager backend
     # with recompilation in inductor backend.
     def test_recompile(self):
