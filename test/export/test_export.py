@@ -6620,9 +6620,15 @@ def forward(self, x, b_t, y):
                 "torch.ops.higher_order.wrap_with_set_grad_enabled",
                 ep.graph_module.code,
             )
+        gm = torch.export.export_for_training(model, (torch.randn(4, 4),)).module()
+        self.assertIn(
+            "set_grad_enabled",
+            gm.code,
+        )
 
     # T203671967
     @testing.expectedFailureRetraceability  # autocast nodes not created after re-tracing
+    @testing.expectedFailureNonStrict
     def test_export_with_autocast(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -6641,13 +6647,16 @@ def forward(self, x, b_t, y):
         # _export_for_traininig is using pre_dispatch=False
         # Therefore the autocast calls are not replaced with a hop.
         # non_strict doesn't have autocast nodes
-        if not is_non_strict_test(self._testMethodName) and not is_training_ir_test(
-            self._testMethodName
-        ):
+        if not is_training_ir_test(self._testMethodName):
             self.assertIn(
                 "torch.ops.higher_order.wrap_with_autocast",
                 ep.graph_module.code,
             )
+        gm = torch.export.export_for_training(model, (torch.randn(4, 4),)).module()
+        self.assertIn(
+            "autocast",
+            gm.code,
+        )
 
     def test_export_as_backend(self):
         def f(x, y):
