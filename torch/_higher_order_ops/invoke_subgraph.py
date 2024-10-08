@@ -1,0 +1,185 @@
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
+
+
+import torch
+import torch.utils._pytree as pytree
+from torch._C import DispatchKey
+from torch._dispatch.python import suspend_functionalization
+from torch._higher_order_ops.utils import (
+    _from_fun,
+    _maybe_reenter_make_fx,
+    get_dummy_aot_autograd_config,
+    prepare_fw_with_masks,
+    reenter_make_fx,
+)
+from torch._ops import HigherOrderOperator
+from torch._subclasses import FakeTensorMode
+from torch._subclasses.functional_tensor import disable_functional_mode
+from torch.fx.experimental.proxy_tensor import (
+    disable_proxy_modes_tracing,
+    ProxyTorchDispatchMode,
+    track_tensor_tree,
+)
+from torch.fx.graph_module import GraphModule
+
+
+class InvokeSubgraphHOP(HigherOrderOperator):
+    def __init__(self) -> None:
+        super().__init__("invoke_subgraph")
+
+    # identifier is setup by upper part of the stack. This helps us in
+    # identifying two invoke_subgraph calls have same subgraph.
+    def __call__(
+        self,
+        subgraph: GraphModule,
+        identifier: str,
+        operands,
+    ):
+        return super().__call__(subgraph, identifier, operands)
+
+
+invoke_subgraph = InvokeSubgraphHOP()
+
+
+def trace_joint_graph(fn, fw_inputs, fw_outputs):
+    """
+    Naively trace out a joint graph. This simplifies the reconstruction of joint
+    graph in the min-cut partitioner later on.
+    """
+    from torch._functorch.aot_autograd import create_joint
+
+    dummy_aot_config = get_dummy_aot_autograd_config()
+
+    primals = list(fw_inputs)
+
+    # TODO(anijain2305) - This makes an assumption that the strides for
+    # grad_inputs are same as strides for forward outs.
+    # TODO(anijain2305) - Add a test case where this assumption is violated and
+    # add contiguous calls.
+    tangents = [_from_fun(out) for out in fw_outputs]
+
+    joint_fn = create_joint(prepare_fw_with_masks(fn), aot_config=dummy_aot_config)
+
+    # Signature of joint_fn is (primals, tangents) -> (fw_outs, grads)
+    return _maybe_reenter_make_fx(joint_fn)(primals, tangents)
+
+
+def create_fw_bw_graph(subgraph, operands):
+    with suspend_functionalization(), disable_functional_mode():
+        with disable_proxy_modes_tracing():
+            # args are functional tensors, generate some example tensors
+            fw_inputs = pytree.tree_map(_from_fun, operands)
+
+            fw_outputs = pytree.tree_map(_from_fun, subgraph(*fw_inputs))
+            if any(
+                not isinstance(out, torch.Tensor)
+                for out in fw_outputs
+                if out is not None
+            ):
+                raise RuntimeError(
+                    "Expect outputs of invoke_subgraph to only contains tensors or None. "
+                    f"Got types {[type(out) for out in fw_outputs]}."
+                )
+
+            # Trace the forward subgraph
+            fw_graph = _maybe_reenter_make_fx(subgraph)(*fw_inputs)
+
+            # Trace the joint graph and assign it to the bwd graph
+            bw_graph = trace_joint_graph(
+                subgraph,
+                fw_inputs,
+                fw_outputs,
+            )
+            return fw_graph, bw_graph
+
+
+class InvokeSubgraphAutogradOp(torch.autograd.Function):
+    """
+    This autograd function op is to stash the backward graph in the ctx while
+    running forward.
+    """
+
+    @staticmethod
+    def forward(ctx, fw_graph, bw_graph, identifier, *operands):
+        ctx._fw_graph = fw_graph
+        ctx._bw_graph = bw_graph
+        ctx._identifier = identifier
+
+        with torch._C._AutoDispatchBelowAutograd():
+            out = invoke_subgraph(
+                fw_graph,
+                f"___forward_{identifier}",
+                operands,
+            )
+
+        ctx.save_for_backward(*operands)
+        return out
+
+    @staticmethod
+    def backward(ctx, *grad_outs):
+        # bw_graph is a joint graph with signature (primals, tangents) and returns (fw_outs, grads)
+        bw_graph = ctx._bw_graph
+        identifier = ctx._identifier
+        primals = ctx.saved_tensors
+        _, grads = invoke_subgraph(
+            bw_graph, f"___backward_{identifier}", (primals, grad_outs)
+        )
+        return None, None, None, *grads
+
+
+@invoke_subgraph.py_impl(DispatchKey.CompositeExplicitAutograd)
+def invoke_subgraph_composite_explicit_autograd(subgraph, identifier, operands):
+    from torch.utils._python_dispatch import _get_current_dispatch_mode
+
+    mode = _get_current_dispatch_mode()
+    assert mode is None, "Mode should never be enabled for CPU/CUDA key"
+    return subgraph(*operands)
+
+
+@invoke_subgraph.py_impl(DispatchKey.Autograd)
+def invoke_subgraph_autograd(subgraph, identifier, operands):
+    if not torch.is_grad_enabled():
+        with torch._C._AutoDispatchBelowAutograd():
+            return invoke_subgraph(subgraph, identifier, operands)
+
+    fw_graph, bw_graph = create_fw_bw_graph(subgraph, operands)
+    return InvokeSubgraphAutogradOp.apply(fw_graph, bw_graph, identifier, *operands)
+
+
+@invoke_subgraph.py_functionalize_impl
+def invoke_subgraph_func(ctx, subgraph, identifier, operands):
+    unwrapped_operands = ctx.unwrap_tensors(operands)
+    with ctx.redispatch_to_next() as m:
+        # TODO(anijain2305) - Handle mutation of inputs
+        functionalized_subgraph = ctx.functionalize(subgraph)
+
+        out = invoke_subgraph(functionalized_subgraph, identifier, unwrapped_operands)
+    return ctx.wrap_tensors(out)
+
+
+@invoke_subgraph.py_impl(FakeTensorMode)
+def invoke_subgraph_fake_tensor_mode(mode, subgraph, identifier, operands):
+    # TODO(anijain2305) - Implement fake tensor caching.
+    return subgraph(*operands)
+
+
+@invoke_subgraph.py_impl(ProxyTorchDispatchMode)
+def invoke_subgraph_proxy_torch_dispatch_mode(
+    proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands
+):
+    # TODO(anijain2305) - Implement proxy tensor caching.
+    example_out = invoke_subgraph(subgraph, identifier, operands)
+    graph = reenter_make_fx(subgraph)(*operands)
+    assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
+    qualname = proxy_mode.tracer.get_fresh_qualname("repeated_subgraph")
+    proxy_mode.tracer.root.register_module(qualname, graph)
+
+    node_args = (graph, identifier, operands)
+    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
+    out_proxy = proxy_mode.tracer.create_proxy(
+        "call_function", invoke_subgraph, proxy_args, {}
+    )
+    return track_tensor_tree(
+        example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
+    )
