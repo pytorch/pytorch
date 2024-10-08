@@ -250,6 +250,18 @@ def _flatten_dynamic_shapes(
     return flat_shapes
 
 
+def _clean_dynamic_markers(tensor: torch.Tensor) -> None:
+    for attr in [
+        "_dynamo_weak_dynamic_indices",
+        "_dynamo_dynamic_indices",
+        "_dynamo_dynamic_range",
+        "_dynamo_static_indices",
+        "_dynamo_unbacked_indices",
+    ]:
+        if hasattr(tensor, attr):
+            delattr(tensor, attr)
+
+
 def produce_guards_and_solve_constraints(
     fake_mode: FakeTensorMode,
     gm: torch.fx.GraphModule,
@@ -339,6 +351,11 @@ def make_constraints(
     }
     if not dynamic_shapes:
         return range_constraints
+
+    # clean up dynamic markers from tensors
+    for arg in pytree.tree_flatten(combined_args)[0]:
+        if isinstance(arg, torch.Tensor):
+            _clean_dynamic_markers(arg)
 
     # get individual dynamic shapes spec for each input
     if not isinstance(dynamic_shapes, dict):

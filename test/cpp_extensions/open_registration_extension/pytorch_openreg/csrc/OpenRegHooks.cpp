@@ -195,7 +195,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * Wait (by blocking the calling thread) until all the work previously
    * enqueued on the stream has completed running on the device.
    */
-  virtual void synchronizeStream(const c10::Stream& stream) const {
+  virtual void synchronizeStream(const c10::Stream& stream) const override {
     py::gil_scoped_acquire acquire;
     get_method("synchronizeStream")(stream);
   }

@@ -593,9 +593,8 @@ struct THPStorageMeta {
 int THPStorageMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs);
 
 PyTypeObject THPStorageMetaType = {
-    PyVarObject_HEAD_INIT(
-        DEFERRED_ADDRESS(&PyType_Type),
-        0) "torch._C._StorageMeta", /* tp_name */
+    PyVarObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type), 0)
+    "torch._C._StorageMeta", /* tp_name */
     sizeof(THPStorageMeta), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
@@ -637,9 +636,8 @@ PyTypeObject THPStorageMetaType = {
 
 // TODO: implement equality
 PyTypeObject THPStorageType = {
-    PyVarObject_HEAD_INIT(
-        &THPStorageMetaType,
-        0) "torch._C.StorageBase", /* tp_name */
+    PyVarObject_HEAD_INIT(&THPStorageMetaType, 0)
+    "torch._C.StorageBase", /* tp_name */
     sizeof(THPStorage), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
