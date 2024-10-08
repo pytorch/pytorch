@@ -213,6 +213,15 @@ struct C10_API DeviceGuardImplInterface {
   }
 
   /**
+   * Wait (by blocking the calling thread) until all the work previously
+   * enqueued on the device has been completed.
+   */
+  virtual void synchronizeDevice(const DeviceIndex /*device_index*/) const {
+    TORCH_CHECK(
+        false, "Backend doesn't support synchronizing all streams on device.");
+  }
+
+  /**
    * Ensure the caching allocator (if any) is aware that the given DataPtr is
    * being used on the given stream, and that it should thus avoid recycling the
    * DataPtr until all work on that stream is done.
