@@ -2808,6 +2808,14 @@ class TestBlockMask(InductorTestCase):
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
 
     @supported_platform
+    def test_block_mask_non_divisible(self):
+        seq = torch.arange(1023, device='cuda') // 128
+        def mod(b, h, q, kv): 
+            return seq[q] == seq[kv]
+        create_block_mask(mod, None, None, 1023, 1023, device='cuda')
+        torch.compile(create_block_mask)(mod, None, None, 1023, 1023, device='cuda')
+
+    @supported_platform
     def test_block_mask_viz(self):
         def causal_mask(b, h, q, kv):
             return q >= kv
