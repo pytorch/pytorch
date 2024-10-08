@@ -484,6 +484,9 @@ class PythonWrapperCodegen(CodeGen):
         self.user_defined_kernel_cache: Dict[Tuple[Any, ...], Tuple[str, Any]] = {}
         self.unbacked_symbol_decls: Set[str] = set()  # str of sympy.Symbol
         self.computed_sizes: Set[sympy.Symbol] = set()
+        self.launcher_fn_name = None
+        # This function can be overridden to change the launcher name
+        self.set_launcher_fn_name()
 
         # this is used for tracking which GraphLowering instance---parent graph
         # or (nested) subgraph---is currently codegened; the primary use case is
@@ -526,6 +529,9 @@ class PythonWrapperCodegen(CodeGen):
         self.debug_printer = DebugPrinterManager(
             debug_printer_level=config.aot_inductor.debug_intermediate_value_printer
         )
+
+    def set_launcher_fn_name(self) -> None:
+        self.launcher_fn_name = "call"
 
     def write_constant(self, name: str, hashed: str) -> None:
         self.header.writeline(f"{name} = None  # {hashed}")
@@ -656,14 +662,21 @@ class PythonWrapperCodegen(CodeGen):
             line = f"assert not {name}.isinf().any().item()"
             self.prefix.writeline(line)
 
-    def write_prefix(self) -> None:
+    def write_async_compile_wait(self) -> None:
         self.prefix.splice(
             """
 
             async_compile.wait(globals())
             del async_compile
+            """
+        )
 
-            def call(args):
+    def write_prefix(self) -> None:
+        assert self.launcher_fn_name is not None
+        self.write_async_compile_wait()
+        self.prefix.splice(
+            f"""
+            def {self.launcher_fn_name}(args):
             """
         )
         with self.prefix.indent():
@@ -677,10 +690,13 @@ class PythonWrapperCodegen(CodeGen):
                 self.prefix.writeline("args.clear()")
 
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
-            if config.size_asserts:
-                self.codegen_input_size_asserts()
-            if config.nan_asserts:
-                self.codegen_input_nan_asserts()
+            self.codegen_input_size_and_nan_asserts()
+
+    def codegen_input_size_and_nan_asserts(self) -> None:
+        if config.size_asserts:
+            self.codegen_input_size_asserts()
+        if config.nan_asserts:
+            self.codegen_input_nan_asserts()
 
     # this function (and below) takes a graph as input so
     # that stream caching happens per graph instance. this

@@ -640,7 +640,6 @@ def _compile_fx_inner(
                     and i in static_input_idxs
                 ):
                     input._is_inductor_static = True  # type: ignore[attr-defined]
-
             compiled_graph = FxGraphCache.load(
                 codegen_and_compile,
                 gm,
@@ -812,6 +811,7 @@ def fx_codegen_and_compile(
                     user_visible_outputs=user_visible_outputs,
                     extern_node_serializer=extern_node_serializer,
                     is_inference=is_inference,
+                    is_backward=is_backward,
                     is_const_graph=True,
                 )
                 with V.set_graph_handler(const_graph):
@@ -833,6 +833,7 @@ def fx_codegen_and_compile(
                 user_visible_outputs=user_visible_outputs,
                 extern_node_serializer=extern_node_serializer,
                 is_inference=is_inference,
+                is_backward=is_backward,
                 const_output_index=const_output_index,
                 const_code=const_code,
                 const_module=const_graph,
