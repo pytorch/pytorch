@@ -129,9 +129,9 @@ class DeviceGuard:
 
     Example::
 
-        >>> # xdoctest: +SKIP("requires multi-devices.")
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA1)
         >>> assert torch.acc.is_available() "No available accelerators detected."
-        >>> assert torch.acc.device_count() "No multi-devices detected."
+        >>> assert torch.acc.device_count() > 1 "No multi-devices detected."
         >>> orig_device = 0
         >>> target_device = 1
         >>> with torch.acc.DeviceGuard(target_device):
