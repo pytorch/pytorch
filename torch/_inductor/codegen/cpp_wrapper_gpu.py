@@ -190,13 +190,6 @@ class CppWrapperGpu(CppWrapperCpu):
         )
 
     def write_get_raw_stream(self, index, graph=None):
-        if self.device == "xpu":
-            name = f"stream{index}"
-            self.writeline(
-                f"at::xpu::XPUStream {name} = at::xpu::getCurrentXPUStream({index});"
-            )
-            return name
-
         name = f"stream{index}"
         self.writeline(
             maybe_hipify_code_wrapper(
@@ -266,17 +259,7 @@ class CppWrapperGpu(CppWrapperCpu):
         self,
         kernel_name: str,
         graph: "GraphLowering",  # for per-graph caching
-        device_index=None,
     ):
-        extra_args = ""
-        if self.device == "xpu":
-            stream = (
-                "stream"
-                if V.graph.aot_mode
-                else self.write_get_raw_stream(device_index, V.graph)
-            )
-            extra_args = f"{stream}.queue(), "
-
         keys = (get_cpp_wrapper_cubin_path_name(), "mangled_name", "shared_mem")
         kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
         self.writeline(f"if ({kernel_var_name} == nullptr) {{")
@@ -285,11 +268,11 @@ class CppWrapperGpu(CppWrapperCpu):
                 kernel_name,
                 """    """
                 + kernel_var_name
-                + f""" = loadKernel({extra_args}"%s", "%s", %s, this->cubin_dir_);"""
+                + """ = loadKernel("%s", "%s", %s, this->cubin_dir_);"""
                 if V.graph.aot_mode
                 else """    """
                 + kernel_var_name
-                + f""" = loadKernel({extra_args}"%s", "%s", %s);""",
+                + """ = loadKernel("%s", "%s", %s);""",
                 keys,
             )
         )
@@ -407,67 +390,84 @@ class CppWrapperGpu(CppWrapperCpu):
                 grid_extra_kwargs,
             )
 
-        device_index, call_args = self.prepare_triton_kernel_call(
-            device_index, call_args
-        )
-        kernel_var_name = self.generate_load_kernel_once(
-            kernel_name, V.graph, device_index
-        )
-
-        # args with value 1 are added into equal_to_1 and constants
-        # in triton_meta (in the Python codegen) which makes them
-        # inlined in the PTX and compiled CUBIN
-        if (
-            triton_meta is not None
-            and "configs" in triton_meta
-            and triton_meta["configs"]
-        ):
-            equal_to_1 = triton_meta["configs"][0].equal_to_1
-            call_args = [arg for i, arg in enumerate(call_args) if i not in equal_to_1]
-            arg_types = [t for i, t in enumerate(arg_types) if i not in equal_to_1]
-
-        call_args_str = self.generate_args_decl(call_args, arg_types)
-        kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
-        if self.device == "xpu":
-            self.writeline(
-                f"std::vector<void*> {kernel_args_var} = {{{call_args_str}}};"
-            )
-        else:
-            self.writeline(f"void* {kernel_args_var}[] = {{{call_args_str}}};")
+        if device_index is None:
+            current_device = V.graph.scheduler.get_current_device_or_throw()
+            device_index = current_device.index
         stream = (
             "stream"
             if V.graph.aot_mode
             else self.write_get_raw_stream(device_index, V.graph)
         )
-        if self.device == "xpu":
-            stream = f"{stream}.queue()"
 
-        grid_var = f"{kernel_name}_grid_{next(self.grid_id)}"
-        self.writeline(
-            DeferredGpuGridLine(kernel_name, grid_var, grid, autotune_configs)
-        )
-
-        kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
-        # add debug printer code for all triton kernel related calls
-        debug_printer_manager = V.graph.wrapper_code.debug_printer
-        debug_printer_manager.set_printer_args(call_args, kernel_name, arg_types, None)
-        with debug_printer_manager:
-            self.writeline(f"if ({grid_var}.is_non_zero()) {{")
-            self.writeline(
-                DeferredGpuKernelLine(
-                    kernel_name,
-                    r"    launchKernel({}, {}, {}, {}, %s, %s, {}, {});".format(
-                        kernel_var_name,
-                        f"{grid_var}.grid_x",
-                        f"{grid_var}.grid_y",
-                        f"{grid_var}.grid_z",
-                        kernel_args_var,
-                        stream,
-                    ),
-                    ("num_warps", "shared_mem"),
-                ),
+        if triton:
+            device_index, call_args = self.prepare_triton_kernel_call(
+                device_index, call_args
             )
-            self.writeline("}")
+            kernel_var_name = self.generate_load_kernel_once(kernel_name, V.graph)
+
+            # args with value 1 are added into equal_to_1 and constants
+            # in triton_meta (in the Python codegen) which makes them
+            # inlined in the PTX and compiled CUBIN
+            if (
+                triton_meta is not None
+                and "configs" in triton_meta
+                and triton_meta["configs"]
+            ):
+                equal_to_1 = triton_meta["configs"][0].equal_to_1
+                call_args = [
+                    arg for i, arg in enumerate(call_args) if i not in equal_to_1
+                ]
+                arg_types = [t for i, t in enumerate(arg_types) if i not in equal_to_1]
+
+            call_args_str = self.generate_args_decl(call_args, arg_types)
+            kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
+            self.writeline(f"void* {kernel_args_var}[] = {{{call_args_str}}};")
+
+            grid_var = f"{kernel_name}_grid_{next(self.grid_id)}"
+            self.writeline(
+                DeferredGpuGridLine(kernel_name, grid_var, grid, autotune_configs)
+            )
+
+            kernel_var_name = (
+                f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
+            )
+            # add debug printer code for all triton kernel related calls
+            debug_printer_manager = V.graph.wrapper_code.debug_printer
+            debug_printer_manager.set_printer_args(
+                call_args, kernel_name, arg_types, None
+            )
+            with debug_printer_manager:
+                self.writeline(f"if ({grid_var}.is_non_zero()) {{")
+                self.writeline(
+                    DeferredGpuKernelLine(
+                        kernel_name,
+                        r"    launchKernel({}, {}, {}, {}, %s, %s, {}, {});".format(
+                            kernel_var_name,
+                            f"{grid_var}.grid_x",
+                            f"{grid_var}.grid_y",
+                            f"{grid_var}.grid_z",
+                            kernel_args_var,
+                            stream,
+                        ),
+                        ("num_warps", "shared_mem"),
+                    ),
+                )
+                self.writeline("}")
+        else:
+            casted = []
+            for arg_type, arg in zip(arg_types, call_args):
+                new_arg = arg
+                if arg_type.endswith("*") and arg != "nullptr":
+                    if config.abi_compatible:
+                        new_arg = f"var_{next(self.arg_var_id)}"
+                        self.writeline(
+                            f"auto* {new_arg} = get_data_ptr_wrapper({arg});"
+                        )
+                    else:
+                        new_arg = f"{arg}.data_ptr()"
+                casted.append(f"({arg_type}){new_arg}")
+            call_args_str = ", ".join(casted)
+            self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")
 
     def generate_workspace_allocation(self, nbytes, device, zero_fill):
         line = self.make_allocation(
