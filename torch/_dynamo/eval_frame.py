@@ -114,6 +114,54 @@ def _maybe_set_eval_frame(callback: DynamoCallback):
         return set_eval_frame(callback)
 
 
+_phase = "default"
+
+
+def _set_phase(phase: str):
+    global _phase
+    from torch._C._dynamo.eval_frame import set_eval_frame_callback_enabled
+
+    if phase == "default":
+        set_eval_frame_callback_enabled(True)
+    elif phase == "force_eager":
+        set_eval_frame_callback_enabled(False)
+    else:
+        raise AttributeError(f"unsupported torch.compiler phase: {phase}")
+
+    prior = _phase
+    _phase = phase
+    return prior
+
+
+# forbid in graph
+_set_phase._dynamo_forbidden = True  # type: ignore[attr-defined]
+
+
+class SetPhaseCtxMgrDecorator:
+    """
+    Context manager and decorator to set dynamo phase
+    """
+
+    def __init__(self, phase: str):
+        self.phase = phase
+
+    def __call__(self, fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            with self:
+                return fn(*args, **kwargs)
+
+        # forbid wrapper in graph
+        wrapper._dynamo_forbidden = True  # type: ignore[attr-defined]
+        return wrapper
+
+    def __enter__(self):
+        self.prior = _set_phase(self.phase)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        _set_phase(self.prior)
+
+
 def _reset_guarded_backend_cache():
     global cached_backends
     for backend in cached_backends.values():
