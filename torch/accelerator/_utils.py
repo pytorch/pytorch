@@ -1,8 +1,11 @@
-from typing import Union, Optional
+from typing import Optional, Union
+
 import torch
 from torch import device as _device
 
+
 _device_t = Union[_device, str, int, None]
+
 
 def _get_device_index(device: _device_t, optional: bool = False) -> int:
     if isinstance(device, int):
