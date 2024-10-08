@@ -3167,6 +3167,13 @@ static void uncached_delete(void* ptr) {
 
 void local_raw_delete(void* ptr);
 
+struct SentinelCapture {
+  c10::DeviceIndex device;
+  std::function<bool(cudaStream_t)> streamFilter;
+  std::function<void*(size_t)> allocatorOverride;
+  size_t captureUniqueToken;
+};
+
 class NativeCachingAllocator : public CUDAAllocator {
  private:
   // allows this allocator to be turned on and off programmatically
@@ -3202,6 +3209,10 @@ class NativeCachingAllocator : public CUDAAllocator {
   bool record_history = false;
   RingBuffer<AnnotationEntry> annotation_buffer;
 
+  // sentinel_captures_underway tracks if we are diverting some allocations to sentinel values
+  // see CUDAGraph.cpp
+  std::vector<SentinelCapture> sentinel_captures_underway;
+
  public:
   std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocator;
 
@@ -3233,8 +3244,6 @@ class NativeCachingAllocator : public CUDAAllocator {
     return !device_allocator.empty();
   }
 
-  std::vector<std::tuple<c10::DeviceIndex, std::function<bool(cudaStream_t)>, std::function<void*(size_t)>, size_t>> sentinel_captures_underway;
-
   /** allocates a block which is safe to use from the provided stream */
   void malloc(
       void** devPtr,
@@ -3247,12 +3256,11 @@ class NativeCachingAllocator : public CUDAAllocator {
         device,
         ": did you call init?");
     for (auto& it : sentinel_captures_underway) {
-      if (device == std::get<0>(it)) {
-        auto filter = std::get<1>(it);
-        if (filter(stream)) {
-          auto callback = std::get<2>(it);
-          void* ptr = callback(size);
-          TORCH_CHECK((size_t) ptr < sentinelLimit, "need to be tell apart real from fake pointers");
+      if (device == it.device) {
+        if (it.streamFilter(stream)) {
+          void* ptr = it.allocatorOverride(size);
+          // note that "ptr" is a totally fake ptr, there is no Block* tracking it or anything
+          TORCH_CHECK((size_t) ptr < sentinelLimit, "need to be able to tell apart real from fake pointers");
           *devPtr = ptr;
           return;
         }
@@ -3571,12 +3579,17 @@ class NativeCachingAllocator : public CUDAAllocator {
       size_t captureUniqueToken
   ) override {
     assertValidDevice(device);
-    sentinel_captures_underway.emplace_back(device, std::move(streamFilter), std::move(allocatorOverride), captureUniqueToken);
+    sentinel_captures_underway.emplace_back(SentinelCapture{
+      .device = device,
+      .streamFilter = std::move(streamFilter),
+      .allocatorOverride = std::move(allocatorOverride),
+      .captureUniqueToken = captureUniqueToken
+    });
   }
 
   void endAllocateSentinelPointers(size_t captureUniqueToken) {
     for (auto it = sentinel_captures_underway.begin(); it != sentinel_captures_underway.end(); ++it) {
-      if (std::get<3>(*it) == captureUniqueToken) {
+      if ((*it).captureUniqueToken == captureUniqueToken) {
         sentinel_captures_underway.erase(it);
         return;
       }
