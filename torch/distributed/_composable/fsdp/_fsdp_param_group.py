@@ -380,6 +380,7 @@ class FSDPParamGroup:
                     self.comm_ctx.reduce_scatter_state.event
                 )
                 self.comm_ctx.reduce_scatter_state = None
+            self._wait_for_post_backward()
             (
                 reduce_scatter_input,
                 reduce_scatter_event,
@@ -404,14 +405,26 @@ class FSDPParamGroup:
             )
 
     def finalize_backward(self):
-        if self._post_reduce_event is not None:
-            self.device_handle.current_stream().wait_event(self._post_reduce_event)
-            self._post_reduce_event = None
+        self._wait_for_post_backward()
         for fsdp_param in self.fsdp_params:
             if fsdp_param.grad_offload_event is not None:
                 fsdp_param.grad_offload_event.synchronize()
                 fsdp_param.grad_offload_event = None
+        if self._all_gather_result is not None:
+            # If there was a mistargeted unshard without a corresponding wait,
+            # then we wait here and clear the unshard
+            if (event := self._all_gather_result.all_gather_event) is not None:
+                torch.cuda.current_stream().wait_event(event)
+            work = self._all_gather_result.all_gather_work
+            if isinstance(work, dist.distributed_c10d.Work):
+                work.wait()
+            self._all_gather_result = None
         self._post_forward_indices.clear()
+
+    def _wait_for_post_backward(self):
+        if self._post_reduce_event is not None:
+            self.device_handle.current_stream().wait_event(self._post_reduce_event)
+            self._post_reduce_event = None
 
     def _backward_prefetch(self) -> None:
         if self._training_state == TrainingState.PRE_BACKWARD:

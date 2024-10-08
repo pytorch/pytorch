@@ -12,8 +12,7 @@ std::mutex CPUCachingAllocator::mutex_;
 ska::flat_hash_map<void*, size_t> CPUCachingAllocator::allocation_map_;
 
 inline void* CPUCachingAllocator::allocate_and_cache(const size_t bytes) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  void* ptr;
+  void* ptr = nullptr;
   try {
     ptr = c10::alloc_cpu(bytes);
   } catch (c10::Error&) {

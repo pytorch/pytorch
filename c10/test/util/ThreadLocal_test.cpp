@@ -149,7 +149,7 @@ TEST(ThreadLocalTest, TestObjectsAreReleased) {
   static std::atomic<int> ctors{0};
   static std::atomic<int> dtors{0};
   struct A {
-    A() : i() {
+    A() {
       ++ctors;
     }
 
@@ -160,7 +160,7 @@ TEST(ThreadLocalTest, TestObjectsAreReleased) {
     A(const A&) = delete;
     A& operator=(const A&) = delete;
 
-    int i;
+    int i{};
   };
 
   C10_DEFINE_TLS_static(A, a);
@@ -184,7 +184,7 @@ TEST(ThreadLocalTest, TestObjectsAreReleasedByNonstaticThreadLocal) {
   static std::atomic<int> ctors(0);
   static std::atomic<int> dtors(0);
   struct A {
-    A() : i() {
+    A() {
       ++ctors;
     }
 
@@ -195,7 +195,7 @@ TEST(ThreadLocalTest, TestObjectsAreReleasedByNonstaticThreadLocal) {
     A(const A&) = delete;
     A& operator=(const A&) = delete;
 
-    int i;
+    int i{};
   };
 
   std::atomic_bool b(false);
