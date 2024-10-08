@@ -173,7 +173,16 @@ class Unboxing:
             # handle list type with size, e.g., bool[4]
             code.extend(
                 f"""
-    auto {out_name} = {arg_name}.toBoolList();
+#ifdef USE_ATEN_LIB
+std::array<bool, {t.size}> {out_name};
+auto {in_name} = {arg_name}.toBoolList();
+size_t _i = 0;
+for (auto {elem_name}: {in_name}) {{
+    {out_name}[_i++] = {elem_name};
+}}
+#else
+auto {out_name} = {arg_name}.toBoolList();
+#endif
                 """.split(
                     "\n"
                 )
