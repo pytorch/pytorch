@@ -4,12 +4,7 @@ import sys
 
 import torch
 from torch import distributed as dist
-from torch.distributed.checkpoint import (
-    FileSystemReader,
-    FileSystemWriter,
-    load,
-    save,
-)
+from torch.distributed.checkpoint import FileSystemReader, FileSystemWriter, load, save
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType
 from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel
 from torch.distributed.fsdp.wrap import enable_wrap, wrap

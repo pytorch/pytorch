@@ -16,6 +16,7 @@ class TestTraverse(TestCase):
     """
     Test class for util methods of _traverse
     """
+
     def test_traverse_shallow(self) -> None:
         state_dict = {
             "key0": 1,
