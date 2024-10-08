@@ -15,7 +15,7 @@ Hardware Prerequisite
    * - Intel Client GPU
      - Windows/Linux
 
-Intel GPUs support (Beta) is ready in PyTorch* 2.5 for Intel® Data Center GPU Max Series and Intel® Client GPUs on both Linux and Windows, which brings Intel GPUs and the SYCL* software stack into the official PyTorch stack with consistent user experience to embrace more AI application scenarios.
+Intel GPUs support (Prototype) is ready in PyTorch* 2.5 for Intel® Data Center GPU Max Series and Intel® Client GPUs on both Linux and Windows, which brings Intel GPUs and the SYCL* software stack into the official PyTorch stack with consistent user experience to embrace more AI application scenarios.
 
 Software Prerequisite
 ---------------------
@@ -65,7 +65,7 @@ For nightly wheels
 
 .. code-block::
 
-    pip3 install --pre torch --index-url https://download.pytorch.org/whl/nightly/xpu
+    pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/xpu
 
 From Source
 ^^^^^^^^^^^
