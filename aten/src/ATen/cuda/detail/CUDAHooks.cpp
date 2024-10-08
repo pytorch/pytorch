@@ -444,6 +444,10 @@ DeviceIndex CUDAHooks::getCurrentDevice() const {
   return at::cuda::detail::current_device();
 }
 
+void CUDAHooks::setCurrentDevice(DeviceIndex device) const {
+  c10::cuda::set_device(device);
+}
+
 #ifdef USE_ROCM
 bool CUDAHooks::isGPUArch(DeviceIndex device_index, const std::vector<std::string>& archs) const {
   hipDeviceProp_t* prop = at::cuda::getDeviceProperties(device_index);
@@ -461,14 +465,6 @@ bool CUDAHooks::isGPUArch(DeviceIndex device_index, const std::vector<std::strin
 void CUDAHooks::deviceSynchronize(DeviceIndex device_index) const {
   at::DeviceGuard device_guard(at::Device(at::DeviceType::CUDA, device_index));
   c10::cuda::device_synchronize();
-}
-
-void CUDAHooks::setCurrentDevice(DeviceIndex device) const {
-  c10::cuda::set_device(device);
-}
-
-DeviceIndex CUDAHooks::getCurrentDevice() const {
-  return c10::cuda::current_device();
 }
 
 // Sigh, the registry doesn't support namespaces :(
