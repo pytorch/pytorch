@@ -1,5 +1,9 @@
 # flake8: noqa: G004
 
+# Note: Copies of this script in runner_determinator.py and _runner-determinator.yml
+#       must be kept in sync. You can do it easily by running the following command:
+#           python .github/scripts/update_runner_determinator.py
+
 """
 This runner determinator is used to determine which set of runners to run a
 GitHub job on. It uses the first comment of a GitHub issue (by default
@@ -78,6 +82,9 @@ CANARY_FLEET_SUFFIX = ".c"
 class Experiment(NamedTuple):
     rollout_perc: float = (
         0  # Percentage of workflows to experiment on when user is not opted-in.
+    )
+    all_branches: bool = (
+        False  # If True, the experiment is also enabled on the exception branches
     )
 
     # Add more fields as needed
@@ -212,7 +219,7 @@ def get_potential_pr_author(
 
 def is_exception_branch(branch: str) -> bool:
     """
-    Branches that get opted out of all experiments and should always use Meta runners
+    Branches that get opted out of experiments by default, until they're explicitly enabled.
     """
     return branch.split("/")[0] in {"main", "nightly", "release", "landchecks"}
 
@@ -338,7 +345,10 @@ def is_user_opted_in(user: str, user_optins: UserOptins, experiment_name: str) -
 
 
 def get_runner_prefix(
-    rollout_state: str, workflow_requestors: Iterable[str], is_canary: bool = False
+    rollout_state: str,
+    workflow_requestors: Iterable[str],
+    branch: str,
+    is_canary: bool = False,
 ) -> str:
     settings = parse_settings(rollout_state)
     user_optins = parse_users(rollout_state)
@@ -347,6 +357,12 @@ def get_runner_prefix(
     prefixes = []
     for experiment_name, experiment_settings in settings.experiments.items():
         enabled = False
+
+        if not experiment_settings.all_branches and is_exception_branch(branch):
+            log.info(
+                f"Branch {branch} is an exception branch. Not enabling experiment {experiment_name}."
+            )
+            continue
 
         # Is any workflow_requestor opted in to this experiment?
         opted_in_users = [
@@ -407,35 +423,34 @@ def get_rollout_state_from_issue(github_token: str, repo: str, issue_num: int) -
 def main() -> None:
     args = parse_args()
 
-    if args.github_ref_type == "branch" and is_exception_branch(args.github_branch):
-        log.info(
-            f"Exception branch: '{args.github_branch}', using Meta runners and no experiments."
+    runner_label_prefix = DEFAULT_LABEL_PREFIX
+
+    try:
+        rollout_state = get_rollout_state_from_issue(
+            args.github_token, args.github_issue_repo, args.github_issue
         )
-        runner_label_prefix = DEFAULT_LABEL_PREFIX
-    else:
-        try:
-            rollout_state = get_rollout_state_from_issue(
-                args.github_token, args.github_issue_repo, args.github_issue
-            )
 
-            username = get_potential_pr_author(
-                args.github_token,
-                args.github_repo,
-                args.github_actor,
-                args.github_ref_type,
-                args.github_branch,
-            )
+        username = get_potential_pr_author(
+            args.github_token,
+            args.github_repo,
+            args.github_actor,
+            args.github_ref_type,
+            args.github_branch,
+        )
 
-            is_canary = args.github_repo == "pytorch/pytorch-canary"
+        is_canary = args.github_repo == "pytorch/pytorch-canary"
 
-            runner_label_prefix = get_runner_prefix(
-                rollout_state, (args.github_issue_owner, username), is_canary
-            )
+        runner_label_prefix = get_runner_prefix(
+            rollout_state,
+            (args.github_issue_owner, username),
+            args.github_branch,
+            is_canary,
+        )
 
-        except Exception as e:
-            log.error(
-                f"Failed to get issue. Defaulting to Meta runners and no experiments. Exception: {e}"
-            )
+    except Exception as e:
+        log.error(
+            f"Failed to get issue. Defaulting to Meta runners and no experiments. Exception: {e}"
+        )
 
     set_github_output(GH_OUTPUT_KEY_LABEL_TYPE, runner_label_prefix)
 
