@@ -4,6 +4,7 @@ import torch
 import torch.distributed as dist
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
+from torch.distributed._functional_collectives import all_gather_tensor
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
     _fused_all_gather_scaled_matmul_fallback,
@@ -544,12 +545,16 @@ class SymmMemAllReduceTest(MultiProcessTestCase):
             dtype=dtype,
             device=self.device,
             group_name=group_name,
-        ).fill_(
-            1
-        )  # TODO(yifu): use random data
+        ).normal_()
 
         res = torch.ops.symm_mem.multimem_one_shot_all_reduce(inp, "sum", group_name)
-        self._verify_all_reduce_result(inp, res)
+
+        gathered_inps = all_gather_tensor(inp, 0, "0").view(self.world_size, -1)
+        # Only verify that the results are close to the sum of inputs across
+        # ranks (see Note [multimem_one_shot_all_reduce]).
+        torch.testing.assert_close(
+            gathered_inps.sum(dim=0), res, rtol=1e-03, atol=1e-05
+        )
 
         dist.destroy_process_group()
 
@@ -614,8 +619,6 @@ class SymmMemAllReduceTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     def _verify_all_reduce_result(self, inp, res):
-        from torch.distributed._functional_collectives import all_gather_tensor
-
         gathered_res = all_gather_tensor(res, 0, "0").view(self.world_size, -1)
         # Verify that the results across ranks are identical
         self.assertEqual(

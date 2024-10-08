@@ -490,6 +490,13 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       torch::dispatch(c10::DispatchKey::CUDA, ::multimem_all_reduce_),
       {at::Tag::pt2_compliant_tag});
 
+  // NOTE: [multimem_one_shot_all_reduce]
+  // multimem.ld_reduce does not guarantee a fixed accumulation order. This
+  // means that while multimem_one_shot_all_reduce is faster and has higher
+  // numerical accuracy than one_shot_all_reduce, it doesn't guarantee
+  // identical results across ranks. There may be use cases that can take
+  // advantage of this property, but it should not be used without
+  // understanding the caveats.
   m.def(
       "multimem_one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor",
       torch::dispatch(c10::DispatchKey::CUDA, ::multimem_one_shot_all_reduce),
