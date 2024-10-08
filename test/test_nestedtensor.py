@@ -4,6 +4,7 @@ import ast
 import io
 import itertools
 import math
+import random
 import sys
 import tempfile
 import unittest
@@ -25,6 +26,7 @@ from torch.nested._internal.nested_tensor import (
     NestedTensor,
     ViewNestedFromBuffer,
 )
+from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM70OrLater,
@@ -33,6 +35,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
+    flex_attention_supported_platform,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
@@ -6968,6 +6971,98 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         attn_output_eager.sum().backward()
         self.assertTrue(torch.allclose(attn_output_eager, attn_output))
         self.assertTrue(torch.allclose(value_grad, value.grad))
+
+    @flex_attention_supported_platform
+    @dtypes(torch.float32)
+    def test_flex_attention(self, device, dtype):
+        # TODO: Move these alongside other helpers in torch.nn.attention.flex_attention.
+        # Need to nail down the right level of abstraction here.
+        def create_njt_block_mask(score_mod, njt):
+            return create_block_mask(
+                score_mod,
+                1,
+                1,
+                njt._values.shape[0],
+                njt._values.shape[0],
+                device=njt.device,
+            )
+
+        def create_njt_wrapper(orig_mask_mod, offsets):
+            """Generic Wrapper that converts Dense mask_mod functions to NJT mask_mod functions"""
+
+            # computes "reverse offsets"
+            def _build_seq_idx(offsets: torch.Tensor):
+                total_length = offsets[-1].item()
+                # Create a range tensor from 0 to total_length
+                range_tensor = torch.arange(
+                    total_length, device="cuda", dtype=torch.int32
+                )
+
+                # Use searchsorted to find the index for each position
+                seq_idx = torch.searchsorted(offsets, range_tensor, right=True) - 1
+
+                return seq_idx
+
+            def njt_score_mod(b, h, q_idx, kv_idx, seq_idx=_build_seq_idx(offsets)):
+                q_nested = q_idx - offsets[seq_idx[q_idx]]
+                kv_nested = kv_idx - offsets[seq_idx[kv_idx]]
+                is_same_sequence = seq_idx[q_idx] == seq_idx[kv_idx]
+                return orig_mask_mod(b, h, q_nested, kv_nested) & is_same_sequence
+
+            return njt_score_mod
+
+        # Dense Score Mod
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+            # return torch.where(q_idx >= kv_idx, score, -float("inf"))
+
+        batch_size = 8
+        n_heads = 8
+        D = 16
+
+        sentence_lengths = [random.randint(1, 1024) for _ in range(batch_size - 1)]
+        total = sum(sentence_lengths)
+
+        # shape (B, *, D_total) where D_total = n_heads * D
+        query = torch.nested.nested_tensor(
+            [torch.randn(l, n_heads * D, device="cuda") for l in sentence_lengths],
+            layout=torch.jagged,
+        )
+        key = torch.randn_like(query)
+        value = torch.randn_like(query)
+
+        # shape (B, *, D_total) -> (B, n_heads, *, D)
+        query = (
+            query.unflatten(-1, [n_heads, D]).transpose(1, 2).detach().requires_grad_()
+        )
+        key = key.unflatten(-1, [n_heads, D]).transpose(1, 2).detach().requires_grad_()
+        value = (
+            value.unflatten(-1, [n_heads, D]).transpose(1, 2).detach().requires_grad_()
+        )
+
+        # Build the seq_idx lookup table for query's offsets
+        causal_score_mod_njt = create_njt_wrapper(causal_mask, query.offsets())
+        block_mask = create_njt_block_mask(causal_score_mod_njt, query)
+
+        # Run FlexAttention with a causal mask
+        out_flex = flex_attention(query, key, value, block_mask=block_mask)
+        grad_out = torch.randn_like(out_flex)
+        grads_flex = torch.autograd.grad(
+            out_flex, inputs=(query, key, value), grad_outputs=(grad_out,)
+        )
+        flex_outs = [out_flex, *grads_flex]
+
+        # Run causal SDPA for comparison
+        out_sdpa = F.scaled_dot_product_attention(query, key, value, is_causal=True)
+        grads_sdpa = torch.autograd.grad(
+            out_sdpa, inputs=(query, key, value), grad_outputs=(grad_out,)
+        )
+        sdpa_outs = [out_sdpa, *grads_sdpa]
+
+        # Compare flex vs. SDPA output and grads
+        for flex, sdpa in zip(flex_outs, sdpa_outs):
+            self.assertTrue(flex.is_nested and sdpa.is_nested)
+            self.assertEqual(flex, sdpa, atol=1e-2, rtol=1e-2)
 
     @dtypes(torch.float32)
     def test_apply_(self, device, dtype):
