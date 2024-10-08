@@ -37,7 +37,7 @@ class TORCH_API DeviceData : public TsNode {
 
   // To reuse IR nodes, use this method to create DeviceData nodes
   // instead of calling the constructor directconst ly.
-  static NodePtr Create(&std::shared_ptr<BackendData> data);
+  static NodePtr Create(const std::shared_ptr<BackendData>& data);
 
   TSOpVector Lower(
       std::shared_ptr<torch::jit::GraphFunction> function,
