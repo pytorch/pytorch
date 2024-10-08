@@ -1603,13 +1603,19 @@ class PythonWrapperCodegen(CodeGen):
                 buf_name = f"tmp_arg_{index}"
                 buf = raw_arg
 
-            size = V.graph.sizevars.size_hints(
-                buf.get_size(),
-                fallback=config.unbacked_symint_fallback,
+            size = tuple(
+                V.graph.sizevars.atomically_apply_size_hint(
+                    e,
+                    fallback=config.unbacked_symint_fallback,
+                )
+                for e in buf.get_size()
             )
-            stride = V.graph.sizevars.size_hints(
-                buf.get_stride(),
-                fallback=config.unbacked_symint_fallback,
+            stride = tuple(
+                V.graph.sizevars.atomically_apply_size_hint(
+                    e,
+                    fallback=config.unbacked_symint_fallback,
+                )
+                for e in buf.get_stride()
             )
             device = buf.get_device()
             dtype = buf.get_dtype()
@@ -1633,18 +1639,11 @@ class PythonWrapperCodegen(CodeGen):
             if arg in V.graph.sizevars.inv_precomputed_replacements:
                 arg = V.graph.sizevars.inv_precomputed_replacements[arg]
 
-            # For multiple expressions that depend on an unbacked symint,
-            # we want to compute them consistently for a size hint we have chosen.
-            # So, recursively compute expressions via size hints of contained symbols.
-            free_symbols = arg.free_symbols
-            size_dict = {
-                symbol: V.graph.sizevars.size_hint(
-                    symbol,
-                    fallback=config.unbacked_symint_fallback,
+            return str(
+                V.graph.sizevars.atomically_apply_size_hint(
+                    arg, fallback=config.unbacked_symint_fallback
                 )
-                for symbol in free_symbols
-            }
-            return str(arg.subs(size_dict))
+            )
 
         elif isinstance(arg, (str, int, float, bool)):
             return str(arg)
