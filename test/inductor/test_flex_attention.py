@@ -2070,6 +2070,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 )
 
     @supported_platform
+    def test_block_mask_non_divisible(self):
+        seq = torch.arange(1023, device='cuda') // 128
+        def mod(b, h, q, kv): 
+            return seq[q] == seq[kv]
+        block_mask = create_block_mask(mod, None, None, 1023, 1023, device='cuda')
+        torch.compile(create_block_mask)(mod, None, None, 1023, 1023, device='cuda')
+        self.run_test_with_call(lambda q, k, v: flex_attention(q, k, v, block_mask=block_mask), Q_S=1023, KV_S=1023)
+
+    @supported_platform
     def test_comparison_vs_sdpa_with_learnable_bias(self):
         # 1-dimensional bias:
         B, H, S, D = 1, 1, 256, 64
@@ -2806,14 +2815,6 @@ class TestBlockMask(InductorTestCase):
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((6, 16, 24)))
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((6, 16, 24, 24)))
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
-
-    @supported_platform
-    def test_block_mask_non_divisible(self):
-        seq = torch.arange(1023, device='cuda') // 128
-        def mod(b, h, q, kv): 
-            return seq[q] == seq[kv]
-        create_block_mask(mod, None, None, 1023, 1023, device='cuda')
-        torch.compile(create_block_mask)(mod, None, None, 1023, 1023, device='cuda')
 
     @supported_platform
     def test_block_mask_viz(self):
