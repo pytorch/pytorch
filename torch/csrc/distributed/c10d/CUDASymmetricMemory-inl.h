@@ -87,25 +87,25 @@ __device__ __forceinline__ void wait_signal(uint32_t* addr) {
     ;
 }
 
-// Synchronizes blocks all remote blocks with the matching blockIdx.
-// This itself is not a barrier across all remote threads, but it can be used
-// to express different synchronization patterns.
+// Synchronizes blocks with matching blockIdx across participating devices.
+// Note: sync_remote_block itself is not a system level barrier/fence. It is a
+// building block for expressing different synchronization patterns.
 //
 // Pattern 0: Ensures that all writes to symm_mem buffers from previous
-// kernels, on any device, are visible to the current kernel:
+// kernels across all devices are visible to the current kernel:
 //
 //   sync_remote_blocks<MemOpSem::Relaxed>(...);
 //   __syncthreads();
 //
 // Pattern 1: Ensures that all writes to symm_mem buffers from the current
-// block are visible to all remote blocks with the matching blockIdx:
+// block are visible to all remote blocks with matching blockIdx:
 //
 //   __syncthreads();
 //   sync_remote_blocks<MemOpSem::AcqRel>(...);
 //   __syncthreads();
 //
 // Pattern 2: Ensures that symm_mem buffers read by the current kernel are safe
-// for writing by subsequent kernels on any device.
+// for writing by subsequent kernels across all devices.
 //
 //   __syncthreads();
 //   sync_remote_blocks<MemOpSem::Relaxed>(...);
