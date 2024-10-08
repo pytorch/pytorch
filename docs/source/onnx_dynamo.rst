@@ -1,3 +1,4 @@
+===============================
 TorchDynamo-based ONNX Exporter
 ===============================
 
@@ -11,7 +12,7 @@ TorchDynamo-based ONNX Exporter
   The ONNX exporter for TorchDynamo is a rapidly evolving beta technology.
 
 Overview
---------
+========
 
 The ONNX exporter leverages TorchDynamo engine to hook into Python's frame evaluation API
 and dynamically rewrite its bytecode into an FX Graph.
@@ -31,7 +32,7 @@ The exporter is designed to be modular and extensible. It is composed of the fol
   - **ONNX Diagnostic Options**: :class:`DiagnosticOptions` has a set of options that control the diagnostics emitted by the exporter.
 
 Dependencies
-------------
+============
 
 The ONNX exporter depends on extra Python packages:
 
@@ -48,7 +49,7 @@ They can be installed through `pip <https://pypi.org/project/pip/>`_:
 on a large variety of processors.
 
 A simple example
-----------------
+================
 
 See below a demonstration of exporter API in action with a simple Multilayer Perceptron (MLP) as example:
 
@@ -101,7 +102,7 @@ the last line of the previous example can be replaced by the following one.
   onnx_program = torch.onnx.dynamo_export(model, tensor_x)
 
 Inspecting the ONNX model using GUI
------------------------------------
+===================================
 
 You can view the exported model using `Netron <https://netron.app/>`__.
 
@@ -124,7 +125,7 @@ By expanding it, the function body is shown.
 The function body is a sequence of ONNX operators or other functions.
 
 When the conversion fails
--------------------------
+=========================
 
 Function :func:`torch.onnx.export` should called a second time with
 parameter ``report=True``. A markdown report is generated to help the user
@@ -149,8 +150,41 @@ The main advantages are:
 
    generated/onnx_dynamo_diagnostics_rules/*
 
+Known issues
+============
+
+torch.jit.instance
+------------------
+
+The exporter fails because `torch.jit.isinstance` was used instead of `isinstance`
+and it is not supported by :func:`torch.export.export`.
+If modifying the code is not possible, replacing
+`torch.jit.isinstance` by instance `isinstance` makes the export work:
+
+.. code-block:: python
+
+    @contextlib.contextmanager
+    def bypass_export_jit_isinstance():
+        """
+        Tries to bypass some functions torch.export.export does not
+        support such as ``torch.jit.isinstance``.
+        """
+        import torch.jit
+
+        f = torch.jit.isinstance
+        torch.jit.isinstance = isinstance
+
+        try:
+            yield
+        finally:
+            torch.jit.isinstance = f
+
+
+        with bypass_export_jit_isinstance():
+            onnx_program = torch.onnx.export(..., dynamo=True)
+
 API Reference
--------------
+=============
 
 .. autofunction:: torch.onnx.dynamo_export
 
