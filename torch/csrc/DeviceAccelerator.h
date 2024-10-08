@@ -5,4 +5,4 @@ namespace torch::accelerator {
 
 void initModule(PyObject* module);
 
-} // torch::accelerator
+} // namespace torch::accelerator
