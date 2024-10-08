@@ -363,6 +363,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 fake_args.append(node.meta["val"])
 
         fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
+        # TODO T204030333
         fake_mode = _detect_fake_mode_from_gm(ep.graph_module)
         if fake_mode is None:
             fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
