@@ -70,11 +70,15 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
     TORCH_CHECK(false, "Cannot query primary context without ATen_xpu library.");
   }
 
-  virtual void setCurrentDevice(DeviceIndex device) const override {
+  DeviceIndex deviceCount() const override {
+    return 0;
+  }
+
+  void setCurrentDevice(DeviceIndex device) const override {
     TORCH_CHECK(false, "Cannot set current device without ATen_xpu library.");
   }
 
-  virtual DeviceIndex getCurrentDevice() const override {
+  DeviceIndex getCurrentDevice() const override {
     TORCH_CHECK(false, "Cannot get current device without ATen_xpu library.");
     return -1;
   }

@@ -187,6 +187,19 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     return 0;
   }
 
+  DeviceIndex deviceCount() const override {
+    return 0;
+  }
+
+  void setCurrentDevice(DeviceIndex device) const override {
+    TORCH_CHECK(false, "Cannot set current device without ATen_cuda library. ", CUDA_HELP);
+  }
+
+  DeviceIndex getCurrentDevice() const override {
+    TORCH_CHECK(false, "Cannot get current device without ATen_cuda library. ", CUDA_HELP);
+    return -1;
+  }
+
 #ifdef USE_ROCM
   virtual bool isGPUArch(DeviceIndex /*device_index*/, const std::vector<std::string>& /*archs*/) const {
     TORCH_CHECK(false, "Cannot check GPU arch without ATen_cuda library. ", CUDA_HELP);
@@ -195,15 +208,6 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
 
   virtual void deviceSynchronize(DeviceIndex /*device_index*/) const {
     TORCH_CHECK(false, "Cannot synchronize CUDA device without ATen_cuda library. ", CUDA_HELP);
-  }
-
-  virtual void setCurrentDevice(DeviceIndex device) const override {
-    TORCH_CHECK(false, "Cannot set current device without ATen_cuda library. ", CUDA_HELP);
-  }
-
-  virtual DeviceIndex getCurrentDevice() const override {
-    TORCH_CHECK(false, "Cannot get current device without ATen_cuda library. ", CUDA_HELP);
-    return -1;
   }
 };
 

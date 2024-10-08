@@ -26,6 +26,23 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `getDeviceFromPtr`.");
   }
 
+  DeviceIndex deviceCount() const override {
+    return 0;
+  }
+
+  void setCurrentDevice(DeviceIndex device) const override {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `setCurrentDevice`.");
+  }
+
+  DeviceIndex getCurrentDevice() const override {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `getCurrentDevice`.");
+    return -1;
+  }
+
   bool isPinnedPtr(const void* data) const override {
     return false;
   }
@@ -40,19 +57,6 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `hasPrimaryContext`.");
-  }
-
-  virtual void setCurrentDevice(DeviceIndex device) const override {
-    TORCH_CHECK(
-        false,
-        "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `setCurrentDevice`.");
-  }
-
-  virtual DeviceIndex getCurrentDevice() const override {
-    TORCH_CHECK(
-        false,
-        "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `getCurrentDevice`.");
-    return -1;
   }
 
   void init() const override {}
