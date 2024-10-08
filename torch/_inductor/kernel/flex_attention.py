@@ -20,20 +20,22 @@ from ..ir import (
     get_stride_order,
     InputBuffer,
     IRNode,
+    MutationLayoutSHOULDREMOVE,
+    Scatter,
     StorageBox,
     stride_order2fill_order,
     Subgraph,
     TensorBox,
-    Scatter,
 )
 from ..lowering import (
+    _full,
+    check_and_broadcast_indices,
     empty,
     empty_strided,
+    expand,
+    index_output_size_and_inner_fn,
     lowerings,
     register_lowering,
-    check_and_broadcast_indices,
-    index_output_size_and_inner_fn,
-    expand,
     to_dtype,
 )
 from ..select_algorithm import autotune_select_algorithm, realize_inputs, TritonTemplate
@@ -45,7 +47,7 @@ Expr = sympy.Expr
 
 
 def zeros_and_scater_lowering(shape: List[int], indices, values):
-    self = empty_strided(shape, None, dtype=values.get_dtype(), device=values.get_device())
+    self = _full(0, values.get_device(), values.get_dtype(), shape)
     x_size = self.get_size()
     x_ndim = len(x_size)
 
@@ -56,9 +58,7 @@ def zeros_and_scater_lowering(shape: List[int], indices, values):
     assert isinstance(self, TensorBox)
     self.realize()
 
-    indices, tensor_indices = check_and_broadcast_indices(
-            indices, self.get_device()
-        )
+    indices, tensor_indices = check_and_broadcast_indices(indices, self.get_device())
     # We can use the first one since they are all required to be the same size
     tensor_size = list(indices[tensor_indices[0]].get_size())
     indexed_size = [x_size[i] for i in range(len(indices))]
@@ -75,8 +75,6 @@ def zeros_and_scater_lowering(shape: List[int], indices, values):
     )
 
     values = expand(values, expected_vals_size)
-    # all guards are set above during broadcast_tensors and expand
-
     scatter = Scatter(
         device=self.get_device(),
         dtype=self.get_dtype(),
@@ -85,7 +83,14 @@ def zeros_and_scater_lowering(shape: List[int], indices, values):
         output_indexer=inner_fn,
         scatter_mode="atomic_add",
     )
-    return scatter
+    buffer = ComputedBuffer(
+        None,
+        MutationLayoutSHOULDREMOVE(self),
+        scatter,
+    )
+    buffer.name = V.graph.register_buffer(buffer)
+    V.graph.register_operation(buffer)
+    return buffer
 
 
 def construct_strides(
@@ -172,16 +177,21 @@ def build_subgraph_buffer(
                 args, kwargs = tree_map(
                     lambda x: env[x] if x in env else x, (node.args, node.kwargs)
                 )
-                flex_lowering = lowerings[node.target] if node.target._opname != "zeros_and_scatter" else zeros_and_scater_lowering
+                flex_lowering = (
+                    lowerings[node.target]
+                    if node.target._opname != "zeros_and_scatter"
+                    else zeros_and_scater_lowering
+                )
                 env[node] = flex_lowering(*args, **kwargs)
             elif node.op == "output":
+
                 def convert_output_node_to_buffer(output):
                     if output is None:
                         return None
                     output_node = output
                     output_buffer = env[output_node]
-                    if isinstance(output_buffer, Scatter):
-                        import fbvscode; fbvscode.set_trace()
+                    if isinstance(output_buffer, ComputedBuffer):
+                        # These nodes are coming from the output of zeros_and_scatter
                         return output_buffer
                     assert isinstance(output_buffer, TensorBox), (
                         "The output node  for flex attention's subgraph must be a TensorBox, but got: ",
@@ -1648,6 +1658,21 @@ def bwd_dkdv_block_mn(
         n="n",
         grad_score_mod="dsT"
     ) | indent_except_first(1) }}
+
+    # ~~~~~~~~~~~~~~~~~~~ Apply other buffer grad writes ~~~~~~~~~~~~~
+    {{ modification(
+        subgraph_number=3,
+        output_name = "scatter",
+        score="pre_mod_scores",
+        b="off_z",
+        h="off_hq",
+        m="m",
+        n="n",
+        grad_score_mod="dsT"
+    ) | indent_except_first(1) }}
+
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
     if CHECK_BLOCK_BOUNDARY:
         grad_scores = tl.where(offs_n1[:, None] < KV_LEN, grad_scores, 0.0)
 
@@ -1769,18 +1794,10 @@ def flex_attention_backward(*args, **kwargs):
         joint_placeholder_inps + list(score_mod_other_buffers), joint_graph
     )
     joint_subgraph_buffer = all_joint_outputs[0]
-    score_mod_other_buffer_scatters = all_joint_outputs[len(joint_placeholder_inps) - 1:]
-    # Create output grads for each non None Scatter op
-    score_mod_other_buffer_grad = [
-        (
-            empty_strided(
-                buffer.get_size(), buffer.get_stride(), dtype=dtype, device=device
-            )
-            if scatter_op is not None else None
-        )
-        for buffer, scatter_op in zip(score_mod_other_buffers, score_mod_other_buffer_scatters)
+    score_mod_other_buffer_grads = all_joint_outputs[len(joint_placeholder_inps) - 1 :]
+    mutated_other_buffer_grads = [
+        buffer for buffer in score_mod_other_buffer_grads if buffer is not None
     ]
-    mutated_other_buffer_grads = [buffer for buffer in score_mod_other_buffer_grad if buffer is not None]
 
     mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
@@ -1893,8 +1910,17 @@ def flex_attention_backward(*args, **kwargs):
                 full_q_indices,
             ],
             layout=layout_broadcasted_k,  # We use store_output only for grad_key
-            subgraphs=[fw_subgraph_buffer, joint_subgraph_buffer, mask_graph_buffer],
-            mutated_inputs=[grad_query, broadcasted_grad_value, *mutated_other_buffer_grads],
+            subgraphs=[
+                fw_subgraph_buffer,
+                joint_subgraph_buffer,
+                mask_graph_buffer,
+                score_mod_other_buffer_grads,
+            ],
+            mutated_inputs=[
+                grad_query,
+                broadcasted_grad_value,
+                *mutated_other_buffer_grads,
+            ],
             call_sizes=query.get_size() + key.get_size()[1:3],
             num_stages=num_stages,
             num_warps=num_warps,
@@ -1955,5 +1981,5 @@ def flex_attention_backward(*args, **kwargs):
         grad_query,
         grad_key,
         grad_value,
-        *score_mod_other_buffer_grad,
+        *score_mod_other_buffer_grads,
     )
