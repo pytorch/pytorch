@@ -21,6 +21,9 @@ from .exported_program import (
 
 @torch._dynamo.disable
 def _check_input_constraints_pre_hook(self, *args, **kwargs):
+    if not self.validate_inputs:
+        return
+
     flat_args_with_path, received_spec = pytree.tree_flatten_with_path(args)
 
     if received_spec != self._in_spec:
@@ -31,7 +34,7 @@ def _check_input_constraints_pre_hook(self, *args, **kwargs):
             f"{received_spec}"
         )
 
-    return _check_input_constraints_for_graph(
+    _check_input_constraints_for_graph(
         [node for node in self.graph.nodes if node.op == "placeholder"],
         flat_args_with_path,
         self.range_constraints,
@@ -254,6 +257,7 @@ class _StatefulGraphModule(torch.fx.GraphModule, metaclass=_StatefulGraphModuleF
         super().__init__(root, graph)
         # Need to fix up non-persistent buffers.
         self.range_constraints = range_constraints or []
+        self.validate_inputs = True
 
 
 def _create_stateful_graph_module(
@@ -331,8 +335,9 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
     ep = _remove_effect_tokens(ep)
     new_gm = torch.fx.GraphModule(ep.graph_module, copy.deepcopy(ep.graph))
     _register_attrs_to_new_gm(new_gm, ep.graph_signature, ep.state_dict, ep.constants)
-    forward_arg_names = ep.graph_module.meta.get("forward_arg_names")
-
+    forward_arg_names = (
+        sig.forward_arg_names if (sig := ep.module_call_graph[0].signature) else None
+    )
     lifted_inputs: List[Optional[str]] = [
         (
             in_spec.target

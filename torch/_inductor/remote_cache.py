@@ -287,6 +287,10 @@ class RemoteFxGraphCache(RedisRemoteCache):
     pass
 
 
+class RemoteAOTAutogradCache(RedisRemoteCache):
+    pass
+
+
 def create_cache(
     key: str,
     is_fbcode: bool,
