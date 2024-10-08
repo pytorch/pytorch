@@ -219,6 +219,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     C10_CUDA_CHECK(cudaEventSynchronize(cuda_event));
   }
 
+  // Note: synchronizeDevice can be safely called from any device
   void synchronizeDevice(const c10::DeviceIndex device_index) const override {
     DeviceIndex orig_device{-1};
     C10_CUDA_CHECK(c10::cuda::GetDevice(&orig_device));

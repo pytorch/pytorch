@@ -93,16 +93,10 @@ void initModule(PyObject* module) {
     const auto device_type = at::getAccelerator(true).value();
     torch::utils::maybe_initialize_device(device_type);
     c10::impl::VirtualGuardImpl impl(device_type);
-    auto orig_device = impl.getDevice();
-    if (orig_device.index() != device_index) {
-      impl.setDevice({device_type, device_index});
-    }
+    // impl.synchronizeDevice should can be safely called from any device
     {
       py::gil_scoped_release no_gil;
       impl.synchronizeDevice(device_index);
-    }
-    if (orig_device.index() != device_index) {
-      impl.setDevice(orig_device);
     }
   });
 }
