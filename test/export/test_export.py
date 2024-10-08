@@ -8200,6 +8200,89 @@ def forward(self, x):
         with self.assertRaises(RuntimeError):
             ep.module()(torch.randn(4, 2))
 
+    def test_dim_hints_with_range(self):
+        # test simple ranges for dynamic & auto
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                torch._check(x.shape[0] >= 8)
+                x = x[6:] + 2.0
+                y = y + torch.randn(4)
+                return x, y
+
+        inputs = (torch.randn(2048), torch.randn(8, 4))
+        ep = export(
+            Foo(),
+            inputs,
+            dynamic_shapes={
+                "x": {0: Dim.Dynamic(min=4, max=4096)},
+                "y": {
+                    0: Dim.Auto(min=4, max=16),
+                    1: Dim.Auto(min=4, max=16),
+                },
+            }
+        )
+        x, y = [node for node in ep.graph.nodes if node.op == "placeholder"]
+        s0 = x.meta["val"].shape[0]
+        s1 = y.meta["val"].shape[0]
+        vr_s0 = ep.range_constraints[s0.node.expr]
+        vr_s1 = ep.range_constraints[s1.node.expr]
+        self.assertEqual([vr_s0.lower, vr_s0.upper], [8, 4096])
+        self.assertEqual([vr_s1.lower, vr_s1.upper], [4, 16])
+        self.assertEqual(y.meta["val"].shape[1], 4)
+
+        # test erroring out on invalid ranges
+        class Baz(torch.nn.Module):
+            def forward(self, x):
+                torch._check(x.shape[0] <= 256)
+                return x[128:]
+
+        inputs = (torch.randn(200),)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r".*user-specified range of 512 \<\= inputs.* \<\= int_oo, "
+            r"but tracing produced valid range of \[128, 256\]"
+        ):
+            export(
+                Baz(),
+                inputs,
+                dynamic_shapes={
+                    "x": (Dim.Dynamic(min=512),),
+                },
+            )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r".*user-specified range of 0 \<\= inputs.* \<\= 64, "
+            r"but tracing produced valid range of \[128, 256\]"
+        ):
+            export(
+                Baz(),
+                inputs,
+                dynamic_shapes={
+                    "x": (Dim.Auto(max=64),),
+                },
+            )
+
+        # test ranges for derived relations
+        class Bar(torch.nn.Module):
+            def forward(self, x, y):
+                return x[4:] + y
+
+        inputs = (torch.randn(16), torch.randn(12))
+        ep = export(
+            Bar(),
+            inputs,
+            dynamic_shapes={
+                "x": {0: Dim.Dynamic(min=10, max=18)},
+                "y": {0: Dim.Auto(min=10, max=18)},
+            },
+        )
+        # valid range for y[0] should be [10, 14]
+        ep.module()(torch.randn(14), torch.randn(10))
+        ep.module()(torch.randn(18), torch.randn(14))
+        with self.assertRaises(RuntimeError):
+            ep.module()(torch.randn(13), torch.randn(9))
+            ep.module()(torch.randn(19), torch.randn(15))
+
     @testing.expectedFailureNonStrict
     @testing.expectedFailureTrainingIRToRunDecompNonStrict  # unbacked symint not tracked?
     @testing.expectedFailureSerDer  # T195866111

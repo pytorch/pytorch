@@ -66,7 +66,10 @@ from torch._guards import detect_fake_mode
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._utils_internal import log_export_usage
-from torch.export.dynamic_shapes import _check_dynamic_shapes, _combine_args
+from torch.export.dynamic_shapes import (
+    _check_dynamic_shapes,
+    _combine_args,
+)
 from torch.export.exported_program import OutputKind
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.experimental.proxy_tensor import make_fx

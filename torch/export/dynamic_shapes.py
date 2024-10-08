@@ -40,7 +40,7 @@ __all__ = [
 log = logging.getLogger(__name__)
 
 
-class _DimHint(Enum):
+class _DimHintType(Enum):
     """
     Enum for dynamic shape hints.
     - AUTO means automatic inference of shape (static or dynamic).
@@ -51,6 +51,26 @@ class _DimHint(Enum):
     AUTO = auto()
     STATIC = auto()
     DYNAMIC = auto()
+
+
+class _DimHint:
+    AUTO = _DimHintType.AUTO
+    STATIC = _DimHintType.STATIC
+    DYNAMIC = _DimHintType.DYNAMIC
+
+    def __init__(self, _type, _min=None, _max=None):
+        assert _type in (self.AUTO, self.STATIC, self.DYNAMIC)
+        self.type = _type
+        self.min = _min
+        self.max = _max
+
+    @staticmethod
+    def Auto(min=None, max=None):
+        return _DimHint(_DimHintType.AUTO, _min=min, _max=max)
+
+    @staticmethod
+    def Dynamic(min=None, max=None):
+        return _DimHint(_DimHintType.DYNAMIC, _min=min, _max=max)
 
 
 class _Dim(type):
@@ -235,9 +255,11 @@ def Dim(name: str, *, min: Optional[int] = None, max: Optional[int] = None):
     return dim
 
 
-Dim.AUTO = _DimHint.AUTO  # type: ignore[attr-defined]
-Dim.STATIC = _DimHint.STATIC  # type: ignore[attr-defined]
-Dim.DYNAMIC = _DimHint.DYNAMIC  # type: ignore[attr-defined]
+Dim.AUTO = _DimHint(_DimHintType.AUTO)  # type: ignore[attr-defined]
+Dim.STATIC = _DimHint(_DimHintType.STATIC)  # type: ignore[attr-defined]
+Dim.DYNAMIC = _DimHint(_DimHintType.DYNAMIC)  # type: ignore[attr-defined]
+Dim.Auto = _DimHint.Auto  # type: ignore[attr-defined]
+Dim.Dynamic = _DimHint.Dynamic  # type: ignore[attr-defined]
 
 
 def dims(*names: str, min: Optional[int] = None, max: Optional[int] = None):
@@ -772,7 +794,8 @@ def _check_dynamic_shapes(
     flat_dynamic_shapes = _flatten_dynamic_shapes(combined_args, dynamic_shapes)
     flatter_dynamic_shapes, _ = tree_flatten(flat_dynamic_shapes)
     if any(isinstance(s, _Dim) for s in flatter_dynamic_shapes) and any(
-        s == _DimHint.AUTO for s in flatter_dynamic_shapes
+        isinstance(s, _DimHint) and s.type in [_DimHintType.AUTO, _DimHintType.DYNAMIC]
+        for s in flatter_dynamic_shapes
     ):
         raise UserError(
             UserErrorType.INVALID_INPUT,
@@ -913,11 +936,11 @@ def _process_dynamic_shapes(
                     constraint = to_constraint(dim, tensor, i)
                     symbols[dim.__name__].append(constraint)
                 elif isinstance(dim, _DimHint):
-                    if dim == _DimHint.AUTO:
+                    if dim.type == _DimHint.AUTO:
                         torch._dynamo.maybe_mark_dynamic(tensor, i)
-                    elif dim == _DimHint.STATIC:
+                    elif dim.type == _DimHint.STATIC:
                         torch._dynamo.mark_static(tensor, i)
-                    elif dim == _DimHint.DYNAMIC:
+                    elif dim.type == _DimHint.DYNAMIC:
                         torch._dynamo.mark_dynamic(tensor, i)
                 elif dim is None:
                     torch._dynamo.mark_static(tensor, i)
@@ -929,11 +952,11 @@ def _process_dynamic_shapes(
                     constraint = to_constraint(dim, tensor, i)
                     symbols[dim.__name__].append(constraint)
                 elif isinstance(dim, _DimHint):
-                    if dim == _DimHint.AUTO:
+                    if dim.type == _DimHint.AUTO:
                         torch._dynamo.maybe_mark_dynamic(tensor, i)
-                    elif dim == _DimHint.STATIC:
+                    elif dim.type == _DimHint.STATIC:
                         torch._dynamo.mark_static(tensor, i)
-                    elif dim == _DimHint.DYNAMIC:
+                    elif dim.type == _DimHint.DYNAMIC:
                         torch._dynamo.mark_dynamic(tensor, i)
                 elif dim is None:
                     torch._dynamo.mark_static(tensor, i)
