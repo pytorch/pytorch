@@ -54,7 +54,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     CUSTOM = 5,
   };
 
-  static std::string backendTypeToString(BackendType type) {
+  static std::string backendTypeToString(const BackendType& type) {
     switch (type) {
       case BackendType::GLOO:
         return "gloo";
@@ -66,8 +66,26 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         return "mpi";
       case BackendType::UNDEFINED:
         return "undefined";
-      default:
+      case BackendType::CUSTOM:
         return "custom";
+      default:
+        TORCH_CHECK(false, "THis should never happen!");
+    }
+  };
+
+  static BackendType strToBackendType(const std::string& backend) {
+    if (backend == "undefined") {
+      return BackendType::UNDEFINED;
+    } else if (backend == "gloo") {
+      return BackendType::GLOO;
+    } else if (backend == "nccl") {
+      return BackendType::NCCL;
+    } else if (backend == "ucc") {
+      return BackendType::UCC;
+    } else if (backend == "mpi") {
+      return BackendType::MPI;
+    } else {
+      return BackendType::CUSTOM;
     }
   };
 
@@ -649,6 +667,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   void setDefaultBackend(const BackendType& backendType) {
     backendType_ = backendType;
+  }
+
+  void setDefaultBackend(const std::string& backend) {
+    backendType_ = strToBackendType(backend);
   }
 
   c10::intrusive_ptr<Backend> getBackend(c10::DeviceType deviceType);

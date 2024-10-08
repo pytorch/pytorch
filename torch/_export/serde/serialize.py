@@ -7,6 +7,7 @@ import heapq
 import inspect
 import io
 import json
+import keyword
 import logging
 import math
 import operator
@@ -14,6 +15,7 @@ import re
 import typing
 import traceback
 
+from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
@@ -125,6 +127,7 @@ ST_DELIMITER = ";"
 _TORCH_TO_SERIALIZE_DTYPE = {
     torch.uint8: ScalarType.BYTE,
     torch.int8: ScalarType.CHAR,
+    torch.uint16: ScalarType.UINT16,
     torch.int16: ScalarType.SHORT,
     torch.int32: ScalarType.INT,
     torch.int64: ScalarType.LONG,
@@ -1394,6 +1397,7 @@ class ExportedProgramSerializer(metaclass=Final):
                 minor=SCHEMA_VERSION[1],
             ),
             verifiers=[v.dialect for v in exported_program.verifiers],
+            torch_version=torch.__version__,
         )
 
         # Test canonical form is well defined.
@@ -1945,12 +1949,18 @@ class GraphModuleDeserializer(metaclass=Final):
             for input in serialized_node.inputs
         }
         args = []
-        kwargs = {}
+        kwargs: OrderedDict[str, Any] = OrderedDict()
         for schema_arg in schema_args:
             is_positional = (
                 not schema_arg.has_default_value() and not schema_arg.kwarg_only
             )
             if is_positional:
+                args.append(actual_args[schema_arg.name])
+            elif keyword.iskeyword(schema_arg.name):
+                assert not schema_arg.kwarg_only
+                if len(kwargs) > 0:
+                    kwargs = OrderedDict()
+                    args.extend(list(kwargs.values()))
                 args.append(actual_args[schema_arg.name])
             else:
                 if schema_arg.name in actual_args:
@@ -2905,6 +2915,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
         range_constraints=range_constraints,
         schema_version=ep.schema_version,
         verifiers=ep.verifiers,
+        torch_version=ep.torch_version,
     )
 
 

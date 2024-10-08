@@ -313,9 +313,9 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
     output_padding.emplace_back(config_vals.at(idx));
     idx++;
   }
-  int64_t groups = config_vals.at(idx);
+  int64_t groups [[maybe_unused]] = config_vals.at(idx);
   idx++;
-  int64_t flags = config_vals.at(idx);
+  int64_t flags [[maybe_unused]] = config_vals.at(idx);
   idx++;
   TORCH_INTERNAL_ASSERT(idx == static_cast<int64_t>(config_vals.size()),
       "Unexpected length of config_vals, expected ",
@@ -323,7 +323,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
       " got ",
       config_vals.size());
 
-  bool transpose = flags & (1 << 0);
+  bool transpose [[maybe_unused]] = flags & (1 << 0);
 
   int64_t other_flags = flags & ~(1 << 0);
   TORCH_INTERNAL_ASSERT(other_flags == 0, "Unexpected flags set in ", flags, ".");

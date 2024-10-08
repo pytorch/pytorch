@@ -104,9 +104,9 @@ jobs:
       - get-label-type
 {%- if config["gpu_arch_type"] == "cuda" %}
 {%- if branches == "nightly" %}
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
 {%- else %}
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.8xlarge.nvidia.gpu.nonephemeral"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge.nonephemeral"
 {%- endif %}
 {%- else %}
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"

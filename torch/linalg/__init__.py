@@ -1440,7 +1440,8 @@ but it is faster in some cases.
 
 Args:
     x (Tensor): tensor, flattened by default, but this behavior can be
-        controlled using :attr:`dim`.
+        controlled using :attr:`dim`.  (Note: the keyword argument
+        `input` can also be used as an alias for `x`.)
     ord (int, float, inf, -inf, 'fro', 'nuc', optional): order of norm. Default: `2`
     dim (int, Tuple[int], optional): dimensions over which to compute
         the norm. See above for the behavior when :attr:`dim`\ `= None`.
@@ -2232,7 +2233,7 @@ the output has the same batch dimensions.
         equations with a unique solution.
 
 Args:
-    A (Tensor): tensor of shape `(*, n, n)` (or `(*, k, k)` if :attr:`left`\ `= True`)
+    A (Tensor): tensor of shape `(*, n, n)` (or `(*, k, k)` if :attr:`left`\ `= False`)
                 where `*` is zero or more batch dimensions.
     B (Tensor): right-hand side tensor of shape `(*, n, k)`.
 

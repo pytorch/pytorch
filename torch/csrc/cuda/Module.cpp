@@ -390,9 +390,11 @@ PyObject* THCPModule_cudaJiteratorCompileAndLaunchKernel(
   PyObject* key = nullptr;
   PyObject* value = nullptr;
   Py_ssize_t pos = 0;
+  Py_BEGIN_CRITICAL_SECTION(kwargs_o);
   while (PyDict_Next(kwargs_o, &pos, &key, &value)) {
     extra_args.emplace_back(as_scalar(value));
   }
+  Py_END_CRITICAL_SECTION();
 
   c10::SmallVector<at::Tensor> outputs = at::cuda::CompileAndLaunchKernel(
       code_string,
@@ -424,6 +426,19 @@ PyObject* THCPModule_cudaCachingAllocator_raw_delete(
     pybind11::gil_scoped_release no_gil;
     c10::cuda::CUDACachingAllocator::raw_delete(mem_ptr);
   }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_cudaCachingAllocator_enable(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkBool(arg),
+      "cudaCachingAllocator_enable expects a bool, but got ",
+      THPUtils_typename(arg));
+  c10::cuda::CUDACachingAllocator::enable(THPUtils_unpackBool(arg));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -542,9 +557,20 @@ PyObject* THCPModule_setMemoryFraction(PyObject* _unused, PyObject* args) {
   Py_RETURN_NONE;
 }
 
+PyObject* THCPModule_hostEmptyCache(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS {
+    pybind11::gil_scoped_release no_gil;
+    at::cuda::CachingHostAllocator_emptyCache();
+  }
+  END_HANDLE_TH_ERRORS
+  Py_RETURN_NONE;
+}
+
 PyObject* THCPModule_emptyCache(PyObject* _unused, PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  c10::cuda::CUDACachingAllocator::emptyCache();
+  HANDLE_TH_ERRORS {
+    pybind11::gil_scoped_release no_gil;
+    c10::cuda::CUDACachingAllocator::emptyCache();
+  }
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -554,10 +580,10 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to memory_allocated");
   const auto device_index = THPUtils_unpackDeviceIndex(arg);
 
-  using c10::cuda::CUDACachingAllocator::DeviceStats;
-  using c10::cuda::CUDACachingAllocator::Stat;
-  using c10::cuda::CUDACachingAllocator::StatArray;
-  using c10::cuda::CUDACachingAllocator::StatType;
+  using c10::CachingDeviceAllocator::DeviceStats;
+  using c10::CachingDeviceAllocator::Stat;
+  using c10::CachingDeviceAllocator::StatArray;
+  using c10::CachingDeviceAllocator::StatType;
 
   const auto statToDict = [](const Stat& stat) {
     py::dict dict;
@@ -978,11 +1004,10 @@ static void registerCudaDeviceProperties(PyObject* module) {
           "max_threads_per_multi_processor",
           &cudaDeviceProp::maxThreadsPerMultiProcessor)
       .def_readonly("warp_size", &cudaDeviceProp::warpSize)
-#if !USE_ROCM
-      // NVIDA only property
+#if (defined(USE_ROCM) && ROCM_VERSION >= 60100) || !USE_ROCM
       .def_readonly(
           "regs_per_multiprocessor", &cudaDeviceProp::regsPerMultiprocessor)
-#endif // USE_ROCM
+#endif
       // HIP-only property; reuse name attribute for CUDA builds
       .def_readonly(
           "gcnArchName",
@@ -1837,12 +1862,17 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_cudaHostAllocator,
      METH_NOARGS,
      nullptr},
+    {"_host_emptyCache", THCPModule_hostEmptyCache, METH_NOARGS, nullptr},
     {"_cuda_cudaCachingAllocator_raw_alloc",
      THCPModule_cudaCachingAllocator_raw_alloc,
      METH_VARARGS,
      nullptr},
     {"_cuda_cudaCachingAllocator_raw_delete",
      THCPModule_cudaCachingAllocator_raw_delete,
+     METH_O,
+     nullptr},
+    {"_cuda_cudaCachingAllocator_enable",
+     THCPModule_cudaCachingAllocator_enable,
      METH_O,
      nullptr},
     {"_cuda_cudaCachingAllocator_set_allocator_settings",

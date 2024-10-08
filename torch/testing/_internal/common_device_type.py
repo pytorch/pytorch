@@ -1646,16 +1646,38 @@ def expectedFailureMeta(fn):
     return skipIfTorchDynamo()(expectedFailure("meta")(fn))
 
 
-def expectedFailureMPS(fn):
-    return expectedFailure("mps")(fn)
-
-
 def expectedFailureXLA(fn):
     return expectedFailure("xla")(fn)
 
 
 def expectedFailureHPU(fn):
     return expectedFailure("hpu")(fn)
+
+
+def expectedFailureMPS(fn):
+    return expectedFailure("mps")(fn)
+
+
+def expectedFailureMPSPre15(fn):
+    import platform
+
+    version = float(".".join(platform.mac_ver()[0].split(".")[:2]) or -1)
+    if not version or version < 1.0:  # cpu or other unsupported device
+        return fn
+    if version < 15.0:
+        return expectedFailure("mps")(fn)
+    return fn
+
+
+def expectedFailureMPSPre14(fn):
+    import platform
+
+    version = float(".".join(platform.mac_ver()[0].split(".")[:2]) or -1)
+    if not version or version < 1.0:  # cpu or other unsupported device
+        return fn
+    if version < 14.0:
+        return expectedFailure("mps")(fn)
+    return fn
 
 
 # Skips a test on CPU if LAPACK is not available.
@@ -1889,24 +1911,6 @@ def skipXLA(fn):
 
 def skipMPS(fn):
     return skipMPSIf(True, "test doesn't work on MPS backend")(fn)
-
-
-def skipMPSVersionIfLessThan(major: int, minor: int):
-    def dec_fn(fn):
-        @wraps(fn)
-        def wrap_fn(self, *args, **kwargs):
-            if self.device_type == "mps":
-                if not torch.backends.mps.is_macos_or_newer(major, minor):
-                    reason = (
-                        f"MPS test is skipped for MacOS versions < {major}.{minor} "
-                    )
-                    raise unittest.SkipTest(reason)
-
-            return fn(self, *args, **kwargs)
-
-        return wrap_fn
-
-    return dec_fn
 
 
 def skipHPU(fn):
