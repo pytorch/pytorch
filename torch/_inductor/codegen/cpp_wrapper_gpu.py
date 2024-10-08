@@ -450,9 +450,6 @@ class CppWrapperGpu(CppWrapperCpu):
             else:
                 self.writeline(f"void* {kernel_args_var}[] = {{{call_args_str}}};")
 
-            if self.device == "xpu":
-                stream = f"{stream}.queue()"
-
             grid_var = f"{kernel_name}_grid_{next(self.grid_id)}"
             self.writeline(
                 DeferredGpuGridLine(kernel_name, grid_var, grid, autotune_configs)
