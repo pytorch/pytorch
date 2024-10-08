@@ -871,10 +871,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             return ConstantVariable.create(None)
 
-        @register(torch._C.TensorBase.__getitem__)
-        def handle_getitem(self, tx: "InstructionTranslator", *args, **kwargs):
-            return args[0].call_method(tx, "getitem", args[1:], kwargs)
-
         return handlers
 
     def call_function(
@@ -903,6 +899,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 ),
             )
+
+        if self.is_tensor_method():
+            return self.call_tensor_method(tx, args, kwargs)
 
         special_handler = self._get_handlers().get(self.value)
         if special_handler:
@@ -1175,6 +1174,16 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             source
         )
         return result
+
+    def call_tensor_method(self, tx, args, kwargs):
+        return args[0].call_method(tx, self.get_function().__name__, args[1:], kwargs)
+
+    def is_tensor_method(self):
+        return (
+            inspect.ismethoddescriptor(self.get_function())
+            and hasattr(self.get_function(), "__objclass__")
+            and self.get_function().__objclass__ == torch._C.TensorBase
+        )
 
     def torch_function_override_enabled(self, tx, args, kwargs):
         return (
