@@ -7,6 +7,7 @@ import torch
 import torch.fx as fx
 from torch._prims_common import get_computation_dtype
 from torch._subclasses import fake_tensor  # noqa: TCH001
+from torch._utils_internal import JustKnobsConfig
 from torch.fx._utils import lazy_format_graph_code
 from torch.fx.experimental.symbolic_shapes import ShapeEnv  # noqa: TCH001
 from torch.fx.graph_module import GraphModule  # noqa: TCH001
@@ -34,13 +35,15 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 # you don't want to keep recomputing the same quantity over and over again if
 # it's used multiple times.
 #
-# This pass runs on the JOINT graph produced by AOT Autograd, prior to
-# partitioning, because we want to be able to make changes that affect
-# our partitioning decisions (in particular, we want to avoid having to
-# be able to save floats across the partition, and passes that change what
-# device compute happen on need to happen before partitioning, but after this
-# pass). Note that some transformations have to happen before this in Dynamo,
-# if fake tensor propagating the SymFloat would cause a spurious specialization.
+# This pass runs on the JOINT graph produced by AOT Autograd, prior to partitioning.
+# The primary goal of this pass is to eliminate floats by replacing TensorScalar
+# operations with TensorTensor operations and then Dead Code Elimination (DCE) of
+# the item calls, which effectively removes the floats.
+#
+# This needs to happen before partitioning because it influences partitioning decisions,
+# specifically by ensuring that we don't need to save floats across partitions.
+# Additionally, there is a separate pass that changes which device computations
+# occur on. That pass must be run after this one, but still before partitioning.
 #
 # HISTORY NOTE: Originally, I wanted to formulate this pass as pushing item()
 # calls down, transforming float compute into int compute as we went. If you
@@ -79,7 +82,12 @@ def tensorify_python_scalars(
     """
     import sympy
 
-    if not torch._functorch.config.tensorify_python_scalars:
+    knob = JustKnobsConfig(
+        name="pytorch/compiler:tensorify_python_scalars",
+        env_name="TENSORIFY_PYTHON_SCALARS",
+        default=True,
+    ).get()
+    if not knob:
         return None
 
     graph = gm.graph
