@@ -9,9 +9,7 @@
 #include <fstream>
 #include <string>
 
-namespace torch {
-namespace data {
-namespace datasets {
+namespace torch::data::datasets {
 namespace {
 constexpr uint32_t kTrainSize = 60000;
 constexpr uint32_t kTestSize = 10000;
@@ -43,8 +41,13 @@ uint32_t read_int32(std::ifstream& stream) {
 
 uint32_t expect_int32(std::ifstream& stream, uint32_t expected) {
   const auto value = read_int32(stream);
-  TORCH_CHECK(value == expected,
-      "Expected to read number ", expected, " but found ", value, " instead");
+  TORCH_CHECK(
+      value == expected,
+      "Expected to read number ",
+      expected,
+      " but found ",
+      value,
+      " instead");
   return value;
 }
 
@@ -98,14 +101,15 @@ MNIST::MNIST(const std::string& root, Mode mode)
       targets_(read_targets(root, mode == Mode::kTrain)) {}
 
 Example<> MNIST::get(size_t index) {
-  return {images_[index], targets_[index]};
+  return {
+      images_[static_cast<int64_t>(index)],
+      targets_[static_cast<int64_t>(index)]};
 }
 
 std::optional<size_t> MNIST::size() const {
   return images_.size(0);
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape)
 bool MNIST::is_train() const noexcept {
   return images_.size(0) == kTrainSize;
 }
@@ -118,6 +122,4 @@ const Tensor& MNIST::targets() const {
   return targets_;
 }
 
-} // namespace datasets
-} // namespace data
-} // namespace torch
+} // namespace torch::data::datasets
