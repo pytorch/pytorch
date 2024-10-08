@@ -238,7 +238,7 @@ class CondTests(TestCase):
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
-    def test_cond_simple_with_int_closure(self, device, dynamic):
+    def test_cond_simple_with_int_closure(self, device):
         self._run_test(
             model=torch.compile(CondModels.SimpleWithIntClosure(), dynamic=True),
             inputs=(
