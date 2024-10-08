@@ -2373,21 +2373,7 @@ class Scheduler:
                 node.node, ir.MultiTemplateBuffer
             ):
                 multi_node = node.node
-                if not config.test_configs.force_extern_kernel_in_multi_template:
-                    min_node_unfused, _ = multi_node.get_min_choice()
-                else:
-                    min_node_unfused = next(
-                        (
-                            timing
-                            for timing in multi_node.choice_timings
-                            if isinstance(
-                                timing,
-                                torch._inductor.select_algorithm.ExternKernelCaller,
-                            )
-                        ),
-                        None,  # type: ignore[arg-type]
-                    )
-                    assert min_node_unfused is not None
+                min_node_unfused, _ = multi_node.get_min_choice()
 
                 if isinstance(
                     min_node_unfused,
