@@ -64,6 +64,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     run_tests,
+    skipIfCrossRef,
     TEST_TRANSFORMERS,
     TestCase as TorchTestCase,
 )
@@ -6973,6 +6974,7 @@ def forward(self, x):
         real_names_and_ops = [(node.name, node.op) for node in ep.graph.nodes]
         self.assertEqual(expected_names_and_ops, real_names_and_ops)
 
+    @skipIfCrossRef  # Dynamo changes the order of ops under Torch function modes
     def test_placeholder_naming_collisions_hoo_subgraphs(self):
         # test collisions between user inputs, top-level nodes, and HOO subgraph nodes
         class Foo(torch.nn.Module):
@@ -8309,6 +8311,7 @@ class TestOneOffModelExportResult(TestCase):
     #     getitem = _scaled_dot_product_flash_attention_for_cpu[0];  _scaled_dot_product_flash_attention_for_cpu = None
     #     return (getitem,)""")
 
+    @skipIfCrossRef
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Can't run fused SDPA on this platform",

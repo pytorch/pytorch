@@ -335,8 +335,9 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
     ep = _remove_effect_tokens(ep)
     new_gm = torch.fx.GraphModule(ep.graph_module, copy.deepcopy(ep.graph))
     _register_attrs_to_new_gm(new_gm, ep.graph_signature, ep.state_dict, ep.constants)
-    forward_arg_names = ep.graph_module.meta.get("forward_arg_names")
-
+    forward_arg_names = (
+        sig.forward_arg_names if (sig := ep.module_call_graph[0].signature) else None
+    )
     lifted_inputs: List[Optional[str]] = [
         (
             in_spec.target
