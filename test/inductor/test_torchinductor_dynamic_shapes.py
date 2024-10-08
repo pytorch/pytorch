@@ -937,7 +937,6 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([5] * 320))
 
-    @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/137087
     def test_mark_unbacked_slice(self):
         @torch.compile(backend="inductor", mode="reduce-overhead", fullgraph=True)
         def f(x):
