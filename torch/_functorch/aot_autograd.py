@@ -27,11 +27,12 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 static_inputs_log = torch._logging.getArtifactLogger(
     __name__, "cudagraph_static_inputs"
 )
-
 from . import config
 from ._aot_autograd.autograd_cache import (  # noqa: F401
     AOTAutogradCache,
     autograd_cache_key,
+    should_use_local_autograd_cache,
+    should_use_remote_autograd_cache,
 )
 from ._aot_autograd.collect_metadata_analysis import (  # noqa: F401
     run_functionalized_fw_and_collect_metadata,
@@ -1069,9 +1070,18 @@ def aot_module_simplified(
         return compiled_fn
 
     # Autograd cache stuff
-    if config.enable_autograd_cache and not torch._inductor.config.force_disable_caches:
+    remote = should_use_remote_autograd_cache()
+    local = should_use_local_autograd_cache()
+
+    if local or remote:
         compiled_fn = AOTAutogradCache.load(
-            dispatch_and_compile, mod, fake_flat_args, aot_config, cudagraphs
+            dispatch_and_compile,
+            mod,
+            fake_flat_args,
+            aot_config,
+            cudagraphs,
+            local,
+            remote,
         )
     else:
         compiled_fn = dispatch_and_compile()
@@ -1261,6 +1271,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
         )
     if trace_joint:
 
+        @wraps(functional_call)
         def flattened_joint(*args):
             # The idea here is that the joint graph that AOTAutograd creates has some strict properties:
             # (1) It accepts two arguments (primals, tangents), and pytree_flattens them
@@ -1301,7 +1312,7 @@ https://github.com/pytorch/pytorch/issues/101192
                     assert grad is None
             return *fw_outs, *output_gradients
 
-        fx_g = make_fx(flattened_joint)(*full_args)
+        fx_g = make_fx(flattened_joint, record_module_stack=True)(*full_args)
 
     user_args_flat = pytree.arg_tree_leaves(*args, **kwargs)
     return fx_g, create_graph_signature(
