@@ -52,7 +52,6 @@ bool is_numpy_dlpack_deleter_bugged() {
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
 #include <memory>
-#include <sstream>
 #include <stdexcept>
 
 using namespace at;
@@ -68,8 +67,7 @@ bool is_numpy_available() {
     }
     // Try to get exception message, print warning and return false
     std::string message = "Failed to initialize NumPy";
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    PyObject *type, *value, *traceback;
+    PyObject *type = nullptr, *value = nullptr, *traceback = nullptr;
     PyErr_Fetch(&type, &value, &traceback);
     if (auto str = value ? PyObject_Str(value) : nullptr) {
       if (auto enc_str = PyUnicode_AsEncodedString(str, "utf-8", "strict")) {
@@ -403,10 +401,8 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   }
 
   // Extract the `obj.__cuda_array_interface__['typestr']` attribute
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  ScalarType dtype;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int dtype_size_in_bytes;
+  ScalarType dtype{};
+  int dtype_size_in_bytes = 0;
   {
     PyObject* py_typestr = nullptr;
     if (PyDict_GetItemStringRef(cuda_dict, "typestr", &py_typestr) < 0) {
@@ -415,8 +411,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
     if (py_typestr == nullptr) {
       throw TypeError("attribute `typestr` must exist");
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    PyArray_Descr* descr;
+    PyArray_Descr* descr = nullptr;
     TORCH_CHECK_VALUE(
         PyArray_DescrConverter(py_typestr, &descr), "cannot parse `typestr`");
     dtype = numpy_dtype_to_aten(descr->type_num);
@@ -429,8 +424,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   }
 
   // Extract the `obj.__cuda_array_interface__['data']` attribute
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  void* data_ptr;
+  void* data_ptr = nullptr;
   {
     PyObject* py_data = nullptr;
     if (PyDict_GetItemStringRef(cuda_dict, "data", &py_data) < 0) {
