@@ -361,7 +361,8 @@ class FSDPParam:
             # collectives and (2) introduces extra complexity to handle padding
             # and unpadding
             raise NotImplementedError(
-                f"FSDP does not support uneven sharding on dim {shard_dim}: {param_data.size()}"
+                f"FSDP does not support uneven sharding on dim {shard_dim}: "
+                f"{param_data.size()} (world size: {shard_world_size})"
             )
         chunks = _chunk_with_empty(param_data, shard_world_size, dim=shard_dim)
         sharded_param = chunks[shard_rank]
