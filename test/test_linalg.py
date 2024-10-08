@@ -1396,16 +1396,17 @@ class TestLinalg(TestCase):
                 error_msg = "Expected a non-complex scalar"
                 with self.assertRaisesRegex(RuntimeError, error_msg):
                     torch.linalg.matrix_norm(input, ord, dim, keepdim)
-            msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}'
-            result = torch.linalg.norm(input, ord, dim, keepdim)
-            input_numpy = input.cpu().numpy()
-            result_numpy = np.linalg.norm(input_numpy, ord, dim, keepdim)
+            else:
+                msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}'
+                result = torch.linalg.norm(input, ord, dim, keepdim)
+                input_numpy = input.cpu().numpy()
+                result_numpy = np.linalg.norm(input_numpy, ord, dim, keepdim)
 
-            result = torch.linalg.norm(input, ord, dim, keepdim)
-            self.assertEqual(result, result_numpy, msg=msg)
-            if ord is not None and dim is not None:
-                result = torch.linalg.matrix_norm(input, ord, dim, keepdim)
+                result = torch.linalg.norm(input, ord, dim, keepdim)
                 self.assertEqual(result, result_numpy, msg=msg)
+                if ord is not None and dim is not None:
+                    result = torch.linalg.matrix_norm(input, ord, dim, keepdim)
+                    self.assertEqual(result, result_numpy, msg=msg)
 
         ord_matrix = [1, -1, 2, -2, inf, -inf, 'nuc', 'fro', 1 + 2j]
         S = 10
