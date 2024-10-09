@@ -492,6 +492,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   });
 
   _C_m.def("_activate_gpu_trace", []() { activateGPUTrace(); });
+  _C_m.def(
+      "_swap_saved",
+      [](torch::autograd::SavedVariable& a, torch::autograd::SavedVariable& b) {
+        std::swap(a, b);
+      });
 
   py_context_manager_DEPRECATED<c10::InferenceMode, bool>(
       _C_m, "_InferenceMode");
@@ -510,11 +515,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   py_context_manager_DEPRECATED<DisableFuncTorch>(_C_m, "_DisableFuncTorch");
   py_context_manager<DisableAutocast>(_C_m, "_DisableAutocast");
   py::class_<torch::autograd::SavedVariable>(std::move(m), "SavedTensor")
-      .def(py::init([]() -> torch::autograd::SavedVariable {
-        TORCH_CHECK(
-            false,
-            "Trying to create a SavedTensor object from Python is forbidden.");
-      }))
+      .def(py::init(
+          [](const at::Tensor& tensor) -> torch::autograd::SavedVariable {
+            return torch::autograd::SavedVariable(tensor, /*is_output*/ false);
+          }))
       .def(
           "register_hooks",
           [](torch::autograd::SavedVariable& s,

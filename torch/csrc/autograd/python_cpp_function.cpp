@@ -190,6 +190,41 @@ PyObject* THPCppFunction_register_prehook(PyObject* self, PyObject* hook) {
   return registerFunctionPreHook(fn, hook);
 }
 
+PyObject* THPCppFunction_pre_hooks(PyObject* self, PyObject* noargs) {
+  torch::autograd::Node& fn = *((THPCppFunction*)self)->cdata;
+  PyObject* pyinput =
+      PyTuple_New(static_cast<Py_ssize_t>(fn.pre_hooks().size()));
+  for (const auto i : c10::irange(fn.pre_hooks().size())) {
+    PyFunctionPreHook* pre_hook =
+        dynamic_cast<PyFunctionPreHook*>(fn.pre_hooks()[i].get());
+    TORCH_CHECK(pre_hook != nullptr, "TODO");
+    PyTuple_SET_ITEM(pyinput, i, pre_hook->dict);
+  }
+  return pyinput;
+}
+
+PyObject* THPCppFunction_post_hooks(PyObject* self, PyObject* noargs) {
+  torch::autograd::Node& fn = *((THPCppFunction*)self)->cdata;
+  PyObject* pyinput =
+      PyTuple_New(static_cast<Py_ssize_t>(fn.pre_hooks().size()));
+  for (const auto i : c10::irange(fn.pre_hooks().size())) {
+    PyFunctionPostHook* post_hook =
+        dynamic_cast<PyFunctionPostHook*>(fn.pre_hooks()[i].get());
+    TORCH_CHECK(post_hook != nullptr, "TODO");
+    PyTuple_SET_ITEM(pyinput, i, post_hook->dict);
+  }
+  return pyinput;
+}
+
+PyObject* THPCppFunction_is_traceable(PyObject* self, PyObject* noargs) {
+  torch::autograd::Node& fn = *((THPCppFunction*)self)->cdata;
+  if (fn.is_traceable()) {
+    return Py_True;
+  } else {
+    return Py_False;
+  }
+}
+
 PyObject* THPCppFunction_name(PyObject* self, PyObject* noargs) {
   auto& fn = *((THPCppFunction*)self)->cdata;
   return THPUtils_packString(fn.name());

@@ -38,6 +38,12 @@ PyObject* CppFunction_pynew(
    THPCppFunction_register_hook_dict,                                          \
    METH_O,                                                                     \
    nullptr},                                                                   \
+      {(char*)"pre_hooks", THPCppFunction_pre_hooks, METH_NOARGS, nullptr},    \
+      {(char*)"post_hooks", THPCppFunction_post_hooks, METH_NOARGS, nullptr},  \
+      {(char*)"is_traceable",                                                  \
+       THPCppFunction_is_traceable,                                            \
+       METH_NOARGS,                                                            \
+       nullptr},                                                               \
       {(char*)"register_hook", THPCppFunction_register_hook, METH_O, nullptr}, \
       {(char*)"register_prehook",                                              \
        THPCppFunction_register_prehook,                                        \
@@ -75,6 +81,7 @@ PyObject* THPCppFunction_requires_grad(PyObject* self, void* _unused);
 PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var);
 PyObject* THPCppFunction_register_hook(PyObject* self, PyObject* hook);
 PyObject* THPCppFunction_register_prehook(PyObject* self, PyObject* hook);
+PyObject* THPCppFunction_get_prehooks(PyObject* self, PyObject* noargs);
 
 PyObject* THPCppFunction_name(PyObject* self, PyObject* noargs);
 PyObject* THPCppFunction_sequence_nr(PyObject* self, PyObject* noargs);
