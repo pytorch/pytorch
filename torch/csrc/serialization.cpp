@@ -168,7 +168,7 @@ void doRead(io fildes, void* raw_buf, size_t nbytes) {
       if (err == EINTR) {
         continue;
       } else {
-        AT_ERROR("read(): fd ", fildes, " failed with ", strerror(err));
+        TORCH_CHECK(false, "read(): fd ", fildes, " failed with ", strerror(err));
       }
     } else if (r == 0) {
       break;
@@ -180,7 +180,7 @@ void doRead(io fildes, void* raw_buf, size_t nbytes) {
     nbytes -= r;
   }
   if (nbytes != 0) {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "unexpected EOF, expected ",
         nbytes,
         " more bytes. The file might be corrupted.");
@@ -208,7 +208,7 @@ void doWrite(io fildes, void* raw_buf, size_t nbytes) {
       if (err == EINTR) {
         continue;
       } else {
-        AT_ERROR("write(): fd ", fildes, " failed with ", strerror(err));
+        TORCH_CHECK(false, "write(): fd ", fildes, " failed with ", strerror(err));
       }
     }
     buf += r;

@@ -349,7 +349,7 @@ Value& OrderedDict<Key, Value>::operator[](const Key& key) {
   if (auto* value = find(key)) {
     return *value;
   }
-  AT_ERROR(key_description_, " '", key, "' is not defined");
+  TORCH_CHECK(false, key_description_, " '", key, "' is not defined");
 }
 
 template <typename Key, typename Value>
@@ -357,7 +357,7 @@ const Value& OrderedDict<Key, Value>::operator[](const Key& key) const {
   if (auto* value = find(key)) {
     return *value;
   }
-  AT_ERROR(key_description_, " '", key, "' is not defined");
+  TORCH_CHECK(false, key_description_, " '", key, "' is not defined");
 }
 
 template <typename Key, typename Value>

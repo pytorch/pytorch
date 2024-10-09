@@ -689,13 +689,6 @@ namespace c10::detail {
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_ERROR(msg) is deprecated, use TORCH_CHECK(false, msg)
-instead.")
-*/
-inline void deprecated_AT_ERROR() {}
-
-/*
-// Deprecation disabled until we fix sites in our codebase
 C10_DEPRECATED_MESSAGE("AT_ASSERT is deprecated, if you mean to indicate an
 internal invariant failure, use " \
                        "TORCH_INTERNAL_ASSERT instead; if you mean to do user
@@ -738,16 +731,6 @@ inline void deprecated_AT_ASSERTM() {}
   do {                                                                    \
     ::c10::detail::deprecated_AT_ASSERTM();                               \
     C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(cond, __VA_ARGS__)); \
-  } while (false)
-
-// Deprecated alias; this alias was deprecated because it represents extra API
-// surface that makes it hard for people to understand what macro to use.
-// Use TORCH_CHECK(false, ...) or TORCH_INTERNAL_ASSERT(false, ...) to
-// unconditionally fail at a line of code.
-#define AT_ERROR(...)                                                        \
-  do {                                                                       \
-    ::c10::detail::deprecated_AT_ERROR();                                    \
-    C10_EXPAND_MSVC_WORKAROUND(TORCH_CHECK(false, ::c10::str(__VA_ARGS__))); \
   } while (false)
 
 #endif // C10_UTIL_EXCEPTION_H_

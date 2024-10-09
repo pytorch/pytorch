@@ -80,11 +80,11 @@ void cpu_max_unpool(
 
   if (optional_error_index) {
     if constexpr (is_3d) {
-      AT_ERROR("Found an invalid max index: ", optional_error_index.value(),
+      TORCH_CHECK(false, "Found an invalid max index: ", optional_error_index.value(),
           " (output volumes are of size ", output_depth,
           "x", output_height, "x", output_width);
     } else {
-      AT_ERROR("Found an invalid max index: ", optional_error_index.value(),
+      TORCH_CHECK(false, "Found an invalid max index: ", optional_error_index.value(),
           " (output volumes are of size ", output_height,
           "x", output_width);
     }
@@ -148,7 +148,7 @@ void cpu_max_unpool_channels_last(
   });
 
   if (optional_error_index) {
-    AT_ERROR("Found an invalid max index: ", optional_error_index.value(),
+    TORCH_CHECK(false, "Found an invalid max index: ", optional_error_index.value(),
         " (output volumes are of size ", output_height,
         "x", output_width, ")");
   }
@@ -217,12 +217,12 @@ void cpu_max_unpool_backward(
 
   if (optional_error_index) {
     if (is_3d) {
-      AT_ERROR("invalid max index ", optional_error_index.value(),
+      TORCH_CHECK(false, "invalid max index ", optional_error_index.value(),
           ", odepth= ", output_depth,
           ", owidth= ", output_width,
           ", oheight= ", output_height);
     } else {
-      AT_ERROR("invalid max index ", optional_error_index.value(),
+      TORCH_CHECK(false, "invalid max index ", optional_error_index.value(),
           ", owidth= ", output_width,
           ", oheight= ", output_height);
     }

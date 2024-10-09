@@ -573,12 +573,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   if (running_mean.defined()) {
     check_dims_match_num_input_features("running_mean", num_features, running_mean.sym_numel());
   } else if (!training) {
-    AT_ERROR("running_mean must be defined in evaluation mode");
+    TORCH_CHECK(false, "running_mean must be defined in evaluation mode");
   }
   if (running_var.defined()) {
     check_dims_match_num_input_features("running_var", num_features, running_var.sym_numel());
   } else if (!training) {
-    AT_ERROR("running_var must be defined in evaluation mode");
+    TORCH_CHECK(false, "running_var must be defined in evaluation mode");
   }
   if (weight.defined()) {
     check_dims_match_num_input_features("weight", num_features, weight.sym_numel());

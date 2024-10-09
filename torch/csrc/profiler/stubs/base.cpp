@@ -41,7 +41,7 @@ struct DefaultStubs : public ProfilerStubs {
 
  private:
   void fail() const {
-    AT_ERROR(name_, " used in profiler but not enabled.");
+    TORCH_CHECK(false, name_, " used in profiler but not enabled.");
   }
 
   const char* const name_;

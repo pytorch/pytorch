@@ -55,7 +55,7 @@ class TORCH_API Context {
       return at::detail::getPrivateUse1Hooks().getDefaultGenerator(
           device.index());
     } else {
-      AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
+      TORCH_CHECK(false, c10::DeviceTypeName(device_type), " device type not enabled.");
     }
   }
 
@@ -77,7 +77,7 @@ class TORCH_API Context {
     } else if (device_type == at::kHIP) {
       return at::detail::getHIPHooks();
     } else {
-      AT_ERROR(
+      TORCH_CHECK(false,
           c10::DeviceTypeName(device_type), " device type not an accelerator.");
     }
   }
@@ -94,7 +94,7 @@ class TORCH_API Context {
     } else if (device_type == at::kPrivateUse1) {
       return at::detail::getPrivateUse1Hooks().getDeviceFromPtr(data);
     } else {
-      AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
+      TORCH_CHECK(false, c10::DeviceTypeName(device_type), " device type not enabled.");
     }
   }
 

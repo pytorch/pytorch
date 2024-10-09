@@ -342,7 +342,7 @@ inline TypedIValue toDictKeyIValue(py::handle key) {
   } else if (py::isinstance<py::float_>(key)) {
     return TypedIValue(py::cast<double>(key), FloatType::get());
   } else {
-    AT_ERROR("Dictionary inputs may only have string, int, or float keys");
+    TORCH_CHECK(false, "Dictionary inputs may only have string, int, or float keys");
   }
 }
 
@@ -687,7 +687,7 @@ inline IValue toTypeInferredIValue(py::handle input) {
       return c10::intrusive_ptr<c10::ivalue::Object>::reclaim_copy(
           ptr.release());
     }
-    AT_ERROR(
+    TORCH_CHECK(false,
         "Tracer cannot infer type of ", py::str(input), "\n:", match.reason());
   }
   return toIValue(input, match.type());
@@ -1086,7 +1086,7 @@ inline Stack evilDeprecatedBadCreateStackDoNotUse(
     at::ArrayRef<Value*> inputs,
     size_t reserve_extra_space = 0) {
   if (tuple.size() != inputs.size()) {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "expected " + std::to_string(inputs.size()) + " inputs, but got " +
         std::to_string(tuple.size()));
   }

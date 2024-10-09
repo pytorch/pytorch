@@ -23,13 +23,13 @@ struct TORCH_API IPUHooksInterface: AcceleratorHooksInterface {
 
   virtual const Generator& getDefaultIPUGenerator(
       DeviceIndex device_index [[maybe_unused]] = -1) const {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "Cannot get the default IPU generator: the IPU backend is not "
         "available.");
   }
 
   virtual Generator newIPUGenerator(DeviceIndex device_index [[maybe_unused]] = -1) const {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "Cannot create a new IPU generator: the IPU backend is not available.");
   }
 };
