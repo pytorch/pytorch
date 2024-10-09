@@ -55,6 +55,10 @@ class TestOpenReg(TestCase):
         a = torch.ones(10, device="openreg").clone()
         self.assertEqual(a, torch.ones(10, device="openreg"))
 
+    def test_cross_diff_devices_copy(self):
+        a = torch.ones(10, device="openreg:0").to(device="openreg:1").to(device="cpu")
+        self.assertEqual(a, torch.ones(10))
+
     def test_data_dependent_output(self):
         cpu_a = torch.randn(10)
         a = cpu_a.to(device="openreg")
