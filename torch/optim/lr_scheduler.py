@@ -1384,8 +1384,9 @@ class ReduceLROnPlateau(LRScheduler):
                     f"({len(self.optimizer.param_groups)}) differs "
                     f"from when `ReduceLROnPlateau` was initialized "
                     f"({len(self.min_lrs)}), usually due to a new "
-                    "param group being added. Please modify the `min_lrs` "
-                    "field to match the length of the `optimizer` param groups."
+                    "param group being added to the optimizer. Please "
+                    "modify the `min_lrs` field to match the length "
+                    "of the `optimizer` param groups."
                 )
             else:
                 self.min_lrs = [self.default_min_lr] * len(self.optimizer.param_groups)
