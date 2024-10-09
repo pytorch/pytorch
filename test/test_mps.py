@@ -813,8 +813,6 @@ def mps_ops_modifier(ops):
         'take': None,
         'to': None,
         'to_sparse': None,
-        'tril_indices': None,
-        'triu_indices': None,
         'unique': None,
         'vdot': None,
         'segment_reduce_': None,
