@@ -203,7 +203,6 @@ def export_compat(
     onnx_program.model = onnxscript_apis.convert_version(
         onnx_program.model, opset_version
     )
-    onnx_program.model = onnxscript_apis.optimize(onnx_program.model)
 
     if f is not None:
         onnx_program.save(
