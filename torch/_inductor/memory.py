@@ -585,8 +585,6 @@ def reorder_for_peak_memory(
     graph_outputs: Set[str],
     methods: List[Callable[..., List[BaseSchedulerNode]]] = [  # noqa: B006
         topological_sort_lpmf,
-        topological_sort_bfs,
-        topological_sort_dfs,
     ],
 ) -> List[BaseSchedulerNode]:
     """
