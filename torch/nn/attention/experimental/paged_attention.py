@@ -61,7 +61,7 @@ class PagedAttention:
 
     def reserve(self, batch_idx: Tensor, seq_len: Tensor) -> None:
         """
-        Requests that the capacity of a given batch be at least enough to
+        Requests the capacity of a given batch to be at least enough to
         hold `seq_len` elements.
 
         Args:
@@ -114,7 +114,7 @@ class PagedAttention:
         """
 
         # find allocated pages
-        allocated_page_idx = self.page_table[batch_idx, :] != -1
+        allocated_page_idx = self.page_table[batch_idx] != -1
         allocated_pages = self.page_table[batch_idx][allocated_page_idx]
 
         # clean metadata
@@ -164,13 +164,13 @@ class PagedAttention:
             )
         if K_D != k_cache.shape[3]:
             raise RuntimeError(
-                f"Expect val and cache has the same hidden dim "
-                f"but got K_D={K_D} and K_D={k_cache.shape[3]}."
+                f"Expect k_val and k_cache has the same hidden dim "
+                f"but got D={K_D} and D={k_cache.shape[3]}."
             )
         if V_D != v_cache.shape[3]:
             raise RuntimeError(
-                f"Expect val and cache has the same hidden dim "
-                f"but got V_D={V_D} and V_D={v_cache.shape[3]}."
+                f"Expect v_val and v_cache has the same hidden dim "
+                f"but got D={V_D} and D={v_cache.shape[3]}."
             )
 
         # find address
