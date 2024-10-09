@@ -85,8 +85,51 @@ void CUDAGraph::register_generator_state(const at::Generator& generator) {
 
 std::atomic<size_t> captureUniqueToken{1};
 
-constexpr int kAllocationStride = 1024; // a misaligned data pointer will freak out the kernels
-constexpr int kAllocationBase = 2048; // nullptr freaks out various APIs throughout torch
+
+// Assume that all pointers must be divisible by this, for alignment reasons
+// 64 is probably safe, let's do 128 just to be extra safe
+constexpr int kMinimumAlignment = 128;
+
+// The natural choice would be nullptr, however, there are various checks throughout torch that assert pointers are never null
+// Therefore, an arbitrary value:
+constexpr int kAllocationBase = 2048;
+static_assert(kAllocationBase % kMinimumAlignment == 0, "Base allocation must not lead to misaligned pointers");
+static_assert(kAllocationBase, "Base allocation must never return nullptr");
+
+// How much should we stride between each allocation?
+constexpr int kAllocationStride = 256;
+static_assert(kAllocationStride % kMinimumAlignment == 0, "Every allocation in the second run must be aligned");
+
+/**
+ * This check is critical to ensure that we can never false positive and modify data that is not truly a data pointer
+ * We CAN false positive on arbitrary 8-byte sections of uninitialized memory
+ * But, that's fine, because it's uninitialized so we can overwrite it, or not, to no ill effect
+ *
+ * The only thing we MUST avoid is modifying actual data that just so happened to look like our sentinel values
+ * Due to struct padding, we can sometimes have an 8-byte section that is nondeterministic, but only SOME of it is uninitialized
+ * At least 1 byte of it COULD be actual data, that we MUST not overwrite
+ * To see how, consider this case: struct SomeData { int8_t fieldA; int64_t fieldB; };
+ * Note that fieldA will be have offsetof == 0, fieldB will have offsetof == 8
+ * This means that between these fields, there are 7 bytes of uninitialized memory.
+ * We must NEVER misidentify this as a pointer!
+ * But if those 7 bytes can be anything, how could we guarantee that? Sure we could call it unlikely, but we'd prefer a guarantee!
+ * This data will have a constant fieldA, meaning its least significant byte is constant
+ * All we need to do is ensure that our two sentinel values have DIFFERENT least significant bytes!
+ * The actual data will look like this:
+ * [constant byte, varying byte, ..., varying byte]
+ * Note that subtracting two runs will always result in the first byte being 0!
+ * Our sentinel values will look like this:
+ * [0, varying byte, ..., varying byte] (first run)
+ * [128, varying byte, ..., varying byte] (second run)
+ * Subtracting these runs will ALWAYS result in a first byte of 128!
+ * Therefore, these values can NEVER false positive as equal to each other, because at least one byte is guaranteed to be different!
+ * The following static_asserts guarantee this - we add kStrideBetweenRuns to the second run but not the first
+ */
+constexpr int kStrideBetweenRuns = 128;
+static_assert(kStrideBetweenRuns % 256 != 0, "First run and second run must guarantee unique least significant byte");
+static_assert(kAllocationStride % 256 == 0, "We need EVERY allocIdx to have this uniqueness property, not just the even ones!");
+static_assert(kStrideBetweenRuns % kMinimumAlignment == 0, "Every allocation in the second run must be aligned");
+
 
 void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capture_mode, int sentinel_allocations_mode) {
   TORCH_CHECK(!has_graph_exec_,
@@ -153,18 +196,14 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
         return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == capture_id_;
     }, [this](size_t allocSz) {
       allocationSizes.push_back(allocSz);
+      size_t ptr;
       if (sentinelAllocationsMode == 1) {
-        std::cout << "intercepted alloc of size " << allocSz << " returning " << kAllocationBase << " since mode=1" << std::endl;
-        return (void*)((char*)nullptr + kAllocationBase);
+        ptr = kAllocationBase;
       } else {
-        std::cout << "intercepted alloc of size " << allocSz << " returning allocIdx+1 since mode=2" << std::endl;
-        // I think that alignment is causing issues... The kernels can
-        // inspect the alignment to decide what amount of
-        // vectorization is possible in the loads and stores, etc. We
-        // want to make sure that the alignment is always "large
-        // enough". Use 1024 for now...
-        return (void*)((char*)nullptr + kAllocationBase + kAllocationStride * (1 + sentinelAllocationIdx++));
+        ptr = kAllocationBase + kStrideBetweenRuns + kAllocationStride * sentinelAllocationIdx++;
       }
+      std::cout << "intercepted alloc " << sentinelAllocationIdx << " of size " << allocSz << " returning " << ptr << " since mode=" << sentinelAllocationsMode << std::endl;
+      return (void*)((char*)nullptr + ptr);
     }, sentinelCaptureUniqueToken);
   }
 
@@ -396,6 +435,20 @@ void CUDAGraph::compare_with_recapture(const CUDAGraph& graph2) {
   auto checkAllocation = [this](void* ptr1, void* ptr2) -> std::optional<std::tuple<size_t, size_t>> {
     // reverse engineer the sentinel pointers to determine which allocation this is (allocIdx) and the offset into the tensor (offset)
     int64_t whichAlloc = (int64_t)((char*)ptr2 - (char*)ptr1);
+    if (whichAlloc % 256 != kStrideBetweenRuns) {
+      std::cout << "LEIJURV: MISMATCH the allocation strided between runs by "
+                << whichAlloc
+                << " which has least significant byte "
+                << (whichAlloc % 256)
+                << " which does not match our value of "
+                << kStrideBetweenRuns
+                << std::endl;
+      return std::nullopt;
+    }
+    // at this point, we are SURE that this is EITHER one of our pointers, OR a full 8 bytes of nondeterministic / uninitialized memory
+    // we could just do the math and return early here with no checks, but, that would have poor performance since we could overwrite a bit much
+    // so, let's do some more checks:
+    whichAlloc -= kStrideBetweenRuns;
     if (whichAlloc % kAllocationStride != 0) {
       std::cout << "LEIJURV: MISMATCH the allocation strided by " << whichAlloc
                 << " which is not divisible by our stride " << kAllocationStride 
@@ -403,7 +456,7 @@ void CUDAGraph::compare_with_recapture(const CUDAGraph& graph2) {
       return std::nullopt;
     }
     
-    int64_t allocIdx = whichAlloc / kAllocationStride - 1;
+    int64_t allocIdx = whichAlloc / kAllocationStride;
     if (allocIdx < 0 || allocIdx >= (int64_t)allocationSizes.size()) {
       std::cout << "LEIJURV: MISMATCH it did stride in units of " << kAllocationStride << " but to a total count of " << allocIdx << " while we expected between 0 and " << allocationSizes.size() << " exclusive" << std::endl;
       return std::nullopt;
