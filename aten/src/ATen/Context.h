@@ -380,11 +380,6 @@ class TORCH_API Context {
   }
 
  private:
-  void initHPUIfNeeded(c10::DeviceType p) {
-    if (p == c10::DeviceType::HPU) {
-      lazyInitHPU();
-    }
-  }
   static bool checkCuBLASConfigDeterministic();
   std::array<c10::once_flag, at::COMPILE_TIME_MAX_DEVICE_TYPES> init_;
   bool enabled_cudnn = true;

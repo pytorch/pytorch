@@ -12,7 +12,7 @@ namespace at {
 struct TORCH_API HPUHooksInterface : AcceleratorHooksInterface {
   ~HPUHooksInterface() override = default;
 
-  virtual void initHPU() const {
+  void init() const override{
     TORCH_CHECK(false, "Cannot initialize HPU without HPU backend");
   }
 
