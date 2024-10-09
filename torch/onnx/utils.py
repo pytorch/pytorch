@@ -4,6 +4,7 @@
 These models can be loaded with the ONNX library and then
 converted to models which run on other deep learning frameworks.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -138,14 +139,14 @@ def disable_apex_o2_state_dict_hook(model: torch.nn.Module | torch.jit.ScriptFun
 
 @contextlib.contextmanager
 def setup_onnx_logging(verbose: bool):
-    is_originally_enabled = torch.onnx.is_onnx_log_enabled()
-    if is_originally_enabled or verbose:
-        torch.onnx.enable_log()
+    is_originally_enabled = _C._jit_is_onnx_log_enabled
+    if is_originally_enabled or verbose:  # type: ignore[truthy-function]
+        _C._jit_set_onnx_log_enabled(True)
     try:
         yield
     finally:
-        if not is_originally_enabled:
-            torch.onnx.disable_log()
+        if not is_originally_enabled:  # type: ignore[truthy-function]
+            _C._jit_set_onnx_log_enabled(False)
 
 
 @contextlib.contextmanager
@@ -172,12 +173,9 @@ def _get_torch_export_args(
 
 
 def export(
-    model: torch.nn.Module
-    | torch.jit.ScriptModule
-    | torch.jit.ScriptFunction
-    | torch.export.ExportedProgram,
+    model: torch.nn.Module | torch.jit.ScriptModule | torch.jit.ScriptFunction,
     args: tuple[Any, ...] | torch.Tensor,
-    f: str | None = None,
+    f: str,
     *,
     kwargs: dict[str, Any] | None = None,
     export_params: bool = True,
@@ -191,13 +189,11 @@ def export(
     dynamic_axes: Mapping[str, Mapping[int, str]]
     | Mapping[str, Sequence[int]]
     | None = None,
-    dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None = None,
     keep_initializers_as_inputs: bool | None = None,
     custom_opsets: Mapping[str, int] | None = None,
     export_modules_as_functions: bool | Collection[type[torch.nn.Module]] = False,
-    autograd_inlining: bool | None = True,
-    dynamo: bool = False,
-) -> torch.onnx.ONNXProgram | None:
+    autograd_inlining: bool = True,
+) -> None:
     r"""Exports a model into ONNX format.
 
     If ``model`` is not a :class:`torch.jit.ScriptModule` nor a
@@ -229,13 +225,7 @@ def export(
 
             3. A TUPLE OF ARGUMENTS ENDING WITH A DICTIONARY OF NAMED ARGUMENTS::
 
-                args = (
-                    x,
-                    {
-                        "y": input_y,
-                        "z": input_z
-                    }
-                )
+                args = (x, {"y": input_y, "z": input_z})
 
             All but the last element of the tuple will be passed as non-keyword arguments,
             and named arguments will be set from the last element. If a named argument is
@@ -257,22 +247,14 @@ def export(
                         (
                             x,
                             # WRONG: will be interpreted as named arguments
-                            {y: z}
+                            {y: z},
                         ),
-                        "test.onnx.pb"
+                        "test.onnx.pb",
                     )
 
                 Write::
 
-                    torch.onnx.export(
-                        model,
-                        (
-                            x,
-                            {y: z},
-                            {}
-                        ),
-                        "test.onnx.pb"
-                    )
+                    torch.onnx.export(model, (x, {y: z}, {}), "test.onnx.pb")
 
         f: Path to the output ONNX model file. E.g. "model.onnx".
         kwargs: Named arguments to the model.
@@ -374,12 +356,13 @@ def export(
                     def forward(self, x):
                         return torch.sum(x, dim=1)
 
+
                 torch.onnx.export(
                     SumModule(),
                     (torch.ones(2, 2),),
                     "onnx.pb",
                     input_names=["x"],
-                    output_names=["sum"]
+                    output_names=["sum"],
                 )
 
             Produces::
@@ -415,7 +398,7 @@ def export(
                         "x": {0: "my_custom_axis_name"},
                         # list value: automatic names
                         "sum": [0],
-                    }
+                    },
                 )
 
             Produces::
@@ -491,8 +474,6 @@ def export(
         autograd_inlining: Flag used to control whether to inline autograd functions.
             Refer to https://github.com/pytorch/pytorch/pull/74765 for more details.
 
-        dynamo: Whether to export the model with Dynamo instead of TorchScript.
-
     Raises:
         :class:`torch.onnx.errors.CheckerError`: If the ONNX checker detects an invalid ONNX graph.
         :class:`torch.onnx.errors.UnsupportedOperatorError`: If the ONNX graph cannot be exported because it
@@ -515,65 +496,29 @@ def export(
         )
 
     args = (args,) if isinstance(args, torch.Tensor) else args
+    if kwargs is not None:
+        args = args + (kwargs,)
 
-    if dynamo:
-        if isinstance(model, (torch.jit.ScriptModule, torch.jit.ScriptFunction)):
-            raise TypeError(
-                "Dynamo export does not support ScriptModule or ScriptFunction."
-            )
-        # TODO(justinchuby): Remove the warning once logic migration is done
-        warnings.warn(
-            "export_params, verbose, training, input_names, output_names, operator_export_type, opset_version, "
-            "do_constant_folding, keep_initializers_as_inputs, custom_opsets, export_modules_as_functions, and "
-            "autograd_inlining are not supported for dynamo export at the moment."
-        )
-        args, kwargs = _get_torch_export_args(args, kwargs)
-        if isinstance(model, torch.export.ExportedProgram):
-            exported_program = model
-        else:
-            if dynamic_shapes is None and dynamic_axes is not None:
-                dynamic_shapes = _from_dynamic_axes_to_dynamic_shapes(
-                    model, dynamic_axes, input_names
-                )
-            exported_program = torch.export.export(
-                model, args=args, kwargs=kwargs, dynamic_shapes=dynamic_shapes  # type: ignore[arg-type]
-            )
-        if kwargs is None:
-            # TODO(justinchuby): dynamo_export requires kwargs to be unpacked. Once migration is done
-            # we can pass kwargs as None
-            kwargs = {}
-        onnx_program = torch.onnx.dynamo_export(exported_program, *args, **kwargs)
-        if f is not None:
-            onnx_program.save(f)
-        return onnx_program
+    _export(
+        model,
+        args,
+        f,
+        export_params,
+        verbose,
+        training,
+        input_names,
+        output_names,
+        operator_export_type=operator_export_type,
+        opset_version=opset_version,
+        do_constant_folding=do_constant_folding,
+        dynamic_axes=dynamic_axes,
+        keep_initializers_as_inputs=keep_initializers_as_inputs,
+        custom_opsets=custom_opsets,
+        export_modules_as_functions=export_modules_as_functions,
+        autograd_inlining=autograd_inlining,
+    )
 
-    else:
-        # Torch Script export path
-        if f is None:
-            raise ValueError("Export destination must be specified when dynamo=False.")
-        if kwargs is not None:
-            args = args + (kwargs,)
-
-        _export(
-            model,
-            args,
-            f,
-            export_params,
-            verbose,
-            training,
-            input_names,
-            output_names,
-            operator_export_type=operator_export_type,
-            opset_version=opset_version,
-            do_constant_folding=do_constant_folding,
-            dynamic_axes=dynamic_axes,
-            keep_initializers_as_inputs=keep_initializers_as_inputs,
-            custom_opsets=custom_opsets,
-            export_modules_as_functions=export_modules_as_functions,
-            autograd_inlining=autograd_inlining,
-        )
-
-        return None
+    return None
 
 
 def _is_constant_tensor_list(node):
@@ -868,64 +813,6 @@ def _decide_input_format(model, args):
     return args
 
 
-def _from_dynamic_axes_to_dynamic_shapes(
-    model,
-    dynamic_axes: Mapping[str, Mapping[int, str]]
-    | Mapping[str, Sequence[int]]
-    | None = None,
-    input_names: Sequence[str] | None = None,
-) -> dict[str, Any] | None:
-    """
-
-    dynamic_axes examples:
-    (1) dynamic_axes = {"x": {0: "my_custom_axis_name_1"}, "y": {1: "my_custom_axis_name_2"}}
-    (2) dynamic_axes = {"x": [0], "y": [1]}
-
-    these will be converted to dynamic_shapes respectively:
-    (1) dynamic_shapes = {"x": {0: Dim("my_custom_axis_name_1")}, "y": {1: Dim("my_custom_axis_name_2")}}
-    (2) dynamic_shapes = {"x": {0: Dim("x_dim_0")}, "y": {1: Dim("y_dim_1")}}  # auto-generated dim names
-
-    """
-    if dynamic_axes is None:
-        return None
-
-    if input_names is None:
-        input_names_set = set()
-    else:
-        input_names_set = set(input_names)
-
-    dynamic_shapes: dict[str, Any | None] = {}
-    for input_name, axes in dynamic_axes.items():
-        if input_name in input_names_set:
-            raise ValueError(
-                "Assinging new input names is not supported yet. Please use model forward signature "
-                "to specify input names in dynamix_axes."
-            )
-        if isinstance(axes, dict):
-            dynamic_shapes[input_name] = {
-                k: torch.export.Dim(v) for k, v in axes.items()
-            }
-        elif isinstance(axes, list):
-            dynamic_shapes[input_name] = {
-                k: torch.export.Dim(f"{input_name}_dim_{k}") for k in axes
-            }
-        else:
-            raise TypeError(
-                f"dynamic_axes value must be either a dict or a list, but got {type(axes)}"
-            )
-    # torch.export.export needs static dim to present in dynamic_shapes
-    # for all input tensors, so we need to add them with None
-    try:
-        sig = _signature(model)
-    except ValueError as e:
-        warnings.warn(f"{e}, skipping auto filling None on static axes...")
-        return dynamic_shapes
-    for input_name in sig.parameters.keys():
-        if input_name not in dynamic_shapes:
-            dynamic_shapes[input_name] = None
-    return dynamic_shapes
-
-
 def _trace(func, args, operator_export_type, return_outs=False):
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
@@ -1180,7 +1067,7 @@ def _model_to_graph(
             module=module,
         )
     except Exception as e:
-        torch.onnx.log("Torch IR graph at exception: ", graph)
+        _C._jit_onnx_log("Torch IR graph at exception: ", graph)
         raise
 
     is_script = isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule))
@@ -1441,9 +1328,9 @@ def _setup_trace_module_map(
         and start from the first non-numeric atom.
 
         Example:
-            >>> _unqualified_variable_name('__main__.Foo.bar')
+            >>> _unqualified_variable_name("__main__.Foo.bar")
             'bar'
-            >>> _unqualified_variable_name('__main__.Foo.bar.0')
+            >>> _unqualified_variable_name("__main__.Foo.bar.0")
             'bar.0'
         """
         name_atoms = qualified_name.split(".")
@@ -1507,7 +1394,7 @@ def _get_module_attributes(module):
         try:
             attrs[k] = getattr(module, k)
         except AttributeError:
-            torch.onnx.log(f"Skipping module attribute '{k}'")
+            _C._jit_onnx_log(f"Skipping module attribute '{k}'")
             continue
     return attrs
 
@@ -1531,7 +1418,7 @@ def _export(
     custom_opsets=None,
     add_node_names=True,
     onnx_shape_inference=True,
-    export_modules_as_functions=False,
+    export_modules_as_functions: Any = False,
     autograd_inlining=True,
 ):
     assert GLOBALS.in_onnx_export is False
@@ -1560,9 +1447,7 @@ def _export(
             f"Exporting to ONNX opset version {opset_version} is not supported. "
             f"by 'torch.onnx.export()'. "
             f"The highest opset version supported is {_constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET}. "
-            f"To use a newer opset version, consider 'torch.onnx.dynamo_export()'. "
-            f"Note that dynamo_export() is in preview. Please report errors with "
-            f"dynamo_export() as Github issues to https://github.com/pytorch/pytorch/issues.",
+            f"To use a newer opset version, consider 'torch.onnx.export(..., dynamo=True)'. ",
             category=errors.OnnxExporterWarning,
         )
 
@@ -1650,7 +1535,9 @@ def _export(
 
             if keep_initializers_as_inputs is not True:
                 params_dict = _C._jit_pass_onnx_deduplicate_initializers(  # type: ignore[assignment]
-                    graph, params_dict, getattr(model, "training", False)  # type: ignore[arg-type]
+                    graph,
+                    params_dict,  # type: ignore[arg-type]
+                    getattr(model, "training", False),  # type: ignore[arg-type]
                 )
             _C._jit_pass_onnx_assign_scoped_names_for_node_and_value(graph)
             if export_params:
@@ -1697,20 +1584,8 @@ def _export(
                 custom_opsets,
             )
             if verbose:
-                torch.onnx.log("Exported graph: ", graph)
+                _C._jit_onnx_log("Exported graph: ", graph)
             onnx_proto_utils._export_file(proto, f, export_type, export_map)
-            # The ONNX checker only works for ONNX graph. So if the operator_export_type is not ONNX,
-            # we can skip this check.
-            # If large model format export is enabled, proto will only contain data location instead of
-            # raw data and _check_onnx_proto() will fail because it can only handle the raw ONNX proto
-            # string in memory.
-            if (operator_export_type is _C_onnx.OperatorExportTypes.ONNX) and (
-                not val_use_external_data_format
-            ):
-                try:
-                    _C._check_onnx_proto(proto)
-                except RuntimeError as e:
-                    raise errors.CheckerError(e) from e
     finally:
         assert GLOBALS.in_onnx_export
         GLOBALS.in_onnx_export = False
@@ -1821,45 +1696,6 @@ def _should_aten_fallback(
     return False
 
 
-def _need_symbolic_context(symbolic_fn: Callable) -> bool:
-    """Checks if the first argument to symbolic_fn is annotated as type `torch.onnx.SymbolicContext`."""
-    params = tuple(inspect.signature(symbolic_fn).parameters.values())
-    # When the annotation is postpone-evaluated, the annotation is a string
-    # and not a type. We need to use get_type_hints to get the real type.
-    if not params:
-        return False
-    first_param_name = params[0].name
-    type_hints = typing.get_type_hints(symbolic_fn)
-    if first_param_name not in type_hints:
-        return False
-    param_type = type_hints[first_param_name]
-    return issubclass(param_type, _exporter_states.SymbolicContext)
-
-
-def _symbolic_context_handler(symbolic_fn: Callable) -> Callable:
-    """Decorator that provides the symbolic context to the symbolic function if needed."""
-    if _need_symbolic_context(symbolic_fn):
-        # TODO(justinchuby): Update the module name of GraphContext when it is public
-        warnings.warn(
-            "The first argument to symbolic functions is deprecated in 1.13 and will be "
-            "removed in the future. Please annotate treat the first argument (g) as GraphContext "
-            "and use context information from the object instead.",
-            category=FutureWarning,
-        )
-
-        def wrapper(graph_context: jit_utils.GraphContext, *args, **kwargs):
-            symbolic_context = _exporter_states.SymbolicContext(
-                params_dict=graph_context.params_dict,
-                env=graph_context.env,
-                cur_node=graph_context.original_node,
-                onnx_block=graph_context.block,
-            )
-            return symbolic_fn(symbolic_context, graph_context, *args, **kwargs)
-
-        return wrapper
-    return symbolic_fn
-
-
 def _get_aten_op_overload_name(n: _C.Node) -> str:
     # Returns `overload_name` attribute to ATen ops on non-Caffe2 builds
     schema = n.schema()
@@ -1947,7 +1783,9 @@ def _run_symbolic_function(
         }
         if namespace == "onnx":
             # Clone node to trigger ONNX shape inference
-            return graph_context.op(op_name, *inputs, **attrs, outputs=node.outputsSize())  # type: ignore[attr-defined]
+            return graph_context.op(
+                op_name, *inputs, **attrs, outputs=node.outputsSize()
+            )  # type: ignore[attr-defined]
 
         raise errors.UnsupportedOperatorError(
             symbolic_function_name,
@@ -2023,13 +1861,7 @@ def register_custom_op_symbolic(
 
     _verify_custom_op_name(symbolic_name)
 
-    registration.custom_onnx_symbolic(
-        symbolic_name,
-        opset_version,
-        decorate=[
-            _symbolic_context_handler,
-        ],
-    )(symbolic_fn)
+    registration.custom_onnx_symbolic(symbolic_name, opset_version)(symbolic_fn)
 
 
 def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int):

@@ -85,7 +85,7 @@ class FakeQuantizeBase(ABC, Module):
     fake_quant_enabled: torch.Tensor
     observer_enabled: torch.Tensor
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Set fake_quant_enabled and observer_enabled."""
         super().__init__()
         # fake_quant_enabled and observer_enabled are buffers to support their

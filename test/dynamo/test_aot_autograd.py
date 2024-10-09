@@ -43,7 +43,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     def test_LSTM(self):
         # https://github.com/pytorch/torchdynamo/issues/1147
         class Repro(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.self_mod_model_lstm_lstm = torch.nn.LSTM(
                     64, 64, num_layers=2, bidirectional=True
@@ -148,7 +148,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
     def test_call_fn_with_non_const_inputs_aot_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=20, kernel_size=(5, 5)
@@ -434,7 +434,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args_param_non_tensor_arg(self):
         class F(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
@@ -487,7 +487,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         z = None
 
         class F(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
@@ -524,7 +524,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args_param_non_tensor_arg_list(self):
         class F(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
@@ -574,7 +574,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args_param(self):
         class F(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
@@ -730,7 +730,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             from torch._functorch.aot_autograd import aot_module_simplified
 
             class WrapperModule(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.original = input_mod
                     self.submod = aot_module_simplified(input_mod, args, nop)
@@ -775,7 +775,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
     def test_aot_sequence_nr(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = torch.nn.Conv2d(
                     in_channels=16,
@@ -842,7 +842,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         # Walk all the nodes in fx graph.
         # Write the resulting ops to a table
         min_seq_nr = -1
-        seq_table = "SeqNr|OrigAten|SrcFn\n"
+        seq_table = "SeqNr|OrigAten|SrcFn|FwdSrcFn\n"
         for node in fx_g.graph.nodes:
             if "call_" in node.op and "getitem" not in str(node.target):
                 seq_nr = node.meta.get("seq_nr", -1)
@@ -857,51 +857,59 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                     mod_name = source_fn_stack[-1][0]
                 # Make all seq_nr relative so it starts at 0
                 seq_nr = seq_nr - min_seq_nr
-                seq_table = seq_table + f"{seq_nr}|{orig_aten}|{mod_name}\n"
+                # For backward nodes, also test that metadata from the corresponding
+                # forward node is copied over.
+                fwd_source_fn_stack = node.meta.get("fwd_source_fn_stack", [])
+                fwd_mod_name = ""
+                if len(fwd_source_fn_stack):
+                    fwd_mod_name = fwd_source_fn_stack[-1][0]
+                seq_table = (
+                    seq_table + f"{seq_nr}|{orig_aten}|{mod_name}|{fwd_mod_name}\n"
+                )
 
         self.maxDiff = None
         self.assertExpectedInline(
             seq_table,
             dedent(
                 """\
-SeqNr|OrigAten|SrcFn
-0|aten.convolution.default|l__self___conv1
-0|aten.add.Tensor|l__self___bn1
-1|aten._native_batch_norm_legit_functional.default|l__self___bn1
-2|aten.relu.default|l__self___relu1
-2|aten.detach.default|l__self___relu1
-2|aten.detach.default|l__self___relu1
-3|aten.add.Tensor|add
-4|aten.view.default|flatten
-5|aten.view.default|l__self___fc1
-6|aten.t.default|l__self___fc1
-7|aten.addmm.default|l__self___fc1
-8|aten.view.default|l__self___fc1
-9|aten.sub.Tensor|l__self___loss_fn
-10|aten.abs.default|l__self___loss_fn
-11|aten.mean.default|l__self___loss_fn
-11|aten.ones_like.default|
-11|aten.expand.default|
-11|aten.div.Scalar|
-10|aten.sgn.default|
-10|aten.mul.Tensor|
-8|aten.view.default|
-7|aten.t.default|
-7|aten.mm.default|
-7|aten.t.default|
-7|aten.mm.default|
-7|aten.t.default|
-7|aten.sum.dim_IntList|
-7|aten.view.default|
-6|aten.t.default|
-5|aten.view.default|
-4|aten.view.default|
-2|aten.detach.default|
-2|aten.detach.default|
-2|aten.threshold_backward.default|
-1|aten.native_batch_norm_backward.default|
-0|aten.convolution_backward.default|
-11|aten.add.Tensor|
+SeqNr|OrigAten|SrcFn|FwdSrcFn
+0|aten.convolution.default|l__self___conv1|
+0|aten.add.Tensor|l__self___bn1|
+1|aten._native_batch_norm_legit_functional.default|l__self___bn1|
+2|aten.relu.default|l__self___relu1|
+2|aten.detach.default|l__self___relu1|
+2|aten.detach.default|l__self___relu1|
+3|aten.add.Tensor|add|
+4|aten.view.default|flatten|
+5|aten.view.default|l__self___fc1|
+6|aten.t.default|l__self___fc1|
+7|aten.addmm.default|l__self___fc1|
+8|aten.view.default|l__self___fc1|
+9|aten.sub.Tensor|l__self___loss_fn|
+10|aten.abs.default|l__self___loss_fn|
+11|aten.mean.default|l__self___loss_fn|
+11|aten.ones_like.default||l__self___loss_fn
+11|aten.expand.default||l__self___loss_fn
+11|aten.div.Scalar||l__self___loss_fn
+10|aten.sgn.default||l__self___loss_fn
+10|aten.mul.Tensor||l__self___loss_fn
+8|aten.view.default||l__self___fc1
+7|aten.t.default||l__self___fc1
+7|aten.mm.default||l__self___fc1
+7|aten.t.default||l__self___fc1
+7|aten.mm.default||l__self___fc1
+7|aten.t.default||l__self___fc1
+7|aten.sum.dim_IntList||l__self___fc1
+7|aten.view.default||l__self___fc1
+6|aten.t.default||l__self___fc1
+5|aten.view.default||l__self___fc1
+4|aten.view.default||
+2|aten.detach.default||l__self___relu1
+2|aten.detach.default||l__self___relu1
+2|aten.threshold_backward.default||l__self___relu1
+1|aten.native_batch_norm_backward.default||l__self___bn1
+0|aten.convolution_backward.default||l__self___conv1
+11|aten.add.Tensor||l__self___loss_fn
 """
             ),
         )
@@ -953,7 +961,7 @@ SeqNr|OrigAten|SrcFn
 
     def test_eager_sequence_nr(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.conv1 = torch.nn.Conv2d(
                     in_channels=16,
@@ -1264,7 +1272,7 @@ SeqNr|OrigAten|SrcFn
         logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
 
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.zeros([2, 2]))
 
@@ -1325,7 +1333,7 @@ SeqNr|OrigAten|SrcFn
     def test_donated_buffer_with_retain_or_create_graph1(self):
         # Gives non-empty bw_donated_idxs
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.zeros([3, 3]))
 
@@ -1342,7 +1350,7 @@ SeqNr|OrigAten|SrcFn
     def test_donated_buffer_with_retain_or_create_graph2(self):
         # Gives non-empty bw_donated_idxs
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.zeros([3, 3]))
 
@@ -1361,7 +1369,7 @@ SeqNr|OrigAten|SrcFn
     def test_donated_buffer_with_retain_or_create_graph3(self):
         # Gives non-empty bw_donated_idxs
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.zeros([3, 3]))
 
@@ -1381,7 +1389,7 @@ SeqNr|OrigAten|SrcFn
     def test_donated_buffer_with_retain_or_create_graph4(self):
         # Gives non-empty bw_donated_idxs
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.zeros([3, 3]))
 

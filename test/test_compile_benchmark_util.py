@@ -22,7 +22,7 @@ except ImportError:
 class TestCompileBenchmarkUtil(TestCase):
     def test_training_and_inference(self):
         class ToyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.nn.Parameter(torch.Tensor(2, 2))
 
