@@ -8,6 +8,7 @@ import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._export.wrappers import _mark_strict_experimental
 from torch._functorch.aot_autograd import aot_export_module
+from torch.export import export
 from torch.export._trace import _convert_ts_to_export_experimental
 from torch.export.experimental import _export_forward_backward
 from torch.testing import FileCheck
@@ -18,9 +19,9 @@ class TestExperiment(TestCase):
     def test_with_buffer_as_submodule(self):
         @_mark_strict_experimental
         class B(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.register_buffer("buffer1", torch.ones(3))
+                self.buffer1 = torch.nn.Buffer(torch.ones(3))
 
             def forward(self, x):
                 y = x + 2
@@ -31,7 +32,7 @@ class TestExperiment(TestCase):
                 return x.sum() + y.sum() + buffer_updated.sum()
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.submodule = B()
 
@@ -48,9 +49,9 @@ def forward(self, b_submodule_buffer1, x):
     sin = torch.ops.aten.sin.default(x)
     strict_graph_0 = self.strict_graph_0
     strict_mode = torch.ops.higher_order.strict_mode(strict_graph_0, (sin, b_submodule_buffer1));  strict_graph_0 = sin = b_submodule_buffer1 = None
-    getitem_2 = strict_mode[0];  strict_mode = None
+    getitem = strict_mode[0];  strict_mode = None
     add = torch.ops.aten.add.Tensor(x, 3);  x = None
-    return (getitem_2, add)""",
+    return (getitem, add)""",
         )
 
         self.assertExpectedInline(
@@ -86,7 +87,7 @@ def forward(self, arg0_1, arg1_1):
     def test_mark_strict_with_container_type(self):
         @_mark_strict_experimental
         class B(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
@@ -94,7 +95,7 @@ def forward(self, arg0_1, arg1_1):
                 return x0.sum()
 
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.submodule = B()
 
@@ -194,7 +195,7 @@ def forward(self, arg0_1, arg1_1):
 
     def test_joint_basic(self) -> None:
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 3)
                 self.loss = torch.nn.CrossEntropyLoss()
@@ -209,64 +210,109 @@ def forward(self, arg0_1, arg1_1):
         m(*example_inputs)
         ep = torch.export._trace._export(m, example_inputs, pre_dispatch=True)
         joint_ep = _export_forward_backward(ep)
-        print(joint_ep)
-
-        """
-        ExportedProgram:
-            class GraphModule(torch.nn.Module):
-                def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]"):
-                    # No stacktrace found for following nodes
-                    view: "f32[1, 3]" = torch.ops.aten.view.default(arg3_1, [1, 3]);  arg3_1 = None
-                    t: "f32[3, 3]" = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
-                    addmm: "f32[1, 3]" = torch.ops.aten.addmm.default(arg1_1, view, t);  arg1_1 = t = None
-                    view_1: "f32[3]" = torch.ops.aten.view.default(addmm, [3]);  addmm = None
-                    _softmax: "f32[3]" = torch.ops.aten._softmax.default(view_1, 0, False);  view_1 = None
-                    detach_1: "f32[3]" = torch.ops.aten.detach.default(_softmax)
-                    clone: "f32[3]" = torch.ops.aten.clone.default(arg2_1);  arg2_1 = None
-                    detach_5: "f32[3]" = torch.ops.aten.detach.default(clone);  clone = None
-                    _log_softmax: "f32[3]" = torch.ops.aten._log_softmax.default(_softmax, 0, False);  _softmax = None
-                    detach_12: "f32[3]" = torch.ops.aten.detach.default(_log_softmax)
-                    mul: "f32[3]" = torch.ops.aten.mul.Tensor(_log_softmax, detach_5);  _log_softmax = None
-                    sum_1: "f32[]" = torch.ops.aten.sum.default(mul);  mul = None
-                    neg: "f32[]" = torch.ops.aten.neg.default(sum_1);  sum_1 = None
-                    div: "f32[]" = torch.ops.aten.div.Scalar(neg, 1);  neg = None
-                    ones_like: "f32[]" = torch.ops.aten.ones_like.default(div, pin_memory = False, memory_format = torch.preserve_format)
-                    div_1: "f32[]" = torch.ops.aten.div.Scalar(ones_like, 1);  ones_like = None
-                    neg_1: "f32[]" = torch.ops.aten.neg.default(div_1);  div_1 = None
-                    expand: "f32[3]" = torch.ops.aten.expand.default(neg_1, [3]);  neg_1 = None
-                    mul_1: "f32[3]" = torch.ops.aten.mul.Tensor(expand, detach_5);  expand = detach_5 = None
-                    _log_softmax_backward_data: "f32[3]" = torch.ops.aten._log_softmax_backward_data.default(mul_1, detach_12, 0, torch.float32);  mul_1 = detach_12 = None
-                    _softmax_backward_data: "f32[3]" = torch.ops.aten._softmax_backward_data.default(_log_softmax_backward_data, detach_1, 0, torch.float32);  _log_softmax_backward_data = detach_1 = None
-                    view_2: "f32[1, 3]" = torch.ops.aten.view.default(_softmax_backward_data, [1, 3]);  _softmax_backward_data = None
-                    t_1: "f32[3, 1]" = torch.ops.aten.t.default(view_2)
-                    mm: "f32[3, 3]" = torch.ops.aten.mm.default(t_1, view);  t_1 = view = None
-                    t_2: "f32[3, 3]" = torch.ops.aten.t.default(mm);  mm = None
-                    sum_2: "f32[1, 3]" = torch.ops.aten.sum.dim_IntList(view_2, [0], True);  view_2 = None
-                    view_3: "f32[3]" = torch.ops.aten.view.default(sum_2, [3]);  sum_2 = None
-                    t_3: "f32[3, 3]" = torch.ops.aten.t.default(t_2);  t_2 = None
-                    return (div, t_3, view_3)
-
-        Graph signature: ExportGraphSignature(
-            input_specs=[
-                InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg0_1'), target='linear.weight', persistent=None),
-                InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg1_1'), target='linear.bias', persistent=None),
-                InputSpec(kind=<InputKind.CONSTANT_TENSOR: 4>, arg=TensorArgument(name='arg2_1'), target='lifted_tensor_0', persistent=None),
-                InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='arg3_1'), target=None, persistent=None)
-            ],
-            output_specs=[
-                OutputSpec(kind=<OutputKind.USER_OUTPUT: 1>, arg=TensorArgument(name='div'), target=None),
-                OutputSpec(kind=<OutputKind.GRADIENT_TO_PARAMETER: 4>, arg=TensorArgument(name='t_3'), target='linear.weight'),
-                OutputSpec(kind=<OutputKind.GRADIENT_TO_PARAMETER: 4>, arg=TensorArgument(name='view_3'), target='linear.bias')
-            ]
+        self.assertExpectedInline(
+            str(joint_ep.graph_module.code).strip(),
+            """\
+def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
+    view = torch.ops.aten.view.default(x, [1, 3]);  x = None
+    permute = torch.ops.aten.permute.default(p_linear_weight, [1, 0]);  p_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(p_linear_bias, view, permute);  p_linear_bias = permute = None
+    view_1 = torch.ops.aten.view.default(addmm, [3]);  addmm = None
+    _softmax = torch.ops.aten._softmax.default(view_1, 0, False);  view_1 = None
+    alias = torch.ops.aten.alias.default(_softmax)
+    alias_1 = torch.ops.aten.alias.default(alias);  alias = None
+    clone = torch.ops.aten.clone.default(c_lifted_tensor_0);  c_lifted_tensor_0 = None
+    alias_2 = torch.ops.aten.alias.default(clone);  clone = None
+    alias_3 = torch.ops.aten.alias.default(alias_2);  alias_2 = None
+    alias_4 = torch.ops.aten.alias.default(alias_3);  alias_3 = None
+    _log_softmax = torch.ops.aten._log_softmax.default(_softmax, 0, False);  _softmax = None
+    alias_5 = torch.ops.aten.alias.default(_log_softmax)
+    alias_6 = torch.ops.aten.alias.default(alias_5);  alias_5 = None
+    mul = torch.ops.aten.mul.Tensor(_log_softmax, alias_4);  _log_softmax = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(mul, []);  mul = None
+    neg = torch.ops.aten.neg.default(sum_1);  sum_1 = None
+    div = torch.ops.aten.div.Scalar(neg, 1);  neg = None
+    full_like = torch.ops.aten.full_like.default(div, 1, pin_memory = False, memory_format = torch.preserve_format)
+    div_1 = torch.ops.aten.div.Scalar(full_like, 1);  full_like = None
+    neg_1 = torch.ops.aten.neg.default(div_1);  div_1 = None
+    expand = torch.ops.aten.expand.default(neg_1, [3]);  neg_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(expand, alias_4);  expand = alias_4 = None
+    alias_7 = torch.ops.aten.alias.default(alias_6);  alias_6 = None
+    alias_8 = torch.ops.aten.alias.default(alias_7);  alias_7 = None
+    exp = torch.ops.aten.exp.default(alias_8);  alias_8 = None
+    sum_2 = torch.ops.aten.sum.dim_IntList(mul_1, [0], True)
+    mul_2 = torch.ops.aten.mul.Tensor(exp, sum_2);  exp = sum_2 = None
+    sub = torch.ops.aten.sub.Tensor(mul_1, mul_2);  mul_1 = mul_2 = None
+    alias_9 = torch.ops.aten.alias.default(alias_1);  alias_1 = None
+    alias_10 = torch.ops.aten.alias.default(alias_9);  alias_9 = None
+    mul_3 = torch.ops.aten.mul.Tensor(sub, alias_10);  sub = None
+    sum_3 = torch.ops.aten.sum.dim_IntList(mul_3, [0], True)
+    mul_4 = torch.ops.aten.mul.Tensor(alias_10, sum_3);  alias_10 = sum_3 = None
+    sub_1 = torch.ops.aten.sub.Tensor(mul_3, mul_4);  mul_3 = mul_4 = None
+    view_2 = torch.ops.aten.view.default(sub_1, [1, 3]);  sub_1 = None
+    permute_1 = torch.ops.aten.permute.default(view_2, [1, 0])
+    mm = torch.ops.aten.mm.default(permute_1, view);  permute_1 = view = None
+    permute_2 = torch.ops.aten.permute.default(mm, [1, 0]);  mm = None
+    sum_4 = torch.ops.aten.sum.dim_IntList(view_2, [0], True);  view_2 = None
+    view_3 = torch.ops.aten.view.default(sum_4, [3]);  sum_4 = None
+    permute_3 = torch.ops.aten.permute.default(permute_2, [1, 0]);  permute_2 = None
+    return (div, permute_3, view_3)""",
         )
-        Range constraints: {}
-        """
+        ep = joint_ep.run_decompositions()
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
+    view = torch.ops.aten.view.default(x, [1, 3]);  x = None
+    permute = torch.ops.aten.permute.default(p_linear_weight, [1, 0]);  p_linear_weight = None
+    addmm = torch.ops.aten.addmm.default(p_linear_bias, view, permute);  p_linear_bias = permute = None
+    view_1 = torch.ops.aten.view.default(addmm, [3]);  addmm = None
+    _softmax = torch.ops.aten._softmax.default(view_1, 0, False);  view_1 = None
+    alias = torch.ops.aten.alias.default(_softmax)
+    alias_1 = torch.ops.aten.alias.default(alias);  alias = None
+    clone = torch.ops.aten.clone.default(c_lifted_tensor_0);  c_lifted_tensor_0 = None
+    alias_2 = torch.ops.aten.alias.default(clone);  clone = None
+    alias_3 = torch.ops.aten.alias.default(alias_2);  alias_2 = None
+    alias_4 = torch.ops.aten.alias.default(alias_3);  alias_3 = None
+    _log_softmax = torch.ops.aten._log_softmax.default(_softmax, 0, False);  _softmax = None
+    alias_5 = torch.ops.aten.alias.default(_log_softmax)
+    alias_6 = torch.ops.aten.alias.default(alias_5);  alias_5 = None
+    mul = torch.ops.aten.mul.Tensor(_log_softmax, alias_4);  _log_softmax = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(mul, []);  mul = None
+    neg = torch.ops.aten.neg.default(sum_1);  sum_1 = None
+    div = torch.ops.aten.div.Scalar(neg, 1);  neg = None
+    full_like = torch.ops.aten.full_like.default(div, 1, pin_memory = False, memory_format = torch.preserve_format)
+    div_1 = torch.ops.aten.div.Scalar(full_like, 1);  full_like = None
+    neg_1 = torch.ops.aten.neg.default(div_1);  div_1 = None
+    expand = torch.ops.aten.expand.default(neg_1, [3]);  neg_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(expand, alias_4);  expand = alias_4 = None
+    alias_7 = torch.ops.aten.alias.default(alias_6);  alias_6 = None
+    alias_8 = torch.ops.aten.alias.default(alias_7);  alias_7 = None
+    exp = torch.ops.aten.exp.default(alias_8);  alias_8 = None
+    sum_2 = torch.ops.aten.sum.dim_IntList(mul_1, [0], True)
+    mul_2 = torch.ops.aten.mul.Tensor(exp, sum_2);  exp = sum_2 = None
+    sub = torch.ops.aten.sub.Tensor(mul_1, mul_2);  mul_1 = mul_2 = None
+    alias_9 = torch.ops.aten.alias.default(alias_1);  alias_1 = None
+    alias_10 = torch.ops.aten.alias.default(alias_9);  alias_9 = None
+    mul_3 = torch.ops.aten.mul.Tensor(sub, alias_10);  sub = None
+    sum_3 = torch.ops.aten.sum.dim_IntList(mul_3, [0], True)
+    mul_4 = torch.ops.aten.mul.Tensor(alias_10, sum_3);  alias_10 = sum_3 = None
+    sub_1 = torch.ops.aten.sub.Tensor(mul_3, mul_4);  mul_3 = mul_4 = None
+    view_2 = torch.ops.aten.view.default(sub_1, [1, 3]);  sub_1 = None
+    permute_1 = torch.ops.aten.permute.default(view_2, [1, 0])
+    mm = torch.ops.aten.mm.default(permute_1, view);  permute_1 = view = None
+    permute_2 = torch.ops.aten.permute.default(mm, [1, 0]);  mm = None
+    sum_4 = torch.ops.aten.sum.dim_IntList(view_2, [0], True);  view_2 = None
+    view_3 = torch.ops.aten.view.default(sum_4, [3]);  sum_4 = None
+    permute_3 = torch.ops.aten.permute.default(permute_2, [1, 0]);  permute_2 = None
+    return (div, permute_3, view_3)""",
+        )
 
     def test_joint_dynamic(self) -> None:
         from torch.export import Dim
 
         class Module(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.y = torch.nn.Parameter(torch.randn(3))
 
@@ -281,6 +327,40 @@ def forward(self, arg0_1, arg1_1):
             m, example_inputs, pre_dispatch=True, dynamic_shapes={"x": {0: Dim("x0")}}
         )
         joint_ep = _export_forward_backward(ep)
+
+    def test_joint_cifar10_backwards(self) -> None:
+        import torch.nn as nn
+        import torch.nn.functional as F
+
+        # From Pytorch's CIFAR10 example:
+        # https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html
+        class Net(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = nn.Conv2d(3, 6, 5)
+                self.pool = nn.MaxPool2d(2, 2)
+                self.conv2 = nn.Conv2d(6, 16, 5)
+                self.fc1 = nn.Linear(16 * 5 * 5, 120)
+                self.fc2 = nn.Linear(120, 84)
+                self.fc3 = nn.Linear(84, 10)
+                self.loss = nn.CrossEntropyLoss()
+
+            def forward(self, x, labels):
+                x = self.pool(F.relu(self.conv1(x)))
+                x = self.pool(F.relu(self.conv2(x)))
+                x = torch.flatten(x, 1)  # flatten all dimensions except batch
+                x = F.relu(self.fc1(x))
+                x = F.relu(self.fc2(x))
+                x = self.fc3(x)
+                return self.loss(x, labels)
+
+        net = Net()
+        x = torch.randn(4, 3, 32, 32)
+        labels = torch.ones(4, dtype=torch.int64)
+        inputs = (x, labels)
+
+        ep = export(net, inputs)
+        ep = _export_forward_backward(ep)
 
 
 if __name__ == "__main__":
