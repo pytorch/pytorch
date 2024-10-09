@@ -233,7 +233,7 @@ class FSDPParam:
         self.pin_memory = (
             self.offload_to_cpu and cast(CPUOffloadPolicy, offload_policy).pin_memory
         )
-        self.grad_offload_event: Optional[torch.cuda.Event] = None
+        self.grad_offload_event: Optional[torch.Event] = None
         self._init_sharded_param(param, device)
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
@@ -254,6 +254,10 @@ class FSDPParam:
         if param.device != device and param.device.type != "meta":
             raise AssertionError(
                 f"Expects the parameter to already be moved to device {device} but got {param.device}"
+            )
+        if not param.is_contiguous():
+            raise NotImplementedError(
+                f"FSDP does not support non-contiguous parameters yet: {param.shape=} {param.stride()=}"
             )
         # TODO: Replace the sharded DTensor parameter construction logic with
         # `distribute_tensor` after https://github.com/pytorch/pytorch/issues/116101
@@ -334,6 +338,7 @@ class FSDPParam:
                 ),
             )
             param_data = param
+        assert param_data.is_contiguous(), f"{param_data.shape=} {param_data.stride()=}"
         self._orig_size = param_data.size()
         self._contiguous_orig_stride = make_contiguous_strides_for(self._orig_size)
         shard_rank = self.mesh_info.shard_mesh_rank
@@ -350,7 +355,9 @@ class FSDPParam:
         if self.offload_to_cpu and not padded_sharded_param.is_meta:
             padded_sharded_param = padded_sharded_param.cpu()
             if self.pin_memory:
-                padded_sharded_param = padded_sharded_param.pin_memory()
+                padded_sharded_param = padded_sharded_param.pin_memory(
+                    device=self.device
+                )
         self._sharded_param_data = padded_sharded_param.view(-1)
         self.sharded_param = nn.Parameter(
             self.to_sharded_dtensor(padded_sharded_param[: sharded_param.size(0)])
@@ -393,11 +400,6 @@ class FSDPParam:
                 f"if using all-gather extensions: {inner_tensor}"
             )
         if has_fsdp_pre_all_gather:
-            if self.padded_sharded_param_size != self._sharded_local_tensor.size():
-                raise NotImplementedError(
-                    "FSDP all-gather extensions require even sharding on dim-0.\n"
-                    f"{self._orig_size} is not divisible by FSDP world size {self.mesh_info.mesh.size()}."
-                )
             self._extensions_data = ExtensionsData()
         self._unsharded_inner_tensors: List[torch.Tensor] = []
 
@@ -656,7 +658,7 @@ class FSDPParam:
                 # Old signature only passes mesh; keep for BC for now
                 assert num_fn_params in (
                     1,
-                    3,
+                    5,
                 ), (
                     f"Invalid fsdp_pre_all_gather: {pre_all_gather_signature}\n"
                     "Expects fsdp_pre_all_gather(self, mesh: DeviceMesh, "
@@ -673,9 +675,27 @@ class FSDPParam:
                         self._extensions_data.all_gather_metadata,
                     ) = sharded_local_tensor.fsdp_pre_all_gather(
                         self.mesh_info.mesh,
+                        self._orig_size,
+                        self._contiguous_orig_stride,
                         self._module_info.module,
                         self.mp_policy,
                     )
+                    if (
+                        sharded_local_tensor.size() != self.padded_sharded_param_size
+                        and any(
+                            all_gather_input.size() != self.padded_sharded_param_size
+                            for all_gather_input in all_gather_inputs
+                        )
+                    ):
+                        # NOTE: Since this error can only be raised on the
+                        # ranks that have padding, this can manifest as a NCCL
+                        # watchdog timeout, as the other ranks will not error.
+                        raise AssertionError(
+                            "When a parameter is unevenly sharded by FSDP "
+                            f"(orig size={self._orig_size}, FSDP world size={self.mesh_info.mesh.size()}), "
+                            "fsdp_pre_all_gather must return all-gather inputs with the padded sharded size "
+                            f"{self.padded_sharded_param_size} but got {[t.size() for t in all_gather_inputs]}"
+                        )
                 self._extensions_data.all_gather_input_sizes = [
                     t.size() for t in all_gather_inputs
                 ]
@@ -763,7 +783,7 @@ class FSDPParam:
             local_tensor = padded_local_tensor
             updated_local_tensor = True
         if self.pin_memory and not local_tensor.is_pinned():
-            local_tensor = local_tensor.cpu().pin_memory()
+            local_tensor = local_tensor.cpu().pin_memory(device=self.device)
             updated_local_tensor = True
         self._sharded_param_data = local_tensor.view(-1)
         assert isinstance(self.sharded_param, DTensor)  # mypy
