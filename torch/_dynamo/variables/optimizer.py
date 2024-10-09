@@ -301,7 +301,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
             if not all_static and perf_hint_log.isEnabledFor(logging.WARNING):
                 non_static_grads = [src.name() for src in non_static_grads]
-                perf_hint_log.warn(
+                perf_hint_log.warning(
                     (
                         f"Grad tensors {non_static_grads} will be copied during cudagraphs execution."
                         "If using cudagraphs and the grad tensor addresses will be the same across runs,"
