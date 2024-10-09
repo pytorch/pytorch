@@ -7,6 +7,8 @@
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
+#elif defined(USE_ROCM)
+#include <hip/hip_runtime_api.h>
 #endif
 
 #include <sys/socket.h>
@@ -55,6 +57,7 @@ class IpcChannel {
     struct sockaddr_un addr = {.sun_family = AF_UNIX};
     std::copy(socket_name_.begin(), socket_name_.end(), addr.sun_path);
 
+    unlink(addr.sun_path);
     TORCH_CHECK(
         bind(socket_, (struct sockaddr*)&addr, SUN_LEN(&addr)) == 0,
         "Failed to bind socket: ",
@@ -67,26 +70,31 @@ class IpcChannel {
   }
 
   void send_fd(int dst_pid, int fd) {
+    //Define destination socket address
     struct sockaddr_un addr = {.sun_family = AF_UNIX};
     auto socket_name = get_socket_name(dst_pid);
     std::copy(socket_name.begin(), socket_name.end(), addr.sun_path);
 
+    //Prepare data to send
+    //Data being sent is "fd", the value of fd will be sent as auxiliary data (control message)
     struct iovec io = {.iov_base = (void*)("fd"), .iov_len = 2};
 
+    //Prepare control message data buffer and zero it out
     char cbuf[CMSG_SPACE(sizeof(int))];
     memset(cbuf, 0, sizeof(cbuf));
 
+    //Create message header
     struct msghdr msg {
-      .msg_name = (void*)&addr, .msg_namelen = sizeof(struct sockaddr_un),
-      .msg_iov = &io, .msg_iovlen = 1, .msg_control = cbuf,
-      .msg_controllen = sizeof(cbuf)
+      .msg_name = (void*)&addr, .msg_namelen = sizeof(struct sockaddr_un), //destination socket address and size of it
+      .msg_iov = &io, .msg_iovlen = 1, //message content in msg_iov and number of such structs (1 in our case)
+      .msg_control = cbuf, .msg_controllen = sizeof(cbuf) //auxiliary data with the value of fd and size of it
     };
 
+    //Fill in auxiliary data
     auto cmsg = CMSG_FIRSTHDR(&msg);
     cmsg->cmsg_len = CMSG_LEN(sizeof(int));
-    cmsg->cmsg_level = SOL_SOCKET;
-    cmsg->cmsg_type = SCM_RIGHTS;
-
+    cmsg->cmsg_level = SOL_SOCKET; //Specify socket level message
+    cmsg->cmsg_type = SCM_RIGHTS;  //SCM_RIGHTS is the type used to pass file descriptors
     if (fd != -1) {
       // memcpy(CMSG_DATA(cmsg), &fd, sizeof(fd));
       std::copy(
@@ -97,23 +105,34 @@ class IpcChannel {
       msg.msg_controllen = 0;
     }
 
+    //Finally send the the message
     TORCH_CHECK(
         sendmsg(socket_, &msg, 0) > 0, "Failed to send fd: ", strerror(errno));
   }
 
   int recv_fd() {
+    //Prepare buffer for regular message "fd"
     char buf[2];
+    memset(&buf, 0, sizeof(buf));
     struct iovec io = {.iov_base = (void*)buf, .iov_len = sizeof(buf)};
 
+    //Prepare buffer for control message and zero it out
     char cbuf[CMSG_SPACE(sizeof(int))];
     memset(cbuf, 0, sizeof(cbuf));
 
+    struct sockaddr_un addr = {.sun_family = AF_UNIX};
+    std::copy(socket_name_.begin(), socket_name_.end(), addr.sun_path);
+
+    //Prepare message header
     struct msghdr msg = {
+        .msg_name = (void*)&addr,
+        .msg_namelen = sizeof(struct sockaddr_un),
         .msg_iov = &io,
         .msg_iovlen = 1,
         .msg_control = cbuf,
         .msg_controllen = sizeof(cbuf)};
 
+    //Recieve message on socket_
     TORCH_CHECK(
         recvmsg(socket_, &msg, 0) > 0,
         "Failed to receive fd: ",
@@ -123,6 +142,7 @@ class IpcChannel {
       return -1;
     }
 
+    //Extract control message and validate its content
     auto cmsg = CMSG_FIRSTHDR(&msg);
     TORCH_CHECK(cmsg != NULL);
     TORCH_CHECK(cmsg->cmsg_len == CMSG_LEN(sizeof(int)));
@@ -255,6 +275,16 @@ void map_block(
   desc.location.id = static_cast<int>(device_idx);
   desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemSetAccess_(*dev_ptr, size, &desc, 1));
+#elif defined(USE_ROCM)
+  C10_HIP_CHECK(hipMemAddressReserve(ptr, size, 0ULL, 0, 0ULL));
+  C10_HIP_CHECK(hipMemMap(*ptr, size, 0, reinterpret_cast<hipMemGenericAllocationHandle_t>(handle), 0ULL));
+
+  hipMemAccessDesc desc;
+  desc.location.type = hipMemLocationTypeDevice;
+  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+  desc.location.id = static_cast<int>(device_idx);
+  desc.flags =  hipMemAccessFlagsProtReadWrite;
+  C10_HIP_CHECK(hipMemSetAccess(*ptr, size, &desc, 1));
 #else
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
@@ -301,7 +331,6 @@ CUDASymmetricMemory::CUDASymmetricMemory(
 }
 
 CUDASymmetricMemory::~CUDASymmetricMemory() {
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   // Leak the cuda allocations during static deinitialization
   if (is_finalizing()) {
     return;
@@ -309,18 +338,24 @@ CUDASymmetricMemory::~CUDASymmetricMemory() {
   c10::cuda::CUDAGuard guard(local_device_idx_);
   C10_CUDA_CHECK(cudaDeviceSynchronize());
 
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto driver_api = c10::cuda::DriverAPI::get();
   for (int r = 0; r < world_size_; ++r) {
     C10_CUDA_DRIVER_CHECK(driver_api->cuMemUnmap_(
         reinterpret_cast<CUdeviceptr>(buffers_[r]), block_size_));
     C10_CUDA_DRIVER_CHECK(driver_api->cuMemRelease_(handles_[r]));
   }
-  c10::cuda::CUDACachingAllocator::raw_delete(buffers_dev_);
-  c10::cuda::CUDACachingAllocator::raw_delete(signal_pads_dev_);
+#elif defined(USE_ROCM)
+  for (int r = 0; r < world_size_; ++r) {
+    C10_HIP_CHECK(hipMemUnmap(buffers_[r], block_size_));
+    C10_HIP_CHECK(hipMemRelease(reinterpret_cast<hipMemGenericAllocationHandle_t>(handles_[r])));
+  }
 #else
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
 #endif
+  c10::cuda::CUDACachingAllocator::raw_delete(buffers_dev_);
+  c10::cuda::CUDACachingAllocator::raw_delete(signal_pads_dev_);
 }
 
 std::vector<void*> CUDASymmetricMemory::get_buffer_ptrs() {
@@ -398,7 +433,7 @@ void check_channel(int channel, int world_size) {
 }
 
 __device__ __forceinline__ void release_signal(uint32_t* addr) {
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
   CUDA_KERNEL_ASSERT(false);
 #else
   volatile uint32_t* signal = addr;
@@ -410,7 +445,7 @@ __device__ __forceinline__ void release_signal(uint32_t* addr) {
 }
 
 __device__ __forceinline__ void acquire_signal(uint32_t* addr) {
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
   CUDA_KERNEL_ASSERT(false);
 #else
   volatile uint32_t* signal = addr;
@@ -521,6 +556,10 @@ void* CUDASymmetricMemoryAllocator::alloc(
     size_t size,
     int device_idx,
     const std::string& group_name) {
+  
+  size_t signal_pad_offset = at::round_up(size, 16UL);
+  size_t block_size = signal_pad_offset + signal_pad_size;
+
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto driver_api = c10::cuda::DriverAPI::get();
 
@@ -531,8 +570,6 @@ void* CUDASymmetricMemoryAllocator::alloc(
   prop.location.id = device_idx;
   prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
 
-  size_t signal_pad_offset = at::round_up(size, 16UL);
-  size_t block_size = signal_pad_offset + signal_pad_size;
 
   size_t granularity;
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemGetAllocationGranularity_(
@@ -543,6 +580,25 @@ void* CUDASymmetricMemoryAllocator::alloc(
   C10_CUDA_DRIVER_CHECK(
       driver_api->cuMemCreate_(&handle, block_size, &prop, 0));
 
+#elif defined(USE_ROCM)
+  hipMemAllocationProp prop = {};
+  prop.type = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+  prop.location.id = device_idx;
+  prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+  size_t granularity;
+  C10_HIP_CHECK(hipMemGetAllocationGranularity(
+      &granularity, &prop, hipMemAllocationGranularityRecommended));
+  block_size = at::round_up(block_size, granularity);
+
+  HandleType handle;
+  C10_HIP_CHECK(hipMemCreate(reinterpret_cast<hipMemGenericAllocationHandle_t*>(&handle), block_size, &prop, 0));
+
+#else
+  TORCH_CHECK(
+      false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
+#endif
   void* ptr = nullptr;
   map_block(&ptr, handle, block_size, device_idx);
 
@@ -556,14 +612,9 @@ void* CUDASymmetricMemoryAllocator::alloc(
     ptr_to_block_.emplace(ptr, std::move(block));
   }
   return ptr;
-#else
-  TORCH_CHECK(
-      false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
-#endif
 }
 
 void CUDASymmetricMemoryAllocator::free(void* ptr) {
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto block = find_block(ptr);
   // Leak the cuda allocations during static deinitialization
   if (block == nullptr || is_finalizing()) {
@@ -572,19 +623,23 @@ void CUDASymmetricMemoryAllocator::free(void* ptr) {
   // Initializing CUDASymmetricMemory with an allocation transfers its
   // ownership to the CUDASymmetricMemory object.
   if (block->symm_mem == nullptr) {
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
     auto driver_api = c10::cuda::DriverAPI::get();
     C10_CUDA_DRIVER_CHECK(driver_api->cuMemUnmap_(
         reinterpret_cast<CUdeviceptr>(ptr), block->block_size));
     C10_CUDA_DRIVER_CHECK(driver_api->cuMemRelease_(block->handle));
+#elif defined(USE_ROCM)
+    C10_HIP_CHECK(hipMemUnmap(ptr, block->block_size));
+    C10_HIP_CHECK(hipMemRelease(reinterpret_cast<hipMemGenericAllocationHandle_t>(block->handle)));
+#else
+  TORCH_CHECK(
+      false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
+#endif
   }
   {
     std::unique_lock lock(mutex_);
     ptr_to_block_.erase(ptr);
   }
-#else
-  TORCH_CHECK(
-      false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
-#endif
 }
 
 size_t CUDASymmetricMemoryAllocator::get_alloc_size(void* ptr) {
@@ -718,7 +773,6 @@ static void init_multicast_for_block(
 
 c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
     void* ptr) {
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto block = find_block(ptr);
   if (block == nullptr) {
     return nullptr;
@@ -733,11 +787,19 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
   auto store = group_info.store;
   int rank = group_info.rank;
   int world_size = group_info.world_size;
-
-  auto driver_api = c10::cuda::DriverAPI::get();
   int block_fd;
+
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+  auto driver_api = c10::cuda::DriverAPI::get();
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemExportToShareableHandle_(
       &block_fd, block->handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0));
+#elif defined (USE_ROCM)
+  C10_HIP_CHECK(hipMemExportToShareableHandle(
+      &block_fd, block->handle, hipMemHandleTypePosixFileDescriptor, 0));
+#else
+  TORCH_CHECK(
+      false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
+#endif
 
   auto local_req = RendezvousRequest{
       .device_idx = block->device_idx,
@@ -766,10 +828,20 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
       signal_pads[r] = (void*)((uintptr_t)ptr + block->signal_pad_offset);
       continue;
     }
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
     C10_CUDA_DRIVER_CHECK(driver_api->cuMemImportFromShareableHandle_(
         &handles[r],
         (void*)(uintptr_t)imported_fds[r],
         CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
+#elif defined (USE_ROCM)
+    C10_HIP_CHECK(hipMemImportFromShareableHandle(
+        &handles[r],
+        (void*)(uintptr_t)&(imported_fds[r]),
+        hipMemHandleTypePosixFileDescriptor));
+#else
+  TORCH_CHECK(
+      false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
+#endif
     map_block(&buffers[r], handles[r], block->block_size, block->device_idx);
     signal_pads[r] = (void*)((uintptr_t)buffers[r] + block->signal_pad_offset);
     close(imported_fds[r]);
@@ -801,10 +873,6 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
       group_info.rank,
       group_info.world_size);
   return block->symm_mem;
-#else
-  TORCH_CHECK(
-      false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
-#endif
 }
 
 bool CUDASymmetricMemoryAllocator::is_rendezvous_completed(void* ptr) {

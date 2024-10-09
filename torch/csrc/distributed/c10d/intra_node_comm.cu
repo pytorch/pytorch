@@ -5,6 +5,11 @@
 #include <c10/cuda/CUDAGuard.h>
 
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory-inl.h>
+#if defined(USE_ROCM)
+#include <hip/amd_detail/amd_hip_bf16.h>
+#include <hip/amd_detail/amd_hip_atomic.h>
+#include <hip/amd_detail/hip_ldg.h>
+#endif
 
 namespace c10d {
 namespace intra_node_comm {
@@ -18,10 +23,6 @@ static constexpr size_t kHcmThreshBytes = 256 * 1024;
 static constexpr size_t kOneShotThreshBytes = 256 * 1024;
 static constexpr size_t kTwoShotThreshBytes = 10 * 1024 * 1024;
 
-#if defined(USE_ROCM)
-using __nv_bfloat162 = uint32_t;
-#endif
-
 struct __align__(16) bf16x8 {
   __nv_bfloat162 vals[4];
 };
@@ -31,14 +32,13 @@ struct __align__(16) bf16x8 {
 DEVICE_INLINE __nv_bfloat162
 bf16hadd2(const __nv_bfloat162 x, const __nv_bfloat162 y) {
 #if defined(USE_ROCM)
-  CUDA_KERNEL_ASSERT(false);
-  return 0;
+  return bf16hadd2(x, y);
 #elif (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
   CUDA_KERNEL_ASSERT(false);
   __nv_bfloat162 res;
   return res;
 #else
-  return __hadd2(x, y);
+  return reinterpret_cast<__nv_bfloat162>(__hadd2(x, y));
 #endif
 }
 
@@ -53,8 +53,12 @@ DEVICE_INLINE bf16x8 add_bf16x8(bf16x8 a, bf16x8 b) {
 
 template <typename T>
 DEVICE_INLINE void streamLoad128(bf16x8& val, const T* addr) {
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
   CUDA_KERNEL_ASSERT(false);
+#elif defined(USE_ROCM)
+  ulonglong2 l_val = __ldg(reinterpret_cast<const ulonglong2*>(addr));
+  reinterpret_cast<unsigned long long*>(&val)[0] = l_val.data[0];
+  reinterpret_cast<unsigned long long*>(&val)[1] = l_val.data[1];
 #else
   unsigned long long int low, high;
   asm("ld.global.v2.u64 {%0, %1}, [%2];" : "=l"(low), "=l"(high) : "l"(addr));
@@ -64,8 +68,13 @@ DEVICE_INLINE void streamLoad128(bf16x8& val, const T* addr) {
 }
 
 __device__ inline void streamStore128(at::BFloat16* addr, const bf16x8& val) {
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
   CUDA_KERNEL_ASSERT(false);
+#elif defined(USE_ROCM)
+    for (int i = 0; i < 8; i++)
+    {
+        addr[i] = reinterpret_cast<const at::BFloat16*>(&val)[i];
+    }
 #else
   unsigned long long int low, high;
   low = reinterpret_cast<const unsigned long long int*>(&val)[0];
@@ -439,7 +448,7 @@ static void getLaunchConfig(
 }
 
 bool isIntraNodeCommSupported() {
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
   return false;
 #else
   return true;
