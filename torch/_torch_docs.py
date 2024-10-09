@@ -10378,7 +10378,7 @@ Example::
 add_docstr(
     torch.squeeze,
     r"""
-squeeze(input: Tensor, dim: Optional[Union[int, List[int]]]) -> Tensor
+squeeze(input, dim=None) -> Tensor
 
 Returns a tensor with all specified dimensions of :attr:`input` of size `1` removed.
 

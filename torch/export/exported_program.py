@@ -738,10 +738,23 @@ class CustomDecompTable(Dict):
                     self.deleted_custom_ops.remove(k)
 
     def __missing__(self, key):
-        return super(self).__missing__(key)
+        return not self.__contains__(key)
 
     def __contains__(self, key):
-        pass
+        if _is_aten_op(key):
+            return key in self.aten_decomp_table
+        
+        if key in self.additional_custom_op_decomp:
+            return True 
+        
+        if not _is_preservable_cia_op(key):
+            return False 
+
+        if key in self.deleted_custom_ops:
+            return False 
+        
+        self.additional_custom_op_decomp[key] = _get_decomp_for_cia(key)
+        return True
 
     def __len__(self):
         return len(self.aten_decomp_table) + len(self.additional_custom_op_decomp)

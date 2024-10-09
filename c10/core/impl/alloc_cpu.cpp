@@ -92,7 +92,8 @@ void* alloc_cpu(size_t nbytes) {
       "alloc_cpu() seems to have been called with negative number: ",
       nbytes);
 
-  void* data = nullptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  void* data;
 #ifdef __ANDROID__
   data = memalign(gAlignment, nbytes);
   CAFFE_ENFORCE(

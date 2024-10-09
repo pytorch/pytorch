@@ -98,6 +98,7 @@ from .variables.lists import (
 from .variables.misc import (
     ClosureVariable,
     GetAttrVariable,
+    InlinedClosureVariable,
     NullVariable,
     PythonModuleVariable,
     UnknownVariable,
@@ -3274,10 +3275,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if name in self.closure_cells:
             return self.closure_cells[name]
         else:
-            # We model unmodified cells captured by `UserFunctionVariable` as
-            # their contents, in `self.symbolic_locals`. See
-            # `UserFunctionVariable::bind_args`.
-            return self.symbolic_locals[name]
+            return InlinedClosureVariable(name=name)
 
     def check_replace_is_safe(self, oldvar):
         if not is_side_effect_safe(oldvar.mutable_local):

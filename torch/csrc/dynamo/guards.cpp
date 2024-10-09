@@ -1466,8 +1466,8 @@ class DYNAMIC_INDICES : public LeafGuard {
     }
 
     static PyObject* issubset_str = PyUnicode_InternFromString("issubset");
-    PyObject* call_result = PyObject_CallMethodObjArgs(
-        indices, issubset_str, _dynamic_indices.ptr(), nullptr); // new ref
+    PyObject* call_result = PyObject_CallMethodOneArg(
+        indices, issubset_str, _dynamic_indices.ptr()); // new ref
     bool result = PyObject_IsTrue(call_result);
     Py_DECREF(call_result);
     Py_DECREF(indices);

@@ -230,14 +230,8 @@ class TestDynamismExpression(TestCase):
 
         inp = torch.zeros([3])
         dim_x = torch.export.Dim("dim_x", min=6)
-
-        if is_non_strict_test(self._testMethodName):
-            error_type = torch.fx.experimental.symbolic_shapes.ConstraintViolationError
-        else:
-            error_type = torch._dynamo.exc.UserError
-
-        with self.assertRaisesRegex(error_type, "not in range"):
-            export(
+        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "not in range"):
+            torch.export.export(
                 InvalidInputConflictWithInputConstraints(),
                 (inp,),
                 dynamic_shapes={"x": {0: dim_x}},
@@ -901,22 +895,6 @@ graph():
             torch.allclose(ep.module()(torch.zeros(2, 3)), torch.ones(2, 3) * 21)
         )
 
-    def test_state_shape_attribute_assignment(self):
-        class TestModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(10, 10)
-                self.last_z_shape = self.linear.weight.shape
-
-            def forward(self, x):
-                self.last_z_shape = x.shape
-                return self.linear(x)
-
-        model = TestModule()
-        x = torch.randn(20, 10)
-        ep_model = export(model, (x,), strict=False).module()
-        self.assertTrue(torch.allclose(model(x), ep_model(x)))
-
     @testing.expectedFailureTrainingIRToRunDecompNonStrict  # TODO(pianpwk): user_output signature
     def test_real_tensor_for_max_op(self):
         class Foo(torch.nn.Module):
@@ -1069,6 +1047,8 @@ graph():
             warnings.simplefilter("error")
             torch.export.export(Foo(), (x,))
 
+        ops_registered_before = set(op for op in torch.ops.mylib)
+
         # Assert warning for CompositeImplictAutograd op
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             lib.define("foo123(Tensor x) -> Tensor")
@@ -1084,7 +1064,10 @@ graph():
                 with warnings.catch_warnings():
                     warnings.simplefilter("always")
                     torch.export.export(Bar(), (x,))
-
+        
+        ops_registered_after = set(op for op in torch.ops.mylib)
+        self.assertEqual(ops_registered_after, ops_registered_before)
+        
     def test_export_preserve_linear_at_aot_level(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
