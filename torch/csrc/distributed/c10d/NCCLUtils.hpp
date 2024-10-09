@@ -253,11 +253,11 @@ class TORCH_API DebugInfoWriter {
 class NCCLComm {
  public:
   explicit NCCLComm(ncclComm_t ncclComm)
-      : ncclComm_(ncclComm),
-        aborted_(false),
+      : aborted_(false),
         ncclAsyncErr_(ncclSuccess),
         commFailureReason_(std::nullopt),
-        initialized_(false) {}
+        initialized_(false),
+        ncclComm_(ncclComm) {}
 
   NCCLComm() : NCCLComm(nullptr) {}
 
@@ -458,15 +458,17 @@ class NCCLComm {
         ncclComm_);
 
     void* handle;
+    // Use getNcclComm to make sure comm is ready before calling nccl APIs
+    auto comm = getNcclComm();
     C10D_NCCL_CHECK(
-        ncclCommRegister(ncclComm_, ptr, size, &handle),
+        ncclCommRegister(comm, ptr, size, &handle),
         c10::str(
             "Failed to register segment with ptr ",
             ptr,
             ", size ",
             size,
             " on ncclComm_ ",
-            ncclComm_));
+            comm));
     registeredSegmentHandles_[ptr] = handle;
     return ncclSuccess;
 #else
@@ -485,15 +487,17 @@ class NCCLComm {
         ncclComm_);
 
     void* handle = registeredSegmentHandles_[ptr];
+    // Use getNcclComm to make sure comm is ready before calling nccl APIs
+    auto comm = getNcclComm();
     C10D_NCCL_CHECK(
-        ncclCommDeregister(ncclComm_, handle),
+        ncclCommDeregister(comm, handle),
         c10::str(
             "Failed to deregister segment handle ",
             handle,
             ", with ptr ",
             ptr,
             " on ncclComm_ ",
-            ncclComm_));
+            comm));
     registeredSegmentHandles_.erase(ptr);
     return ncclSuccess;
 #else
@@ -501,12 +505,15 @@ class NCCLComm {
 #endif
   }
 
+  std::string repr() const {
+    return c10::str((void*)ncclComm_);
+  }
+
   friend class ProcessGroupNCCL;
 
  protected:
   // a helper function to wait until the communicator is initialized;
   void waitUntilInitialized();
-  ncclComm_t ncclComm_;
   // Unique nccl_id for this communicator.
   ncclUniqueId ncclId_;
   bool aborted_;
@@ -523,6 +530,9 @@ class NCCLComm {
   // Stores handlers for tensors registered by NCCL
   std::unordered_map<void*, void*> registeredSegmentHandles_;
 #endif
+
+ private:
+  ncclComm_t ncclComm_;
 };
 
 // Helper that automatically cleans up premul sums.
