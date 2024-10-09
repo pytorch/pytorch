@@ -180,7 +180,6 @@ class CppWrapperGpu(CppWrapperCpu):
 
         self.header.splice("#include <filesystem>")
         if config.abi_compatible:
-            print("should not reach here")
             self.header.splice(self.device_codegen.abi_compatible_header())
         else:
             self.header.splice(
