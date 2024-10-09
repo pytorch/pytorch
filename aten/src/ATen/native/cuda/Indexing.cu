@@ -1518,7 +1518,7 @@ Tensor& index_select_out_cuda(
         out.scalar_type(),
         "index_select_cuda",
         AT_WRAP([&] { index_select_out_cuda_impl<scalar_t>(out, self, (uint64_t) dim, index); }),
-        AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
+        AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), AT_EXPAND(AT_FLOAT8_TYPES),
         kComplexHalf,
         kHalf,
         kBool,
