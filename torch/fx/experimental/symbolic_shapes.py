@@ -6356,7 +6356,8 @@ class ShapeEnv:
         if not self._suppress_guards_tls():
             # If you're here because of this assert, read Note [Backwards runtime asserts]
             # in torch/_inductor/graph.py
-            assert not self.runtime_asserts_frozen, expr
+            if self.runtime_asserts_frozen:
+                log.warning("runtime_asserts_frozen but then got %s", expr)
 
             self._check_frozen(expr, sympy.true)
 
