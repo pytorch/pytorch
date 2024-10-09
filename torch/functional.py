@@ -257,17 +257,21 @@ def einsum(*args: Any) -> Tensor:
 
     .. note::
 
-        This function uses opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/) to speed up computation or to
-        consume less memory by optimizing contraction order. This optimization occurs when there are at least three
-        inputs, since the order does not matter otherwise. Note that finding _the_ optimal path is an NP-hard problem,
-        thus, opt_einsum relies on different heuristics to achieve near-optimal results. If opt_einsum is not available,
-        the default order is to contract from left to right.
+        Please install opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/) in order to enroll into a more
+        performant einsum. You can install when installing torch like so: `pip install torch[opt-einsum]` or by itself
+        with `pip install opt_einsum`.
 
-        To bypass this default behavior, add the following line to disable the usage of opt_einsum and skip path
-        calculation: `torch.backends.opt_einsum.enabled = False`
+        If opt_einsum is available, this function will automatically speed up computation and/or consume less memory
+        by optimizing contraction order. This optimization occurs when there are at least three inputs, since the
+        order does not matter otherwise. Note that finding _the_ optimal path is an NP-hard problem, thus, opt_einsum
+        relies on different heuristics to achieve near-optimal results. If opt_einsum is not available, the default
+        order is to contract from left to right.
+
+        To bypass this default behavior, check out our :mod:`torch.backends.opt_einsum`. Add the following line to
+        disable the usage of opt_einsum and skip path calculation: ``torch.backends.opt_einsum.enabled = False``
 
         To specify which strategy you'd like for opt_einsum to compute the contraction path, add the following line:
-        `torch.backends.opt_einsum.strategy = 'auto'`. The default strategy is 'auto', and we also support 'greedy' and
+        ``torch.backends.opt_einsum.strategy = 'auto'``. The default strategy is 'auto', and we also support 'greedy' and
         'optimal'. Disclaimer that the runtime of 'optimal' is factorial in the number of inputs! See more details in
         the opt_einsum documentation (https://optimized-einsum.readthedocs.io/en/stable/path_finding.html).
 
