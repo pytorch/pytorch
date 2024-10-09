@@ -134,7 +134,7 @@ def compute_size_for_scheduler_buffer(
 
     sched_buf_to_size: Dict[str, Tuple[int, int]] = dict()
 
-    def _get_buf_size(
+    def _compute_and_update_buf_size(
         sched_buf: SchedulerBuffer, user_of_MultiOutputLayout: bool = False
     ) -> int:
         if isinstance(sched_buf.node.layout, MultiOutputLayout):
@@ -144,7 +144,7 @@ def compute_size_for_scheduler_buffer(
                     continue
                 for buf in user.node.get_outputs():
                     if isinstance(buf.node, MultiOutput):
-                        size_alloc += _get_buf_size(buf, True)
+                        size_alloc += _compute_and_update_buf_size(buf, True)
             sched_buf_to_size[sched_buf.get_name()] = (
                 0 if user_of_MultiOutputLayout else size_alloc,
                 0,
@@ -164,7 +164,7 @@ def compute_size_for_scheduler_buffer(
         # skip if sched_buf is already processed as an user of another SchedulerBuffer
         # whose layout is of the type MultiOutputLayout
         if sched_buf.get_name() not in sched_buf_to_size:
-            _ = _get_buf_size(sched_buf)
+            _compute_and_update_buf_size(sched_buf)
 
     return sched_buf_to_size
 
