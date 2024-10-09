@@ -2145,13 +2145,7 @@ class InstructionTranslatorBase(
         self.push(b)
         self.push(a)
 
-    def FORMAT_VALUE(self, inst):
-        flags = inst.arg
-        if (flags & 0x04) == 0x04:
-            fmt_spec = self.pop()
-        else:
-            fmt_spec = ConstantVariable.create("")
-
+    def _format_value(self, fmt_spec, flags):
         value = self.pop()
         if isinstance(value, SymNodeVariable):
             from torch._dynamo.variables.lazy import (
@@ -2174,6 +2168,15 @@ class InstructionTranslatorBase(
         fmt_var = ConstantVariable.create("{:" + fmt_spec.as_python_constant() + "}")
 
         self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
+
+    def FORMAT_VALUE(self, inst):
+        flags = inst.arg
+        if (flags & 0x04) == 0x04:
+            fmt_spec = self.pop()
+        else:
+            fmt_spec = ConstantVariable.create("")
+
+        return self._format_value(fmt_spec, flags)
 
     def BUILD_STRING(self, inst):
         format_string_parts: List[str] = []
@@ -2571,20 +2574,11 @@ class InstructionTranslatorBase(
 
         self.push(fn)
 
-    def _format_value_313(self, fmt_spec):
-        value = self.pop()
-        if isinstance(value, SymNodeVariable):
-            value = ConstantVariable.create(str(value.sym_num))
-
-        fmt_var = ConstantVariable.create("{:" + fmt_spec.as_python_constant() + "}")
-
-        self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
-
     def FORMAT_SIMPLE(self, inst):
-        self._format_value_313(ConstantVariable.create(""))
+        self._format_value(ConstantVariable.create(""), 0)
 
     def FORMAT_WITH_SPEC(self, inst):
-        self._format_value_313(self.pop())
+        self._format_value(self.pop(), 0)
 
     def is_non_empty_graph(self):
         if self.output.count_calls() > 1:
