@@ -19,13 +19,15 @@ from typing import Any, Callable, List, Optional, Sequence, Tuple
 import torch
 import torch.utils.dlpack
 from torch import Tensor
-from torch._dynamo.utils import lazy_format_graph_code
+from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
 from torch._guards import CompileContext, TracingContext
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
+from torch.fx.graph_module import GraphModule
+from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
 
 from .. import config
@@ -143,6 +145,13 @@ def aot_dispatch_base(
     fw_module, updated_flat_args, maybe_subclass_meta = aot_dispatch_base_graph(  # type: ignore[misc]
         flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
     )
+    # Save the forward_graph_str right after aot_dispatch_base_graph,
+    # to save in the cache
+    aot_forward_graph_str = None
+    if autograd_cache_enabled():
+        aot_forward_graph_str = fw_module.print_readable(
+            print_output=False, include_stride=True, include_device=True
+        )
 
     fakified_out_wrapper = FakifiedOutWrapper()
     (
@@ -179,6 +188,10 @@ def aot_dispatch_base(
             )
 
         with TracingContext.report_output_strides() as fwd_output_strides:
+            fake_mode = detect_fake_mode()
+            if fake_mode is not None:
+                assert isinstance(fw_module, GraphModule)
+                tensorify_python_scalars(fw_module, fake_mode.shape_env, fake_mode)
             compiled_fw = compiler(fw_module, updated_flat_args)
 
         if fakified_out_wrapper.needs_post_compile:
@@ -203,6 +216,9 @@ def aot_dispatch_base(
             entry = AOTAutogradCacheEntry(
                 compiled_fw=CompiledForward(fw_key),
                 compiled_bw=None,
+                aot_joint_graph_str=None,
+                aot_forward_graph_str=aot_forward_graph_str,
+                aot_backward_graph_str=None,
                 runtime_metadata=fw_metadata,
                 dispatch_wrappers=wrappers,
                 maybe_subclass_meta=maybe_subclass_meta,
@@ -344,7 +360,7 @@ def aot_dispatch_autograd(
 
     # Copied from aot_dispatch_autograd_graph.
     disable_amp = torch._C._is_any_autocast_enabled()
-
+    joint_graph_str = None
     if aot_config.enable_log:
         aot_joint_log.info(
             "%s",
@@ -357,11 +373,12 @@ def aot_dispatch_autograd(
                 colored=True,
             ),
         )
+        joint_graph_str = fx_g.print_readable(
+            print_output=False, include_stride=True, include_device=True
+        )
         trace_structured(
             "aot_joint_graph",
-            payload_fn=lambda: fx_g.print_readable(
-                print_output=False, include_stride=True, include_device=True
-            ),
+            payload_fn=lambda: joint_graph_str,
         )
 
     with torch.no_grad():
@@ -387,6 +404,9 @@ def aot_dispatch_autograd(
                 + inner_meta.num_outputs_rng_offset
                 + num_tokens  # See Note [Side-Effectful Tokens in AOTAutograd]
             )
+            fake_mode = detect_fake_mode()
+            if fake_mode is not None:
+                tensorify_python_scalars(fx_g, fake_mode.shape_env, fake_mode)
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
@@ -527,6 +547,8 @@ def aot_dispatch_autograd(
                 if bw_out is None and not metadata_mutation_in_graph and is_non_leaf:
                     _indices_of_inps_to_detach.append(i)
 
+        fw_module_str = None
+        bw_module_str = None
         if aot_config.enable_log:
             aot_graphs_log.info(
                 "%s",
@@ -550,17 +572,19 @@ def aot_dispatch_autograd(
                     colored=True,
                 ),
             )
+            fw_module_str = fw_module.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            )
+            bw_module_str = bw_module.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            )
             trace_structured(
                 "aot_forward_graph",
-                payload_fn=lambda: fw_module.print_readable(
-                    print_output=False, include_stride=True, include_device=True
-                ),
+                payload_fn=lambda: fw_module_str,
             )
             trace_structured(
                 "aot_backward_graph",
-                payload_fn=lambda: bw_module.print_readable(
-                    print_output=False, include_stride=True, include_device=True
-                ),
+                payload_fn=lambda: bw_module_str,
             )
 
         with track_graph_compiling(aot_config, "forward"):
@@ -762,11 +786,20 @@ def aot_dispatch_autograd(
                 # It's possible this changes in the future, in which case we should
                 # update backward_time_taken_ns to be more inclusive
                 backward_time_taken_ns = getattr(compiled_bw_func, "_time_taken_ns", 0)
+
+                aot_forward_graph_str: Optional[str] = fw_module_str
+                aot_backward_graph_str: Optional[str] = bw_module_str
+                aot_joint_graph_str: Optional[str] = joint_graph_str
                 entry = AOTAutogradCacheEntry(
                     CompiledForward(fw_key),
                     CompiledBackward(
-                        bw_key, backward_state_indices, num_symints_saved_for_bw
+                        bw_key,
+                        backward_state_indices,
+                        num_symints_saved_for_bw,
                     ),
+                    aot_joint_graph_str,
+                    aot_forward_graph_str,
+                    aot_backward_graph_str,
                     _fw_metadata,
                     wrappers,
                     maybe_subclass_meta,

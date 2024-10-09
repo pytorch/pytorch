@@ -297,7 +297,7 @@ auto PyNode::compiled_autograd_should_lift() const -> bool {
 void PyNode::compiled_args(CompiledNodeArgs& args) {
   static PyObject* method_name =
       PyUnicode_InternFromString("_compiled_autograd_key");
-  THPObjectPtr pykey(PyObject_CallMethodNoArgs(obj, method_name));
+  THPObjectPtr pykey(PyObject_CallMethodObjArgs(obj, method_name, nullptr));
   if (!pykey)
     throw_python_error();
   TORCH_CHECK(
@@ -733,8 +733,18 @@ static void _wrap_outputs(
       PyTuple_SetItem(outputs, i, obj);
     } else {
       if (is_executable) {
+        // If one of the grad outputs is undefined, a correctly-shaped zeros
+        // should be used instead. To construct these for NJT, zeros_like() must
+        // be used until we have factory function support.
         // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-        self->output_info.emplace_back(*wrapped_outputs[i]);
+        bool is_differentiable =
+            (non_differentiable.count(
+                 wrapped_outputs[i]->unsafeGetTensorImpl()) == 0 &&
+             isDifferentiableType(wrapped_outputs[i]->scalar_type()));
+        bool use_zeros_like = is_differentiable && num_outputs > 1 &&
+            wrapped_outputs[i]->is_nested();
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        self->output_info.emplace_back(*wrapped_outputs[i], use_zeros_like);
       }
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       PyTuple_SetItem(outputs, i, THPVariable_Wrap(*wrapped_outputs[i]));
