@@ -355,39 +355,28 @@ class _StorageBase:
         """Casts this storage to float8_e4m3fnuz type"""
         return self._to(torch.float8_e4m3fnuz)
 
-    def is_pinned(self, device: Union[None, str, torch.device] = None):
+    def is_pinned(self, device: Union[str, torch.device] = "cuda"):
         r"""Determine whether the CPU storage is already pinned on device.
 
         Args:
-            device (None, str or torch.device): The device to pin memory on. Default: ``None``.
-                This argument is deprecated, since the device is autoselected to pin memory on.
+            device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
+                This argument is discouraged and subject to deprecated.
 
         Returns:
             A boolean variable.
         """
-        if device is not None:
-            warnings.warn(
-                "'device' argument is deprecated, please do not pass it.",
-                FutureWarning,
-                stacklevel=2,
-            )
-            return (
-                torch.tensor([], dtype=torch.uint8, device=self.device)
-                .set_(cast(Storage, self))
-                .is_pinned(device)
-            )
         return (
             torch.tensor([], dtype=torch.uint8, device=self.device)
             .set_(cast(Storage, self))
-            .is_pinned()
+            .is_pinned(device)
         )
 
-    def pin_memory(self, device: Union[None, str, torch.device] = None):
+    def pin_memory(self, device: Union[str, torch.device] = "cuda"):
         r"""Copy the CPU storage to pinned memory, if it's not already pinned.
 
         Args:
-            device (None, str or torch.device): The device to pin memory on. Default: ``None``.
-                This argument is deprecated, since the device is autoselected to pin memory on.
+            device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
+                This argument is discouraged and subject to deprecated.
 
         Returns:
             A pinned CPU storage.
@@ -395,23 +384,11 @@ class _StorageBase:
         if self.device.type != "cpu":
             raise TypeError(f"cannot pin '{self.type()}' only CPU memory can be pinned")
 
-        if device is not None:
-            warnings.warn(
-                "'device' argument is deprecated, please do not pass it.",
-                FutureWarning,
-                stacklevel=2,
-            )
-            pinned_tensor = (
-                torch.tensor([], dtype=torch.uint8, device=self.device)
-                .set_(cast(Storage, self))
-                .pin_memory(device)
-            )
-        else:
-            pinned_tensor = (
-                torch.tensor([], dtype=torch.uint8, device=self.device)
-                .set_(cast(Storage, self))
-                .pin_memory()
-            )
+        pinned_tensor = (
+            torch.tensor([], dtype=torch.uint8, device=self.device)
+            .set_(cast(Storage, self))
+            .pin_memory(device)
+        )
         return pinned_tensor.untyped_storage()
 
     def share_memory_(self):
@@ -1179,47 +1156,33 @@ class TypedStorage:
         _warn_typed_storage_removal()
         return self._new_wrapped_storage(self._untyped_storage.cpu())
 
-    def is_pinned(self, device: Union[None, str, torch.device] = None):
+    def is_pinned(self, device: Union[str, torch.device] = "cuda"):
         r"""Determine whether the CPU TypedStorage is already pinned on device.
 
         Args:
-            device (None, str or torch.device): The device to pin memory on. Default: ``None``
-                This argument is deprecated, since the device is autoselected to pin memory on.
+            device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
+                This argument is discouraged and subject to deprecated.
 
         Returns:
             A boolean variable.
         """
         _warn_typed_storage_removal()
-        if device is not None:
-            warnings.warn(
-                "'device' argument is deprecated, please do not pass it.",
-                FutureWarning,
-                stacklevel=2,
-            )
-            return self._untyped_storage.is_pinned(device)
-        return self._untyped_storage.is_pinned()
+        return self._untyped_storage.is_pinned(device)
 
-    def pin_memory(self, device: Union[None, str, torch.device] = None):
+    def pin_memory(self, device: Union[str, torch.device] = "cuda"):
         r"""Copy the CPU TypedStorage to pinned memory, if it's not already pinned.
 
         Args:
-            device (None, str or torch.device): The device to pin memory on. Default: ``None``.
-                This argument is deprecated, since the device is autoselected to pin memory on.
+            device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
+                This argument is discouraged and subject to deprecated.
 
         Returns:
             A pinned CPU storage.
         """
         _warn_typed_storage_removal()
-        if device is not None:
-            warnings.warn(
-                "'device' argument is deprecated, please do not pass it.",
-                FutureWarning,
-                stacklevel=2,
-            )
-            return self._new_wrapped_storage(
-                self._untyped_storage.pin_memory(device=device)
-            )
-        return self._new_wrapped_storage(self._untyped_storage.pin_memory())
+        return self._new_wrapped_storage(
+            self._untyped_storage.pin_memory(device=device)
+        )
 
     def share_memory_(self):
         """See :meth:`torch.UntypedStorage.share_memory_`"""

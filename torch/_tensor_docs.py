@@ -2749,7 +2749,7 @@ add_docstr_all(
     "is_pinned",
     r"""
 Returns true if this tensor resides in pinned memory.
-By default, the device wrt pinned memory will be selected automatically.
+By default, the device pinned memory on will be the current :ref:`accelerator<accelerators>`.
 """,
 )
 
@@ -6466,7 +6466,7 @@ add_docstr_all(
 pin_memory() -> Tensor
 
 Copies the tensor to pinned memory, if it's not already pinned.
-By default, the device will be selected automatically to pin memory on.
+By default, the device pinned memory on will be the current :ref:`accelerator<accelerators>`.
 """,
 )
 

@@ -184,8 +184,8 @@ class DataLoader(Generic[_T_co]):
             the worker processes after a dataset has been consumed once. This allows to
             maintain the workers `Dataset` instances alive. (default: ``False``)
         pin_memory_device (str, optional): the device to :attr:`pin_memory` on if ``pin_memory`` is
-            ``True``. This argument is deprecated and will be ignored, since the device to
-            ``pin_memory`` on is selected automatically now.
+            ``True``. If not given, the current :ref:`accelerator<accelerators>` will be the
+            default. This argument is discouraged and subject to deprecated.
         in_order (bool, optional): If ``False``, the data loader will not enforce that batches
             are returned in a first-in, first-out order. Only applies when ``num_workers > 0``. (default: ``True``)
 
@@ -280,18 +280,11 @@ class DataLoader(Generic[_T_co]):
         if persistent_workers and num_workers == 0:
             raise ValueError("persistent_workers option needs num_workers > 0")
 
-        if len(pin_memory_device) != 0:
-            warnings.warn(
-                "'pin_memory_device' argument is deprecated and "
-                "this arg will be ignored. Please do not pass it.",
-                FutureWarning,
-                stacklevel=2,
-            )
-
         self.dataset = dataset
         self.num_workers = num_workers
         self.prefetch_factor = prefetch_factor
         self.pin_memory = pin_memory
+        self.pin_memory_device = pin_memory_device
         self.timeout = timeout
         self.worker_init_fn = worker_init_fn
         self.multiprocessing_context = multiprocessing_context
@@ -659,14 +652,31 @@ class _BaseDataLoaderIter:
         ws, rank = _get_distributed_settings()
         self._world_size = ws
         self._rank = rank
-        self._pin_memory = loader.pin_memory
-        if loader.pin_memory and torch._C._get_accelerator() == torch.device("cpu"):
-            warn_msg = (
-                "'pin_memory' argument is set as true but no accelerator is found, "
-                "then device pinned memory won't be used."
-            )
-            warnings.warn(warn_msg)
-            self._pin_memory = False
+        # If pin_memory_device not set, default behaviour is current accelerator.
+        # If pin_memory_device is set but pin_memory is not set, the default
+        # behaviour false.
+        if len(loader.pin_memory_device) == 0:
+            cur_accelerator = torch._C._get_accelerator().type
+            if loader.pin_memory and cur_accelerator == "cpu":
+                warn_msg = (
+                    "'pin_memory' argument is set as true but no accelerator is found, "
+                    "then device pinned memory won't be used."
+                )
+                warnings.warn(warn_msg)
+
+            self._pin_memory = loader.pin_memory and cur_accelerator != "cpu"
+            self._pin_memory_device = None
+        else:
+            if not loader.pin_memory:
+                warn_msg = (
+                    "'pin_memory_device' is set but 'pin_memory' argument is not set, "
+                    "then device pinned memory won't be used."
+                    "please set 'pin_memory' to true, if you need to use the device pin memory"
+                )
+                warnings.warn(warn_msg)
+
+            self._pin_memory = loader.pin_memory
+            self._pin_memory_device = loader.pin_memory_device
         self._timeout = loader.timeout
         self._collate_fn = loader.collate_fn
         self._sampler_iter = iter(self._index_sampler)
@@ -763,7 +773,7 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
         index = self._next_index()  # may raise StopIteration
         data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
         if self._pin_memory:
-            data = _utils.pin_memory.pin_memory(data)
+            data = _utils.pin_memory.pin_memory(data, self._pin_memory_device)
         return data
 
 
@@ -1152,7 +1162,18 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
             # Queue is not type-annotated
             self._data_queue = queue.Queue()  # type: ignore[var-annotated]
-            current_device = torch._C._accelerator_hooks_get_current_device()
+            current_device = -1
+            if self._pin_memory_device == "cuda":
+                current_device = torch.cuda.current_device()
+            elif self._pin_memory_device == "xpu":
+                current_device = torch.xpu.current_device()
+            elif self._pin_memory_device == torch._C._get_privateuse1_backend_name():
+                custom_device_mod = getattr(
+                    torch, torch._C._get_privateuse1_backend_name()
+                )
+                current_device = custom_device_mod.current_device()
+            elif self._pin_memory_device is None:
+                current_device = torch._C._accelerator_hooks_get_current_device()
             pin_memory_thread = threading.Thread(
                 target=_utils.pin_memory._pin_memory_loop,
                 args=(
@@ -1160,6 +1181,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     self._data_queue,
                     current_device,
                     self._pin_memory_thread_done_event,
+                    self._pin_memory_device,
                 ),
             )
             pin_memory_thread.daemon = True
