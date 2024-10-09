@@ -628,6 +628,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             or value.__name__ == "auto_functionalized_v2"
         ):
             return AutoFunctionalizeHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "invoke_subgraph":
+            return InvokeSubgraphHigherOrderVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -2473,3 +2475,50 @@ def maybe_positional_arg_names(func):
             else:
                 result.append(name)
     return result
+
+
+class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
+    def add_subgraph_to_root_module(
+        self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="invoke_subgraph"
+    ):
+        # TODO(anijain305) - De-dupe if the subgraph has been seen before.
+        return super().add_subgraph_to_root_module(
+            tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name
+        )
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        # This flattens the kwargs into lifted args
+        (
+            p_args,
+            p_kwargs,
+            example_value,
+            body_r,
+            treespec,
+            _,
+            body_name,
+        ) = self.create_wrapped_node(
+            tx, args[0], args[2].items, kwargs, "invoke_subgraph"
+        )
+
+        if len(p_kwargs) > 0:
+            unimplemented("kwargs should have been flattened into lifted args")
+
+        flat_example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
+
+        p_args = (
+            p_args[0],
+            body_name,
+            p_args[1:],
+        )
+        return _call_function_and_unflatten_output(
+            tx, self.value, tuple(p_args), p_kwargs, flat_example_value, treespec
+        )
