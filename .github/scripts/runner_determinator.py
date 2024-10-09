@@ -387,28 +387,21 @@ def get_runner_prefix(
             if is_user_opted_in(requestor, user_optins, experiment_name)
         ]
 
-        if opted_in_users:
-            log.info(f"{', '.join(opted_in_users)} have opted into experiment {experiment_name}.")
+        do_check = True
+        if check_experiments:
+            if experiment_name not in check_experiments:
+                exp_list = ", ".join(check_experiments)
+                log.info(f"Skipping experiment '{experiment_name}', as it is not in the check_experiments list: {exp_list}")
+                do_check = False
+        elif not experiment_settings.default:
+            log.info(f"Skipping experiment '{experiment_name}', as it is not a default experiment")
+            do_check = False
 
-            if check_experiments:
-                if experiment_name in check_experiments:
-                    enabled = True
-                else:
-                    log.info(f"Skipping experiment '{experiment_name}', as it is not in the check_experiments list")
-            else:
-                enabled = True
+        if opted_in_users and do_check:
+            log.info(f"{', '.join(opted_in_users)} have opted into experiment {experiment_name}.")
+            enabled = True
 
         elif experiment_settings.rollout_perc:
-            do_check = True
-            if check_experiments:
-                if experiment_name not in check_experiments:
-                    exp_list = ", ".join(check_experiments)
-                    log.info(f"Skipping experiment '{experiment_name}', as it is not in the check_experiments list: {exp_list}")
-                    do_check = False
-            elif not experiment_settings.default:
-                log.info(f"Skipping experiment '{experiment_name}', as it is not a default experiment")
-                do_check = False
-
             # If no user is opted in, then we randomly enable the experiment based on the rollout percentage
             if do_check and random.uniform(0, 100) <= experiment_settings.rollout_perc:
                 log.info(
