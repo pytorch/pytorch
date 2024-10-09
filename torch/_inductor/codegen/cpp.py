@@ -2147,10 +2147,7 @@ class CppKernel(Kernel):
 
     @property
     def assert_function(self) -> str:
-        if config.abi_compatible:
-            return "AOTI_TORCH_CHECK"
-        else:
-            return "TORCH_CHECK"
+        return "AOTI_TORCH_CHECK"
 
     def decide_parallel_depth(self, max_parallel_depth, threads):
         assert self.call_ranges is not None
@@ -4652,7 +4649,7 @@ class KernelGroup:
     def call_kernel(self, wrapper, kernel_name):
         _, call_args, arg_types = self.args.cpp_argdefs()
         wrapper.generate_kernel_call(
-            kernel_name, call_args, gpu=False, arg_types=arg_types
+            kernel_name, call_args, gpu=False, triton=False, arg_types=arg_types
         )
 
 
