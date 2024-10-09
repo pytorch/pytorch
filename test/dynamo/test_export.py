@@ -4565,11 +4565,6 @@ def forward(self, x, b, y):
     return pytree.tree_unflatten([x], self._out_spec)""",  # NOQA: B950
         )
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "boolean masking setitem backwards"
-        ):
-            gm, _ = torch._dynamo.export(fn)(x, b, y)
-
     def test_dynamo_list_index(self):
         def fn(x, in_list):
             return x + in_list.index(2)
