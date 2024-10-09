@@ -362,6 +362,7 @@ static std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
     const Tensor& grad_output_, const Tensor& input_, const Tensor& weight_,
     const c10::OptionalArrayRef<SymInt> bias_sizes_opt,
     c10::SymIntArrayRef stride, c10::SymIntArrayRef padding, c10::SymIntArrayRef dilation, bool transposed,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     c10::SymIntArrayRef output_padding, c10::SymInt groups, std::array<bool, 3> output_mask) {
   const auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "convolution_backward_plumbing");

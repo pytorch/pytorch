@@ -138,6 +138,12 @@ def _run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
     if (handler_name := INDEX_DTYPE_HANDLERS.get(expr.func)) is not None:
         return getattr(analysis, handler_name)(*args, index_dtype)
 
+    # Fastpath for n-ary integral addition
+    if expr.func is sympy.Add and expr.is_integer and hasattr(analysis, "sym_sum"):
+        r = analysis.sym_sum(args)
+        log.debug("sym_sum(%s) -> %s", args, r)
+        return r
+
     if hasattr(expr.func, "_torch_handler_name"):
         handler_name = expr.func._torch_handler_name
     else:
@@ -160,12 +166,16 @@ def _run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
         raise
 
 
+_nil = object()
+
+
 def sympy_interp(
     analysis,
     env: Dict[sympy.Symbol, Any],
     expr: Union[sympy.Expr, SympyBoolean],
     *,
     index_dtype=torch.int64,
+    missing_handler=None,
 ):
     # Handle base cases
     dtype = None
@@ -179,12 +189,26 @@ def sympy_interp(
     if dtype is not None:
         return analysis.constant(expr, dtype)
     elif isinstance(expr, sympy.Symbol):
-        return env[expr]
+        if (r := env.get(expr, _nil)) is not _nil:
+            return r
+        elif missing_handler:
+            return missing_handler(expr)
+        else:
+            raise KeyError(expr)
 
     # Recursive case
     return _run_sympy_handler(
         analysis,
-        [sympy_interp(analysis, env, arg) for arg in expr.args],  # type: ignore[arg-type]
+        [
+            sympy_interp(
+                analysis,
+                env,
+                arg,
+                index_dtype=index_dtype,
+                missing_handler=missing_handler,
+            )
+            for arg in expr.args
+        ],  # type: ignore[arg-type]
         expr,
         index_dtype=index_dtype,
     )  # type: ignore[arg-type]
