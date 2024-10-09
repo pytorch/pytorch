@@ -46,7 +46,8 @@
 
 // Manually create _PyTupleIterObject struct
 typedef struct {
-  PyObject_HEAD Py_ssize_t it_index;
+  PyObject_HEAD
+  Py_ssize_t it_index;
   PyTupleObject* it_seq; /* Set to NULL when iterator is exhausted */
 } _PyTupleIterObject;
 
@@ -499,7 +500,8 @@ static PyMethodDef TensorGuards_methods[] = {
     {nullptr} /* Sentinel */
 };
 
-static PyTypeObject TensorGuardsType = {PyVarObject_HEAD_INIT(nullptr, 0)};
+static PyTypeObject TensorGuardsType = { PyVarObject_HEAD_INIT(nullptr, 0)
+};
 
 // TODO (janimesh) - Remove the PyObject_HEAD part when C++ guard manager is
 // merged.
@@ -616,7 +618,8 @@ static PyMethodDef GlobalStateGuard_methods[] = {
      METH_NOARGS,
      "Return string reason for guard check failing"},
     {nullptr}};
-static PyTypeObject GlobalStateGuardType = {PyVarObject_HEAD_INIT(nullptr, 0)};
+static PyTypeObject GlobalStateGuardType = { PyVarObject_HEAD_INIT(nullptr, 0)
+};
 
 static PyObject* check_type_id(PyObject* dummy, PyObject* args) {
   // faster `lambda obj, expected: id(type(obj)) == expected`
