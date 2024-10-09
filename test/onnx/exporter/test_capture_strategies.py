@@ -17,6 +17,7 @@ class ExportStrategiesTest(common_utils.TestCase):
             _capture_strategies.TorchExportNonStrictStrategy,
             _capture_strategies.JitTraceConvertStrategy,
         ],
+        name_fn=lambda strategy_cls: strategy_cls.__name__,
     )
     def test_jit_isinstance(self, strategy_cls):
         class Model(torch.nn.Module):
