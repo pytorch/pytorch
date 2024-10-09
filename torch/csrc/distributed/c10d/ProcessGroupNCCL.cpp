@@ -676,9 +676,7 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
 
   // In case of blockingWait or a timeout value is specified by the user, we
   // block the CPU thread until the work is completed or timed out.
-  // For barrier wait, we also need to block the CPU thread till the work is
-  // completed
-  if (blockingWait_ || timeout != kNoTimeout || isBarrierOp_) {
+  if (blockingWait_ || timeout != kNoTimeout) {
     while (!isCompleted()) {
       bool timedOut = checkTimeout(
           timeout == kNoTimeout ? std::nullopt : std::make_optional(timeout));
@@ -697,13 +695,21 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
       std::this_thread::sleep_for(
           std::chrono::milliseconds(kSynchronizeBusyWaitMillis));
     }
+  } else if (isBarrierOp_ && !isCompleted()) {
+    // For barrier wait when timeout is unspecified, we block the CPU thread on
+    // current stream. This is to minimize the CPU barrier wait time in healthy
+    // path
+    auto currentStream = at::cuda::getCurrentCUDAStream(device_.index());
+    // CUDAStream wrapper will correctly use a DeviceGuard here
+    currentStream.synchronize();
+  }
 
-    if (exception()) {
-      // Abort NCCL communicators
-      abort();
-      // Throw exception (from main thread here)
-      handleException(TearDown);
-    }
+  // If exception is detected, throw it from the main CPU thread
+  if (exception()) {
+    // Abort NCCL communicators
+    abort();
+    // Throw exception (from main thread here)
+    handleException(TearDown);
   }
 
   // TODO(kwen2501): this should be moved to c10d tests, to qualify a NCCL

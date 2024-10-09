@@ -292,13 +292,8 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
   // Now run all reduce with errors.
   pg.simulateError();
   work = pg.allreduce(tensors_);
-  EXPECT_THROW(work->wait(), std::runtime_error);
-
   // Verify the work item failed.
-  EXPECT_TRUE(work->isCompleted());
   EXPECT_THROW(work->wait(), std::runtime_error);
-
-  // Communicators might be aborted here, further operations would fail.
 }
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
