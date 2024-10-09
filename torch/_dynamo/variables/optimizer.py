@@ -303,10 +303,11 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 non_static_grads = [src.name() for src in non_static_grads]
                 perf_hint_log.warning(
                     (
-                        f"Grad tensors {non_static_grads} will be copied during cudagraphs execution."
+                        "Grad tensors %s will be copied during cudagraphs execution."
                         "If using cudagraphs and the grad tensor addresses will be the same across runs,"
                         " use torch._dynamo.decorators.mark_static_address to elide this copy.",
-                    )
+                    ),
+                    non_static_grads,
                 )
 
         # We have to again iterate over the state dict to collect the
