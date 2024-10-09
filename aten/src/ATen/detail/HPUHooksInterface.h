@@ -37,6 +37,11 @@ struct TORCH_API HPUHooksInterface : AcceleratorHooksInterface {
         false,
         "You should register `HPUHooksInterface` for HPU before call `getPinnedMemoryAllocator`.");
   }
+  bool hasPrimaryContext(C10_UNUSED DeviceIndex device_index) const override {
+    TORCH_CHECK(
+        false,
+        "You should register `HPUHooksInterface` for HPU before call `hasPrimaryContext`.");
+  }
 };
 
 struct TORCH_API HPUHooksArgs {};
