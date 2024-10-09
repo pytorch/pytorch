@@ -813,7 +813,12 @@ static PyObject* THPVariable_make_wrapper_subclass(
   // don't bother releasing GIL here, as we are not allocating any nontrivial
   // data
   Tensor tensor;
-
+  if(options.device().is_privateuseone())
+  {
+    at::GetPrivateUse1HooksInterface()->forBlobPrivateUse1(tensor, nullptr, r.intlist(1),
+    r.intlistOptional(2), r.toInt64Optional(3),options,options.device());
+  }
+  else
   {
     AutoDispatchBelowADInplaceOrView guard{}; // TODO: Remove.
     tracer::impl::NoTracerDispatchMode tracer_guard{};
