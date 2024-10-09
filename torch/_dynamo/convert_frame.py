@@ -1077,16 +1077,7 @@ def _compile(
 
             def convert_sets_to_strings(d: Dict[str, Any]) -> Dict[str, Any]:
                 return {
-                    key: (
-                        list(value)
-                        if isinstance(value, set)
-                        else (
-                            str(value)
-                            if key == "allowed_functions_module_string_ignorelist"
-                            or "reorderable_logging_functions"
-                            else value
-                        )
-                    )
+                    key: str(value) if isinstance(value, set) else value
                     for key, value in d.items()
                 }
 
