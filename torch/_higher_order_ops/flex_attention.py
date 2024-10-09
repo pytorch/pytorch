@@ -69,7 +69,7 @@ def _permute_strides(out: torch.Tensor, query_strides: Tuple[int, ...]) -> torch
     return new_out
 
 
-@torch.library.custom_op("mylib::zeros_and_scatter", mutates_args=())  # type: ignore[misc]
+@torch.library.custom_op("FlexAttentionLib::zeros_and_scatter", mutates_args=())  # type: ignore[misc]
 def zeros_and_scatter(
     shape: List[int],
     indices: List[Tensor],
@@ -90,7 +90,7 @@ def _(
     indices: List[Tensor],
     vals: Tensor,
 ) -> Tensor:
-    return torch.empty(shape, device=vals.device)
+    return vals.new_empty(shape)
 
 
 @zeros_and_scatter.register_vmap  # type: ignore[misc]
@@ -101,7 +101,7 @@ def _(info, in_dims, shape, indices, val):  # type: ignore[no-untyped-def]
             if torch._C._functorch.is_batchedtensor(idx):
                 indices[i] = idx.unsqueeze(-1)
 
-    out = torch.ops.mylib.zeros_and_scatter(
+    out = torch.ops.FlexAttentionLib.zeros_and_scatter(
         shape,
         indices,
         val,
@@ -126,7 +126,7 @@ class ModIndex(torch.autograd.Function):
     def backward(ctx, gradOut):  # type: ignore[no-untyped-def]
         indices = ctx.saved_tensors
         return (
-            torch.ops.mylib.zeros_and_scatter(
+            torch.ops.FlexAttentionLib.zeros_and_scatter(
                 ctx.input_shape,
                 indices,
                 gradOut,
