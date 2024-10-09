@@ -336,7 +336,7 @@ struct Vectorized<c10::qint32> : public Vectorizedqi {
       Vectorized<c10::qint32> retval;
       auto rhs_data = (__m256)rhs[0];
       at::native::quantize_vec<c10::qint32, /*precision=*/32>(
-          scale, zero_point, (float*)&rhs_data, (c10::qint32*)&retval.vals, rhs.size());
+          scale, zero_point, (float*)&rhs_data, (c10::qint32*)&retval.vals, size());
       return retval;
     }
 
@@ -872,11 +872,11 @@ struct VectorizedQuantizedConverter {
   }
 
   static constexpr int float_num_vecs() {
-    return size() / Vectorized<float>::size();
+    return size_ / Vectorized<float>::size();
   }
 
   static constexpr int int_num_vecs() {
-    return size() / Vectorized<int>::size();
+    return size_ / Vectorized<int>::size();
   }
 
   using float_vec_return_type = float_vec_return_type_;
