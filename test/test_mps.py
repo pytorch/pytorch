@@ -199,6 +199,8 @@ def mps_ops_grad_modifier(ops):
 
         # Exception: Caused by sample input at index 3 on MPS
         'nn.functional.conv3d': [torch.float32],
+
+
     }
 
     def addDecorator(op, d) -> None:
@@ -991,6 +993,12 @@ def mps_ops_modifier(ops):
         # Failures due to lack of implementation of downstream functions on MPS backend
         # TODO: remove these once downstream function 'aten::_linalg_svd.U' have been implemented
         'linalg.matrix_rank': None,
+
+        # TODO: remove these once downstream function 'aten::i0.out' have been implemented
+        'signal.windows.kaiser': [torch.float32],
+
+        # Exception: Caused by `torch.arange(-8.001, -4.0, dtype=torch.uint8, device="mps")`
+        'arange': [torch.uint8],
     }
 
     EMPTY_OPS_SKIPLIST = {
@@ -12097,7 +12105,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.upsample_bilinear',
         'nn.functional.upsample_nearest',
         'norm', 'masked.normalize',
-        'linspace',
+        'arange', 'linspace',
     }
 
     FP32_LOW_PRECISION_LIST = {
