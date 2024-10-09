@@ -1980,7 +1980,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.writeline("}")
 
     def generate_extern_kernel_args_decl_if_needed(
-        self, op_overload, raw_args, output_args
+        self,
+        op_overload,
+        raw_args,
+        output_args: Optional[List[str]] = None,
+        raw_outputs: Optional[List[ir.Buffer]] = None,
     ):
         arg_types = [x.real_type for x in op_overload._schema.arguments]
         return_types = [x.type for x in op_overload._schema.returns]
@@ -2068,13 +2072,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 else:
                     fill_args(arg, arg_type)
 
-        def fill_output_arg(arg, return_type):
+        def fill_output_arg(arg, return_type, is_mutated_output: bool):
             if isinstance(return_type, torch.TensorType):
-                self.writeline(f"AtenTensorHandle {arg}_handle;  // output buffer")
-                self.writeline(
-                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&{arg}_handle));"
-                )
-                self.writeline(f"RAIIAtenTensorHandle {arg}({arg}_handle);")
+                if not is_mutated_output:
+                    self.writeline(f"AtenTensorHandle {arg}_handle;  // output buffer")
+                    self.writeline(
+                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&{arg}_handle));"
+                    )
+                    self.writeline(f"RAIIAtenTensorHandle {arg}({arg}_handle);")
                 new_tensor_args.append(f"{arg}")
             elif isinstance(return_type, torch.SymIntType):
                 raise NotImplementedError("NYI support for return type: SymInt")
@@ -2098,13 +2103,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     f"return type {return_type} is not yet supported."
                 )
 
-        for output_arg in output_args:
+        for output_arg, raw_output_arg in zip(output_args, raw_outputs):
             assert output_arg is not None, "Optional return types are not yet supported"
             if isinstance(output_arg, (list, tuple)):
                 for out in output_arg:
-                    fill_output_arg(out, torch.TensorType.get())
+                    fill_output_arg(
+                        out,
+                        torch.TensorType.get(),
+                        isinstance(raw_output_arg, ir.MutationOutput),
+                    )
             else:
-                fill_output_arg(output_arg, torch.TensorType.get())
+                fill_output_arg(
+                    output_arg,
+                    torch.TensorType.get(),
+                    isinstance(raw_output_arg, ir.MutationOutput),
+                )
 
         return new_tensor_args, new_int_args
 
@@ -2126,6 +2139,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 return None
             elif isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
                 return out.get_name()
+            elif isinstance(out, ir.MutationOutput):
+                mutated_buf_names = out.get_mutation_names()
+                assert (
+                    isinstance(mutated_buf_names, list) and len(mutated_buf_names) == 1
+                ), "Expect only one mutated buffer in MutationOutput"
+                return mutated_buf_names[0]
             elif isinstance(out, (list, tuple)):
                 return type(out)(extract_output_name(o) for o in out)
             else:
@@ -2150,6 +2169,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 op_overload,
                 raw_args,
                 output_args,
+                outputs,
             )
         else:
             return self.generate_extern_kernel_alloc_and_find_schema_if_needed_jit(
@@ -2385,12 +2405,16 @@ if (py_{buf_name}.get() == NULL) {{
         op_overload,
         raw_args,  # contains both args and flatten kwargs
         output_args: Optional[List[str]] = None,
+        raw_outputs: Optional[List[ir.Buffer]] = None,
     ):
         (
             tensor_call_args,
             int_call_args,
         ) = self.generate_extern_kernel_args_decl_if_needed(
-            op_overload, raw_args, output_args
+            op_overload,
+            raw_args,
+            output_args,
+            raw_outputs,
         )
 
         tensor_call_args_str = ", ".join(tensor_call_args)
