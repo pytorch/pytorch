@@ -67,7 +67,7 @@ static PyObject* THPGenerator_pynew(
   } else {
     self->cdata = globalContext()
                       .getAcceleratorHooksInterface(device_type)
-                      .getNewGenerator(device_type);
+                      .getNewGenerator(device.index());
   }
 
   return (PyObject*)self.release();
