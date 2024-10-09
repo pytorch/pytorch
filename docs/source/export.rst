@@ -369,7 +369,7 @@ You can also go from this IR to an inference IR via :func:`run_decompositions` w
 ::
 
     # Lower to core aten inference IR, but keep conv2d
-    decomp_table = torch.export.core_aten_decompositions()
+    decomp_table = torch.export.default_decompositions()
     del decomp_table[torch.ops.aten.conv2d.default]
     ep_for_inference = ep_for_training.run_decompositions(decomp_table)
 
@@ -418,7 +418,7 @@ You can do even more customizations by directly registering custom decomp behavi
 ::
 
     # Lower to core aten inference IR, but customize conv2d
-    decomp_table = torch.export.core_aten_decompositions()
+    decomp_table = torch.export.default_decompositions()
 
     def my_awesome_custom_conv2d_function(x, weight, bias, stride=[1, 1], padding=[0, 0], dilation=[1, 1], groups=1):
         return 2 * torch.ops.aten.convolution(x, weight, bias, stride, padding, dilation, False, [0, 0], groups)

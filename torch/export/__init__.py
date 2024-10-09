@@ -50,7 +50,7 @@ __all__ = [
     "ExportedProgram",
     "ModuleCallEntry",
     "ModuleCallSignature",
-    "core_aten_decompositions",
+    "default_decompositions",
     "dims",
     "export",
     "export_for_training",
@@ -66,7 +66,7 @@ __all__ = [
 
 from .dynamic_shapes import Constraint, Dim, dims, ShapesCollection
 from .exported_program import (
-    core_aten_decompositions,
+    default_decompositions,
     ExportedProgram,
     ModuleCallEntry,
     ModuleCallSignature,

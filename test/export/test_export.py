@@ -18,9 +18,9 @@ import torch._dynamo as torchdynamo
 import torch.nn.functional as F
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
+from torch.export import default_decompositions
 from torch._decomp import (
     _decomp_table_to_post_autograd_aten,
-    core_aten_decompositions,
     get_decompositions,
 )
 from torch._dynamo.test_case import TestCase
@@ -1588,7 +1588,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
                 )
             )
         else:
-            decomp_table = core_aten_decompositions()
+            decomp_table = default_decompositions()
             del decomp_table[torch.ops.aten.conv2d.default]
             del decomp_table[torch.ops.aten.conv1d.default]
 
@@ -1613,7 +1613,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
                 _preserve_ops=(torch.ops.aten.conv2d.default,)
             )
         else:
-            decomp_table = core_aten_decompositions()
+            decomp_table = default_decompositions()
             del decomp_table[torch.ops.aten.conv2d.default]
 
             ep_has_convd = ep_has_convd.run_decompositions(decomp_table=decomp_table)
@@ -1691,7 +1691,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
                 )
             )
         else:
-            decomp_table = core_aten_decompositions()
+            decomp_table = default_decompositions()
             del decomp_table[torch.ops.aten.conv2d.default]
             del decomp_table[torch.ops.aten.conv1d.default]
 
@@ -1718,7 +1718,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
                 _preserve_ops=(torch.ops.aten.conv2d.default,)
             )
         else:
-            decomp_table = core_aten_decompositions()
+            decomp_table = default_decompositions()
             del decomp_table[torch.ops.aten.conv2d.default]
             ep_has_convd = ep_has_convd.run_decompositions(decomp_table=decomp_table)
 
@@ -1762,7 +1762,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
                 _preserve_ops=(torch.ops.aten.sum.default,)
             )
         else:
-            decomp_table = core_aten_decompositions()
+            decomp_table = default_decompositions()
             del decomp_table[torch.ops.aten.sum.default]
             ep_preserve_sum = ep.run_decompositions(decomp_table)
 
@@ -4903,7 +4903,7 @@ def forward(self, b_a_buffer, x):
         inp = (torch.randn(5, 10),)
         m = M()
 
-        decomp_table = torch.export.core_aten_decompositions()
+        decomp_table = torch.export.default_decompositions()
 
         def _custom_decomp_for_linear(x, weight, bias):
             return x + bias.sum()
@@ -4957,7 +4957,7 @@ def forward(self, p_lin_weight, p_lin_bias, x):
         def custom_decomp_callable(x, weight, bias):
             return x + bias
 
-        decomp_table = core_aten_decompositions()
+        decomp_table = default_decompositions()
         decomp_table[torch.ops.aten.linear.default] = custom_decomp_callable
         core_aten_ep = ep.run_decompositions(decomp_table)
         self.assertExpectedInline(
@@ -7697,7 +7697,7 @@ def forward(self, x, y):
                 y = torch.ops.testlib.foo_functional.default(x)
                 return torch.ops.testlib.foo_mutated.default(y)
 
-        decomp_table = torch.export.core_aten_decompositions()
+        decomp_table = torch.export.default_decompositions()
 
         # FIXME (We need to design a proper way that doesn't need _preserve_ops)
         ep = torch.export.export(M(), (torch.randn(4, 4),)).run_decompositions(
@@ -7745,7 +7745,7 @@ def forward(self, x):
                 {}, _preserve_ops=(torch.ops.aten.linear.default,)
             )
         else:
-            table = torch.export.core_aten_decompositions()
+            table = torch.export.default_decompositions()
             del table[torch.ops.aten.linear.default]
             ep = ep.run_decompositions(table)
 
@@ -8850,7 +8850,7 @@ class TestExportCustomClass(TorchTestCase):
         if IS_FBCODE:
             ep = ep.run_decompositions(_preserve_ops=(torch.ops.aten.elu.default,))
         else:
-            decomp_table = core_aten_decompositions()
+            decomp_table = default_decompositions()
             del decomp_table[torch.ops.aten.elu.default]
 
             ep = ep.run_decompositions(
@@ -8882,7 +8882,7 @@ class TestExportCustomClass(TorchTestCase):
                 _preserve_ops=(torch.ops.aten.upsample_bilinear2d.vec,)
             )
         else:
-            decomp_table = core_aten_decompositions()
+            decomp_table = default_decompositions()
             del decomp_table[torch.ops.aten.upsample_bilinear2d.vec]
             ep = ep.run_decompositions(
                 decomp_table=decomp_table,
