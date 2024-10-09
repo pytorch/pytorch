@@ -389,7 +389,19 @@ def _stack_pytree(pytrees):
 
 
 # We cannot call save_for_backward for symints. This helper function
-# can be used to save symints as a direct attributes in ctx.
+# can be used to save symints as direct attributes of ctx in autograd.Function.
+#
+# For example, if args = (x, y, s0, z, s1),
+# save_tensors_and_symints_for_backward will partition the args into two lists, and a bookkeeping list pos:
+#   partitioned_args[0] = (x, y, z)
+#   partitioned_args[1] = (s0, s1)
+#   pos = (0, 0, 1, 0, 1)
+# pos list keeps track of which partition the args
+# is partitioned into in order to recover it in saved_tensors_and_symints.
+#
+# In saved_tensors_and_symints, we can recover the original args by:
+# iterating over the pos list and pop one item from the front of paritioned_args[pos[i]].
+# We use t_idx and s_idx to keep track of the next index of the item we are going to pop for the two lists.
 def save_tensors_and_symints_for_backward(ctx, args):
     assert all(isinstance(arg, (torch.Tensor, torch.SymInt, int)) for arg in args), args
     partitioned_args: List[Any] = [[], []]
@@ -399,8 +411,8 @@ def save_tensors_and_symints_for_backward(ctx, args):
         partitioned_args[idx].append(arg)
         pos.append(idx)
 
-    assert getattr(ctx, "sym_int_args", None) is None, "ctx already has sym_int_args"
-    assert getattr(ctx, "pos", None) is None, "ctx already has pos"
+    assert not hasattr(ctx, "sym_int_args"), "ctx already has sym_int_args attribute."
+    assert not hasattr(ctx, "pos"), "ctx already has pos attribute."
     ctx.save_for_backward(*partitioned_args[0])
     ctx.sym_int_args = partitioned_args[1]
     ctx.pos = pos

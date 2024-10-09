@@ -231,10 +231,10 @@ def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     assert isinstance(
         operands, (list, tuple)
-    ), f"Cond operands must be a list or tuple of tensors {operands}"
+    ), f"Cond operands must be a list or tuple of tensors and SymInts {operands}"
     assert all(
         isinstance(o, (torch.Tensor, torch.SymInt)) for o in operands
-    ), f"Cond operands must be a list of tensors {operands}"
+    ), f"Cond operands must be a list of tensors and SymInts {operands}"
 
     true_graph = reenter_make_fx(true_fn)(*operands)
     false_graph = reenter_make_fx(false_fn)(*operands)
