@@ -751,7 +751,8 @@ py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isSymBool()) {
     return py::cast(std::move(ivalue).toSymBool());
   } else {
-    TORCH_CHECK(false,
+    TORCH_CHECK(
+        false,
         "Missing cases in 'toPyObject'! Can't convert ",
         ivalue.tagKind(),
         " to a Python object");

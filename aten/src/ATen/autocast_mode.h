@@ -225,7 +225,8 @@ inline at::ScalarType prioritize(
     } else if (current == lower_precision_fp && next == lower_precision_fp) {
       return lower_precision_fp;
     } else {
-      TORCH_CHECK(false, "Unexpected floating ScalarType in at::autocast::prioritize");
+      TORCH_CHECK(
+          false, "Unexpected floating ScalarType in at::autocast::prioritize");
       return current;
     }
   } else {

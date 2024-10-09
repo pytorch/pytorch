@@ -63,7 +63,8 @@ const Variable& checked_cast_variable(
     const char* name,
     int pos) {
   if (!t.defined()) {
-    TORCH_CHECK(false,
+    TORCH_CHECK(
+        false,
         "Expected a proper Tensor but got None (or an undefined Tensor in C++) ",
         "for argument #",
         pos,
@@ -76,7 +77,8 @@ const Variable& checked_cast_variable(
 
 Variable& checked_cast_variable(Tensor& t, const char* name, int pos) {
   if (!t.defined()) {
-    TORCH_CHECK(false,
+    TORCH_CHECK(
+        false,
         "Expected a proper Tensor but got None (or an undefined Tensor in C++) ",
         "for argument #",
         pos,
@@ -303,7 +305,8 @@ Tensor& detach_(c10::DispatchKeySet ks, Tensor& self) {
   RECORD_FUNCTION("detach_", std::vector<c10::IValue>({self}));
   if (self.is_view()) {
     // See NOTE [ View + Inplace detection ]
-    TORCH_CHECK(false,
+    TORCH_CHECK(
+        false,
         "Can't detach views in-place. Use detach() instead. "
         "If you are using DistributedDataParallel (DDP) for training, "
         "and gradient_as_bucket_view is set as True, gradients are "

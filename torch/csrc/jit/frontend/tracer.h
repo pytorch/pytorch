@@ -349,14 +349,16 @@ inline void addInputs(
 
 template <typename T>
 void addInputs(Node* n, const char* name, ArrayRef<T> value) {
-  TORCH_CHECK(false, "Tracing a list of arbitrary type is currently not supported!");
+  TORCH_CHECK(
+      false, "Tracing a list of arbitrary type is currently not supported!");
 }
 template <typename K, typename V>
 void addInputs(
     Node* n,
     const char* name,
     const std::unordered_map<K, V>& value) {
-  TORCH_CHECK(false, "Tracing a dict of arbitrary types is currently not supported!");
+  TORCH_CHECK(
+      false, "Tracing a dict of arbitrary types is currently not supported!");
 }
 
 template <size_t N>
@@ -387,7 +389,8 @@ template <
              std::decay_t<T>,
              c10::intrusive_ptr<c10::ivalue::Object>>)>>
 void addOutput(Node* node, T&&) {
-  TORCH_CHECK(false,
+  TORCH_CHECK(
+      false,
       "Found an unsupported argument type ",
       c10::demangle_type<T>(),
       " in the JIT tracer. File a bug report.");
