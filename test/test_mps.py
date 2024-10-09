@@ -275,7 +275,6 @@ def mps_ops_modifier(ops):
         'empty',
         'empty_permuted',
         'empty_strided',
-        'eye',
         'exp',
         'expand',
         'expand_as',
@@ -409,6 +408,7 @@ def mps_ops_modifier(ops):
         'equal',
         'exp2',
         'expm1',
+        'eye',
         'fft.fft',
         'fft.fft2',
         'fft.fftn',
@@ -12148,8 +12148,8 @@ class TestConsistency(TestCaseMPS):
             # TODO: Investigate why this is needed
             # See https://github.com/pytorch/pytorch/issues/120237
             return (3e-5, 3e-5)
-        # TODO: Investigate why rounding is broken on MPS
-        if op.name in ['linspace'] and dtype in [torch.int8, torch.uint8, torch.int32, torch.int16, torch.int64]:
+        # TODO: Rounding is broken for linspace, see https://github.com/pytorch/pytorch/issues/137635
+        if op.name == 'linspace' and dtype in [torch.int8, torch.uint8, torch.int32, torch.int16, torch.int64]:
             return (1.0, 0.0)
         return (None, None)
 
