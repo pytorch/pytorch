@@ -3996,6 +3996,9 @@ class TritonTemplateBuffer(TemplateBuffer):
     def get_outputs(self) -> List[Buffer]:
         return self.outputs
 
+    def get_allowed_prologue_inps() -> OrderedSet[str]:
+        return self.allowed_prologue_inps
+
     def __str__(self) -> str:
         out = f"TritonTemplateBuffer(layout={self.layout}, {self.debug_extra})"
         return out

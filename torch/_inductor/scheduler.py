@@ -3038,7 +3038,7 @@ class Scheduler:
                 why("prologue fusion only supported for TritonTemplates")
                 return False
 
-            allowed_prologue_inps = template.allowed_prologue_inps
+            allowed_prologue_inps = template.get_allowed_prologue_inps()
 
             unsupported_prologue_args = (
                 OrderedSet(inp.get_name() for inp in template.inputs)
