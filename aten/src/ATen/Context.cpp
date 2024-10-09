@@ -121,6 +121,14 @@ void Context::setAllowTF32CuDNN(bool b) {
   allow_tf32_cudnn = b;
 }
 
+bool Context::allowTF32Mkldnn() const {
+  return allow_tf32_mkldnn;
+}
+
+void Context::setAllowTF32Mkldnn(bool b){
+  allow_tf32_mkldnn = b;
+}
+
 bool Context::userEnabledFlashSDP() const {
   return enabled_flashSDP;
 }
