@@ -65,8 +65,9 @@ static PyObject* THPGenerator_pynew(
   if (device_type == at::kCPU) {
     self->cdata = make_generator<CPUGeneratorImpl>();
   } else {
-    self->cdata =
-        getAcceleratorHooksInterface(device_type).getNewGenerator(device_type);
+    self->cdata = globalContext()
+                      .getAcceleratorHooksInterface(device_type)
+                      .getNewGenerator(device_type);
   }
 
   return (PyObject*)self.release();
