@@ -180,12 +180,24 @@ def scan(
                 "The number of leaves of the pytree of the new carry produced by the operator\
  needs to match the length of the pytree of the init"
             )
-        if any(
-            in_l.shape != out_l.shape for in_l, out_l in zip(leaves_init, carry_leaves)
-        ):
-            raise RuntimeError(
-                "The pytree of the new carry produced by the operator needs to match the pytree of the init"
-            )
+
+        def _check_new_carry_match_init(leaves_init, carry_leaves):
+            for i, (init, new_carry) in enumerate(zip(leaves_init, carry_leaves)):
+                assert init.shape == new_carry.shape, (
+                    ""
+                    f"The shape of the new_carry[{i}] {new_carry.shape} doesn't match that of the init[{i}] {init.shape}."
+                )
+                assert (
+                    init.stride() == new_carry.stride()
+                ), f"The stride of the new_carry[{i}] {new_carry.stride()} doesn't match that of the init[{i}] {init.stride()}."
+                assert (
+                    init.dtype == new_carry.dtype
+                ), f"The dtype of the new_carry[{i}] {new_carry.dtype} doesn't match that of the init[{i}] {init.dtype}."
+                assert (
+                    init.requires_grad == new_carry.requires_grad
+                ), f"The requires_grad of the new_carry[{i}] {new_carry.requires_grad} doesn't match that of the init[{i}] {init.requires_grad}."  # noqa: B950
+
+        _check_new_carry_match_init(leaves_init, carry_leaves)
 
         # There are no pytree restrictions on the second output of the operator
         out_leaves, tree_out = pytree.tree_flatten(out[1])

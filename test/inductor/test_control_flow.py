@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import contextlib
 import itertools
 import unittest
 
@@ -830,6 +831,137 @@ class ScanModels:
                 dim=self.dim,
             )
 
+    class ScanLinearWithView(torch.nn.Module):
+        def __init__(self, reverse, dim):
+            super().__init__()
+            self.reverse = reverse
+            self.dim = dim
+            self.linear = torch.nn.Linear(9, 9)
+
+        def forward(self, scan_op, init, xs):
+            def combine_fn(carry, x):
+                prev_sz = x.size()
+                x = self.linear(x.view(-1, x.size(-1)))
+                x_view = x.view(*prev_sz)
+                return x_view, x_view.clone()
+
+            return scan_op(combine_fn, init, xs, dim=self.dim, reverse=self.reverse)
+
+    class ScanConv(torch.nn.Module):
+        def __init__(self, reverse, dim):
+            super().__init__()
+            self.reverse = reverse
+            self.dim = dim
+            self.conv2d = torch.nn.Conv2d(4, 4, (3, 3), stride=(1, 1), padding=(1, 1))
+
+        # init = torch.randn(4, 4, 9, 9)
+        # xs = torch.randn(scan_dim, 4, 4, 9, 9)
+        def forward(self, scan_op, init, xs):
+            def combine_fn(carry, x):
+                x = self.conv2d(x)
+                return x, x.clone()
+
+            return scan_op(combine_fn, init, xs, dim=self.dim, reverse=self.reverse)
+
+    class ScanConvAndLinear(torch.nn.Module):
+        def __init__(self, reverse, dim):
+            super().__init__()
+            self.reverse = reverse
+            self.dim = dim
+            self.conv2d = torch.nn.Conv2d(4, 4, (3, 3), stride=(1, 1), padding=(1, 1))
+            self.linear = torch.nn.Linear(9, 9)
+
+        # init = torch.randn(4, 4, 9, 9)
+        # xs = torch.randn(scan_dim, 4, 4, 9, 9)
+        def forward(self, scan_op, init, xs):
+            def combine_fn(carry, x):
+                # size is still 4, 4, 9, 9 after conv2d
+                x = self.conv2d(x)
+                sizes = x.size()
+                x = self.linear(x.view(-1, sizes[-1]))
+                x = x.view(*sizes)
+                new_carry = carry + x
+                y = new_carry.view(-1)
+                return new_carry, y
+
+            return scan_op(combine_fn, init, xs, dim=self.dim, reverse=self.reverse)
+
+    class ScanInScan(torch.nn.Module):
+        def __init__(self, reverse, dim):
+            super().__init__()
+            self.reverse = reverse
+            self.dim = dim
+            self.linear = torch.nn.Linear(9, 9)
+            self.linear2 = torch.nn.Linear(9, 9)
+
+        # init: (4, 9)
+        # xs: (scan_length, 4, 9, 9)
+        def forward(self, scan_op, init, xs):
+            # carry: (4, 9)
+            # x: (9, 9)
+            def inner_combine_fn(carry, x):
+                prev_sz = x.size()
+                x = self.linear(x.view(-1, x.size(-1)))
+                x_view = x.view(*prev_sz)
+                # x_view: (9, 9)
+                return carry + torch.sum(x_view, 0, keepdim=True), x_view.clone()
+
+            # carry: (4, 9)
+            # x: (4, 9, 9)
+            def outer_combine_fn(carry, x):
+                new_carry = self.linear2(carry)
+                new_carry2, y2 = scan_op(inner_combine_fn, new_carry, x)
+                return new_carry2, y2
+
+            return scan_op(
+                outer_combine_fn, init, xs, reverse=self.reverse, dim=self.dim
+            )
+
+    class ScanInCond(torch.nn.Module):
+        def __init__(self, reverse, dim):
+            super().__init__()
+            self.true_scan_linear = ScanModels.ScanConvAndLinear(reverse, dim)
+            self.false_scan_linear = ScanModels.ScanConvAndLinear(not reverse, dim)
+
+        def forward(self, scan_op, pred, init, xs):
+            def true_fn():
+                last_carry, y = self.true_scan_linear(scan_op, init, xs)
+                return last_carry.sum(), y.sin()
+
+            def false_fn():
+                last_carry, y = self.false_scan_linear(scan_op, init, xs)
+                return -last_carry.sum(), y.cos()
+
+            return torch.cond(pred, true_fn, false_fn, tuple())
+
+    class CondInScan(torch.nn.Module):
+        def __init__(self, reverse, dim):
+            super().__init__()
+            self.reverse = reverse
+            self.dim = dim
+            self.true_linear = torch.nn.Linear(9, 9)
+            self.false_linear = torch.nn.Linear(9, 9)
+
+        def forward(self, scan_op, init, xs):
+            def combine_fn(carry, x):
+                old_sizes = carry.size()
+                carry_view = carry.view(-1, carry.size()[-1])
+                new_carry_out = torch.cond(
+                    torch.all(carry_view > 1),
+                    lambda: self.true_linear(carry_view).sin(),
+                    lambda: self.false_linear(carry_view).cos(),
+                    tuple(),
+                )
+                return carry + new_carry_out.view(*old_sizes), new_carry_out
+
+            return scan_op(
+                combine_fn,
+                init,
+                xs,
+                dim=self.dim,
+                reverse=self.reverse,
+            )
+
     class SimpleWithPytreeInOuts(torch.nn.Module):
         def __init__(self, reverse, dim):
             super().__init__()
@@ -972,6 +1104,7 @@ class ScanTests(TestCase):
         inputs,
         device,
         dynamic,
+        requires_grad=False,
     ):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
         compiled_model = torch.compile(backend=cnt, fullgraph=True, dynamic=dynamic)(
@@ -979,12 +1112,15 @@ class ScanTests(TestCase):
         )
 
         inputs = [inp.to(device=device) for inp in inputs]
+        model = model.to(device=device)
         cloned_inputs = [inp.clone() for inp in inputs]
-        result = model(scan, *cloned_inputs)
-        result_exp = model(_fake_scan, *cloned_inputs)
+        grad_ctx = contextlib.nullcontext() if requires_grad else torch.no_grad()
+        with grad_ctx:
+            result = model(scan, *cloned_inputs)
+            result_exp = model(_fake_scan, *cloned_inputs)
 
-        result_compiled = compiled_model(scan, *cloned_inputs)
-        result_compiled_exp = compiled_model(_fake_scan, *cloned_inputs)
+            result_compiled = compiled_model(scan, *cloned_inputs)
+            result_compiled_exp = compiled_model(_fake_scan, *cloned_inputs)
 
         self.assertEqual(result, result_exp)
         self.assertEqual(result, result_compiled)
@@ -1004,7 +1140,7 @@ class ScanTests(TestCase):
         self.assertEqual(model1_out, model2_out)
 
     @requires_gpu
-    @parametrize("device", [GPU_TYPE])
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     @parametrize("reverse", [True, False])
     @parametrize("dim", [0, 1, 2])
@@ -1021,7 +1157,131 @@ class ScanTests(TestCase):
         )
 
     @requires_gpu
-    @parametrize("device", [GPU_TYPE])
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    @parametrize("reverse", [True, False])
+    @parametrize("dim", [0, 1, 2, 3])
+    @parametrize("scan_length", [1, 5])
+    def test_scan_nn_modules(self, device, dynamic, reverse, dim, scan_length):
+        init = torch.randn(20, 16, 9, 9)
+        xs = torch.randn(scan_length, 20, 16, 9, 9)
+        xs = xs.movedim(0, dim)
+        self._run_test(
+            model=ScanModels.ScanLinearWithView(reverse=reverse, dim=dim),
+            inputs=(
+                init,
+                xs,
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    @parametrize("reverse", [True, False])
+    @parametrize("dim", [0, 1, 2, 3])
+    @parametrize("scan_length", [1, 5])
+    def test_scan_conv(self, device, dynamic, reverse, dim, scan_length):
+        init = torch.randn(4, 4, 9, 9)
+        xs = torch.randn(scan_length, 4, 4, 9, 9)
+        xs = xs.movedim(0, dim)
+        self._run_test(
+            model=ScanModels.ScanConv(reverse=reverse, dim=dim),
+            inputs=(
+                init,
+                xs,
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    @parametrize("reverse", [True, False])
+    @parametrize("dim", [0, 1, 2, 3])
+    @parametrize("scan_length", [1, 5])
+    def test_scan_conv_linear(self, device, dynamic, reverse, dim, scan_length):
+        init = torch.randn(4, 4, 9, 9)
+        xs = torch.randn(scan_length, 4, 4, 9, 9)
+        xs = xs.movedim(0, dim)
+        self._run_test(
+            model=ScanModels.ScanConvAndLinear(reverse=reverse, dim=dim),
+            inputs=(
+                init,
+                xs,
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    @parametrize("reverse", [True, False])
+    @parametrize("dim", [0, 1, 2, 3])
+    @parametrize("scan_length", [1, 5])
+    def test_scan_in_scan(self, device, dynamic, reverse, dim, scan_length):
+        init = torch.randn(4, 9)
+        xs = torch.randn(scan_length, 4, 9, 9)
+        xs = xs.movedim(0, dim)
+        self._run_test(
+            model=ScanModels.ScanInScan(reverse=reverse, dim=dim),
+            inputs=(
+                init,
+                xs,
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    # TODO(yidi): when setting dynamic=True, some symints are lifted to the subgraph of cond, which
+    # is not supported by cond yet.
+    @parametrize("dynamic", [False])
+    @parametrize("reverse", [True, False])
+    @parametrize("dim", [0, 1, 2, 3])
+    @parametrize("pred", [True, False])
+    @parametrize("scan_length", [1, 5])
+    def test_scan_in_cond(self, device, dynamic, reverse, dim, pred, scan_length):
+        init = torch.randn(4, 4, 9, 9)
+        xs = torch.randn(scan_length, 4, 9, 9)
+        xs = xs.movedim(0, dim)
+        self._run_test(
+            model=ScanModels.ScanInCond(reverse=reverse, dim=dim),
+            inputs=(
+                torch.tensor(pred),
+                init,
+                xs,
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    @parametrize("reverse", [True, False])
+    @parametrize("dim", [0, 1, 2, 3])
+    @parametrize("scan_length", [1, 5])
+    def test_cond_in_scan(self, device, dynamic, reverse, dim, scan_length):
+        init = torch.randn(4, 4, 9, 9)
+        xs = torch.randn(scan_length, 4, 9, 9)
+        xs = xs.movedim(0, dim)
+        self._run_test(
+            model=ScanModels.CondInScan(reverse=reverse, dim=dim),
+            inputs=(
+                init,
+                xs,
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     def test_scan_chunked_ce(self, device, dynamic):
         self._run_test(
@@ -1037,7 +1297,7 @@ class ScanTests(TestCase):
         )
 
     @requires_gpu
-    @parametrize("device", [GPU_TYPE])
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
     def test_scan_compare_chunked_ce_with_no_scan(self, device, dynamic):
         for trunk_size, B, T in zip([10, 20], [10, 100], [20, 40]):

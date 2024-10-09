@@ -2031,7 +2031,8 @@ class Scheduler:
 
             # Handle output mutations
             for buf in node.get_outputs():
-                # a node can mutate multiple buffers e.g. while_loop lowered from scan
+                # a node will mutate either 0 or 1 buffers
+                assert len(buf.get_mutations()) <= 1
                 for alt_name in buf.get_mutations():
                     alt_name = rename(alt_name)
                     # this node must run after the prior writer

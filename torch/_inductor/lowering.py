@@ -6212,6 +6212,13 @@ def cond(pred, true_fn, false_fn, operands):
     return list(map(TensorBox.create, result))
 
 
+# 1. best way of bind a new symint inside decomposing pass
+#   and 1.1 create_new_symint the right thing to do?
+# 2. mutation outputs downs to lowering of while_loop.
+#  a. we could probalby identify subgraph input mutation in inductor
+#  b. schemas for hops. We could use this infra. Fearsible.
+
+
 @register_lowering(torch.ops.higher_order.while_loop)
 def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
     if any(map(is_triton, carried_inputs + additional_inputs)):
@@ -6221,7 +6228,7 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
         V.graph.disable_cudagraphs_reason = msg
 
     fx_all_inputs = V.graph.current_node.args[-2] + V.graph.current_node.args[-1]  # type: ignore[operator]
-    fake_all_inputs = [x.meta["val"] for x in fx_all_inputs]  # type: ignore[union-attr]
+    fake_all_inputs = [x.meta["val"] if isinstance(x, torch.fx.Node) else x for x in fx_all_inputs]  # type: ignore[union-attr]
 
     for subgraph in (cond_fn, body_fn):
         if subgraph.graph is None:
@@ -6234,7 +6241,19 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
             with V.set_graph_handler(subgraph.graph):
                 subgraph.graph.run(*fake_all_inputs)
 
-    result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
+    symint_exprs = [
+        inp.node.expr for inp in carried_inputs if isinstance(inp, torch.SymInt)
+    ]
+    assert len(symint_exprs) <= 1, "while_loop only supports one symint"
+    idx_iter_expr = symint_exprs[0] if len(symint_exprs) == 1 else None
+    # TODO: using HOP schema to pass the mutated_inputs info here.
+    result = ir.WhileLoop.create(
+        cond_fn,
+        body_fn,
+        [inp for inp in carried_inputs if not isinstance(inp, torch.SymInt)],
+        [inp for inp in additional_inputs if not isinstance(inp, torch.SymInt)],
+        iter_idx_expr=idx_iter_expr,
+    )
     return list(map(TensorBox.create, result))
 
 
@@ -6258,49 +6277,13 @@ def scan(combine_subgraph, init, xs, dim, reverse, additional_inputs):
     specialized_dim = int(dim)
 
     with V.graph.fake_mode:
-        # We choose tensor box to be the single source of truth of creating fake.
-        # tensors for subgraph.
-        # It's not reliable to get fake tensor from the "val" meta of fx node.
-        # For example: the View ir node in inductor will create a new TensorBox
-        # whose size is exactly the viewed shape but in fake tensor
-        # propagation, we it's not guaranteed to be the case. Check the decomposition
-        # of view operator.
-        def fake_tensor_from_tbox(tbox):
-            tbox.realize()
-            with V.graph.fake_mode:
-                shape_env = V.graph.fake_mode.shape_env
-
-                def _find_all_symints(fake: Union[torch.SymInt, torch.Tensor]):
-                    assert isinstance(fake, (torch.Tensor, torch.SymInt))
-                    if isinstance(fake, torch.Tensor):
-                        for sz in fake.size():
-                            if isinstance(sz, torch.SymInt):
-                                all_symints.update({str(sz): sz})
-                        for st in fake.size():
-                            if isinstance(st, torch.SymInt):
-                                all_symints.update({str(st): st})
-                    elif isinstance(fake, torch.SymInt):
-                        all_symints.update({str(fake): fake})
-
-                all_symints: Dict[str, torch.SymInt] = {}
-                pytree.tree_map(
-                    lambda fake: _find_all_symints(fake.fake), shape_env.tracked_fakes  # type: ignore[union-attr]
-                )
-                fake_size = [eval(str(sz), all_symints) for sz in tbox.get_size()]
-                fake_stride = [eval(str(sz), all_symints) for sz in tbox.get_stride()]
-                return torch.empty_strided(
-                    fake_size,
-                    fake_stride,
-                    dtype=tbox.get_dtype(),
-                    device=tbox.get_device(),
-                )
-
+        _, fx_init, fx_xs, _, _, fx_additional_inputs = V.graph.current_node.args
         fake_init, fake_xs, fake_additional_inputs = pytree.tree_map(
-            fake_tensor_from_tbox, (init, xs, additional_inputs)
+            lambda node: node.meta["val"], (fx_init, fx_xs, fx_additional_inputs)
         )
         fake_xs_subgraph = [t.select(specialized_dim, 0) for t in fake_xs]
         fake_scan_length = fake_xs[0].size()[specialized_dim]
-        _, fake_ys_subgraph = _extract_carry_and_out(
+        fake_carry_subgraph, fake_ys_subgraph = _extract_carry_and_out(
             combine_subgraph.graph_module(
                 *(fake_init + fake_xs_subgraph + fake_additional_inputs)
             ),
@@ -6376,6 +6359,17 @@ def scan(combine_subgraph, init, xs, dim, reverse, additional_inputs):
         )
         with V.set_graph_handler(subgraph.graph):
             subgraph.graph.run(*fake_args)
+            new_subgraph_outputs = []
+            if subgraph is body_subgraph:
+                for fake_carry, carry in zip(
+                    fake_args[:-1], subgraph.graph.graph_outputs
+                ):
+                    new_subgraph_outputs.append(
+                        ir.ExternKernel.require_exact_strides(
+                            carry, fake_carry.stride(), allow_padding=False
+                        )
+                    )
+                subgraph.graph.graph_outputs = new_subgraph_outputs
 
     subgraph_ys_outs = pytree.tree_unflatten(
         body_subgraph.graph.graph_outputs + [fake_idx], tree_spec  # type: ignore[union-attr]

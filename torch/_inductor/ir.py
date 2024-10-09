@@ -2897,9 +2897,17 @@ class Layout(IRNode):
         ), f"size={size}, stride={stride}"
         self.device = device
         self.dtype = dtype
-        assert all(isinstance(s, (Expr, int)) for s in size)
-        self.size = size
-        self._stride = stride
+
+        def _symint_to_sympy_expr(s: Union[Expr, int, torch.SymInt]):
+            if isinstance(s, torch.SymInt):
+                return s.node.expr
+            return s
+
+        assert all(isinstance(s, (torch.SymInt, Expr, int)) for s in size)
+        self.size = [_symint_to_sympy_expr(s) for s in size]
+        self._stride = (
+            [_symint_to_sympy_expr(s) for s in stride] if stride is not None else stride
+        )
         self.offset = offset
 
     @property
@@ -6635,14 +6643,24 @@ class WhileLoop(ExternKernel):
 
         # make sure carried_inputs and body outputs are structurally equivalent
         assert len(carried_inputs) == len(body_outputs), (carried_inputs, body_outputs)
+
+        def _guard_list_equals(
+            li: List[Union[int, sympy.Expr]], ri: List[Union[int, sympy.Expr]]
+        ):
+            for l, r in zip(li, ri):
+                V.graph.sizevars.guard_equals(l, r)
+
         for i, (op, bo) in enumerate(zip(carried_inputs, body_outputs)):
-            assert op.get_size() == bo.get_size(), (i, op, bo)
-            assert op.get_stride() == bo.get_stride(), (i, op, bo)
+            # We already know that correponding carried_inputs and body_outputs
+            # should have same strides and sizes. This is enforced by the front-end
+            # so we guard them to be equal.
+            _guard_list_equals(op.get_size(), bo.get_size())
+            _guard_list_equals(op.get_stride(), bo.get_stride())
             # assume all carried_inputs and outputs are on the same device
             # as the MultiOutputLayout below requires single device
             assert op.get_device() == bo.get_device() == device, (i, op, bo, device)
             assert op.get_dtype() == bo.get_dtype(), (i, op, bo)
-            assert op.get_layout().offset == bo.get_layout().offset, (i, op, bo)
+            assert op.get_layout().offset == op.get_layout().offset, (i, op, bo)
 
         while_loop = WhileLoop(
             carried_inputs=carried_inputs,
@@ -6691,10 +6709,6 @@ class WhileLoop(ExternKernel):
 
     def codegen(self, wrapper):
         wrapper.codegen_while_loop(self)
-
-    def get_mutation_names(self):
-        assert self.mutated_inputs is not None
-        return [inp.get_name() for inp in self.mutated_inputs]
 
 
 class EffectfulKernel(FallbackKernel):

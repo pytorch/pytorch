@@ -1657,10 +1657,16 @@ def forward(self, pred_1, x_1):
         A = torch.randn(state_dim, requires_grad=True, device=device)
         elements = (A.repeat((timesteps, 1)), projected_inputs)
         init = tuple(
-            [torch.ones_like(torch._ops.ops.aten.slice(elements[0], 0, 0, 1, 1))]
+            [
+                torch.ones_like(
+                    torch._ops.ops.aten.slice(elements[0], 0, 0, 1, 1),
+                    requires_grad=True,
+                )
+            ]
             + [
                 torch.zeros_like(
-                    torch._ops.ops.aten.slice(projected_inputs, 0, 0, 1, 1)
+                    torch._ops.ops.aten.slice(projected_inputs, 0, 0, 1, 1),
+                    requires_grad=True,
                 )
             ]
         )
@@ -2777,7 +2783,7 @@ def forward(self, pred_1, x_1):
             # Should be: RuntimeError: The pytree of the new carry produced
             # by the operator needs to match the pytree of the init
             torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
+            ".*",
         ):
             gm = make_fx(f, tracing_mode="symbolic")(
                 get_scan_combine_fn("add", True), init, x
@@ -2799,7 +2805,7 @@ def forward(self, pred_1, x_1):
             # Should be: RuntimeError: The pytree of the new carry produced by
             # the operator needs to match the pytree of the init
             torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
+            ".*",
         ):
             gm = make_fx(f, tracing_mode="symbolic")(add_wrong_carry, init, x)
 
@@ -2819,8 +2825,8 @@ def forward(self, pred_1, x_1):
             # Should be: RuntimeError: Expected the init and
             # the new carry produced by the operator to be a tensor of
             # torch.int64 but got torch.float32 and torch.int64
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            ".*",
+            torch._dynamo.exc.Unsupported,
+            "Observed exception",
         ):
             gm = make_fx(f, tracing_mode="symbolic")(add_wrong_dtype, init, x)
 
@@ -2867,7 +2873,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     l_init_ = L_init_
     l_xs_ = L_xs_
     select = l_xs_.select(0, 0)
-    out_l = l_init_ + select;  out_l = None
+    new_carry = l_init_ + select;  new_carry = None
     add_1 = l_init_ + select;  select = add_1 = None
     child = l_init_.clone();  child = None
     child_1 = torch.select_copy(l_xs_, 0, 0);  child_1 = None
