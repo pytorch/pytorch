@@ -183,11 +183,7 @@ class TorchExportNonStrictStrategy(CaptureStrategy):
     ) -> torch.export.ExportedProgram:
         try:
             return torch.export.export(
-                model,
-                args,
-                kwargs=kwargs,
-                dynamic_shapes=dynamic_shapes,
-                strict=False,
+                model, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes, strict=False
             )
         except torch._dynamo.exc.UserError as exc:
             # Refine the dynamic shapes based on the suggested fixes.
