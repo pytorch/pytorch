@@ -11,8 +11,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace torch {
-namespace data {
+namespace torch::data {
 namespace detail {
 // For increased safety and more separated logic, this implementation of
 // `Iterator` consists of a `ValidIterator` and a `SentinelIterator`. A
@@ -174,5 +173,4 @@ class Iterator {
   /// Points either to a `ValidIterator` or to a `SentinelIterator`.
   std::shared_ptr<detail::IteratorImpl<Batch>> impl_;
 };
-} // namespace data
-} // namespace torch
+} // namespace torch::data
