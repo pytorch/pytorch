@@ -24,7 +24,7 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, has_hipsolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
-     onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver, skipCUDAIfNotRocm,
+     onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver, skipCUDAIfNotRocm, skipCUDAIfRocmVersionLessThan,
      dtypesIfMPS, largeTensorTest)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -2351,7 +2351,7 @@ class TestLinalg(TestCase):
             if self.device_type != 'cpu' and randrange(100) < 95:
                 return  # too many cpu <==> device copies
 
-            a = np.array(x.cpu(), copy=False)
+            a = np.asarray(x.cpu())
             expected = np.linalg.norm(a, "nuc", axis=axes)
 
             ans = torch.norm(x, "nuc", dim=axes)
@@ -3082,7 +3082,14 @@ class TestLinalg(TestCase):
             self.assertEqual(b.expand_as(Ax), Ax)
 
             # Check against NumPy
-            expected = np.linalg.solve(A.cpu().numpy(), b.expand_as(x).cpu().numpy())
+            if rhs == ():
+                # In NumPy 2, "b" can no longer be a vector (i.e. rhs == ()) if has batch dimensions.
+                # So, reshape it to a matrix and back. Related documentation:
+                # https://numpy.org/doc/1.26/reference/generated/numpy.linalg.solve.html
+                # https://numpy.org/doc/2.0/reference/generated/numpy.linalg.solve.html
+                expected = np.linalg.solve(A.cpu().numpy(), b.cpu().numpy().reshape(*b.shape, 1)).reshape(b.shape)
+            else:
+                expected = np.linalg.solve(A.cpu().numpy(), b.cpu().numpy())
             self.assertEqual(x, expected)
 
         batches = [(), (0, ), (3, ), (2, 3)]
@@ -5234,7 +5241,9 @@ class TestLinalg(TestCase):
                 tau_shape = [*A_cpu.shape[:-2], A_cpu.shape[-1]]
                 tau = torch.empty(tau_shape, dtype=dtype).view(-1, A_cpu.shape[-1])
                 for A_i, reflectors_i, tau_i in zip(A_cpu.contiguous().view(*flattened_batch_shape), reflectors, tau):
-                    reflectors_tmp, tau_i[:] = map(torch.from_numpy, np.linalg.qr(A_i, mode='raw'))
+                    reflectors_tmp, tau_i[:] = (
+                        torch.from_numpy(x) if isinstance(x, np.ndarray) else x for x in np.linalg.qr(A_i, mode='raw')
+                    )
                     reflectors_i[:] = reflectors_tmp.T
                 reflectors = reflectors.view(*A_cpu.shape)
                 tau = tau.view(tau_shape)
@@ -6159,6 +6168,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(SM90OrLater and not TEST_WITH_ROCM, "Expected failure on sm90")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @skipCUDAIfRocmVersionLessThan((6, 0))
     @onlyCUDA
     @parametrize("k", [16, 32])
     @parametrize("n", [16, 32])
@@ -6232,13 +6242,11 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @skipCUDAIfRocmVersionLessThan((6, 0))
     @onlyCUDA
     def test__int_mm_errors(self, device):
-        if TEST_WITH_ROCM:
-            self.skipTest("_int_mm not compiled for ROCM")
-
         version = _get_torch_cuda_version()
-        if version < (11, 7):
+        if torch.version.cuda and version < (11, 7):
             self.skipTest("_int_mm only compiled for CUDA 11.7")
 
         def genf_int(x, y):
