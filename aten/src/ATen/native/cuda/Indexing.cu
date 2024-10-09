@@ -1334,16 +1334,26 @@ tensorInfoLegacyIfScalar(cuda::detail::TensorInfo<T, IndexType> ti) {
   return ti;
 }
 
+constexpr uint64_t getDefaultMaxThreadsPerBlock() {
+#ifndef USE_ROCM
+  return 128;
+#else
+  // bigger default
+  return 512;
+#endif
 }
+
+}
+
 
 template <typename scalar_t>
 void index_select_out_cuda_impl(
     Tensor& out,
     const Tensor& self,
-    long dim,
+    uint64_t dim,
     const Tensor& index) {
   uint64_t numIndices = index.numel();
-  uint64_t selfDims = self.dim() == 0 ? 1 : self.dim();
+  auto selfDims = self.dim() == 0 ? 1 : self.dim();
 
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
@@ -1400,14 +1410,16 @@ void index_select_out_cuda_impl(
       selfSelectDimSize);                                                      \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (uint64_t)128), (uint64_t) (mpc * 8)));
-  dim3 smallIndexBlock(std::min(sliceSize, (uint64_t)128));
+  uint64_t defaultMaxBlockThreads = getDefaultMaxThreadsPerBlock();
+  dim3 smallIndexGrid(std::min(ceil_div(sliceSize, defaultMaxBlockThreads), (uint64_t) (mpc * 8)));
+  dim3 smallIndexBlock(std::min(sliceSize, defaultMaxBlockThreads));
 
-  dim3 largeIndexGrid(std::min(ceil_div(outTotalSize, (uint64_t)128), (uint64_t) (mpc * 8)));
+  dim3 largeIndexGrid(std::min(ceil_div(outTotalSize, defaultMaxBlockThreads), (uint64_t) (mpc * 8)));
   // for issue https://github.com/pytorch/pytorch/issues/130806 there are two problems
   // 1: ptrdiff_t was used but it is signed int,  outTotalSize of 2147483648 can cause overflow
   // 2: On ROCm, std::min -> ::min did not work as expected on when outTotalSize>=2147483648
-  dim3 largeIndexBlock( (outTotalSize < 128) ? outTotalSize : 128 );
+  dim3 largeIndexBlock( (outTotalSize < defaultMaxBlockThreads) ? outTotalSize : defaultMaxBlockThreads );
+
   if (cuda::detail::canUse32BitIndexMath(out) &&
       cuda::detail::canUse32BitIndexMath(self) &&
       cuda::detail::canUse32BitIndexMath(index)) {
@@ -1499,14 +1511,14 @@ Tensor& index_select_out_cuda(
       self.qscheme() == kPerTensorAffine,
       "Only per_tensor quantized quantized tensors are supported by index_select.")
     AT_DISPATCH_QINT_TYPES(out.scalar_type(), "index_select_quant_cuda", [&] {
-      index_select_out_cuda_impl<scalar_t>(out, self, dim, index);
+      index_select_out_cuda_impl<scalar_t>(out, self, (uint64_t) dim, index);
     });
   } else {
     AT_DISPATCH_V2(
         out.scalar_type(),
         "index_select_cuda",
-        AT_WRAP([&] { index_select_out_cuda_impl<scalar_t>(out, self, dim, index); }),
-        AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
+        AT_WRAP([&] { index_select_out_cuda_impl<scalar_t>(out, self, (uint64_t) dim, index); }),
+        AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), AT_EXPAND(AT_FLOAT8_TYPES),
         kComplexHalf,
         kHalf,
         kBool,

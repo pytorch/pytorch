@@ -18,6 +18,7 @@
 /torch/optim/ @albanD @janeyx99
 /test/test_public_bindings.py @albanD
 /test/allowlist_for_publicAPI.json @albanD
+/test/forward_backward_compatibility/check_forward_backward_compatibility.py @larryliu0820
 /docs/source/conf.py @albanD
 /aten/src/ATen/native/tags.yaml @ezyang
 
@@ -56,7 +57,6 @@ nn/qat/ @jerryzh168
 # Docker
 /.ci/docker/ @jeffdaily
 /.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @bertmaher @jeffdaily @jataylo @jithunnair-amd @pruthvistony
-/.ci/docker/ci_commit_pins/triton-rocm.txt @jeffdaily @jataylo @jithunnair-amd @pruthvistony
 /.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
 
 # Github Actions
@@ -98,6 +98,10 @@ test/test_type_promotion.py @mruberry
 test/functorch/test_ops.py @zou3519 @chillee @kshitij12345
 test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
 
+# HOPs
+torch/_higher_order_ops/*.py @zou3519
+torch/_dynamo/variables/higher_order_ops.py @zou3519
+
 # torch MPS
 test/test_mps.py @kulinseth @malfet
 aten/src/ATen/mps/ @kulinseth @malfet
@@ -117,7 +121,7 @@ torch/profiler/ @aaronenyeshi @sraikund16
 test/functorch/test_aotdispatch.py @ezyang @Chillee
 
 # Dataloader
-torch/utils/data/ @andrewkho @gokulavasan
+torch/utils/data/ @andrewkho @divyanshk
 
 # hipify
 torch/utils/hipify/ @jeffdaily @jithunnair-amd

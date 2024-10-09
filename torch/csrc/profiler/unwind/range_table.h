@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <memory>
 #include <optional>
-#include <unordered_map>
 #include <vector>
 
 namespace torch::unwind {
@@ -14,7 +13,7 @@ struct RangeTable {
     addresses_.push_back(0);
     payloads_.emplace_back(std::nullopt);
   }
-  void add(uint64_t address, unwind::optional<T> payload, bool sorted) {
+  void add(uint64_t address, std::optional<T> payload, bool sorted) {
     if (addresses_.back() > address) {
       UNWIND_CHECK(!sorted, "expected addresses to be sorted");
       sorted_ = false;
@@ -22,7 +21,7 @@ struct RangeTable {
     addresses_.push_back(address);
     payloads_.emplace_back(std::move(payload));
   }
-  unwind::optional<T> find(uint64_t address) {
+  std::optional<T> find(uint64_t address) {
     maybeSort();
     auto it = std::upper_bound(addresses_.begin(), addresses_.end(), address);
     return payloads_.at(it - addresses_.begin() - 1);
@@ -56,7 +55,7 @@ struct RangeTable {
            bool(payloads_[a]) < bool(payloads_[b]));
     });
     std::vector<uint64_t> addresses;
-    std::vector<unwind::optional<T>> payloads;
+    std::vector<std::optional<T>> payloads;
     addresses.reserve(addresses_.size());
     payloads.reserve(addresses_.size());
     for (auto i : indices) {
@@ -69,6 +68,6 @@ struct RangeTable {
   }
   bool sorted_ = true;
   std::vector<uint64_t> addresses_;
-  std::vector<unwind::optional<T>> payloads_;
+  std::vector<std::optional<T>> payloads_;
 };
 } // namespace torch::unwind

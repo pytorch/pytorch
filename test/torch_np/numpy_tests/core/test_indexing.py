@@ -5,13 +5,10 @@ import operator
 import re
 import sys
 import warnings
-
 from itertools import product
-
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
 import pytest
-
 from pytest import raises as assert_raises
 
 from torch.testing._internal.common_utils import (
@@ -23,6 +20,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xpassIfTorchDynamo,
 )
+
 
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
@@ -604,16 +602,21 @@ class TestFancyIndexingCast(TestCase):
         zero_array[bool_index] = np.array([1])
         assert_equal(zero_array[0, 1], 1)
 
+        # np.ComplexWarning moved to np.exceptions in numpy>=2.0.0
+        # np.exceptions only available in numpy>=1.25.0
+        has_exceptions_ns = hasattr(np, "exceptions")
+        ComplexWarning = (
+            np.exceptions.ComplexWarning if has_exceptions_ns else np.ComplexWarning
+        )
+
         # Fancy indexing works, although we get a cast warning.
         assert_warns(
-            np.ComplexWarning, zero_array.__setitem__, ([0], [1]), np.array([2 + 1j])
+            ComplexWarning, zero_array.__setitem__, ([0], [1]), np.array([2 + 1j])
         )
         assert_equal(zero_array[0, 1], 2)  # No complex part
 
         # Cast complex to float, throwing away the imaginary portion.
-        assert_warns(
-            np.ComplexWarning, zero_array.__setitem__, bool_index, np.array([1j])
-        )
+        assert_warns(ComplexWarning, zero_array.__setitem__, bool_index, np.array([1j]))
         assert_equal(zero_array[0, 1], 0)
 
 
@@ -882,7 +885,7 @@ class TestMultiIndexingAutomated(TestCase):
                         if np.any(_indx >= _size) or np.any(_indx < -_size):
                             raise IndexError
                 if len(indx[1:]) == len(orig_slice):
-                    if np.product(orig_slice) == 0:
+                    if np.prod(orig_slice) == 0:
                         # Work around for a crash or IndexError with 'wrap'
                         # in some 0-sized cases.
                         try:
@@ -1014,6 +1017,14 @@ class TestMultiIndexingAutomated(TestCase):
             # This is so that np.array(True) is not accepted in a full integer
             # index, when running the file separately.
             warnings.filterwarnings("error", "", DeprecationWarning)
+            # np.VisibleDeprecationWarning moved to np.exceptions in numpy>=2.0.0
+            # np.exceptions only available in numpy>=1.25.0
+            has_exceptions_ns = hasattr(np, "exceptions")
+            VisibleDeprecationWarning = (
+                np.exceptions.VisibleDeprecationWarning
+                if has_exceptions_ns
+                else np.VisibleDeprecationWarning
+            )
             warnings.filterwarnings("error", "", np.VisibleDeprecationWarning)
 
             def isskip(idx):
@@ -1094,7 +1105,7 @@ class TestFloatNonIntegerArgument(TestCase):
         def mult(a, b):
             return a * b
 
-        assert_raises(TypeError, mult, [1], np.float_(3))
+        assert_raises(TypeError, mult, [1], np.float64(3))
         # following should be OK
         mult([1], np.int_(3))
 
