@@ -1379,7 +1379,7 @@ class ReduceLROnPlateau(LRScheduler):
     def _reduce_lr(self, epoch):
         if len(self.optimizer.param_groups) != len(self.min_lrs):
             if self.default_min_lr is None:
-                raise ValueError(
+                raise RuntimeError(
                     "The number of param groups in the `optimizer` "
                     f"({len(self.optimizer.param_groups)}) differs "
                     f"from when `ReduceLROnPlateau` was initialized "
