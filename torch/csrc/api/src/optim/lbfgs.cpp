@@ -176,7 +176,8 @@ std::tuple<double, Tensor> LBFGS::_directional_evaluate(
     double t,
     const Tensor& d) {
   _add_grad(t, d);
-  double loss = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  double loss;
   {
     torch::AutoGradMode enable_grad(true);
     loss = closure().item<double>();
@@ -214,9 +215,12 @@ static double _cubic_interpolate(
 
   auto d1 = (g1 + g2) - (3 * (f1 - f2) / (x1 - x2));
   auto d2_square = std::pow(d1, 2) - g1 * g2;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  double d2;
   if (d2_square >= 0) {
-    auto d2 = std::sqrt(d2_square);
-    double min_pos = 0;
+    d2 = std::sqrt(d2_square);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    double min_pos;
     if (x1 <= x2) {
       min_pos = x2 - ((x2 - x1) * ((g2 + d2 - d1) / (g2 - g1 + 2 * d2)));
     } else {

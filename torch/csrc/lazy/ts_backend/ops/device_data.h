@@ -4,9 +4,8 @@
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
-#include <utility>
-
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 class TORCH_API DeviceData : public TsNode {
  public:
@@ -19,7 +18,7 @@ class TORCH_API DeviceData : public TsNode {
   // A DeviceData node can be reused if the shape matches,
   // but we will substitute the actual data_ pointer under
   // the hood.
-  bool CanBeReused(const std::shared_ptr<BackendData>& data) const {
+  bool CanBeReused(std::shared_ptr<BackendData> data) const {
     return data_->shape() == data->shape();
   }
 
@@ -30,14 +29,14 @@ class TORCH_API DeviceData : public TsNode {
   }
 
   void SetData(std::shared_ptr<BackendData> data) {
-    data_ = std::move(data);
+    data_ = data;
   }
 
   static const DeviceData* Cast(const Node* node);
 
   // To reuse IR nodes, use this method to create DeviceData nodes
-  // instead of calling the constructor directconst ly.
-  static NodePtr Create(const std::shared_ptr<BackendData>& data);
+  // instead of calling the constructor directly.
+  static NodePtr Create(std::shared_ptr<BackendData> data);
 
   TSOpVector Lower(
       std::shared_ptr<torch::jit::GraphFunction> function,
@@ -47,4 +46,5 @@ class TORCH_API DeviceData : public TsNode {
   std::shared_ptr<BackendData> data_;
 };
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

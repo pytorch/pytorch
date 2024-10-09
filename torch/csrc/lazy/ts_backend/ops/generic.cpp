@@ -1,6 +1,7 @@
 #include <torch/csrc/lazy/ts_backend/ops/generic.h>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 Generic::Generic(
     OpKind op,
@@ -31,4 +32,5 @@ Generic::Generic(OpKind op, Shape shape, size_t num_outputs, hash_t hash_seed)
     : TsNode(op, std::move(shape), num_outputs, hash_seed),
       hash_seed_(hash_seed) {}
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

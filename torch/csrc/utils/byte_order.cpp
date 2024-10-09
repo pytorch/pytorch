@@ -12,7 +12,8 @@
 namespace {
 
 static inline void swapBytes16(void* ptr) {
-  uint16_t output = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  uint16_t output;
   memcpy(&output, ptr, sizeof(uint16_t));
 #if defined(_MSC_VER) && !defined(_DEBUG)
   output = _byteswap_ushort(output);
@@ -27,7 +28,8 @@ static inline void swapBytes16(void* ptr) {
 }
 
 static inline void swapBytes32(void* ptr) {
-  uint32_t output = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  uint32_t output;
   memcpy(&output, ptr, sizeof(uint32_t));
 #if defined(_MSC_VER) && !defined(_DEBUG)
   output = _byteswap_ulong(output);
@@ -44,7 +46,8 @@ static inline void swapBytes32(void* ptr) {
 }
 
 static inline void swapBytes64(void* ptr) {
-  uint64_t output = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  uint64_t output;
   memcpy(&output, ptr, sizeof(uint64_t));
 #if defined(_MSC_VER)
   output = _byteswap_uint64(output);
@@ -67,7 +70,8 @@ static inline void swapBytes64(void* ptr) {
 }
 
 static inline uint16_t decodeUInt16(const uint8_t* data) {
-  uint16_t output = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  uint16_t output;
   memcpy(&output, data, sizeof(uint16_t));
   return output;
 }
@@ -79,7 +83,8 @@ static inline uint16_t decodeUInt16ByteSwapped(const uint8_t* data) {
 }
 
 static inline uint32_t decodeUInt32(const uint8_t* data) {
-  uint32_t output = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  uint32_t output;
   memcpy(&output, data, sizeof(uint32_t));
   return output;
 }
@@ -91,7 +96,8 @@ static inline uint32_t decodeUInt32ByteSwapped(const uint8_t* data) {
 }
 
 static inline uint64_t decodeUInt64(const uint8_t* data) {
-  uint64_t output = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  uint64_t output;
   memcpy(&output, data, sizeof(uint64_t));
   return output;
 }
@@ -143,7 +149,6 @@ TORCH_API void THP_decodeBuffer<c10::Half, bool>(
     bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint16_t x;
       c10::Half f;
@@ -186,7 +191,6 @@ TORCH_API void THP_decodeBuffer<float, bool>(
     bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint32_t x;
       float f;
@@ -204,7 +208,6 @@ TORCH_API void THP_decodeBuffer<double, bool>(
     bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint64_t x;
       double d;
@@ -222,12 +225,10 @@ TORCH_API void THP_decodeBuffer<c10::complex<float>, bool>(
     bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint32_t x;
       float re;
     };
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint32_t y;
       float im;
@@ -249,12 +250,10 @@ TORCH_API void THP_decodeBuffer<c10::complex<double>, bool>(
     bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint64_t x;
       double re;
     };
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint64_t y;
       double im;
