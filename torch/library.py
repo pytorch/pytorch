@@ -556,6 +556,7 @@ def impl(qualname, types, func=None, *, lib=None):
         >>> import torch
         >>> import numpy as np
         >>>
+        >>> # Example 1: register an implementation for cpu
         >>> # Define the operator
         >>> torch.library.define("mylib::mysin", "(Tensor x) -> Tensor")
         >>>
@@ -566,6 +567,25 @@ def impl(qualname, types, func=None, *, lib=None):
         >>>
         >>> x = torch.randn(3)
         >>> y = torch.ops.mylib.mysin(x)
+        >>> assert torch.allclose(y, x.sin())
+        >>>
+        >>> # Example 2: register an implementation for cpu with nested decorators
+        >>> # Define the operators
+        >>> torch.library.define("mylib::sin", "(Tensor x) -> Tensor")
+        >>> torch.library.define("mylib::mysin", "(Tensor x) -> Tensor")
+        >>>
+        >>> # Add implementations for the cpu device
+        >>> @torch.library.impl("mylib::mysin", "cpu")
+        >>> def f(x):
+        >>>     return torch.from_numpy(np.sin(x.numpy()))
+        >>>
+        >>> # Add implementations for the outer operator
+        >>> @torch.library.impl("mylib::sin", "cpu")
+        >>> def g(x):
+        >>>    return torch.ops.mylib.mysin(x)
+        >>>
+        >>> x = torch.randn(3)
+        >>> y = torch.ops.mylib.sin(x)
         >>> assert torch.allclose(y, x.sin())
     """
     return _impl(qualname, types, func, lib=lib, disable_dynamo=False)
