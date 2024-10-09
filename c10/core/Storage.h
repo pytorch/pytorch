@@ -16,6 +16,12 @@
 
 namespace c10 {
 
+struct IPCHandlePimpl {
+  std::string memory_handle;
+  std::string ref_counter_handle;
+  std::string event_handle;
+};
+
 struct Storage;
 
 C10_API bool isSharedStorageAlias(

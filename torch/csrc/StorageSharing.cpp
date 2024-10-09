@@ -5,6 +5,7 @@
 #include <structmember.h>
 
 #include <c10/core/CPUAllocator.h>
+#include <c10/core/Storage.h>
 #include <libshm.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
@@ -316,21 +317,19 @@ static PyObject* THPStorage_shareDevice(PyObject* self, PyObject* noargs) {
         [ipc_memory_handle_size,
          ipc_event_handle_size,
          offset_bytes,
-         memory_handle,
-         event_handle,
-         ref_counter,
          ref_counter_offset,
-         event_sync_required] = at::globalContext()
-                                    .getAcceleratorHooksInterface()
-                                    .StorageShareDevice(storage);
+         event_sync_required,
+         ipc_handles] = at::globalContext()
+                            .getAcceleratorHooksInterface()
+                            .StorageShareDevice(storage);
 
     _handle = PyBytes_FromStringAndSize(
-        memory_handle.c_str(), ipc_memory_handle_size);
+        ipc_handles.memory_handle.c_str(), ipc_memory_handle_size);
     _offset_bytes = PyLong_FromSsize_t((Py_ssize_t)offset_bytes);
-    _ref_counter = PyBytes_FromString(ref_counter.c_str());
+    _ref_counter = PyBytes_FromString(ipc_handles.ref_counter_handle.c_str());
     _ref_counter_offset = THPUtils_packUInt64(ref_counter_offset);
-    _event_handle =
-        PyBytes_FromStringAndSize(event_handle.c_str(), ipc_event_handle_size);
+    _event_handle = PyBytes_FromStringAndSize(
+        ipc_handles.event_handle.c_str(), ipc_event_handle_size);
     _event_sync_required = PyBool_FromLong(event_sync_required);
   }
 
@@ -448,34 +447,12 @@ static PyObject* THPStorage_newSharedDevice(PyObject* _unused, PyObject* args) {
       (ptrdiff_t)THPUtils_unpackLong(_offset_bytes);
   const auto device_index = c10::checked_convert<c10::DeviceIndex>(
       THPUtils_unpackLong(_device), "c10::DeviceIndex");
-<<<<<<< HEAD
-  at::cuda::CUDAGuard device_guard(device);
-
-  if (PyObject_IsTrue(_event_sync_required)) {
-    // Ensure that producer prepared all tensor's data
-    std::string s_ipc_event_handle =
-        THPStorage_bytesAsHandleString(_event_handle);
-    if (s_ipc_event_handle.empty()) {
-      return nullptr;
-    }
-    auto ipc_event_handle = reinterpret_cast<const cudaIpcEventHandle_t*>(
-        s_ipc_event_handle.c_str());
-    cudaEvent_t event = nullptr;
-    cudaIpcOpenEventHandle(&event, *ipc_event_handle);
-    C10_CUDA_CHECK(
-        cudaStreamWaitEvent(c10::cuda::getCurrentCUDAStream(device), event, 0));
-  }
-
-  std::string s_handle = THPStorage_bytesAsHandleString(_handle);
-  if (s_handle.empty()) {
-=======
   auto device = at::Device(device_type, device_index);
   at::DeviceGuard device_guard(device);
   std::string s_ipc_event_handle =
       THPStorage_bytesAsHandleString(_event_handle);
   bool event_sync_required = PyObject_IsTrue(_event_sync_required);
   if (event_sync_required && s_ipc_event_handle.empty())
->>>>>>> 19763d6b60... Make IPC features extendable on third-party devices #suppress-bc-linter
     return nullptr;
   std::string s_handle = THPStorage_bytesAsHandleString(_handle);
   std::string ref_counter_handle = PyBytes_AS_STRING(_ref_counter);
