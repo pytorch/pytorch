@@ -144,6 +144,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     # ./fx_passes/README.md for a discussion of mutation invariants.
     reinplace_inplaceable_ops(gm.graph)
     decompose_auto_functionalized(gm.graph)
+    # TODO: use gm.graph
+    lower_scan_to_while_loop_pass(gm)
 
     comms.reinplace_fsdp_all_gather(gm.graph)
 
@@ -899,7 +901,166 @@ def decompose_auto_functionalized(graph):
         raise AssertionError("triton_kernel_wrapper_functional was not removed")
 
 
-@register_lowering_pattern(
+def lower_scan_to_while_loop_pass(gm: torch.fx.GraphModule):
+    graph_pass = PatternMatcherPass()
+    cur_idx = 0
+
+    @register_graph_pattern(
+        CallFunctionVarArgs(torch.ops.higher_order.scan),
+        pass_dict=graph_pass,
+    )
+    def _(match: Match, *args, **kwargs):
+        assert (
+            len(kwargs) == 0
+        ), "kwargs of scan are not merged into args before entering lower_scan_to_while_loop_pass"
+        nonlocal cur_idx
+        from torch._dynamo.source import GlobalSource
+        from torch._higher_order_ops.scan import _extract_carry_and_out
+        from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+        assert (
+            len(kwargs) == 0
+        ), "kwargs are not merged into args before entering inductor."
+        combine_subgraph, fx_init, fx_xs, dim, reverse, fx_additional_inputs = args
+        cur_node = match.nodes[cur_idx]
+        num_init_leaves = len(fx_init)
+        assert combine_subgraph.op == "get_attr", "first arg is not combine_subgraph"
+        sub_gm: torch.fx.GraphModule = getattr(gm, combine_subgraph.target)
+        (
+            fake_init,
+            fake_xs,
+            fake_additional_inputs,
+            specialized_dim,
+            fake_outputs,
+        ) = pytree.tree_map(
+            lambda node: node.meta["val"],
+            (fx_init, fx_xs, fx_additional_inputs, dim, cur_node),
+        )
+        fake_xs_subgraph = [t.select(specialized_dim, 0) for t in fake_xs]
+        fake_scan_length = fake_xs[0].size()[specialized_dim]
+        fake_carry_subgraph, fake_ys_outs = _extract_carry_and_out(
+            fake_outputs,
+            num_init_leaves,
+        )
+        fake_mode = fake_init[0].fake_mode
+        fake_idx = fake_mode.shape_env.create_symintnode(  # type: ignore[union-attr]
+            fake_mode.shape_env.create_unspecified_symbol(  # type: ignore[union-attr]
+                0, source=GlobalSource("scan_idx"), dynamic_dim=DimDynamic.DYNAMIC
+            ),
+            hint=0,
+            source=GlobalSource("scan_idx"),
+        )
+        fake_ys_outs_sizes = [list(y.size()) for y in fake_ys_outs]
+        fake_ys_outs_strides = [list(y.stride()) for y in fake_ys_outs]
+        fake_args, tree_spec = pytree.tree_flatten(
+            [
+                fake_init,
+                fake_xs,
+                fake_additional_inputs,
+                fake_ys_outs_sizes,
+                fake_ys_outs_strides,
+                fake_idx,
+            ]
+        )
+
+        def lower_to_while_loop(*flat_args):
+            (
+                init,
+                xs,
+                additional_inputs,
+                fake_ys_outs_sizes,
+                fake_ys_outs_strides,
+                idx,
+            ) = pytree.tree_unflatten(flat_args, tree_spec)
+            ys_outs = [
+                torch.empty_strided(
+                    y_size,
+                    y_stride,
+                    dtype=y.dtype,
+                    layout=y.layout,
+                    device=y.device,
+                    requires_grad=y.requires_grad,
+                )
+                for y_size, y_stride, y in zip(
+                    fake_ys_outs_sizes, fake_ys_outs_strides, fake_ys_outs
+                )
+            ]
+
+            while_loop_operands, while_loop_spec = pytree.tree_flatten(
+                (init, xs, additional_inputs, ys_outs, idx)
+            )
+
+            def cond_fn_out(*flat_args):
+                init, xs, additional_inputs, ys_outs, idx = pytree.tree_unflatten(
+                    flat_args, while_loop_spec
+                )
+                return idx < xs[0].size()[specialized_dim]
+
+            def body_fn_out(*flat_args):
+                init, xs, additional_inputs, ys_outs, idx = pytree.tree_unflatten(
+                    flat_args, while_loop_spec
+                )
+                scan_idx = (
+                    idx if not reverse else xs[0].size()[specialized_dim] - idx - 1
+                )
+                sub_xs = []
+                for x in xs:
+                    sub_xs.append(
+                        torch.ops._scan_helper.unsafe_select(
+                            x, specialized_dim, scan_idx
+                        )
+                    )
+
+                new_carry, ys = _extract_carry_and_out(
+                    sub_gm(*(list(init) + sub_xs + list(additional_inputs))),
+                    num_init_leaves,
+                )
+                for y, y_out in zip(ys, ys_outs):
+                    y_out_slice = torch.ops._scan_helper.unsafe_select(
+                        y_out, 0, scan_idx
+                    )
+                    y_out_slice.copy_(y)
+                return *new_carry, *xs, *additional_inputs, *ys_outs
+
+            last_carry, _, _, ys_outs, _ = pytree.tree_unflatten(
+                torch.ops.higher_order.while_loop(
+                    cond_fn_out, body_fn_out, tuple(while_loop_operands), tuple()
+                )
+                + (idx,),
+                while_loop_spec,
+            )
+            return list(last_carry) + list(ys_outs)
+
+        def post_fn(gm):
+            return gm
+
+        lower_to_while_loop_args, _ = pytree.tree_flatten(
+            (
+                fx_init,
+                fx_xs,
+                fx_additional_inputs,
+                fake_ys_outs_sizes,
+                fake_ys_outs_strides,
+                [fake_idx],
+            )
+        )
+        match.replace_by_example(
+            lower_to_while_loop,
+            lower_to_while_loop_args,
+            run_functional_passes=False,
+            post_trace_fn=post_fn,
+        )
+        cur_idx += 1
+
+    graph_pass.apply(gm)
+
+    for node in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.scan
+    ):
+        raise AssertionError("scan is not lowered to while_loop")
+
+
+register_lowering_pattern(
     CallFunction(
         aten.cat,
         ListOf(
@@ -920,6 +1081,8 @@ def decompose_auto_functionalized(graph):
     pass_number=2,
     extra_check=is_valid_splitwithsizes_cat,
 )
+
+
 def splitwithsizes_cat_replace(match, input_):
     return input_
 

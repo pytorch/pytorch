@@ -18,6 +18,7 @@ import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._higher_order_ops.associative_scan import associative_scan_op
+from torch._higher_order_ops.scan import scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._prims_common import (
     canonicalize_dim,
@@ -6211,6 +6212,13 @@ def cond(pred, true_fn, false_fn, operands):
     return list(map(TensorBox.create, result))
 
 
+# 1. best way of bind a new symint inside decomposing pass
+#   and 1.1 create_new_symint the right thing to do?
+# 2. mutation outputs downs to lowering of while_loop.
+#  a. we could probalby identify subgraph input mutation in inductor
+#  b. schemas for hops. We could use this infra. Fearsible.
+
+
 @register_lowering(torch.ops.higher_order.while_loop)
 def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
     if any(map(is_triton, carried_inputs + additional_inputs)):
@@ -6219,8 +6227,184 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-    result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
+    fx_all_inputs = V.graph.current_node.args[-2] + V.graph.current_node.args[-1]  # type: ignore[operator]
+    fake_all_inputs = [x.meta["val"] if isinstance(x, torch.fx.Node) else x for x in fx_all_inputs]  # type: ignore[union-attr]
+
+    for subgraph in (cond_fn, body_fn):
+        if subgraph.graph is None:
+            # create and lower subgraphs
+            subgraph.graph = V.graph.make_subgraph(
+                gm=subgraph.graph_module,
+                example_inputs=fx_all_inputs,  # type: ignore[arg-type]
+                subgraph_name=subgraph.name,
+            )
+            with V.set_graph_handler(subgraph.graph):
+                subgraph.graph.run(*fake_all_inputs)
+
+    symint_exprs = [
+        inp.node.expr for inp in carried_inputs if isinstance(inp, torch.SymInt)
+    ]
+    assert len(symint_exprs) <= 1, "while_loop only supports one symint"
+    idx_iter_expr = symint_exprs[0] if len(symint_exprs) == 1 else None
+    # TODO: using HOP schema to pass the mutated_inputs info here.
+    result = ir.WhileLoop.create(
+        cond_fn,
+        body_fn,
+        [inp for inp in carried_inputs if not isinstance(inp, torch.SymInt)],
+        [inp for inp in additional_inputs if not isinstance(inp, torch.SymInt)],
+        iter_idx_expr=idx_iter_expr,
+    )
     return list(map(TensorBox.create, result))
+
+
+# This is a spcialized version of select because we're certain that the idx is valid
+@register_lowering(torch.ops._scan_helper.unsafe_select, type_promotion_kind=None)
+def _(dst, dim, idx):
+    return squeeze(slice_(dst, dim, idx, idx + 1, step=1, clamp=False), dim)
+
+
+@register_lowering(scan_op)
+def scan(combine_subgraph, init, xs, dim, reverse, additional_inputs):
+    from torch._dynamo.source import GlobalSource
+    from torch._higher_order_ops.scan import _extract_carry_and_out, stack_y
+    from torch._inductor.pattern_matcher import fwd_only
+    from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+    if torch._inductor.config.cpp_wrapper:
+        raise NotImplementedError("scan is not supported with cpp_wrapper yet.")
+
+    num_init_leaves = len(init)
+    specialized_dim = int(dim)
+
+    with V.graph.fake_mode:
+        _, fx_init, fx_xs, _, _, fx_additional_inputs = V.graph.current_node.args
+        fake_init, fake_xs, fake_additional_inputs = pytree.tree_map(
+            lambda node: node.meta["val"], (fx_init, fx_xs, fx_additional_inputs)
+        )
+        fake_xs_subgraph = [t.select(specialized_dim, 0) for t in fake_xs]
+        fake_scan_length = fake_xs[0].size()[specialized_dim]
+        fake_carry_subgraph, fake_ys_subgraph = _extract_carry_and_out(
+            combine_subgraph.graph_module(
+                *(fake_init + fake_xs_subgraph + fake_additional_inputs)
+            ),
+            num_init_leaves,
+        )
+        fake_ys_outs = [stack_y(y, fake_scan_length) for y in fake_ys_subgraph]
+        fake_idx = V.graph.fake_mode.shape_env.create_symintnode(  # type: ignore[union-attr]
+            V.graph.fake_mode.shape_env.create_unspecified_symbol(  # type: ignore[union-attr]
+                0, source=GlobalSource("scan_idx"), dynamic_dim=DimDynamic.DYNAMIC
+            ),
+            hint=0,
+            source=GlobalSource("scan_idx"),
+        )
+        fake_args, tree_spec = pytree.tree_flatten(
+            [fake_init, fake_xs, fake_additional_inputs, fake_ys_outs, fake_idx]
+        )
+
+        # Note: we lower scan into while_loop by constructing cond_fn and body_fn.
+        # We need the out variant graph because, for ys_outs, if we append them to a list then
+        # stack them together after the loop, we'll waste a lot of memory and it's also time
+        # consuming. We could optimize the overhead away by pre-allocating the memory.
+        # The cond_fn and body_fn are out variants, where ys_outs is passed in as a pre-allocated
+        # buffer and we pass in an additional SymInt to represent the current iteration idx.
+        # Tracing the graph produces a new graph, where the nodes depends on the value of symint
+        # to select from xs of input and copy into a slice of ys_outs.
+        def cond_fn_out(*flat_args):
+            init, xs, additional_inputs, ys_outs, idx = pytree.tree_unflatten(
+                flat_args, tree_spec
+            )
+            return idx < xs[0].size()[specialized_dim]
+
+        def body_fn_out(*flat_args):
+            init, xs, additional_inputs, ys_outs, idx = pytree.tree_unflatten(
+                flat_args, tree_spec
+            )
+            scan_idx = idx if not reverse else xs[0].size()[specialized_dim] - idx - 1
+            sub_xs = []
+            for x in xs:
+                sub_xs.append(torch.ops._scan_helper.unsafe_select(x, dim, scan_idx))
+
+            new_carry, ys = _extract_carry_and_out(
+                combine_subgraph.graph_module(
+                    *(list(init) + sub_xs + list(additional_inputs))
+                ),
+                num_init_leaves,
+            )
+            for y, y_out in zip(ys, ys_outs):
+                y_out_slice = torch.ops._scan_helper.unsafe_select(y_out, 0, scan_idx)
+                y_out_slice.copy_(y)
+            return *new_carry, *xs, *additional_inputs, *ys_outs
+
+        # Note:
+        # 1. fwd_only trace with real mode, we need to trace under current fake_mode otherwise
+        # factory functions will create real tensors instead of fake tensors.
+        # 2. We set run_functional_passes = False because body_fn_out is not functional
+        # due to the inplace writes.
+        cond_gm = fwd_only(cond_fn_out, fake_args, run_functional_passes=False)
+        body_gm = fwd_only(body_fn_out, fake_args, run_functional_passes=False)
+
+    cond_subgraph = ir.Subgraph(
+        name=combine_subgraph.name + "_loop_cond", graph_module=cond_gm
+    )
+    body_subgraph = ir.Subgraph(
+        name=combine_subgraph.name + "_loop_body", graph_module=body_gm
+    )
+
+    for subgraph in (cond_subgraph, body_subgraph):
+        # create and lower subgraphs
+        subgraph.graph = V.graph.make_subgraph(
+            gm=subgraph.graph_module,
+            example_inputs=fake_args,  # type: ignore[arg-type]
+            subgraph_name=subgraph.name,
+        )
+        with V.set_graph_handler(subgraph.graph):
+            subgraph.graph.run(*fake_args)
+            new_subgraph_outputs = []
+            if subgraph is body_subgraph:
+                for fake_carry, carry in zip(
+                    fake_args[:-1], subgraph.graph.graph_outputs
+                ):
+                    new_subgraph_outputs.append(
+                        ir.ExternKernel.require_exact_strides(
+                            carry, fake_carry.stride(), allow_padding=False
+                        )
+                    )
+                subgraph.graph.graph_outputs = new_subgraph_outputs
+
+    subgraph_ys_outs = pytree.tree_unflatten(
+        body_subgraph.graph.graph_outputs + [fake_idx], tree_spec  # type: ignore[union-attr]
+    )[3]
+    # Pre-allocate an out buffer to store the ys_outs
+    ys_out_buffer = [
+        empty_strided(
+            size=y.get_size(),
+            stride=y.get_stride(),
+            device=y.get_device(),
+            dtype=y.get_dtype(),
+        )
+        for y in subgraph_ys_outs
+    ]
+
+    carried_inputs = [*init, *xs, *additional_inputs, *ys_out_buffer]
+    output = ir.WhileLoop.create(
+        cond_fn=cond_subgraph,
+        body_fn=body_subgraph,
+        carried_inputs=carried_inputs,
+        additional_inputs=[],
+        mutated_inputs=ys_out_buffer,
+        iter_idx_expr=fake_idx.node.expr,
+    )
+
+    for out_buffer in ys_out_buffer:
+        V.graph.mark_buffer_mutated(out_buffer.get_name())
+
+    last_carry, _, _, ys_outs, _ = pytree.tree_unflatten(
+        output + ys_out_buffer + [fake_idx], tree_spec
+    )
+    return [
+        TensorBox.create(t) if not isinstance(t, TensorBox) else t
+        for t in last_carry + ys_outs
+    ]
 
 
 @register_lowering(associative_scan_op, type_promotion_kind=None)

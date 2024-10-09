@@ -48,6 +48,20 @@ def _extract_carry_and_out(flat_out: List[Any], num_carry: int):
     return flat_out[:num_carry], flat_out[num_carry:]
 
 
+# An custom op that's used for lowering scan in inductor.
+# Compared with aten.select, the lowering rule for this is more specialized
+# to the scan operator. For example, we skips a bunch of checks that we're
+# certain is true for scan.
+@torch.library.custom_op("_scan_helper::unsafe_select", mutates_args=())  # type: ignore[misc]
+def _unsafe_select(t: torch.Tensor, dim: int, idx: int) -> torch.Tensor:
+    return torch.select(t, dim, idx)
+
+
+@torch.library.register_fake("_scan_helper::unsafe_select")
+def _(t, dim, idx):
+    return t.select(dim, 0)
+
+
 def scan(
     combine_fn: Callable[
         [pytree.PyTree, pytree.PyTree], Tuple[pytree.PyTree, pytree.PyTree]
@@ -112,7 +126,6 @@ def scan(
         raise RuntimeError("Reverse must be a bool, but got " + str(type(reverse)))
 
     # TODO: Support closures/nn_modules in order to be able represent RNNs with scan
-    # TODO: Support _inductor lowering
     # TODO: Support Autograd
     # TODO: Unify handling of pytrees for control flow ops, such as cond, while_loop, etc.
     # TODO: Unify the list inputs of control flow ops to tuple.
@@ -131,6 +144,12 @@ def scan(
                 return torch.compile(scan, backend=backend, fullgraph=True)(
                     combine_fn, init, xs, dim=dim, reverse=reverse
                 )
+
+    # TODO: Support cpp warpper and abi compitatible mode
+    if torch._inductor.config.cpp_wrapper or torch._inductor.config.abi_compatible:
+        raise RuntimeError(
+            "scan is not supported in cpp_wrapper and abi_compatible mode yet."
+        )
 
     leaves_init, spec_init = pytree.tree_flatten(init)
     leaves_xs, spec_xs = pytree.tree_flatten(xs)
@@ -161,12 +180,24 @@ def scan(
                 "The number of leaves of the pytree of the new carry produced by the operator\
  needs to match the length of the pytree of the init"
             )
-        if any(
-            in_l.shape != out_l.shape for in_l, out_l in zip(leaves_init, carry_leaves)
-        ):
-            raise RuntimeError(
-                "The pytree of the new carry produced by the operator needs to match the pytree of the init"
-            )
+
+        def _check_new_carry_match_init(leaves_init, carry_leaves):
+            for i, (init, new_carry) in enumerate(zip(leaves_init, carry_leaves)):
+                assert init.shape == new_carry.shape, (
+                    ""
+                    f"The shape of the new_carry[{i}] {new_carry.shape} doesn't match that of the init[{i}] {init.shape}."
+                )
+                assert (
+                    init.stride() == new_carry.stride()
+                ), f"The stride of the new_carry[{i}] {new_carry.stride()} doesn't match that of the init[{i}] {init.stride()}."
+                assert (
+                    init.dtype == new_carry.dtype
+                ), f"The dtype of the new_carry[{i}] {new_carry.dtype} doesn't match that of the init[{i}] {init.dtype}."
+                assert (
+                    init.requires_grad == new_carry.requires_grad
+                ), f"The requires_grad of the new_carry[{i}] {new_carry.requires_grad} doesn't match that of the init[{i}] {init.requires_grad}."  # noqa: B950
+
+        _check_new_carry_match_init(leaves_init, carry_leaves)
 
         # There are no pytree restrictions on the second output of the operator
         out_leaves, tree_out = pytree.tree_flatten(out[1])

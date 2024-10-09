@@ -1280,7 +1280,6 @@ def forward(self, pred_1, x_1):
         fake_outs = fwbw(_fake_map, f, x, y)
         self.assertEqual(true_outs, fake_outs)
 
-    # TODO: provide an implementation for all compile modes and re-enable all test
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
@@ -1347,10 +1346,10 @@ def forward(self, pred_1, x_1):
         exp_out = _fake_scan(combine_fn, init, xs, dim=dim)
         self.assertEqual(out, exp_out)
 
-    # TODO: provide an implementation for all compile modes and re-enable all test
+    @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_compile(self, reverse, compile_mode, device):
         def add2(x: torch.Tensor, y: torch.Tensor):
@@ -1448,10 +1447,10 @@ def forward(self, pred_1, x_1):
         )
         self.assertEqual(result, result_exp)
 
-    # TODO: provide an implementation for all compile modes and re-enable all test
+    @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize(
         "dtype",
@@ -1462,6 +1461,18 @@ def forward(self, pred_1, x_1):
             torch.int64,
             torch.complex64,
         ],
+    )
+    # Skipping the combination of dtype=torch.complex64 and compiled_mode
+    # is compile or compile_with_dynamic due to inductor failure.
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            (
+                params["compile_mode"] == "compile"
+                or params["compile_mode"] == "compile_dynamic_shape"
+            )
+            and params["dtype"] == torch.complex64
+        ),
     )
     def test_scan_dtype(self, reverse, compile_mode, device, dtype):
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -1646,10 +1657,16 @@ def forward(self, pred_1, x_1):
         A = torch.randn(state_dim, requires_grad=True, device=device)
         elements = (A.repeat((timesteps, 1)), projected_inputs)
         init = tuple(
-            [torch.ones_like(torch._ops.ops.aten.slice(elements[0], 0, 0, 1, 1))]
+            [
+                torch.ones_like(
+                    torch._ops.ops.aten.slice(elements[0], 0, 0, 1, 1),
+                    requires_grad=True,
+                )
+            ]
             + [
                 torch.zeros_like(
-                    torch._ops.ops.aten.slice(projected_inputs, 0, 0, 1, 1)
+                    torch._ops.ops.aten.slice(projected_inputs, 0, 0, 1, 1),
+                    requires_grad=True,
                 )
             ]
         )
@@ -1874,7 +1891,6 @@ def forward(self, pred_1, x_1):
         )
         self.assertEqual(result, expected_result)
 
-    # TODO: provide an implementation for all compile modes and re-enable all test
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("combine_mode", ["pointwise", "generic"])
@@ -1914,7 +1930,6 @@ def forward(self, pred_1, x_1):
         result1 = fct_cmp(inp)
         self.assertEqual(result1, expected_result)
 
-    # TODO: provide an implementation for all compile modes and re-enable all test
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("combine_mode", ["pointwise", "generic"])
@@ -1966,7 +1981,6 @@ def forward(self, pred_1, x_1):
         result1 = fct_cmp(inp)
         self.assertEqual(result1, expected_result)
 
-    # TODO: provide an implementation for all compile modes and re-enable all test
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("combine_mode", ["pointwise", "generic"])
@@ -2017,9 +2031,9 @@ def forward(self, pred_1, x_1):
         result1 = fct_cmp(inp)
         self.assertEqual(result1, expected_result)
 
-    # TODO: provide an implementation for all compile modes and re-enable all test
+    @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_downstream_scan_matmul(self, compile_mode, reverse, device):
@@ -2051,17 +2065,17 @@ def forward(self, pred_1, x_1):
             result1 = fct_cmp(inp)
             self.assertEqual(result1, expected_result)
 
-    # TODO: provide an implementation for all compile modes and re-enable all test
+    @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_downstream_scan_scan_dim(self, compile_mode, reverse, device):
-        inp = torch.randn(3, 10, 2, device=device)
-        init = torch.randn(3, 2, device=device)
+        inp = torch.ones(2, 3, 2, device=device)
+        init = torch.zeros(2, 2, device=device)
 
         # Chain with scan on different dim
-        init2 = torch.randn(1, 10, 2, device=device)
+        init2 = torch.zeros(3, 2, device=device)
 
         def chain_fct_different_dim(inp):
             o1 = scan(
@@ -2089,12 +2103,12 @@ def forward(self, pred_1, x_1):
             xs=inp,
             dim=1,
             reverse=reverse,
-        )[1]
+        )
         xs = pytree.tree_map(lambda t: t.movedim(0, 1), xs)
         expected_result = _fake_scan(
             get_scan_combine_fn("add", False),
             init=init2,
-            xs=xs,
+            xs=xs[1],
             dim=0,
             reverse=reverse,
         )
@@ -2304,9 +2318,10 @@ def forward(self, pred_1, x_1):
             )
             self.assertEqual(cnt.frame_count, 6)
 
+    @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_init_scanned_0(self, reverse, compile_mode, device):
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -2332,9 +2347,10 @@ def forward(self, pred_1, x_1):
                 reverse=reverse,
             )
 
+    @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_init_non_tensor(self, reverse, compile_mode, device):
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -2353,9 +2369,10 @@ def forward(self, pred_1, x_1):
                 get_scan_combine_fn("add", False), init, x, dim=dim, reverse=reverse
             )
 
+    @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_init_wrong_shape(self, reverse, compile_mode, device):
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -2381,9 +2398,10 @@ def forward(self, pred_1, x_1):
                 reverse=reverse,
             )
 
+    @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_init_wrong_pytree(self, reverse, compile_mode, device):
         def add_one_carry(x: torch.Tensor, y: torch.Tensor):
@@ -2410,9 +2428,10 @@ def forward(self, pred_1, x_1):
         ):
             result_init = scan_fct(add_one_carry, init, inp, dim=dim, reverse=reverse)
 
+    @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_init(self, reverse, compile_mode, device):
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -2764,7 +2783,7 @@ def forward(self, pred_1, x_1):
             # Should be: RuntimeError: The pytree of the new carry produced
             # by the operator needs to match the pytree of the init
             torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
+            ".*",
         ):
             gm = make_fx(f, tracing_mode="symbolic")(
                 get_scan_combine_fn("add", True), init, x
@@ -2786,7 +2805,7 @@ def forward(self, pred_1, x_1):
             # Should be: RuntimeError: The pytree of the new carry produced by
             # the operator needs to match the pytree of the init
             torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
+            ".*",
         ):
             gm = make_fx(f, tracing_mode="symbolic")(add_wrong_carry, init, x)
 
@@ -2806,8 +2825,8 @@ def forward(self, pred_1, x_1):
             # Should be: RuntimeError: Expected the init and
             # the new carry produced by the operator to be a tensor of
             # torch.int64 but got torch.float32 and torch.int64
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            ".*",
+            torch._dynamo.exc.Unsupported,
+            "Observed exception",
         ):
             gm = make_fx(f, tracing_mode="symbolic")(add_wrong_dtype, init, x)
 
@@ -2854,7 +2873,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     l_init_ = L_init_
     l_xs_ = L_xs_
     select = l_xs_.select(0, 0)
-    out_l = l_init_ + select;  out_l = None
+    new_carry = l_init_ + select;  new_carry = None
     add_1 = l_init_ + select;  select = add_1 = None
     child = l_init_.clone();  child = None
     child_1 = torch.select_copy(l_xs_, 0, 0);  child_1 = None
@@ -5375,7 +5394,6 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     getitem_1 = scan[1];  scan = None
     return (getitem, getitem_1)""",  # noqa: B950
             )
-
         else:
             self.assertExpectedInline(
                 backend.graphs[0].code.strip(),

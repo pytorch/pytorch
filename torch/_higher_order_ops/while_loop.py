@@ -43,7 +43,8 @@ class WhileLoopOp(HigherOrderOperator):
                 f"additional_inputs must be a tuple, got {type(additional_inputs)}"
             )
         if not all(
-            isinstance(t, (torch.Tensor, int, float, bool)) for t in carried_inputs
+            isinstance(t, (torch.Tensor, int, float, bool, torch.SymInt))
+            for t in carried_inputs
         ):
             raise RuntimeError(
                 "carried_inputs must be a tuple of tensors, ints, floats, or bools, got "
@@ -51,7 +52,8 @@ class WhileLoopOp(HigherOrderOperator):
             )
 
         if not all(
-            isinstance(t, (torch.Tensor, int, float, bool)) for t in additional_inputs
+            isinstance(t, (torch.Tensor, int, float, bool, torch.SymInt))
+            for t in additional_inputs
         ):
             raise RuntimeError(
                 "additional_inputs must be a tuple of tensors, ints, floats, or bools, got "

@@ -2021,19 +2021,27 @@ class WrapperCodeGen(CodeGen):
         # are passed in as they're before.
         body_outer_outputs = body_outer_inputs[: len(outer_carried_inputs)]
 
+        if while_loop.iter_idx_expr is not None:
+            self.writeline(f"{while_loop.iter_idx_expr} = 0")
         self.writeline("while True:")
         self.writeline(EnterSubgraphLine(self, while_loop.cond_subgraph.graph))
         self.codegen_subgraph(
             while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
         )
+        if not isinstance(
+            while_loop.cond_subgraph.graph.graph_outputs[0], ir.ShapeAsConstantBuffer
+        ):
+            cond_outer_outputs[0] = cond_outer_outputs[0] + ".item()"
         self.writeline(
-            f"if not {cond_outer_outputs[0]}.item(): break"
+            f"if not {cond_outer_outputs[0]}: break"
         )  # condition doesn't hold
         self.writeline(ExitSubgraphLine(self))
         self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
         self.codegen_subgraph(
             while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
         )
+        if while_loop.iter_idx_expr is not None:
+            self.writeline(f"{while_loop.iter_idx_expr} += 1")
         self.writeline(ExitSubgraphLine(self))
 
     @staticmethod
