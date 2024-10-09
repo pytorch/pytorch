@@ -321,6 +321,7 @@ class GraphLowering(torch.fx.Interpreter):
             Callable[[List[ir.ExternKernelNode]], Any]
         ] = None,
         is_inference: bool = False,
+        is_backward: bool = False,
         is_const_graph: bool = False,
         const_output_index: Optional[Dict[str, int]] = None,
         const_code: Optional[str] = None,
@@ -336,6 +337,7 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.num_channels_last_conv = 0
         self.is_inference = is_inference
+        self.is_backward = is_backward
         self.is_const_graph = is_const_graph
         self.const_code = const_code
         self.const_module = const_module
@@ -382,6 +384,7 @@ class GraphLowering(torch.fx.Interpreter):
             const_module.constants if const_module else {}
         )
         self.torchbind_constants: Dict[str, torch._C.ScriptObject] = {}
+        self.seen_subgraphs: Dict[str, ir.Subgraph] = {}
         self.constant_reprs: Dict[str, str] = {}
         self.removed_operations: OrderedSet[str] = OrderedSet()
         self.removed_buffers: OrderedSet[str] = OrderedSet()
@@ -658,6 +661,7 @@ class GraphLowering(torch.fx.Interpreter):
             aot_mode=self.aot_mode,
             extern_node_serializer=self.extern_node_serializer,
             is_inference=self.is_inference,
+            is_backward=self.is_backward,
             name=self.qualify_name(subgraph_name),
         )
 
@@ -924,20 +928,23 @@ class GraphLowering(torch.fx.Interpreter):
         self, target: str, args: Tuple[object], kwargs: Dict[str, object]  # type: ignore[override]
     ) -> Union[Expr, TensorBox, None]:
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
-        self.graph_input_names.append(target)
         if isinstance(example, SymTypes):
             expr = example.node.expr
             self.graph_inputs[target] = expr
+            self.graph_input_names.append(target)
             return expr
         elif isinstance(example, (int, bool, float)):
             expr = sympy.sympify(example)
             self.graph_inputs[target] = expr
+            self.graph_input_names.append(target)
             return expr
         elif example is None:
+            self.graph_input_names.append(target)
             return None
         if isinstance(example, BackwardState):
             # Ignored arg, must be unused
             # Alternately we could filter this out in AotAutograd
+            self.graph_input_names.append(target)
             return None
         assert isinstance(example, torch.Tensor), example
         # todo(chilli): We can remove the last check once we turn buffers into
@@ -958,6 +965,7 @@ class GraphLowering(torch.fx.Interpreter):
             )
         )
         self.graph_inputs[target] = tensor
+        self.graph_input_names.append(target)
         self.graph_inputs_original[target] = tensor.data.data
         if self.current_node.users:  # cudagraphs should work with an unused CPU input
             self.add_device_info(example.device)
@@ -1040,7 +1048,13 @@ class GraphLowering(torch.fx.Interpreter):
         value = getattr_recursive(self.module, target)  # type: ignore[arg-type]
 
         if isinstance(value, torch.fx.GraphModule):
-            return ir.Subgraph(name=target, graph_module=value)
+            # Reuse the existing subgraph if we have seen it before already.
+            if target in self.seen_subgraphs:
+                return self.seen_subgraphs[target]
+
+            out = ir.Subgraph(name=target, graph_module=value)
+            self.seen_subgraphs[target] = out
+            return out
 
         if isinstance(value, torch._C.ScriptObject):
             self.torchbind_constants[target] = value
@@ -1290,6 +1304,8 @@ class GraphLowering(torch.fx.Interpreter):
         def debug(msg: str) -> None:
             log.debug("lowering %s %s", LazyString(n.format_node), msg)
 
+        from torch._inductor.bisect_helper import BisectionManager
+
         buffer_watermark = len(self.buffers)
         operation_watermark = len(self.operations)
 
@@ -1306,7 +1322,12 @@ class GraphLowering(torch.fx.Interpreter):
             if (
                 n.op == "call_function"
                 and n.target is not operator.getitem
-                and fallback_node_due_to_unsupported_type(n)
+                and (
+                    fallback_node_due_to_unsupported_type(n)
+                    or BisectionManager.disable_subsystem(
+                        "inductor", "lowerings", lambda: repr(n)
+                    )
+                )
             ):
                 debug("fallback_handler")
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
