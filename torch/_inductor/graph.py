@@ -2036,13 +2036,20 @@ class SubgraphLowering(GraphLowering):
             ] = OrderedSet()  # Use a set to avoid duplicates
             if isinstance(expr, sympy.Symbol):
                 symbols.add(expr)
-            elif hasattr(expr, "args"):  # Recurse if it has further sub-expressions
-                for arg in expr.args:
-                    symbols.update(get_free_symbols(arg))
+            elif isinstance(expr, sympy.Expr):
+                symbols.update(expr.free_symbols)
             return symbols
 
         subgraph_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
-        for value in self.graph_inputs.values():
+
+        graph_inputs_tensors = list(
+            filter(
+                lambda x: not isinstance(x[1], sympy.Expr), self.graph_inputs.items()
+            )
+        )
+
+        for name_value in graph_inputs_tensors:
+            _, value = name_value
             shapes = value.get_size()
             for dim, shape in enumerate(shapes):
                 subgraph_symbols.update(get_free_symbols(shape))
