@@ -364,6 +364,38 @@ class TestCKBackend(TestCase):
 
             torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
+    def test_max_autotune_conv2d(self, max_autotune_gemm_backends):
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        tensor_options = {"device": "cuda", "dtype": torch.float16}
+
+        x = torch.randn(1, 3, 224, 224, **tensor_options)
+        w = torch.randn(64, 3, 7, 7, **tensor_options)
+
+        assert "rocm" in dir(config)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "compile_threads": 2,
+                "rocm.ck_dir": self.ck_dir,
+                "rocm.n_max_profiling_configs": 2,
+            }
+        ):
+
+            @torch.compile(dynamic=False)
+            def conv2d(x, w):
+                return torch.conv2d(x, w)
+
+            Y_compiled = conv2d(x, w)
+            Y_eager = torch.conv2d(x, w)
+
+            torch.testing.assert_close(Y_compiled, Y_eager)
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
