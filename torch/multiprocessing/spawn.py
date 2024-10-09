@@ -110,19 +110,31 @@ class ProcessContext:
     def pids(self):
         return [int(process.pid) for process in self.processes]
 
-    def join(self, timeout=None):
+    def _join_procs_with_timeout(self, timeout: float):
+        """Attempt to join all processes with a shared timeout."""
+        end = time.monotonic() + timeout
+        for process in self.processes:
+            time_to_wait = max(0, end - time.monotonic())
+            process.join(time_to_wait)
+
+    def join(
+        self, timeout: Optional[float] = None, grace_period: Optional[float] = None
+    ):
         r"""Join one or more processes within spawn context.
 
         Attempt to join one or more processes in this spawn context.
         If one of them exited with a non-zero exit status, this function
-        kills the remaining processes and raises an exception with the cause
-        of the first process exiting.
+        kills the remaining processes (optionally with a grace period)
+        and raises an exception with the cause of the first process exiting.
 
         Returns ``True`` if all processes have been joined successfully,
         ``False`` if there are more processes that need to be joined.
 
         Args:
-            timeout (float): Wait this long before giving up on waiting.
+            timeout (float): Wait this long (in seconds) before giving up on waiting.
+            grace_period (float): When any processes fail, wait this long (in seconds)
+                for others to shutdown gracefully before terminating them. If they
+                still don't exit, wait another grace period before killing them.
         """
         # Ensure this function can be called even when we're done.
         if len(self.sentinels) == 0:
@@ -147,22 +159,22 @@ class ProcessContext:
         if error_index is None:
             # Return whether or not all processes have been joined.
             return len(self.sentinels) == 0
-
-        # Assume failure. Terminate processes that are still alive.
-        # Try SIGTERM then SIGKILL if the process isn't going down.
-        # The reason is related to python signal handling is limited
-        # to main thread and if that is in c/c++ land and stuck it won't
-        # to handle it. We have seen processes getting stuck not handling
-        # SIGTERM for the above reason.
-        timeout: int = 30
+        # An error occurred. Clean-up all processes before returning.
+        # First, allow a grace period for processes to shutdown themselves.
+        if grace_period is not None:
+            self._join_procs_with_timeout(grace_period)
+        # Then, terminate processes that are still alive. Try SIGTERM first.
         for process in self.processes:
             if process.is_alive():
                 log.warning("Terminating process %s via signal SIGTERM", process.pid)
                 process.terminate()
-        end = time.monotonic() + timeout
-        for process in self.processes:
-            time_to_wait = max(0, end - time.monotonic())
-            process.join(time_to_wait)
+
+        # Try SIGKILL if the process isn't going down after another grace_period.
+        # The reason is related to python signal handling is limited
+        # to main thread and if that is in c/c++ land and stuck it won't
+        # to handle it. We have seen processes getting stuck not handling
+        # SIGTERM for the above reason.
+        self._join_procs_with_timeout(30 if grace_period is None else grace_period)
         for process in self.processes:
             if process.is_alive():
                 log.warning(
