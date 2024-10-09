@@ -3313,9 +3313,7 @@ class AOTInductorTestsTemplate:
             model, example_inputs_list, dynamic_shapes=dynamic_shapes
         )
 
-    # max_autotune is disabled due to https://github.com/pytorch/pytorch/issues/135106
-    # @common_utils.parametrize("max_autotune", [False, True])
-    @common_utils.parametrize("max_autotune", [False])
+    @common_utils.parametrize("max_autotune", [True, False])
     def test_misc_1(self, max_autotune):
         if self.device == "cpu" and IS_MACOS and max_autotune:
             raise unittest.SkipTest("max_autotune not supported on macos")
@@ -3537,6 +3535,44 @@ class AOTInductorTestsTemplate:
                 FileCheck().check_count(
                     f"after_launch - {kernel_call}",
                     count,
+                ).run(code)
+
+    def test_aoti_debug_printer_sym_inputs(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        from torch.testing._internal.triton_utils import add_kernel
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                maxlen = max(x.item(), 512)
+                a = torch.ones(maxlen, device="cuda")
+                b = torch.ones(maxlen, device="cuda")
+                out = torch.zeros_like(a)
+                # unbacked symint in grid
+                add_kernel[(1, 1, maxlen)](a, b, out, maxlen, 32)
+                return out
+
+        example_inputs = (torch.randint(high=1024, size=(1,), device=self.device),)
+
+        expected_scalar_args = [
+            "triton_poi_fused_zeros_like_0_xnumel",
+            "triton_poi_fused_ones_1_xnumel",
+            "std::max(static_cast<int64_t>(512L), static_cast<int64_t>(u0))",
+        ]
+
+        with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
+            result, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+            self.assertEqual("aoti_torch_print_tensor_handle" in code, True)
+            for scalar in expected_scalar_args:
+                FileCheck().check_count(
+                    f"{scalar}",
+                    2,
                 ).run(code)
 
     def test_size_from_multi_output(self):
@@ -3765,6 +3801,7 @@ CUDA_TEST_FAILURES = {
     "test_aoti_debug_printer_user_defined_triton_kernel": fail_non_abi_compatible_cuda(
         is_skip=True
     ),
+    "test_aoti_debug_printer_sym_inputs": fail_non_abi_compatible_cuda(is_skip=True),
 }
 
 
@@ -3828,6 +3865,7 @@ if not IS_FBCODE:
             "test_aoti_debug_printer_user_defined_triton_kernel": fail_cuda(
                 is_skip=True
             ),
+            "test_aoti_debug_printer_sym_inputs": fail_cuda(is_skip=True),
         }
     )
 
