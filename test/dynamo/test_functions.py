@@ -939,6 +939,16 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x - 1
 
     @make_test
+    def test_tensor_size(x):
+        fn = torch.Tensor.size
+        return fn(x + 1)
+
+    @make_test
+    def test_tensor_dim(x):
+        fn = torch.Tensor.dim
+        return fn(x + 1)
+
+    @make_test
     def test_tensor_is_inference(x):
         if x.is_inference():
             return x + 1
