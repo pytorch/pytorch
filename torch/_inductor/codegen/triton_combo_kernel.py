@@ -37,7 +37,7 @@ from .common import (
     WorkspaceArg,
 )
 from .simd import SIMDScheduling
-from .triton import gen_common_triton_imports, TritonKernel, TritonSymbols
+from .triton import gen_common_triton_imports, TritonKernel
 from .triton_utils import config_of, signature_to_meta
 
 
@@ -740,11 +740,9 @@ class ComboKernel(Kernel):
             code.splice(f"YBLOCK: tl.constexpr = {self.block_size_2d}")
         else:
             code.splice(f"XBLOCK: tl.constexpr = {self.block_size_1d}")
-        if self.reduction_block_arg is not None:
+        if "R0_BLOCK" in self.block_args:
             code.splice(f"R0_BLOCK: tl.constexpr = {self.block_size_reduce}")
-            code.splice(
-                f"{self.reduction_block_arg}: tl.constexpr = {self.block_size_reduce}"
-            )
+            code.splice(f"RBLOCK: tl.constexpr = {self.block_size_reduce}")
 
     def add_blockd_to_args(self, argdefs: List[str]) -> List[str]:
         block_args = {}
@@ -763,17 +761,6 @@ class ComboKernel(Kernel):
         if self.enable_autotune:
             argdefs.extend(block_args)
         self.block_args = list(block_names.keys())
-
-        # Check that the reductions are 1D. Otherwise, block_size_reduce would be
-        # ambiguous.
-        reduction_block_args = [
-            symt for symt in self.block_args if symt in TritonSymbols.reduction_types
-        ]
-        if len(reduction_block_args) > 1:
-            raise NotImplementedError("Tiled reductions are not yet supported")
-        self.reduction_block_arg = (
-            reduction_block_args[0] if len(reduction_block_args) == 1 else None
-        )
 
         return argdefs
 
