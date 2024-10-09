@@ -2131,7 +2131,7 @@ class TritonKernel(SIMDKernel):
                 # taking two reductions doesn't increase memory usage.
                 result_var = self.welford_reduce_fallback(dtype, value)
             elif reduction_type == "welford_combine":
-                assert isinstance(masked_value, tuple)
+                assert isinstance(masked_value, Sequence)
                 mean, m2, weight = masked_value
                 welford = f"triton_helpers.welford({mean}, {m2}, {weight}, {dim})"
                 mean, m2, weight = (self.cse.newvar() for _ in range(3))
