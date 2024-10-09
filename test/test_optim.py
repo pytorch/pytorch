@@ -1484,7 +1484,7 @@ class TestOptimRenewed(TestCase):
 
     @parametrize("is_named_optim0", [True, False])
     @parametrize("is_named_optim1", [True, False])
-    @optims(optim_db, dtypes=[torch.float32])
+    @optims([o for o in optim_db if not o.only_supports_sparse_grads], dtypes=[torch.float32])
     def test_can_load_from_to_named_state_dict(
             self, device, dtype, optim_info, is_named_optim0, is_named_optim1
     ):

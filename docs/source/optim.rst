@@ -342,7 +342,7 @@ Example::
     torch.save(optimizer.state_dict(), PATH)
 
 Let's say that ``model`` implements an expert (MoE), and we want to duplicate it and resume training
-for two experts, both initialized the same way as the ``fc`` layer. For the following ``model2`` wecreate two layers identical to ``fc`` and resume training by loading the model weights and optimizer states from ``model`` into both ``fc1`` and ``fc2`` of ``model2`` (and adjust them accordingly)::
+for two experts, both initialized the same way as the ``fc`` layer. For the following ``model2`` we create two layers identical to ``fc`` and resume training by loading the model weights and optimizer states from ``model`` into both ``fc1`` and ``fc2`` of ``model2`` (and adjust them accordingly)::
 
     class TwoLayerModel(nn.Module):
         def __init__(self):
