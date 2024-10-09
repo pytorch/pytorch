@@ -39,8 +39,9 @@ def _take_first_line(text: str) -> str:
 
 
 @contextlib.contextmanager
-def _patch_dynamo_unsupported_functions():
+def _patch_dynamo_unsupported_functions() -> None:
     """Patch PyTorch to bypass some functions torch.export.export does not support."""
+    # TODO: Remove the patches once dynamo supports these functions.
     import torch.jit
 
     # Replace torch.jit.isinstance with isinstance
