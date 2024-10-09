@@ -69,6 +69,14 @@ specialize_float = True
 # legacy config, does nothing now!
 dynamic_shapes = True
 
+# Experiment to measure the regression from setting the first dimension
+# as dynamic. The benefit is that our graphs become more cacheable,
+# potentially allowing us to recover the regression and even achieve
+# a net improvement in aggregate. THIS IS NOT LANDABLE. We will likely
+# default this to False and slowly roll out with a JK. I'm setting this
+# to True for now so I can run the benchmark suites more easily.
+dynamic_first_dimension = True
+
 use_lazy_graph_module = (
     os.environ.get("TORCH_COMPILE_USE_LAZY_GRAPH_MODULE", "1") == "1"
 )
