@@ -1,4 +1,4 @@
-# mypy: allow-untyped-defs
+caf# mypy: allow-untyped-defs
 import contextlib
 import functools
 import inspect
@@ -424,6 +424,7 @@ class Library:
             if not hasattr(namespace, name):
                 continue
             delattr(namespace, name)
+            namespace._dir.remove(name)
 
 
 def _del_library(
