@@ -4780,7 +4780,8 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   }
 
   if (output_mask[1] && !gG.defined()) {
-    AT_ASSERTM(affine, "gamma should always be defined when it requires grad");
+    TORCH_INTERNAL_ASSERT(
+        affine, "gamma should always be defined when it requires grad");
   }
 
   return std::tuple<Tensor, Tensor, Tensor>{gI, gG, ggO};
@@ -4923,7 +4924,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
   }
 
   if (output_mask[1] && !gG.defined()) {
-    AT_ASSERTM(affine, "gamma should always be defined when it requires grad");
+    TORCH_INTERNAL_ASSERT(
+        affine, "gamma should always be defined when it requires grad");
   }
 
   return std::tuple<Tensor, Tensor, Tensor>{gI, gG, ggO};
@@ -6882,7 +6884,8 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     grad_self = (self == result) * grad_distributed;
     grad_src = (src == value) * grad_distributed.gather(dim, index);
   } else {
-    TORCH_CHECK(false,
+    TORCH_CHECK(
+        false,
         "Expected 'reduce' to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ",
         reduce,
         ".");
@@ -6977,7 +6980,8 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
     grad_self = self_is_result * grad_distributed;
     grad_src = source_is_result * grad_distributed.index_select(dim, index);
   } else {
-    TORCH_CHECK(false,
+    TORCH_CHECK(
+        false,
         "Expected 'reduce' to be one of 'prod', 'amax', 'amin' or 'mean' but got ",
         reduce,
         ".");

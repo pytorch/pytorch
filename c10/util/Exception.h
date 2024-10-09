@@ -697,16 +697,6 @@ https://github.com/pytorch/pytorch/issues/20287 for more details.")
 */
 inline void deprecated_AT_ASSERT() {}
 
-/*
-// Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_ASSERTM is deprecated, if you mean to indicate an
-internal invariant failure, use " \
-                       "TORCH_INTERNAL_ASSERT instead; if you mean to do user
-error checking, use " \ "TORCH_CHECK.  See
-https://github.com/pytorch/pytorch/issues/20287 for more details.")
-*/
-inline void deprecated_AT_ASSERTM() {}
-
 } // namespace c10::detail
 
 // Deprecated alias; this alias was deprecated because people kept mistakenly
@@ -717,20 +707,6 @@ inline void deprecated_AT_ASSERTM() {}
   do {                                                              \
     ::c10::detail::deprecated_AT_ASSERT();                          \
     C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__)); \
-  } while (false)
-
-// Deprecated alias, like AT_ASSERT.  The new TORCH_INTERNAL_ASSERT macro
-// supports both 0-ary and variadic calls, so having a separate
-// message-accepting macro is not necessary.
-//
-// NB: we MUST include cond explicitly here, as MSVC will miscompile the macro
-// expansion, shunting all of __VA_ARGS__ to cond.  An alternate workaround
-// can be seen at
-// https://stackoverflow.com/questions/5134523/msvc-doesnt-expand-va-args-correctly
-#define AT_ASSERTM(cond, ...)                                             \
-  do {                                                                    \
-    ::c10::detail::deprecated_AT_ASSERTM();                               \
-    C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(cond, __VA_ARGS__)); \
   } while (false)
 
 #endif // C10_UTIL_EXCEPTION_H_

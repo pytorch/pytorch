@@ -243,7 +243,8 @@ struct TreeToken {
         queue.push_back(n->inputs()[0]->node());
         queue.push_back(n->inputs()[1]->node());
       } else {
-        AT_ASSERTM(false, "Unsupported node found in a BatchMM tree!");
+        TORCH_INTERNAL_ASSERT(
+            false, "Unsupported node found in a BatchMM tree!");
       }
     }
     return matmuls;
