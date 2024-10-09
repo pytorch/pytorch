@@ -3911,7 +3911,18 @@ class TemplateBuffer(OperationBuffer):
         deps = dependencies.extract_read_writes(
             dummy, self.get_size(), (), normalize=normalize
         )
-        deps.reads = OrderedSet(dependencies.StarDep(x.get_name()) for x in self.inputs)
+
+        for inp in self.inputs:
+            indexer = inp.layout.make_indexer()
+
+            def dummy(index, rindex):
+                assert len(rindex) == 0
+                ops.load(inp.get_name(), indexer(index))
+
+            deps.reads |= dependencies.extract_read_writes(
+                dummy, inp.get_size(), (), normalize=True
+            ).reads
+
         return deps
 
     def get_reduction_size(self):
@@ -3948,6 +3959,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         make_kernel_render,
         debug_extra=None,
         mutated_inputs: Optional[Iterable[IRNode]] = None,
+        allowed_prologue_inps: Optional[OrderedSet[str]] = None,
     ):
         """
         NOTE:[TritonTemplates with multiple outputs]
@@ -3977,8 +3989,15 @@ class TritonTemplateBuffer(TemplateBuffer):
                 MutationOutput(NoneLayout(device), buf, self) for buf in mutated_inputs
             ]
 
+        self.allowed_prologue_inps = (
+            allowed_prologue_inps if allowed_prologue_inps else OrderedSet()
+        )
+
     def get_outputs(self) -> List[Buffer]:
         return self.outputs
+
+    def get_allowed_prologue_inps() -> OrderedSet[str]:
+        return self.allowed_prologue_inps
 
     def __str__(self) -> str:
         out = f"TritonTemplateBuffer(layout={self.layout}, {self.debug_extra})"
@@ -4047,8 +4066,14 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         inputs: List[IRNode],
         choice_timings: Callable[[], Dict[ChoiceCaller, float]],
         unfiltered_choices: List[ChoiceCaller],
+        allowed_prologue_inps: OrderedSet[str],
     ):
-        super().__init__(layout=layout, inputs=inputs, make_kernel_render=None)
+        super().__init__(
+            layout=layout,
+            inputs=inputs,
+            make_kernel_render=None,
+            allowed_prologue_inps=allowed_prologue_inps,
+        )
         self._choice_timings_fn = choice_timings
         self._choice_timings: Optional[Dict[ChoiceCaller, float]] = None
         self.original_inputs = inputs

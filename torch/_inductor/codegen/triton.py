@@ -3050,6 +3050,9 @@ class TritonKernel(SIMDKernel):
             if self._has_constant_mask(tree):
                 mask_vars.discard(f"{tree.prefix}mask")
 
+        # can be added as an override_mask
+        mask_vars.discard("None")
+
     def iteration_ranges_codegen_header(self, entry, code):
         x = entry.prefix
         if entry.is_loop:
@@ -3183,7 +3186,7 @@ class TritonScheduling(SIMDScheduling):
 
         return kernel_name
 
-    def benchmark_fused_nodes(self, nodes):
+    def benchmark_fused_nodes(self, nodes, n_spills_threshold=8):
         with preserve_rng_state(), torch.cuda.device(
             self.scheduler.get_current_device_or_throw()
         ):
@@ -3236,7 +3239,9 @@ class TritonScheduling(SIMDScheduling):
 
             launchers = wrapped_jit_function.launchers
             assert len(launchers) == 1
-            if launchers[0].n_spills > 0:
+            # n_spills does not necessarily mean it's not profitable to fuse,
+            # and sometimes it can be inaccurate
+            if launchers[0].n_spills > n_spills_threshold:
                 # skip benchmarking the kernel if there are register spills
                 ms = float("inf")
             else:

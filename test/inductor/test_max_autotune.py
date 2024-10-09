@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import contextlib
 import os
 import unittest
 from typing import Callable, List, Optional
@@ -944,6 +945,199 @@ class TestTuningProcess(TestCase):
             self.assertEqual(timings[choice2], choice2.bmreq.value)
 
             tuning_pool.terminate()
+
+
+@instantiate_parametrized_tests
+class TestPrologueFusion(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._stack = contextlib.ExitStack()
+        cls._stack.enter_context(
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "prologue_fusion": True,
+                    "benchmark_epilogue_fusion": False,
+                    "shape_padding": False,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "test_configs.max_mm_configs": 4,  # significantly speeds up tests
+                }
+            )
+        )
+
+    def check_code(self, code_str, num_kernels, num_allocs, num_deallocs):
+        FileCheck().check("def call").check_count(
+            ".run", num_kernels, exactly=True
+        ).run(code_str)
+
+        if num_allocs is not None:
+            FileCheck().check("def call").check_count(
+                "empty_strided", num_allocs, exactly=True
+            ).run(code_str)
+
+        if num_deallocs is not None:
+            FileCheck().check("def call").check_count(
+                "del", num_deallocs, exactly=True
+            ).run(code_str)
+
+    @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
+    def test_upcast(self, sizes):
+        M, K, N = sizes
+
+        x = torch.rand([M, K], dtype=torch.float16, device="cuda")
+        y = torch.rand([K, N], dtype=torch.float, device="cuda")
+
+        def foo(x, y):
+            return x.to(y.dtype) @ y
+
+        out, code = run_and_get_code(torch.compile(foo), x, y)
+        self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+
+    def test_downcast(self):
+        # per heuristics, dont fuse a downcast into a mm because it would lead to more reads inside kernel
+        M, K, N = (64, 128, 256)
+        x = torch.rand([M, K], dtype=torch.float, device="cuda")
+        y = torch.rand([K, N], dtype=torch.float16, device="cuda")
+
+        def foo(x, y):
+            return x.to(y.dtype) @ y
+
+        out, code = run_and_get_code(torch.compile(foo), x, y)
+        self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
+
+    @parametrize("sizes", ((64, 128, 256), (64, 64, 64), (64, 120, 64)))
+    def test_multiple_fusions(self, sizes):
+        M, K, N = sizes
+
+        def foo(x, y):
+            return ((x - 1.1) @ (y + 1.1)) * 1.1
+
+        x = torch.rand([M, K], dtype=torch.float, device="cuda")
+        y = torch.rand([K, N], dtype=torch.float, device="cuda")
+
+        out, code = run_and_get_code(torch.compile(foo), x, y)
+        self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+
+        # check that we do not CSE any variables between prologues, epilogues
+        FileCheck().check("def triton").check_count("= 1.1", 3, exactly=True).check(
+            "tl.store"
+        ).run(code[0])
+
+    @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
+    def test_multiple_inputs(self, sizes):
+        M, K, N = sizes
+
+        def foo(x, y, z):
+            return (x + y).to(torch.float) @ z
+
+        x = torch.rand([M, K], dtype=torch.float16, device="cuda")
+        y = torch.rand([M, K], dtype=torch.float16, device="cuda")
+        z = torch.rand([K, N], dtype=torch.float, device="cuda")
+        out_eager = foo(x, y, z)
+        out, code = run_and_get_code(torch.compile(foo), x, y, z)
+        self.assertEqual(out, out_eager, atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
+
+    def test_storage_offset_prologue(self):
+        def foo(a):
+            q = a[:64, :]
+            k = a[64:, :]
+            return torch.mm(q + 2, k - 2)
+
+        inp = torch.randn(128, 64, device="cuda")
+        out, code = run_and_get_code(torch.compile(foo), inp)
+        self.assertEqual(out, foo(inp), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=1)
+
+    @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
+    @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
+    def test_prologue_multiple_nodes(self, sizes):
+        M, K, N = sizes
+
+        def foo(x, y):
+            return ((((x * 2) - 1) / 2) @ (y * 4)) * 3.0
+
+        x = torch.rand([M, K], dtype=torch.float, device="cuda")
+        y = torch.rand([K, N], dtype=torch.float, device="cuda")
+
+        out, code = run_and_get_code(torch.compile(foo), x, y)
+        self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+
+    def test_broadcast(self):
+        def foo(x, y):
+            return (x.expand([1, y.shape[0]]) + 1) @ y
+
+        x = torch.rand([1, 1], dtype=torch.float, device="cuda")
+        y = torch.rand([64, 128], dtype=torch.float, device="cuda")
+
+        out, code = run_and_get_code(torch.compile(foo), x, y)
+        self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+
+    @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
+    @parametrize("benchmark_fusion", (True, False))
+    def test_prologue_read_into_both_inputs(self, benchmark_fusion):
+        M = K = N = 256
+
+        # not supported today. it could be, but typically the pointwise nodes would get
+        # inlined into separate nodes.
+
+        def foo(x):
+            y = (x + 1) * 2
+            return y @ (y - 2)
+
+        with config.patch(benchmark_epilogue_fusion=benchmark_fusion):
+            x = torch.rand([M, K], dtype=torch.float, device="cuda")
+
+            out, code = run_and_get_code(torch.compile(foo), x)
+            self.assertEqual(out, foo(x), atol=0.05, rtol=0.05)
+            # not guaranteed to fuse, but still checking correctness
+            if not benchmark_fusion:
+                self.check_code(
+                    code[0], num_kernels=2, num_allocs=None, num_deallocs=None
+                )
+
+    @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
+    @config.patch(allow_buffer_reuse=False)
+    def test_mismatched_prologue_group(self):
+        def foo(x, y, z):
+            a = (x + 2) * 2
+            b = a * y
+            return b @ z
+
+        x = torch.rand([1, 256], device="cuda")
+        y = torch.rand([256, 256], device="cuda")
+        z = torch.rand([256, 128], device="cuda")
+
+        out, code = run_and_get_code(torch.compile(foo), x, y, z)
+        self.assertEqual(out, foo(x, y, z), atol=0.05, rtol=0.05)
+        # theres one more dealloc than there should be because of a buffer reuse. TODO:
+        # not sure why disabling buffer reuse doesnt stop
+        self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=4)
+
+    @config.patch(shape_padding=True)
+    @config.patch(force_shape_pad=True)
+    @parametrize("sizes", ((250, 245, 128), (250, 256, 128), (256, 128, 62)))
+    def test_prologue_masked_load(self, sizes):
+        M, K, N = sizes
+
+        def foo(x, y):
+            return x @ y
+
+        # cat will turn into masked load
+        # TODO - we should not attempt fusion if it turns an aligned load
+        # into an unaligned load
+        x = torch.rand([250, 245], device="cuda")
+        y = torch.rand([245, 128], device="cuda")
+
+        out, code = run_and_get_code(torch.compile(foo), x, y)
+        self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
 
 if __name__ == "__main__":

@@ -1148,8 +1148,8 @@ class FxGraphCache:
         from .graph import GraphLowering
 
         GraphLowering.save_output_code(code)
-        output_code_log.debug("Output code written to: %s", artifact_path)
         output_code_log.debug("Output code: \n%s", code)
+        output_code_log.debug("Output code written to: %s", artifact_path)
         # On cache hit, use artifact path as filename
         trace_structured(
             "inductor_output_code",
