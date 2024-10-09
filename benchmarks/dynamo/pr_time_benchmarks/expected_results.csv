@@ -7,3 +7,5 @@ basic_modules_ListOfLinears_eager,                         compile_time_instruct
 basic_modules_ListOfLinears_inductor,                      compile_time_instruction_count, 18337517279,    0.015
 basic_modules_ListOfLinears_inductor_gpu_force_shape_pad,  compile_time_instruction_count, 16448960788,    0.015
 basic_modules_ListOfLinears_inductor_gpu,                  compile_time_instruction_count, 16403080126,    0.20
+update_hint_regression,                                    compile_time_instruction_count,  2433084132,    0.20
+sum_floordiv_regression,                                   compile_time_instruction_count, 1164734502,     0.015
