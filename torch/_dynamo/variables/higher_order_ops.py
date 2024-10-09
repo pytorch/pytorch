@@ -1512,7 +1512,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         body_node = make_attr(tx, body_name)
-        return body_node
+        return body_name, body_node
 
     def create_wrapped_node(
         self,
@@ -1541,7 +1541,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
-        body_node = self.add_subgraph_to_root_module(
+        body_name, body_node = self.add_subgraph_to_root_module(
             tx, fn_vt, fn_args_vt, kwargs, body_gmod
         )
 
@@ -1556,7 +1556,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             body_r.as_proxy(),
         )
 
-        return proxy_args, {}, example_value, body_r, treespec, body_gmod
+        return proxy_args, {}, example_value, body_r, treespec, body_gmod, body_name
 
     def call_function(
         self,
@@ -1565,9 +1565,15 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # This flattens the kwargs into lifted args
-        p_args, p_kwargs, example_value, body_r, treespec, _ = self.create_wrapped_node(
-            tx, args[0], args[1:], kwargs, "wrap"
-        )
+        (
+            p_args,
+            p_kwargs,
+            example_value,
+            body_r,
+            treespec,
+            _,
+            _,
+        ) = self.create_wrapped_node(tx, args[0], args[1:], kwargs, "wrap")
 
         if len(p_kwargs) > 0:
             unimplemented("kwargs should have been flattened into lifted args")
@@ -1869,6 +1875,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             body_r,
             treespec,
             checkpointed_gmod,
+            _,
         ) = self.create_wrapped_node(
             tx,
             args[0],
