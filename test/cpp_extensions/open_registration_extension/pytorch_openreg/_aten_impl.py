@@ -29,6 +29,9 @@ _register_same_name("uncheckedSetDevice")
 _register_same_name("exchangeDevice")
 _register_same_name("malloc", True)
 _register_same_name("free", True)
+_register_same_name("isPinnedPtr", True)
+_register_same_name("hostMalloc", True)
+_register_same_name("hostFree", True)
 
 
 # TODO: replace it with implementing torch.openreg.device

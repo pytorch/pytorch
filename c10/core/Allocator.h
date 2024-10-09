@@ -10,7 +10,6 @@
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 #include <c10/util/UniqueVoidPtr.h>
@@ -114,10 +113,8 @@ class C10_API DataPtr {
   }
   // Unsafely mutates the device on a DataPtr.  Under normal use,
   // you should never actually need to call this function.
-  // We used to need this for the implementation of the hack detailed
-  // in Note [Masquerading as CUDA], but that hack has been removed.
-  C10_DEPRECATED_MESSAGE(
-      "unsafe_set_device is deprecated. You should never need to call this function.")
+  // We need this for the implementation of the hack detailed
+  // in Note [Masquerading as CUDA]
   void unsafe_set_device(Device device) {
     device_ = device;
   }
