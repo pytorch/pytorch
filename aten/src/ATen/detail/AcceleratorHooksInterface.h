@@ -66,12 +66,20 @@ struct TORCH_API AcceleratorHooksInterface {
   }
 
   virtual const Generator& getDefaultGenerator(
+<<<<<<< HEAD
       [[maybe_unused]] DeviceIndex device_index = -1) const {
+=======
+      C10_UNUSED DeviceIndex device_index = -1) const {
+>>>>>>> 3b2bfc5cd2e... process handle with PIMPL. #suppress-bc-linter
     TORCH_CHECK(false, "Backend doesn`t support getDefaultGenerator()");
   }
 
   virtual Generator getNewGenerator(
+<<<<<<< HEAD
       [[maybe_unused]] DeviceIndex device_index = -1) const {
+=======
+      C10_UNUSED DeviceIndex device_index = -1) const {
+>>>>>>> 3b2bfc5cd2e... process handle with PIMPL. #suppress-bc-linter
     TORCH_CHECK(false, "Backend doesn`t support getNewGenerator()");
   }
 
