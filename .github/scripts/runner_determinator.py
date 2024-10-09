@@ -363,7 +363,7 @@ def get_runner_prefix(
     rollout_state: str,
     workflow_requestors: Iterable[str],
     branch: str,
-    check_experiments: Set[str],
+    check_experiments: Set[str] = Set(),
     is_canary: bool = False,
 ) -> str:
     settings = parse_settings(rollout_state)
@@ -372,15 +372,6 @@ def get_runner_prefix(
     fleet_prefix = ""
     prefixes = []
     for experiment_name, experiment_settings in settings.experiments.items():
-        if check_experiments:
-            if experiment_name not in check_experiments:
-                exp_list = ", ".join(check_experiments)
-                log.info(f"Skipping experiment '{experiment_name}', as it is not in the check_experiments list: {exp_list}")
-                continue
-        elif not experiment_settings.default:
-            log.info(f"Skipping experiment '{experiment_name}', as it is not a default experiment")
-            continue
-
         enabled = False
 
         if not experiment_settings.all_branches and is_exception_branch(branch):
@@ -402,8 +393,18 @@ def get_runner_prefix(
             )
             enabled = True
         elif experiment_settings.rollout_perc:
+            do_check = True
+            if check_experiments:
+                if experiment_name not in check_experiments:
+                    exp_list = ", ".join(check_experiments)
+                    log.info(f"Skipping experiment '{experiment_name}', as it is not in the check_experiments list: {exp_list}")
+                    do_check = False
+            elif not experiment_settings.default:
+                log.info(f"Skipping experiment '{experiment_name}', as it is not a default experiment")
+                do_check = False
+
             # If no user is opted in, then we randomly enable the experiment based on the rollout percentage
-            if random.uniform(0, 100) <= experiment_settings.rollout_perc:
+            if do_check and random.uniform(0, 100) <= experiment_settings.rollout_perc:
                 log.info(
                     f"Based on rollout percentage of {experiment_settings.rollout_perc}%, enabling experiment {experiment_name}."
                 )
