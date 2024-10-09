@@ -19,8 +19,6 @@
 
 #include <utility>
 
-#include <ATen/ScalarOps.h>
-
 namespace torch::lazy {
 namespace {
 
