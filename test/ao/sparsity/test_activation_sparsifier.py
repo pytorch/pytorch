@@ -13,13 +13,14 @@ from torch.ao.pruning._experimental.activation_sparsifier.activation_sparsifier 
 from torch.ao.pruning.sparsifier.utils import module_to_fqn
 from torch.testing._internal.common_utils import skipIfTorchDynamo, TestCase
 
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 
 
 class Model(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.conv1 = nn.Conv2d(1, 32, kernel_size=3)
         self.conv2 = nn.Conv2d(32, 32, kernel_size=3)

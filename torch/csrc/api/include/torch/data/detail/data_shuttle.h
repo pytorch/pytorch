@@ -45,7 +45,7 @@ class DataShuttle {
   /// Returns the result of a job, or nullopt if all jobs were exhausted. Called
   /// by the main thread.
   std::optional<Result> pop_result(
-      std::optional<std::chrono::milliseconds> timeout = nullopt) {
+      std::optional<std::chrono::milliseconds> timeout = std::nullopt) {
     if (in_flight_jobs_ > 0) {
       auto result = results_.pop(timeout);
       --in_flight_jobs_;

@@ -71,7 +71,7 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
   /// Special cloning function for `ModuleList` because it does not use
   /// `reset()`.
   std::shared_ptr<Module> clone(
-      const std::optional<Device>& device = nullopt) const override {
+      const std::optional<Device>& device = std::nullopt) const override {
     auto clone = std::make_shared<ModuleListImpl>();
     for (const auto& module : modules_) {
       clone->push_back(module->clone(device));

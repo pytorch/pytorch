@@ -32,6 +32,7 @@ from torch._prims_common import dtype_to_type, is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
+from .sizevars import evaluate_expr
 from .utils import generate_assert
 from .virtualized import V
 
@@ -86,7 +87,10 @@ class SymPyOps:
 
     @staticmethod
     def to_dtype(
-        value: TypedExpr, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None
+        value: TypedExpr,
+        dtype: torch.dtype,
+        src_dtype: Optional[torch.dtype] = None,
+        use_compute_types: bool = False,
     ) -> TypedExpr:
         return TypedExpr(value.expr, dtype)
 
@@ -194,7 +198,7 @@ class IndexPropagation:
         inner: Any,
         iter_ranges: Dict[sympy.Symbol, sympy.Expr],
         indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr],
-    ):
+    ) -> None:
         self._inner = inner
         self.shape_env = V.graph.sizevars.shape_env
 
@@ -321,12 +325,7 @@ class IndexPropagation:
                 for k, v in self.indirect_var_ranges.items()
             ),
         )
-        evaluated = self.shape_env._maybe_evaluate_static(
-            e,
-            axioms=self.axioms,
-            var_to_range=var_to_range,
-        )
-        return bool(evaluated)
+        return evaluate_expr(self.shape_env, e, self.axioms, var_to_range)
 
     def indirect_indexing(
         self,

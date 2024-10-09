@@ -10,6 +10,7 @@ from torch.utils._sympy.symbol import SymT
 
 from .. import config, cpp_builder, ir, lowering as L
 from ..autotune_process import CppBenchmarkRequest
+from ..loop_body import LoopBody
 from ..select_algorithm import PartialRender
 from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
 from ..virtualized import V
@@ -106,7 +107,9 @@ class CppTemplateKernel(CppKernel):
     def call_kernel(self, name: str, node: ir.CppTemplateBuffer):
         wrapper = V.graph.wrapper_code
         _, call_args, arg_types = self.args.cpp_argdefs()
-        wrapper.generate_kernel_call(name, call_args, cuda=False, arg_types=arg_types)
+        wrapper.generate_kernel_call(
+            name, call_args, triton=False, gpu=False, arg_types=arg_types
+        )
 
     def dtype(self, node: ir.Buffer) -> str:
         return DTYPE_TO_CPP[node.get_dtype()]
@@ -140,7 +143,7 @@ class CppTemplateKernel(CppKernel):
         Slice the given node with a list of ranges (start and end) corresponding to its dims.
         The dim is not sliced if the corresponding range is empty.
         """
-        assert len(ranges) == len(node.get_size())
+        assert len(ranges) == len(node.get_size()), f"{ranges=}, {node=}"
         sliced = wrap_with_tensorbox(node)
         for dim, _range in enumerate(ranges):
             if len(_range) == 0:
@@ -239,7 +242,13 @@ class CppTemplateKernel(CppKernel):
                     node.make_loader()(new_args).value,
                 )
 
-            body = ir.LoopBody(fn, (list(var_ranges.keys()), ()), var_ranges)
+            body = LoopBody(
+                fn,
+                (list(var_ranges.keys()), ()),
+                var_ranges,
+                list(var_ranges.keys()),
+                tuple(),
+            )
             bodies.append(body)
             var_sizes_list.append(var_sizes)
 
@@ -324,7 +333,12 @@ class CppTemplateCaller(ir.ChoiceCaller):
         input_nodes: List[ir.Buffer],
         layout: ir.Layout,
         make_kernel_render: Callable[
-            [ir.CppTemplateBuffer, Optional[List[ir.IRNode]]], str
+            [
+                ir.CppTemplateBuffer,
+                bool,
+                Optional[List[ir.IRNode]],
+            ],
+            str,
         ],
         bmreq: CppBenchmarkRequest,
         template: "CppTemplate",  # type: ignore[name-defined]  # noqa: F821

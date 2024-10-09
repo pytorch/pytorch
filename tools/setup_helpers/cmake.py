@@ -204,7 +204,6 @@ class CMake:
                     "UBSAN_FLAGS",
                     "BLAS",
                     "WITH_BLAS",
-                    "BUILDING_WITH_TORCH_LIBS",
                     "CUDA_HOST_COMPILER",
                     "CUDA_NVCC_EXECUTABLE",
                     "CUDA_SEPARABLE_COMPILATION",

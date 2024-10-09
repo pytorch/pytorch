@@ -44,6 +44,7 @@ struct ConcretePyInterpreterVTable final
     : public c10::impl::PyInterpreterVTable {
   std::string name() const override;
 
+  void incref(PyObject* pyobj) const override;
   void decref(PyObject* pyobj, bool has_pyobj_slot) const override;
 
   // TODO: Need to make this work for StorageImpl too. I imagine I'll want to
@@ -275,6 +276,13 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool has_pyobj_slot)
   Py_DECREF(pyobj);
 };
 
+void ConcretePyInterpreterVTable::incref(PyObject* pyobj) const {
+  if (!Py_IsInitialized())
+    return;
+  pybind11::gil_scoped_acquire gil;
+  Py_INCREF(pyobj);
+};
+
 bool isPythonTensor(const at::Tensor& tensor) {
   return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Python);
 }
@@ -359,9 +367,12 @@ void ConcretePyInterpreterVTable::python_dispatcher(
   }
 
   c10::DispatchKey k = ks.highestPriorityTypeId();
-  // TODO: allow this to be non-owning
-  auto handler = py::reinterpret_borrow<py::object>(
-      PyDict_GetItem(cache.ptr(), py::cast(k).ptr()));
+  PyObject* raw_handler = nullptr;
+  if (PyDict_GetItemRef(cache.ptr(), py::cast(k).ptr(), &raw_handler) < 0) {
+    // There was an error that is not missing key (which would return 0)
+    throw python_error();
+  }
+  auto handler = py::reinterpret_steal<py::object>(raw_handler);
   if (handler.ptr() == nullptr) {
     // Slow path
     handler = torch_api_function_overload.attr("_get_dispatch")(k);
