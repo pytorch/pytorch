@@ -301,14 +301,15 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     bool isSuccess() const override;
 
-    // Same as calling synchronize() for NCCL work.
+    // Same as calling synchronize() for NCCL work if timeout is not set.
+    // Otherwise, it will block the CPU thread until the NCCL work is completed
+    // or timed out. If timeout, exception will be thrown.
     bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
 
     void abort() override;
 
-    // Let current stream wait on the completing of the NCCL work
-    // Throws on exceptions. Blocking operation, which will wait for work
-    // completion.
+    // Let current stream wait on the completion of the NCCL work
+    // Throws on exceptions.
     void synchronize() override;
 
     // Synchronize streams by blocking each on the NCCL stream
@@ -404,9 +405,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
         const WorkNCCL& workNCCL);
 
    private:
-    // Helper function for synchronize
-    void synchronizeInternal(std::chrono::milliseconds timeout);
-
     // Checks for NCCL errors and sets an appropriate exception_ptr.
     void checkAndSetException();
 

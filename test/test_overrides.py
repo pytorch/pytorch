@@ -691,7 +691,10 @@ def generate_tensor_like_override_tests(cls):
                     f"Unsupported argument type {arg_type} for {arg_name} of function {func}"
                 )
 
-        if func in annotated_args:
+        # Special case; this doesn't have a schema but takes a list
+        if func is torch.sym_sum:
+            func_args.append([TensorLike(), TensorLike()])
+        elif func in annotated_args:
             for arg in annotated_args[func]:
                 # Guess valid input to aten function based on type of argument
                 t = arg["simple_type"]
