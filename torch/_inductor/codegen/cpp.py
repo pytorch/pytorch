@@ -4213,6 +4213,7 @@ class CppScheduling(BaseScheduling):
                             for name_, expr_ in original_body.indexing_exprs.items()
                             if name_ != name
                         )
+                        and div_expr.args[1] > 4
                     ):
                         split_var = div_expr.args[0]
                         split_number = div_expr.args[1]
