@@ -135,9 +135,9 @@ if(HIP_FOUND)
   message("HIP_VERSION_MINOR: ${HIP_VERSION_MINOR}")
   message("TORCH_HIP_VERSION: ${TORCH_HIP_VERSION}")
 
-  message("\n***** Library versions from cmake find_package *****\n")
   # Find ROCM components using Config mode
   # These components will be searced for recursively in ${ROCM_PATH}
+  message("\n***** Library versions from cmake find_package *****\n")
   find_package_and_print_version(hip REQUIRED)
   find_package_and_print_version(hsa-runtime64 REQUIRED)
   find_package_and_print_version(amd_comgr REQUIRED)
