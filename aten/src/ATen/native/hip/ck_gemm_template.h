@@ -12,9 +12,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h>
-#include <torch/torch.h>
 #include <ATen/native/hip/ck_gemm.h>
-
 
 #include <ck/ck.hpp>
 #include <ck/tensor_operation/gpu/device/gemm_specialization.hpp>
