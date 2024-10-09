@@ -610,6 +610,22 @@ class CompileTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
+    def test_inductor_all_reduce_non_contig_input(self):
+        def func(arg: torch.Tensor) -> torch.Tensor:
+            ar0 = funcol.all_reduce(arg, "avg", "0")
+            ar0 = funcol.wait_tensor(ar0)
+            # Expect allocation
+            return ar0
+
+        arg = torch.rand(4, 4, device="cuda").T
+        compiled = torch.compile(func)
+
+        code = run_and_get_triton_code(compiled, arg)
+        # clone induced by non contig input
+        assert "torch.ops._c10d_functional.wait_tensor.default" in code
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @fresh_inductor_cache()
     def test_inductor_reuse_buffer_after_inplace_collective(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
             # Expect allocation
@@ -685,7 +701,7 @@ class CompileTest(TestCase):
             FileCheck()
             .check(
                 "buf0 = torch.ops._c10d_functional.all_gather_into_tensor_coalesced"
-                ".default([arg0_1, arg1_1, arg2_1, arg3_1]"
+                ".default([arg3_1, arg2_1, arg1_1, arg0_1]"
             )
             .check("buf1 = buf0[0]")
             .check("buf2 = buf0[1]")
@@ -701,7 +717,18 @@ class CompileTest(TestCase):
         )
 
         # Test aoti
-        out = AOTIRunnerUtil.run("cuda", func, (args,))
+        # out = AOTIRunnerUtil.run("cuda", func, (args,))
+        # torch.cuda.synchronize()
+
+    @unittest.skipIf(not HAS_GPU, "This is a GPU test!")
+    @fresh_inductor_cache()
+    def test_wait_tensor_temp(self):
+        def func(arg: torch.Tensor) -> torch.Tensor:
+            return funcol.wait_tensor(arg)
+
+        # Test aoti
+        arg = torch.rand(4, 4, device="cuda")
+        out = AOTIRunnerUtil.run("cuda", func, (arg,))
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")

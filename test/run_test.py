@@ -220,6 +220,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_cuda_nvml_based_avail",
     # temporarily sets a global config
     "test_autograd_fallback",
+    "inductor/test_compiler_bisector",
 ] + FSDP_TEST
 
 # Test files that should always be run serially with other test files,
@@ -1417,7 +1418,16 @@ def get_selected_tests(options) -> List[str]:
         options.exclude.extend(CPP_TESTS)
 
     if options.mps:
-        selected_tests = ["test_mps", "test_metal", "test_modules", "test_nn"]
+        selected_tests = [
+            "test_mps",
+            "test_metal",
+            "test_modules",
+            "nn/test_convolution",
+            "nn/test_dropout",
+            "nn/test_pooling",
+            "test_view_ops",
+            "test_nn",
+        ]
     else:
         # Exclude all mps tests otherwise
         options.exclude.extend(["test_mps", "test_metal"])

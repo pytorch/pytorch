@@ -3998,10 +3998,14 @@ equal(input, other) -> bool
 
 ``True`` if two tensors have the same size and elements, ``False`` otherwise.
 
+Note that tensors containing NaNs are never equal to each other.
+
 Example::
 
     >>> torch.equal(torch.tensor([1, 2]), torch.tensor([1, 2]))
     True
+    >>> torch.equal(torch.tensor([3, torch.nan]), torch.tensor([3, torch.nan]))
+    False
 """,
 )
 
@@ -10374,7 +10378,7 @@ Example::
 add_docstr(
     torch.squeeze,
     r"""
-squeeze(input, dim=None) -> Tensor
+squeeze(input: Tensor, dim: Optional[Union[int, List[int]]]) -> Tensor
 
 Returns a tensor with all specified dimensions of :attr:`input` of size `1` removed.
 
