@@ -277,7 +277,7 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         """
 
         # User3 is opted out, but is pulled into default experiments by the 10% rollout
-        prefix = rd.get_runner_prefix(settings_text, ["User3"], USER_BRANCH, check_experiments={"otherExp"})
+        prefix = rd.get_runner_prefix(settings_text, ["User3"], USER_BRANCH)
         self.assertEqual("", prefix, "Runner prefix not correct for user")
 
     def test_lf_prefix_always_comes_first(self) -> None:
