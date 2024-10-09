@@ -423,7 +423,7 @@ std::future<bool> launchAsyncGilCheck() {
 }
 
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 100;
-constexpr int64_t kSynchronizeBusyWaitMillis = 10;
+constexpr int64_t kSynchronizeBusyWaitMillis = 1;
 thread_local uint64_t ProcessGroupNCCL::ncclActiveGroupCounter_ = 0;
 
 std::ostream& operator<<(
