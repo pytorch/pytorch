@@ -212,7 +212,7 @@ def _get_module_type_filter(tp: Callable):
         # }
         nn_module_stack = n.meta.get("nn_module_stack", {})
         types = []
-        for _, t in nn_module_stack.values():
+        for _, t, _ in nn_module_stack.values():
             # export() returns str, but older APIs (e.g. capture_pre_autograd_graph)
             # return type. Handle both cases.
             if isinstance(t, type):

@@ -50,6 +50,7 @@ def _node_metadata_hook(node: torch.fx.Node, stack_trace: str) -> None:
             _EMPTY_NN_MODULE_STACK_KEY: (
                 _EMPTY_NN_MODULE_STACK_KEY,
                 _EMPTY_NN_MODULE_STACK_KEY,
+                0,
             )
         },
     )

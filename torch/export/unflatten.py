@@ -749,7 +749,7 @@ class _ModuleFrame:
         seen_nodes,
         seen_modules,
         parent,
-        module_stack: List[str],
+        module_stack: List[Tuple[str, int]],
         module_id,
         module_call_graph: Dict[str, ModuleCallSignature],
         module: Optional[torch.nn.Module] = None,
@@ -765,7 +765,7 @@ class _ModuleFrame:
         self.module_call_graph = module_call_graph
         self.verbose = False
 
-        self.fqn = self.module_stack[-1]
+        self.fqn, num_calls = self.module_stack[-1]
         if module is not None:
             self.module = module
         else:
@@ -779,9 +779,6 @@ class _ModuleFrame:
 
         self.parent_call_module: Optional[torch.fx.Node] = None
         if parent is not None:
-            num_calls = len(
-                [x for x in self.seen_modules[self.module_id] if x.fqn == self.fqn]
-            )
             if self.fqn in module_call_graph and num_calls == 1:
                 raise ValueError(
                     f"Cannot unflatten multiple calls to module {self.fqn} while preserving its signature "
@@ -1095,7 +1092,7 @@ class _ModuleFrame:
                 node_module_stack = self.module_stack
             else:
                 node_module_stack = [
-                    path for path, ty in node.meta["nn_module_stack"].values()
+                    (path, n) for path, ty, n in node.meta["nn_module_stack"].values()
                 ]
 
             if node_module_stack[: len(self.module_stack)] != self.module_stack:
@@ -1157,7 +1154,7 @@ def _outline_submodules(orig_graph: torch.fx.Graph, root_module: UnflattenedModu
         seen_nodes,
         seen_modules,
         None,
-        [""],
+        [("", 0)],
         "",
         {
             entry.fqn: entry.signature

@@ -271,7 +271,7 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
                 continue
             add_root = True
             if nn_module_stack := node.meta.get("nn_module_stack", {}):
-                path, ty = next(iter(nn_module_stack.values()))
+                path, ty, num_calls = next(iter(nn_module_stack.values()))
                 # After deserializing the class `ty` might not exist anymore so
                 # it could be a string
                 if inspect.isclass(ty) and issubclass(ty, torch.nn.Module):
@@ -301,12 +301,16 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
                         return path
 
                 nn_module_stack = {
-                    root_key: (root, root_cls.__module__ + "." + root_cls.__qualname__),
+                    root_key: (
+                        root,
+                        root_cls.__module__ + "." + root_cls.__qualname__,
+                        0,
+                    ),
                     **nn_module_stack,
                 }
                 node.meta["nn_module_stack"] = {
-                    key: (normalize_path(path), ty)
-                    for key, (path, ty) in nn_module_stack.items()
+                    key: (normalize_path(path), ty, num_calls)
+                    for key, (path, ty, num_calls) in nn_module_stack.items()
                 }
 
 
@@ -902,8 +906,8 @@ def _verify_nn_module_stack(graph_module: torch.fx.GraphModule) -> None:
                     if not all(
                         isinstance(k, str)
                         and isinstance(v, tuple)
-                        and len(v) == 2
-                        and all(isinstance(x, str) for x in v)
+                        and len(v) == 3
+                        and all(isinstance(x, t) for x, t in zip(v, [str, str, int]))
                         for k, v in nn_module_stack.items()
                     ):
                         raise SpecViolationError(

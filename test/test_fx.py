@@ -1813,8 +1813,10 @@ class TestFX(JitTestCase):
         gm = torch.fx.symbolic_trace(m)
 
         mod_stack = {}
-        expected_stack = [('sub_mod', ('sub_mod', type(m.sub_mod))),
-                          ('sub_mod.conv_mod', ('sub_mod.conv_mod', type(m.sub_mod.conv_mod)))]
+        expected_stack = [
+            ('sub_mod', ('sub_mod', type(m.sub_mod), 0)),
+            ('sub_mod.conv_mod', ('sub_mod.conv_mod', type(m.sub_mod.conv_mod), 0)),
+        ]
         for node in gm.graph.nodes:
             mod_stack = node.meta.get('nn_module_stack', {})
             if mod_stack:

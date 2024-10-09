@@ -18,7 +18,7 @@ _FX_TRACER_NN_MODULE_META_TYPE = Tuple[str, type]
 _FX_TRACER_NN_MODULE_STACK_META_TYPE = collections.OrderedDict
 """Legacy type of `node.meta["nn_module_stack"]` produced by FX symbolic tracer."""
 
-_DYNAMO_NN_MODULE_META_TYPE = Tuple[str, Tuple[str, type]]
+_DYNAMO_NN_MODULE_META_TYPE = Tuple[str, Tuple[str, type, int]]
 """Type of item from `node.meta["nn_module_stack"].items()` produced by FX dynamo tracer."""
 _DYNAMO_NN_MODULE_STACK_META_TYPE = Dict[str, _DYNAMO_NN_MODULE_META_TYPE]
 """Type of `node.meta["nn_module_stack"]` produced by FX dynamo tracer."""
@@ -139,7 +139,7 @@ class _ModuleMeta:
         cls, raw_meta: _DYNAMO_NN_MODULE_META_TYPE
     ) -> _ModuleMeta:
         """Create a module meta from raw meta produced by FX dynamo tracer."""
-        module_name, (qualified_name, module_class) = raw_meta
+        module_name, (qualified_name, module_class, _) = raw_meta
         return _ModuleMeta(module_name, module_class, raw_meta)
 
     @classmethod

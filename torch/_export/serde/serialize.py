@@ -584,13 +584,14 @@ class GraphModuleSerializer(metaclass=Final):
         if nn_module_stack := node.meta.get("nn_module_stack"):
 
             def export_nn_module_stack(val):
-                assert isinstance(val, tuple) and len(val) == 2
-                path, ty = val
+                assert isinstance(val, tuple) and len(val) == 3
+                path, ty, num_calls = val
 
                 assert isinstance(path, str)
                 assert isinstance(ty, str)
+                assert isinstance(num_calls, int)
 
-                return path + "," + ty
+                return f"{path},{ty},{num_calls}"
 
             # Serialize to "key,orig_path,type_str"
             nn_module_list = [
@@ -2199,8 +2200,8 @@ class GraphModuleDeserializer(metaclass=Final):
 
         if nn_module_stack_str := metadata.get("nn_module_stack"):
             # Originally serialized to "key,orig_path,type_str"
-            def import_nn_module_stack(key, path, ty):
-                return key, (path, ty)
+            def import_nn_module_stack(key, path, ty, num_calls="0"):
+                return key, (path, ty, int(num_calls))
 
             # Helper function that splits strings by commas except for those
             # encapsulated by parens, which are valid traces.
