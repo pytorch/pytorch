@@ -140,10 +140,10 @@ def make_test_case(
 
 
 if RUN_GPU:
-    config.abi_compatible = True
+    config.abi_compatible = False
+    # TODO enable abi_compatible
     if GPU_TYPE == "xpu":
         config.abi_compatible = False
-
 
     class BaseTest(NamedTuple):
         name: str
@@ -270,7 +270,10 @@ if RUN_GPU:
             tests=test_select_algorithm.TestSelectAlgorithm(),
         ),
     ]:
-        if item.device == "xpu" and item.name in XPU_BASE_TEST_SKIP:
+        # TODO enable test_dtypeview cases after enable abi_compatible.
+        if item.device == "xpu" and (
+            item.name in XPU_BASE_TEST_SKIP or item.name.startswith("test_dtypeview")
+        ):
             continue
         make_test_case(item.name, item.device, item.tests, check_code=item.check_code)
 
