@@ -26,13 +26,13 @@ namespace c10 {
   _(prim, ReductionSizes)            \
   _(prim, Constant)                  \
   _(prim, ChunkSizes)                \
-  _(prim, ConstantMKLDNNTensor)      \
-  _(prim, BroadcastMKLDNNTensors)    \
-  _(prim, MKLDNNGroup)               \
-  _(prim, MKLDNNHardSwish)           \
-  _(prim, MKLDNNHardSigmoid)         \
-  _(prim, MKLDNNHardTanh)            \
-  _(prim, MKLDNNClamp)               \
+  _(prim, ConstantONEDNNTensor)      \
+  _(prim, BroadcastONEDNNTensors)    \
+  _(prim, ONEDNNGroup)               \
+  _(prim, ONEDNNHardSwish)           \
+  _(prim, ONEDNNHardSigmoid)         \
+  _(prim, ONEDNNHardTanh)            \
+  _(prim, ONEDNNClamp)               \
   _(prim, StaticRuntimeCopyOuts)     \
   _(prim, Drop)                      \
   _(prim, Eval)                      \

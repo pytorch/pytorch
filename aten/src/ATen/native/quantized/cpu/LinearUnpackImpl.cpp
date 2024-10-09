@@ -134,9 +134,9 @@ std::tuple<at::Tensor, std::optional<at::Tensor>> PackedLinearWeightFp16::
 }
 #endif // USE_FBGEMM
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 std::tuple<at::Tensor, std::optional<at::Tensor>> PackedLinearWeightsOnednn::unpack() {
   return std::tuple<at::Tensor, std::optional<at::Tensor>>(
       orig_weight_, orig_bias_);
 }
-#endif // #if AT_MKLDNN_ENABLED()
+#endif // #if AT_ONEDNN_ENABLED()

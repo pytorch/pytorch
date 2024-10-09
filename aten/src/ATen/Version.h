@@ -7,7 +7,7 @@ TORCH_API std::string show_config();
 
 TORCH_API std::string get_mkl_version();
 
-TORCH_API std::string get_mkldnn_version();
+TORCH_API std::string get_onednn_version();
 
 TORCH_API std::string get_openmp_version();
 

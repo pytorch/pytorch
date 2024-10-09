@@ -142,7 +142,7 @@ Fast Fourier Transform (torch.fft)
 -  Mike Ruberry (`mruberry <https://github.com/mruberry>`__)
 -  Peter Bell (`peterbell10 <https://github.com/peterbell10>`__)
 
-CPU Performance (Torch Inductor / MKLDNN)
+CPU Performance (Torch Inductor / ONEDNN)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  Mingfei Ma (`mingfeima <https://github.com/mingfeima>`__)
