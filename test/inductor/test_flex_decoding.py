@@ -10,6 +10,7 @@ from unittest.mock import patch
 import torch
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
+from torch.nn.attention.experimental.paged_attention import PagedAttention
 from torch.nn.attention.flex_attention import (
     _create_empty_block_mask,
     _identity,
@@ -17,7 +18,6 @@ from torch.nn.attention.flex_attention import (
     create_block_mask,
     flex_attention,
     noop_mask,
-    PagedAttention,
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -435,8 +435,7 @@ class TestFlexDecoding(InductorTestCase):
         # update cache with k and v
         input_pos = torch.arange(KV_S, device="cuda", dtype=torch.int32)
         batch_idx = torch.arange(KV_B, device="cuda", dtype=torch.int32)
-        paged_attention.assign(batch_idx, input_pos, k, k_cache)
-        paged_attention.assign(batch_idx, input_pos, v, v_cache)
+        paged_attention.assign(batch_idx, input_pos, k, v, k_cache, v_cache)
 
         # convert block mask and score mod
         converted_block_mask = paged_attention.convert_logical_block_mask(block_mask)

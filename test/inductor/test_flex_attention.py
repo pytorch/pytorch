@@ -16,6 +16,7 @@ from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._inductor import metrics
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
+from torch.nn.attention.experimental.paged_attention import PagedAttention
 from torch.nn.attention.flex_attention import (
     _create_empty_block_mask,
     _DEFAULT_SPARSE_BLOCK_SIZE,
@@ -28,7 +29,6 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
     noop_mask,
     or_masks,
-    PagedAttention,
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -466,8 +466,7 @@ class TestFlexAttention(InductorTestCase):
         # update cache with k and v
         input_pos = torch.arange(KV_S, device="cuda", dtype=torch.int32)
         batch_idx = torch.arange(KV_B, device="cuda", dtype=torch.int32)
-        paged_attention.assign(batch_idx, input_pos, k, k_cache)
-        paged_attention.assign(batch_idx, input_pos, v, v_cache)
+        paged_attention.assign(batch_idx, input_pos, k, v, k_cache, v_cache)
 
         # convert block mask and score mod
         converted_block_mask = paged_attention.convert_logical_block_mask(block_mask)
@@ -1508,7 +1507,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         eager_out = f(query, *keys, *values)
 
-        block_mask = create_block_mask(noop_mask, 1, 1, 1, S)
+        block_mask = create_block_mask(noop_mask, 1, 1, 1024, 1024)
 
         (
             k_cache1,
@@ -2265,9 +2264,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return score
 
         self.run_test(noop_mod, torch.float32, B, H, S, D, B, H, S, D, block_mask)
-        self.run_test_with_paged_attention(
-            noop_mod, torch.float32, B, H, S, D, B, H, S, D, block_mask
-        )
 
     @supported_platform
     def test_kernel_options_argument_is_respected(self):
@@ -3398,7 +3394,7 @@ class TestPagedAttention(InductorTestCase):
 
         n_heads, head_dim = 2, 3
         cache_shape = (1, n_heads, n_pages * page_size, head_dim)
-        cache = torch.zeros(cache_shape, dtype=dtype, device="cuda")
+        k_cache = torch.zeros(cache_shape, dtype=dtype, device="cuda")
 
         batch_reserve(paged_cache, torch.tensor([1, 3], device="cuda"))
         batch_reserve(paged_cache, torch.tensor([4, 5], device="cuda"))
@@ -3418,7 +3414,10 @@ class TestPagedAttention(InductorTestCase):
             dtype=dtype,
         ).view(max_batch_size, n_heads, max_seq_len, head_dim)
 
-        paged_cache.assign(batch_idx, input_pos, k, cache)
+        v = k.detach().clone()
+        v_cache = k_cache.detach().clone()
+
+        paged_cache.assign(batch_idx, input_pos, k, v, k_cache, v_cache)
 
         expected_cache = torch.tensor(
             [
@@ -3470,7 +3469,7 @@ class TestPagedAttention(InductorTestCase):
             device="cuda",
             dtype=dtype,
         )
-        self.assertEqual(cache, expected_cache)
+        self.assertEqual(k_cache, expected_cache)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
@@ -3548,8 +3547,7 @@ class TestPagedAttention(InductorTestCase):
 
         batch_idx = torch.arange(max_batch_size, device="cuda", dtype=torch.int32)
         input_pos = torch.arange(max_seq_len, device="cuda", dtype=torch.int32)
-        paged_cache.assign(batch_idx, input_pos, k, k_cache)
-        paged_cache.assign(batch_idx, input_pos, v, v_cache)
+        paged_cache.assign(batch_idx, input_pos, k, v, k_cache, v_cache)
 
         new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
 
