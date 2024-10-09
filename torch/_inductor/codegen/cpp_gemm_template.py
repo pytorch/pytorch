@@ -711,9 +711,9 @@ class CppPackedGemmTemplate(CppTemplate):
                 )
 
             def get_candidates(input_nodes, new_input_nodes):
-                # Only ConstantBuffer like weight and bias might be changed
-                # Even the Inductor IR Node changed, may still share the storage
-                # For example: bias in bfloat16 case which only do the expand
+                # Only Constant Buffer like weight and bias might be changed in GEMM Template.
+                # The Inductor IR Node may changed, but still share the storage. For example:
+                # bias in bfloat16 case which only do the expand
                 return [
                     node
                     for node in input_nodes
