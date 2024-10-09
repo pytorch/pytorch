@@ -234,12 +234,16 @@ if RUN_CPU:
                 or torch.ops.mkldnn._is_mkldnn_fp16_supported()
             ),
         ),
-        BaseTest(
-            "test_lstm_packed_change_input_sizes",
-            "cpu",
-            test_cpu_repro.CPUReproTests(),
-            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
-        ),
+        *[
+            BaseTest(
+                func,
+                "",
+                test_cpu_repro.CPUReproTests(),
+                condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
+            )
+            for func in dir(test_cpu_repro.CPUReproTests())
+            if func.startswith("test_lstm_packed_change_input_sizes")
+        ],
         BaseTest("test_max_pool2d6"),
         BaseTest("test_mm_views"),
         BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
