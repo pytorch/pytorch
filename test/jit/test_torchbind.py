@@ -4,7 +4,6 @@ import copy
 import io
 import os
 import sys
-import unittest
 from typing import Optional
 
 import torch
@@ -15,14 +14,8 @@ from torch.testing._internal.common_utils import skipIfTorchDynamo
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import (
-    find_library_location,
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
-    IS_WINDOWS,
-)
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
 
 if __name__ == "__main__":
@@ -36,12 +29,7 @@ if __name__ == "__main__":
 @skipIfTorchDynamo("skipping as a precaution")
 class TestTorchbind(JitTestCase):
     def setUp(self):
-        if IS_SANDCASTLE or IS_MACOS or IS_FBCODE:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        lib_file_path = find_library_location("libtorchbind_test.so")
-        if IS_WINDOWS:
-            lib_file_path = find_library_location("torchbind_test.dll")
-        torch.ops.load_library(str(lib_file_path))
+        init_torchbind_implementations()
 
     def test_torchbind(self):
         def test_equality(f, cmp_key):
@@ -443,6 +431,30 @@ class TestTorchbind(JitTestCase):
             return torch.classes._TorchScriptTesting._StaticMethod.staticMethod(inp)
 
         self.checkScript(fn, (1,))
+
+    def test_clone(self):
+        tq = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        tq_0 = tq._clone()
+        tq.push(torch.zeros(2, 2))
+        tq.push(torch.ones(2, 2))
+        tq_1 = tq._clone()
+        tq.push(torch.ones(2, 2) * 2)
+        self.assertEqual(tq_0.size(), 0)
+        self.assertEqual(tq_1.size(), 2)
+        self.assertEqual(tq.size(), 3)
+
+        foo = torch.classes._TorchScriptTesting._Foo(1, 2)
+        foo_0 = foo._clone()
+        foo.increment(1)
+        foo_1 = foo._clone()
+        foo.increment(1)
+        self.assertEqual(foo_0.add(1), 3)
+        self.assertEqual(foo_1.add(1), 5)
+        self.assertEqual(foo.add(1), 7)
 
     def test_default_args(self):
         def fn() -> int:
