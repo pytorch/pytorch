@@ -78,10 +78,10 @@ class TestAccelerator(TestCase):
         s1 = torch.cuda.Stream() if torch.cuda.is_available() else torch.xpu.Stream()
         s2 = torch.cuda.Stream() if torch.cuda.is_available() else torch.xpu.Stream()
         torch.acc.set_stream(s1)
-        self.assertEqual(torch.acc.current_stream(), s1)
+        self.assertEqual(torch.acc.current_stream().stream_id, s1.stream_id)
         with torch.acc.StreamGuard(s2):
-            self.assertEqual(torch.acc.current_stream(), s2)
-        self.assertEqual(torch.acc.current_stream(), s1)
+            self.assertEqual(torch.acc.current_stream().stream_id, s2.stream_id)
+        self.assertEqual(torch.acc.current_stream().stream_id, s1.stream_id)
         if torch.cuda.is_available():
             with self.assertRaisesRegex(
                 RuntimeError, "doesn't match the current accelerator"
