@@ -39,7 +39,8 @@ Example config:
     experiments:
       lf:
         rollout_percent: 25
-
+        all_branches: false
+        default: true
     ---
 
     # Opt-ins:
@@ -57,7 +58,7 @@ import os
 import random
 from argparse import ArgumentParser
 from logging import LogRecord
-from typing import Any, Dict, Iterable, List, NamedTuple, Tuple
+from typing import Any, Dict, Iterable, List, NamedTuple, Tuple, Set
 
 import yaml
 from github import Auth, Github
@@ -85,6 +86,9 @@ class Experiment(NamedTuple):
     )
     all_branches: bool = (
         False  # If True, the experiment is also enabled on the exception branches
+    )
+    default: bool = (
+        True  # If True, the experiment is enabled by default for all queries
     )
 
     # Add more fields as needed
@@ -140,6 +144,10 @@ def set_github_output(key: str, value: str) -> None:
         f.write(f"{key}={value}\n")
 
 
+def _str_comma_separated_to_set(value: str) -> Set[str]:
+    return value.strip(" \n\t").split(",").map(str.strip).filter(lambda itm: itm != "").set()
+
+
 def parse_args() -> Any:
     parser = ArgumentParser("Get dynamic rollout settings")
     parser.add_argument("--github-token", type=str, required=True, help="GitHub token")
@@ -173,6 +181,13 @@ def parse_args() -> Any:
         type=str,
         required=True,
         help="Current GitHub ref type, branch or tag",
+    )
+    parser.add_argument(
+        "--check-experiments",
+        type=_str_comma_separated_to_set,
+        required=False,
+        default="",
+        help="comma separated list of experiments to check, if omitted all experiments marked with default=True are checked"
     )
 
     return parser.parse_args()
@@ -348,6 +363,7 @@ def get_runner_prefix(
     rollout_state: str,
     workflow_requestors: Iterable[str],
     branch: str,
+    check_experiments: Set[str],
     is_canary: bool = False,
 ) -> str:
     settings = parse_settings(rollout_state)
@@ -356,6 +372,14 @@ def get_runner_prefix(
     fleet_prefix = ""
     prefixes = []
     for experiment_name, experiment_settings in settings.experiments.items():
+        if check_experiments
+            if experiment_name not in check_experiments:
+                log.info(f"Skipping experiment '{experiment_name}', as it is not in the check_experiments list: {", ".join(check_experiments)}")
+                continue
+        elif not experiment_settings.default:
+            log.info(f"Skipping experiment '{experiment_name}', as it is not a default experiment")
+            continue
+
         enabled = False
 
         if not experiment_settings.all_branches and is_exception_branch(branch):
@@ -444,6 +468,7 @@ def main() -> None:
             rollout_state,
             (args.github_issue_owner, username),
             args.github_branch,
+            args.check_experiments,
             is_canary,
         )
 

@@ -3,6 +3,11 @@ name: Check whether the workflow owner can use ARC runners
 on:
   workflow_call:
     inputs:
+      check_experiments:
+        required: false
+        type: string
+        description: |
+          List of experiments for this workfow. If not defined, all default experiments are included.
       triggering_actor:
         required: true
         type: string
@@ -538,4 +543,5 @@ jobs:
             --github-actor "$TRIGGERING_ACTOR" \
             --github-issue-owner "$ISSUE_OWNER" \
             --github-ref-type "$curr_ref_type" \
-            --github-repo "$GITHUB_REPOSITORY"
+            --github-repo "$GITHUB_REPOSITORY" \
+            --check-experiments "$" \
