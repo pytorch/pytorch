@@ -6978,6 +6978,7 @@ class _WaitKernel(_CollectiveKernel):
         packed.mutation_outputs.append(
             MutationOutput(NoneLayout(inp.get_device()), inp, packed)
         )
+        packed.outputs = [packed]
 
     def get_read_writes(self):
         read_writes = super().get_read_writes()
