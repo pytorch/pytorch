@@ -826,7 +826,7 @@ class FSDPParam:
         self._sharded_param_data = local_tensor.view(-1)
         assert isinstance(self.sharded_param, DTensor)  # mypy
         if updated_local_tensor:
-            # Only change the local tensor object if needed        
+            # Only change the local tensor object if needed
             self.sharded_param._local_tensor = local_tensor.narrow(
                 dim=shard_dim, start=0, length=length
             )
