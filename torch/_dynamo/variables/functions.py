@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import builtins
 import collections
 import functools
 import inspect
@@ -152,6 +153,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         assert isinstance(
             fn, (types.FunctionType, torch.jit.ScriptFunction)
         ), f"expected FunctionType found {typestr(fn)} {fn}"
+        # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
+        # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
         # unpack @torch._dynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
         self.fn: types.FunctionType = fn
@@ -320,7 +323,20 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), args, kwargs
             )
-
+        if (
+            tx.output.current_tracer.under_activation_checkpoint
+            and not tx.output.current_tracer.allow_side_effects_under_checkpoint
+        ):
+            try:
+                from torch.distributed._composable.fsdp._fsdp_state import FSDPState
+            except Exception:
+                FSDPState = None
+            if FSDPState is not None and self.fn in [
+                FSDPState._pre_forward,
+                FSDPState._post_forward,
+            ]:
+                with torch._dynamo.side_effects.allow_side_effects_under_checkpoint(tx):
+                    return super().call_function(tx, args, kwargs)
         return super().call_function(tx, args, kwargs)
 
 
@@ -625,9 +641,6 @@ class SkipFunctionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
         self.reason = reason
-
-    def python_type(self):
-        return type(self.value)
 
     def as_python_constant(self):
         return self.value
@@ -1001,6 +1014,36 @@ class PolyfilledFunctionVariable(VariableTracker):
             )
             return SourcelessBuilder.create(tx, result)
 
+        # Special case for sum on tuple/list of ints
+        if (
+            self.fn is builtins.sum
+            and len(args) == 1
+            and not kwargs
+            and isinstance(args[0], (variables.ListVariable, variables.TupleVariable))
+            and all(
+                (isinstance(x, variables.ConstantVariable) and isinstance(x.value, int))
+                or (isinstance(x, variables.SymNodeVariable) and x.python_type() is int)
+                for x in args[0].items
+            )
+        ):
+            return variables.SymNodeVariable.create(
+                tx,
+                tx.output.create_proxy(
+                    "call_function",
+                    torch.sym_sum,
+                    (tuple(a.as_proxy() for a in args[0].items),),
+                    {},
+                ),
+                sym_num=torch.sym_sum(
+                    [
+                        x.value
+                        if isinstance(x, variables.ConstantVariable)
+                        else x.sym_num
+                        for x in args[0].items
+                    ]
+                ),
+            )
+
         traceable_function_variable = SourcelessBuilder.create(tx, self.traceable_fn)
         return traceable_function_variable.call_function(tx, args, kwargs)
 
@@ -1134,3 +1177,12 @@ class TritonKernelVariable(VariableTracker):
 
         # Bail out to parent's implementation
         return super().call_method(tx, name, args, kwargs)
+
+    def specialize_symbolic(self, arg: Any) -> Any:
+        from .constant import ConstantVariable
+        from .tensor import SymNodeVariable
+
+        # See [Note: Specialize tl.constexpr args in user-defined triton kernels]
+        if isinstance(arg, SymNodeVariable):
+            return ConstantVariable.create(arg.evaluate_expr())
+        return arg

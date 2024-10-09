@@ -6,7 +6,7 @@ from typing import Any, cast, Dict, Iterable, List, NoReturn, Optional, Type, Un
 import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
-from torch.distributed._tensor import DeviceMesh
+from torch.distributed.tensor import DeviceMesh
 from torch.distributed.utils import _get_root_modules
 
 from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
@@ -112,6 +112,10 @@ def fully_shard(
     elif mesh.ndim == 1:
         mesh_info = FSDPMeshInfo(mesh, shard_mesh_dim=0)
     else:
+        if mesh.mesh_dim_names is None:
+            raise AssertionError(
+                "Please init the 2D mesh for HSDP with mesh_dim_names specified"
+            )
         mesh_info = HSDPMeshInfo(mesh, shard_mesh_dim=1, replicate_mesh_dim=0)
     device = _get_device_from_mesh(mesh)
     post_forward_mesh_info = _get_post_forward_mesh_info(
@@ -324,7 +328,7 @@ class FSDPModule:
             module._get_fsdp_state() for module in modules
         ]
 
-    def set_post_optim_event(self, event: torch.cuda.Event) -> None:
+    def set_post_optim_event(self, event: torch.Event) -> None:
         """
         Sets a post-optimizer-step event for the root FSDP module to wait the
         all-gather streams on.
@@ -338,7 +342,7 @@ class FSDPModule:
         called with a new event each iteration.
 
         Args:
-            event (torch.cuda.Event): Event recorded after the optimizer step
+            event (torch.Event): Event recorded after the optimizer step
                 to wait all-gather streams on.
         """
         self._get_fsdp_state()._state_ctx.post_optim_event = event
@@ -357,6 +361,25 @@ class FSDPModule:
             mul_factor = 1.0 / float(factor)
             reduce_op = torch.distributed._make_nccl_premul_sum(mul_factor)
             fsdp_param_group.reduce_scatter_reduce_op = reduce_op
+
+    def _set_unshard_async_op(self, async_op: bool):
+        """
+        Sets whether to use ``async_op=True`` or ``False`` for the pre-forward
+        and pre-backward unshard op. This defaults to ``False`` but can be set
+        to ``True`` with this method.
+
+        Setting this to ``True`` allows the all-gather allocations to happen in
+        the default stream, avoiding inter-stream memory fragmentation.
+        However, you must use explicit prefetching (e.g. via :meth:`unshard`)
+        in forward to still get overlap, and the pre-all-gather ops like dtype
+        casting and copy-in will not overlap with compute.
+        """
+        self_module = cast(nn.Module, self)
+        for module in self_module.modules():
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                if fsdp_param_group := state._fsdp_param_group:
+                    fsdp_param_group.unshard_async_op = async_op
 
     def _get_fsdp_state(self) -> FSDPState:
         if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:

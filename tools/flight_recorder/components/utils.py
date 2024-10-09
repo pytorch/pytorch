@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import argparse
 import math
 from typing import Any, Dict, List, Set, Tuple
 
@@ -174,7 +175,7 @@ def check_size_alltoall(alltoall_cases: List[Dict[str, Any]]) -> Tuple[bool, int
     for e in alltoall_cases:
         input_numel += math.prod(e["input_sizes"][0])
         output_numel += math.prod(e["output_sizes"][0])
-    return input_numel == output_numel, input_numel, output_numel
+    return input_numel != output_numel, input_numel, output_numel
 
 
 def find_coalesced_group(
@@ -214,21 +215,35 @@ def just_print_entries(
     _groups: Dict[str, Group],
     _memberships: Dict[str, Set[Any]],
     _pg_guids: Dict[Tuple[str, int], str],
+    args: argparse.Namespace,
 ) -> None:
     rows = []
     ranks = sorted(all_entries.keys())
-    headers = [f"Rank {rank}" for rank in ranks]
+    headers = [
+        f"Rank {rank}"
+        for rank in ranks
+        if args.selected_ranks is None or rank in args.selected_ranks
+    ]
     progress = True
     while progress:
         progress = False
         row = []
         for rank in ranks:
+            if args.selected_ranks is not None and rank not in args.selected_ranks:
+                continue
             if len(all_entries[rank]) == 0:
                 row.append("")
             else:
                 entry = all_entries[rank].pop(0)
                 pg_name = _pg_guids[(entry["process_group"][0], rank)]
-                row.append(str(Op(entry, _memberships, pg_name)))
+                if (
+                    args.pg_filters is None
+                    or entry["process_group"][1] in args.pg_filters
+                    or entry["process_group"][0] in args.pg_filters
+                ):
+                    row.append(str(Op(entry, _memberships, pg_name)))
+                else:
+                    row.append("")
                 progress = True
         if progress:
             rows.append(row)
@@ -248,23 +263,29 @@ def check_no_missing_dump_files(
     ), f"Missing dump files from ranks {all_ranks - dumps_ranks}"
 
 
-def check_version(versions: Dict[str, Any]) -> None:
-    for rank, version in versions.items():  # noqa: PERF102
-        major, minor = map(int, version.split("."))
-        # assert major == 2, f"Rank {rank} unsupported version {version}"
-        # assert minor >= 0, f"Rank {rank} unsupported version {version}"
+def check_version(version_by_ranks: Dict[str, str], version: str) -> None:
+    for rank, v in version_by_ranks.items():
+        assert (
+            v == version
+        ), f"Rank {rank} has different version {v} from the given version {version}"
 
 
-def sort_trace_from_beginning(
+def get_version_detail(version: str) -> Tuple[int, int]:
+    version = version.split(".")
+    assert len(version) == 2, f"Invalid version {version}"
+    major, minor = map(int, version)
+    return major, minor
+
+
+def align_trace_from_beginning(
     entries: Dict[int, List[Dict[str, Any]]]
 ) -> Dict[int, List[Dict[str, Any]]]:
     """
-    Sorts the trace entries by record ID for entries.
+    Align the trace entries by record ID for entries.
     This function takes a dictionary of rank names to lists of trace entries as input.
     Each trace entry is a dictionary containing information about a collective operation,
     including its unique identifier (`record_id` is monotonically increasing as we write into the ring buffer).
-    The function first sorts the entries in each rank by their `record_id` values.
-    Then, it finds the largest starting point across all ranks by taking the maximum
+    The function finds the largest starting point across all ranks by taking the maximum
     `record_id` value of the first entry in each rank. Finally, it filters out any
     entries with `record_id` values less than the maximum starting point.
     The function returns the updated dictionary of sorted and filtered trace entries.

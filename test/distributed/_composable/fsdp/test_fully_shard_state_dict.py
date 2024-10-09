@@ -3,6 +3,7 @@
 import copy
 import functools
 import unittest
+from contextlib import nullcontext
 from typing import Dict
 
 import torch
@@ -40,7 +41,11 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
         )
         if self.world_size % 2 != 0:
             return
-        hsdp_mesh = init_device_mesh("cuda", (self.world_size // 2, 2))
+        hsdp_mesh = init_device_mesh(
+            "cuda",
+            (self.world_size // 2, 2),
+            mesh_dim_names=("dp_replicate", "dp_shard"),
+        )
         self.run_subtests(
             {"mlp_dim": [2, 3, 4, 5], "mesh": [hsdp_mesh]},
             self._test_dp_state_dict_save_load,
@@ -77,8 +82,21 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_dp_state_dict_cpu_offload(self):
+        self.run_subtests(
+            {
+                "offload_policy": [
+                    CPUOffloadPolicy(pin_memory=True),
+                    CPUOffloadPolicy(pin_memory=False),
+                ],
+                "cpu_state_dict": [True, False],
+            },
+            self._test_dp_state_dict_cpu_offload,
+        )
+
+    def _test_dp_state_dict_cpu_offload(
+        self, offload_policy: CPUOffloadPolicy, cpu_state_dict: bool
+    ):
         mlp_dim = 4
-        offload_policy = CPUOffloadPolicy(pin_memory=True)
         torch.manual_seed(42)
         with torch.device("meta"):
             model = nn.Sequential(
@@ -97,6 +115,8 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
             sharded_tensor = distribute_tensor(
                 full_tensor, dtensor.device_mesh, dtensor.placements
             )
+            if cpu_state_dict:
+                sharded_tensor = sharded_tensor.cpu()
             state_dicts.append({name: sharded_tensor})
 
         # check that we can load with some parameters still on meta device
@@ -105,11 +125,20 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
 
         # lazy init without error
         inp = torch.rand((mlp_dim, mlp_dim), device="cuda")
-        model(inp)
 
-        state_dict = model.state_dict()
-        for name, dtensor in state_dict.items():
-            self.assertEqual(dtensor.device.type, "cpu")
+        context = (
+            self.assertRaisesRegex(
+                RuntimeError,
+                r"Found following parameters on non-CPU device: \[\('0.weight', device\(type='cuda'",
+            )
+            if not cpu_state_dict
+            else nullcontext()
+        )
+        with context:
+            model(inp).sum()
+            state_dict = model.state_dict()
+            for name, dtensor in state_dict.items():
+                self.assertEqual(dtensor.device.type, "cpu")
 
     def test_2d_state_dict_correctness(self):
         dp_size = 2

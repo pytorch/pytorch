@@ -197,6 +197,72 @@ PyObject* THXPModule_emptyCache(PyObject* self, PyObject* noargs) {
   Py_RETURN_NONE;
 }
 
+PyObject* THXPModule_memoryStats(PyObject* self, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to memory_stats");
+  const auto device_index = THPUtils_unpackDeviceIndex(arg);
+
+  using c10::CachingDeviceAllocator::DeviceStats;
+  using c10::CachingDeviceAllocator::Stat;
+  using c10::CachingDeviceAllocator::StatArray;
+  using c10::CachingDeviceAllocator::StatType;
+
+  const auto statToDict = [](const Stat& stat) {
+    py::dict dict;
+
+    dict["current"] = stat.current;
+    dict["peak"] = stat.peak;
+    dict["allocated"] = stat.allocated;
+    dict["freed"] = stat.freed;
+    return dict;
+  };
+
+  const auto statArrayToDict = [=](const StatArray& statArray) {
+    const std::array<const char*, static_cast<size_t>(StatType::NUM_TYPES)>
+        statTypeNames = {"all", "small_pool", "large_pool"};
+    py::dict dict;
+    for (const auto i : c10::irange(statTypeNames.size())) {
+      dict[statTypeNames[i]] = statToDict(statArray[i]);
+    }
+    return dict;
+  };
+
+  const DeviceStats stats =
+      c10::xpu::XPUCachingAllocator::getDeviceStats(device_index);
+
+  py::dict result;
+  result["allocated_bytes"] = statArrayToDict(stats.allocated_bytes);
+  result["reserved_bytes"] = statArrayToDict(stats.reserved_bytes);
+  result["active_bytes"] = statArrayToDict(stats.active_bytes);
+  result["requested_bytes"] = statArrayToDict(stats.requested_bytes);
+
+  return result.release().ptr();
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THXPModule_resetPeakMemoryStats(PyObject* self, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkLong(arg), "invalid argument to reset_peak_memory_stats");
+  const auto device_index = THPUtils_unpackDeviceIndex(arg);
+  c10::xpu::XPUCachingAllocator::resetPeakStats(device_index);
+  END_HANDLE_TH_ERRORS
+  Py_RETURN_NONE;
+}
+
+PyObject* THXPModule_resetAccumulatedMemoryStats(
+    PyObject* self,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkLong(arg),
+      "invalid argument to reset_accumulated_memory_stats");
+  const auto device_index = THPUtils_unpackDeviceIndex(arg);
+  c10::xpu::XPUCachingAllocator::resetAccumulatedStats(device_index);
+  END_HANDLE_TH_ERRORS
+  Py_RETURN_NONE;
+}
+
 // XPU module initialization
 
 static void registerXpuDeviceProperties(PyObject* module) {
@@ -353,6 +419,15 @@ static struct PyMethodDef _THXPModule_methods[] = {
      nullptr},
     {"_xpu_synchronize", THXPModule_xpuSynchronize, METH_O, nullptr},
     {"_xpu_emptyCache", THXPModule_emptyCache, METH_NOARGS, nullptr},
+    {"_xpu_memoryStats", THXPModule_memoryStats, METH_O, nullptr},
+    {"_xpu_resetAccumulatedMemoryStats",
+     THXPModule_resetAccumulatedMemoryStats,
+     METH_O,
+     nullptr},
+    {"_xpu_resetPeakMemoryStats",
+     THXPModule_resetPeakMemoryStats,
+     METH_O,
+     nullptr},
     {nullptr}};
 
 PyMethodDef* THXPModule_methods() {
