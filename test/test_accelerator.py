@@ -15,7 +15,6 @@ from torch.testing._internal.common_utils import (
 
 
 if not TEST_ACCELERATOR:
-    assert torch.acc.current_accelerator() == "cpu" "No available accelerator detected."
     print("No available accelerator detected, skipping tests", file=sys.stderr)
     TestCase = NoTest  # noqa: F811
 
