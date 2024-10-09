@@ -1,0 +1,24 @@
+# Python dependencies required for development
+astunparse
+expecttest>=0.2.1
+hypothesis
+numpy
+psutil
+pyyaml
+requests
+# Setuptools>=74.0.0 stopped support for directly using private funcs(_msvccompiler)
+# and consolidated all compiler logic in distutils used in Pytorch build, so older
+# is required until pytorch build not refactored to work for latest setuptools.
+setuptools<=72.1.0
+types-dataclasses
+typing-extensions>=4.8.0
+sympy==1.12.1 ; python_version == "3.8"
+sympy==1.13.1 ; python_version >= "3.9"
+filelock
+networkx
+jinja2
+fsspec
+lintrunner
+ninja
+packaging
+optree>=0.13.0
