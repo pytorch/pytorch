@@ -292,7 +292,7 @@ at::BlasBackend Context::blasPreferredBackend() {
     static const bool hipblaslt_unsupported = []() {
       static const std::vector<std::string> archs = {
           "gfx90a", "gfx940", "gfx941", "gfx942",
-#if ROCM_VERSION >= 60200
+#if ROCM_VERSION >= 60300
           "gfx1100", "gfx1101"
 #endif
       };
