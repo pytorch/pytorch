@@ -86,6 +86,7 @@ jobs:
             docker-image-name: libtorch-cxx11-builder-rocm${{matrix.rocm_version}}
             docker-build-dir:  .ci/docker/libtorch
             always-rebuild: true
+            force-push: true
             push: true
       - name: Authenticate if WITH_PUSH_ROCM
         if: env.WITH_PUSH_ROCM == 'true'
