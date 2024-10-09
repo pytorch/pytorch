@@ -42,6 +42,7 @@ IF (APL_FOUND)
   MESSAGE(STATUS "Found APL library: ${APL_LIB_DIR}")
   message(STATUS "APL_LIBRARIES: ${APL_LIBRARIES}")
   SET(CMAKE_REQUIRED_LIBRARIES ${APL_LIBRARIES})
+  include(CheckCSourceRuns)
   CHECK_C_SOURCE_RUNS("
 #include <stdlib.h>
 #include <stdio.h>
