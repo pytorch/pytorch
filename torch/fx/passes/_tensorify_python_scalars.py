@@ -119,7 +119,7 @@ def tensorify_python_scalars(
             # This is guaranteed to be populated by invariant established by
             # insert_deferred_runtime_asserts
             expr_to_tensor_proxy[expr] = torch.ops.aten.scalar_tensor.default(
-                expr_to_sym_proxy[expr].node
+                expr_to_sym_proxy[expr]
             )
 
         # cache constants, why not

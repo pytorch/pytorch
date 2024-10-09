@@ -561,8 +561,7 @@ class MetaProxy(Proxy):
                 *[a.node.meta["val"] if isinstance(a, Proxy) else a for a in args],
                 **kwargs
             )
-
-        return MetaProxy(proxy.node, proxy.tracer)
+        return MetaProxy(proxy.node, proxy.tracer, meta_proxy.fake_mode)
 
 @compatibility(is_backward_compatible=True)
 class Attribute(Proxy):
