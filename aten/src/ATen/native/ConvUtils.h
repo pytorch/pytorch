@@ -1,4 +1,5 @@
 #pragma once
+#include <ATen/div_rtn.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
@@ -207,6 +208,62 @@ inline void convolution_shape_check(
   // TODO: check that output->size() matches output_sizes
   // TODO: check that weight matches output->sizes()
   checkSameDim(c, input, output);
+
+  // check common-case 2D and expanded 1D shape
+  // TODO: handle dilation check
+  const int ndim = input->dim();
+  if (ndim == 4 && dilation[0] == 1 && dilation[1] == 1) {
+    constexpr int dim_height = 2;
+    constexpr int dim_width  = 3;
+    const int64_t input_height = input->size(dim_height);
+    const int64_t input_width = input->size(dim_width);
+    const int64_t exact_input_height = input_height + 2 * padding[0];
+    const int64_t exact_input_width = input_width + 2 * padding[1];
+    const int64_t kernel_height = weight->size(2);
+    const int64_t kernel_width = weight->size(3);
+
+    TORCH_CHECK(
+        exact_input_height >= kernel_height && exact_input_width >= kernel_width,
+        "Calculated padded input size per channel: (",
+        exact_input_height,
+        " x ",
+        exact_input_width,
+        "). ",
+        "Kernel size: (",
+        kernel_height,
+        " x ",
+        kernel_width,
+        "). Kernel size can't be greater than actual input size");
+
+    const int64_t output_height =
+        div_rtn<int64_t>(exact_input_height - kernel_height, stride[0]) + 1;
+    const int64_t output_width =
+        div_rtn<int64_t>(exact_input_width - kernel_width, stride[1]) + 1;
+
+    TORCH_CHECK(
+        output_width >= 1 && output_height >= 1,
+        "Given input size per channel: (",
+        input_height,
+        " x ",
+        input_width,
+        "). "
+        "Calculated output size per channel: (",
+        output_height,
+        " x ",
+        output_width,
+        "). Output size is too small");
+
+    TORCH_CHECK(output->size(dim_height) == output_height,
+	"Got output/output grad height: ",
+	output->size(dim_height),
+	", but expected: ",
+	output_height);
+    TORCH_CHECK(output->size(dim_width) == output_width,
+        "Got output/output grad width: ",
+	output->size(dim_width),
+	", but expected: ",
+	output_width);
+  }
 }
 
 // NB: conv_output_size and conv_input_size are not bijections,
