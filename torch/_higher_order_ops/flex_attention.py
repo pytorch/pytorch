@@ -69,8 +69,8 @@ def _permute_strides(out: torch.Tensor, query_strides: Tuple[int, ...]) -> torch
     return new_out
 
 
-def register_zeros_and_scatter() -> None:
-    """Designed to be called once per process. As a way to lazily register the custom op"""
+if not torch._running_with_deploy():
+    """torch.library.custom_op does not work with torch.deploy/multipy"""
 
     @torch.library.custom_op("FlexAttentionLib::zeros_and_scatter", mutates_args=())  # type: ignore[misc]
     def zeros_and_scatter(
@@ -110,14 +110,10 @@ def register_zeros_and_scatter() -> None:
 
 
 class ModIndex(torch.autograd.Function):
-    _is_registered = False
     generate_vmap_rule = True
 
     @staticmethod
     def forward(x: Tensor, indices: List[Tensor]) -> Tensor:
-        if not ModIndex._is_registered:
-            register_zeros_and_scatter()
-            ModIndex._is_registered = True
         return torch.ops.aten.index(x, indices)
 
     @staticmethod
