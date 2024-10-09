@@ -11,6 +11,7 @@ from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
     _maybe_reenter_make_fx,
+    clone_outputs_aliasing_inputs,
     get_dummy_aot_autograd_config,
     prepare_fw_with_masks,
     reenter_make_fx,
@@ -54,18 +55,26 @@ def trace_joint_graph(fn, fw_inputs, fw_outputs):
 
     dummy_aot_config = get_dummy_aot_autograd_config()
 
-    primals = list(fw_inputs)
+    def joint_fn(*primals_and_tangents):
+        primals = primals_and_tangents[: len(fw_inputs)]
+        tangents = primals_and_tangents[len(fw_inputs) :]
 
+        fw_outs, grads = create_joint(
+            prepare_fw_with_masks(fn), aot_config=dummy_aot_config
+        )(primals, tangents)
+
+        maybe_clone = clone_outputs_aliasing_inputs(primals_and_tangents)
+
+        return pytree.tree_map(maybe_clone, list(fw_outs) + grads)
+
+    primals = list(fw_inputs)
     # This assumes that the tangent strides match fw_outputs strides. Check the
-    # InvokeSubgraphAutogradOp backward op.
+    # InvokeSubgraphAutogradOp backward op for the contiguous call.
     tangents = [_from_fun(out) for out in fw_outputs]
 
-    joint_fn = create_joint(prepare_fw_with_masks(fn), aot_config=dummy_aot_config)
+    joint_operands = primals + tangents
 
-    # TODO(anijain2305) - cond uses clone_outputs_aliasing_inputs. Investigate why we need it?
-
-    # Signature of joint_fn is (primals, tangents) -> (fw_outs, grads)
-    return _maybe_reenter_make_fx(joint_fn)(primals, tangents)
+    return _maybe_reenter_make_fx(joint_fn)(*joint_operands)
 
 
 def create_fw_bw_graph(subgraph, operands):
@@ -94,7 +103,7 @@ def create_fw_bw_graph(subgraph, operands):
                 fw_inputs,
                 fw_outputs,
             )
-            return fw_graph, bw_graph
+            return fw_graph, bw_graph, len(fw_outputs)
 
 
 class InvokeSubgraphAutogradOp(torch.autograd.Function):
@@ -104,10 +113,11 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(ctx, fw_graph, bw_graph, identifier, *operands):
+    def forward(ctx, fw_graph, bw_graph, identifier, num_fw_outs, *operands):
         ctx._fw_graph = fw_graph
         ctx._bw_graph = bw_graph
         ctx._identifier = identifier
+        ctx._num_fw_outs = num_fw_outs
 
         with torch._C._AutoDispatchBelowAutograd():
             out = invoke_subgraph(
@@ -121,18 +131,23 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, *grad_outs):
-        # bw_graph is a joint graph with signature (primals, tangents) and returns (fw_outs, grads)
         bw_graph = ctx._bw_graph
         identifier = ctx._identifier
         primals = ctx.saved_tensors
+        num_fw_outs = ctx._num_fw_outs
 
         # While tracing we made the assumption that tangents are contiguous. So,
         # force the grad_outs to be contiguous.
-        contiguous_grad_outs = [o.contiguous() for o in grad_outs]
-        _, grads = invoke_subgraph(
-            bw_graph, f"___backward_{identifier}", (primals, contiguous_grad_outs)
-        )
-        return None, None, None, *grads
+        contiguous_grad_outs = tuple([o.contiguous() for o in grad_outs])
+
+        # bw_graph is a joint graph with signature (*primals_and_tangents) and
+        # returns (*fw_outs_and_grads). To get the grads, we use the num_fw_outs
+        # to extract the grads.
+        primals_and_tangents = primals + contiguous_grad_outs
+        grads = invoke_subgraph(
+            bw_graph, f"___backward_{identifier}", primals_and_tangents
+        )[num_fw_outs:]
+        return None, None, None, None, *grads
 
 
 @invoke_subgraph.py_impl(DispatchKey.CompositeExplicitAutograd)
@@ -160,9 +175,11 @@ def invoke_subgraph_autograd(subgraph, identifier, operands):
         with torch._C._AutoDispatchBelowAutograd():
             return invoke_subgraph(subgraph, identifier, operands)
 
-    fw_graph, bw_graph = create_fw_bw_graph(subgraph, operands)
+    fw_graph, bw_graph, num_fw_outs = create_fw_bw_graph(subgraph, operands)
     # TODO(anijain2305) - Implement caching of autograd function op.
-    return InvokeSubgraphAutogradOp.apply(fw_graph, bw_graph, identifier, *operands)
+    return InvokeSubgraphAutogradOp.apply(
+        fw_graph, bw_graph, identifier, num_fw_outs, *operands
+    )
 
 
 @invoke_subgraph.py_functionalize_impl
