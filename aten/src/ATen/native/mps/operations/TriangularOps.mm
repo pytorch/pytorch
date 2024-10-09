@@ -344,9 +344,8 @@ Tensor tril_indices_mps(int64_t row,
   if (tril_size <= 0) {
     return tensor;
   }
- auto m_first_row = offset > 0 ?
-    std::min<int64_t>(col, 1 + offset) : // upper bounded by col
-    row + offset > 0; // either 0 or 1
+  auto m_first_row = offset > 0 ? std::min<int64_t>(col, 1 + offset) : // upper bounded by col
+      row + offset > 0; // either 0 or 1
   auto trapezoid_row_offset = std::max<int64_t>(0, -offset);
   auto rectangle_row_offset = trapezoid_row_offset + col - m_first_row + 1;
   int64_t rectangle_size = 0;

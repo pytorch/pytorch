@@ -503,7 +503,9 @@ bool canSliceViewTensor(const TensorBase& src, MPSShape* mpsShape) {
   return true;
 }
 
-MPSGraphTensorData* getMPSGraphTensorDataForView(const TensorBase& src, MPSShape* mpsShape, const MPSDataType mpsDataType) {
+MPSGraphTensorData* getMPSGraphTensorDataForView(const TensorBase& src,
+                                                 MPSShape* mpsShape,
+                                                 const MPSDataType mpsDataType) {
   IntArrayRef src_base_shape = getIMPSAllocator()->getBufferShape(src.storage().data());
   size_t src_ndim_base = src_base_shape.size();
   std::vector<int64_t> src_view_shape = getViewShape(src, mpsShape, false);
