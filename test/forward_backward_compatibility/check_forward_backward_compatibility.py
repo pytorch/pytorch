@@ -26,8 +26,9 @@ logging.basicConfig(level=logging.INFO, format=FORMAT)
 #    `python test/forward_backward_compatibility/check_forward_backward_compatibility.py --existing-schemas nightly_schemas.txt`
 
 # The date specifies how long the allowlist exclusion should apply to. Note that core ATen opset
-# (https://pytorch.org/docs/stable/torch.compiler_ir.html#core-aten-ir) is guaranteed to be BC and hence the allowlist
-# does not apply (or the date is always arbitrarily far for core ATen ops).
+# (https://pytorch.org/docs/stable/torch.compiler_ir.html#core-aten-ir) is guaranteed to be BC, based on this policy
+# (https://dev-discuss.pytorch.org/t/core-aten-opset-backward-forward-compatibility-policy/1772) and hence the
+# allowlist does not apply (or the date is always arbitrarily far for core ATen ops).
 #
 #   - If we NEVER give BC guarantee for an operator, you can put the
 #     date arbitrarily far in the future.
