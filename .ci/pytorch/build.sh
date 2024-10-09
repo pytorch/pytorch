@@ -66,11 +66,11 @@ fi
 if ! which conda; then
   # In ROCm CIs, we are doing cross compilation on build machines with
   # intel cpu and later run tests on machines with amd cpu.
-  # Also leave out two builds to make sure non-mkldnn builds still work.
+  # Also leave out two builds to make sure non-onednn builds still work.
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-    export USE_MKLDNN=1
+    export USE_ONEDNN=1
   else
-    export USE_MKLDNN=0
+    export USE_ONEDNN=0
   fi
 else
   # CMAKE_PREFIX_PATH precedences
@@ -99,8 +99,8 @@ else
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
-  export USE_MKLDNN=1
-  export USE_MKLDNN_ACL=1
+  export USE_ONEDNN=1
+  export USE_ONEDNN_ACL=1
   export ACL_ROOT_DIR=/ComputeLibrary
 fi
 

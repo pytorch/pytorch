@@ -4,12 +4,12 @@
 #include <ATen/Config.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_mkldnn_rnn_layer(
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_onednn_rnn_layer(
     AtenTensorHandle input,
     AtenTensorHandle weight0,
     AtenTensorHandle weight1,
@@ -35,5 +35,5 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_mkldnn_rnn_layer(
 #ifdef __cplusplus
 } // extern "C"
 #endif
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()
 #endif // AOTI_TORCH_SHIM_MKLDNN

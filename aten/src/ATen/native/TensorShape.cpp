@@ -45,8 +45,8 @@
 #include <ATen/ops/_indices_copy_native.h>
 #include <ATen/ops/_make_dual.h>
 #include <ATen/ops/_make_dual_copy_native.h>
-#include <ATen/ops/_mkldnn_reshape.h>
-#include <ATen/ops/_mkldnn_transpose.h>
+#include <ATen/ops/_onednn_reshape.h>
+#include <ATen/ops/_onednn_transpose.h>
 #include <ATen/ops/_neg_view_copy_native.h>
 #include <ATen/ops/_reshape_alias_copy_native.h>
 #include <ATen/ops/_reshape_alias_native.h>
@@ -1622,14 +1622,14 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
     TORCH_CHECK(false, "reshape is not implemented for sparse tensors");
   }
 
-  if (self.is_contiguous() && !self.is_mkldnn()) {
+  if (self.is_contiguous() && !self.is_onednn()) {
     return self.view_symint(proposed_shape);
   }
 
   c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
 
-  if (self.is_mkldnn()) {
-    return at::_mkldnn_reshape(self, C10_AS_INTARRAYREF_SLOW(shape));
+  if (self.is_onednn()) {
+    return at::_onednn_reshape(self, C10_AS_INTARRAYREF_SLOW(shape));
   }
 
   // `computeStride` returns the proper strides to use if this
@@ -1667,8 +1667,8 @@ Tensor _reshape_copy_symint(const Tensor& self, c10::SymIntArrayRef proposed_sha
   }
   c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
 
-  if (self.is_mkldnn()) {
-    TORCH_CHECK(0, "_reshape_copy not implemented for mkldnn tensors");
+  if (self.is_onednn()) {
+    TORCH_CHECK(0, "_reshape_copy not implemented for onednn tensors");
   }
 
   if (self.is_contiguous()) {
@@ -1686,8 +1686,8 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   }
   DimVector shape = infer_size_dv(proposed_shape, self.numel());
 
-  if (self.is_mkldnn()) {
-    return at::_mkldnn_reshape(self, shape);
+  if (self.is_onednn()) {
+    return at::_onednn_reshape(self, shape);
   }
 
   // `computeStride` returns the proper strides to use if this
@@ -2973,8 +2973,8 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
     return sparse_transpose_(self, dim0, dim1);
   }
 
-  if (self.is_mkldnn()) {
-    return at::_mkldnn_transpose_(self, dim0, dim1);
+  if (self.is_onednn()) {
+    return at::_onednn_transpose_(self, dim0, dim1);
   }
 
   DimVector sizes(self.sizes().begin(), self.sizes().end());
@@ -3128,8 +3128,8 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
     return sparse_compressed_transpose(self, dim0, dim1);
   }
 
-  if (self.is_mkldnn()) {
-    return at::_mkldnn_transpose(self, dim0, dim1);
+  if (self.is_onednn()) {
+    return at::_onednn_transpose(self, dim0, dim1);
   }
 
   // Transpose of a tensor is a view operation.

@@ -487,7 +487,7 @@ def _register_quantized_linear_binary_lowering(
         o_zero_point = kwargs["o_zp"] if output_dtype == torch.uint8 else 0
 
         x2.realize()
-        from .mkldnn_fusion import _can_be_inplace
+        from .onednn_fusion import _can_be_inplace
 
         binary_op_name = binary_unary_attr.binary_op_name
 
@@ -598,7 +598,7 @@ def _is_valid_quantized_op_binary_optimization_pattern(
         # ancestor nodes of the compute node, except for the binary node
         # connected to the compute node.
 
-        from .mkldnn_fusion import _get_remaining_users
+        from .onednn_fusion import _get_remaining_users
 
         extra_input_of_pattern = (
             match.kwargs["other"]
@@ -658,7 +658,7 @@ def _register_quantized_conv_binary_lowering(
         o_zero_point = kwargs["o_zp"] if output_dtype == torch.uint8 else 0
 
         accum.realize()
-        from .mkldnn_fusion import _can_be_inplace
+        from .onednn_fusion import _can_be_inplace
 
         assert _can_be_inplace(
             accum
@@ -696,7 +696,7 @@ def _register_quantized_conv_binary_lowering(
 
 
 def _register_quantization_unary_fusion():
-    from .mkldnn_fusion import (
+    from .onednn_fusion import (
         _gelu_fusion_1 as _gelu_fusion_erf,
         _gelu_fusion_2 as _gelu_fusion_tanh,
         _hardswish_fusion,

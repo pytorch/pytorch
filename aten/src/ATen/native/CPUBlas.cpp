@@ -1,7 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/mkl/LinearAlgebra.h>
-#include <ATen/native/mkldnn/Matmul.h>
+#include <ATen/native/onednn/Matmul.h>
 #include <ATen/Config.h>
 
 #include <c10/util/SmallBuffer.h>
@@ -41,7 +41,7 @@ extern "C" void zaxpy_(int *n, void *a, const void *x, int *incx, void *y, int *
 #include <fbgemm/FbgemmI64.h>
 #endif  // USE_FBGEMM
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 #include <oneapi/dnnl/dnnl_version.h>
 #endif // oneDNN
 
@@ -176,8 +176,8 @@ void gemm(
     const float beta,
     float *c, int64_t ldc) {
   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
-#if AT_MKLDNN_ENABLED()
-   if (mkldnn_bf32_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+#if AT_ONEDNN_ENABLED()
+   if (onednn_bf32_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
    }
 #endif
@@ -331,8 +331,8 @@ void gemm(
       return;
    }
 #endif
-#if AT_MKLDNN_ENABLED()
-   if (mkldnn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+#if AT_ONEDNN_ENABLED()
+   if (onednn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
    }
 #endif
@@ -350,8 +350,8 @@ void gemm(
    const float beta,
    at::Half *c, int64_t ldc) {
    internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
-#if AT_MKLDNN_ENABLED()
-   if (mkldnn_fp16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+#if AT_ONEDNN_ENABLED()
+   if (onednn_fp16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
    }
 #endif
@@ -1075,7 +1075,7 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
   }
 
   static inline bool device_check(ScalarType dtype) {
-    if (!at::globalContext().userEnabledMkldnn()) {
+    if (!at::globalContext().userEnabledOnednn()) {
       return false;
     }
     if (dtype == ScalarType::Half) {
@@ -1114,7 +1114,7 @@ struct Pack : public KernelCache <PackKey, pack_t> {
   }
 
   static inline bool need_pack(ScalarType dtype) {
-    if (!at::globalContext().userEnabledMkldnn()) {
+    if (!at::globalContext().userEnabledOnednn()) {
       return false;
     }
     if (dtype == ScalarType::Half) {
