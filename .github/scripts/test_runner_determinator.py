@@ -168,7 +168,6 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
                 rollout_perc: 0
             otherExp:
                 rollout_perc: 0
-                default: false
         ---
 
         Users:
@@ -178,6 +177,60 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         """
         prefix = rd.get_runner_prefix(settings_text, ["User2"], USER_BRANCH)
         self.assertEqual("lf.otherExp.", prefix, "Runner prefix not correct for User2")
+
+    def test_opted_in_user_two_experiments_default(self) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+            otherExp:
+                rollout_perc: 0
+                default: false
+        ---
+
+        Users:
+        @User1,lf
+        @User2,lf,otherExp
+
+        """
+        prefix = rd.get_runner_prefix(settings_text, ["User2"], USER_BRANCH)
+        self.assertEqual("lf.", prefix, "Runner prefix not correct for User2")
+
+    def test_opted_in_user_two_experiments_default_exp(self) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+            otherExp:
+                rollout_perc: 0
+                default: false
+        ---
+
+        Users:
+        @User1,lf
+        @User2,lf,otherExp
+
+        """
+        prefix = rd.get_runner_prefix(settings_text, ["User2"], USER_BRANCH, {"lf", "otherExp"})
+        self.assertEqual("lf.otherExp.", prefix, "Runner prefix not correct for User2")
+
+    def test_opted_in_user_two_experiments_default_exp_2(self) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+            otherExp:
+                rollout_perc: 0
+                default: false
+        ---
+
+        Users:
+        @User1,lf
+        @User2,lf,otherExp
+
+        """
+        prefix = rd.get_runner_prefix(settings_text, ["User2"], USER_BRANCH, {"otherExp"})
+        self.assertEqual("otherExp.", prefix, "Runner prefix not correct for User2")
 
     @patch("random.uniform", return_value=50)
     def test_opted_out_user(self, mock_uniform: Mock) -> None:
