@@ -175,6 +175,9 @@ class BaseSchedulerNode:
 
     def __init__(self, scheduler: Scheduler) -> None:
         self.scheduler: Scheduler = scheduler
+        self.debug_device_str: Callable[
+            [BaseSchedulerNode], List[str]
+        ] = lambda *args, **kwargs: []
 
     def _init_from_node(self, node: ir.Operation) -> None:
         self.node: Optional[ir.Operation] = node
@@ -194,9 +197,6 @@ class BaseSchedulerNode:
         self.outputs_by_name: Dict[str, SchedulerBuffer] = {
             buf.get_name(): buf for buf in self.outputs
         }
-        self.debug_device_str: Callable[
-            [BaseSchedulerNode], List[str]
-        ] = lambda *args, **kwargs: []
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(name={self.get_name()!r})"
