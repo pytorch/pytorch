@@ -191,6 +191,10 @@ class CppWrapperGpu(CppWrapperCpu):
 
     def write_get_raw_stream(self, index, graph=None):
         name = f"stream{index}"
+        if self.device == "xpu":
+            self.writeline(f"sycl::queue *{name} = &(at::xpu::getCurrentXPUStream({index}).queue());")
+            return name
+
         self.writeline(
             maybe_hipify_code_wrapper(
                 f"{self.device_codegen.cpp_stream_type()} {name};"
@@ -259,7 +263,14 @@ class CppWrapperGpu(CppWrapperCpu):
         self,
         kernel_name: str,
         graph: "GraphLowering",  # for per-graph caching
+        device_index=None,
+        stream=None,
     ):
+        extra_args = ""
+        if self.device == "xpu":
+            assert stream is not None
+            extra_args = f", {stream}"
+
         keys = (get_cpp_wrapper_cubin_path_name(), "mangled_name", "shared_mem")
         kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
         self.writeline(f"if ({kernel_var_name} == nullptr) {{")
@@ -268,11 +279,11 @@ class CppWrapperGpu(CppWrapperCpu):
                 kernel_name,
                 """    """
                 + kernel_var_name
-                + """ = loadKernel("%s", "%s", %s, this->cubin_dir_);"""
+                + f""" = loadKernel("%s", "%s", %s{extra_args}, this->cubin_dir_);"""
                 if V.graph.aot_mode
                 else """    """
                 + kernel_var_name
-                + """ = loadKernel("%s", "%s", %s);""",
+                + f""" = loadKernel("%s", "%s", %s{extra_args});""",
                 keys,
             )
         )
@@ -393,6 +404,7 @@ class CppWrapperGpu(CppWrapperCpu):
         if device_index is None:
             current_device = V.graph.scheduler.get_current_device_or_throw()
             device_index = current_device.index
+
         stream = (
             "stream"
             if V.graph.aot_mode
@@ -403,7 +415,7 @@ class CppWrapperGpu(CppWrapperCpu):
             device_index, call_args = self.prepare_triton_kernel_call(
                 device_index, call_args
             )
-            kernel_var_name = self.generate_load_kernel_once(kernel_name, V.graph)
+            kernel_var_name = self.generate_load_kernel_once(kernel_name, V.graph, stream=stream)
 
             # args with value 1 are added into equal_to_1 and constants
             # in triton_meta (in the Python codegen) which makes them
@@ -421,7 +433,12 @@ class CppWrapperGpu(CppWrapperCpu):
 
             call_args_str = self.generate_args_decl(call_args, arg_types)
             kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
-            self.writeline(f"void* {kernel_args_var}[] = {{{call_args_str}}};")
+            if self.device == "xpu":
+                self.writeline(
+                    f"std::vector<void*> {kernel_args_var} = {{{call_args_str}}};"
+                )
+            else:
+                self.writeline(f"void* {kernel_args_var}[] = {{{call_args_str}}};")
 
             grid_var = f"{kernel_name}_grid_{next(self.grid_id)}"
             self.writeline(
@@ -480,9 +497,8 @@ class CppWrapperGpu(CppWrapperCpu):
             if config.abi_compatible:
                 # TODO: remove this function to use the default WrapperCodegen behavior after service platform has zero_() symbol
                 # default behavior is f"workspace.zero_(){self.ending}"
-                self.writeline(
-                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_zero_(workspace.get())){self.ending}"
-                )
+                # or add f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_zero_(workspace.get())){self.ending}"
+                pass
             else:
                 self.writeline(f"workspace.zero_(){self.ending}")
             if config.triton.autotune_at_compile_time:

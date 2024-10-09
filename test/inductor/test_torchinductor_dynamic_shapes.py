@@ -253,6 +253,20 @@ class TestInductorDynamic(TestCase):
         opt_r = opt_f()
         self.assertEqual(r, opt_r)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_sym_sum_unbacked(self, device):
+        def f(a):
+            xs = a.tolist()
+            y = sum(xs)
+            return torch.tensor(y)
+
+        splits = torch.randint(10, (100,), device=device)
+
+        opt_f = torch.compile(f, fullgraph=True)
+        r = f(splits)
+        opt_r = opt_f(splits)
+        self.assertEqual(r, opt_r)
+
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_nonzero_size_factory_nobreak(self, device):
         def f(x, b):
@@ -936,6 +950,15 @@ class TestInductorDynamic(TestCase):
             return torch.zeros(y, device=device)
 
         f(torch.tensor([5] * 320))
+
+    def test_mark_unbacked_slice(self):
+        @torch.compile(backend="inductor", mode="reduce-overhead", fullgraph=True)
+        def f(x):
+            return x.sum()
+
+        x = torch.empty_strided((1, 4), (5, 1), device="cuda")
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        f(x)
 
     def test_sort_dynamic_shape_with_check(self, device):
         if TEST_WITH_ROCM or torch.device(device).type != GPU_TYPE:

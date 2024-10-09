@@ -317,13 +317,25 @@ class EnterDeviceContextManagerLine(WrapperLine):
                     ), "AOTInductor only supports running on one CUDA device"
             else:
                 if self.last_seen_device_guard_index is None:
-                    code.writeline(
-                        f"{V.graph.device_ops.cpp_aoti_device_guard()} device_guard({self.device_idx});"
-                        if config.abi_compatible
-                        else maybe_hipify_code_wrapper(
-                            f"{V.graph.device_ops.cpp_device_guard()} device_guard({self.device_idx});"
+                    if config.abi_compatible:
+                        code.writeline(
+                            f"{V.graph.device_ops.cpp_aoti_device_guard()} device_guard({self.device_idx});"
                         )
-                    )
+                    else:
+                        # XPU use DeviceGuard which needs a Device for constuctor.
+                        # TODO: generalize CUDAGurad as DeviceGuard.
+                        if V.graph.device_type == "xpu":
+                            code.writeline(
+                                f"{V.graph.device_ops.cpp_device_guard()} device_guard("
+                                f"c10::Device(c10::DeviceType::{V.graph.device_type.upper()}"
+                                f", {self.device_idx}));"
+                            )
+                        else:
+                            code.writeline(
+                                maybe_hipify_code_wrapper(
+                                    f"{V.graph.device_ops.cpp_device_guard()} device_guard({self.device_idx});"
+                                )
+                            )
                 else:
                     code.writeline(f"device_guard.set_index({self.device_idx});")
         else:
@@ -596,6 +608,7 @@ class PythonWrapperCodegen(CodeGen):
                 async_compile = AsyncCompile()
                 generate_example_value = AlgorithmSelectorCache.generate_example_value
                 empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
+                empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
             """
         )
 
