@@ -244,16 +244,16 @@ RMSprop.__doc__ = (
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         lr (float, Tensor, optional): learning rate (default: 1e-2)
-        momentum (float, optional): momentum factor (default: 0)
         alpha (float, optional): smoothing constant (default: 0.99)
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
+        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        momentum (float, optional): momentum factor (default: 0)
         centered (bool, optional) : if ``True``, compute the centered RMSProp,
             the gradient is normalized by an estimation of its variance
-        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        {_capturable_doc}
         {_foreach_doc}
         {_maximize_doc}
-        {_capturable_doc}
         {_differentiable_doc}
 
     """
