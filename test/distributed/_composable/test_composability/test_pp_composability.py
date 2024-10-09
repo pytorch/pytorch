@@ -211,9 +211,9 @@ class ComposabilityTest(MultiProcessTestCase):
             )
 
         # Run
-        # TODO(whc): this test doesn't pass with shape inference.
+        # TODO(whc) should we make it a hard error if you pass arguments into the step API on nonzero ranks?
         # why are we passing inputs/targets on every rank?
-        if self.rank == 0:
+        if pp_group.rank() == 0:
             pipeline_schedule._step_microbatches(arg_mbs=input_mb, target_mbs=input_mb)
         else:
             pipeline_schedule._step_microbatches(
