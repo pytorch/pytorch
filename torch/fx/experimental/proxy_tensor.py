@@ -1260,8 +1260,13 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             # It's for passing the export verifier which needs to verify the meta['val']
             # TODO(tmanlaibaatar): we should systematically couple it with expoert verifier,
             # instead of hardcoding it here.
+            # T203648563
             node = self.tracer.create_node("call_function", func, args, {})  # type: ignore[arg-type]
-            if func is torch._C._set_grad_enabled:
+            if func in [
+                torch._C._set_grad_enabled,
+                torch.amp.autocast_mode._enter_autocast,
+                torch.amp.autocast_mode._exit_autocast,
+            ]:
                 node.meta["val"] = None
             return node
             # Don't actually run the function! We just want to trace the calls
@@ -1351,12 +1356,24 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
     def _compute_proxy(
         self, func: OpOverload, args: Tuple[object, ...], out: PySymType
     ) -> Proxy:
-        n_args = tuple(
-            get_proxy_slot(a, self.tracer).force().node
-            if isinstance(a, py_sym_types)
-            else a
-            for a in args
-        )
+        # Handle torch.sym_sum
+        n_args: Tuple[object, ...]
+        if len(args) == 1 and isinstance(args[0], (list, tuple)):
+            n_args = (
+                tuple(
+                    get_proxy_slot(a, self.tracer).force().node
+                    if isinstance(a, py_sym_types)
+                    else a
+                    for a in args[0]
+                ),
+            )
+        else:
+            n_args = tuple(
+                get_proxy_slot(a, self.tracer).force().node
+                if isinstance(a, py_sym_types)
+                else a
+                for a in args
+            )
 
         # func doesn't have a __torch_function__ that Proxy can interpose, so
         # we gotta do it manually
