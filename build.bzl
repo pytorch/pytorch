@@ -325,7 +325,3 @@ GENERATED_AOTI_CPP = [
 GENERATED_AOTI_CUDA_CPP = [
     "torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.cpp",
 ]
-
-GENERATED_AOTI_XPU_CPP = [
-    "torch/csrc/inductor/aoti_torch/generated/c_shim_xpu.cpp",
-]
