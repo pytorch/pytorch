@@ -989,7 +989,7 @@ class TestFlexAttention(InductorTestCase):
         self.run_test(composed_score_mod, dtype)
 
     @supported_platform
-    @expectedFailure  # TODO: Remove this after supporting compiled flex attention with training bias
+    # @expectedFailure  # TODO: Remove this after supporting compiled flex attention with training bias
     @common_utils.parametrize("dtype", test_dtypes)
     def test_captured_buffers(self, dtype: torch.dtype):
         head_offset = torch.rand(8, device="cuda", dtype=dtype, requires_grad=True)
