@@ -351,9 +351,6 @@ class _TorchDynamoContext:
         if dynamic is not None:
             self.enter_exit_hooks.append(make_set_enable_dynamic(dynamic))
 
-        if torch._dynamo.config.dynamic_first_dimension:
-
-
         if on_enter is not nothing:
             # this case is not common
             def call_on_enter():

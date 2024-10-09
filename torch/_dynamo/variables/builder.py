@@ -2689,6 +2689,8 @@ def _automatic_dynamic(
 
         if marked_unbacked:
             dynamic_size = DimDynamic.SIZE_LIKE_UNBACKED
+        elif i == 0 and torch._dynamo.config.dynamic_first_dimension:
+            dynamic_size = DimDynamic.DYNAMIC
         elif (
             constraint_size is not None
             or marked_dynamic
