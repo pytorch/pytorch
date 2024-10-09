@@ -70,6 +70,7 @@ SUPPORTED_OPS = {
     torch.ops.aten.div.Tensor,
     torch.ops.aten.pow.Tensor,
     torch.ops.aten.floor_divide.Tensor,
+    torch.ops.aten.remainder.Tensor,
 }
 
 
