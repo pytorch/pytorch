@@ -72,7 +72,7 @@ struct TORCH_API AcceleratorHooksInterface {
     TORCH_CHECK(false, "Backend doesn`t support getNewGenerator()");
   }
 
-  virtual std::tuple<size_t, size_t, ptrdiff_t, std::string, std::string, std::string, uint64_t, bool>
+  virtual std::tuple<size_t, size_t, ptrdiff_t, uint64_t, bool, c10::IPCHandlePimpl>
   StorageShareDevice(const c10::Storage& storage) const {
     TORCH_CHECK(false, "Backend doesn't support StorageShareDevice");
   };
