@@ -4116,6 +4116,9 @@ class InputsKernel(OperationBuffer):
         for input in self.inputs:
             if isinstance(input, list):
                 reads.update(StarDep(x.get_name()) for x in input)
+            elif isinstance(input, ShapeAsConstantBuffer):
+                # Skip read_writes for symbolics as they're visible globally
+                continue
             else:
                 reads.add(StarDep(input.get_name()))
 
@@ -6541,14 +6544,9 @@ class Conditional(ExternKernel):
             ), "When predicate is not a Tensor, there must be at least one operand in torch.cond."
             device = operands[0].get_device()
 
-        # We ony pass tensor args as the dependency of this op because symbolic expressions
-        # have been burned in the subgraph as constants.
-        tensor_args = [
-            op for op in operands if not isinstance(op, ShapeAsConstantBuffer)
-        ]
         conditional = Conditional(
             predicate=predicate,
-            operands=tensor_args,  # type: ignore[list-item]
+            operands=operands,  # type: ignore[list-item]
             true_subgraph=true_fn,
             false_subgraph=false_fn,
             layout=MultiOutputLayout(device),
