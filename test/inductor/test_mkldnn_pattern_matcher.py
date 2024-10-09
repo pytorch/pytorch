@@ -1612,7 +1612,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
 
     def _qlinear_unary_cpu_test_helper(
-        self, inputs,  unary_op=torch.nn.ReLU(), device="cpu", int8_mixed_bf16=False
+        self, inputs, unary_op=torch.nn.ReLU(), device="cpu", int8_mixed_bf16=False
     ):
         class M(torch.nn.Module):
             def __init__(self, use_bias):
