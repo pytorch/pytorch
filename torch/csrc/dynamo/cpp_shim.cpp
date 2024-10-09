@@ -20,3 +20,13 @@ void _pytorch_record_function_exit(_PytorchRecordFunctionState* state) {
   }
   delete state;
 }
+
+thread_local bool eval_frame_callback_enabled = true;
+
+bool eval_frame_callback_enabled_get() {
+  return eval_frame_callback_enabled;
+}
+
+void eval_frame_callback_enabled_set(bool enabled) {
+  eval_frame_callback_enabled = enabled;
+}

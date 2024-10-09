@@ -10,7 +10,12 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from . import trace_rules, variables
 from .comptime import comptime
-from .eval_frame import DisableContext, innermost_fn, RunOnlyContext
+from .eval_frame import (
+    DisableContext,
+    innermost_fn,
+    RunOnlyContext,
+    SetPhaseCtxMgrDecorator,
+)
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
 from .utils import is_function
@@ -49,7 +54,7 @@ def run(fn=None):
 
 def disable(fn=None, recursive=True):
     """
-    Decorator and context manager to disable TorchDynamo
+    Decorator to disable TorchDynamo
 
     If recursive=True, Dynamo is completely skipped on the decorated function
     frame as well as the recursively invoked functions.
@@ -79,6 +84,19 @@ def skip(fn=None):
     skip_code(fn.__code__)
     fn._torchdynamo_disable = True
     return fn
+
+
+def set_phase(phase: str):
+    """
+    Decorator and context manager to set the current phase of the compiler.
+
+    Options documented in corresponding function in torch/compiler/__init__.py
+    """
+    return SetPhaseCtxMgrDecorator(phase)
+
+
+# forbid set_phase in graph
+set_phase._dynamo_forbidden = True  # type: ignore[attr-defined]
 
 
 def assume_constant_result(fn):
