@@ -2574,14 +2574,6 @@ void ProcessGroupNCCL::startCoalescing() {
   // start, which has one minor downside- we burn a seq_ if someone ever does a
   // 'start' and 'end' coalescing region without doing an operation inbetween.
 
-  // Don't bump op_id_ here, because startCoalescing isn't a logical operation.
-  // Bump it for each logical op inside the coalescing group.
-  if (coalescing_state_ & CoalP2P) {
-    seqP2P_++;
-  } else {
-    seqCollective_++;
-  }
-
   coalescedDevice_.set_index(-1);
   coalescedComm_ = nullptr;
   coalescing_state_ |= CoalActive;
@@ -2683,7 +2675,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   errorIfCapturingNonCapturableNCCL(capture_status);
 
   // Bump collective counter
-  seqCollective_++;
+  if (!coalescing_state_) {
+    seqCollective_++;
+  }
   op_id_++;
 
   auto device = getDevice(inputs[0]);
@@ -2691,6 +2685,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   auto ncclComm = getNCCLComm(key, device, opType);
 
   if (coalescing_state_ & CoalActive) {
+    if ((coalescing_state_ & CoalColl) == 0) {
+      // First op in coalesced operations
+      seqCollective_++;
+    }
     coalescing_state_ |= CoalColl;
     if (coalescedDevice_.index() < 0) {
       coalescedDevice_ = device;
@@ -2858,10 +2856,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   seqCollective_++;
 
   // For coalescingManager collectives, there is no individual c++ call per
-  // collective so there is no flight record and we increment seq*_ and op_id_
-  // together. Compare this to startCoalesing/endCoalescing flow where we
-  // increment seq_ once per group and increment op_id_ once per indvidual
-  // operation within the group
+  // collective so there is no flight record and we increment seqCollective_ and
+  // op_id_ together. Compare this to startCoalescing/endCoalescing flow where
+  // we increment either seqP2P_ or seqCollective_ once per group and increment
+  // op_id_ once per indvidual operation within the group
   op_id_++;
 
   // Currently, the API permits one scenario where inputs.size() and
@@ -3083,8 +3081,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     p2pTargetRank = isSendRecvSelf ? 0 : 1 - p2pRank;
 
     if (!coalescing_state_) {
-      // Bump P2P sequence number. Don't do so if it's a batch P2P, it will be
-      // bumped in `startCoalescing`.
+      // Bump P2P sequence number.
       seqP2P_++;
     }
   }
@@ -3096,6 +3093,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   auto ncclComm = getNCCLComm(key, device, opType, p2pRank, isSendRecvSelf);
 
   if (coalescing_state_ & CoalActive) {
+    // Bump  seqP2P_ once per coalesced group, not once per individual op.
+    if ((coalescing_state_ & CoalP2P) == 0) {
+      seqP2P_++;
+    }
     coalescing_state_ |= CoalP2P;
     if (coalescedDevice_.index() < 0) {
       coalescedDevice_ = device;
