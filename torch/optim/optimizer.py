@@ -855,7 +855,6 @@ class Optimizer:
              If ``param_names`` exist in loaded state dict ``param_groups`` they will be saved and override
              the current names, if present, in the optimizer state. If they do not exist in loaded state dict,
              the optimizer ``param_names`` will remain unchanged.
-
         """
         # shallow copy, to be consistent with module API
         state_dict = state_dict.copy()
