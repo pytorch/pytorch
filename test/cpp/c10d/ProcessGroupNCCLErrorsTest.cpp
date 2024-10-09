@@ -337,7 +337,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
   work = pg.allreduce(tensors_);
 
   work->wait();
-  // an NCCL ERROR happened before should stop the thread from passing the
+  // a NCCL ERROR happened before should stop the thread from passing the
   // barrier.
   EXPECT_THROW(pg.barrier()->wait(), std::runtime_error);
 }
