@@ -739,6 +739,12 @@ class SkipFunctionVariable(VariableTracker):
                     )
                     # also warn on it because most users won't see the graph break message
                     torch._dynamo.utils.warn_once(msg)
+            if self.value.__qualname__ == "allow_in_graph":
+                msg = (
+                    "Found an allow_in_graph decorator to a function which "
+                    "is created inside the parent function that is getting "
+                    "compiled. This is not supported for now."
+                )
             msg += f"', {self.reason}'" if self.reason else ""
             unimplemented(msg)
 
