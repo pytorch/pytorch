@@ -216,7 +216,9 @@ class ComposabilityTest(MultiProcessTestCase):
         if self.rank == 0:
             pipeline_schedule._step_microbatches(arg_mbs=input_mb, target_mbs=input_mb)
         else:
-            pipeline_schedule._step_microbatches(arg_mbs=[[] for _ in input_mb], target_mbs=input_mb)
+            pipeline_schedule._step_microbatches(
+                arg_mbs=[[] for _ in input_mb], target_mbs=input_mb
+            )
 
         # Ref model runs on 2 different inputs, accumulating grads across them.
         # this ensures that we detect if the FSDP reduce becomes a no-op.
