@@ -1344,7 +1344,9 @@ class TestOptimRenewed(TestCase):
     @parametrize("is_named_optim0", [True, False])
     @parametrize("is_named_optim1", [True, False])
     @optims(optim_db, dtypes=[torch.float32])
-    def test_state_dict_deterministic(self, device, dtype, optim_info, is_named_optim0, is_named_optim1):
+    def test_state_dict_deterministic(
+            self, device, dtype, optim_info, is_named_optim0, is_named_optim1
+    ):
         optim_cls = optim_info.optim_cls
 
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
@@ -1361,12 +1363,12 @@ class TestOptimRenewed(TestCase):
         def make_named_param(param, is_named):
             if not is_named:
                 return param
-            return [(f'name{i}', p) for i, p in enumerate(param)]
+            return [(f"name{i}", p) for i, p in enumerate(param)]
 
         def without_param_names(state_dict):
             new_state_dict = deepcopy(state_dict)
-            for pg in new_state_dict['param_groups']:
-                pg.pop('param_names', None)
+            for pg in new_state_dict["param_groups"]:
+                pg.pop("param_names", None)
             return new_state_dict
 
         def fwd_bwd(optim, w, b, i):
@@ -1420,8 +1422,10 @@ class TestOptimRenewed(TestCase):
 
             # Make sure state dict is deterministic with equal (not identical) parameters
             # Param names are optional and not needed to be the consistent.
-            self.assertEqual(without_param_names(optimizer.state_dict()),
-                             without_param_names(optimizer_c.state_dict()))
+            self.assertEqual(
+                without_param_names(optimizer.state_dict()),
+                without_param_names(optimizer_c.state_dict())
+            )
 
             # Make sure repeated parameters have identical representation (see #36831)
             optimizer_c.param_groups.extend(optimizer_c.param_groups)
@@ -1481,7 +1485,9 @@ class TestOptimRenewed(TestCase):
     @parametrize("is_named_optim0", [True, False])
     @parametrize("is_named_optim1", [True, False])
     @optims(optim_db, dtypes=[torch.float32])
-    def test_can_load_from_to_named_state_dict(self, device, dtype, optim_info, is_named_optim0, is_named_optim1):
+    def test_can_load_from_to_named_state_dict(
+            self, device, dtype, optim_info, is_named_optim0, is_named_optim1
+    ):
         optim_cls = optim_info.optim_cls
 
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
@@ -1504,7 +1510,9 @@ class TestOptimRenewed(TestCase):
                 return loss
 
             # test for parameters, named_parameters, and 2 groups:
-            params_to_optimizer = model.named_parameters() if is_named_optim0 else model.parameters()
+            params_to_optimizer = (
+                model.named_parameters() if is_named_optim0 else model.parameters()
+            )
             optimizer = optim_cls(params_to_optimizer, **optim_input.kwargs)
 
             for _ in range(3):
@@ -1517,7 +1525,9 @@ class TestOptimRenewed(TestCase):
             # old_state_dict has all new flags del'd
             old_state_dict = deepcopy(optimizer.state_dict())
 
-            params_to_optimizer2 = model.named_parameters() if is_named_optim1 else model.parameters()
+            params_to_optimizer2 = (
+                model.named_parameters() if is_named_optim1 else model.parameters()
+            )
             optimizer2 = optim_cls(params_to_optimizer2, **optim_input.kwargs)
             optimizer2.load_state_dict(old_state_dict)
 
@@ -1530,12 +1540,16 @@ class TestOptimRenewed(TestCase):
 
             # Make sure that param_names are preserved when provided to at least one of the optimizers
             if is_named_optim0 or is_named_optim1:
-                self.assertEqual(optimizer2.state_dict()['param_groups'][0]['param_names'],
-                                 ['0.weight', '0.bias', '1.weight', '1.bias'])
+                self.assertEqual(
+                    optimizer2.state_dict()["param_groups"][0]["param_names"],
+                    ["0.weight", "0.bias", "1.weight", "1.bias"]
+                )
 
     @parametrize("is_named_optim", [True, False])
     @optims(optim_db, dtypes=[torch.float32])
-    def test_save_load_equality_with_weights_only(self, device, dtype, optim_info, is_named_optim):
+    def test_save_load_equality_with_weights_only(
+            self, device, dtype, optim_info, is_named_optim
+    ):
         optim_cls = optim_info.optim_cls
 
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
@@ -1552,7 +1566,7 @@ class TestOptimRenewed(TestCase):
         def make_named_param(param, is_named):
             if not is_named:
                 return param
-            return [(f'name{i}', p) for i, p in enumerate(param)]
+            return [(f"name{i}", p) for i, p in enumerate(param)]
 
         def fwd_bwd(optim, w, b, i):
             optim.zero_grad()
