@@ -509,7 +509,7 @@ static PyObject* _custom_eval_frame_shim(
   //  - Python callable(): enables TorchDynamo
   PyObject* callback = eval_frame_callback_get();
 
-  if (callback == Py_None) {
+  if (!eval_frame_callback_enabled_get() || callback == Py_None) {
     return eval_frame_default(tstate, frame, throw_flag);
   }
 
@@ -795,6 +795,24 @@ static PyObject* set_eval_frame_py(PyObject* dummy, PyObject* callback) {
   return set_eval_frame(callback, PyThreadState_GET());
 }
 
+static PyObject* set_eval_frame_callback_enabled(PyObject* dummy, PyObject* enabled) {
+  bool prior = eval_frame_callback_enabled_get();
+  if (enabled == Py_True) {
+    eval_frame_callback_enabled_set(true);
+  } else if (enabled == Py_False) {
+    eval_frame_callback_enabled_set(false);
+  } else {
+    DEBUG_TRACE0("arg error");
+    PyErr_SetString(PyExc_TypeError, "expected bool");
+    return NULL;
+  }
+  return PyBool_FromLong(prior);
+}
+
+static PyObject* is_eval_frame_callback_enabled(PyObject* dummy, PyObject* args) {
+  return PyBool_FromLong(eval_frame_callback_enabled_get());
+}
+
 static PyObject* reset_code(PyObject* dummy, PyObject* code) {
   if (!PyCode_Check(code)) {
     DEBUG_TRACE0("arg error");
@@ -853,6 +871,8 @@ static PyObject* set_context_frame(PyObject* dummy, PyObject* obj) {
 
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_O, NULL},
+    {"set_eval_frame_callback_enabled", set_eval_frame_callback_enabled, METH_O, NULL},
+    {"is_eval_frame_callback_enabled", is_eval_frame_callback_enabled, METH_NOARGS, NULL},
     {"reset_code", reset_code, METH_O, NULL},
     {"unsupported", unsupported, METH_VARARGS, NULL},
     {"skip_code", skip_code, METH_O, NULL},
