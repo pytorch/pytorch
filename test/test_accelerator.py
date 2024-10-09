@@ -74,7 +74,7 @@ class TestAccelerator(TestCase):
         self.assertTrue(event.query())
         self.assertEqual(c_acc.cpu(), c)
 
-    @unittest.skip((not TEST_CUDA) and (not TEST_XPU), "requires CUDA or XPU")
+    @unittest.skipIf((not TEST_CUDA) and (not TEST_XPU), "requires CUDA or XPU")
     def test_device_specific_stream_behavior(self):
         s1 = torch.cuda.Stream() if torch.cuda.is_available() else torch.xpu.Stream()
         s2 = torch.cuda.Stream() if torch.cuda.is_available() else torch.xpu.Stream()
