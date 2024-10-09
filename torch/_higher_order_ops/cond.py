@@ -34,7 +34,6 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
-from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 from .utils import _from_fun, create_fw_bw_graph
@@ -298,12 +297,14 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
                 and true_meta.stride == false_meta.stride
             )
 
+        """
         if not _same_meta_except_requires_grad(true_out, false_out):
             raise torch._dynamo.exc.CondOpArgsMismatchError(
                 f"Expected each tensor to have same metadata but got:"
                 f"\n  {true_fn.__name__} returns {true_out.meta['tensor_meta']}"
                 f"\n  {false_fn.__name__} returns {false_out.meta['tensor_meta']}"
             )
+        """
 
     i, true_name = unique_graph_id(proxy_mode, prefix="true_graph")
 
@@ -321,29 +322,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         "call_function", func_overload, proxy_args, {}
     )
 
-    # At this point, we're *guaranteed* that whether an output came from the
-    # true or false branch is indistinguishable. So, as this is just for tracing
-    # purposes, choose the true branch.
-
-    # TODO: the unbacked symbol allocations MUST NOT leak out, if you want to
-    # support this we need to arrange for the reenter_make_fx unbacked SymInts
-    # to be used, AND we need to arrange for some sort of unification between
-    # the two branches (but not really unification; e.g., if one branch
-    # returns [u0] and the other returns [5] this is OK but you MUST NOT
-    # conclude the result is 5.  Also if one branch returns [3] and another
-    # branch returns [5] you can make it work by immediately allocating a new
-    # unbacked SymInt here).
-    ignore_fresh_unbacked = contextlib.nullcontext()
-    if (fake_mode := detect_fake_mode()) and fake_mode.shape_env:
-        ignore_fresh_unbacked = fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-
-    # TODO: Uhh.... it shouldn't matter, but changing this to true_fn results in
-    # a FakeTensorMode error :
-    # `Current active mode <class 'torch._subclasses.fake_tensor.FakeTensorMode'> not registered`
-    # TODO Sometimes the operands are not completely FakeTensor, something seems went wrong in
-    # dynamo? Because of that it runs real computation sometimes and re-triggering downstream dispatch keys.
-    with ignore_fresh_unbacked:
-        out = false_fn(*operands)
+    out = func_overload(pred, true_fn, false_fn, operands)
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
@@ -441,16 +420,40 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
     if len(flat_true_outs) != len(flat_false_outs):
         raise RuntimeError("Unmatched number of outputs from cond() branches.")
 
+    merged_outs = []
     for true_out, false_out in zip(flat_true_outs, flat_false_outs):
-        true_meta = _extract_tensor_metadata(true_out)
-        false_meta = _extract_tensor_metadata(false_out)
-        if true_meta != false_meta:
-            raise torch._dynamo.exc.CondOpArgsMismatchError(
-                f"Expected each tensor to have same metadata but got:"
-                f"\n  {true_fn.__name__} returns {true_meta}"
-                f"\n  {false_fn.__name__} returns {false_meta}"
-            )
-    return true_outs
+        merged_outs.append(_merge_tensors(true_out, false_out, mode))
+    return merged_outs
+
+
+def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
+    torch._check(a.dtype == b.dtype)
+    torch._check(a.device == b.device)
+    torch._check(a.dim() == b.dim())
+
+    merged_size = []
+    for s0, s1 in zip(a.size(), b.size()):
+        # TODO: use the symint eq by expr class after rebase
+        if type(s0) is int and type(s1) is int and s0 == s1:
+            merged_size.append(s0)
+        elif (
+            isinstance(s0, torch.SymInt)
+            and isinstance(s1, torch.SymInt)
+            and s0.node.expr == s1.node.expr
+        ):
+            merged_size.append(s0)
+        else:
+            merged_size.append(mode.shape_env.create_unbacked_symint())
+            # TODO: setup value range
+
+    torch._check(a.stride() == b.stride())  # TODO: relax this
+
+    # NYI
+    assert not a.is_quantized
+    assert not b.is_quantized
+
+    with mode:
+        return torch.empty(merged_size, dtype=a.dtype, device=a.device)
 
 
 @cond_op.py_functionalize_impl

@@ -779,12 +779,14 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     all_diffs.append((f"pair{i}:", meta1, meta2))
             return all_diffs
 
+        """
         if diffs := diff_meta(
             true_r.unpack_var_sequence(tx), false_r.unpack_var_sequence(tx)
         ):
             unimplemented(
                 f"Expected branches to return tensors with same metadata. [(tensor_pair, difference)...]:{diffs}"
             )
+        """
 
         (
             true_graph,
@@ -824,10 +826,16 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             true_shared + unique_true + unique_false,
         )
 
-        flat_example_value = pytree.tree_map_only(
-            torch.fx.Proxy,
-            lambda a: a.node.meta["example_value"],
+        from torch._higher_order_ops.cond import _merge_tensors
+
+        flat_example_value = pytree.tree_map(
+            lambda a, b: _merge_tensors(
+                a.node.meta["example_value"], b.node.meta["example_value"], tx.fake_mode
+            )
+            if isinstance(a, torch.fx.Proxy) and isinstance(b, torch.fx.Proxy)
+            else a,
             true_r.as_proxy(),
+            false_r.as_proxy(),
         )
 
         return _call_function_and_unflatten_output(
