@@ -555,6 +555,19 @@ class CppPackedGemmTemplate(CppTemplate):
                 assert len(input_indices) >= 2
                 return [inputs[idx] for idx in input_indices], layout_or_out
 
+        new_inputs, new_layout = reorder_and_filter(input_nodes, layout)
+        assert new_inputs[1].get_name() in V.graph.constants
+        is_mkldnn_wgt = V.graph.constants[new_inputs[1].get_name()].is_mkldnn
+        if is_mkldnn_wgt:
+            # It shouldn't happen as viewing an mkldnn tensor, we can extend the
+            # implementation if it does.
+            assert not isinstance(new_inputs[1], ir.BaseView)
+        assert isinstance(new_inputs[1].layout, ir.FixedLayout)
+        # Note that the layout of MKLDNN Tensor is with the wrong stride
+        view_size = new_inputs[1].layout.size
+        view_stride = new_inputs[1].layout.stride
+        view_offset = new_inputs[1].layout.offset
+
         def maybe_to_dense(inputs, layout_or_out):
             new_inputs = list(inputs)
             if isinstance(inputs[1], torch.Tensor):
@@ -563,12 +576,19 @@ class CppPackedGemmTemplate(CppTemplate):
             return new_inputs, layout_or_out
 
         def normalize_shapes(inputs, layout_or_out):
-            if not trans_w:
-                return inputs, layout_or_out
             new_inputs = list(inputs)
-            X = inputs[0]
-            W = inputs[1]
-            B = inputs[2] if has_bias else None
+            if not is_mkldnn_wgt and isinstance(new_inputs[1], torch.Tensor):
+                # With the assumptation that W is the storage of unwrap view
+                # thus view it back here
+                new_inputs[1] = new_inputs[1].as_strided(
+                    view_size, view_stride, view_offset
+                )
+
+            if not trans_w:
+                return new_inputs, layout_or_out
+            X = new_inputs[0]
+            W = new_inputs[1]
+            B = new_inputs[2] if has_bias else None
             if isinstance(W, ir.IRNode):
                 if trans_w:
                     if not isinstance(W, ir.TensorBox):
@@ -593,9 +613,7 @@ class CppPackedGemmTemplate(CppTemplate):
 
         # TODO(jgong5): decide proper number of threads per problem size
         num_threads = parallel_num_threads()
-        new_inputs, _ = normalize_shapes(
-            *maybe_to_dense(*reorder_and_filter(input_nodes, layout))
-        )
+        new_inputs, _ = normalize_shapes(*maybe_to_dense(new_inputs, new_layout))
         m, n, k, *_ = mm_args(new_inputs[0], new_inputs[1])
         output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
             new_inputs[0].get_dtype()
