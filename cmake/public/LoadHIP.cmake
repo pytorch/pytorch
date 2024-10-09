@@ -138,6 +138,7 @@ if(HIP_FOUND)
   find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCM_PATH}/lib)
 
   # check whether HIP declares new types
+  set(PROJECT_RANDOM_BINARY_DIR "${PROJECT_BINARY_DIR}")
   set(file "${PROJECT_BINARY_DIR}/hip_new_types.cc")
   file(WRITE ${file} ""
     "#include <hip/library_types.h>\n"
