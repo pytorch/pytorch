@@ -826,11 +826,12 @@ class FSDPParam:
         self._sharded_param_data = local_tensor.view(-1)
         assert isinstance(self.sharded_param, DTensor)  # mypy
         if updated_local_tensor:
-            # Only change the local tensor object if needed
+            # Only change the local tensor object if needed        
             self.sharded_param._local_tensor = local_tensor.narrow(
                 dim=shard_dim, start=0, length=length
             )
             assert self.sharded_param._local_tensor.is_contiguous()
+        self._sharding_spec = self.sharded_param._spec
 
     def __repr__(self):
         return f"FSDPParam(fqn={self._param_fqn}, orig_size={self._orig_size})"
