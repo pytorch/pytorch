@@ -191,7 +191,7 @@ int64_t registerFusion(const Node* fusion_group) {
   // be a valid spec (must have had upfrontCompilation run on it).
   const auto key = store(graph);
   const auto maybe_retrieved_spec = retrieve(key);
-  AT_ASSERT(maybe_retrieved_spec);
+  TORCH_INTERNAL_ASSERT(maybe_retrieved_spec);
   upfrontCompilation(**maybe_retrieved_spec);
 
   return key;

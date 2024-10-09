@@ -6,7 +6,7 @@ namespace at::native {
 
 namespace {
 static bool is_constant_index(int ntensor, const int64_t* strides) {
-  AT_ASSERT(ntensor >= 3);
+  TORCH_INTERNAL_ASSERT(ntensor >= 3);
   for (const auto arg : c10::irange(2, ntensor)) {
     if (strides[arg] != 0) {
       return false;
@@ -24,8 +24,8 @@ struct Indexer {
     , indexer_strides(indexer_strides)
     , original_strides(original_strides.data())
     , original_sizes(original_sizes.data()) {
-    AT_ASSERT(static_cast<int64_t>(original_strides.size()) == num_indexers);
-    AT_ASSERT(static_cast<int64_t>(original_sizes.size()) == num_indexers);
+    TORCH_INTERNAL_ASSERT(static_cast<int64_t>(original_strides.size()) == num_indexers);
+    TORCH_INTERNAL_ASSERT(static_cast<int64_t>(original_sizes.size()) == num_indexers);
   }
 
   int64_t num_indexers;

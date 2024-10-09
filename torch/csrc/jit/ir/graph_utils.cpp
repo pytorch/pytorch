@@ -68,11 +68,11 @@ void setInputTensorTypes(
       if (auto qualname = named_type->name()) {
         if (getCustomClass(qualname->qualifiedName())) {
           if (param_count_list.empty()) {
-            AT_ASSERT(s_iter != stack.end());
+            TORCH_INTERNAL_ASSERT(s_iter != stack.end());
             s_iter++;
           } else {
             if (param_count_list[list_idx] > 0) {
-              AT_ASSERT(s_iter != stack.end());
+              TORCH_INTERNAL_ASSERT(s_iter != stack.end());
             }
             s_iter += param_count_list[list_idx];
           }

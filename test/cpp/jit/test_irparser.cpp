@@ -36,7 +36,7 @@ static void checkRoundtrip(const std::string& s) {
     std::cerr << "Input:" << std::endl << original << std::endl;
     std::cerr << "Parsed:" << std::endl << parsed << std::endl;
   }
-  AT_ASSERT(original == parsed);
+  TORCH_INTERNAL_ASSERT(original == parsed);
 }
 
 TEST(IRParserTest, Basic) {
@@ -52,35 +52,36 @@ graph(%0 : Tensor, %1 : Tensor):
       &*graph,
       vmap);
 
-  AT_ASSERT(graph->inputs().size() == 2);
-  AT_ASSERT(graph->outputs().size() == 3);
+  TORCH_INTERNAL_ASSERT(graph->inputs().size() == 2);
+  TORCH_INTERNAL_ASSERT(graph->outputs().size() == 3);
   Value* x = graph->outputs()[0];
   Value* y = graph->outputs()[1];
   Value* res = graph->outputs()[2];
   Value* t0 = graph->inputs()[0];
   Value* t1 = graph->inputs()[1];
-  AT_ASSERT(vmap["x"] == x);
-  AT_ASSERT(vmap["y"] == y);
-  AT_ASSERT(vmap["res"] == res);
-  AT_ASSERT(vmap["0"] == t0);
-  AT_ASSERT(vmap["1"] == t1);
-  AT_ASSERT(x->node() == y->node());
+  TORCH_INTERNAL_ASSERT(vmap["x"] == x);
+  TORCH_INTERNAL_ASSERT(vmap["y"] == y);
+  TORCH_INTERNAL_ASSERT(vmap["res"] == res);
+  TORCH_INTERNAL_ASSERT(vmap["0"] == t0);
+  TORCH_INTERNAL_ASSERT(vmap["1"] == t1);
+  TORCH_INTERNAL_ASSERT(x->node() == y->node());
   Node* comb = x->node();
   Value* t2 = comb->inputs()[1];
   Value* t3 = comb->inputs()[2];
-  AT_ASSERT(vmap["2"] == t2);
-  AT_ASSERT(vmap["3"] == t3);
-  AT_ASSERT(comb->kind().toQualString() == std::string("foo::combine"));
-  AT_ASSERT(comb->outputs() == std::vector<Value*>({x, y}));
-  AT_ASSERT(comb->inputs() == std::vector<Value*>({res, t2, t3}));
+  TORCH_INTERNAL_ASSERT(vmap["2"] == t2);
+  TORCH_INTERNAL_ASSERT(vmap["3"] == t3);
+  TORCH_INTERNAL_ASSERT(
+      comb->kind().toQualString() == std::string("foo::combine"));
+  TORCH_INTERNAL_ASSERT(comb->outputs() == std::vector<Value*>({x, y}));
+  TORCH_INTERNAL_ASSERT(comb->inputs() == std::vector<Value*>({res, t2, t3}));
   Node* mul = res->node();
-  AT_ASSERT(mul->kind().toQualString() == std::string("foo::mul"));
-  AT_ASSERT(mul->inputs() == std::vector<Value*>({t0, t2}));
-  AT_ASSERT(mul->outputs() == std::vector<Value*>({res, t3}));
+  TORCH_INTERNAL_ASSERT(mul->kind().toQualString() == std::string("foo::mul"));
+  TORCH_INTERNAL_ASSERT(mul->inputs() == std::vector<Value*>({t0, t2}));
+  TORCH_INTERNAL_ASSERT(mul->outputs() == std::vector<Value*>({res, t3}));
   Node* add = t2->node();
-  AT_ASSERT(add->kind().toQualString() == std::string("foo::add"));
-  AT_ASSERT(add->inputs() == std::vector<Value*>({t0, t1}));
-  AT_ASSERT(add->outputs() == std::vector<Value*>({t2}));
+  TORCH_INTERNAL_ASSERT(add->kind().toQualString() == std::string("foo::add"));
+  TORCH_INTERNAL_ASSERT(add->inputs() == std::vector<Value*>({t0, t1}));
+  TORCH_INTERNAL_ASSERT(add->outputs() == std::vector<Value*>({t2}));
 }
 
 TEST(IRParserTest, NestedBlock) {
@@ -145,7 +146,8 @@ TEST(IRParserTest, InferredTypeIsTensor) {
 graph(%a):
   return (%a))IR",
       &*graph);
-  AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(*TensorType::get()));
+  TORCH_INTERNAL_ASSERT(
+      graph->inputs()[0]->type()->isSubtypeOf(*TensorType::get()));
 }
 
 TEST(IRParserTest, ValueReuse) {
@@ -163,10 +165,10 @@ graph(%x):
   Node* b = x2->node();
   Value* x1 = b->inputs()[0];
   Node* a = x1->node();
-  AT_ASSERT(a->inputs() == std::vector<Value*>({x0}));
-  AT_ASSERT(a->outputs() == std::vector<Value*>({x1}));
-  AT_ASSERT(b->inputs() == std::vector<Value*>({x1}));
-  AT_ASSERT(b->outputs() == std::vector<Value*>({x2}));
+  TORCH_INTERNAL_ASSERT(a->inputs() == std::vector<Value*>({x0}));
+  TORCH_INTERNAL_ASSERT(a->outputs() == std::vector<Value*>({x1}));
+  TORCH_INTERNAL_ASSERT(b->inputs() == std::vector<Value*>({x1}));
+  TORCH_INTERNAL_ASSERT(b->outputs() == std::vector<Value*>({x2}));
 }
 
 TEST(IRParserTest, Attributes) {
@@ -260,7 +262,8 @@ TEST(IRParserTest, FileCheck) {
       return (%a))IR";
 
   parseIR(text, &*graph);
-  AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(*TensorType::get()));
+  TORCH_INTERNAL_ASSERT(
+      graph->inputs()[0]->type()->isSubtypeOf(*TensorType::get()));
   torch::jit::testing::FileCheck().run(text, *graph);
 }
 
@@ -283,19 +286,19 @@ graph(%a : Float(4, 5),
   auto a_type = a->type()->cast<TensorType>();
   auto a_sizes = *a_type->sizes().concrete_sizes();
   auto a_strides = a_type->strides().concrete_sizes();
-  AT_ASSERT(a_sizes[0] == 4 && a_sizes[1] == 5);
-  AT_ASSERT(a_strides == std::nullopt);
+  TORCH_INTERNAL_ASSERT(a_sizes[0] == 4 && a_sizes[1] == 5);
+  TORCH_INTERNAL_ASSERT(a_strides == std::nullopt);
 
   auto b_type = b->type()->cast<TensorType>();
   auto b_sizes = *b_type->sizes().concrete_sizes();
   auto b_strides = *(b_type->strides().sizes());
-  AT_ASSERT(b_sizes[0] == 4 && b_sizes[1] == 5);
-  AT_ASSERT(*b_strides[0] == 5 && *b_strides[1] == 1);
+  TORCH_INTERNAL_ASSERT(b_sizes[0] == 4 && b_sizes[1] == 5);
+  TORCH_INTERNAL_ASSERT(*b_strides[0] == 5 && *b_strides[1] == 1);
 
   auto c_type = c->type()->cast<TensorType>();
-  AT_ASSERT(*c_type->sizes().size() == 2);
-  AT_ASSERT(c_type->sizes().concrete_sizes() == std::nullopt);
-  AT_ASSERT(c_type->strides().concrete_sizes() == std::nullopt);
+  TORCH_INTERNAL_ASSERT(*c_type->sizes().size() == 2);
+  TORCH_INTERNAL_ASSERT(c_type->sizes().concrete_sizes() == std::nullopt);
+  TORCH_INTERNAL_ASSERT(c_type->strides().concrete_sizes() == std::nullopt);
 }
 
 TEST(IRParserTest, MalformedStrides) {
@@ -348,16 +351,17 @@ graph():
 )IR",
       &*graph);
   Node* n = graph->outputs()[0]->node();
-  AT_ASSERT(n->kind() == prim::Constant);
-  AT_ASSERT(n->kindOf(attr::value) == AttributeKind::ival);
+  TORCH_INTERNAL_ASSERT(n->kind() == prim::Constant);
+  TORCH_INTERNAL_ASSERT(n->kindOf(attr::value) == AttributeKind::ival);
   const auto& genericList = n->ival(attr::value).toList();
   std::vector<int> int_vals;
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const IValue& ival : genericList) {
     int_vals.push_back(ival.toInt());
   }
-  AT_ASSERT(int_vals.size() == 3);
-  AT_ASSERT(int_vals[0] == 1 && int_vals[1] == 2 && int_vals[2] == 3);
+  TORCH_INTERNAL_ASSERT(int_vals.size() == 3);
+  TORCH_INTERNAL_ASSERT(
+      int_vals[0] == 1 && int_vals[1] == 2 && int_vals[2] == 3);
 }
 
 TEST(IRParserTest, PartialStarTensor) {

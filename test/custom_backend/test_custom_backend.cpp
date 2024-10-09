@@ -13,14 +13,14 @@ void load_serialized_lowered_module_and_execute(const std::string& path) {
   auto tensor = torch::ones(5);
   std::vector<torch::jit::IValue> inputs{tensor, tensor};
   auto output = module.forward(inputs);
-  AT_ASSERT(output.isTuple());
+  TORCH_INTERNAL_ASSERT(output.isTuple());
   auto output_elements = output.toTupleRef().elements();
   for (auto& e : output_elements) {
-    AT_ASSERT(e.isTensor());
+    TORCH_INTERNAL_ASSERT(e.isTensor());
   }
-  AT_ASSERT(output_elements.size(), 2);
-  AT_ASSERT(output_elements[0].toTensor().allclose(tensor + tensor));
-  AT_ASSERT(output_elements[1].toTensor().allclose(tensor - tensor));
+  TORCH_INTERNAL_ASSERT(output_elements.size(), 2);
+  TORCH_INTERNAL_ASSERT(output_elements[0].toTensor().allclose(tensor + tensor));
+  TORCH_INTERNAL_ASSERT(output_elements[1].toTensor().allclose(tensor - tensor));
 }
 
 int main(int argc, const char* argv[]) {

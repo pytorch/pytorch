@@ -356,7 +356,7 @@ static optional_variable_list _process_backward_mode_ad(
     if (!raw_outputs[i].has_value()) {
       if (cdata) {
         auto output_nr = cdata->add_input_metadata(Node::undefined_input());
-        AT_ASSERT(i == output_nr);
+        TORCH_INTERNAL_ASSERT(i == output_nr);
       }
       outputs.emplace_back();
       continue;
@@ -381,7 +381,7 @@ static optional_variable_list _process_backward_mode_ad(
       } else {
         output_nr = cdata->add_input_metadata(var);
       }
-      AT_ASSERT(i == output_nr);
+      TORCH_INTERNAL_ASSERT(i == output_nr);
     }
     set_history(
         var,

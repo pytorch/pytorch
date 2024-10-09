@@ -385,7 +385,7 @@ TEST(CustomFusionTest, Basic) {
       std::find_if(nodes.begin(), nodes.end(), [](const Node* node) {
         return node->kind() == Symbol::fromQualString("prim::FusionGroup");
       });
-  AT_ASSERT(fusion_group != nodes.end());
+  TORCH_INTERNAL_ASSERT(fusion_group != nodes.end());
 
   auto subgraph = fusion_group->g(attr::Subgraph);
   auto hits = 0;
@@ -394,7 +394,7 @@ TEST(CustomFusionTest, Basic) {
     (void)n;
     hits++;
   }
-  AT_ASSERT(hits == 2);
+  TORCH_INTERNAL_ASSERT(hits == 2);
 }
 
 TEST(CustomFusionTest, NestedBlocks) {
@@ -439,7 +439,8 @@ TEST(CustomFusionTest, NestedBlocks) {
     return false;
   };
 
-  AT_ASSERT(dfs(g->block(), Symbol::fromQualString("prim::FusionGroup")));
+  TORCH_INTERNAL_ASSERT(
+      dfs(g->block(), Symbol::fromQualString("prim::FusionGroup")));
 }
 
 static const auto cf_examples = R"JIT(
@@ -1567,7 +1568,7 @@ TEST(NoneSchemaMatchTest, Basic) {
 
   auto nodes = r->block()->nodes();
   // checking that constant propagation ran wo/failure
-  AT_ASSERT(std::distance(nodes.begin(), nodes.end()) == 1);
+  TORCH_INTERNAL_ASSERT(std::distance(nodes.begin(), nodes.end()) == 1);
 }
 
 static int testPassValue = 0;
@@ -1595,7 +1596,7 @@ graph(%a):
   run(graph, stack);
   // we will not run fusion in simple mode
   if (!getExecutorMode()) {
-    AT_ASSERT(testPassValue);
+    TORCH_INTERNAL_ASSERT(testPassValue);
   }
 }
 

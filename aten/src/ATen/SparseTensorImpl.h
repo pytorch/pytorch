@@ -289,7 +289,7 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
         allow_tensor_metadata_change(),
         "set_nnz_and_narrow ",
         err_msg_tensor_metadata_change_not_allowed);
-    AT_ASSERT(new_nnz <= nnz());
+    TORCH_INTERNAL_ASSERT(new_nnz <= nnz());
     indices_ = indices_.narrow(1, 0, new_nnz);
     values_ = values_.narrow(0, 0, new_nnz);
     if (new_nnz < 2) {
@@ -372,7 +372,7 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
    * `allow_tensor_metadata_change_`, see NOTE [ TensorImpl Shallow-Copying ].
    */
   void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override {
-    AT_ASSERT(has_compatible_shallow_copy_type(impl->key_set()));
+    TORCH_INTERNAL_ASSERT(has_compatible_shallow_copy_type(impl->key_set()));
     auto sparse_impl = static_cast<const SparseTensorImpl*>(impl.get());
     copy_tensor_metadata(
         /*src_sparse_impl=*/sparse_impl,

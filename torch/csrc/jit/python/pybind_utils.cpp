@@ -710,7 +710,7 @@ py::object toPyObject(IValue ivalue) {
       return py::cast(Object(obj));
     }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
-    AT_ASSERT(classType, c10::str(obj->name(), " is not found."));
+    TORCH_INTERNAL_ASSERT(classType, c10::str(obj->name(), " is not found."));
     auto pyClass = getScriptedClassOrError(obj->type());
     auto pyObj = pyClass.attr("__new__")(pyClass);
 

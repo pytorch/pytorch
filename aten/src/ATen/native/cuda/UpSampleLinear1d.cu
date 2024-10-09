@@ -131,7 +131,7 @@ static void upsample_linear1d_out_cuda_template(
 
   output.zero_();
 
-  AT_ASSERT(input_width > 0 && output_width > 0);
+  TORCH_INTERNAL_ASSERT(input_width > 0 && output_width > 0);
 
   const int num_kernels = output_width;
   const int num_threads = 512;

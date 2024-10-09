@@ -57,11 +57,11 @@ TEST(LiteInterpreterDirectTest, CheckAttrAccess) {
   mobile::Module bc = jitModuleToMobile(m, options);
   bool mobile_optimized = bc.attr("mobile_optimized", false).toBool();
 
-  AT_ASSERT(mobile_optimized);
+  TORCH_INTERNAL_ASSERT(mobile_optimized);
   m.setattr("mobile_optimized", false);
   bc = jitModuleToMobile(m, options);
   mobile_optimized = bc.attr("mobile_optimized", false).toBool();
-  AT_ASSERT(!mobile_optimized);
+  TORCH_INTERNAL_ASSERT(!mobile_optimized);
 }
 
 TEST(
@@ -108,7 +108,7 @@ TEST(
 
     auto resd = res.toTensor().item<float>();
     auto refd = ref.toTensor().item<float>();
-    AT_ASSERT(resd == refd);
+    TORCH_INTERNAL_ASSERT(resd == refd);
   }
 }
 
@@ -139,8 +139,8 @@ TEST(LiteInterpreterDirectTest, Conv) {
     res = bc.get_method("forward")(inputs);
   }
   auto output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(outputref.dim() == output.dim());
+  TORCH_INTERNAL_ASSERT(
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 }
 
@@ -160,7 +160,7 @@ TEST(LiteInterpreterDirectTest, Inline) {
   mobile::Module bc = jitModuleToMobile(m, options);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("foo3")(inputs);
-  AT_ASSERT(output.toTensor().item<float>() == 7.0);
+  TORCH_INTERNAL_ASSERT(output.toTensor().item<float>() == 7.0);
 }
 
 TEST(LiteInterpreterDirectTest, Tuple) {
@@ -177,7 +177,7 @@ TEST(LiteInterpreterDirectTest, Tuple) {
   mobile::Module bc = jitModuleToMobile(m, options);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("forward")(inputs);
-  AT_ASSERT(output.toTupleRef().elements()[1].toInt() == 2);
+  TORCH_INTERNAL_ASSERT(output.toTupleRef().elements()[1].toInt() == 2);
 }
 
 TEST(LiteInterpreterDirectTest, Dict) {
@@ -194,7 +194,8 @@ TEST(LiteInterpreterDirectTest, Dict) {
   mobile::Module bc = jitModuleToMobile(m, options);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("forward")(inputs);
-  AT_ASSERT(output.toGenericDict().at("result").toTensor().item().toInt() == 2);
+  TORCH_INTERNAL_ASSERT(
+      output.toGenericDict().at("result").toTensor().item().toInt() == 2);
 }
 
 TEST(LiteInterpreterDirectTest, Prim) {
@@ -221,7 +222,7 @@ TEST(LiteInterpreterDirectTest, Prim) {
 
   auto resi = res.toInt();
   auto refi = ref.toInt();
-  AT_ASSERT(resi == refi);
+  TORCH_INTERNAL_ASSERT(resi == refi);
 }
 
 TEST(LiteInterpreterDirectTest, PrimScalar) {
@@ -247,7 +248,7 @@ TEST(LiteInterpreterDirectTest, PrimScalar) {
 
   auto resi = res.toInt();
   auto refi = ref.toInt();
-  AT_ASSERT(resi == refi);
+  TORCH_INTERNAL_ASSERT(resi == refi);
 }
 
 TEST(LiteInterpreterDirectTest, WrongMethodName) {
@@ -300,7 +301,7 @@ TEST(LiteInterpreterDirectTest, SetState) {
 
   auto resd = res.toTensor().item<float>();
   auto refd = ref.toTensor().item<float>();
-  AT_ASSERT(resd == refd);
+  TORCH_INTERNAL_ASSERT(resd == refd);
 }
 
 class TorchBindLiteInterpreterDirectTestStruct
@@ -381,20 +382,20 @@ TEST(LiteInterpreterDirectTest, BuiltinFunction) {
   // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto str = res.toStringRef();
   std::string expected = "Hello! Your tensor has 12 elements!";
-  AT_ASSERT(str == expected);
+  TORCH_INTERNAL_ASSERT(str == expected);
 }
 
 #if !defined FB_XPLAT_BUILD
 TEST(LiteInterpreterDirectTest, GetRuntimeByteCodeVersion) {
   auto runtime_bytecode_version = _get_runtime_bytecode_version();
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       runtime_bytecode_version ==
       caffe2::serialize::kMaxSupportedBytecodeVersion);
 }
 
 TEST(LiteInterpreterDirectTest, GetRuntimeOperatorsVersion) {
   auto runtime_operators_version = _get_runtime_operators_min_max_versions();
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       runtime_operators_version.first ==
           caffe2::serialize::kMinSupportedFileFormatVersion &&
       runtime_operators_version.second ==
@@ -416,7 +417,7 @@ TEST(LiteInterpreterDirectTest, GetByteCodeVersion) {
   test_model_file_v4.append("script_module_v4.ptl");
 
   auto version_v4 = _get_model_bytecode_version(test_model_file_v4);
-  AT_ASSERT(version_v4 == 4);
+  TORCH_INTERNAL_ASSERT(version_v4 == 4);
 }
 
 #endif // !defined(FB_XPLAT_BUILD)
@@ -425,7 +426,7 @@ TEST(LiteInterpreterDirectTest, GetRuntimeOpsAndInfo) {
   auto runtime_ops = _get_runtime_ops_and_info();
   // Ballpark estimate of the minimal number of ops; just used to
   // verify API returns a reasonably large number.
-  AT_ASSERT(runtime_ops.size() > 2900);
+  TORCH_INTERNAL_ASSERT(runtime_ops.size() > 2900);
 }
 
 TEST(LiteInterpreterDirectTest, Eval) {
@@ -456,8 +457,8 @@ TEST(LiteInterpreterDirectTest, Eval) {
     res = bc.get_method("forward")(inputs);
   }
   auto output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(outputref.dim() == output.dim());
+  TORCH_INTERNAL_ASSERT(
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 }
 
@@ -494,13 +495,13 @@ TEST(LiteInterpreterDirectTest, FindAndRunMethod) {
   for (int i = 0; i < 3; ++i) {
     auto bcinputs = inputs;
     auto method = bc.find_method("add_it");
-    AT_ASSERT(method != std::nullopt);
+    TORCH_INTERNAL_ASSERT(method != std::nullopt);
     res = (*method)(std::move(bcinputs));
   }
 
   auto resd = res.toTensor().item<float>();
   auto refd = ref.toTensor().item<float>();
-  AT_ASSERT(resd == refd);
+  TORCH_INTERNAL_ASSERT(resd == refd);
 }
 
 TEST(LiteInterpreterDirectTest, RunMethodVariadic) {
@@ -522,7 +523,7 @@ TEST(LiteInterpreterDirectTest, RunMethodVariadic) {
 
   auto resd = res.toTensor().item<float>();
   auto refd = ref.toTensor().item<float>();
-  AT_ASSERT(resd == refd);
+  TORCH_INTERNAL_ASSERT(resd == refd);
 }
 
 TEST(LiteInterpreterDirectTest, DuplicateSetState) {
@@ -606,8 +607,8 @@ TEST(LiteInterpreterDirectTest, DefaultArgsConv) {
     res = bc.get_method("forward")(inputs);
   }
   auto output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(output.equal(outputref));
+  TORCH_INTERNAL_ASSERT(outputref.dim() == output.dim());
+  TORCH_INTERNAL_ASSERT(output.equal(outputref));
 }
 
 namespace {
@@ -624,8 +625,8 @@ void testLiteModuleCompareResultTensors(
     res = bc.get_method(method_name)(inputs);
   }
   auto output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(output.equal(outputref));
+  TORCH_INTERNAL_ASSERT(outputref.dim() == output.dim());
+  TORCH_INTERNAL_ASSERT(output.equal(outputref));
 }
 
 void testDefaultArgsPinv2(int num_args) {
@@ -807,7 +808,7 @@ TEST(LiteInterpreterDirectTest, DefaultArgsWithOutArg) {
   CompilationOptions options;
   mobile::Module bc = jitModuleToMobile(m, options);
   bc.run_method("forward", input_x, input_h);
-  AT_ASSERT(input_x.equal(4 * torch::ones({})));
+  TORCH_INTERNAL_ASSERT(input_x.equal(4 * torch::ones({})));
 }
 
 TEST(LiteInterpreterDirectTest, TestExceptionStackWithTwoLevelModuleHierarchy) {

@@ -49,7 +49,7 @@ class AliasInfo {
   }
 
   Symbol beforeSet() const {
-    AT_ASSERT(beforeSets_.size() == 1);
+    TORCH_INTERNAL_ASSERT(beforeSets_.size() == 1);
     return *beforeSets_.begin();
   }
 

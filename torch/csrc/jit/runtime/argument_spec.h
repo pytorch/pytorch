@@ -86,7 +86,8 @@ struct ArgumentSpec {
   }
 
   void addTensor(const IValue& input, bool with_grad) {
-    AT_ASSERT(input.isTensor(), "Expected Tensor but found ", input.tagKind());
+    TORCH_INTERNAL_ASSERT(
+        input.isTensor(), "Expected Tensor but found ", input.tagKind());
     tensor_args.emplace_back();
     auto& arg = tensor_args.back();
     // Initialize all fields to 0. This is convenient, because e.g.

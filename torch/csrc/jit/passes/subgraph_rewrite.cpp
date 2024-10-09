@@ -137,7 +137,7 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
       }
       inputs.push_back(input);
     }
-    AT_ASSERT(ins_point);
+    TORCH_INTERNAL_ASSERT(ins_point);
 
     // Check that the insertion point we've chosen precedes all the uses of the
     // outputs - otherwise the replacement is incorrect and we have to skip it.
@@ -173,7 +173,7 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
         insertGraph(*graph, replacement_graph, inputs);
 
     // Record all planned rewritings
-    AT_ASSERT(outputs.size() == new_outputs.size());
+    TORCH_INTERNAL_ASSERT(outputs.size() == new_outputs.size());
     for (const auto idx : c10::irange(outputs.size())) {
       values_to_rewrite.push_back(outputs[idx]);
       rewrite_map[outputs[idx]] =

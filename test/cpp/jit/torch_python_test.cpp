@@ -27,11 +27,11 @@ void testEvalModeForLoadedModule() {
     return; // The module file to load is not generated in Sandcastle
   std::string module_path = "dropout_model.pt";
   torch::jit::Module module = torch::jit::load(module_path);
-  AT_ASSERT(module.attr("dropout").toModule().is_training());
+  TORCH_INTERNAL_ASSERT(module.attr("dropout").toModule().is_training());
   module.eval();
-  AT_ASSERT(!module.attr("dropout").toModule().is_training());
+  TORCH_INTERNAL_ASSERT(!module.attr("dropout").toModule().is_training());
   module.train();
-  AT_ASSERT(module.attr("dropout").toModule().is_training());
+  TORCH_INTERNAL_ASSERT(module.attr("dropout").toModule().is_training());
 }
 
 // TODO: this test never ran before and is broken.
@@ -52,11 +52,11 @@ void testEvalModeForLoadedModule() {
 
 //   auto elements = ivalue.toTupleRef().elements();
 //   auto ones = torch::ones({2, 2});
-//   AT_ASSERT(ones.equal(elements.at(0).toTensor()));
+//   TORCH_INTERNAL_ASSERT(ones.equal(elements.at(0).toTensor()));
 
 //   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 //   auto twos = torch::ones({3, 5}) * 2;
-//   AT_ASSERT(twos.equal(elements.at(1).toTensor()));
+//   TORCH_INTERNAL_ASSERT(twos.equal(elements.at(1).toTensor()));
 // }
 
 void testTorchSaveError() {
@@ -73,7 +73,7 @@ void testTorchSaveError() {
   } catch (const std::exception& c) {
   }
   // Ensure torch::jit::load did not run
-  AT_ASSERT(passed);
+  TORCH_INTERNAL_ASSERT(passed);
 }
 } // namespace
 

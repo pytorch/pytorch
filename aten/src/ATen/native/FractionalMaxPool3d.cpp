@@ -147,9 +147,9 @@ static void fractional_max_pool3d_out_single_batch_frame(
             for (t2 = inputTStart; t2 < inputTStart + poolSizeT; ++t2) {
               for (h2 = inputHStart; h2 < inputHStart + poolSizeH; ++h2) {
                 for (w2 = inputWStart; w2 < inputWStart + poolSizeW; ++w2) {
-                  AT_ASSERT(t2 >= 0 && t2 < inputT);
-                  AT_ASSERT(h2 >= 0 && h2 < inputH);
-                  AT_ASSERT(w2 >= 0 && w2 < inputW);
+                  TORCH_INTERNAL_ASSERT(t2 >= 0 && t2 < inputT);
+                  TORCH_INTERNAL_ASSERT(h2 >= 0 && h2 < inputH);
+                  TORCH_INTERNAL_ASSERT(w2 >= 0 && w2 < inputW);
 
                   int64_t planeIndex = t2 * inputH * inputW + h2 * inputW + w2;
                   scalar_t val = inputForPlane[planeIndex];
@@ -281,7 +281,7 @@ static void fractional_max_pool3d_backward_out_single_batch_frame(
           for (w = 0; w < outputW; ++w) {
             int64_t outputIndex = t * outputH * outputW + h * outputW + w;
             int64_t index = indicesForPlane[outputIndex];
-            AT_ASSERT(index >= 0 && index < inputT * inputH * inputW);
+            TORCH_INTERNAL_ASSERT(index >= 0 && index < inputT * inputH * inputW);
             gradInputForPlane[index] += gradOutputForPlane[outputIndex];
           }
         }

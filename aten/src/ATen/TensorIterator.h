@@ -340,21 +340,21 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   }
 
   const TensorBase& output_base(int64_t arg = 0) const {
-    AT_ASSERT(arg < num_outputs_);
+    TORCH_INTERNAL_ASSERT(arg < num_outputs_);
     return tensor_base(arg);
   }
 
   const Tensor& output(int64_t arg = 0) const {
-    AT_ASSERT(arg < num_outputs_);
+    TORCH_INTERNAL_ASSERT(arg < num_outputs_);
     return tensor(arg);
   }
 
   const TensorBase& input_base(int64_t arg = 0) const {
-    AT_ASSERT(arg >= 0 && arg < ntensors() - num_outputs_);
+    TORCH_INTERNAL_ASSERT(arg >= 0 && arg < ntensors() - num_outputs_);
     return tensor_base(num_outputs_ + arg);
   }
   const Tensor& input(int64_t arg = 0) const {
-    AT_ASSERT(arg >= 0 && arg < ntensors() - num_outputs_);
+    TORCH_INTERNAL_ASSERT(arg >= 0 && arg < ntensors() - num_outputs_);
     return tensor(num_outputs_ + arg);
   }
 

@@ -451,13 +451,13 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
     case EmbeddingBagMode::SUM:
     case EmbeddingBagMode::MEAN:
       if (mode == EmbeddingBagMode::MEAN)
-        AT_ASSERT(!per_sample_weights.defined());
+        TORCH_INTERNAL_ASSERT(!per_sample_weights.defined());
       return embedding_bag_backward_cuda_sum_avg(grad, indices, offset2bag,
               bag_size_, num_weights, scale_grad_by_freq, mode,
               per_sample_weights, padding_idx);
 
     case EmbeddingBagMode::MAX:
-      AT_ASSERT(!per_sample_weights.defined());
+      TORCH_INTERNAL_ASSERT(!per_sample_weights.defined());
       return embedding_bag_backward_cuda_max(grad, max_indices, num_weights,
               padding_idx);
 
@@ -516,16 +516,16 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
       mode == EmbeddingBagMode::SUM,
       "embedding_bag_backward: per_sample_weights only supported for mode='sum'");
 
-  AT_ASSERT(grad.dim() == 2);
+  TORCH_INTERNAL_ASSERT(grad.dim() == 2);
   auto embedding_features = grad.size(1);
 
   Tensor indices, offsets;
   std::tie(indices, offsets) = promoteIndicesAndOffsets(indices_, offsets_);
-  AT_ASSERT(indices.dim() == 1);
+  TORCH_INTERNAL_ASSERT(indices.dim() == 1);
   auto num_samples = indices.size(0);
 
-  AT_ASSERT(weight.dim() == 2);
-  AT_ASSERT(weight.size(1) == embedding_features);
+  TORCH_INTERNAL_ASSERT(weight.dim() == 2);
+  TORCH_INTERNAL_ASSERT(weight.size(1) == embedding_features);
 
   const int threads_per_block = 512;
   const int warps_per_block = threads_per_block / at::cuda::warp_size();

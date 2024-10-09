@@ -21,7 +21,7 @@ void RandomSampler::reset(std::optional<size_t> new_size) {
 }
 
 std::optional<std::vector<size_t>> RandomSampler::next(size_t batch_size) {
-  AT_ASSERT(index_ <= indices_.numel());
+  TORCH_INTERNAL_ASSERT(index_ <= indices_.numel());
   const size_t remaining_indices = indices_.numel() - index_;
   if (remaining_indices == 0) {
     return nullopt;

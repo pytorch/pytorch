@@ -235,7 +235,7 @@ struct GuardElimination {
           input->node()->kind() == prim::Constant ||
           (allow_numbers && input->type()->isSubtypeOf(*NumberType::get())) ||
           except.count(i) != 0) {
-        AT_ASSERT(
+        TORCH_INTERNAL_ASSERT(
             input->node()->kind() != prim::Guard ||
             input->type()->expect<TensorType>());
       } else {

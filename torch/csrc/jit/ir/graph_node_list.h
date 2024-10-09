@@ -72,7 +72,7 @@ struct generic_graph_node_list_iterator {
     return cur;
   }
   generic_graph_node_list_iterator& operator++() {
-    AT_ASSERT(cur);
+    TORCH_INTERNAL_ASSERT(cur);
     cur = cur->next_in_graph[d];
     return *this;
   }
@@ -82,7 +82,7 @@ struct generic_graph_node_list_iterator {
     return old;
   }
   generic_graph_node_list_iterator& operator--() {
-    AT_ASSERT(cur);
+    TORCH_INTERNAL_ASSERT(cur);
     cur = cur->next_in_graph[reverseDir()];
     return *this;
   }

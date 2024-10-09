@@ -269,7 +269,7 @@ void initPythonTracerBindings(PyObject* module) {
   });
   m.def("_tracer_set_get_unique_name_fn", [](const py::function& func) {
     const auto& tracing_state = getTracingState();
-    AT_ASSERT(tracing_state);
+    TORCH_INTERNAL_ASSERT(tracing_state);
     tracing_state->lookup_var_name_fn =
         [func](const Variable& var) -> std::string {
       pybind11::gil_scoped_acquire ag;
@@ -278,7 +278,7 @@ void initPythonTracerBindings(PyObject* module) {
   });
   m.def("_tracer_set_force_outplace", [](bool force_outplace) {
     const auto& tracing_state = getTracingState();
-    AT_ASSERT(tracing_state);
+    TORCH_INTERNAL_ASSERT(tracing_state);
     tracing_state->force_outplace = force_outplace;
   });
 }

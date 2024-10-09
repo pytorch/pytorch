@@ -147,7 +147,7 @@ void insertLastUses(Graph& g) {
       // In other words, we find the first program point for v that
       // _reverse_ dominates the definition of v, and add a drop point there.
       Node* same_depth_node = findOwnerInBlock(n, v->node()->owningBlock());
-      AT_ASSERT(
+      TORCH_INTERNAL_ASSERT(
           same_depth_node); // failure means v is not in scope for n, use lint!
 
       // In the case where v and n are in the same block,

@@ -87,51 +87,51 @@ intrusive_ptr<T> dynamic_intrusive_pointer_cast(intrusive_ptr<U> r) {
 }
 
 inline c10::intrusive_ptr<ivalue::Future> IValue::toFuture() && {
-  AT_ASSERT(isFuture(), "Expected Future but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isFuture(), "Expected Future but got ", tagKind());
   return moveToIntrusivePtr<ivalue::Future>();
 }
 inline c10::intrusive_ptr<ivalue::Future> IValue::toFuture() const& {
-  AT_ASSERT(isFuture(), "Expected Future but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isFuture(), "Expected Future but got ", tagKind());
   return toIntrusivePtr<ivalue::Future>();
 }
 inline c10::intrusive_ptr<ivalue::Await> IValue::toAwait() && {
-  AT_ASSERT(isAwait(), "Expected Await but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isAwait(), "Expected Await but got ", tagKind());
   return moveToIntrusivePtr<ivalue::Await>();
 }
 inline c10::intrusive_ptr<ivalue::Await> IValue::toAwait() const& {
-  AT_ASSERT(isAwait(), "Expected Await but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isAwait(), "Expected Await but got ", tagKind());
   return toIntrusivePtr<ivalue::Await>();
 }
 inline c10::intrusive_ptr<c10::RRefInterface> IValue::toRRef() && {
-  AT_ASSERT(isRRef(), "Expected RRef but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isRRef(), "Expected RRef but got ", tagKind());
   return moveToIntrusivePtr<c10::RRefInterface>();
 }
 inline c10::intrusive_ptr<c10::RRefInterface> IValue::toRRef() const& {
-  AT_ASSERT(isRRef(), "Expected RRef but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isRRef(), "Expected RRef but got ", tagKind());
   return toIntrusivePtr<c10::RRefInterface>();
 }
 inline c10::intrusive_ptr<at::Quantizer> IValue::toQuantizer() && {
-  AT_ASSERT(isQuantizer(), "Expected Quantizer but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isQuantizer(), "Expected Quantizer but got ", tagKind());
   return moveToIntrusivePtr<at::Quantizer>();
 }
 inline c10::intrusive_ptr<at::Quantizer> IValue::toQuantizer() const& {
-  AT_ASSERT(isQuantizer(), "Expected Quantizer but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isQuantizer(), "Expected Quantizer but got ", tagKind());
   return toIntrusivePtr<at::Quantizer>();
 }
 inline c10::intrusive_ptr<ivalue::ConstantString> IValue::toString() && {
-  AT_ASSERT(isString(), "Expected String but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isString(), "Expected String but got ", tagKind());
   return moveToIntrusivePtr<ivalue::ConstantString>();
 }
 inline c10::intrusive_ptr<ivalue::ConstantString> IValue::toString() const& {
-  AT_ASSERT(isString(), "Expected String but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isString(), "Expected String but got ", tagKind());
   return toIntrusivePtr<ivalue::ConstantString>();
 }
 inline c10::intrusive_ptr<ivalue::Object> IValue::toObject() && {
-  AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isObject(), "Expected Object but got ", tagKind());
   return moveToIntrusivePtr<ivalue::Object>();
 }
 inline c10::intrusive_ptr<ivalue::Object> IValue::toObject() const& {
-  AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isObject(), "Expected Object but got ", tagKind());
   return toIntrusivePtr<ivalue::Object>();
 }
 inline c10::intrusive_ptr<ivalue::PyObjectHolder> IValue::
@@ -187,34 +187,34 @@ inline const at::Tensor& IValue::toTensor() const& {
   return payload.as_tensor;
 }
 inline c10::Storage IValue::toStorage() && {
-  AT_ASSERT(isStorage(), "Expected Storage but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isStorage(), "Expected Storage but got ", tagKind());
   return c10::Storage(
       moveToIntrusivePtr<at::StorageImpl>());
 }
 inline c10::Storage IValue::toStorage() const& {
-  AT_ASSERT(isStorage(), "Expected Storage but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isStorage(), "Expected Storage but got ", tagKind());
   return c10::Storage(toIntrusivePtr<at::StorageImpl>());
 }
 inline c10::Stream IValue::toStream() && {
-  AT_ASSERT(isStream(), "Expected Stream but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isStream(), "Expected Stream but got ", tagKind());
   auto ptr = toIntrusivePtr<ivalue::StreamData3Holder>();
   return c10::Stream::unpack3((*ptr).val.stream_id,
                               (*ptr).val.device_index,
                               (*ptr).val.device_type);
 }
 inline c10::Stream IValue::toStream() const& {
-  AT_ASSERT(isStream(), "Expected Stream but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isStream(), "Expected Stream but got ", tagKind());
   auto ptr = toIntrusivePtr<ivalue::StreamData3Holder>();
   return c10::Stream::unpack3((*ptr).val.stream_id,
                               (*ptr).val.device_index,
                               (*ptr).val.device_type);
 }
 inline c10::intrusive_ptr<caffe2::Blob> IValue::toBlob() && {
-  AT_ASSERT(isBlob(), "Expected Blob but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isBlob(), "Expected Blob but got ", tagKind());
   return moveToIntrusivePtr<caffe2::Blob>();
 }
 inline c10::intrusive_ptr<caffe2::Blob> IValue::toBlob() const& {
-  AT_ASSERT(isBlob(), "Expected Blob but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isBlob(), "Expected Blob but got ", tagKind());
   return toIntrusivePtr<caffe2::Blob>();
   ;
 }
@@ -227,15 +227,15 @@ inline c10::intrusive_ptr<torch::CustomClassHolder> IValue::toCapsule() const& {
   return toIntrusivePtr<torch::CustomClassHolder>();
 }
 inline at::Generator IValue::toGenerator() && {
-  AT_ASSERT(isGenerator(), "Expected Generator but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isGenerator(), "Expected Generator but got ", tagKind());
   return at::Generator(moveToIntrusivePtr<at::GeneratorImpl>());
 }
 inline at::Generator IValue::toGenerator() const& {
-  AT_ASSERT(isGenerator(), "Expected Generator but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isGenerator(), "Expected Generator but got ", tagKind());
   return at::Generator(toIntrusivePtr<at::GeneratorImpl>());
 }
 inline c10::SymInt IValue::toSymInt() && {
-  AT_ASSERT(isSymInt() || isInt(), "Expected SymInt or int but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isSymInt() || isInt(), "Expected SymInt or int but got ", tagKind());
   if (isSymInt()) {
     return c10::SymInt(moveToIntrusivePtr<c10::SymNodeImpl>());
   } else {
@@ -243,7 +243,7 @@ inline c10::SymInt IValue::toSymInt() && {
   }
 }
 inline c10::SymInt IValue::toSymInt() const& {
-  AT_ASSERT(isSymInt() || isInt(), "Expected SymInt or int but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isSymInt() || isInt(), "Expected SymInt or int but got ", tagKind());
   if (isSymInt()) {
     return c10::SymInt(toIntrusivePtr<c10::SymNodeImpl>());
   } else {
@@ -251,7 +251,7 @@ inline c10::SymInt IValue::toSymInt() const& {
   }
 }
 inline c10::SymFloat IValue::toSymFloat() && {
-  AT_ASSERT(isSymFloat() || isDouble(), "Expected SymFloat or double but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isSymFloat() || isDouble(), "Expected SymFloat or double but got ", tagKind());
   if (isSymFloat()) {
     return c10::SymFloat(moveToIntrusivePtr<c10::SymNodeImpl>());
   } else {
@@ -259,7 +259,7 @@ inline c10::SymFloat IValue::toSymFloat() && {
   }
 }
 inline c10::SymFloat IValue::toSymFloat() const& {
-  AT_ASSERT(isSymFloat() || isDouble(), "Expected SymFloat or double but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isSymFloat() || isDouble(), "Expected SymFloat or double but got ", tagKind());
   if (isSymFloat()) {
     return c10::SymFloat(toIntrusivePtr<c10::SymNodeImpl>());
   } else {
@@ -267,7 +267,7 @@ inline c10::SymFloat IValue::toSymFloat() const& {
   }
 }
 inline c10::SymBool IValue::toSymBool() && {
-  AT_ASSERT(isSymBool() || isBool(), "Expected SymBool or boolean but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isSymBool() || isBool(), "Expected SymBool or boolean but got ", tagKind());
   if (isSymBool()) {
     return c10::SymBool(moveToIntrusivePtr<c10::SymNodeImpl>());
   } else {
@@ -276,7 +276,7 @@ inline c10::SymBool IValue::toSymBool() && {
 }
 
 inline c10::SymBool IValue::toSymBool() const& {
-  AT_ASSERT(isSymBool() || isBool(), "Expected SymBool or boolean but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isSymBool() || isBool(), "Expected SymBool or boolean but got ", tagKind());
   if (isSymBool()) {
     return c10::SymBool(toIntrusivePtr<c10::SymNodeImpl>());
   } else {
@@ -997,7 +997,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // Get the result of the current future.
   IValue value() {
     std::unique_lock<std::mutex> lock(mutex_);
-    AT_ASSERT(completed());
+    TORCH_INTERNAL_ASSERT(completed());
     if (eptr_) {
       std::rethrow_exception(eptr_);
     }
@@ -1008,7 +1008,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // completed() with no error.
   const IValue& constValue() const {
     std::unique_lock<std::mutex> lock(mutex_);
-    AT_ASSERT(completed());
+    TORCH_INTERNAL_ASSERT(completed());
     TORCH_INTERNAL_ASSERT(
       !eptr_,
       "value() accessor should only be used when future is not completed with ",
@@ -1022,8 +1022,8 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // completed() with no error.
   const std::vector<WeakStorage>& storages() const {
     std::unique_lock<std::mutex> lock(mutex_);
-    AT_ASSERT(completed());
-    AT_ASSERT(!eptr_);
+    TORCH_INTERNAL_ASSERT(completed());
+    TORCH_INTERNAL_ASSERT(!eptr_);
     return storages_;
   }
 
@@ -1678,7 +1678,7 @@ using _guarded_unsigned_long = std::conditional_t<
 } // namespace detail
 
 inline ivalue::Object& IValue::toObjectRef() const {
-  AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isObject(), "Expected Object but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(), "Attempted to create null reference");
   return *static_cast<c10::ivalue::Object*>(payload.u.as_intrusive_ptr);
 }
@@ -1960,15 +1960,15 @@ inline typename c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue
 }
 
 inline c10::List<int64_t> IValue::toIntList() && {
-  AT_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
   return c10::List<int64_t>(moveToIntrusivePtr<c10::detail::ListImpl>());
 }
 inline c10::List<int64_t> IValue::toIntList() const& {
-  AT_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
   return c10::List<int64_t>(toIntrusivePtr<c10::detail::ListImpl>());
 }
 inline std::vector<int64_t> IValue::toIntVector() const {
-  AT_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
       "called toIntVector on null intrusive_ptr IValue");
@@ -1976,7 +1976,7 @@ inline std::vector<int64_t> IValue::toIntVector() const {
       static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
 }
 inline std::vector<c10::SymInt> IValue::toSymIntVector() const {
-  AT_ASSERT(isSymIntList() || isIntList(), "Expected SymIntList or IntList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isSymIntList() || isIntList(), "Expected SymIntList or IntList but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
       "called toSymIntVector on null intrusive_ptr IValue");
@@ -1984,7 +1984,7 @@ inline std::vector<c10::SymInt> IValue::toSymIntVector() const {
       static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
 }
 inline at::DimVector IValue::toDimVector() const {
-  AT_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
       "called toDimVector on null intrusive_ptr IValue");
@@ -1992,15 +1992,15 @@ inline at::DimVector IValue::toDimVector() const {
       static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
 }
 inline c10::List<double> IValue::toDoubleList() && {
-  AT_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
   return c10::List<double>(moveToIntrusivePtr<c10::detail::ListImpl>());
 }
 inline c10::List<double> IValue::toDoubleList() const& {
-  AT_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
   return c10::List<double>(toIntrusivePtr<c10::detail::ListImpl>());
 }
 inline std::vector<double> IValue::toDoubleVector() const {
-  AT_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
       "called toDoubleVector on null intrusive_ptr IValue");
@@ -2008,15 +2008,15 @@ inline std::vector<double> IValue::toDoubleVector() const {
       static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
 }
 inline c10::List<c10::complex<double>> IValue::toComplexDoubleList() && {
-  AT_ASSERT(isComplexDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isComplexDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
   return c10::List<c10::complex<double>>(moveToIntrusivePtr<c10::detail::ListImpl>());
 }
 inline c10::List<c10::complex<double>> IValue::toComplexDoubleList() const& {
-  AT_ASSERT(isComplexDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isComplexDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
   return c10::List<c10::complex<double>>(toIntrusivePtr<c10::detail::ListImpl>());
 }
 inline std::vector<c10::complex<double>> IValue::toComplexDoubleVector() const {
-  AT_ASSERT(isComplexDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isComplexDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
       "called toComplexDoubleVector on null intrusive_ptr IValue");
@@ -2024,23 +2024,23 @@ inline std::vector<c10::complex<double>> IValue::toComplexDoubleVector() const {
       static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
 }
 inline c10::List<bool> IValue::toBoolList() && {
-  AT_ASSERT(isBoolList(), "Expected BoolList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isBoolList(), "Expected BoolList but got ", tagKind());
   return c10::List<bool>(moveToIntrusivePtr<c10::detail::ListImpl>());
 }
 inline c10::List<bool> IValue::toBoolList() const& {
-  AT_ASSERT(isBoolList(), "Expected BoolList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isBoolList(), "Expected BoolList but got ", tagKind());
   return c10::List<bool>(toIntrusivePtr<c10::detail::ListImpl>());
 }
 inline c10::List<at::Tensor> IValue::toTensorList() && {
-  AT_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
   return c10::List<at::Tensor>(moveToIntrusivePtr<c10::detail::ListImpl>());
 }
 inline c10::List<at::Tensor> IValue::toTensorList() const& {
-  AT_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
   return c10::List<at::Tensor>(toIntrusivePtr<c10::detail::ListImpl>());
 }
 inline std::vector<at::Tensor> IValue::toTensorVector() const {
-  AT_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
       "called toTensorVector on null intrusive_ptr IValue");
@@ -2048,15 +2048,15 @@ inline std::vector<at::Tensor> IValue::toTensorVector() const {
       static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
 }
 inline c10::List<std::optional<at::Tensor>> IValue::toOptionalTensorList() && {
-  AT_ASSERT(isOptionalTensorList(), "Expected OptionalTensorList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isOptionalTensorList(), "Expected OptionalTensorList but got ", tagKind());
   return c10::List<std::optional<at::Tensor>>(moveToIntrusivePtr<c10::detail::ListImpl>());
 }
 inline c10::List<std::optional<at::Tensor>> IValue::toOptionalTensorList() const& {
-  AT_ASSERT(isOptionalTensorList(), "Expected OptionalTensorList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isOptionalTensorList(), "Expected OptionalTensorList but got ", tagKind());
   return c10::List<std::optional<at::Tensor>>(toIntrusivePtr<c10::detail::ListImpl>());
 }
 inline std::vector<std::optional<at::Tensor>> IValue::toOptionalTensorVector() const {
-  AT_ASSERT(isOptionalTensorList(), "Expected OptionalTensorList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isOptionalTensorList(), "Expected OptionalTensorList but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
       "called toOptionalTensorVector on null intrusive_ptr IValue");
@@ -2064,15 +2064,15 @@ inline std::vector<std::optional<at::Tensor>> IValue::toOptionalTensorVector() c
       static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
 }
 inline c10::List<IValue> IValue::toList() && {
-  AT_ASSERT(isList(), "Expected GenericList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isList(), "Expected GenericList but got ", tagKind());
   return c10::List<IValue>(moveToIntrusivePtr<c10::detail::ListImpl>());
 }
 inline c10::List<IValue> IValue::toList() const& {
-  AT_ASSERT(isList(), "Expected GenericList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isList(), "Expected GenericList but got ", tagKind());
   return c10::List<IValue>(toIntrusivePtr<c10::detail::ListImpl>());
 }
 inline c10::ArrayRef<IValue> IValue::toListRef() const {
-  AT_ASSERT(isList(), "Expected GenericList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isList(), "Expected GenericList but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
       "called toListRef on null intrusive_ptr IValue");
@@ -2080,23 +2080,23 @@ inline c10::ArrayRef<IValue> IValue::toListRef() const {
       ->list;
 }
 inline c10::Dict<IValue, IValue> IValue::toGenericDict() && {
-  AT_ASSERT(isGenericDict(), "Expected GenericDict but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isGenericDict(), "Expected GenericDict but got ", tagKind());
   return c10::Dict<IValue, IValue>(moveToIntrusivePtr<c10::detail::DictImpl>());
 }
 inline c10::Dict<IValue, IValue> IValue::toGenericDict() const& {
-  AT_ASSERT(isGenericDict(), "Expected GenericDict but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isGenericDict(), "Expected GenericDict but got ", tagKind());
   return c10::Dict<IValue, IValue>(toIntrusivePtr<c10::detail::DictImpl>());
 }
 inline c10::intrusive_ptr<ivalue::Tuple> IValue::toTuple() && {
-  AT_ASSERT(isTuple(), "Expected Tuple but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isTuple(), "Expected Tuple but got ", tagKind());
   return moveToIntrusivePtr<ivalue::Tuple>();
 }
 inline c10::intrusive_ptr<ivalue::Tuple> IValue::toTuple() const& {
-  AT_ASSERT(isTuple(), "Expected Tuple but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isTuple(), "Expected Tuple but got ", tagKind());
   return toIntrusivePtr<ivalue::Tuple>();
 }
 inline ivalue::Tuple& IValue::toTupleRef() const {
-  AT_ASSERT(isTuple(), "Expected Tuple but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isTuple(), "Expected Tuple but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
       "called toTupleRef on null intrusive_ptr IValue");
@@ -2353,7 +2353,7 @@ inline IValue::IValue(c10::complex<T> c)
 }
 
 inline const std::string& IValue::toStringRef() const {
-  AT_ASSERT(isString(), "Expected String but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isString(), "Expected String but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
       "called toStringRef on null intrusive_ptr IValue");
@@ -2366,7 +2366,7 @@ inline std::optional<std::reference_wrapper<const std::string>> IValue::
   if (isNone()) {
     return std::nullopt;
   }
-  AT_ASSERT(isString(), "Expected std::optional<string> but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isString(), "Expected std::optional<string> but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
       "called toOptionalStringRef on null intrusive_ptr IValue");
@@ -2376,7 +2376,7 @@ inline std::optional<std::reference_wrapper<const std::string>> IValue::
 }
 
 inline c10::string_view IValue::toStringView() const {
-  AT_ASSERT(isString(), "Expected String but got ", tagKind());
+  TORCH_INTERNAL_ASSERT(isString(), "Expected String but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
       "called toStringView on null intrusive_ptr IValue");

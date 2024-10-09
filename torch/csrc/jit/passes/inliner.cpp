@@ -14,7 +14,7 @@ using namespace ::c10::prim;
 
 GraphFunction* tryToGraphFunction(Node* n) {
   if (n->kind() == prim::CallFunction) {
-    AT_ASSERT(n->input(0)->node()->kind() == prim::Constant);
+    TORCH_INTERNAL_ASSERT(n->input(0)->node()->kind() == prim::Constant);
     auto function_constant = n->input(0)->node();
     auto fun_type = function_constant->output()->type()->expect<FunctionType>();
     return tryToGraphFunction(*fun_type->function());

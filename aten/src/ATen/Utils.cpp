@@ -21,7 +21,7 @@ namespace detail {
 template <typename T>
 Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
   auto result = at::empty(values.size(), options);
-  AT_ASSERT(result.is_contiguous());
+  TORCH_INTERNAL_ASSERT(result.is_contiguous());
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX(result.scalar_type(), "tensor_cpu", [&] {
     std::copy(
         values.begin(), values.end(), result.template data_ptr<scalar_t>());
@@ -38,7 +38,7 @@ Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options) {
 template <typename T>
 Tensor tensor_complex_cpu(ArrayRef<T> values, const TensorOptions& options) {
   auto result = at::empty(values.size(), options);
-  AT_ASSERT(result.is_contiguous());
+  TORCH_INTERNAL_ASSERT(result.is_contiguous());
   AT_DISPATCH_COMPLEX_TYPES(result.scalar_type(), "tensor_cpu", [&] {
     std::copy(
         values.begin(), values.end(), result.template data_ptr<scalar_t>());

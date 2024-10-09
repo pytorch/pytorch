@@ -94,7 +94,7 @@ TEST(LiteInterpreterTest, Index) {
   expected[0][0] = 0;
   expected[0][1] = 1;
 
-  AT_ASSERT(result_1.toTensor().equal(expected));
+  TORCH_INTERNAL_ASSERT(result_1.toTensor().equal(expected));
 }
 
 TEST(LiteInterpreterTest, Gradient) {
@@ -112,11 +112,11 @@ TEST(LiteInterpreterTest, Gradient) {
 
   const auto result_1 = bc.forward({0});
   at::Tensor expected_1 = at::tensor({-1.5, -0.75, 3.75, 7.5}, c10::TensorOptions(c10::ScalarType::Float));
-  AT_ASSERT(result_1.toList().get(0).toTensor().equal(expected_1));
+  TORCH_INTERNAL_ASSERT(result_1.toList().get(0).toTensor().equal(expected_1));
 
   const auto result_2 = bc.forward({1});
   at::Tensor expected_2 = at::tensor({-3.0, -1.5, 7.5, 15.0}, c10::TensorOptions(c10::ScalarType::Float));
-  AT_ASSERT(result_2.toList().get(0).toTensor().equal(expected_2));
+  TORCH_INTERNAL_ASSERT(result_2.toList().get(0).toTensor().equal(expected_2));
 }
 
 TEST(LiteInterpreterTest, Upsample) {
@@ -128,7 +128,7 @@ TEST(LiteInterpreterTest, Upsample) {
 
   const auto result_1 = bc.forward({at::ones({1, 2, 3})});
   at::Tensor expected_1 = at::ones({1, 2, 6}, c10::TensorOptions(c10::ScalarType::Float));
-  AT_ASSERT(result_1.toTensor().equal(expected_1));
+  TORCH_INTERNAL_ASSERT(result_1.toTensor().equal(expected_1));
 }
 
 TEST(LiteInterpreterTest, IndexTensor) {
@@ -143,7 +143,7 @@ TEST(LiteInterpreterTest, IndexTensor) {
   const auto result_1 = bc.forward({at::tensor({1}, c10::TensorOptions(c10::ScalarType::Long))});
 
   at::Tensor expected_1 = at::tensor({1.}, c10::TensorOptions(c10::ScalarType::Float));
-  AT_ASSERT(result_1.toTensor().equal(expected_1));
+  TORCH_INTERNAL_ASSERT(result_1.toTensor().equal(expected_1));
 }
 
 TEST(LiteInterpreterTest, Conv2d) {
@@ -170,7 +170,7 @@ TEST(LiteInterpreterTest, AddTensor) {
   const auto result_1 = bc.forward({at::tensor({1, 2, 3}, c10::TensorOptions(c10::ScalarType::Long))});
 
   at::Tensor expected_1 = at::tensor({2, 3, 4}, c10::TensorOptions(c10::ScalarType::Long));
-  AT_ASSERT(result_1.toTensor().equal(expected_1));
+  TORCH_INTERNAL_ASSERT(result_1.toTensor().equal(expected_1));
 }
 
 TEST(LiteInterpreterTest, DivideTensor) {
@@ -188,8 +188,8 @@ TEST(LiteInterpreterTest, DivideTensor) {
 
   at::Tensor expected_1 = at::tensor({-4}, c10::TensorOptions(c10::ScalarType::Long));
   at::Tensor expected_2 = at::tensor({-4.}, c10::TensorOptions(c10::ScalarType::Float));
-  AT_ASSERT(result_1.toList().get(0).toTensor().equal(expected_1));
-  AT_ASSERT(result_1.toList().get(1).toTensor().equal(expected_2));
+  TORCH_INTERNAL_ASSERT(result_1.toList().get(0).toTensor().equal(expected_1));
+  TORCH_INTERNAL_ASSERT(result_1.toList().get(1).toTensor().equal(expected_2));
 }
 
 TEST(LiteInterpreterTest, MultipleOps) {
@@ -213,7 +213,7 @@ TEST(LiteInterpreterTest, MultipleOps) {
   const auto result = bc.forward({b});
 
   at::Tensor expected = torch::tensor({{1, 1, 1, 1, 1, 1, 1, 1}, {0, 0, 0, 0, 0, 0, 0, 0}}, c10::TensorOptions(c10::ScalarType::Float));
-  AT_ASSERT(result.toTensor().equal(expected));
+  TORCH_INTERNAL_ASSERT(result.toTensor().equal(expected));
 }
 } // namespace mobile
 } // namespace jit

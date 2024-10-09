@@ -594,7 +594,7 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_, std::optional
 }
 
 Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
-  AT_ASSERT(input_.layout() == c10::kStrided);
+  TORCH_INTERNAL_ASSERT(input_.layout() == c10::kStrided);
   return grad.to_dense(input_.scalar_type());
 }
 
@@ -1218,7 +1218,7 @@ Tensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
     auto ix = toListOfOptionalTensors(indices.chunk(indices.size(0), 0));
     values = self.index(ix).squeeze(0).clone(at::MemoryFormat::Preserve);
   } else {
-    AT_ASSERT(nz.sizes().equals({0, 1}));
+    TORCH_INTERNAL_ASSERT(nz.sizes().equals({0, 1}));
     // In this cases, indices is a clone of nz, which is a tensor of shape (0,
     // 1). Given sparse tensor invariants, values should be shape (1,)
     values = self.unsqueeze(0).clone(at::MemoryFormat::Preserve);

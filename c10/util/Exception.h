@@ -681,32 +681,4 @@ namespace c10::detail {
 #define TORCH_CHECK_ARG(cond, argN, ...) \
   TORCH_CHECK(cond, "invalid argument ", argN, ": ", __VA_ARGS__)
 
-// ----------------------------------------------------------------------------
-// Deprecated macros
-// ----------------------------------------------------------------------------
-
-namespace c10::detail {
-
-/*
-// Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_ASSERT is deprecated, if you mean to indicate an
-internal invariant failure, use " \
-                       "TORCH_INTERNAL_ASSERT instead; if you mean to do user
-error checking, use " \ "TORCH_CHECK.  See
-https://github.com/pytorch/pytorch/issues/20287 for more details.")
-*/
-inline void deprecated_AT_ASSERT() {}
-
-} // namespace c10::detail
-
-// Deprecated alias; this alias was deprecated because people kept mistakenly
-// using it for user error checking.  Use TORCH_INTERNAL_ASSERT or TORCH_CHECK
-// instead. See https://github.com/pytorch/pytorch/issues/20287 for more
-// details.
-#define AT_ASSERT(...)                                              \
-  do {                                                              \
-    ::c10::detail::deprecated_AT_ASSERT();                          \
-    C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__)); \
-  } while (false)
-
 #endif // C10_UTIL_EXCEPTION_H_

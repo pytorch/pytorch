@@ -155,7 +155,7 @@ Tensor _upsample_nearest3d_quantized_cpu(
   int64_t input_depth = input.size(2);
   int64_t input_height = input.size(3);
   int64_t input_width = input.size(4);
-  AT_ASSERT(input_width > 0 && output_width > 0);
+  TORCH_INTERNAL_ASSERT(input_width > 0 && output_width > 0);
   if (input.is_contiguous(c10::MemoryFormat::ChannelsLast3d)) {
     Tensor output = at::_empty_affine_quantized(
         {nbatch, channels, output_depth, output_height, output_width},

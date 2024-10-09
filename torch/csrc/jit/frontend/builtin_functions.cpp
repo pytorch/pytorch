@@ -110,7 +110,7 @@ struct BuiltinFunctionRegistry {
       loadBuiltinFunctions();
       state = INITIALIZED;
     }
-    AT_ASSERT(state == INITIALIZED);
+    TORCH_INTERNAL_ASSERT(state == INITIALIZED);
     auto it = builtins_by_name_.find(name);
     if (it == builtins_by_name_.end())
       return empty;

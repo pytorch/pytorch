@@ -397,7 +397,7 @@ void SimpleValue::setAttr(
     }
   }
 
-  AT_ASSERT(expectedType);
+  TORCH_INTERNAL_ASSERT(expectedType);
 
   // Check type correctness
   const auto newType = newValue->type();
@@ -426,7 +426,7 @@ std::shared_ptr<SugaredValue> SimpleValue::call(
     std::shared_ptr<Graph> graph =
         self->inputs().at(0)->node()->g(attr::Subgraph);
     Value* context = self->inputs().at(1);
-    AT_ASSERT(context->node()->kind() == prim::TupleConstruct);
+    TORCH_INTERNAL_ASSERT(context->node()->kind() == prim::TupleConstruct);
 
     // fork nodes are emitted in their own block but we do not simplify
     // tuple construction across blocks. To ensure we clean up the tuple
@@ -705,7 +705,7 @@ std::shared_ptr<SugaredValue> ClassValue::call(
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
-  AT_ASSERT(n_binders <= 1);
+  TORCH_INTERNAL_ASSERT(n_binders <= 1);
 
   // Generate a new object of the right type, then call `__init__` on it
   auto& g = *m.graph();

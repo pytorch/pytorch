@@ -34,7 +34,7 @@ struct ExitPair : public std::pair<Value*, std::vector<Value*>> {
     for (Value* v : exit_val_ref) {
       exit_vals.push_back(v);
     }
-    AT_ASSERT(exit_v->type() == BoolType::get());
+    TORCH_INTERNAL_ASSERT(exit_v->type() == BoolType::get());
     this->first = exit_v;
     this->second = std::move(exit_vals);
   }

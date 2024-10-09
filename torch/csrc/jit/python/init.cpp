@@ -2152,7 +2152,7 @@ void initJITBindings(PyObject* module) {
     return self_value->overlaps(*other_value);
   });
   m.def("_awaitable", [](const py::args& args, const py::kwargs& kwargs) {
-    AT_ASSERT(!args.empty());
+    TORCH_INTERNAL_ASSERT(!args.empty());
     py::tuple args_tup(args.size() - 1);
     for (const auto i : c10::irange(1, args.size())) {
       args_tup[i - 1] = args[i];
@@ -2169,7 +2169,7 @@ void initJITBindings(PyObject* module) {
         return py_aw->wait();
       });
   m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
-    AT_ASSERT(!args.empty());
+    TORCH_INTERNAL_ASSERT(!args.empty());
 
     py::function f = py::cast<py::function>(args[0]);
     py::tuple args_tup(args.size() - 1);

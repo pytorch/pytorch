@@ -72,7 +72,7 @@ TEST(RunTimeTest, Delegate) {
   inputs.emplace_back(1.0 * at::ones({}));
 
   auto mres = mlm.forward(inputs);
-  AT_ASSERT(mres.toTensor().equal(3 * at::ones({})));
+  TORCH_INTERNAL_ASSERT(mres.toTensor().equal(3 * at::ones({})));
 }
 
 TEST(RunTimeTest, DelegateException) {

@@ -370,7 +370,7 @@ struct TORCH_API IValue final {
       return false;
     }
 
-    AT_ASSERT(rhs.isIntrusivePtr());
+    TORCH_INTERNAL_ASSERT(rhs.isIntrusivePtr());
 
     // Other types can be compared by their ptr value
     return this->payload.u.as_intrusive_ptr == rhs.payload.u.as_intrusive_ptr;
@@ -857,7 +857,7 @@ struct TORCH_API IValue final {
     return Tag::None == tag;
   }
   std::string toNone() const {
-    AT_ASSERT(isNone());
+    TORCH_INTERNAL_ASSERT(isNone());
     return "None";
   }
 
@@ -928,7 +928,7 @@ struct TORCH_API IValue final {
     return Tag::Device == tag;
   }
   c10::Device toDevice() const {
-    AT_ASSERT(isDevice());
+    TORCH_INTERNAL_ASSERT(isDevice());
     return c10::Device(payload.u.as_device.type, payload.u.as_device.index);
   }
 

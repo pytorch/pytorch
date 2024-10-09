@@ -172,12 +172,12 @@ void ConcretePythonOp::lint_python() const {
     } else if (c == 'd') {
       n_tensors++;
     } else {
-      AT_ASSERT(0);
+      TORCH_INTERNAL_ASSERT(0);
     }
-    AT_ASSERT(static_cast<bool>(pyobj));
+    TORCH_INTERNAL_ASSERT(static_cast<bool>(pyobj));
   }
-  AT_ASSERT(n_scalars == scalar_args.size());
-  AT_ASSERT(n_tensors == inputs().size());
+  TORCH_INTERNAL_ASSERT(n_scalars == scalar_args.size());
+  TORCH_INTERNAL_ASSERT(n_tensors == inputs().size());
 }
 
 Node* Graph::createPythonOp(
@@ -720,7 +720,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "t_",
           [](Node& n, const char* name, const torch::autograd::Variable& v) {
-            AT_ASSERT(!v.requires_grad());
+            TORCH_INTERNAL_ASSERT(!v.requires_grad());
             return n.t_(Symbol::attr(name), v);
           })
       .def(
@@ -735,7 +735,7 @@ void initPythonIRBindings(PyObject* module_) {
             std::vector<at::Tensor> tensors;
             tensors.reserve(vs.size());
             for (auto& variable : vs) {
-              AT_ASSERT(!variable.requires_grad());
+              TORCH_INTERNAL_ASSERT(!variable.requires_grad());
               tensors.push_back(variable);
             }
             return n.ts_(Symbol::attr(name), std::move(tensors));

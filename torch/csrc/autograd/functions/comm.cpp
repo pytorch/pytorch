@@ -28,7 +28,7 @@ Scatter::Scatter(
 Scatter::~Scatter() = default;
 
 variable_list Scatter::apply(variable_list&& inputs) {
-  AT_ASSERT(inputs.size() == 1);
+  TORCH_INTERNAL_ASSERT(inputs.size() == 1);
   auto& input = inputs.front();
 
   std::shared_ptr<Node> grad_fn;
@@ -47,9 +47,9 @@ variable_list Scatter::apply(variable_list&& inputs) {
   std::vector<Variable> variables;
   variables.reserve(tensors.size());
   for (auto& tensor : tensors) {
-    AT_ASSERT(tensor.defined());
+    TORCH_INTERNAL_ASSERT(tensor.defined());
     if (unsqueeze_scalars_) {
-      AT_ASSERT(tensor.dim() == 1 && tensor.numel() == 1);
+      TORCH_INTERNAL_ASSERT(tensor.dim() == 1 && tensor.numel() == 1);
       variables.push_back(tensor[0]);
     } else {
       variables.push_back(std::move(tensor));

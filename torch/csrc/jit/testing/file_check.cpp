@@ -350,7 +350,7 @@ struct FileCheckImpl {
       return;
     }
     for (const auto& check : nots) {
-      AT_ASSERT(check.type_ == CHECK_NOT);
+      TORCH_INTERNAL_ASSERT(check.type_ == CHECK_NOT);
       assertNotFind(SourceRange(source, start, end), check.search_str_, check);
     }
   }
@@ -438,9 +438,9 @@ struct FileCheckImpl {
     size_t group_beg = std::string::npos;
     size_t group_end = 0;
 
-    AT_ASSERT(!groups.empty());
+    TORCH_INTERNAL_ASSERT(!groups.empty());
     for (const auto& check : group) {
-      AT_ASSERT(check.type_ == group[0].type_);
+      TORCH_INTERNAL_ASSERT(check.type_ == group[0].type_);
       auto pos = assertFind(source, check.search_str_, prev.end(), check);
       group_beg = std::min(pos, group_beg);
       group_end = std::max(pos + check.search_str_.size(), group_end);
@@ -453,14 +453,14 @@ struct FileCheckImpl {
       const std::vector<Check>& group,
       const std::shared_ptr<Source>& source,
       const SourceRange& prev) {
-    AT_ASSERT(!group.empty());
+    TORCH_INTERNAL_ASSERT(!group.empty());
     CheckType type = group[0].type_;
 
     if (type == CHECK_DAG) {
       return matchDagGroup(group, source, prev);
     }
-    AT_ASSERT(type != CHECK_NOT);
-    AT_ASSERT(group.size() == 1);
+    TORCH_INTERNAL_ASSERT(type != CHECK_NOT);
+    TORCH_INTERNAL_ASSERT(group.size() == 1);
 
     const auto& check = group[0];
     size_t start_range = prev.end();
@@ -486,7 +486,7 @@ struct FileCheckImpl {
       } break;
       case CHECK_COUNT: {
         auto group_start_range = std::string::npos;
-        AT_ASSERT(check.count_ && *check.count_ != 0);
+        TORCH_INTERNAL_ASSERT(check.count_ && *check.count_ != 0);
         for (size_t i = 0; i < *check.count_; ++i) {
           start_range =
               assertFind(source, check.search_str_, start_range, check);
@@ -523,7 +523,7 @@ struct FileCheckImpl {
       } else {
         if (i + 1 < groups.size()) {
           const auto& next_group = groups[i + 1];
-          AT_ASSERT(next_group.at(0).type_ != CHECK_NOT);
+          TORCH_INTERNAL_ASSERT(next_group.at(0).type_ != CHECK_NOT);
           SourceRange after_not = matchGroup(next_group, source, prev);
           doCheckNot(curr_group, source, prev, after_not);
           prev = after_not;

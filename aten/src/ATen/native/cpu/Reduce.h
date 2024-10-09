@@ -127,7 +127,7 @@ static void set_result(const int index, const res_t result, const TensorIterator
 
 template<typename traits, typename res_t>
 static void set_results(const res_t result, const TensorIteratorBase &iter, const int num_outputs) {
-  AT_ASSERT(num_outputs == 1);
+  TORCH_INTERNAL_ASSERT(num_outputs == 1);
   set_result<traits>(0, result, iter, num_outputs);
 }
 
@@ -149,9 +149,9 @@ for_each_in_tuple(const std::tuple<tuple_t...>& t, const TensorIteratorBase &ite
 
 template<typename traits, typename... res_t>
 static void set_results(const std::tuple<res_t...>& result, const TensorIteratorBase &iter, const int num_outputs) {
-  AT_ASSERT(num_outputs >= 1);
+  TORCH_INTERNAL_ASSERT(num_outputs >= 1);
   std::size_t result_size = for_each_in_tuple<traits>(result, iter, num_outputs);
-  AT_ASSERT((size_t)num_outputs == result_size);
+  TORCH_INTERNAL_ASSERT((size_t)num_outputs == result_size);
 }
 
 template <typename T, typename... Args>
@@ -214,7 +214,7 @@ void binary_kernel_reduce(TensorIteratorBase& iter, ops_t ops, init_t init) {
     auto reduction_body = [&ops, &sub_iter, num_outputs](acc_t acc, int64_t begin, int64_t end) -> acc_t {
       int ntensors = sub_iter.ntensors();
       sub_iter.serial_for_each([&acc, &ops, num_outputs, ntensors, begin](char** data, const int64_t* strides, int64_t size) {
-        AT_ASSERT(ntensors - num_outputs == 1);
+        TORCH_INTERNAL_ASSERT(ntensors - num_outputs == 1);
         char *in = data[ntensors - 1];
         int64_t stride = strides[ntensors - 1];
         for (const auto i : c10::irange(size)) {
@@ -231,7 +231,7 @@ void binary_kernel_reduce(TensorIteratorBase& iter, ops_t ops, init_t init) {
       total_acc = reduction_body(total_acc, 0, numel);
     } else {
       int max_threads = at::get_num_threads();
-      AT_ASSERT(max_threads > 0);
+      TORCH_INTERNAL_ASSERT(max_threads > 0);
       static_assert(
         !std::is_same<acc_t, bool>::value,
         "Concurrently modifying different references into std::vector<bool> is UB."

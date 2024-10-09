@@ -256,7 +256,7 @@ struct ConstantPropagator {
 
   void inlineIf(Node* n) {
     auto input_bool = constant_as<bool>(n->input());
-    AT_ASSERT(input_bool);
+    TORCH_INTERNAL_ASSERT(input_bool);
     GRAPH_UPDATE(
         "Folding if ",
         getHeader(n->input()->node()),

@@ -297,7 +297,7 @@ static void disas(const std::string& so_file) {
   env.s("so_file", so_file);
   std::string cmd = format(disas_string, env);
   int r = system(cmd.c_str());
-  AT_ASSERT(r == 0);
+  TORCH_INTERNAL_ASSERT(r == 0);
 }
 
 FusedKernelCPU::FusedKernelCPU(

@@ -54,7 +54,7 @@ class Queue {
     } else {
       cv_.wait(lock, [this] { return !this->queue_.empty(); });
     }
-    AT_ASSERT(!queue_.empty());
+    TORCH_INTERNAL_ASSERT(!queue_.empty());
     T value = queue_.front();
     queue_.pop();
     lock.unlock();

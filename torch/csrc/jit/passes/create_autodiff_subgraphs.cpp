@@ -197,7 +197,7 @@ class SubgraphSlicer {
   //
   // Returns true if an inlining has occurred, false otherwise.
   bool inlineIfTooSmall(Node* n) {
-    AT_ASSERT(n->kind() == prim::DifferentiableGraph);
+    TORCH_INTERNAL_ASSERT(n->kind() == prim::DifferentiableGraph);
     auto subgraph = SubgraphUtils::getSubgraph(n);
     size_t i = 0;
     for (auto it = subgraph->nodes().begin(); it != subgraph->nodes().end();
@@ -280,7 +280,7 @@ class SubgraphSlicer {
   // Try to merge `producer` into `consumer`. If successful, this destroys
   // `producer` and returns the `consumer` group.
   std::optional<Node*> tryMerge(Node* consumer, Node* producer) {
-    AT_ASSERT(consumer->kind() == prim::DifferentiableGraph);
+    TORCH_INTERNAL_ASSERT(consumer->kind() == prim::DifferentiableGraph);
     bool canMerge = shouldConsiderForMerge(producer) &&
         aliasDb_.moveBeforeTopologicallyValid(producer, consumer);
 

@@ -39,7 +39,7 @@ static void inlineForkedClosure(Node* fork_closure, NodeKind genKind) {
         << "Cannot fork lambda with parameters";
   }
   auto fork_graph_context = fork_graph->inputs().at(0);
-  AT_ASSERT(fork_graph_context->uses().size() == 1);
+  TORCH_INTERNAL_ASSERT(fork_graph_context->uses().size() == 1);
   auto fork_graph_unpack = fork_graph_context->uses().at(0).user;
 
   for (size_t i = 0; i < context->inputs().size(); ++i) {

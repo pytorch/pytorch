@@ -382,7 +382,7 @@ const Tensor& indices) {
           const dim3 grid(grid_x, grid_y, grid_z);
 
           size_t shmem_size = (kernel_size_C * block_x*block_y*block_z) * (sizeof(int) + sizeof(scalar_t));
-          AT_ASSERT(shmem_size <= at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock);
+          TORCH_INTERNAL_ASSERT(shmem_size <= at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock);
 
           max_pool_forward_nhwc<scalar_t>
           <<<grid, block, shmem_size, at::cuda::getCurrentCUDAStream()>>>(
@@ -517,7 +517,7 @@ const Tensor& gradInput) {
           const dim3 grid(grid_x, grid_y, grid_z);
 
           size_t shmem_size = (kernel_size_C * block_x*block_y*block_z) * sizeof(accscalar_t);
-          AT_ASSERT(shmem_size <= at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock);
+          TORCH_INTERNAL_ASSERT(shmem_size <= at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock);
 
           // The backward kernel is launched on input instead output.
           // If it is launched on output layer, atomic_add would not provide much benefit on FP16.

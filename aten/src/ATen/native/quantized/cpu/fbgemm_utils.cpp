@@ -158,7 +158,7 @@ Tensor MakeStridedQTensorCPU(
     const IntArrayRef& strides,
     const TensorOptions& options,
     QuantizerPtr quantizer) {
-  AT_ASSERT(options.device().is_cpu());
+  TORCH_INTERNAL_ASSERT(options.device().is_cpu());
   at::native::check_size_nonnegative(sizes);
   auto* allocator = at::getCPUAllocator();
   const int64_t nelements = c10::multiply_integers(sizes);

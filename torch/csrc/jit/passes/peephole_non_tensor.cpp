@@ -171,7 +171,7 @@ struct PeepholeOptimizeNonTensorImpl {
         // if we are comparing a None value with a value that can't be None
         // replace the output with true if node is __isnot__ or false if node is
         // __is__
-        AT_ASSERT(node->inputs().size() == 2);
+        TORCH_INTERNAL_ASSERT(node->inputs().size() == 2);
         for (size_t check_none_index : {0, 1}) {
           bool input_must_be_none =
               node->inputs().at(check_none_index)->mustBeNone();

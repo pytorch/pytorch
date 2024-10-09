@@ -286,7 +286,7 @@ static std::string encodeRHS(const Node* n) {
     } else {
       str = templ.for_double;
     }
-    AT_ASSERT(str);
+    TORCH_INTERNAL_ASSERT(str);
     return format(str, env);
   }
 }
@@ -459,14 +459,14 @@ std::string generateKernel(
       const auto is_bool = input.second.has_value() &&
           ((*input.second).scalar_type == at::ScalarType::Bool);
       if (is_half) {
-        AT_ASSERT(use_cuda);
+        TORCH_INTERNAL_ASSERT(use_cuda);
         env.s(
             "access",
             format("__half2float(t${formal}.data[t${formal}_offset])", env));
         env.s("access_vec4", format("__half2float(t${formal}_buf[i])", env));
         has_half_tensor = true;
       } else if (is_bfloat) {
-        AT_ASSERT(use_cuda);
+        TORCH_INTERNAL_ASSERT(use_cuda);
         env.s(
             "access",
             format(
@@ -546,7 +546,7 @@ std::string generateKernel(
     if (n->mustBeNone())
       continue;
     if (n->kind() == aten::rand_like) {
-      AT_ASSERT(use_cuda);
+      TORCH_INTERNAL_ASSERT(use_cuda);
       has_random = true;
     }
     // Always emit double for prim::Constant. This will be narrowed later based
@@ -561,7 +561,7 @@ std::string generateKernel(
       } else if (val.isBool()) {
         rhs = scalarValue(val.toBool());
       } else {
-        AT_ASSERT(val.isInt());
+        TORCH_INTERNAL_ASSERT(val.isInt());
         rhs = scalarValue(val.toInt());
       }
       env.s("node", valueName(n->output()));
@@ -590,12 +590,12 @@ std::string generateKernel(
     const auto is_bfloat =
         (output.second.scalar_type == at::ScalarType::BFloat16);
     if (is_half) {
-      AT_ASSERT(use_cuda);
+      TORCH_INTERNAL_ASSERT(use_cuda);
       body << format("${access} = __float2half(${node});\n", env);
       body_vec4 << format("${access_vec4} = __float2half(${node});\n", env);
       has_half_tensor = true;
     } else if (is_bfloat) {
-      AT_ASSERT(use_cuda);
+      TORCH_INTERNAL_ASSERT(use_cuda);
       body << format("${access} = __float2bfloat16(${node});\n", env);
       body_vec4 << format("${access_vec4} = __float2bfloat16(${node});\n", env);
       has_bfloat_tensor = true;

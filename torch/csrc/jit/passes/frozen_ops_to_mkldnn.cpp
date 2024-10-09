@@ -1099,7 +1099,7 @@ class MKLDNNSubgraphSlicer {
   // Try to merge `consumer` into `producer`. If successful, this destroys
   // `consumer` and returns the `producer` group.
   std::optional<Node*> tryMerge(Node* producer, Node* consumer) {
-    AT_ASSERT(producer->kind() == prim::MKLDNNGroup);
+    TORCH_INTERNAL_ASSERT(producer->kind() == prim::MKLDNNGroup);
     bool canMerge = shouldConsiderForMerge(consumer) &&
         aliasDb_.moveAfterTopologicallyValid(consumer, producer);
 

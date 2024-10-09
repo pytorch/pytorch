@@ -59,12 +59,12 @@ struct NamedValue {
   }
 
   const std::string& name() const {
-    AT_ASSERT(name_);
+    TORCH_INTERNAL_ASSERT(name_);
     return *name_;
   }
 
   const SourceRange& loc() const {
-    AT_ASSERT(loc_);
+    TORCH_INTERNAL_ASSERT(loc_);
     return *loc_;
   }
 

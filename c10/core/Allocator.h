@@ -186,12 +186,12 @@ struct C10_API Allocator {
   }
   void* raw_allocate(size_t n) {
     auto dptr = allocate(n);
-    AT_ASSERT(dptr.get() == dptr.get_context());
+    TORCH_INTERNAL_ASSERT(dptr.get() == dptr.get_context());
     return dptr.release_context();
   }
   void raw_deallocate(void* ptr) {
     auto d = raw_deleter();
-    AT_ASSERT(d);
+    TORCH_INTERNAL_ASSERT(d);
     d(ptr);
   }
 

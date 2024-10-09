@@ -121,8 +121,8 @@ RegisterOperators mm_tree_reduction_reg({Operator(
       }
       drop(stack, num_inputs);
 
-      AT_ASSERT(!inputs.empty());
-      AT_ASSERT(inputs.size() % 2 == 0);
+      TORCH_INTERNAL_ASSERT(!inputs.empty());
+      TORCH_INTERNAL_ASSERT(inputs.size() % 2 == 0);
       size_t side_num_elems = inputs.size() / 2;
       auto lhs_inputs = at::TensorList(inputs).slice(0, side_num_elems);
       auto rhs_inputs = at::TensorList(inputs).slice(side_num_elems);
@@ -226,7 +226,7 @@ struct TreeToken {
         matmuls.push_back(n);
       } else if (n->matches("aten::t(Tensor self) -> Tensor")) {
         Node* input_node = n->input()->node();
-        AT_ASSERT(input_node->matches(
+        TORCH_INTERNAL_ASSERT(input_node->matches(
             "aten::mm(Tensor self, Tensor mat2) -> Tensor"));
         // (AB)^T == B^TA^T
         WithInsertPoint insert_guard{input_node};
@@ -419,10 +419,10 @@ static void BatchMMSide(Block* block, AliasDb& alias_db) {
   // NB: 8 is the current loop unrolling factor
   static constexpr size_t how_many_is_many = 8;
   const auto batch_side = [&](std::vector<Node*>& mms, Side side) {
-    AT_ASSERT(!mms.empty());
+    TORCH_INTERNAL_ASSERT(!mms.empty());
     for (int64_t i = static_cast<int64_t>(mms.size()) - 2; i >= 0; --i) {
       bool move_ok = alias_db.moveBeforeTopologicallyValid(mms[i], mms[i + 1]);
-      AT_ASSERT(move_ok);
+      TORCH_INTERNAL_ASSERT(move_ok);
     }
     WithInsertPoint insert_guard{mms[0]};
     Graph* graph = mms[0]->owningGraph();

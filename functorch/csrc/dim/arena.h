@@ -259,7 +259,7 @@ private:
 
 template<typename T>
 inline void Slice<T>::insert(Arena& arena, Slice where, Slice to_insert) {
-    AT_ASSERT(inside(where));
+    TORCH_INTERNAL_ASSERT(inside(where));
     Slice result = *this;
     /// b------sb---se-----e,  0----n
     T* body_dest = where.begin();

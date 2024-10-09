@@ -68,7 +68,7 @@ struct TempFile {
     auto wt = c10::u8u16(t);
     std::vector<wchar_t> tt(wt.c_str(), wt.c_str() + wt.size() + 1);
     int fd = wmkstemps(tt.data(), suffix);
-    AT_ASSERT(fd != -1);
+    TORCH_INTERNAL_ASSERT(fd != -1);
     file_ = _wfdopen(fd, L"r+");
     auto wname = std::wstring(tt.begin(), tt.end() - 1);
     name_ = c10::u16u8(wname);
@@ -77,7 +77,7 @@ struct TempFile {
     // so we make a copy of the string here, including null terminator
     std::vector<char> tt(t.c_str(), t.c_str() + t.size() + 1);
     int fd = mkstemps(tt.data(), suffix);
-    AT_ASSERT(fd != -1);
+    TORCH_INTERNAL_ASSERT(fd != -1);
     file_ = fdopen(fd, "r+");
     // - 1 because tt.size() includes the null terminator,
     // but std::string does not expect one
@@ -95,7 +95,7 @@ struct TempFile {
 
   void write(const std::string& str) {
     size_t result = fwrite(str.c_str(), 1, str.size(), file_);
-    AT_ASSERT(str.size() == result);
+    TORCH_INTERNAL_ASSERT(str.size() == result);
   }
 
 #ifdef _MSC_VER

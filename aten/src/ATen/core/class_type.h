@@ -138,12 +138,12 @@ struct TORCH_API ClassType : public NamedType {
   }
 
   const TypePtr& getAttribute(size_t slot) const {
-    AT_ASSERT(slot < attributes_.size());
+    TORCH_INTERNAL_ASSERT(slot < attributes_.size());
     return attributes_.at(slot).getType();
   }
 
   const std::string getAttributeName(size_t slot) const {
-    AT_ASSERT(slot < attributes_.size());
+    TORCH_INTERNAL_ASSERT(slot < attributes_.size());
     return attributes_[slot].getName();
   }
 
@@ -301,9 +301,9 @@ struct TORCH_API ClassType : public NamedType {
 
   TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
     auto ptr = ClassType::create(name(), compilation_unit_, is_module());
-    AT_ASSERT(numAttributes() == contained_types.size());
+    TORCH_INTERNAL_ASSERT(numAttributes() == contained_types.size());
     for(size_t i = 0; i < attributes_.size(); ++i) {
-      AT_ASSERT(attributes_[i].getType()->isSubtypeOf(*contained_types[i]));
+      TORCH_INTERNAL_ASSERT(attributes_[i].getType()->isSubtypeOf(*contained_types[i]));
       ptr->addAttribute(attributes_[i].getName(), std::move(contained_types[i]));
     }
     // Copy methods over

@@ -473,7 +473,7 @@ c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach(
 }
 
 void FunctionalTensorWrapper::shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) {
-    AT_ASSERT(has_compatible_shallow_copy_type(impl->key_set()));
+    TORCH_INTERNAL_ASSERT(has_compatible_shallow_copy_type(impl->key_set()));
     auto functional_impl =
         static_cast<FunctionalTensorWrapper*>(impl.get());
     copy_tensor_metadata_and_refresh(

@@ -379,7 +379,7 @@ TEST(ModuleAPITest, Define) {
       return self.foo + x + b
   )");
   auto result = m.run_method("add_it", torch::ones({}));
-  AT_ASSERT(result.toTensor().item<float>() == 6);
+  TORCH_INTERNAL_ASSERT(result.toTensor().item<float>() == 6);
 }
 
 TEST(ModuleAPITest, Freezing) {
@@ -452,8 +452,8 @@ TEST(ModuleAPITest, To_CUDA) {
 
     m.to(at::kCUDA);
     m.to(at::kCPU);
-    AT_ASSERT(m.attr("foo").toTensor().device().is_cpu());
-    AT_ASSERT(m.attr("bar").toTensor().device().is_cpu());
+    TORCH_INTERNAL_ASSERT(m.attr("foo").toTensor().device().is_cpu());
+    TORCH_INTERNAL_ASSERT(m.attr("bar").toTensor().device().is_cpu());
   }
   {
     // test cpu to cuda for params and buffers
@@ -461,8 +461,8 @@ TEST(ModuleAPITest, To_CUDA) {
     m.register_buffer("bar", torch::ones({}));
 
     m.to(at::kCUDA);
-    AT_ASSERT(m.attr("foo").toTensor().device().is_cuda());
-    AT_ASSERT(m.attr("bar").toTensor().device().is_cuda());
+    TORCH_INTERNAL_ASSERT(m.attr("foo").toTensor().device().is_cuda());
+    TORCH_INTERNAL_ASSERT(m.attr("bar").toTensor().device().is_cuda());
   }
 }
 

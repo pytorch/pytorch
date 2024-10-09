@@ -79,7 +79,7 @@ struct OrderedSequencer : public Sequencer<Result> {
     while (true) {
       auto result = next_result();
       if (!result) {
-        AT_ASSERT(!detail::buffer_contains_result(buffer_));
+        TORCH_INTERNAL_ASSERT(!detail::buffer_contains_result(buffer_));
         break;
       }
       // If it was not nullopt and the sequence numbers match, return it
@@ -89,7 +89,7 @@ struct OrderedSequencer : public Sequencer<Result> {
         return result;
       }
       // Stash the result for later.
-      AT_ASSERT(!buffer(result->sequence_number).has_value());
+      TORCH_INTERNAL_ASSERT(!buffer(result->sequence_number).has_value());
       buffer(result->sequence_number) = std::move(result);
     }
     // The result was an empty optional, so we are done with this epoch.

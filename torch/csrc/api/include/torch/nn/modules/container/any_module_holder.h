@@ -41,7 +41,7 @@ struct AnyModuleHolder : public AnyModulePlaceholder {
   struct CheckedGetter {
     template <typename T>
     std::decay_t<T>&& operator()(size_t index) {
-      AT_ASSERT(index < arguments_.size());
+      TORCH_INTERNAL_ASSERT(index < arguments_.size());
       auto& value = arguments_[index];
       if (auto* maybe_value = value.template try_get<std::decay_t<T>>()) {
         return std::move(*maybe_value);

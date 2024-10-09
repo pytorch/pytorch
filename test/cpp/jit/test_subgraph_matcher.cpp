@@ -20,7 +20,7 @@ graph(%0):
   %x = a::aaa(%0)
   return (%x))IR",
       &pattern);
-  AT_ASSERT(!findPatternMatches(pattern, graph).empty());
+  TORCH_INTERNAL_ASSERT(!findPatternMatches(pattern, graph).empty());
 }
 
 TEST(SubgraphMatcherTest, Trivial2) {
@@ -38,11 +38,12 @@ TEST(SubgraphMatcherTest, Trivial2) {
   pattern.registerOutput(p_tanh->output());
 
   auto matches = findPatternMatches(pattern, graph);
-  AT_ASSERT(matches.size() == 1);
+  TORCH_INTERNAL_ASSERT(matches.size() == 1);
   for (const Match& m : matches) {
-    AT_ASSERT(m.values_map.at(p_in) == g_in);
-    AT_ASSERT(m.values_map.at(p_tanh->output()) == g_tanh->output());
-    AT_ASSERT(m.nodes_map.at(p_tanh) == g_tanh);
+    TORCH_INTERNAL_ASSERT(m.values_map.at(p_in) == g_in);
+    TORCH_INTERNAL_ASSERT(
+        m.values_map.at(p_tanh->output()) == g_tanh->output());
+    TORCH_INTERNAL_ASSERT(m.nodes_map.at(p_tanh) == g_tanh);
   }
 }
 
@@ -62,7 +63,7 @@ graph(%a, %b):
   %c = a::c(%a, %b)
   return (%c))IR",
       &pattern);
-  AT_ASSERT(!findPatternMatches(pattern, graph).empty());
+  TORCH_INTERNAL_ASSERT(!findPatternMatches(pattern, graph).empty());
 }
 
 TEST(SubgraphMatcherTest, Trivial4) {
@@ -84,12 +85,12 @@ TEST(SubgraphMatcherTest, Trivial4) {
   pattern.registerOutput(p_mul->output());
 
   auto matches = findPatternMatches(pattern, graph);
-  AT_ASSERT(matches.size() == 1);
+  TORCH_INTERNAL_ASSERT(matches.size() == 1);
   for (const Match& m : matches) {
-    AT_ASSERT(m.values_map.at(p_in0) == g_in0);
-    AT_ASSERT(m.values_map.at(p_in1) == g_in1);
-    AT_ASSERT(m.values_map.at(p_mul->output()) == g_mul->output());
-    AT_ASSERT(m.nodes_map.at(p_mul) == g_mul);
+    TORCH_INTERNAL_ASSERT(m.values_map.at(p_in0) == g_in0);
+    TORCH_INTERNAL_ASSERT(m.values_map.at(p_in1) == g_in1);
+    TORCH_INTERNAL_ASSERT(m.values_map.at(p_mul->output()) == g_mul->output());
+    TORCH_INTERNAL_ASSERT(m.nodes_map.at(p_mul) == g_mul);
   }
 }
 
@@ -112,7 +113,7 @@ graph(%0):
   %y = c::ccc(%x)
   return (%y))IR",
       &pattern);
-  AT_ASSERT(!findPatternMatches(pattern, graph).empty());
+  TORCH_INTERNAL_ASSERT(!findPatternMatches(pattern, graph).empty());
 }
 
 TEST(SubgraphMatcherTest, Linear2) {
@@ -142,13 +143,15 @@ TEST(SubgraphMatcherTest, Linear2) {
   pattern.registerOutput(p_tanh2->output());
 
   auto matches = findPatternMatches(pattern, graph);
-  AT_ASSERT(matches.size() == 1);
+  TORCH_INTERNAL_ASSERT(matches.size() == 1);
   for (const Match& m : matches) {
-    AT_ASSERT(m.values_map.at(p_in) == g_in);
-    AT_ASSERT(m.values_map.at(p_tanh->output()) == g_tanh->output());
-    AT_ASSERT(m.values_map.at(p_tanh2->output()) == g_tanh2->output());
-    AT_ASSERT(m.nodes_map.at(p_tanh) == g_tanh);
-    AT_ASSERT(m.nodes_map.at(p_tanh2) == g_tanh2);
+    TORCH_INTERNAL_ASSERT(m.values_map.at(p_in) == g_in);
+    TORCH_INTERNAL_ASSERT(
+        m.values_map.at(p_tanh->output()) == g_tanh->output());
+    TORCH_INTERNAL_ASSERT(
+        m.values_map.at(p_tanh2->output()) == g_tanh2->output());
+    TORCH_INTERNAL_ASSERT(m.nodes_map.at(p_tanh) == g_tanh);
+    TORCH_INTERNAL_ASSERT(m.nodes_map.at(p_tanh2) == g_tanh2);
   }
 }
 
@@ -188,7 +191,7 @@ graph(%0):
   %d = d::ddd(%b, %c)
   return (%d))IR",
       &pattern1);
-  AT_ASSERT(!findPatternMatches(pattern1, graph).empty());
+  TORCH_INTERNAL_ASSERT(!findPatternMatches(pattern1, graph).empty());
 
   // Check that order of nodes inside the diamond does not affect the result
   parseIR(
@@ -200,7 +203,7 @@ graph(%0):
   %d = d::ddd(%b, %c)
   return (%d))IR",
       &pattern2);
-  AT_ASSERT(!findPatternMatches(pattern2, graph).empty());
+  TORCH_INTERNAL_ASSERT(!findPatternMatches(pattern2, graph).empty());
 }
 
 /**
@@ -244,13 +247,15 @@ TEST(SubgraphMatcherTest, Diamond2) {
   pattern.registerOutput(p_mul->output());
 
   auto matches = findPatternMatches(pattern, graph);
-  AT_ASSERT(matches.size() == 1);
+  TORCH_INTERNAL_ASSERT(matches.size() == 1);
   for (const Match& m : matches) {
-    AT_ASSERT(m.values_map.at(p_in) == g_in);
-    AT_ASSERT(m.values_map.at(p_chunk->outputs()[0]) == g_chunk->outputs()[0]);
-    AT_ASSERT(m.values_map.at(p_chunk->outputs()[1]) == g_chunk->outputs()[1]);
-    AT_ASSERT(m.values_map.at(p_mul->output()) == g_mul->output());
-    AT_ASSERT(m.nodes_map.at(p_mul) == g_mul);
+    TORCH_INTERNAL_ASSERT(m.values_map.at(p_in) == g_in);
+    TORCH_INTERNAL_ASSERT(
+        m.values_map.at(p_chunk->outputs()[0]) == g_chunk->outputs()[0]);
+    TORCH_INTERNAL_ASSERT(
+        m.values_map.at(p_chunk->outputs()[1]) == g_chunk->outputs()[1]);
+    TORCH_INTERNAL_ASSERT(m.values_map.at(p_mul->output()) == g_mul->output());
+    TORCH_INTERNAL_ASSERT(m.nodes_map.at(p_mul) == g_mul);
   }
 }
 
@@ -278,7 +283,7 @@ graph(%0, %1):
   %g = g::ggg(%e, %f)
   return (%g))IR",
       &pattern);
-  AT_ASSERT(!findPatternMatches(pattern, graph).empty());
+  TORCH_INTERNAL_ASSERT(!findPatternMatches(pattern, graph).empty());
 }
 
 TEST(SubgraphMatcherTest, MultipleMatches) {
@@ -299,7 +304,7 @@ graph(%t0):
   return (%t1))IR",
       &pattern);
   auto matches = findPatternMatches(pattern, graph);
-  AT_ASSERT(matches.size() == 4);
+  TORCH_INTERNAL_ASSERT(matches.size() == 4);
 }
 
 TEST(SubgraphMatcherTest, OverlappingMatches) {
@@ -321,7 +326,7 @@ graph(%t0):
   return (%t2))IR",
       &pattern);
   auto matches = findPatternMatches(pattern, graph);
-  AT_ASSERT(matches.size() == 3);
+  TORCH_INTERNAL_ASSERT(matches.size() == 3);
 }
 
 TEST(SubgraphMatcherTest, MatchInBasicBlocks1) {
@@ -348,7 +353,7 @@ graph(%x, %y):
   %z = aten::mul(%x, %y)
   return (%z))IR",
       &pattern0);
-  AT_ASSERT(findPatternMatches(pattern0, graph).size() == 3);
+  TORCH_INTERNAL_ASSERT(findPatternMatches(pattern0, graph).size() == 3);
 
   Graph pattern1;
   parseIR(
@@ -358,7 +363,7 @@ graph(%x, %y):
   %z2 = aten::mul(%y, %z1)
   return (%z2))IR",
       &pattern1);
-  AT_ASSERT(findPatternMatches(pattern1, graph).size() == 0);
+  TORCH_INTERNAL_ASSERT(findPatternMatches(pattern1, graph).size() == 0);
 }
 
 TEST(SubgraphMatcherTest, MatchInBasicBlocks2) {
@@ -382,7 +387,7 @@ graph(%x, %y):
   %z = my::mul(%x, %y)
   return (%z))IR",
       &pattern0);
-  AT_ASSERT(findPatternMatches(pattern0, graph).size() == 2);
+  TORCH_INTERNAL_ASSERT(findPatternMatches(pattern0, graph).size() == 2);
 
   // Ensure the matches don't cross basic block boundaries
   Graph pattern1;
@@ -393,7 +398,7 @@ graph(%x, %y):
   %v = my::mul(%y, %u)
   return (%v))IR",
       &pattern1);
-  AT_ASSERT(findPatternMatches(pattern1, graph).size() == 0);
+  TORCH_INTERNAL_ASSERT(findPatternMatches(pattern1, graph).size() == 0);
 }
 
 TEST(SubgraphMatcherTest, MatchesAttributes) {
@@ -415,7 +420,7 @@ graph(%a, %b):
   %c = a::c[myattr="qqq"](%a, %b)
   return (%c))IR",
         &pattern);
-    AT_ASSERT(!findPatternMatches(pattern, graph).empty());
+    TORCH_INTERNAL_ASSERT(!findPatternMatches(pattern, graph).empty());
   }
   {
     Graph pattern;
@@ -425,7 +430,7 @@ graph(%a, %b):
   %c = a::c[myattr="zzz"](%a, %b)
   return (%c))IR",
         &pattern);
-    AT_ASSERT(findPatternMatches(pattern, graph).empty());
+    TORCH_INTERNAL_ASSERT(findPatternMatches(pattern, graph).empty());
   }
   {
     Graph pattern;
@@ -435,7 +440,7 @@ graph(%0):
   %b = a::b[extraattr=10](%0)
   return (%b))IR",
         &pattern);
-    AT_ASSERT(findPatternMatches(pattern, graph).empty());
+    TORCH_INTERNAL_ASSERT(findPatternMatches(pattern, graph).empty());
   }
   {
     Graph pattern;
@@ -445,7 +450,7 @@ graph(%0):
   %b = a::b[intattr=10, floatattr=3.14, complexattr=-3.14j](%0)
   return (%b))IR",
         &pattern);
-    AT_ASSERT(!findPatternMatches(pattern, graph).empty());
+    TORCH_INTERNAL_ASSERT(!findPatternMatches(pattern, graph).empty());
   }
   {
     Graph pattern;
@@ -455,7 +460,7 @@ graph(%0):
   %b = a::b[intattr=10, floatattr=3.14, complexattr=-3.14j, strattr="rrr"](%0)
   return (%b))IR",
         &pattern);
-    AT_ASSERT(findPatternMatches(pattern, graph).empty());
+    TORCH_INTERNAL_ASSERT(findPatternMatches(pattern, graph).empty());
   }
   {
     Graph pattern;
@@ -466,7 +471,7 @@ graph(%0):
   return (%a))IR",
         &pattern);
     // Lists are not supported yet, thus we shouldn't match for now.
-    AT_ASSERT(findPatternMatches(pattern, graph).empty());
+    TORCH_INTERNAL_ASSERT(findPatternMatches(pattern, graph).empty());
   }
   {
     Graph pattern;
@@ -476,7 +481,7 @@ graph(%a, %b):
   %c = a::c[myattr="q.*"](%a, %b)
   return (%c))IR",
         &pattern);
-    AT_ASSERT(!findPatternMatches(pattern, graph).empty());
+    TORCH_INTERNAL_ASSERT(!findPatternMatches(pattern, graph).empty());
   }
 }
 
@@ -538,7 +543,7 @@ graph(%0):
   %b = b::bbb(%a)
   return (%b, %a))IR",
         &pattern);
-    AT_ASSERT(findPatternMatches(pattern, graph).size() == 2);
+    TORCH_INTERNAL_ASSERT(findPatternMatches(pattern, graph).size() == 2);
   }
   {
     Graph graph, pattern;
@@ -561,7 +566,7 @@ graph(%0, %1):
   %b = b::bbb(%a1)
   return (%b, %a2))IR",
         &pattern);
-    AT_ASSERT(findPatternMatches(pattern, graph).size() == 2);
+    TORCH_INTERNAL_ASSERT(findPatternMatches(pattern, graph).size() == 2);
   }
 }
 

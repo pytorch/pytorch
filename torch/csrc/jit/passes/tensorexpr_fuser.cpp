@@ -58,7 +58,7 @@ bool usedOnlyInSize(Value* v) {
 }
 
 Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db) {
-  AT_ASSERT(!sizes.empty());
+  TORCH_INTERNAL_ASSERT(!sizes.empty());
   Graph* graph = sizes[0]->owningGraph();
   Node* broadcast_n =
       graph->insertNode(graph->create(prim::BroadcastSizes, sizes));
@@ -436,7 +436,7 @@ class TensorExprFuser {
 
     auto inputs = fusion_group->inputs();
     auto sinputs = subgraph->inputs();
-    AT_ASSERT(inputs.size() == sinputs.size());
+    TORCH_INTERNAL_ASSERT(inputs.size() == sinputs.size());
     for (const auto i : c10::irange(inputs.size())) {
       if (inputs[i]->type()->isSubtypeOf(*TensorType::get())) {
         Value* soutput = graph->insert(aten::size, {inputs[i]});
@@ -456,7 +456,7 @@ class TensorExprFuser {
     // beginning of the kernel.
     auto outputs = fusion_group->outputs();
     auto soutputs = subgraph->outputs();
-    AT_ASSERT(outputs.size() == soutputs.size());
+    TORCH_INTERNAL_ASSERT(outputs.size() == soutputs.size());
     for (const auto i : c10::irange(outputs.size())) {
       if (usedOnlyInSize(outputs[i]))
         continue;
@@ -536,7 +536,8 @@ class TensorExprFuser {
       if (usedOnlyInSize(output) && shape_of.count(soutput) > 0) {
         auto uses = output->uses();
         for (Use u : uses) {
-          AT_ASSERT(u.user->matches("aten::size(Tensor self) -> int[]"));
+          TORCH_INTERNAL_ASSERT(
+              u.user->matches("aten::size(Tensor self) -> int[]"));
           u.user->output()->replaceAllUsesWith(shape_of.at(soutput));
           u.user->destroy();
         }

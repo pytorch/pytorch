@@ -1004,7 +1004,7 @@ void ivalue::Object::unsafeRemoveAttr(const std::string& name) {
 }
 
 void ivalue::Object::resizeObject(size_t slot) {
-  AT_ASSERT(slot < type()->numAttributes());
+  TORCH_INTERNAL_ASSERT(slot < type()->numAttributes());
   slots_.resize(type()->numAttributes());
 }
 

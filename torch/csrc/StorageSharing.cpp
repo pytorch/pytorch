@@ -129,7 +129,7 @@ static PyObject* THPStorage_shareFilename(PyObject* self, PyObject* noargs) {
     storage.unsafeGetStorageImpl()->set_allocator(new_storage.allocator());
 
     ctx = THManagedMapAllocator::fromDataPtr(storage.data_ptr());
-    AT_ASSERT(ctx);
+    TORCH_INTERNAL_ASSERT(ctx);
   }
 
   THPObjectPtr manager_handle(PyBytes_FromString(ctx->manager_handle()));
@@ -227,7 +227,7 @@ static PyObject* THPStorage_shareFd(PyObject* self, PyObject* noargs) {
     storage.unsafeGetStorageImpl()->set_allocator(new_storage.allocator());
 
     ctx = at::MapAllocator::fromDataPtr(storage.data_ptr());
-    AT_ASSERT(ctx);
+    TORCH_INTERNAL_ASSERT(ctx);
   }
 
   THPObjectPtr storage_handle(THPUtils_packInt32(ctx->fd()));

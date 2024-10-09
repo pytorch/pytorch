@@ -140,7 +140,7 @@ struct TokenTrie {
   TokenTrie() = default;
   void insert(const char* str, int tok) {
     if (*str == '\0') {
-      AT_ASSERT(kind == 0);
+      TORCH_INTERNAL_ASSERT(kind == 0);
       kind = tok;
       return;
     }
@@ -519,9 +519,9 @@ struct Lexer {
     next_tokens.push_back(std::move(r));
   }
   Token lexRaw(bool whitespace_token = false) {
-    AT_ASSERT(source);
+    TORCH_INTERNAL_ASSERT(source);
     if (current == nullptr) {
-      AT_ASSERT(pos == 0);
+      TORCH_INTERNAL_ASSERT(pos == 0);
       current = std::make_unique<StringCordView::Iterator>(
           source->text_str().begin());
     }

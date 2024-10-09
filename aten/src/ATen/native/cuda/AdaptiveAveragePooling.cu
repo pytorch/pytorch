@@ -529,12 +529,12 @@ namespace {
         // TODO: to really support input tensor large enought to go beyond int32,
         // we will need to restrict out shared memory usage and adjust the launch
         // config;
-        AT_ASSERT(input_.numel() < std::numeric_limits<int32_t>::max());
+        TORCH_INTERNAL_ASSERT(input_.numel() < std::numeric_limits<int32_t>::max());
         AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
             input_.scalar_type(), "adaptive_avg_pool2d_nhwc_cuda", [&] {
               using opmath_t = at::opmath_type<scalar_t>;
               size_t shmem_size = (kernel_size_C * block_x * block_y * block_z) * sizeof(opmath_t);
-              AT_ASSERT(shmem_size <= sharedMemPerBlock);
+              TORCH_INTERNAL_ASSERT(shmem_size <= sharedMemPerBlock);
               adaptive_average_pool_nhwc<int32_t><<<grid, block, shmem_size, at::cuda::getCurrentCUDAStream()>>> (
                 input_.const_data_ptr<scalar_t>(),
                 output.mutable_data_ptr<scalar_t>(),
@@ -682,7 +682,7 @@ namespace {
           // TODO: to really support input tensor large enought to go beyond int32,
           // we will need to restrict out shared memory usage and adjust the launch
           // config;
-          AT_ASSERT(input.numel() < std::numeric_limits<int32_t>::max());
+          TORCH_INTERNAL_ASSERT(input.numel() < std::numeric_limits<int32_t>::max());
           AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
               input.scalar_type(), "adaptive_avg_pool2d_backward_nhwc_cuda", [&] {
                 size_t shmem_size = (kernel_size_C * block_x * block_y * block_z + osizeH + osizeW) * sizeof(scalar_t) + 2 * isizeW * sizeof(int32_t);

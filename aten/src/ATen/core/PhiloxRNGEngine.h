@@ -119,7 +119,7 @@ public:
 
   inline float randn(uint32_t n_rounds) {
     #ifdef __CUDA_ARCH__
-    AT_ASSERT(false, "Unsupported invocation of randn on CUDA");
+    TORCH_INTERNAL_ASSERT(false, "Unsupported invocation of randn on CUDA");
     #endif
     if(STATE == 0) {
       detail::UINT4 counter = counter_;

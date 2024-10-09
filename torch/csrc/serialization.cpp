@@ -177,7 +177,7 @@ void doRead(io fildes, void* raw_buf, size_t nbytes) {
     buf += r;
     // This is guaranteed by POSIX, but I just want to be double-sure
     // to not underflow a signed integer.
-    AT_ASSERT(static_cast<size_t>(r) <= nbytes);
+    TORCH_INTERNAL_ASSERT(static_cast<size_t>(r) <= nbytes);
     nbytes -= r;
   }
   if (nbytes != 0) {
@@ -215,7 +215,7 @@ void doWrite(io fildes, void* raw_buf, size_t nbytes) {
       }
     }
     buf += r;
-    AT_ASSERT(static_cast<size_t>(r) <= nbytes);
+    TORCH_INTERNAL_ASSERT(static_cast<size_t>(r) <= nbytes);
     nbytes -= r;
   }
 }

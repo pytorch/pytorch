@@ -214,7 +214,7 @@ struct DimEntry {
 
     DimEntry(int64_t pos)
     : data_(pos) {
-        AT_ASSERT(pos < 0);
+        TORCH_INTERNAL_ASSERT(pos < 0);
     }
     DimEntry(mpy::hdl<Dim> d) {
        std::memcpy(&data_, &d, sizeof(int64_t));
@@ -705,13 +705,13 @@ public:
 
     at::Tensor& tensor(Arena& A) {
         if (C10_UNLIKELY(!tensor_.defined())) {
-            AT_ASSERT(delayed_);
+            TORCH_INTERNAL_ASSERT(delayed_);
             auto t = Tensor::wrap(run_torch_function(A, delayed_->orig, delayed_->args, true));
             tensor_ = t->tensor(A);
             delayed_.reset();
             // don't force creation of batch tensor if it wasn't alreay provided.
             batchtensor_ = t->batchtensor_;
-            AT_ASSERT(levels() == t->levels());
+            TORCH_INTERNAL_ASSERT(levels() == t->levels());
         }
         return tensor_;
     }
@@ -857,22 +857,22 @@ mpy::object Tensor::from_positional(Arena & A, at::Tensor tensor, Slice<DimEntry
     for (auto i : levels.enumerate()) {
         auto l = levels[i];
         if (l.is_positional()) {
-            AT_ASSERT(last == 0 || last + 1 == l.position());
+            TORCH_INTERNAL_ASSERT(last == 0 || last + 1 == l.position());
             last = l.position();
         } else {
             mpy::object::borrow(l.dim()).release();
-            //AT_ASSERT(sz[i] == l.dim()->size());
+            //TORCH_INTERNAL_ASSERT(sz[i] == l.dim()->size());
             ++seen_dims;
         }
     }
-    AT_ASSERT(last == 0 || last == -1);
+    TORCH_INTERNAL_ASSERT(last == 0 || last == -1);
     if (!seen_dims) {
         return mpy::object::steal(THPVariable_Wrap(std::move(tensor)));
     }
 
     mpy::obj<Tensor> self = Tensor::create();
     self->tensor_ = std::move(tensor);
-    AT_ASSERT(self->tensor_.dim() == levels.size());
+    TORCH_INTERNAL_ASSERT(self->tensor_.dim() == levels.size());
     self->levels_.set(levels, free_levels_dims);
     self->has_device_ = has_device;
     mpy::object r = std::move(self);
@@ -1053,7 +1053,7 @@ PyObject* py_unflatten(PyObject *self,
     }
     auto AA = (UnflattenArena*) PyCapsule_GetPointer(self, "arena");
     auto r = AA->unflatten(slice).release();
-    AT_ASSERT(r != nullptr);
+    TORCH_INTERNAL_ASSERT(r != nullptr);
     return r;
     PY_END(nullptr)
 }
@@ -1144,7 +1144,7 @@ struct EnableAllLayers {
     ~EnableAllLayers() {
         auto to_remove = levels_start_ + levels_to_dim_.size() - 1;
         for (auto i : levels_to_dim_.enumerate()) {
-            AT_ASSERT(at::functorch::popDynamicLayerAndDeleteMetadata().layerId() == to_remove - i);
+            TORCH_INTERNAL_ASSERT(at::functorch::popDynamicLayerAndDeleteMetadata().layerId() == to_remove - i);
         }
     }
 
@@ -1157,7 +1157,7 @@ struct EnableAllLayers {
         at::functorch::BatchedTensorImpl * impl = maybeGetBatchedImpl(batchedtensor);
         while(true) {
             auto level = impl->level();
-            AT_ASSERT(level >= levels_start_ && level < levels_start_ + levels_to_dim_.size());
+            TORCH_INTERNAL_ASSERT(level >= levels_start_ && level < levels_start_ + levels_to_dim_.size());
             mpy::hdl<Dim> dim = levels_to_dim_[level - levels_start_].ptr();
             levels.insert(A, impl->bdim(), dim);
             at::functorch::BatchedTensorImpl * nimpl = maybeGetBatchedImpl(impl->value());
@@ -1203,7 +1203,7 @@ TensorRef _match_levels(Arena& A, TensorRef v, Slice<DimEntry> from_levels, Slic
     // drop_levels -> if a dim appears in from_levels but not to_levels, it is assumed it has stride 0.
     at::IntArrayRef sz = v->sizes();
     at::IntArrayRef sd = v->strides();
-    AT_ASSERT(drop_levels || from_levels.size() <= to_levels.size());
+    TORCH_INTERNAL_ASSERT(drop_levels || from_levels.size() <= to_levels.size());
     Slice<int64_t> nsz;
     Slice<int64_t> nsd;
     for (auto l : to_levels) {
@@ -1237,7 +1237,7 @@ mpy::object run_torch_function(Arena &A, mpy::handle orig, mpy::vector_args args
         infos.append(A, TensorInfo::create(A, f, !is_pointwise, false));
         if (infos.back()) {
             TensorInfo& info = infos.back();
-            AT_ASSERT(is_pointwise || info.batchedtensor);
+            TORCH_INTERNAL_ASSERT(is_pointwise || info.batchedtensor);
             if (!device_holding_tensor && info.has_device) {
                 device_holding_tensor = infos.back().tensor;
             }
@@ -1293,7 +1293,7 @@ mpy::object run_torch_function(Arena &A, mpy::handle orig, mpy::vector_args args
         }
         Slice<mpy::handle> flat_it = flat_args;
         mpy::vector_args uargs = unflatten_args(A, flat_it);
-        AT_ASSERT(flat_it.size() == 0);
+        TORCH_INTERNAL_ASSERT(flat_it.size() == 0);
         mpy::object result = orig.call_vector(uargs);
         auto wrap = [&](mpy::handle h) {
             if (THPVariable_Check(h.ptr())) {
@@ -1312,7 +1312,7 @@ namespace{
 
 mpy::object __torch_function__(Arena &A, mpy::handle orig, mpy::vector_args args, bool is_pointwise) {
     if (orig == torch_Tensor___mul__) {
-        AT_ASSERT(args.nargs == 2 && !args.has_keywords());
+        TORCH_INTERNAL_ASSERT(args.nargs == 2 && !args.has_keywords());
         auto lhs = args[0];
         auto rhs = args[1];
         if (mpy::isinstance(lhs, _Tensor) && mpy::isinstance(rhs, _Tensor) && _Tensor_ndim(lhs) == 0 && _Tensor_ndim(rhs) == 0) {
@@ -1364,7 +1364,7 @@ PyObject* py___torch_function__(PyObject *self,
     Arena A;
     PY_BEGIN
     maybeInitializeGlobals();
-    AT_ASSERT(nargs == 4 || nargs == 5);
+    TORCH_INTERNAL_ASSERT(nargs == 4 || nargs == 5);
     auto va = as_vector_args(A, args[3], nargs == 5 ? args[4] : nullptr);
     bool is_pointwise = pointwise.contains(args[1]);
     return __torch_function__(A, args[1], std::move(va), is_pointwise).release();
@@ -1708,7 +1708,7 @@ static mpy::object dot(Arena& A, TensorInfo lhs, TensorInfo rhs, Slice<DimEntry>
                 // lo
                 lo_dims.append(A, d);
             } else {
-                AT_ASSERT(rhs_stride != 0);
+                TORCH_INTERNAL_ASSERT(rhs_stride != 0);
                 ro_dims.append(A, d);
             }
         }
@@ -1767,43 +1767,43 @@ static PyObject* test_c(PyObject *self,
 
     Arena A;
     Slice<int> s(A, 3, 4, 5);
-    AT_ASSERT(s.size() == 3 && s.capacity() == 8);
-    AT_ASSERT(s[0] == 3 && s[1] == 4 && s[2] == 5);
+    TORCH_INTERNAL_ASSERT(s.size() == 3 && s.capacity() == 8);
+    TORCH_INTERNAL_ASSERT(s[0] == 3 && s[1] == 4 && s[2] == 5);
     s.append(A, 6);
-    AT_ASSERT(s[3] == 6);
+    TORCH_INTERNAL_ASSERT(s[3] == 6);
     for(int i : irange(10)) {
         s.append(A, i);
     }
-    AT_ASSERT(s[0] == 3 && s.back() == 9 && s.size() == 14 && s.capacity() == 16);
+    TORCH_INTERNAL_ASSERT(s[0] == 3 && s.back() == 9 && s.size() == 14 && s.capacity() == 16);
 
     Slice<int> s2(A, -1, -2, -3);
-    AT_ASSERT(s2[1] == -2 && s[0] == 3);
+    TORCH_INTERNAL_ASSERT(s2[1] == -2 && s[0] == 3);
 
     auto ss = s.slice(1,2);
-    AT_ASSERT(ss.size() == 1);
-    AT_ASSERT(ss[0] == 4);
-    AT_ASSERT(ss.capacity() == 1);
+    TORCH_INTERNAL_ASSERT(ss.size() == 1);
+    TORCH_INTERNAL_ASSERT(ss[0] == 4);
+    TORCH_INTERNAL_ASSERT(ss.capacity() == 1);
     ss.append(A, -4);
-    AT_ASSERT(ss.size() == 2 && ss[1] == -4);
+    TORCH_INTERNAL_ASSERT(ss.size() == 2 && ss[1] == -4);
     ss[0] = 3;
-    AT_ASSERT(s[1] == 4);
+    TORCH_INTERNAL_ASSERT(s[1] == 4);
 
     s.insert(A, s.slice(1, 4), ss);
-    AT_ASSERT(s[1] == 3  && s[2] == -4 && s[3] == 0);
+    TORCH_INTERNAL_ASSERT(s[1] == 3  && s[2] == -4 && s[3] == 0);
 
     auto sz = s.size();
     s.insert(A, s.slice(1, 1), 4);
-    AT_ASSERT(s[1] == 4 && sz + 1 == s.size());
+    TORCH_INTERNAL_ASSERT(s[1] == 4 && sz + 1 == s.size());
 
 
     Slice<int> d(A, 0, 1, 2, 3, 4);
 
     Slice<int> b(A, 0, 1, 2, 3, 4);
     b.insert(A, b.slice(1,1), d);
-    AT_ASSERT(b.size() == 10);
-    AT_ASSERT(b[1] == 0);
-    AT_ASSERT(b[5] == 4);
-    AT_ASSERT(b.back() == 4);
+    TORCH_INTERNAL_ASSERT(b.size() == 10);
+    TORCH_INTERNAL_ASSERT(b[1] == 0);
+    TORCH_INTERNAL_ASSERT(b[5] == 4);
+    TORCH_INTERNAL_ASSERT(b.back() == 4);
 
     Py_RETURN_NONE;
 
@@ -1820,7 +1820,7 @@ static PyObject* order(PyObject *_,
     if (kwnames) {
         mpy::raise_error(PyExc_TypeError, "unexpected keyword arguments %S", kwnames);
     }
-    AT_ASSERT(nargs-- > 0);
+    TORCH_INTERNAL_ASSERT(nargs-- > 0);
     Slice<DimEntry> orig_levels;
     Slice<DimEntry> levels;
     TensorRef data;
@@ -1961,7 +1961,7 @@ static PyObject* expand(PyObject *_,
                       PyObject *kwnames) {
     Arena A;
     PY_BEGIN
-    AT_ASSERT(nargs-- > 0);
+    TORCH_INTERNAL_ASSERT(nargs-- > 0);
     auto info = TensorInfo::create(A, args++[0], false);
     for (auto i : irange(nargs)) {
         if (!Dim::check(args[i])) {
@@ -2578,7 +2578,7 @@ IndexingInfo getsetitem_flat(Arena& A, TensorInfo self_info, Slice<mpy::handle> 
     if (requires_getindex) {
         for (auto i : flat_inputs.enumerate()) {
             if (tensor_inputs[i]) {
-                AT_ASSERT(!flat_inputs[i].ptr());
+                TORCH_INTERNAL_ASSERT(!flat_inputs[i].ptr());
                 // std::cout << "tensor " << i << " " << tensor_inputs[i].levels << "\n";
                 TensorRef t = tensor_inputs[i].tensor;
                 if (!tensor_inputs[i].has_device && device_holding_tensor) {
@@ -2673,7 +2673,7 @@ PyObject* py___getitem__(PyObject *_,
                       PyObject *kwnames) {
     Arena A;
     PY_BEGIN
-    AT_ASSERT(nargs == 2);
+    TORCH_INTERNAL_ASSERT(nargs == 2);
     return __getitem__(A, args[0], args[1]).release();
     PY_END(nullptr)
 }
@@ -2684,7 +2684,7 @@ PyObject* py___setitem__(PyObject *_,
                       PyObject *kwnames) {
     Arena A;
     PY_BEGIN
-    AT_ASSERT(nargs == 3);
+    TORCH_INTERNAL_ASSERT(nargs == 3);
     __setitem__(A, args[0], args[1], args[2]);
     Py_RETURN_NONE;
     PY_END(nullptr)
@@ -3085,7 +3085,7 @@ PyObject* _wrap_method(PyObject *self,
                       Py_ssize_t nargs,
                       PyObject *kwnames) {
     PY_BEGIN
-    AT_ASSERT(nargs == 2);
+    TORCH_INTERNAL_ASSERT(nargs == 2);
     // XXX - ignore python function wrapped, we will call torch function directly
     mpy::handle orig = args[0];
     if (!pointwise.ptr()) {

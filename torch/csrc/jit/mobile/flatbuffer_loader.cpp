@@ -425,7 +425,7 @@ IValue parseEnum(
   const auto* enum_val = ivalue.val_as_EnumValue();
   auto enum_type = loader.getOrCreateTypeAnnotations(enum_val->type_name())
                        ->cast<c10::EnumType>();
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       enum_type,
       "Enum with type: " + enum_val->type_name()->str() + " not found.");
   IValue val = loader.getIValue(enum_val->value());
@@ -436,7 +436,7 @@ IValue parseEnum(
       return IValue(std::move(enum_holder));
     }
   }
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       false, "Enum with type: " + enum_val->type_name()->str() + " not found.");
 }
 
@@ -678,7 +678,7 @@ IValue parseObject(
       return obj;
     }
     default:
-      AT_ASSERT(false, "need to be object");
+      TORCH_INTERNAL_ASSERT(false, "need to be object");
   }
 }
 
@@ -728,7 +728,7 @@ TypePtr FlatbufferLoader::getOrCreateTypeAnnotations(
 void FlatbufferLoader::extractJitSourceAndConstants(
     ExtraFilesMap* jit_sources,
     std::vector<IValue>* constants) {
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       module_parsed_,
       "Need to first parse a flatbuffer file before extracting jit_sources");
 

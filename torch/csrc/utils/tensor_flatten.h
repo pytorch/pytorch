@@ -32,12 +32,12 @@ struct TensorGroup {
   size_t size = 0;
 
   size_t type_id() {
-    AT_ASSERT(!tensors.empty());
+    TORCH_INTERNAL_ASSERT(!tensors.empty());
     return ::torch::utils::type_id(tensors[0]);
   }
 
   const at::TensorOptions options() {
-    AT_ASSERT(!tensors.empty());
+    TORCH_INTERNAL_ASSERT(!tensors.empty());
     return tensors[0].options();
   }
 };

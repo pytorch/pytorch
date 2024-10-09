@@ -33,8 +33,8 @@ static void InlineForkWait(
       node->output()->replaceAllUsesWith(future_remap.at(node->output()));
       it.destroyCurrent();
     } else if (node->kind() == aten::wait) {
-      AT_ASSERT(node->inputs().size() == 1);
-      AT_ASSERT(node->outputs().size() == 1);
+      TORCH_INTERNAL_ASSERT(node->inputs().size() == 1);
+      TORCH_INTERNAL_ASSERT(node->outputs().size() == 1);
       // If the future does not map to a prim::fork, it could be
       // returned from prim::rpc_async, which has side effect, so it shouldn't
       // be dead code eliminated.

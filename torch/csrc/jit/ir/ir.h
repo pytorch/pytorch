@@ -197,7 +197,7 @@ struct Value {
   TORCH_API void inferTypeFrom(
       const c10::intrusive_ptr<c10::ivalue::Object>& output);
   const TypePtr& type() const {
-    AT_ASSERT(type_ != nullptr);
+    TORCH_INTERNAL_ASSERT(type_ != nullptr);
     return type_;
   }
   bool requires_grad() const {
@@ -502,19 +502,19 @@ struct TORCH_API Node {
   // lots of things like chunk have a single input or single output, so we have
   // a helper to make accessing it easier
   Value* input() {
-    AT_ASSERT(inputs_.size() == 1);
+    TORCH_INTERNAL_ASSERT(inputs_.size() == 1);
     return inputs_.at(0);
   }
   Value* output() {
-    AT_ASSERT(outputs_.size() == 1);
+    TORCH_INTERNAL_ASSERT(outputs_.size() == 1);
     return outputs_.at(0);
   }
   const Value* output() const {
-    AT_ASSERT(outputs_.size() == 1);
+    TORCH_INTERNAL_ASSERT(outputs_.size() == 1);
     return outputs_.at(0);
   }
   const Value* input() const {
-    AT_ASSERT(inputs_.size() == 1);
+    TORCH_INTERNAL_ASSERT(inputs_.size() == 1);
     return inputs_.at(0);
   }
   // Access a particular input.  This is a checked index.
@@ -827,21 +827,21 @@ struct TORCH_API Node {
     return this;
   }
   bool hasAttribute(Symbol name) const {
-    AT_ASSERT(name.is_attr());
+    TORCH_INTERNAL_ASSERT(name.is_attr());
     return findAttr(name, false) != values_.end();
   }
   bool hasAttributeS(const std::string& name) const {
     return hasAttribute(Symbol::attr(name));
   }
   AttributeKind kindOf(Symbol name) const {
-    AT_ASSERT(name.is_attr());
+    TORCH_INTERNAL_ASSERT(name.is_attr());
     return (*findAttr(name, true))->kind();
   }
   AttributeKind kindOfS(const std::string& name) const {
     return kindOf(Symbol::attr(name));
   }
   Node* removeAttribute(Symbol name) {
-    AT_ASSERT(name.is_attr());
+    TORCH_INTERNAL_ASSERT(name.is_attr());
     values_.erase(findAttr(name, true));
     return this;
   }
@@ -930,7 +930,7 @@ struct TORCH_API Node {
 
   template <typename T>
   Node* setAttr(Symbol name, typename T::ConstructorType v) {
-    AT_ASSERT(name.is_attr());
+    TORCH_INTERNAL_ASSERT(name.is_attr());
     auto it = findAttr(name, false);
     auto nv = AVPtr(new T(name, std::forward<typename T::ConstructorType>(v)));
     // NOLINTNEXTLINE(bugprone-branch-clone)
@@ -943,7 +943,7 @@ struct TORCH_API Node {
   }
   template <typename T>
   typename T::ValueType& getAttr(Symbol name) const {
-    AT_ASSERT(name.is_attr());
+    TORCH_INTERNAL_ASSERT(name.is_attr());
     auto it = findAttr(name, true);
     auto* child = dynamic_cast<T*>(it->get());
     if (child == nullptr) {
@@ -957,26 +957,26 @@ struct TORCH_API Node {
   // a big pile of messages.
   std::vector<AVPtr> values_;
   std::vector<AVPtr>::iterator findAttr(Symbol name, bool required) {
-    AT_ASSERT(name.is_attr());
+    TORCH_INTERNAL_ASSERT(name.is_attr());
     auto it = std::find_if(values_.begin(), values_.end(), [&](const AVPtr& v) {
       return v->name == name;
     });
     if (required && it == values_.end()) {
       throw IRAttributeError(name, false);
     }
-    AT_ASSERT(!required || it != values_.end());
+    TORCH_INTERNAL_ASSERT(!required || it != values_.end());
     return it;
   }
   std::vector<AVPtr>::const_iterator findAttr(Symbol name, bool required)
       const {
-    AT_ASSERT(name.is_attr());
+    TORCH_INTERNAL_ASSERT(name.is_attr());
     auto it = std::find_if(values_.begin(), values_.end(), [&](const AVPtr& v) {
       return v->name == name;
     });
     if (required && it == values_.end()) {
       throw IRAttributeError(name, false);
     }
-    AT_ASSERT(!required || it != values_.end());
+    TORCH_INTERNAL_ASSERT(!required || it != values_.end());
     return it;
   }
 
@@ -995,7 +995,7 @@ struct TORCH_API Node {
 
   bool inBlockList() const {
     if (next() == nullptr) {
-      AT_ASSERT(prev() == nullptr);
+      TORCH_INTERNAL_ASSERT(prev() == nullptr);
     }
     return next() != nullptr;
   }
@@ -1118,12 +1118,12 @@ struct Block {
   }
 
   Node* appendNode(Node* n) {
-    AT_ASSERT(n->graph_ == graph_ && !n->inBlockList());
+    TORCH_INTERNAL_ASSERT(n->graph_ == graph_ && !n->inBlockList());
     n->insertBefore(output_);
     return n;
   }
   Node* prependNode(Node* n) {
-    AT_ASSERT(n->graph_ == graph_ && !n->inBlockList());
+    TORCH_INTERNAL_ASSERT(n->graph_ == graph_ && !n->inBlockList());
     n->insertAfter(input_);
     return n;
   }
@@ -1394,21 +1394,21 @@ struct Graph : std::enable_shared_from_this<Graph> {
   // initialized to insert at the end of the top level block
   // can be changed with setInsertPoint()
   Node* insertNode(Node* n) {
-    AT_ASSERT(
+    TORCH_INTERNAL_ASSERT(
         insert_before_->inBlockList() &&
         "insert point node is no longer in a block list");
     return n->insertBefore(insert_before_);
   }
   // set where nodes are inserted to append to the end of this block
   void setInsertPoint(Block* b) {
-    AT_ASSERT(b->owningGraph() == this);
+    TORCH_INTERNAL_ASSERT(b->owningGraph() == this);
     setInsertPoint(b->return_node());
   }
   // set where nodes are inserted to insert _before_ this node
   // for implementation simplicity we only support inserting before a node for
   // now
   void setInsertPoint(Node* n) {
-    AT_ASSERT(n->owningGraph() == this && n->inBlockList());
+    TORCH_INTERNAL_ASSERT(n->owningGraph() == this && n->inBlockList());
     insert_before_ = n;
     predicted_insert_count_ = 0;
   }
@@ -1500,7 +1500,7 @@ inline Value::Value(Node* node_, size_t offset_)
 }
 
 inline Value* Value::setType(TypePtr type) {
-  AT_ASSERT(type);
+  TORCH_INTERNAL_ASSERT(type);
   if (auto dyn = type->castRaw<c10::DynamicType>()) {
     type = dyn->fallback();
   }

@@ -156,8 +156,8 @@ static void validateInputData(const TensorIteratorBase& iter,
   const auto num_indices = index_size.size();
   TORCH_CHECK(num_indices <= 16, "Current limit allows up to 16 indices to be used in MPS indexing kernels");
 
-  AT_ASSERT(num_indices == index_stride.size());
-  AT_ASSERT(static_cast<int>(num_indices) == iter.ntensors() - 2);
+  TORCH_INTERNAL_ASSERT(num_indices == index_stride.size());
+  TORCH_INTERNAL_ASSERT(static_cast<int>(num_indices) == iter.ntensors() - 2);
   const Tensor& inputTensor = iter.tensor(1);
   const auto scalar_type = inputTensor.scalar_type();
 

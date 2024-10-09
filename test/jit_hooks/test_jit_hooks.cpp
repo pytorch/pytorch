@@ -24,7 +24,7 @@ void test_module_forward_invocation_no_hooks_run(
           {"a", "outer_mod_name", "inner_mod_name"}, "no_pre_hook_");
   std::cout << "----- module output: " << output << std::endl;
   std::cout << "----- module forward output: " << output_forward << std::endl;
-  AT_ASSERT(correct_direct_output == output_forward);
+  TORCH_INTERNAL_ASSERT(correct_direct_output == output_forward);
 }
 
 void test_submodule_called_directly_with_hooks(
@@ -41,7 +41,7 @@ void test_submodule_called_directly_with_hooks(
   torch::jit::IValue correct_output = "pre_hook_override_name_inner_mod_fh";
   std::cout << "----- submodule's output: " << output << std::endl;
   std::cout << "----- expected output   : " << correct_output << std::endl;
-  AT_ASSERT(correct_output == correct_output);
+  TORCH_INTERNAL_ASSERT(correct_output == correct_output);
 }
 
 struct HooksTestCase {
@@ -123,7 +123,7 @@ int main(int argc, const char *argv[]) {
     torch::jit::IValue output = module(test_case.inputs);
     std::cout << "----- module's output: " << output << std::endl;
     std::cout << "----- expected output: " << test_case.output << std::endl;
-    AT_ASSERT(output == test_case.output);
+    TORCH_INTERNAL_ASSERT(output == test_case.output);
   }
 
   // special test cases that don't call the imported module directly

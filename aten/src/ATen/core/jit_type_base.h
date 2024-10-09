@@ -541,25 +541,25 @@ struct TORCH_API Type {
   template <typename T>
   auto expect() {
     auto r = cast<T>();
-    AT_ASSERT(r);
+    TORCH_INTERNAL_ASSERT(r);
     return r;
   }
   template <typename T>
   auto expect() const {
     auto r = cast<const T>();
-    AT_ASSERT(r);
+    TORCH_INTERNAL_ASSERT(r);
     return r;
   }
   template <typename T>
   T& expectRef() {
     auto* r = castRaw<T>();
-    AT_ASSERT(r);
+    TORCH_INTERNAL_ASSERT(r);
     return *r;
   }
   template <typename T>
   const T& expectRef() const {
     auto* r = castRaw<const T>();
-    AT_ASSERT(r);
+    TORCH_INTERNAL_ASSERT(r);
     return *r;
   }
   virtual ~Type() = default;

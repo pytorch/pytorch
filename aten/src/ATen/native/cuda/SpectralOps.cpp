@@ -92,7 +92,7 @@ static inline
 CuFFTParamsLRUCache &cufft_get_plan_cache(DeviceIndex device_index) {
   std::lock_guard<std::mutex> guard(plan_caches_mutex);
 
-  AT_ASSERT(device_index >= 0);
+  TORCH_INTERNAL_ASSERT(device_index >= 0);
 
   if (device_index >= static_cast<int64_t>(plan_caches.size())) {
     plan_caches.resize(device_index + 1);

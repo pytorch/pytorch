@@ -162,7 +162,8 @@ ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)
         // consume tuple
         // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Assign)
         const IValue* iv = stack[stack_top]++;
-        AT_ASSERT(iv->isTuple(), "Expected Tuple but got ", iv->tagKind());
+        TORCH_INTERNAL_ASSERT(
+            iv->isTuple(), "Expected Tuple but got ", iv->tagKind());
         auto p = *reinterpret_cast<const at::ivalue::Tuple* const*>(iv);
         auto tup_ptr = &p->elements()[0];
         // push list of tuple elements to the stack
@@ -172,7 +173,8 @@ ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)
         // consume object
         // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Assign)
         const IValue* iv = stack[stack_top]++;
-        AT_ASSERT(iv->isObject(), "Expected Object but got ", iv->tagKind());
+        TORCH_INTERNAL_ASSERT(
+            iv->isObject(), "Expected Object but got ", iv->tagKind());
         auto obj_ptr = &iv->toObjectRef().slots()[0];
         // push list of object elements to the stack
         stack[++stack_top] = obj_ptr;
@@ -217,7 +219,7 @@ void ArgumentSpecCreator::specializeTypes(
           break;
         }
         auto& arg = spec.tensorAt(tensor_arg_spec_offset++);
-        AT_ASSERT(arg.defined());
+        TORCH_INTERNAL_ASSERT(arg.defined());
         result_stack.back().emplace_back(arg.toType());
       } break;
       case SPECIALIZE_TENSOR: {
@@ -264,7 +266,7 @@ void ArgumentSpecCreator::specializeTypes(
         break;
     }
   }
-  AT_ASSERT(result_stack.size() == 1);
+  TORCH_INTERNAL_ASSERT(result_stack.size() == 1);
   // FIXME: by doing this only on the inputs, we only capture graph inputs and
   // not
   //        optionals in tuples or objects. For that to work, we would have

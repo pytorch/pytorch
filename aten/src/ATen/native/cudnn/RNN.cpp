@@ -2244,7 +2244,7 @@ hidden_type pack_hidden(const Tensor& hx, const Tensor& cx) {
 
 template <>
 Tensor pack_hidden<Tensor>(const Tensor& hx, const Tensor& cx) {
-  AT_ASSERT(cx.numel() == 0);
+  TORCH_INTERNAL_ASSERT(cx.numel() == 0);
   return hx;
 }
 
@@ -2357,7 +2357,7 @@ DropoutState& get_dropout_state(
       static_cast<size_t>(cuda::getNumGPUs())};
   static std::mutex state_cache_mut;
 
-  AT_ASSERT(options.device().is_cuda());
+  TORCH_INTERNAL_ASSERT(options.device().is_cuda());
   auto device = options.device().index();
 
   std::unique_lock<std::mutex> lock{state_cache_mut};
@@ -2460,17 +2460,17 @@ Tensor try_get_weight_buf(
   int64_t num_parameters = parameters.size();
   int64_t num_ptrs = expected_data_ptrs.size();
   if (proj_size != 0) {
-    AT_ASSERT(num_parameters % (has_biases ? 5 : 3) == 0);
-    AT_ASSERT(num_ptrs % 5 == 0);
+    TORCH_INTERNAL_ASSERT(num_parameters % (has_biases ? 5 : 3) == 0);
+    TORCH_INTERNAL_ASSERT(num_ptrs % 5 == 0);
     if (has_biases) {
-      AT_ASSERT(num_ptrs == num_parameters);
+      TORCH_INTERNAL_ASSERT(num_ptrs == num_parameters);
       for (const auto i : c10::irange(num_parameters)) {
         if (expected_data_ptrs[i] != parameters[i].data_ptr())
           return {};
       }
     } else {
-      AT_ASSERT(num_parameters % 3 == 0);
-      AT_ASSERT(num_ptrs == num_parameters * 5 / 3);
+      TORCH_INTERNAL_ASSERT(num_parameters % 3 == 0);
+      TORCH_INTERNAL_ASSERT(num_ptrs == num_parameters * 5 / 3);
       for (int64_t param_i = 0, ptr_i = 0; ptr_i < num_ptrs;
            ptr_i += 5, param_i += 3) {
         if (expected_data_ptrs[ptr_i] != parameters[param_i].data_ptr())
@@ -2482,8 +2482,8 @@ Tensor try_get_weight_buf(
       }
     }
   } else {
-    AT_ASSERT(num_ptrs == (num_parameters * (has_biases ? 1 : 2)));
-    AT_ASSERT(num_parameters % (has_biases ? 4 : 2) == 0);
+    TORCH_INTERNAL_ASSERT(num_ptrs == (num_parameters * (has_biases ? 1 : 2)));
+    TORCH_INTERNAL_ASSERT(num_parameters % (has_biases ? 4 : 2) == 0);
     for (int64_t param_i = 0, ptr_i = 0; ptr_i < num_ptrs;
          ptr_i += (has_biases ? 2 : 4), param_i += 2) {
       if (expected_data_ptrs[ptr_i] != parameters[param_i].data_ptr())

@@ -455,11 +455,11 @@ void inlineScopeBlocks(Block* b) {
       });
 
       WithInsertPoint insert_point(n);
-      AT_ASSERT(n->inputs().size() == graph->inputs().size());
+      TORCH_INTERNAL_ASSERT(n->inputs().size() == graph->inputs().size());
       auto new_outputs = insertGraph(*n->owningGraph(), *graph, n->inputs());
       const auto& old_outputs = n->outputs();
 
-      AT_ASSERT(new_outputs.size() == old_outputs.size());
+      TORCH_INTERNAL_ASSERT(new_outputs.size() == old_outputs.size());
       for (const auto i : c10::irange(old_outputs.size())) {
         old_outputs[i]->replaceAllUsesWith(new_outputs[i]);
       }

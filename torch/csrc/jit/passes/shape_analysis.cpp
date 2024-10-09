@@ -35,13 +35,14 @@ bool mergeTypes(
     ArrayRef<Value*> lhs,
     ArrayRef<Value*> rhs,
     ArrayRef<Value*> outputs) {
-  AT_ASSERT(lhs.size() == rhs.size() && rhs.size() == outputs.size());
+  TORCH_INTERNAL_ASSERT(
+      lhs.size() == rhs.size() && rhs.size() == outputs.size());
   bool changed = false;
   for (const auto i : c10::irange(lhs.size())) {
     auto old_output_type = outputs[i]->type();
     auto new_type =
         unifyTypes(lhs[i]->type(), rhs[i]->type(), /*default_to_union=*/true);
-    AT_ASSERT(new_type);
+    TORCH_INTERNAL_ASSERT(new_type);
     outputs[i]->setType(*new_type);
     if (*old_output_type != *outputs[i]->type())
       changed = true;
@@ -50,7 +51,7 @@ bool mergeTypes(
 }
 
 static void applyTypes(ArrayRef<Value*> src, ArrayRef<Value*> dst) {
-  AT_ASSERT(src.size() == dst.size());
+  TORCH_INTERNAL_ASSERT(src.size() == dst.size());
   for (const auto i : c10::irange(src.size())) {
     dst[i]->setType(src[i]->type());
   }
@@ -452,7 +453,7 @@ class ShapePropagator : public PropertyPropBase {
     // preceded by schema checking.
     op(stack);
 
-    AT_ASSERT(stack.size() == node->outputs().size());
+    TORCH_INTERNAL_ASSERT(stack.size() == node->outputs().size());
     for (const auto i : c10::irange(stack.size())) {
       // some ops may have mixed tensor/primitive outputs
       // for primitives, we don't need to change the type because it is already
@@ -640,7 +641,7 @@ class ShapePropagator : public PropertyPropBase {
       }
       case prim::TupleUnpack: {
         auto tuple_type = node->input()->type()->cast<TupleType>();
-        AT_ASSERT(
+        TORCH_INTERNAL_ASSERT(
             tuple_type &&
             tuple_type->elements().size() == node->outputs().size());
         auto elems = tuple_type->elements();
@@ -741,7 +742,7 @@ class ShapePropagator : public PropertyPropBase {
   }
 
   static std::optional<size_t> determineListSize(Value* list) {
-    AT_ASSERT(list->type()->cast<ListType>());
+    TORCH_INTERNAL_ASSERT(list->type()->cast<ListType>());
     if (auto shape = constant_as<c10::List<int64_t>>(list)) {
       return shape->size();
     }
@@ -772,7 +773,7 @@ class ShapePropagator : public PropertyPropBase {
       if (tensor_types.size() == 1) {
         return tensor_types[0]->dimensionedOnly()->withScalarType(t);
       }
-      AT_ASSERT(!tensor_types.empty());
+      TORCH_INTERNAL_ASSERT(!tensor_types.empty());
       auto any_type = tensor_types[0];
       auto max_dims = any_type->dim();
       for (auto& type : tensor_types) {
@@ -941,7 +942,7 @@ class ShapePropagator : public PropertyPropBase {
         },
         [](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types = gatherTensorTypes(node)) {
-            AT_ASSERT(maybe_tensor_types->size() >= 2);
+            TORCH_INTERNAL_ASSERT(maybe_tensor_types->size() >= 2);
             auto dtype = getPromotedTypeForArithmeticOp(node);
             return {broadcast(*maybe_tensor_types, dtype)};
           }
@@ -979,7 +980,7 @@ class ShapePropagator : public PropertyPropBase {
         },
         [](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types = gatherTensorTypes(node)) {
-            AT_ASSERT(maybe_tensor_types->size() >= 2);
+            TORCH_INTERNAL_ASSERT(maybe_tensor_types->size() >= 2);
             auto first_scalar_type = (*maybe_tensor_types)[0]->scalarType();
             auto second_scalar_type = (*maybe_tensor_types)[1]->scalarType();
             if (!first_scalar_type || !second_scalar_type) {
@@ -1570,9 +1571,10 @@ class ShapePropagator : public PropertyPropBase {
           return false;
         } else {
           auto outputs = node->outputs();
-          AT_ASSERT(types.size() == outputs.size());
+          TORCH_INTERNAL_ASSERT(types.size() == outputs.size());
           for (const auto i : c10::irange(types.size())) {
-            AT_ASSERT(outputs[i]->type()->isSubtypeOf(*TensorType::get()));
+            TORCH_INTERNAL_ASSERT(
+                outputs[i]->type()->isSubtypeOf(*TensorType::get()));
             outputs[i]->setType(types[i]);
           }
           return true;

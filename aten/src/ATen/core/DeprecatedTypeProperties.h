@@ -112,7 +112,7 @@ class TORCH_API DeprecatedTypeProperties {
       return options(-1);
     } else {
       Device device = device_opt.value();
-      AT_ASSERT(device.type() == device_type());
+      TORCH_INTERNAL_ASSERT(device.type() == device_type());
       return options(device.index());
     }
   }
