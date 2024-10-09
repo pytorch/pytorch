@@ -63,8 +63,10 @@ std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(
   bool retainGraph = tupleElements.back().toBool();
 
   // Build AutogradMetadata.
-  int64_t autogradMessageId = tupleElements[tupleElements.size() - 2].toInt();
-  int64_t autogradContextId = tupleElements[tupleElements.size() - 3].toInt();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  int64_t autogradContextId, autogradMessageId;
+  autogradMessageId = tupleElements[tupleElements.size() - 2].toInt();
+  autogradContextId = tupleElements[tupleElements.size() - 3].toInt();
 
   AutogradMetadata autogradMetadata(autogradContextId, autogradMessageId);
 

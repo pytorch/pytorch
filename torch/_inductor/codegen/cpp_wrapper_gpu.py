@@ -480,8 +480,9 @@ class CppWrapperGpu(CppWrapperCpu):
             if config.abi_compatible:
                 # TODO: remove this function to use the default WrapperCodegen behavior after service platform has zero_() symbol
                 # default behavior is f"workspace.zero_(){self.ending}"
-                # or add f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_zero_(workspace.get())){self.ending}"
-                pass
+                self.writeline(
+                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_zero_(workspace.get())){self.ending}"
+                )
             else:
                 self.writeline(f"workspace.zero_(){self.ending}")
             if config.triton.autotune_at_compile_time:

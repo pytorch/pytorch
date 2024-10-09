@@ -148,8 +148,7 @@ def config_of(
                 return False
             return V.graph.sizevars.statically_known_multiple_of(x.expr, alignment)  # type: ignore[arg-type]
         if isinstance(x, WorkspaceArg):
-            # We allocate the workspace ourselves, so it is always aligned
-            return True
+            return V.graph.sizevars.statically_known_multiple_of(x.nbytes, alignment)  # type: ignore[arg-type]
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
     if config.triton.divisible_by_16:

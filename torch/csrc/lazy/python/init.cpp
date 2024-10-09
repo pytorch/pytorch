@@ -18,10 +18,10 @@
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 #endif // FBCODE_CAFFE2 || OVRSOURCE
 #include <string>
-#include <utility>
 #include <vector>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 // TODO(whc) backend 'device' related APIs are not very clear, this code could
 // be simplified but it should probably be done together with
@@ -190,7 +190,7 @@ void initLazyBindings(PyObject* module) {
     return torch::lazy::getLTCForceFallback();
   });
   lazy.def("_set_force_fallback", [](std::string newval) {
-    torch::lazy::getLTCForceFallback() = std::move(newval);
+    torch::lazy::getLTCForceFallback() = newval;
   });
   lazy.def("_clear_ir_cache", []() { TrieCache::Get()->Clear(); });
   lazy.def("_dump_ir_cache", [](std::string filename) {
@@ -337,4 +337,5 @@ void initLazyBindings(PyObject* module) {
 #endif // USE_DEPLOY
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

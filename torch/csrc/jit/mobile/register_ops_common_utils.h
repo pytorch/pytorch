@@ -21,7 +21,7 @@ static C10_UNUSED at::Tensor to_dispatch(
     bool non_blocking,
     bool copy) {
   if (device && device->is_cuda()) {
-    at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
+    at::globalContext().lazyInitCUDA();
   }
   if (!device && !scalarType && !copy) {
     return self;

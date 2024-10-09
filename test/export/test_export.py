@@ -64,7 +64,6 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     run_tests,
-    skipIfCrossRef,
     TEST_TRANSFORMERS,
     TestCase as TorchTestCase,
 )
@@ -230,14 +229,8 @@ class TestDynamismExpression(TestCase):
 
         inp = torch.zeros([3])
         dim_x = torch.export.Dim("dim_x", min=6)
-
-        if is_non_strict_test(self._testMethodName):
-            error_type = torch.fx.experimental.symbolic_shapes.ConstraintViolationError
-        else:
-            error_type = torch._dynamo.exc.UserError
-
-        with self.assertRaisesRegex(error_type, "not in range"):
-            export(
+        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "not in range"):
+            torch.export.export(
                 InvalidInputConflictWithInputConstraints(),
                 (inp,),
                 dynamic_shapes={"x": {0: dim_x}},
@@ -900,22 +893,6 @@ graph():
         self.assertTrue(
             torch.allclose(ep.module()(torch.zeros(2, 3)), torch.ones(2, 3) * 21)
         )
-
-    def test_state_shape_attribute_assignment(self):
-        class TestModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(10, 10)
-                self.last_z_shape = self.linear.weight.shape
-
-            def forward(self, x):
-                self.last_z_shape = x.shape
-                return self.linear(x)
-
-        model = TestModule()
-        x = torch.randn(20, 10)
-        ep_model = export(model, (x,), strict=False).module()
-        self.assertTrue(torch.allclose(model(x), ep_model(x)))
 
     @testing.expectedFailureTrainingIRToRunDecompNonStrict  # TODO(pianpwk): user_output signature
     def test_real_tensor_for_max_op(self):
@@ -6996,7 +6973,6 @@ def forward(self, x):
         real_names_and_ops = [(node.name, node.op) for node in ep.graph.nodes]
         self.assertEqual(expected_names_and_ops, real_names_and_ops)
 
-    @skipIfCrossRef  # Dynamo changes the order of ops under Torch function modes
     def test_placeholder_naming_collisions_hoo_subgraphs(self):
         # test collisions between user inputs, top-level nodes, and HOO subgraph nodes
         class Foo(torch.nn.Module):
@@ -8333,7 +8309,6 @@ class TestOneOffModelExportResult(TestCase):
     #     getitem = _scaled_dot_product_flash_attention_for_cpu[0];  _scaled_dot_product_flash_attention_for_cpu = None
     #     return (getitem,)""")
 
-    @skipIfCrossRef
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Can't run fused SDPA on this platform",

@@ -673,10 +673,7 @@ class FakeTensor(Tensor):
             dispatch_device=True,
             device_for_backend_keys=device,
         )
-        if not fake_mode._allow_unsafe_data_ptr_access:
-            torch._C._set_throw_on_mutable_data_ptr(self)
-        else:
-            torch._C._set_warn_deprecated_on_mutable_data_ptr(self)
+        torch._C._set_throw_on_mutable_data_ptr(self)
 
         assert elem.device.type == "meta", elem.device.type
         device = device if isinstance(device, torch.device) else torch.device(device)
@@ -1132,9 +1129,6 @@ class FakeTensorMode(TorchDispatchMode):
         # places where we unconditionally allow scalar outputs, TO BE REMOVED
         self.allow_scalar_outputs = False
 
-        self._allow_unsafe_data_ptr_access = (
-            torch._functorch.config.fake_tensor_allow_unsafe_data_ptr_access
-        )
         self.allow_meta = torch._functorch.config.fake_tensor_allow_meta
         self.cache_enabled = (
             torch._dynamo.config.fake_tensor_cache_enabled
