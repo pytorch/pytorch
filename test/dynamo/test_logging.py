@@ -646,10 +646,10 @@ print("arf")
         self.assertExpectedInline(
             munge_shape_guards(record.getMessage()),
             """\
-+- LAMBDA_GUARD: L['x'].size()[0] == 2*L['y'].size()[0]  # return x + torch.cat([y, z])  # #:# in # #:# in #
-+- LAMBDA_GUARD: L['z'].size()[0] == L['y'].size()[0]  # duck sizing added this equality because these variables had the same size 3 (to avoid this specialization, set torch.fx.experimental._config.use_duck_shape = False)
-+- LAMBDA_GUARD: Eq(Mod(2*L['y'].size()[0], 3), 0)  # if x.size(0) % 3 == 0:  # #:# in # #:# in #
-+- LAMBDA_GUARD: 2 <= L['y'].size()[0]  # return x + torch.cat([y, z])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.mark_unbacked(tensor, dim))""",  # noqa: B950
++- LAMBDA_GUARD: L['x'].size()[0] == 2*L['z'].size()[0]  # return x + torch.cat([y, z])  # #:# in # #:# in #
++- LAMBDA_GUARD: L['y'].size()[0] == L['z'].size()[0]  # duck sizing added this equality because these variables had the same size 3 (to avoid this specialization, set torch.fx.experimental._config.use_duck_shape = False)
++- LAMBDA_GUARD: Eq(Mod(2*L['z'].size()[0], 3), 0)  # if x.size(0) % 3 == 0:  # #:# in # #:# in #
++- LAMBDA_GUARD: 2 <= L['z'].size()[0]  # return x + torch.cat([y, z])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.mark_unbacked(tensor, dim))""",  # noqa: B950
         )
 
     @make_logging_test(guards=True)
@@ -745,6 +745,40 @@ fn(torch.randn(5))
                     empty_line_normalizer(lines),
                     empty_line_normalizer(stderr.decode("utf-8")),
                 )
+
+    @make_settings_test("torch._dynamo.eval_frame")
+    def test_log_traced_frames(self, records):
+        # Test program
+        @torch.compile()
+        def foo():
+            x = torch.ones([10])
+
+            def bar():
+                y = x + x
+                torch._dynamo.graph_break()
+                z = y * x
+                return z
+
+            return bar(), bar
+
+        foo()
+
+        # `_log_traced_frames` is registered as an atexit callback, so we invoke
+        # it explicitly for testing.
+        torch._dynamo.eval_frame._log_traced_frames()
+
+        # Get the relevant log.
+        record = self.getRecord(records, "TorchDynamo attempted to trace")
+
+        # Check
+        self.assertExpectedInline(
+            munge_exc(record.getMessage()),
+            """\
+TorchDynamo attempted to trace the following frames: [
+  * foo test_logging.py:N
+  * bar test_logging.py:N
+]""",
+        )
 
 
 # single record tests
