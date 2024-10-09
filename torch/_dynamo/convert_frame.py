@@ -1080,9 +1080,12 @@ def _compile(
                     key: (
                         list(value)
                         if isinstance(value, set)
-                        else str(value)
-                        if callable(value)
-                        else value
+                        else (
+                            str(value)
+                            if key == "allowed_functions_module_string_ignorelist"
+                            or "reorderable_logging_functions"
+                            else value
+                        )
                     )
                     for key, value in d.items()
                 }
