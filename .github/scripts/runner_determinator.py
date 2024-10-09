@@ -374,7 +374,8 @@ def get_runner_prefix(
     for experiment_name, experiment_settings in settings.experiments.items():
         if check_experiments:
             if experiment_name not in check_experiments:
-                log.info(f"Skipping experiment '{experiment_name}', as it is not in the check_experiments list: {", ".join(check_experiments)}")
+                exp_list = ", ".join(check_experiments)
+                log.info(f"Skipping experiment '{experiment_name}', as it is not in the check_experiments list: {exp_list}")
                 continue
         elif not experiment_settings.default:
             log.info(f"Skipping experiment '{experiment_name}', as it is not a default experiment")
