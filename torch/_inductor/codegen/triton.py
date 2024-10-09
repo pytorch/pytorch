@@ -1365,7 +1365,7 @@ class TritonKernel(SIMDKernel):
 
         # Compute linear reduction indices.
         if self.inside_reduction:
-            self.codegen_reduction_inds(self.body)
+            self.codegen_reduction_inds(self.indexing_code)
 
     def need_numel_args(self):
         r"""
@@ -2982,10 +2982,10 @@ class TritonKernel(SIMDKernel):
         if self.inside_reduction:
             # rnumel = r0_numel * ... * r(n-1)_numel
             reduction_trees = [tree for tree in self.range_trees if tree.is_reduction]
-            rnumel = V.graph.sizevars.simplify(
-                sympy_product(tree.numel for tree in reduction_trees)
+            rnumel = " *".join(
+                sorted(f"{tree.prefix}numel" for tree in reduction_trees)
             )
-            code.writeline(f"rnumel = {self.index_to_str(rnumel)}")
+            code.writeline(f"rnumel = {rnumel}")
 
             # RBLOCK = R0_BLOCK * ... * R(N-1)_BLOCK
             rblock = sympy_product(
@@ -3179,14 +3179,14 @@ class TritonKernel(SIMDKernel):
 
         # Compute roffset and rindex.
         roffset = sympy_dot(ridx_coeffs, rn_offsets)
-        self.indexing_code.splice(f"roffset = {self.index_to_str(roffset)}")
+        buffer.splice(f"roffset = {self.index_to_str(roffset)}")
         rindex = sympy_dot(ridx_coeffs, rn_inds)
-        self.indexing_code.splice(f"rindex = {self.index_to_str(rindex)}")
+        buffer.splice(f"rindex = {self.index_to_str(rindex)}")
 
         # If inside a loop, compute rbase.
         if any(tree.is_loop for tree in self.range_trees):
             rbase = sympy_dot(ridx_coeffs, rn_bases)
-            self.indexing_code.splice(f"rbase = {self.index_to_str(rbase)}")
+            buffer.splice(f"rbase = {self.index_to_str(rbase)}")
 
     def iteration_ranges_codegen_header(self, entry: IterationRangesRoot, code):
         x = entry.prefix
