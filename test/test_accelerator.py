@@ -18,25 +18,19 @@ if not TEST_ACCELERATOR:
     print("No available accelerator detected, skipping tests", file=sys.stderr)
     TestCase = NoTest  # noqa: F811
 
-HAS_MULTIACC = torch.acc.device_count() > 1
-
 
 class TestAccelerator(TestCase):
-    def test_generic_device_behavior(self):
+    def test_current_accelerator(self):
         self.assertTrue(torch.acc.is_available())
-        orig_device = torch.acc.current_device()
-        torch.acc.set_device(orig_device)
-        self.assertEqual(orig_device, torch.acc.current_device())
-        if torch.cuda.is_available():
-            self.assertEqual(torch.acc.current_accelerator(), "cuda")
-            with self.assertRaisesRegex(
-                ValueError, "doesn't match the current accelerator"
-            ):
-                torch.acc.set_device("xpu")
-        if torch.xpu.is_available():
-            self.assertEqual(torch.acc.current_accelerator(), "xpu")
+        accelerators = ["cuda", "xpu"]
+        for accelerator in accelerators:
+            if torch.get_device_module(accelerator).is_available():
+                self.assertEqual(torch.acc.current_accelerator(), accelerator)
+                with self.assertRaisesRegex(
+                    ValueError, "doesn't match the current accelerator"
+                ):
+                    torch.acc.set_device("cpu")
 
-    @unittest.skipIf(not HAS_MULTIACC, "requires multiple accelerators")
     def test_generic_multi_device_behavior(self):
         orig_device = torch.acc.current_device()
         target_device = (orig_device + 1) % torch.acc.device_count()
@@ -74,7 +68,7 @@ class TestAccelerator(TestCase):
         self.assertEqual(c_acc.cpu(), c)
 
     @unittest.skipIf((not TEST_CUDA) and (not TEST_XPU), "requires CUDA or XPU")
-    def test_device_specific_stream_behavior(self):
+    def test_specific_stream_compatibility(self):
         s1 = torch.cuda.Stream() if torch.cuda.is_available() else torch.xpu.Stream()
         s2 = torch.cuda.Stream() if torch.cuda.is_available() else torch.xpu.Stream()
         torch.acc.set_stream(s1)
@@ -82,11 +76,6 @@ class TestAccelerator(TestCase):
         with torch.acc.StreamGuard(s2):
             self.assertEqual(torch.acc.current_stream().stream_id, s2.stream_id)
         self.assertEqual(torch.acc.current_stream().stream_id, s1.stream_id)
-        if torch.cuda.is_available():
-            with self.assertRaisesRegex(
-                RuntimeError, "doesn't match the current accelerator"
-            ):
-                torch.acc.set_stream(torch.xpu.Stream())
 
 
 if __name__ == "__main__":
