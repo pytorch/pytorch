@@ -327,13 +327,7 @@ class TestNumPyInterop(TestCase):
 
         # list of list or numpy array.
         with self.assertRaisesRegex(ValueError, "expected sequence of length"):
-            torch.tensor(
-                [
-                    [1, 2, 3],
-                    np.random.random(size=(2,)),
-                ],
-                device=device,
-            )
+            torch.tensor([[1, 2, 3], np.random.random(size=(2,))], device=device)
 
     @onlyCPU
     def test_ctor_with_numpy_scalar_ctor(self, device) -> None:
@@ -478,11 +472,18 @@ class TestNumPyInterop(TestCase):
     def test_parse_numpy_int_overflow(self, device):
         # assertRaises uses a try-except which dynamo has issues with
         # Only concrete class can be given where "Type[number[_64Bit]]" is expected
-        self.assertRaisesRegex(
-            RuntimeError,
-            "(Overflow|an integer is required)",
-            lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)),
-        )  # type: ignore[call-overload]
+        if np.__version__ > "2":
+            self.assertRaisesRegex(
+                OverflowError,
+                "out of bounds",
+                lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)),
+            )  # type: ignore[call-overload]
+        else:
+            self.assertRaisesRegex(
+                RuntimeError,
+                "(Overflow|an integer is required)",
+                lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)),
+            )  # type: ignore[call-overload]
 
     @onlyCPU
     def test_parse_numpy_int(self, device):

@@ -9,16 +9,12 @@ from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
+from torch._guards import Source
 
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
-
-from ..._guards import Source
-
-from .. import polyfill, variables
+from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import raise_observed_user_stop_iteration, unimplemented
-from ..source import AttrSource, GetItemSource
+from ..exc import raise_observed_exception, unimplemented
+from ..source import AttrSource
 from ..utils import (
     get_fake_value,
     guard_if_dyn,
@@ -34,6 +30,10 @@ from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 from .iter import IteratorVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 class BaseListVariable(VariableTracker):
@@ -61,7 +61,7 @@ class BaseListVariable(VariableTracker):
         self,
         items: List[VariableTracker],
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(**kwargs)
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
@@ -87,7 +87,7 @@ class BaseListVariable(VariableTracker):
         assert self.python_type() is not SizeVariable
         return self.python_type()(self._as_proxy())
 
-    def getitem_const(self, arg: VariableTracker):
+    def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         from .tensor import SymNodeVariable
 
         if isinstance(arg, SymNodeVariable):
@@ -96,17 +96,12 @@ class BaseListVariable(VariableTracker):
             index = arg.as_python_constant()
 
         if isinstance(index, slice):
-            if self.source is not None:
-                return self.clone(
-                    items=self.items[index],
-                    source=GetItemSource(self.source, index),
-                    mutable_local=MutableLocal() if self.mutable_local else None,
-                )
-            else:
-                return self.clone(
-                    items=self.items[index],
-                    mutable_local=MutableLocal() if self.mutable_local else None,
-                )
+            # Set source to None because slicing a list gives a new local
+            return self.clone(
+                items=self.items[index],
+                source=None,
+                mutable_local=MutableLocal() if self.mutable_local else None,
+            )
         else:
             assert isinstance(index, (int, torch.SymInt))
             return self.items[index]
@@ -133,7 +128,7 @@ class BaseListVariable(VariableTracker):
                     unimplemented("__getitem__ with non-constant tensor")
             else:
                 value = args[0]
-            return self.getitem_const(value)
+            return self.getitem_const(tx, value)
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
@@ -142,7 +137,7 @@ class BaseListVariable(VariableTracker):
             from .builder import SourcelessBuilder
 
             return tx.inline_user_function_return(
-                SourcelessBuilder.create(tx, polyfill.index),
+                SourcelessBuilder.create(tx, polyfills.index),
                 [self] + list(args),
                 kwargs,
             )
@@ -151,13 +146,13 @@ class BaseListVariable(VariableTracker):
 
     @staticmethod
     def list_compare(tx: "InstructionTranslator", op, left, right):
-        return variables.UserFunctionVariable(polyfill.list_cmp).call_function(
+        return variables.UserFunctionVariable(polyfills.list_cmp).call_function(
             tx, [variables.BuiltinVariable(op), left, right], {}
         )
 
 
 class RangeVariable(BaseListVariable):
-    def __init__(self, items, **kwargs):
+    def __init__(self, items, **kwargs) -> None:
         items_to_map = items
         start = variables.ConstantVariable.create(0)
         stop = None
@@ -286,7 +281,7 @@ class RangeVariable(BaseListVariable):
     def as_python_constant(self):
         return range(*[x.as_python_constant() for x in self.items])
 
-    def getitem_const(self, arg: VariableTracker):
+    def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         # implementations mimics https://github.com/python/cpython/blob/main/Objects/rangeobject.c
         index = arg.as_python_constant()
 
@@ -401,7 +396,7 @@ class ListVariable(CommonListMethodsVariable):
     def python_type(self):
         return list
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}(length={len(self.items)})"
 
     def debug_repr(self):
@@ -440,6 +435,16 @@ class ListVariable(CommonListMethodsVariable):
             return ConstantVariable.create(None)
         else:
             return super().call_method(tx, name, args, kwargs)
+
+    def var_getattr(self, tx, name):
+        if name == "__class__":
+            source = AttrSource(self.source, name) if self.source else None
+            class_type = self.python_type()
+            if class_type is list:
+                return variables.BuiltinVariable(class_type, source=source)
+            else:
+                return variables.UserDefinedClassVariable(class_type, source=source)
+        return super().var_getattr(tx, name)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if self.python_type() is not list:
@@ -523,6 +528,9 @@ class TupleVariable(BaseListVariable):
     def python_type(self):
         return tuple
 
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(length={len(self.items)})"
+
     def debug_repr(self):
         return self.debug_repr_helper("(", ")")
 
@@ -538,6 +546,16 @@ class TupleVariable(BaseListVariable):
         kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         return super().call_method(tx, name, args, kwargs)
+
+    def var_getattr(self, tx, name):
+        if name == "__class__":
+            source = AttrSource(self.source, name) if self.source else None
+            class_type = self.python_type()
+            if class_type is tuple:
+                return variables.BuiltinVariable(class_type, source=source)
+            else:
+                return variables.UserDefinedClassVariable(class_type, source=source)
+        return super().var_getattr(tx, name)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if self.python_type() is not tuple:
@@ -558,7 +576,7 @@ class SizeVariable(TupleVariable):
         items: List[VariableTracker],
         proxy: Optional[torch.fx.Proxy] = None,
         **kwargs,
-    ):
+    ) -> None:
         self.proxy = proxy
         super().__init__(items, **kwargs)
 
@@ -678,6 +696,7 @@ class SizeVariable(TupleVariable):
             index = arg.sym_num
         else:
             index = arg.as_python_constant()
+
         if isinstance(index, slice):
             return SizeVariable(self.items[index])
         else:
@@ -694,7 +713,7 @@ class NamedTupleVariable(TupleVariable):
         *TupleVariable._nonvar_fields,
     }
 
-    def __init__(self, items, tuple_cls, **kwargs):
+    def __init__(self, items, tuple_cls, **kwargs) -> None:
         super().__init__(items, **kwargs)
         self.tuple_cls = tuple_cls
 
@@ -744,7 +763,7 @@ class NamedTupleVariable(TupleVariable):
         if name not in fields:
             method = check_and_create_method()
             if not method:
-                super().var_getattr(tx, name)
+                return super().var_getattr(tx, name)
             return method
         return self.items[fields.index(name)]
 
@@ -753,7 +772,7 @@ class NamedTupleVariable(TupleVariable):
 
 
 class SliceVariable(BaseListVariable):
-    def __init__(self, items, **kwargs):
+    def __init__(self, items, **kwargs) -> None:
         items_to_map = items
         start, stop, step = [variables.ConstantVariable.create(None)] * 3
 
@@ -802,7 +821,7 @@ class ListIteratorVariable(IteratorVariable):
         *IteratorVariable._nonvar_fields,
     }
 
-    def __init__(self, items, index: int = 0, **kwargs):
+    def __init__(self, items, index: int = 0, **kwargs) -> None:
         super().__init__(**kwargs)
         assert isinstance(items, list)
         # Removing this check as it slows things down too much
@@ -812,14 +831,14 @@ class ListIteratorVariable(IteratorVariable):
         self.items = items
         self.index = index
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}(length={len(self.items)}, index={repr(self.index)})"
 
     def next_variable(self, tx):
         assert self.mutable_local
         old_index = self.index
         if old_index >= len(self.items):
-            raise_observed_user_stop_iteration(self, tx)
+            raise_observed_exception(StopIteration, tx)
 
         tx.output.side_effects.mutation(self)
         self.index += 1
@@ -916,7 +935,9 @@ class RestrictedListSubclassVariable(ListVariable):
     def is_matching_cls(cls, user_cls: type):
         return cls._is_non_conflicting_subclass(user_cls, list)
 
-    def __init__(self, items, *, user_cls: type, user_cls_source: Source, **kwargs):
+    def __init__(
+        self, items, *, user_cls: type, user_cls_source: Source, **kwargs
+    ) -> None:
         super().__init__(items=items, **kwargs)
         self.user_cls = user_cls
         self.user_cls_source = user_cls_source

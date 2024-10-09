@@ -9,7 +9,8 @@ Global flags for aot autograd
 """
 import os
 import sys
-from typing import TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
+
 
 # Converts torch rng ops to their functional philox rng equivalents. Note that
 # we functionalize only CUDA rng ops today.
@@ -42,7 +43,19 @@ static_weight_shapes = True
 cse = True
 
 
-enable_autograd_cache = os.environ.get("ENABLE_AOT_AUTOGRAD_CACHE", "0") == "1"
+enable_autograd_cache = os.environ.get("TORCHINDUCTOR_AUTOGRAD_CACHE", "0") == "1"
+
+
+def remote_autograd_cache_default() -> Optional[bool]:
+    if os.environ.get("TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE") == "1":
+        return True
+    if os.environ.get("TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE") == "0":
+        return False
+    return None
+
+
+enable_remote_autograd_cache = remote_autograd_cache_default()
+
 
 # When AOTAutograd regenerates aliased graph outputs,
 # attempt to use functionalization's view-replay logic
@@ -61,6 +74,7 @@ enable_autograd_cache = os.environ.get("ENABLE_AOT_AUTOGRAD_CACHE", "0") == "1"
 # once XLA pin update works,
 # or default config to true and fix relevant bugs
 from torch._inductor.config import is_fbcode
+
 
 # View replay is currently not compatible with AOTAutogradCache, since
 # FunctionalTensors are not serializable. We'll need to make them
@@ -195,6 +209,7 @@ if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
 from torch.utils._config_module import install_config_module
+
 
 # adds patch, save_config, invalid config checks, etc
 install_config_module(sys.modules[__name__])
