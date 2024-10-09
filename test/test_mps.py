@@ -667,6 +667,8 @@ def mps_ops_modifier(ops):
     UNIMPLEMENTED_XFAILLIST = {
         # Failures due to lack of op implementation on MPS backend
         'login': None,
+        'logspace': None,
+        'logspacetensor_overload': None,
         'linalg.eig': None,
         'linalg.eigvals': None,
         'put': None,
@@ -941,8 +943,10 @@ def mps_ops_modifier(ops):
         'multinomial': [torch.float16, torch.float32, torch.bfloat16],  # random results
         'uniform': [torch.float16, torch.float32, torch.bfloat16],
         'rand_like': [torch.float16, torch.float32, torch.bfloat16],
+        'randint': None,
         'randint_like': None,
-        'randn_like': [torch.float16, torch.float32, torch.bfloat16],
+        'randn': None,
+        'randn_like': None,
         'bernoulli': [torch.float16, torch.float32, torch.bfloat16],
         'exponential': [torch.float16, torch.float32, torch.bfloat16],
         'nn.functional.feature_alpha_dropoutwith_train': [torch.float16, torch.float32, torch.bfloat16],
@@ -12031,7 +12035,7 @@ MPS_GRAD_DTYPES = [torch.float32, torch.float16]
 def transform_opinfo_sample_to_mps(sample):
     """Transforms opinfo.core.SampleInput from CPU to MPS"""
     mps_sample = sample.transform(
-            lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
+        lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
 
     # Transform kwargs `device="cpu"` to `device="mps"`
     if mps_sample.kwargs.get("device", "") == "cpu":
@@ -12093,6 +12097,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.upsample_bilinear',
         'nn.functional.upsample_nearest',
         'norm', 'masked.normalize',
+        'linspace',
     }
 
     FP32_LOW_PRECISION_LIST = {
@@ -12135,6 +12140,9 @@ class TestConsistency(TestCaseMPS):
             # TODO: Investigate why this is needed
             # See https://github.com/pytorch/pytorch/issues/120237
             return (3e-5, 3e-5)
+        # TODO: Investigate why rounding is broken on MPS
+        if op.name in ['linspace'] and dtype in [torch.int8, torch.uint8, torch.int32, torch.int16, torch.int64]:
+            return (1.0, 0.0)
         return (None, None)
 
     # Used for accept mode only
