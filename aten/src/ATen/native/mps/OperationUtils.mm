@@ -35,7 +35,7 @@ void dispatch_sync_with_rethrow(dispatch_queue_t queue, void (^block)()) {
 /**
  * Computes distance from lowest to highest element offset in given tensor.
  */
-size_t compute_storage_numel_distance(const at::Tensor& t) {
+size_t compute_storage_numel_distance(const TensorBase& t) {
   size_t rc = 1;
   if (t.numel() == 0) {
     return 0;
@@ -97,7 +97,7 @@ MPSDataType getMPSDataType(ScalarType scalar_type) {
 // types.
 MPSGraphTensor* castToIHFTypes(MPSGraph* mpsGraph,
                                MPSGraphTensor* inputTensor,
-                               const Tensor& input,
+                               const TensorBase& input,
                                bool includesInt64) {
   MPSDataType dataType = getMPSDataType(input.scalar_type());
   bool condition =
@@ -117,7 +117,7 @@ MPSGraphTensor* castToIHFTypes(MPSGraph* mpsGraph,
 // types.
 MPSGraphTensor* castFromIHFTypes(MPSGraph* mpsGraph,
                                  MPSGraphTensor* inputTensor,
-                                 const Tensor& input,
+                                 const TensorBase& input,
                                  bool includesInt64) {
   MPSDataType dataType = getMPSDataType(input.scalar_type());
   bool condition =
@@ -240,7 +240,7 @@ static NSArray<NSNumber*>* getTensorAxes(int64_t ndim) {
   return axes;
 }
 
-NSArray<NSNumber*>* getTensorAxes(const Tensor& t) {
+NSArray<NSNumber*>* getTensorAxes(const TensorBase& t) {
   return getTensorAxes(t.dim());
 }
 
@@ -248,7 +248,7 @@ static NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes) {
   return getTensorAxes(sizes.size());
 }
 
-NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim) {
+NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, OptionalIntArrayRef dim) {
   if (dim.has_value() && !dim.value().empty()) {
     IntArrayRef dimValues = dim.value();
     int ndim = dimValues.size();
@@ -313,7 +313,7 @@ Tensor getTensorView(const Tensor& t, MPSShape* shape) {
   return t.view(res);
 }
 
-MPSShape* getMPSShape(const Tensor& t, c10::MemoryFormat memory_format) {
+MPSShape* getMPSShape(const TensorBase& t, c10::MemoryFormat memory_format) {
   return getMPSShape(t.sizes(), memory_format);
 }
 
@@ -419,7 +419,7 @@ static MPSNDArray* permuteNDArray(MPSNDArray* inArray, const std::vector<int64_t
   return result;
 }
 
-MPSNDArray* getMPSNDArray(const at::Tensor& t, MPSShape* sizes, MPSShape* strides) {
+MPSNDArray* getMPSNDArray(const TensorBase& t, MPSShape* sizes, MPSShape* strides) {
   id<MTLBuffer> srcBuf = getMTLBufferStorage(t);
 
   MPSDataType mpsDataType = getMPSDataType(t.scalar_type());
@@ -434,11 +434,11 @@ MPSNDArray* getMPSNDArray(const at::Tensor& t, MPSShape* sizes, MPSShape* stride
   return srcNDArray;
 }
 
-MPSNDArray* getMPSNDArray(const at::Tensor& t, const IntArrayRef& sizes, const IntArrayRef& strides) {
+MPSNDArray* getMPSNDArray(const TensorBase& t, const IntArrayRef& sizes, const IntArrayRef& strides) {
   return getMPSNDArray(t, getMPSShape(sizes.empty() ? t.sizes() : sizes), strides.empty() ? nil : getMPSShape(strides));
 }
 
-static MPSNDArray* getStridedMPSNDArray(const at::Tensor& src, MPSNDArray* srcNDArray) {
+static MPSNDArray* getStridedMPSNDArray(const TensorBase& src, MPSNDArray* srcNDArray) {
   auto strides = src.strides();
   auto sizes = src.sizes();
   auto nStrides = strides.size();
@@ -614,9 +614,9 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
     case ScalarType::Float:
       return {.value.f = scalar.to<float>(), .size = sizeof(float), .type = type};
     case ScalarType::Half:
-      return {.value.h = scalar.to<at::Half>(), .size = sizeof(short), .type = type};
+      return {.value.h = scalar.to<Half>(), .size = sizeof(short), .type = type};
     case ScalarType::BFloat16:
-      return {.value.bf16 = scalar.to<at::BFloat16>(), .size = sizeof(short), .type = type};
+      return {.value.bf16 = scalar.to<BFloat16>(), .size = sizeof(short), .type = type};
     case ScalarType::Long:
       return {.value.i = scalar.to<int64_t>(), .size = sizeof(int64_t), .type = type};
     case ScalarType::Int:
@@ -630,7 +630,7 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
     case ScalarType::Bool:
       return {.value.b = scalar.to<bool>(), .size = sizeof(bool), .type = type};
     case ScalarType::ComplexHalf:
-      return {.value.ch = scalar.to<c10::complex<at::Half>>(), .size = sizeof(int32_t), .type = type};
+      return {.value.ch = scalar.to<c10::complex<Half>>(), .size = sizeof(int32_t), .type = type};
     case ScalarType::ComplexFloat:
     case ScalarType::ComplexDouble:
       return {.value.cf = scalar.to<c10::complex<float>>(), .size = sizeof(int64_t), .type = type};
@@ -667,7 +667,7 @@ Tensor wrapped_scalar_tensor_mps(const Scalar& scalar, const Device device) {
   // as MPS doesn't support float64 tensor.
   Tensor tensor;
   if (scalar.isFloatingPoint()) {
-    tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kFloat));
+    tensor = at::scalar_tensor(scalar, at::device(device).dtype(kFloat));
   } else if (scalar.isBoolean()) {
     tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kBool));
   } else if (scalar.isComplex()) {
