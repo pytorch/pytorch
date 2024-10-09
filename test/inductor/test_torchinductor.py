@@ -99,7 +99,7 @@ DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from torch._inductor import config, test_operators
+from torch._inductor import config, cpu_vec_isa, test_operators
 from torch._inductor.compile_fx import (
     compile_fx,
     compile_fx_inner,
@@ -1575,10 +1575,16 @@ class CommonTemplate:
                 pass  # no device asserts in halide
             elif self.device == "cpu" and not is_triton_cpu_backend(self.device):
                 _, code = run_and_get_cpp_code(fn_opt, *inps)
-                self.assertTrue((") ? (" in code or "blendv" in code) is has_wrapping)
                 self.assertTrue(("TORCH_CHECK" in code) is has_assert)
-                # Assert that we always vectorize the kernel regardless of wrapping / checks
-                self.assertTrue(("loadu" in code) is vectorize)
+                if (
+                    cpu_vec_isa.valid_vec_isa_list()
+                    and os.getenv("ATEN_CPU_CAPABILITY") != "default"
+                ):
+                    self.assertTrue(
+                        (") ? (" in code or "blendv" in code) is has_wrapping
+                    )
+                    # Assert that we always vectorize the kernel regardless of wrapping / checks
+                    self.assertTrue(("loadu" in code) is vectorize)
             else:
                 code = run_and_get_triton_code(fn_opt, *inps)
                 self.assertTrue(("tl.where" in code) is has_wrapping)
@@ -1891,8 +1897,20 @@ class CommonTemplate:
         def fn(a):
             return torch.var(a)
 
-        self.common(fn, (torch.rand((16, 16, 352, 352), dtype=torch.float16),))
-        self.common(fn, (torch.rand((14923), dtype=torch.float16),))
+        atol = None
+        rtol = None
+        if self.device == "cpu" and os.getenv("ATEN_CPU_CAPABILITY") == "default":
+            atol = 1e-3
+            rtol = 1e-3
+        self.common(
+            fn,
+            (torch.rand((16, 16, 352, 352), dtype=torch.float16),),
+            atol=atol,
+            rtol=rtol,
+        )
+        self.common(
+            fn, (torch.rand((14923), dtype=torch.float16),), atol=atol, rtol=rtol
+        )
 
     def test_split_cumsum(self):
         def fn(a):
@@ -10197,9 +10215,15 @@ class CommonTemplate:
         if is_cpp_backend(self.device):
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             _, code = run_and_get_cpp_code(opt_fn, *args)
+            num = (
+                2
+                if cpu_vec_isa.valid_vec_isa_list()
+                and os.getenv("ATEN_CPU_CAPABILITY") != "default"
+                else 1
+            )
             FileCheck().check_count(
                 "static_cast<int64_t>(256)",
-                2,
+                num,
                 exactly=True,
             ).run(code)
 
