@@ -1067,6 +1067,7 @@ graph():
         
         ops_registered_after = set(op for op in torch.ops.mylib)
         self.assertEqual(ops_registered_after, ops_registered_before)
+        
     def test_export_preserve_linear_at_aot_level(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:

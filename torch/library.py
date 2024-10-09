@@ -1,4 +1,4 @@
-caf# mypy: allow-untyped-defs
+# mypy: allow-untyped-defs
 import contextlib
 import functools
 import inspect
