@@ -138,6 +138,8 @@ def main():
                 f"expected {entry.expected_value} ±{entry.noise_margin*100:.2f}%\n"
             )
 
+            log("pass")
+
     # Log all benchmarks that do not have a regression test enabled for them.
     for key, entry in result_data.items():
         if key not in expected_data:
