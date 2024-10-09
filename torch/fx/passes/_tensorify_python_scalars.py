@@ -118,7 +118,9 @@ def tensorify_python_scalars(
         if isinstance(expr, Symbol) and expr not in expr_to_tensor_proxy:
             # This is guaranteed to be populated by invariant established by
             # insert_deferred_runtime_asserts
-            expr_to_tensor_proxy[expr] = torch.ops.aten.scalar_tensor.default(expr_to_sym_proxy[expr].node)
+            expr_to_tensor_proxy[expr] = torch.ops.aten.scalar_tensor.default(
+                expr_to_sym_proxy[expr].node
+            )
 
         # cache constants, why not
         if isinstance(expr, (Integer, Number, BooleanAtom)):
@@ -180,14 +182,20 @@ def tensorify_python_scalars(
 
                         assert isinstance(node.args[0], fx.Node), node.args[0]
 
-                        expr_to_tensor_proxy[s] = MetaProxy(node.args[0], tracer=tracer, fake_mode=fake_mode)
-                        expr_to_sym_proxy[s] = MetaProxy(node, tracer=tracer, fake_mode=fake_mode)
+                        expr_to_tensor_proxy[s] = MetaProxy(
+                            node.args[0], tracer=tracer, fake_mode=fake_mode
+                        )
+                        expr_to_sym_proxy[s] = MetaProxy(
+                            node, tracer=tracer, fake_mode=fake_mode
+                        )
 
             elif (sym_expr := _get_sym_val(node)) is not None:
                 if sym_expr not in expr_to_sym_proxy and not isinstance(
                     sym_expr, (sympy.Number, sympy.logic.boolalg.BooleanAtom)
                 ):
-                    expr_to_sym_proxy[sym_expr] = MetaProxy(node, tracer=tracer, fake_mode=fake_mode)
+                    expr_to_sym_proxy[sym_expr] = MetaProxy(
+                        node, tracer=tracer, fake_mode=fake_mode
+                    )
 
             # Look for functions to convert
             if node.op == "call_function" and node.target is torch.ops.aten.mul.Tensor:
@@ -207,21 +215,23 @@ def tensorify_python_scalars(
                             break
 
                         if proxy.node.meta["val"].dtype != compute_dtype:
-                            proxy = torch.ops.prims.convert_element_type.default(proxy, compute_dtype)
+                            proxy = torch.ops.prims.convert_element_type.default(
+                                proxy, compute_dtype
+                            )
 
                         args.append(proxy)
                     else:
-                        args.append(
-                            MetaProxy(a, tracer=tracer, fake_mode=fake_mode)
-                        )
+                        args.append(MetaProxy(a, tracer=tracer, fake_mode=fake_mode))
 
                 if transform:
                     replacement_proxy = torch.ops.aten.mul.Tensor(*args)
 
                     if compute_dtype != node.meta["val"].dtype:
-                        replacement_proxy = torch.ops.prims.convert_element_type.default(
-                            replacement_proxy,
-                            node.meta["val"].dtype,
+                        replacement_proxy = (
+                            torch.ops.prims.convert_element_type.default(
+                                replacement_proxy,
+                                node.meta["val"].dtype,
+                            )
                         )
 
                     node.replace_all_uses_with(replacement_proxy.node)
