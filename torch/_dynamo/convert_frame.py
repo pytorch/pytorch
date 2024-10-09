@@ -17,6 +17,7 @@ import threading
 import time
 import traceback
 import typing
+import warnings
 import weakref
 from pathlib import Path
 from types import CodeType, FrameType, FunctionType, ModuleType
@@ -65,7 +66,12 @@ from .cache_size import (
     exceeds_cache_size_limit,
     is_recompilation,
 )
-from .eval_frame import always_optimize_code_objects, skip_code, TorchPatcher
+from .eval_frame import (
+    always_optimize_code_objects,
+    dynamo_tls,
+    skip_code,
+    TorchPatcher,
+)
 from .exc import (
     augment_exc_message,
     BackendCompilerFailed,
@@ -86,6 +92,7 @@ from .guards import (
 )
 from .hooks import Hooks
 from .replay_record import ExecutionRecord
+from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .symbolic_convert import (
     DistributedState,
     InstructionTranslator,
@@ -524,6 +531,11 @@ class ConvertFrameAssert:
             },
         )
 
+        # Record traced frames, skipping Dynamo generated ones.
+        if not code.co_name.startswith(TORCH_DYNAMO_RESUME_IN_PREFIX):
+            info = f"{code.co_name} {code.co_filename}:{code.co_firstlineno}"
+            dynamo_tls.traced_frame_infos.append(info)
+
         return _compile(
             frame.f_code,
             frame.f_globals,
@@ -656,10 +668,16 @@ def _compile(
         instructions[:] = output.output_instructions
         code_options.update(output.code_options)
 
-        if config.dead_code_elimination:
-            propagate_inst_exn_table_entries(instructions)
-            check_inst_exn_tab_entries_valid(instructions)
-            instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
+        # The config.dead_code_elimination flag is deprecated
+        # See https://github.com/pytorch/pytorch/issues/136862 for more information
+        if not config.dead_code_elimination:
+            warnings.warn(
+                "The config.dead_code_elimination flag is deprecated, it's now always true."
+            )
+
+        propagate_inst_exn_table_entries(instructions)
+        check_inst_exn_tab_entries_valid(instructions)
+        instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
     def compile_inner(
         code: CodeType,
@@ -1083,6 +1101,8 @@ def _compile(
                 remote_cache_time_saved,
                 structured_logging_overhead_s,
                 config.suppress_errors,
+                config.inline_inbuilt_nn_modules,
+                config.specialize_float,
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()

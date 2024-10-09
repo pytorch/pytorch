@@ -623,7 +623,10 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return CallTorchbindHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "wrap_with_set_grad_enabled":
             return WrapWithSetGradEnabledHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "auto_functionalized":
+        elif (
+            value.__name__ == "auto_functionalized"
+            or value.__name__ == "auto_functionalized_v2"
+        ):
             return AutoFunctionalizeHigherOrderVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
@@ -1482,25 +1485,6 @@ class FunctorchHigherOrderVariable(UserFunctionVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        if not torch._dynamo.config.capture_func_transforms:
-            name = self.get_name()
-            fn = {
-                "grad_impl": "grad",
-                "vmap_impl": "vmap",
-                "vjp": "vjp",
-                "jvp": "jvp",
-                "jacrev": "jacrev",
-                "jacfwd": "jacfwd",
-                "hessian": "hessian",
-                "linearize": "linearize",
-                "functional_call": "functional_call",
-            }.get(name)
-            assert name is not None
-            unimplemented(
-                f"torch.func.{fn} capture is disabled, "
-                "it can be turned on by setting "
-                "`torch._dynamo.config.capture_func_transforms=True`"
-            )
         return super().call_function(tx, args, kwargs)
 
 
