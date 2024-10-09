@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import contextlib
 from typing import Any, Callable, List, TypeVar
 
 import torch
