@@ -20,14 +20,15 @@ from torch._subclasses.fake_tensor import is_fake
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
-
 from .functional_utils import (
     _check_if_mutation_can_be_in_graph,
     FunctionalTensorMetadataEq,
 )
 from .utils import strict_zip
 
+
 zip = strict_zip
+
 
 OutputType = Enum(
     "OutputType",
@@ -313,6 +314,14 @@ class ViewAndMutationMeta:
     # This list is generated after calling make_runtime_safe().
     traced_tangent_metas: Optional[List[Any]] = None
 
+    # for each tangent at index i:
+    #   if the tangent is a plain tensor, traced_tangent_memory_formats[i] holds the memory format
+    #     of the tangent that we need to coerce to
+    #   if the tangent is a subclass, traced_tangent_memory_formats[i] holds a list of memory formats,
+    #     containing the expected memory format of the subclass **and** all of its inner tensors
+    TANGENT_MEMORY_FORMAT = Union[torch.memory_format, List["TANGENT_MEMORY_FORMAT"]]
+    traced_tangent_memory_formats: Optional[List[TANGENT_MEMORY_FORMAT]] = None
+
     num_symints_saved_for_bw: Optional[int] = None
 
     # The grad_enabled mutation that will be emitted in the runtime_wrapper epilogue
@@ -350,6 +359,10 @@ class ViewAndMutationMeta:
     # Donated buffer means the tensor is not alias of any forward user input, forward user output,
     # and backward output.
     bw_donated_idxs: Optional[List[int]] = None
+
+    # Number of tokens used in backward, appended at the end of backward outputs.
+    # Filled after tracing joint function.
+    num_backward_tokens: int = 0
 
     def __post_init__(self):
         # pre-compute the indices of the inputs that are mutated.
@@ -473,11 +486,11 @@ class ViewAndMutationMeta:
         self.num_outputs_rng_offset = 1 if self.is_rng_op_functionalized else 0
 
         # Our forward() returns both (tokens, mutated_inputs, outputs, output_intermediate_bases, saved_tensors, saved_symints)
+        # Tokens will be split out before mutations/view handling and we do not count them here.
         self.num_forward_returns = (
             self.num_mutated_inp_runtime_indices
             + self.num_outputs
             + self.num_intermediate_bases
-            + len(self.tokens)
         )
         # In case of functionalization of rng ops, the fw_module returns one
         # additional output for rng offset. This rng offset is used right
@@ -566,6 +579,7 @@ class ViewAndMutationMeta:
                 x.shape == y.shape and x.dtype == y.dtype
                 for x, y, in zip(self.traced_tangents, other.traced_tangents)
             )
+            and self.num_backward_tokens == other.num_backward_tokens
         )
 
 
@@ -602,7 +616,7 @@ class SubclassMeta:
     # Optional field because we don't compute for inference graphs
     grad_input_metas: Optional[List[Union[int, SubclassCreationMeta]]] = None
 
-    def __init__(self):
+    def __init__(self) -> None:
         # The fields in this class get set after its construction.
         pass
 
@@ -792,6 +806,12 @@ class GraphSignature:
 
 
 @dataclass
+class AOTAutogradCacheInfo:
+    cache_key: str
+    start_time_ns: int
+
+
+@dataclass
 class AOTConfig:
     """
     Configuration for AOTDispatcher
@@ -813,9 +833,8 @@ class AOTConfig:
     enable_log: bool = True
     # this is always false outside of export.
     pre_dispatch: bool = False
-
     # Key to use for AOTAutogradCache
-    cache_key: Optional[str] = None
+    cache_info: Optional[AOTAutogradCacheInfo] = None
 
     def __post_init__(self):
         if self.pre_dispatch:

@@ -87,7 +87,7 @@ jobs:
 
       # TODO: Move to a requirements.txt file for windows
       - name: Install pip dependencies
-        uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
+        uses: nick-fields/retry@v3.0.0
         with:
           shell: bash
           timeout_minutes: 5
@@ -189,7 +189,7 @@ jobs:
         run: |
           pushd "${PYTORCH_FINAL_PACKAGE_DIR}"
           # shellcheck disable=SC2046,SC2102
-          python3 -mpip install $(echo *.whl)[opt-einsum,optree] optree==0.12.1
+          python3 -mpip install $(echo *.whl)[opt-einsum,optree] optree==0.13.0
           popd
 
           .ci/pytorch/win-test.sh
