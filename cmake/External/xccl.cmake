@@ -12,6 +12,9 @@ if(NOT __XCCL_INCLUDED)
       set_property(
         TARGET torch::xccl PROPERTY INTERFACE_LINK_LIBRARIES
         ${XCCL_LIBRARY})
+    else()
+      set(USE_XCCL OFF)
+      set(USE_C10D_XCCL OFF)
     endif()
   endif()
 endif()

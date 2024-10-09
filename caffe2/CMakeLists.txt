@@ -1085,7 +1085,7 @@ if(USE_XPU)
     include_directories(SYSTEM ${ATen_XPU_INCLUDE_DIRS})
 
   endif()
-  if(USE_C10D_XCCL)
+  if(USE_XCCL)
     target_link_libraries(torch_xpu PRIVATE torch::xccl)
     target_compile_definitions(torch_xpu PRIVATE USE_XCCL)
   endif()
@@ -1374,7 +1374,7 @@ if(USE_DISTRIBUTED)
       target_compile_definitions(torch_cuda PUBLIC USE_C10D_NCCL)
     endif()
   endif()
-  if(USE_C10D_XCCL)
+  if(USE_XPU AND USE_C10D_XCCL)
     target_compile_definitions(torch_xpu PUBLIC USE_C10D_XCCL)
     set_source_files_properties(
       ${TORCH_SRC_DIR}/csrc/distributed/c10d/ProcessGroupXCCL.cpp
