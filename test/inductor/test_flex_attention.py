@@ -2069,10 +2069,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                     f"Ref error: {ref_error}, Flex Error: {flex_error}",
                 )
 
-    # TODO this fails in eager, I dont think vmap_scatter works for this case
     @supported_platform
     @expectedFailure
     def test_head_bias_req_grad(self):
+        # TODO vmap_scatter is not adding the unsqueeze dims..
         # RuntimeError: The expanded size of the tensor (256) must match the existing size (4) at non-singleton dimension 3.  Target sizes: [1, 4, 256, 256].  Tensor sizes: [4]
         B, H, S, D = 1, 4, 256, 64
         bias = torch.randn(H, device="cuda", dtype=torch.float16, requires_grad=True)
