@@ -209,8 +209,12 @@ public:
     }
     return vector;
   }
-  static Vectorized<T> blendv(const Vectorized<T>& a, const Vectorized<T>& b,
-                          const Vectorized<T>& mask) {
+#if __GNUC__ <= 12 && defined(__ARM_FEATURE_SVE)
+  static Vectorized<T>  __attribute__ ((optimize("-fno-tree-loop-vectorize"))) blendv(const Vectorized<T>& a,
+#else
+  static Vectorized<T> blendv(const Vectorized<T>& a,
+#endif
+    const Vectorized<T>& b, const Vectorized<T>& mask) {
     Vectorized vector;
     int_same_size_t<T> buffer[size()];
     mask.store(buffer);
