@@ -185,7 +185,8 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     if (auto* return_value = input.template try_get<ReturnType>()) {
       return std::move(*return_value);
     }
-    TORCH_CHECK(false,
+    TORCH_CHECK(
+        false,
         "The type of the return value is ",
         c10::demangle(input.type_info().name()),
         ", but you asked for type ",
