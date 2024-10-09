@@ -542,7 +542,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         device = self.module.custom_device()
         default_protocol = torch.serialization.DEFAULT_PROTOCOL
 
-        # Legacy data saved with _rebuild_device_tensor_from_numpy via
+        # Legacy data saved with _rebuild_device_tensor_from_numpy on f80ed0b8 via
 
         # with patch.object(torch._C, "_has_storage", return_value=False):
         #     x = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.float32, device=device)
