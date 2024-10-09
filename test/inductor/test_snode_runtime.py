@@ -280,6 +280,7 @@ class TestCommAnalysis(TestCase):
         inp = [T(10, 10), T(15, 15)]
         self._verify_runtime_estimation(fn, (inp,))
 
+    @xfailIfXpu
     def test_all_gather_into_tensor(self):
         def fn(x):
             rs = _c10d.all_gather_into_tensor(
