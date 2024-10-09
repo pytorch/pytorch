@@ -69,58 +69,55 @@ def _permute_strides(out: torch.Tensor, query_strides: Tuple[int, ...]) -> torch
     return new_out
 
 
-@torch.library.custom_op("FlexAttentionLib::zeros_and_scatter", mutates_args=())  # type: ignore[misc]
-def zeros_and_scatter(
-    shape: List[int],
-    indices: List[Tensor],
-    vals: Tensor,
-) -> Tensor:
-    """Custom Op so that we can register a custom lowering for the new_output + scatter in the backwards pass
-    Args:
-        shape (List[int]): The shape of the output tensor
-        indices (List[Tensor]): List of index tensors
-        vals (Tensor): Values to scatter
-    Returns:
-        Tensor: The resulting tensor after scattering
-    """
-    grad = torch.zeros(shape, device=vals.device, dtype=vals.dtype)
+def register_zeros_and_scatter() -> None:
+    """Designed to be called once per process. As a way to lazily register the custom op"""
 
-    for i, idx in enumerate(indices):
-        assert isinstance(idx, torch.Tensor)  # Appease the mypy overlords
-        indices[i] = idx.expand(vals.shape)
-
-    return torch.ops.aten.index_put(grad, indices, vals, accumulate=True)
-
-
-@zeros_and_scatter.register_fake  # type: ignore[misc]
-def _(
-    shape: List[int],
-    indices: List[Tensor],
-    vals: Tensor,
-) -> Tensor:
-    return vals.new_empty(shape)
-
-
-@zeros_and_scatter.register_vmap  # type: ignore[misc]
-def _(info, in_dims, shape, indices, val):  # type: ignore[no-untyped-def]
-    """The batching rule is special in that it returns a tensor that is not batched"""
-    if len(indices) > 1:
+    @torch.library.custom_op("FlexAttentionLib::zeros_and_scatter", mutates_args=())  # type: ignore[misc]
+    def zeros_and_scatter(
+        shape: List[int],
+        indices: List[Tensor],
+        vals: Tensor,
+    ) -> Tensor:
+        """Custom Op so that we can register a custom lowering for the new_output + scatter in the backwards pass"""
+        grad = torch.zeros(shape, device=vals.device, dtype=vals.dtype)
         for i, idx in enumerate(indices):
-            # TODO: Don't use is_batchedtensor API, use in_dims instead.
-            if torch._C._functorch.is_batchedtensor(idx):
-                indices[i] = idx.unsqueeze(-1)
+            assert isinstance(idx, torch.Tensor)  # Appease the mypy overlords
+            indices[i] = idx.expand(vals.shape)
+        return torch.ops.aten.index_put(grad, indices, vals, accumulate=True)
 
-    out = torch.ops.FlexAttentionLib.zeros_and_scatter(
-        shape,
-        indices,
-        val,
-    )
-    return out, None
+    @zeros_and_scatter.register_fake  # type: ignore[misc]
+    def _(
+        shape: List[int],
+        indices: List[Tensor],
+        vals: Tensor,
+    ) -> Tensor:
+        return vals.new_empty(shape)
+
+    @zeros_and_scatter.register_vmap  # type: ignore[misc]
+    def _(info, indims, shape, indices, val):  # type: ignore[no-untyped-def]
+        """The batching rule is special in that it returns a tensor that is not batched"""
+        if len(indices) > 1:
+            for i, idx in enumerate(indices):
+                # TODO: Don't use is_batchedtensor API, use in_dims instead.
+                if torch._C._functorch.is_batchedtensor(idx):
+                    indices[i] = idx.unsqueeze(-1)
+        out = torch.ops.FlexAttentionLib.zeros_and_scatter(
+            shape,
+            indices,
+            val,
+        )
+        return out, None
 
 
 class ModIndex(torch.autograd.Function):
+    _is_registered = False
+    generate_vmap_rule = True
+
     @staticmethod
     def forward(x: Tensor, indices: List[Tensor]) -> Tensor:
+        if not ModIndex._is_registered:
+            register_zeros_and_scatter()
+            ModIndex._is_registered = True
         return torch.ops.aten.index(x, indices)
 
     @staticmethod
@@ -128,8 +125,6 @@ class ModIndex(torch.autograd.Function):
         x, indices = inputs
         ctx.save_for_backward(*indices)
         ctx.input_shape = x.shape
-
-    generate_vmap_rule = True
 
     @staticmethod
     def backward(ctx, gradOut):  # type: ignore[no-untyped-def]
