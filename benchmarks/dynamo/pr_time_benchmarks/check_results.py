@@ -37,8 +37,8 @@ def main():
     result_file_path = sys.argv[2]
 
     # A path where a new expected results file will be written that can be used to replace expected_results.csv
-    # in case of faluire. In case of no faluire the content of this file will match expected_file_path, when
-    # is faluire values will be changed for benchmarks that failed only.
+    # in case of faluire. In case of no faluire the content of this file will match expected_file_path, values 
+    # will be changed for benchmarks that failed only.
     reference_expected_results_path = sys.argv[3]
 
     # Read expected data file.
