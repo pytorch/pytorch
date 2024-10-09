@@ -553,6 +553,8 @@ def impl(qualname, types, func=None, *, lib=None):
             will be tied to the lifetime of the Library object.
 
     Examples:
+        >>> import torch
+        >>> import numpy as np
         >>> # Example 1: Register function.
         >>> # Define the operator
         >>> torch.library.define("mylib::sin", "(Tensor x) -> Tensor")
