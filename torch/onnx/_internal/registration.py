@@ -69,7 +69,7 @@ class OverrideDict(Collection[_K], Generic[_K, _V]):
     ones.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._base: Dict[_K, _V] = {}
         self._overrides: Dict[_K, _V] = {}
         self._merged: Dict[_K, _V] = {}
@@ -276,10 +276,13 @@ def onnx_symbolic(
     Usage::
 
     ```
-    @onnx_symbolic("aten::symbolic_b", opset=10, decorate=[quantized_aten_handler(scale=1/128, zero_point=0)])
+    @onnx_symbolic(
+        "aten::symbolic_b",
+        opset=10,
+        decorate=[quantized_aten_handler(scale=1 / 128, zero_point=0)],
+    )
     @symbolic_helper.parse_args("v", "v", "b")
-    def symbolic_b(g: _C.Graph, x: _C.Value, y: _C.Value, arg1: bool) -> _C.Value:
-        ...
+    def symbolic_b(g: _C.Graph, x: _C.Value, y: _C.Value, arg1: bool) -> _C.Value: ...
     ```
 
     Args:

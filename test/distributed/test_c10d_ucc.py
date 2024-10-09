@@ -417,7 +417,7 @@ class DistributedDataParallelTest(
         """
 
         class GlobalLocalUnusedParamModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.t0 = Task()
                 self.t1 = Task()
@@ -507,7 +507,7 @@ class DistributedDataParallelTest(
         """
 
         class FindUnusedParamModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.t0 = Task()
                 self.t1 = Task()
@@ -560,7 +560,7 @@ class DistributedDataParallelTest(
         process_group = self._get_process_group()
 
         class IgnoredOutput(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
@@ -602,7 +602,7 @@ class DistributedDataParallelTest(
         process_group = self._get_process_group()
 
         class IgnoredOutputWithUnusedParameters(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
@@ -669,7 +669,7 @@ class DistributedDataParallelTest(
         )
 
         class TestModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)

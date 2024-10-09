@@ -15,8 +15,8 @@ and /cudnn/linear_unpack_impl.cpp, for cudnn.
 
 int register_linear_params();
 
-namespace at {
-namespace native {
+
+namespace at::native {
 namespace {
 
 class QLinearUnpackWeightInt8 final {
@@ -76,5 +76,4 @@ TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
 }
 
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native

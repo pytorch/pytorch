@@ -19,6 +19,7 @@ from torch._functorch.vmap import (
     vmap_impl,
 )
 
+
 # vmap(func)(inputs) wraps all Tensor inputs to be batched in BatchedTensors,
 # sends those into func, and then unwraps the output BatchedTensors. Operations
 # on BatchedTensors perform the batched operations that the user is asking for.

@@ -20,7 +20,7 @@ torch.manual_seed(0)
 
 # Basic example
 class ExampleCode(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.mm_param1 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
         self.mm_param2 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
@@ -46,7 +46,7 @@ class ExampleCode(torch.nn.Module):
 
 
 class MultiMLP(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.mlp0 = MLPModule(d_hid)
         self.mlp1 = MLPModule(d_hid)

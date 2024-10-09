@@ -776,7 +776,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             return (inp[0] + 1,)
 
         class Mod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layers = torch.nn.ModuleList()
                 for i in range(10):
