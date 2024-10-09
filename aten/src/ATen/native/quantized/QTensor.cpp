@@ -10,8 +10,8 @@
 #include <cmath>
 #include <utility>
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 Tensor quantize_per_tensor_dynamic(
     const Tensor& self,
@@ -29,8 +29,8 @@ Tensor quantize_per_tensor_dynamic(
     reduce_range = false;
   }
 
-  int qmin;
-  int qmax;
+  int qmin = 0;
+  int qmax = 0;
 
   if (dtype == ScalarType::QInt8) {
     qmin = -128;
@@ -393,5 +393,4 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
   xmin_tensor[0] = xmin;
   return std::make_tuple(xmax_tensor, xmin_tensor);
 }
-} // namespace native
-} // namespace at
+} // namespace at::native

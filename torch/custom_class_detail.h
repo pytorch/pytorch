@@ -102,7 +102,7 @@ template <
     typename CurClass,
     typename Func,
     std::enable_if_t<
-        std::is_member_function_pointer<std::decay_t<Func>>::value,
+        std::is_member_function_pointer_v<std::decay_t<Func>>,
         bool> = false>
 WrapMethod<Func> wrap_func(Func f) {
   return WrapMethod<Func>(std::move(f));
@@ -112,7 +112,7 @@ template <
     typename CurClass,
     typename Func,
     std::enable_if_t<
-        !std::is_member_function_pointer<std::decay_t<Func>>::value,
+        !std::is_member_function_pointer_v<std::decay_t<Func>>,
         bool> = false>
 Func wrap_func(Func f) {
   return f;

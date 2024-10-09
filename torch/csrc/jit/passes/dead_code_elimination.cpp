@@ -251,7 +251,6 @@ class DeadCodeEliminator {
       curNode = curNode->owningBlock()->owningNode();
     }
 
-    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     for (const auto input : node->inputs()) {
       if (liveValues_.count(input)) {
         continue;

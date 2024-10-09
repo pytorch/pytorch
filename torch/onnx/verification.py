@@ -21,6 +21,7 @@ import warnings
 from typing import Any, Callable, Collection, Mapping, Sequence, Tuple, Union
 
 import numpy as np
+import numpy.typing as npt
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -29,6 +30,7 @@ from torch.onnx import _constants, _experimental, _exporter_states, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import onnx_proto_utils
 from torch.types import Number
+
 
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
 
@@ -97,7 +99,7 @@ def _flatten_tuples(elem):
 
 
 # TODO(justinchuby): Add type checking by narrowing down the return type when input is None
-def _to_numpy(elem) -> list | np.ndarray:
+def _to_numpy(elem) -> list | npt.NDArray:
     if isinstance(elem, torch.Tensor):
         if elem.requires_grad:
             return elem.detach().cpu().numpy()
@@ -216,8 +218,8 @@ def _compare_onnx_pytorch_outputs_in_np(
     pt_outs: _OutputsType,
     options: VerificationOptions,
 ):
-    assert len(onnx_outs) == len(
-        pt_outs
+    assert (
+        len(onnx_outs) == len(pt_outs)
     ), f"Number of outputs differ ONNX runtime: ({len(onnx_outs)}) PyTorch: ({len(pt_outs)})"
     acceptable_error_percentage = options.acceptable_error_percentage
     if acceptable_error_percentage and (
@@ -1722,7 +1724,7 @@ def find_mismatch(
         ...     opset_version=opset_version,
         ... )
         >>> class Model(torch.nn.Module):
-        ...     def __init__(self):
+        ...     def __init__(self) -> None:
         ...         super().__init__()
         ...         self.layers = torch.nn.Sequential(
         ...             torch.nn.Linear(3, 4),

@@ -144,7 +144,7 @@ def set_and_check_done(value):
 TensorClass = namedtuple("TensorClass", ["tensors"])
 
 class MyPickleClass:
-    def __init__(self):
+    def __init__(self) -> None:
         self.t = None
 
     def __getstate__(self):
@@ -1446,7 +1446,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             world_size=self.world_size)
 
         class MyModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lin = torch.nn.Linear(3, 4)
 

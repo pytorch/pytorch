@@ -9,7 +9,8 @@
 const int LAYOUT_NAME_LEN = 64;
 
 struct THPLayout {
-  PyObject_HEAD at::Layout layout;
+  PyObject_HEAD
+  at::Layout layout;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char name[LAYOUT_NAME_LEN + 1];
 };
