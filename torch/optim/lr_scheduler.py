@@ -258,6 +258,19 @@ class LRScheduler:
             group["lr"] for group in self.optimizer.param_groups
         ]
 
+    def refresh(self, *args, **kwargs):
+        """Function meant to initialize state for newly added/modified optimizer changes
+
+        For example, when the wrapped optimizer adds a new param group, without a refresh
+        of state, ReduceLROnPlateau will error due to inconsistencies incurred by the new
+        param group.
+        """
+        raise NotImplementedError(
+            f"refresh is not yet implemented for {self.__class__}"
+            + " and is usually unnecessary. Please open an issue if you have a use case that"
+            + " requires calling refresh on this LRScheduler."
+        )
+
 
 def _warn_get_lr_called_within_step(lr_scheduler: LRScheduler):
     if not lr_scheduler._get_lr_called_within_step:
@@ -1426,6 +1439,30 @@ class ReduceLROnPlateau(LRScheduler):
         self._init_is_better(
             mode=self.mode, threshold=self.threshold, threshold_mode=self.threshold_mode
         )
+
+    def refresh(self, new_min_lr: Union[List[float], float] = 0) -> None:
+        """Refreshes the min_lr of the scheduler.
+
+        ``refresh`` is intended to be used after the attached optimizer instance is updated with
+        different param groups (for example, as a result of calling add_param_group).
+
+        If you provided a min_lr value to the constructor upon initialization, remember to
+        provide it in refresh as well.
+
+        Args:
+            new_min_lr (float or list): Just like min_lr in the ReduceLROnPlateau constructor,
+            a scalar or a list of scalars that represent a lower bound on the learning rate of
+            all param groups or each group respectively. Default: 0.
+        """
+
+        if isinstance(new_min_lr, (list, tuple)):
+            if len(new_min_lr) != len(self.optimizer.param_groups):
+                raise ValueError(
+                    f"expected {len(self.optimizer.param_groups)} min_lrs, got {len(new_min_lr)}"
+                )
+            self.min_lrs = list(new_min_lr)
+        else:
+            self.min_lrs = [new_min_lr] * len(self.optimizer.param_groups)
 
 
 class CyclicLR(LRScheduler):
