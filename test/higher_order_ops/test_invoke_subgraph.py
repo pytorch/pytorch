@@ -131,7 +131,7 @@ class TestInvokeSubgraph(TestCase):
             @staticmethod
             def backward(ctx, grad_out):
                 a = grad_out.view(12, 5)
-                return torch.cos(torch.reshape(a, (3, 4, 5,)))
+                return torch.cos(torch.reshape(a, (3, 4, 5)))
 
         def gn(x):
             return (CustomOp.apply(x),)
