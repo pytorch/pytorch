@@ -183,7 +183,7 @@ def parse_args() -> Any:
         help="Current GitHub ref type, branch or tag",
     )
     parser.add_argument(
-        "--check-experiments",
+        "--eligible-experiments",
         type=_str_comma_separated_to_set,
         required=False,
         default="",
@@ -388,10 +388,16 @@ def get_runner_prefix(
         ]
 
         if opted_in_users:
-            log.info(
-                f"{', '.join(opted_in_users)} have opted into experiment {experiment_name}."
-            )
-            enabled = True
+            log.info(f"{', '.join(opted_in_users)} have opted into experiment {experiment_name}.")
+
+            if check_experiments:
+                if experiment_name in check_experiments:
+                    enabled = True
+                else:
+                    log.info(f"Skipping experiment '{experiment_name}', as it is not in the check_experiments list")
+            else:
+                enabled = True
+
         elif experiment_settings.rollout_perc:
             do_check = True
             if check_experiments:
