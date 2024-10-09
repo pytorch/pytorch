@@ -61,7 +61,10 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
         return source_codes
 
     def abi_compatible_header(self):
-        return ""
+        return """
+        #include <torch/csrc/inductor/aoti_runtime/utils_xpu.h>
+        #include <torch/csrc/inductor/aoti_runtime/sycl_runtime_wrappers.h>
+        """
 
     def cpp_stream_type(self):
         return "xpuStream_t"

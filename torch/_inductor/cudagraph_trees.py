@@ -1913,22 +1913,32 @@ class CUDAGraphTreeManager:
         # mod2(mod1(x)).sum().backward()
 
         self.running_forwards_with_pending_backwards = False
+        self.mode: Optional[CompilationMode] = None
+
+        self.disable_invalidate_aliases = (
+            False
+            if not torch._environment.is_fbcode()
+            else torch._utils_internal.justknobs_check(
+                "pytorch/inductor:disable_cudagraph_alias_invalidation"
+            )
+        )
 
     def run(self, new_inputs: List[InputType], function_id: FunctionID) -> OutputType:
         assert self.graph is not None, "Running CUDAGraph after shutdown"
+        self.mode = self.id_to_mode[function_id]
         out = self._run(new_inputs, function_id)
 
         # The forwards are only pending following invocation, not before
-        mode = self.id_to_mode[function_id]
-        if mode == CompilationMode.FORWARD:
+        if self.mode == CompilationMode.FORWARD:
             self.running_forwards_with_pending_backwards = True
-        elif mode == CompilationMode.BACKWARD:
+        elif self.mode == CompilationMode.BACKWARD:
             self.running_forwards_with_pending_backwards = False
 
         return out
 
     def set_to_running_backward(self) -> None:
         self.running_forwards_with_pending_backwards = False
+        self.mode = CompilationMode.BACKWARD
 
     def _get_cuda_graph_recorded_tensor_checker(self) -> Callable[[Tensor], bool]:
         return (
@@ -2348,10 +2358,24 @@ class CUDAGraphTreeManager:
             "before each model invocation"
         )
 
+    @staticmethod
+    def format_dealloc_msg(stack_trace: Optional[str]) -> str:
+        stack_trace = (
+            stack_trace.strip() if stack_trace else "[Could not find stack trace]"
+        )
+        return (
+            "Error: accessing tensor output of CUDAGraphs that has been overwritten by a subsequent run. "
+            f"Stack trace: {stack_trace}. "
+            "To prevent overwriting, clone the tensor outside of torch.compile() "
+            "or call torch.compiler.cudagraph_mark_step_begin() before each model invocation."
+        )
+
     def dealloc_current_path_weakrefs(self) -> None:
         assert self.current_node is not None
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
+
+        stor_stack_trace: Dict[int, Optional[str]] = {}
         for node in self.current_node._path_from_root:
             assert node.stack_traces is not None
             assert len(node.tensor_weakrefs) == len(node.stack_traces)
@@ -2360,25 +2384,40 @@ class CUDAGraphTreeManager:
                 if ten is None:
                     continue
 
-                stack_trace = (
-                    stack_trace.strip()
-                    if stack_trace
-                    else "[Could not find stack trace]"
+                torch._C._set_storage_access_error_msg(
+                    ten, self.format_dealloc_msg(stack_trace)
                 )
-                msg = (
-                    "Error: accessing tensor output of CUDAGraphs that has been overwritten by a subsequent run. "
-                    f"Stack trace: {stack_trace}. "
-                    "To prevent overwriting, clone the tensor outside of torch.compile() "
-                    "or call torch.compiler.cudagraph_mark_step_begin() before each model invocation."
-                )
-                torch._C._set_storage_access_error_msg(ten, msg)
+
+            # we would to enable the following assertion, but an internal model failed with a command
+            # that does not repro. len(node.outputs_weakrefs) == len(node.stack_traces)
+            # so, pessimistically assume that they might differ by doing the debug info
+            # loop separately from the dealloc loop
+            if self.disable_invalidate_aliases:
+                continue
+
+            for storage_ref, stack_trace in zip(
+                node.outputs_weakrefs, node.stack_traces
+            ):
+                if not storage_ref:
+                    continue
+
+                stor_stack_trace[storage_ref.data_ptr()] = stack_trace
 
         deleted = set()
         for storage_ref in self.current_node.path_live_weakrefs():
             _storage_deref = storage_ref()
             if _storage_deref and storage_ref.data_ptr() not in deleted:
                 deleted.add(storage_ref.data_ptr())
+
+                msg = self.format_dealloc_msg(
+                    stor_stack_trace.get(storage_ref.data_ptr())
+                )
                 torch._C._free_And_Remove_DeleterFn(_storage_deref)
+
+                if self.disable_invalidate_aliases:
+                    continue
+
+                torch._C._set_storage_data_ptr_access_error_msg(_storage_deref, msg)
 
     def clear_current_path_state_and_set_to_none(self) -> None:
         assert isinstance(self.current_node, CUDAGraphNode)
