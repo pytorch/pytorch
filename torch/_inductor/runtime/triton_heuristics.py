@@ -724,9 +724,10 @@ class CachingAutotuner(KernelInterface):
         budget = torch.cuda.max_memory_allocated() - torch.cuda.memory_allocated()
 
         def maybe_copy(name, arg):
-            if name in self.mutated_arg_names and arg.is_cuda:
+            if name in self.mutated_arg_names:
                 nonlocal budget
                 assert isinstance(arg, torch.Tensor)
+                assert not arg.is_cpu
                 size = arg.numel() * arg.element_size()
                 if size > budget:
                     cpu_arg = torch.empty_strided(

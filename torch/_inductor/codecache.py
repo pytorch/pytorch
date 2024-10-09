@@ -1673,7 +1673,7 @@ class AotCodeCompiler:
             else:
                 objcopy_command = build_paths.objcopy
         else:
-            ld_command = "ld -z noexecstack"
+            ld_command = "ld"
             objcopy_command = "objcopy"
 
         (

@@ -13,6 +13,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/native/layer_norm.h>
+#include <ATen/native/nested/NestedTensorUtils.h>
 
 namespace at::native {
 

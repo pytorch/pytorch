@@ -114,7 +114,8 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     }
 
     auto alloc_size = PreGuardBytes + nbytes + PostGuardBytes;
-    void* data = nullptr;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    void* data;
     auto allocator_ptr = GetThreadLocalCachingAllocator();
     auto profiling_allocator_ptr = GetThreadLocalProfilingAllocator();
     if (allocator_ptr != nullptr) {

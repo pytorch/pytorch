@@ -19,7 +19,8 @@ class AOTInductorModelContainer {
   AOTInductorModelContainer(
       size_t num_models,
       const std::string& device_str,
-      const std::optional<std::string>& cubin_dir = std::nullopt) {
+      const std::optional<std::string>& cubin_dir = std::nullopt)
+      : use_secondary_(false), constant_folded_(false) {
     constants_map_ = std::make_shared<ConstantMap>();
     constants_array_ = std::make_shared<std::vector<ConstantHandle>>();
 
@@ -412,10 +413,10 @@ class AOTInductorModelContainer {
   // If true,
   // constants_map_secondary/constant_blob_secondary/constants_array_secondary
   // is being used.
-  bool use_secondary_{false};
+  bool use_secondary_;
 
   // Determine whether we have ran constant folding
-  bool constant_folded_{false};
+  bool constant_folded_;
 
   // Holds the mapping of constants to at::Tensor.
   // The underlying data of at::Tensor is in either constant_blob_ (for CUDA).

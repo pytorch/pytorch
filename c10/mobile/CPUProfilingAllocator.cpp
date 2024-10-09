@@ -152,8 +152,10 @@ std::vector<uint64_t> formulate_greedy_allocation_plan(
       create_and_sort_mem_events(allocation_sizes, allocation_lifetimes);
   uint64_t max_offset{0};
   for (const auto& mem_event : mem_events) {
-    uint64_t alloc_offset = 0;
-    uint64_t new_offset = 0, new_size = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    uint64_t alloc_offset;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    uint64_t new_offset, new_size;
     if (mem_event.type == EventType::Allocate) {
       auto it = free_size_to_offset.lower_bound(mem_event.size);
       if (it == free_size_to_offset.end()) {

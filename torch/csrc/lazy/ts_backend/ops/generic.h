@@ -4,7 +4,8 @@
 
 #include <torch/csrc/lazy/core/ir_builder.h>
 
-namespace torch::lazy {
+namespace torch {
+namespace lazy {
 
 // Generic IR Node implementation for nodes which can simply be described by a
 // specific OpKind and a lowering function. IR nodes carrying
@@ -49,4 +50,5 @@ inline NodePtr GenericOp(
       op, operands, std::move(shape), num_outputs, hash_seed);
 }
 
-} // namespace torch::lazy
+} // namespace lazy
+} // namespace torch

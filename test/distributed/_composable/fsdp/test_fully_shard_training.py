@@ -216,8 +216,6 @@ class TestFullyShardCastAfterInit(FSDPTestMultiThread):
         model.to(dtype)
         for param in model.parameters():
             self.assertEqual(param.dtype, dtype)
-            self.assertEqual(param.to_local().dtype, dtype)
-            self.assertEqual(param._spec.tensor_meta.dtype, dtype)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
         check_sharded_parity(self, ref_model, model)
         torch.manual_seed(42 + self.rank + 1)
@@ -229,13 +227,6 @@ class TestFullyShardCastAfterInit(FSDPTestMultiThread):
                 losses[-1].backward()
             self.assertEqual(losses[0], losses[1])
             check_sharded_parity(self, ref_model, model)
-            for param in model.parameters():
-                self.assertEqual(param.dtype, dtype)
-                self.assertEqual(param.to_local().dtype, dtype)
-                self.assertEqual(param._spec.tensor_meta.dtype, dtype)
-                self.assertEqual(param.grad.dtype, dtype)
-                self.assertEqual(param.grad.to_local().dtype, dtype)
-                self.assertEqual(param.grad._spec.tensor_meta.dtype, dtype)
             for _optim in (ref_optim, optim):
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
