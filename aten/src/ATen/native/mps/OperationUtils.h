@@ -73,24 +73,24 @@ std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type);
 static inline std::string scalarToMetalTypeString(const TensorBase& t) {
   return scalarToMetalTypeString(t.scalar_type());
 }
-NSArray<NSNumber*>* getTensorAxes(const Tensor& t);
+NSArray<NSNumber*>* getTensorAxes(const TensorBase& t);
 NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim);
 std::string getMPSShapeString(MPSShape* shape);
 std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype = true, bool exclude_shape = false);
 std::string getArrayRefString(const IntArrayRef s);
 // use has_storage() on the returned tensor to determine if src actually is a view
-Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst);
-Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output);
-bool canSliceViewTensor(const Tensor& src, MPSShape *mpsShape);
-MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mpsShape, const MPSDataType mpsDataType);
-MPSGraphTensor* castToIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const Tensor& input, bool includesInt64 = false);
-MPSGraphTensor* castFromIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const Tensor& input, bool includesInt64 = false);
+Tensor gatherViewTensor(const Tensor& src, Tensor& dst);
+Tensor& scatterViewTensor(const Tensor& src, Tensor& output);
+bool canSliceViewTensor(const TensorBase& src, MPSShape *mpsShape);
+MPSGraphTensorData* getMPSGraphTensorDataForView(const TensorBase& src, MPSShape *mpsShape, const MPSDataType mpsDataType);
+MPSGraphTensor* castToIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const TensorBase& input, bool includesInt64 = false);
+MPSGraphTensor* castFromIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const TensorBase& input, bool includesInt64 = false);
 
-MPSNDArray* getMPSNDArray(const at::Tensor& t, const IntArrayRef& sizes = {}, const IntArrayRef& strides = {});
-MPSNDArray* getMPSNDArray(const at::Tensor& t, MPSShape* sizes = nil, MPSShape* strides = nil);
+MPSNDArray* getMPSNDArray(const TensorBase& t, const IntArrayRef& sizes = {}, const IntArrayRef& strides = {});
+MPSNDArray* getMPSNDArray(const TensorBase& t, MPSShape* sizes = nil, MPSShape* strides = nil);
 // The MPSShape could vary based on memory format
 Tensor getTensorView(const Tensor& t, MPSShape* shape);
-MPSShape* getMPSShape(const Tensor& t, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
+MPSShape* getMPSShape(const TensorBase& t, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
 MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
 
 static inline id<MTLBuffer> getMTLBufferStorage(const TensorBase& tensor) {
@@ -326,12 +326,12 @@ MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
 /**
  * Returns distance from lowest to highest element offset in given tensor.
  */
-size_t compute_storage_numel_distance(const at::Tensor& t);
+size_t compute_storage_numel_distance(const TensorBase& t);
 
 /**
  * Checks whether tensor is mapped to a contiguous area in the storage.
  */
-inline bool is_dense_in_storage(const at::Tensor& t) {
+inline bool is_dense_in_storage(const TensorBase& t) {
   return compute_storage_numel_distance(t) == static_cast<size_t>(t.numel());
 }
 
@@ -440,7 +440,7 @@ inline bool supportedFloatingType(ScalarType dtype) {
   return dtype == kFloat || dtype == kHalf || dtype == kBFloat16;
 }
 
-inline bool supportedFloatingType(const Tensor& t) {
+inline bool supportedFloatingType(const TensorBase& t) {
   return supportedFloatingType(t.scalar_type());
 }
 
@@ -450,7 +450,7 @@ inline bool supportedFloatingOrComplexType(ScalarType dtype) {
   }
   return supportedFloatingType(dtype);
 }
-inline bool supportedFloatingOrComplexType(const Tensor& t) {
+inline bool supportedFloatingOrComplexType(const TensorBase& t) {
   return supportedFloatingOrComplexType(t.scalar_type());
 }
 
@@ -459,7 +459,7 @@ inline void checkSupportsBFloat16() {
                    "MPS bfloat16 type is supported on MacOS 14.0 or newer.");
 }
 
-inline bool needsGather(const Tensor& t) {
+inline bool needsGather(const TensorBase& t) {
   static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
   return !is_macOS_15_0_or_newer && (!t.is_contiguous() || t.storage_offset()) ;
 }
