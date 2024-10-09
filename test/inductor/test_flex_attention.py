@@ -989,9 +989,9 @@ class TestFlexAttention(InductorTestCase):
         self.run_test(composed_score_mod, dtype)
 
     @supported_platform
-    # @expectedFailure  # TODO: Remove this after supporting compiled flex attention with training bias
+    @expectedFailure  # TODO: Remove this after supporting compiled flex attention with training bias
     @common_utils.parametrize("dtype", test_dtypes)
-    def test_captured_buffers(self, dtype: torch.dtype):
+    def test_captured_buffers_req_grad(self, dtype: torch.dtype):
         head_offset = torch.rand(8, device="cuda", dtype=dtype, requires_grad=True)
 
         def score_mod(score, b, h, m, n):
@@ -2069,6 +2069,41 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                     f"Ref error: {ref_error}, Flex Error: {flex_error}",
                 )
 
+    # TODO this fails in eager, I dont think vmap_scatter works for this case
+    @supported_platform
+    @expectedFailure
+    def test_head_bias_req_grad(self):
+        # RuntimeError: The expanded size of the tensor (256) must match the existing size (4) at non-singleton dimension 3.  Target sizes: [1, 4, 256, 256].  Tensor sizes: [4]
+        B, H, S, D = 1, 4, 256, 64
+        bias = torch.randn(H, device="cuda", dtype=torch.float16, requires_grad=True)
+
+        bias_flex = bias.detach().clone().requires_grad_(True)
+
+        def head_bias(score, b, h, q_idx, kv_idx):
+            return score + bias_flex[h]
+
+        bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
+        bias_sdpa_ref = bias_sdpa_ref.view(H, 1, 1).expand(H, S, S)
+        implicit_bias_sdpa_ref = bias_sdpa_ref
+        bias_sdpa_gold = (
+            bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
+        )
+        bias_sdpa_gold = bias_sdpa_gold.view(H, 1, 1).expand(H, S, S)
+        implicit_bias_sdpa_gold = bias_sdpa_gold
+
+        self._test_learnable_bias_inner(
+            B,
+            H,
+            S,
+            D,
+            head_bias,
+            bias_flex,
+            implicit_bias_sdpa_ref,
+            bias_sdpa_ref,
+            implicit_bias_sdpa_gold,
+            bias_sdpa_gold,
+        )
+
     @supported_platform
     def test_comparison_vs_sdpa_with_learnable_bias(self):
         # 1-dimensional bias:
@@ -2083,12 +2118,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return score + bias_flex[q_idx + kv_idx]
 
         bias_indices = torch.arange(S)[:, None] + torch.arange(S)
-        bias_spda_ref = bias.detach().clone().requires_grad_(True)
-        implicit_bias_spda_ref = bias_spda_ref[bias_indices]
-        bias_spda_gold = (
+        bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
+        implicit_bias_sdpa_ref = bias_sdpa_ref[bias_indices]
+        bias_sdpa_gold = (
             bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
         )
-        implicit_bias_spda_gold = bias_spda_gold[bias_indices]
+        implicit_bias_sdpa_gold = bias_sdpa_gold[bias_indices]
 
         self._test_learnable_bias_inner(
             B,
@@ -2097,10 +2132,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             D,
             rel_pos_1d,
             bias_flex,
-            implicit_bias_spda_ref,
-            bias_spda_ref,
-            implicit_bias_spda_gold,
-            bias_spda_gold,
+            implicit_bias_sdpa_ref,
+            bias_sdpa_ref,
+            implicit_bias_sdpa_gold,
+            bias_sdpa_gold,
         )
 
         # 2-dimensional bias:
@@ -2112,13 +2147,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def rel_pos_2d(score, b, h, q_idx, kv_idx):
             return score + bias_flex[q_idx, kv_idx]
 
-        bias_indices = torch.arange(S)[:, None] + torch.arange(S)
-        bias_spda_ref = bias.detach().clone().requires_grad_(True)
-        implicit_bias_spda_ref = bias_spda_ref
-        bias_spda_gold = (
+        bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
+        implicit_bias_sdpa_ref = bias_sdpa_ref
+        bias_sdpa_gold = (
             bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
         )
-        implicit_bias_spda_gold = bias_spda_gold
+        implicit_bias_sdpa_gold = bias_sdpa_gold
 
         self._test_learnable_bias_inner(
             B,
@@ -2127,10 +2161,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             D,
             rel_pos_2d,
             bias_flex,
-            implicit_bias_spda_ref,
-            bias_spda_ref,
-            implicit_bias_spda_gold,
-            bias_spda_gold,
+            implicit_bias_sdpa_ref,
+            bias_sdpa_ref,
+            implicit_bias_sdpa_gold,
+            bias_sdpa_gold,
         )
 
         # 2-dimensional bias + index multiple
@@ -2142,13 +2176,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def rel_pos_2d(score, b, h, q_idx, kv_idx):
             return score + bias_flex[q_idx][kv_idx]
 
-        bias_indices = torch.arange(S)[:, None] + torch.arange(S)
-        bias_spda_ref = bias.detach().clone().requires_grad_(True)
-        implicit_bias_spda_ref = bias_spda_ref
-        bias_spda_gold = (
+        bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
+        implicit_bias_sdpa_ref = bias_sdpa_ref
+        bias_sdpa_gold = (
             bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
         )
-        implicit_bias_spda_gold = bias_spda_gold
+        implicit_bias_sdpa_gold = bias_sdpa_gold
 
         self._test_learnable_bias_inner(
             B,
@@ -2157,10 +2190,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             D,
             rel_pos_2d,
             bias_flex,
-            implicit_bias_spda_ref,
-            bias_spda_ref,
-            implicit_bias_spda_gold,
-            bias_spda_gold,
+            implicit_bias_sdpa_ref,
+            bias_sdpa_ref,
+            implicit_bias_sdpa_gold,
+            bias_sdpa_gold,
         )
 
         # 2-dimensional bias + transposed:
@@ -2172,12 +2205,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def rel_pos_2d_transposed(score, b, h, q_idx, kv_idx):
             return score + bias_flex[kv_idx, q_idx]
 
-        bias_spda_ref = bias.detach().clone().requires_grad_(True)
-        implicit_bias_spda_ref = bias_spda_ref.transpose(-1, -2)
-        bias_spda_gold = (
+        bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
+        implicit_bias_sdpa_ref = bias_sdpa_ref.transpose(-1, -2)
+        bias_sdpa_gold = (
             bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
         )
-        implicit_bias_spda_gold = bias_spda_gold.transpose(-1, -2)
+        implicit_bias_sdpa_gold = bias_sdpa_gold.transpose(-1, -2)
 
         self._test_learnable_bias_inner(
             B,
@@ -2186,10 +2219,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             D,
             rel_pos_2d_transposed,
             bias_flex,
-            implicit_bias_spda_ref,
-            bias_spda_ref,
-            implicit_bias_spda_gold,
-            bias_spda_gold,
+            implicit_bias_sdpa_ref,
+            bias_sdpa_ref,
+            implicit_bias_sdpa_gold,
+            bias_sdpa_gold,
         )
 
         # 3-dimensional bias + transposed
@@ -2203,12 +2236,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def rel_pos_3d_transposed(score, b, h, q_idx, kv_idx):
             return score + bias_flex[h, kv_idx, q_idx]
 
-        bias_spda_ref = bias.detach().clone().requires_grad_(True)
-        implicit_bias_spda_ref = bias_spda_ref.transpose(-1, -2)
-        bias_spda_gold = (
+        bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
+        implicit_bias_sdpa_ref = bias_sdpa_ref.transpose(-1, -2)
+        bias_sdpa_gold = (
             bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
         )
-        implicit_bias_spda_gold = bias_spda_gold.transpose(-1, -2)
+        implicit_bias_sdpa_gold = bias_sdpa_gold.transpose(-1, -2)
 
         self._test_learnable_bias_inner(
             B,
@@ -2217,10 +2250,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             D,
             rel_pos_3d_transposed,
             bias_flex,
-            implicit_bias_spda_ref,
-            bias_spda_ref,
-            implicit_bias_spda_gold,
-            bias_spda_gold,
+            implicit_bias_sdpa_ref,
+            bias_sdpa_ref,
+            implicit_bias_sdpa_gold,
+            bias_sdpa_gold,
         )
 
     def _test_learnable_bias_inner(
@@ -2231,10 +2264,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         D,
         score_mod,
         bias_flex,
-        implicit_bias_spda_ref,
-        bias_spda_ref,
-        implicit_bias_spda_gold,
-        bias_spda_gold,
+        implicit_bias_sdpa_ref,
+        bias_sdpa_ref,
+        implicit_bias_sdpa_gold,
+        bias_sdpa_gold,
     ):
         make_tensor = functools.partial(
             torch.ones,
@@ -2250,11 +2283,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         q_flex, k_flex, v_flex = query_key_value_clones(q_ref, k_ref, v_ref)
 
         out_ref = torch.nn.functional.scaled_dot_product_attention(
-            q_ref, k_ref, v_ref, attn_mask=implicit_bias_spda_ref
+            q_ref, k_ref, v_ref, attn_mask=implicit_bias_sdpa_ref
         )
         out_ref.sum().backward()
         out_gold = torch.nn.functional.scaled_dot_product_attention(
-            q_gold, k_gold, v_gold, attn_mask=implicit_bias_spda_gold
+            q_gold, k_gold, v_gold, attn_mask=implicit_bias_sdpa_gold
         )
         out_gold.sum().backward()
         out_flex = flex_attention(q_flex, k_flex, v_flex, score_mod=score_mod)
@@ -2266,7 +2299,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             (q_ref.grad, q_flex.grad, q_gold.grad),
             (k_ref.grad, k_flex.grad, k_gold.grad),
             (v_ref.grad, v_flex.grad, v_gold.grad),
-            (bias_spda_ref.grad, bias_flex.grad, bias_spda_gold.grad),
+            (bias_sdpa_ref.grad, bias_flex.grad, bias_sdpa_gold.grad),
         ]:
             ref_error = rmse(ref, gold)
             flex_error = rmse(flex, gold)
