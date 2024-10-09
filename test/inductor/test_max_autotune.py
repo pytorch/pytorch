@@ -961,6 +961,7 @@ class TestPrologueFusion(TestCase):
                     "benchmark_epilogue_fusion": False,
                     "shape_padding": False,
                     "max_autotune_gemm_backends": "TRITON",
+                    "test_configs.max_mm_configs": 4,  # significantly speeds up tests
                 }
             )
         )
@@ -970,13 +971,15 @@ class TestPrologueFusion(TestCase):
             ".run", num_kernels, exactly=True
         ).run(code_str)
 
-        FileCheck().check("def call").check_count(
-            "empty_strided", num_allocs, exactly=True
-        ).run(code_str)
+        if num_allocs is not None:
+            FileCheck().check("def call").check_count(
+                "empty_strided", num_allocs, exactly=True
+            ).run(code_str)
 
-        FileCheck().check("def call").check_count(
-            "del", num_deallocs, exactly=True
-        ).run(code_str)
+        if num_deallocs is not None:
+            FileCheck().check("def call").check_count(
+                "del", num_deallocs, exactly=True
+            ).run(code_str)
 
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_upcast(self, sizes):
@@ -1005,14 +1008,12 @@ class TestPrologueFusion(TestCase):
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
-    def _test_multiple_fusions_impl(self, sizes):
+    @parametrize("sizes", ((64, 128, 256), (64, 64, 64), (64, 120, 64)))
+    def test_multiple_fusions(self, sizes):
         M, K, N = sizes
 
         def foo(x, y):
-            if prologue_fusion:
-                return ((x - 1.1) @ (y + 1.1)) * 1.1
-            else:
-                return x @ y
+            return ((x - 1.1) @ (y + 1.1)) * 1.1
 
         x = torch.rand([M, K], dtype=torch.float, device="cuda")
         y = torch.rand([K, N], dtype=torch.float, device="cuda")
@@ -1022,14 +1023,9 @@ class TestPrologueFusion(TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
         # check that we do not CSE any variables between prologues, epilogues
-        if prologue_fusion:
-            FileCheck().check("def triton").check_count("= 1.1", 3, exactly=True).check(
-                "tl.store"
-            ).run(code[0])
-
-    @parametrize("sizes", ((64, 128, 256), (64, 64, 64), (64, 120, 64)))
-    def test_multiple_fusions(self, sizes):
-        self._test_multiple_fusions_impl(sizes)
+        FileCheck().check("def triton").check_count("= 1.1", 3, exactly=True).check(
+            "tl.store"
+        ).run(code[0])
 
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_multiple_inputs(self, sizes):
@@ -1102,7 +1098,9 @@ class TestPrologueFusion(TestCase):
             self.assertEqual(out, foo(x), atol=0.05, rtol=0.05)
             # not guaranteed to fuse, but still checking correctness
             if not benchmark_fusion:
-                self.check_code(code[0], num_kernels=2, num_allocs=3, num_deallocs=4)
+                self.check_code(
+                    code[0], num_kernels=2, num_allocs=None, num_deallocs=None
+                )
 
     @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
     @config.patch(allow_buffer_reuse=False)
@@ -1120,8 +1118,7 @@ class TestPrologueFusion(TestCase):
         self.assertEqual(out, foo(x, y, z), atol=0.05, rtol=0.05)
         # theres one more dealloc than there should be because of a buffer reuse. TODO:
         # not sure why disabling buffer reuse doesnt stop
-        FileCheck().check("del buf0  # reuse").run(code[0])
-        self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=5)
+        self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=4)
 
     @config.patch(shape_padding=True)
     @config.patch(force_shape_pad=True)

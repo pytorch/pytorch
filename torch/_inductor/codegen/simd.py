@@ -1529,11 +1529,15 @@ class SIMDScheduling(BaseScheduling):
         for prologue in prologue_nodes:
             names = prologue.get_buffer_names()
             prologue_group.append(prologue)
-            if prologue.get_buffer_names() & template_reads:
+            # this must be the end of a prologue group
+            if names & template_reads:
                 assert len(names) == 1
                 buf_name_to_prologue_group[next(iter(names))] = prologue_group
                 kernel.prologue_fused_inputs.add(next(iter(names)))
                 prologue_group = []
+
+        # all prologue groups should have finalized with use in template
+        assert len(prologue_group) == 0
 
         with kernel:
             if not only_gen_src_code:

@@ -1271,7 +1271,9 @@ external_matmul: List[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]
 
 
 class test_configs:
-    force_extern_kernel_in_multi_template = False
+    force_extern_kernel_in_multi_template: bool = False
+
+    max_mm_configs: Optional[int] = None
 
 
 if TYPE_CHECKING:

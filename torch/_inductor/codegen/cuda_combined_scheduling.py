@@ -63,14 +63,14 @@ class CUDACombinedScheduling(BaseScheduling):
         prologue_nodes: Sequence[BaseSchedulerNode],
     ):
         if self._cuda_cpp_scheduling.is_cuda_cpp_template(template_node):
-            assert epilogue_nodes is None or len(epilogue_nodes) == 0
-            assert prologue_nodes is None or len(epilogue_nodes) == 0
+            assert not epilogue_nodes
+            assert not prologue_nodes
             return self._cuda_cpp_scheduling.codegen_template(
                 template_node, epilogue_nodes
             )
         elif self._rocm_cpp_scheduling.is_rocm_cpp_template(template_node):
-            assert epilogue_nodes is None or len(epilogue_nodes) == 0
-            assert prologue_nodes is None or len(epilogue_nodes) == 0
+            assert not epilogue_nodes
+            assert not prologue_nodes
             return self._rocm_cpp_scheduling.codegen_template(
                 template_node, epilogue_nodes
             )
