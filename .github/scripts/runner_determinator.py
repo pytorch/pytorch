@@ -363,7 +363,7 @@ def get_runner_prefix(
     rollout_state: str,
     workflow_requestors: Iterable[str],
     branch: str,
-    check_experiments: Set[str] = Set(),
+    check_experiments: Set[str] = set(),
     is_canary: bool = False,
 ) -> str:
     settings = parse_settings(rollout_state)
