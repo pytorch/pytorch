@@ -136,7 +136,6 @@ if(HIP_FOUND)
   message("TORCH_HIP_VERSION: ${TORCH_HIP_VERSION}")
 
   message("\n***** Library versions from cmake find_package *****\n")
-
   # Find ROCM components using Config mode
   # These components will be searced for recursively in ${ROCM_PATH}
   find_package_and_print_version(hip REQUIRED)
