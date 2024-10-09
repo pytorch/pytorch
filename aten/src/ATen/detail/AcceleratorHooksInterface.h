@@ -46,6 +46,18 @@ struct TORCH_API AcceleratorHooksInterface {
     return -1;
   }
 
+  virtual c10::Stream getCurrentStream(DeviceIndex device) const {
+    TORCH_CHECK(false, "Backend doesn't support getCurrentStream()");
+  }
+
+  virtual c10::Stream getDefaultStream(DeviceIndex device) const {
+    TORCH_CHECK(false, "Backend doesn't support getDefaultStream()");
+  }
+
+  virtual void setCurrentStream(const c10::Stream& stream) const {
+    TORCH_CHECK(false, "Backend doesn't support setCurrentStream()");
+  }
+
   virtual bool isPinnedPtr(const void* data) const {
     return false;
   }
