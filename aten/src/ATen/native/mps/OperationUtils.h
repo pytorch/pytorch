@@ -57,20 +57,20 @@ void runMPSGraph(MPSStream* mpsStream,
     NSDictionary* results);
 
 MPSDataType getMPSDataType(ScalarType scalar_type);
-static inline MPSDataType getMPSDataType(const Tensor& t) {
+static inline MPSDataType getMPSDataType(const TensorBase& t) {
   return getMPSDataType(t.scalar_type());
 }
 MPSDataType getMPSScalarType(ScalarType scalar_type);
-static inline MPSDataType getMPSScalarType(const Tensor& t) {
+static inline MPSDataType getMPSScalarType(const TensorBase& t) {
   return getMPSScalarType(t.scalar_type());
 }
 MPSScalar   getMPSScalar(const Scalar& scalar, ScalarType type);
 std::string getMPSTypeString(ScalarType scalar_type, bool short_name = false);
-static inline std::string getMPSTypeString(const Tensor& t, bool short_name = false) {
+static inline std::string getMPSTypeString(const TensorBase& t, bool short_name = false) {
   return getMPSTypeString(t.scalar_type(), short_name);
 }
 std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type);
-static inline std::string scalarToMetalTypeString(const Tensor& t) {
+static inline std::string scalarToMetalTypeString(const TensorBase& t) {
   return scalarToMetalTypeString(t.scalar_type());
 }
 NSArray<NSNumber*>* getTensorAxes(const Tensor& t);
@@ -93,7 +93,7 @@ Tensor getTensorView(const Tensor& t, MPSShape* shape);
 MPSShape* getMPSShape(const Tensor& t, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
 MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
 
-static inline id<MTLBuffer> getMTLBufferStorage(const at::Tensor& tensor) {
+static inline id<MTLBuffer> getMTLBufferStorage(const TensorBase& tensor) {
   return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
 }
 
@@ -370,7 +370,7 @@ private:
 
 template<typename encoder_t,
          typename = std::enable_if_t<std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t> || std::is_same_v<id<MTLArgumentEncoder>, encoder_t>>>
-static inline void mtl_setBuffer(encoder_t encoder, const Tensor& t, unsigned idx) {
+static inline void mtl_setBuffer(encoder_t encoder, const TensorBase& t, unsigned idx) {
   [encoder setBuffer:getMTLBufferStorage(t)
               offset:t.storage_offset() * t.element_size()
              atIndex:idx];
