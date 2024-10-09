@@ -55,6 +55,7 @@ struct TORCH_API ExperimentalConfig {
       bool verbose = false,
       std::vector<std::string> performance_events = {},
       bool enable_cuda_sync_events = false,
+      bool adjust_profiler_step = false,
       bool adjust_timestamps = false);
   explicit operator bool() const;
 
@@ -72,6 +73,13 @@ struct TORCH_API ExperimentalConfig {
    * This feature is new and currently disabled by default.
    */
   bool enable_cuda_sync_events;
+  /*
+   * Controls whether or not timestamp adjustment for ProfilerStep and parent
+   * Python events occurs after profiling. This occurs at an O(n) cost and
+   * affects only the start of profiler step events.
+   */
+  bool adjust_profiler_step;
+
   /*
    * Controls whether or not timestamp adjustment occurs after profiling.
    * The purpose of this is to adjust Vulkan event timelines to align with those
