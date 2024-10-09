@@ -150,6 +150,7 @@ def _tensor_rebuild_functions():
         # Reasoning is that we don't have control over the numpy functions, but
         # this utility is provided by pytorch
         torch._utils._rebuild_device_tensor_from_numpy,
+        torch.nested._rebuild_njt,
     }
 
 

@@ -45,11 +45,6 @@ def _load_val_from_tensor(t: torch.Tensor):
     return t.shape[0]
 
 
-# serialization function must be defined at top level
-def _rebuild_njt(constructor_kwargs):
-    return NestedTensor(**constructor_kwargs)
-
-
 class NestedTensor(torch.Tensor):
     _values: torch.Tensor  # type: ignore[assignment]
     _offsets: torch.Tensor
@@ -237,7 +232,7 @@ class NestedTensor(torch.Tensor):
         del state["_size"]
         del state["_strides"]
 
-        func = _rebuild_njt
+        func = torch.nested._rebuild_njt
         constructor_kwargs = {
             "values": self._values,
             "offsets": self._offsets,

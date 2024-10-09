@@ -8,6 +8,8 @@ from torch._C import _add_docstr, _nested  # type: ignore[attr-defined]
 
 from torch.types import _device as Device, _dtype as DType
 
+from torch.nested._internal.nested_tensor import NestedTensor as _NestedTensor
+
 __all__ = [
     "to_padded_tensor",
     "as_nested_tensor",
@@ -16,6 +18,10 @@ __all__ = [
     "narrow",
     "masked_select",
 ]
+
+# serialization function must be defined at top level
+def _rebuild_njt(constructor_kwargs):
+    return _NestedTensor(**constructor_kwargs)
 
 # Nested Tensor constructor functions
 
