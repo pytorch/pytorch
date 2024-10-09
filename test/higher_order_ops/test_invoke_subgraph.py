@@ -25,7 +25,7 @@ class TestInvokeSubgraph(TestCase):
             return (torch.mul(x, y),)
 
         def fn(x, y):
-            return invoke_subgraph(gn, "start", (x, y))[0]
+            return invoke_subgraph(gn, "subgraph", (x, y))[0]
 
         x = torch.randn(8, requires_grad=True)
         y = torch.randn(8, requires_grad=True)
@@ -48,7 +48,7 @@ class TestInvokeSubgraph(TestCase):
             return (torch.mul(x, y),)
 
         def fn(x, y):
-            return invoke_subgraph(gn, "start", (x, y))[0]
+            return invoke_subgraph(gn, "subgraph", (x, y))[0]
 
         x = torch.randn(8, requires_grad=True)
         y = torch.randn(8, requires_grad=True)
@@ -77,9 +77,9 @@ class TestInvokeSubgraph(TestCase):
             return (torch.sin(x),)
 
         def fn(x):
-            a = invoke_subgraph(cos, "start", (x,))[0]
-            b = invoke_subgraph(sin, "start", (a,))[0]
-            return invoke_subgraph(cos, "start", (b,))[0]
+            a = invoke_subgraph(cos, "subgraph1", (x,))[0]
+            b = invoke_subgraph(sin, "subgraph2", (a,))[0]
+            return invoke_subgraph(cos, "subgraph3", (b,))[0]
 
         x = torch.randn(8, requires_grad=True)
         ref = fn(x)
@@ -94,7 +94,7 @@ class TestInvokeSubgraph(TestCase):
             return (torch.mul(x, y),)
 
         def fn(x, y):
-            return invoke_subgraph(gn, "start", (x, y))[0]
+            return invoke_subgraph(gn, "subgraph", (x, y))[0]
 
         x = torch.randn(8, requires_grad=False)
         y = torch.randn(8, requires_grad=False)
@@ -110,7 +110,7 @@ class TestInvokeSubgraph(TestCase):
             return (x, torch.mul(x, y))
 
         def fn(x, y):
-            outs = invoke_subgraph(gn, "start", (x, y))
+            outs = invoke_subgraph(gn, "subgraph", (x, y))
             return outs[0] * outs[1]
 
         x = torch.randn(8, requires_grad=False)
@@ -121,6 +121,41 @@ class TestInvokeSubgraph(TestCase):
         ):
             aot_fn = aot_function(fn, nop)
             res = aot_fn(x, y)
+
+    def test_differing_strides_for_grad_outs(self):
+        class CustomOp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return torch.sin(x)
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                a = grad_out.view(12, 5)
+                return torch.cos(torch.reshape(a, (3, 4, 5,)))
+
+        def gn(x):
+            return (CustomOp.apply(x),)
+
+        def fn(x):
+            a = invoke_subgraph(gn, "subgraph1", (x,))[0]
+            # Force stride changes so that backward view causes a failure if
+            # contiguous not called.
+            b = torch.permute(a, (0, 2, 1))
+            return b
+
+        x = torch.randn(3, 4, 5, requires_grad=True)
+        ref = torch.permute(gn(x)[0], (0, 2, 1))
+
+        x_clone = x.clone().detach().requires_grad_(True)
+        aot_fn = aot_function(fn, nop)
+        res = aot_fn(x_clone)
+
+        # Run backward
+        ref.sum().backward()
+        res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
 
 
 if __name__ == "__main__":

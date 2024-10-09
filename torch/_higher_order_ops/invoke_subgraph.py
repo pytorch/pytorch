@@ -56,13 +56,13 @@ def trace_joint_graph(fn, fw_inputs, fw_outputs):
 
     primals = list(fw_inputs)
 
-    # TODO(anijain2305) - This makes an assumption that the strides for
-    # grad_inputs are same as strides for forward outs.
-    # TODO(anijain2305) - Add a test case where this assumption is violated and
-    # add contiguous calls.
+    # This assumes that the tangent strides match fw_outputs strides. Check the
+    # InvokeSubgraphAutogradOp backward op.
     tangents = [_from_fun(out) for out in fw_outputs]
 
     joint_fn = create_joint(prepare_fw_with_masks(fn), aot_config=dummy_aot_config)
+
+    # TODO(anijain2305) - cond uses clone_outputs_aliasing_inputs. Investigate why we need it?
 
     # Signature of joint_fn is (primals, tangents) -> (fw_outs, grads)
     return _maybe_reenter_make_fx(joint_fn)(primals, tangents)
@@ -125,8 +125,12 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         bw_graph = ctx._bw_graph
         identifier = ctx._identifier
         primals = ctx.saved_tensors
+
+        # While tracing we made the assumption that tangents are contiguous. So,
+        # force the grad_outs to be contiguous.
+        contiguous_grad_outs = [o.contiguous() for o in grad_outs]
         _, grads = invoke_subgraph(
-            bw_graph, f"___backward_{identifier}", (primals, grad_outs)
+            bw_graph, f"___backward_{identifier}", (primals, contiguous_grad_outs)
         )
         return None, None, None, *grads
 
