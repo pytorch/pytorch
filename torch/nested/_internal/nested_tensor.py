@@ -10,6 +10,7 @@ from torch.utils.weak import WeakTensorKeyDictionary
 
 _tensor_id_counter = 0
 _tensor_symint_registry = WeakTensorKeyDictionary()
+_rebuild_njt = torch.nested._rebuild_njt
 
 
 def get_tensor_symint(tensor, *, coeff=1):
@@ -232,7 +233,7 @@ class NestedTensor(torch.Tensor):
         del state["_size"]
         del state["_strides"]
 
-        func = torch.nested._rebuild_njt
+        func = _rebuild_njt
         constructor_kwargs = {
             "values": self._values,
             "offsets": self._offsets,
