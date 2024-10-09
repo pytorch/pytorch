@@ -99,7 +99,7 @@ struct OptionalStreamGuard {
   /// Set the current device to the device associated with the passed stream,
   /// and set the current stream on that device to the passed stream,
   /// if the passed stream is not nullopt.
-  explicit OptionalStreamGuard(optional<Stream> stream_opt)
+  explicit OptionalStreamGuard(std::optional<Stream> stream_opt)
       : guard_(stream_opt) {}
 
   /// Copy is disallowed

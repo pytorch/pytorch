@@ -126,7 +126,7 @@ class Unboxing:
         )
         return (
             f"""
-    {ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.toOptional<{base_type.cpp_type(strip_ref=True)}>();
+    auto {out_name} = {arg_name}.toOptional<{base_type.cpp_type(strip_ref=True)}>();
             """.split(
                 "\n"
             ),
@@ -146,7 +146,7 @@ class Unboxing:
         if isinstance(t.elem, BaseType) and t.elem.name == BaseTy.Tensor:
             code.extend(
                 f"""
-    {ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.toTensorList();
+    auto {out_name} = {arg_name}.toTensorList();
                 """.split(
                     "\n"
                 )
@@ -156,7 +156,7 @@ class Unboxing:
         ):
             code.extend(
                 f"""
-    {ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.toIntList();
+    auto {out_name} = {arg_name}.toIntList();
                 """.split(
                     "\n"
                 )
@@ -164,7 +164,7 @@ class Unboxing:
         elif isinstance(t.elem, BaseType) and t.elem.name == BaseTy.float:
             code.extend(
                 f"""
-    {ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.toDoubleList();
+    auto {out_name} = {arg_name}.toDoubleList();
                 """.split(
                     "\n"
                 )
@@ -173,7 +173,16 @@ class Unboxing:
             # handle list type with size, e.g., bool[4]
             code.extend(
                 f"""
-    {ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.toBoolList();
+#ifdef USE_ATEN_LIB
+std::array<bool, {t.size}> {out_name};
+auto {in_name} = {arg_name}.toBoolList();
+size_t _i = 0;
+for (auto {elem_name}: {in_name}) {{
+    {out_name}[_i++] = {elem_name};
+}}
+#else
+auto {out_name} = {arg_name}.toBoolList();
+#endif
                 """.split(
                     "\n"
                 )
@@ -194,7 +203,7 @@ for (auto {elem_name}: {in_name}) {{
     {out_name}.push_back({elem_name});
 }}
 #else
-torch::executor::ArrayRef<torch::executor::optional<torch::executor::Tensor>> {out_name} = {arg_name}.toListOptionalTensor();
+auto {out_name} = {arg_name}.toListOptionalTensor();
 #endif
                 """.split(
                     "\n"
