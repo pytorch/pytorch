@@ -325,13 +325,7 @@ class TestTEFuser(JitTestCase):
 
             x = torch.randn(4, 4, dtype=torch.float, device=device)
             y = torch.randn(4, 4, dtype=torch.float, device=device)
-            traced_f = torch.jit.trace(
-                f,
-                (
-                    x,
-                    y,
-                ),
-            )
+            traced_f = torch.jit.trace(f, (x, y))
             self.assertEqual(traced_f(x.t().contiguous(), y), traced_f(x.t(), y))
 
     def test_broadcast(self):
@@ -499,9 +493,7 @@ class TestTEFuser(JitTestCase):
                 z0, z1 = z.chunk(2)
                 return z0 * z1
 
-            inputs = [
-                torch.tensor([1.1, 1.2], device=device, dtype=torch.float),
-            ]
+            inputs = [torch.tensor([1.1, 1.2], device=device, dtype=torch.float)]
             for func in [func1, func2]:
                 self.checkScript(func, inputs)
                 self.assertLastGraphAllFused()
@@ -1088,7 +1080,7 @@ class TestTEFuser(JitTestCase):
         class M(torch.jit.ScriptModule):
             __constants__ = ["d"]
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.d = torch.device("cuda")
 
@@ -2200,13 +2192,7 @@ class TestTEFuser(JitTestCase):
             dtypes.remove(torch.float16)
             dtypes.remove(torch.bfloat16)
             for dtype1, dtype2 in product(dtypes, dtypes):
-                x = torch.randint(
-                    2,
-                    (
-                        1,
-                        13,
-                    ),
-                ).to(dtype1)
+                x = torch.randint(2, (1, 13)).to(dtype1)
                 zero = torch.tensor([[0]]).to(dtype2)
                 one = torch.tensor([[1]]).to(dtype2)
                 script = torch.jit.trace(eager, (x, zero))

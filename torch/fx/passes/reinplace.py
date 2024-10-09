@@ -114,7 +114,7 @@ class _FunctionalizationMetadataProp(torch.fx.Interpreter):
         self.node_counter = -1
 
         with FakeTensorMode() as mode:
-            fake_args = [mode.from_tensor(a) for a in args]
+            fake_args = [mode.from_tensor(a) if isinstance(a, torch.Tensor) else a for a in args]
             return super().run(*fake_args)
 
 def _schemas_match(functional_schema, inplace_schema):
@@ -473,8 +473,7 @@ def reinplace(gm, *sample_args):
     input_storages = {
         StorageWeakRef(
             node.meta['fake_result']._typed_storage()
-        ) for node in gm.graph.nodes if node.op == 'placeholder'}
-
+        ) for node in gm.graph.nodes if (node.op == 'placeholder' and isinstance(node.meta['fake_result'], torch.Tensor))}
 
     # We also need to know for a given node, what are all of its aliasing nodes.
     storage_to_nodes: Dict[StorageWeakRef, Set[Node]] = defaultdict(set)

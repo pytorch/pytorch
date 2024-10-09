@@ -51,7 +51,6 @@ class PassBase(abc.ABC):
         Args:
             graph_module: The graph module we will run a pass on
         """
-        pass
 
     def requires(self, graph_module: GraphModule) -> None:  # noqa: B027
         """
@@ -62,7 +61,6 @@ class PassBase(abc.ABC):
         Args:
             graph_module: The graph module we will run checks on
         """
-        pass
 
     def ensures(self, graph_module: GraphModule) -> None:  # noqa: B027
         """
@@ -73,4 +71,3 @@ class PassBase(abc.ABC):
         Args:
             graph_module: The graph module we will run checks on
         """
-        pass

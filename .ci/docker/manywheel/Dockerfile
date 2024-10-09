@@ -10,6 +10,7 @@ ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US.UTF-8
 
 ARG DEVTOOLSET_VERSION=9
+
 # Note: This is required patch since CentOS have reached EOL
 # otherwise any yum install setp will fail
 RUN sed -i s/mirror.centos.org/vault.centos.org/g /etc/yum.repos.d/*.repo
@@ -29,9 +30,7 @@ RUN yum install -y devtoolset-${DEVTOOLSET_VERSION}-gcc devtoolset-${DEVTOOLSET_
 ENV PATH=/opt/rh/devtoolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/rh/devtoolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/devtoolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
 
-RUN wget http://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm && \
-    rpm -ivh epel-release-latest-7.noarch.rpm && \
-    rm -f epel-release-latest-7.noarch.rpm
+RUN yum --enablerepo=extras install -y epel-release
 
 # cmake-3.18.4 from pip
 RUN yum install -y python3-pip && \
@@ -117,7 +116,8 @@ RUN yum install -y \
         yasm
 RUN yum install -y \
     https://repo.ius.io/ius-release-el7.rpm \
-    https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+    https://ossci-linux.s3.amazonaws.com/epel-release-7-14.noarch.rpm
+
 RUN yum swap -y git git236-core
 # git236+ would refuse to run git commands in repos owned by other users
 # Which causes version check to fail, as pytorch repo is bind-mounted into the image
@@ -197,7 +197,7 @@ RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh
 
 # Install AOTriton
 COPY ./common/common_utils.sh common_utils.sh
-COPY ./common/aotriton_version.txt aotriton_version.txt
+COPY ./aotriton_version.txt aotriton_version.txt
 COPY ./common/install_aotriton.sh install_aotriton.sh
 RUN bash ./install_aotriton.sh /opt/rocm && rm install_aotriton.sh aotriton_version.txt
 ENV AOTRITON_INSTALLED_PREFIX /opt/rocm/aotriton

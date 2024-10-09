@@ -149,8 +149,15 @@ class EtcdRendezvousHandler(RendezvousHandler):
     +--------------------------------------------+--------------------------+
     """
 
-    def __init__(self, rdzv_impl):
+    def __init__(self, rdzv_impl: "EtcdRendezvous", local_addr: Optional[str]):
+        """
+        Args:
+            rdzv_impl: the implementation of the rendezvous
+            local_addr: the local address of the current node
+        """
+
         self._rdzv_impl = rdzv_impl
+        self._local_addr = local_addr
 
     def __del__(self):
         # TODO: look into using weakref here instead.
@@ -165,7 +172,9 @@ class EtcdRendezvousHandler(RendezvousHandler):
         logger.info("Creating EtcdStore as the c10d::Store implementation")
         store = self._rdzv_impl.setup_kv_store(rdzv_version)
 
-        bootstrap_store_info = RendezvousStoreInfo.build(rank, store)
+        bootstrap_store_info = RendezvousStoreInfo.build(
+            rank, store, local_addr=self._local_addr
+        )
         return RendezvousInfo(store, rank, world_size, bootstrap_store_info)
 
     def is_closed(self):
@@ -1062,4 +1071,7 @@ def create_rdzv_handler(params: RendezvousParameters) -> RendezvousHandler:
             "last_call_timeout", _DEFAULT_LAST_CALL_TIMEOUT
         ),
     )
-    return EtcdRendezvousHandler(rdzv_impl=rdzv)
+    return EtcdRendezvousHandler(
+        rdzv_impl=rdzv,
+        local_addr=params.local_addr,
+    )
