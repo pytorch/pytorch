@@ -301,7 +301,7 @@ def get_error_inputs_for_all_optims(device, dtype):
                     desc="all optimizer param groups should be with/without names.",
                 ),
                 error_type=ValueError,
-                error_regex="all optimizer param groups should be with/without names."
+                error_regex="all optimizer param groups should be with/without names. "
                             "cannot add param group with names to the optimizer",
             ),
         ]
