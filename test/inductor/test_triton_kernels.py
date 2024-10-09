@@ -3018,8 +3018,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             return z
 
         M, K, N = 128, 64, 32
-        x = torch.randn(M, K, device="cuda")
-        w = torch.randn(K, N, device="cuda")
+        x = torch.randn(M, K, device=GPU_TYPE)
+        w = torch.randn(K, N, device=GPU_TYPE)
 
         torch._dynamo.decorators.mark_unbacked(x, 0)
         torch._logging.set_logs(output_code=True)

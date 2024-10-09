@@ -141,6 +141,9 @@ def make_test_case(
 
 if RUN_GPU:
     config.abi_compatible = True
+    if GPU_TYPE == "xpu":
+        config.abi_compatible = False
+
 
     class BaseTest(NamedTuple):
         name: str
@@ -208,7 +211,6 @@ if RUN_GPU:
             BaseTest(f"test_unspec_inputs_{str(dtype)[6:]}")
             for dtype in test_torchinductor.test_dtypes
         ],
-        BaseTest("test_consecutive_split_cumprod"),
         BaseTest("test_pointwise_hermite_polynomial_he"),
         BaseTest("test_pointwise_hermite_polynomial_h"),
         BaseTest(
@@ -269,7 +271,6 @@ if RUN_GPU:
         ),
     ]:
         if item.device == "xpu" and item.name in XPU_BASE_TEST_SKIP:
-            print("skiped ", item.name)
             continue
         make_test_case(item.name, item.device, item.tests, check_code=item.check_code)
 

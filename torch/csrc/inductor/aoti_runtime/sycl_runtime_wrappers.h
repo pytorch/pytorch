@@ -1,7 +1,6 @@
 // NOLINT
-#ifdef USE_XPU
 #pragma once
-
+#ifdef USE_XPU
 #include <level_zero/ze_api.h>
 #include <sycl/sycl.hpp>
 #include <fstream>
@@ -67,12 +66,12 @@ ze_kernel_handle_t create_function(
 }
 
 static ze_module_handle_t loadModule(
-    sycl::queue& queue,
+    sycl::queue* queue_ptr,
     std::string& spv_path) {
   auto l0_device = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(
-      queue.get_device());
+      queue_ptr->get_device());
   auto l0_context = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(
-      queue.get_context());
+      queue_ptr->get_context());
   std::ifstream IFS(spv_path.c_str(), std::ios::binary);
   std::ostringstream OSS;
   OSS << IFS.rdbuf();
@@ -86,14 +85,14 @@ static ze_module_handle_t loadModule(
 }
 
 static std::unique_ptr<sycl::kernel> getKernel(
-    sycl::queue& queue,
+    sycl::queue* queue_ptr,
     ze_module_handle_t l0_module,
     const char* kernel_name) {
   assert(l0_module);
   assert(kernel_name);
   auto l0_kernel =
       create_function(l0_module, ZE_KERNEL_FLAG_FORCE_RESIDENCY, kernel_name);
-  auto sycl_device = queue.get_device();
+  auto sycl_device = queue_ptr->get_device();
   auto ctx = sycl_device.get_platform().ext_oneapi_get_default_context();
 
   auto mod = sycl::make_kernel_bundle<
@@ -108,18 +107,18 @@ static std::unique_ptr<sycl::kernel> getKernel(
 }
 
 static std::unique_ptr<sycl::kernel> loadKernel(
-    sycl::queue& queue,
     std::string filePath,
     const std::string& funcName,
     uint32_t sharedMemBytes,
+    sycl::queue* queue_ptr,
     const std::optional<std::string>& binDir = std::nullopt) {
   if (binDir) {
     std::filesystem::path p1{*binDir};
     std::filesystem::path p2{filePath};
     filePath = (p1 / p2.filename()).string();
   }
-  auto mod = loadModule(queue, filePath);
-  return getKernel(queue, mod, funcName.c_str());
+  auto mod = loadModule(queue_ptr, filePath);
+  return getKernel(queue_ptr, mod, funcName.c_str());
 }
 
 static void launchKernel(
@@ -130,7 +129,7 @@ static void launchKernel(
     int num_warps,
     int shared_memory,
     std::vector<void*>& params,
-    sycl::queue& stream) {
+    sycl::queue* queue_ptr) {
   std::string kernel_name =
       kernel_ptr->get_info<sycl::info::kernel::function_name>();
   uint32_t num_params = params.size();
@@ -169,6 +168,6 @@ static void launchKernel(
       cgh.parallel_for(parallel_work_size, *kernel_ptr);
     }
   };
-  auto event = stream.submit(cgf);
+  auto event = queue_ptr->submit(cgf);
 }
 #endif
