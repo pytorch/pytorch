@@ -72,6 +72,7 @@ class MiniArrayRef final {
 
   /// Construct an MiniArrayRef from a C array.
   template <size_t N>
+  // NOLINTNEXTLINE(*c-array*)
   /* implicit */ constexpr MiniArrayRef(T (&Arr)[N]) : Data(Arr), Length(N) {}
 
   // /// Construct an MiniArrayRef from an empty C array.

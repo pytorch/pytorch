@@ -31,6 +31,7 @@ class DiagBenchmark(op_bench.TorchBenchmarkBase):
             "out": out,
             "out_tensor": torch.tensor(
                 (),
+                device=device,
             ),
         }
         self.set_module_name("diag")

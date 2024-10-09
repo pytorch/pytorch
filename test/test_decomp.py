@@ -10,7 +10,7 @@ from functools import partial
 import torch._inductor.decomposition
 import torch.autograd
 from torch import Tensor
-from torch._decomp import core_aten_decompositions, decomposition_table
+from torch._decomp import _is_cia_op, core_aten_decompositions, decomposition_table
 from torch._dispatch.python import enable_python_dispatcher
 from torch._ops import DispatchKey
 from torch.testing import make_tensor
@@ -31,7 +31,6 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
-    IS_MACOS,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -63,7 +62,7 @@ decomposition_names = {
 core_decomposition_names = {
     overload_to_aten_name(k)
     for k in core_aten_decompositions()
-    if isinstance(k, torch._ops.OpOverload)
+    if isinstance(k, torch._ops.OpOverload) and not _is_cia_op(k)
 }
 _decomp_test_ops = [
     op
@@ -224,6 +223,7 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.float16, torch.ops.aten.mv.default): 1e-5,
         (torch.bfloat16, torch.ops.aten.mv.default): 1e-5,
         (torch.float16, torch.ops.aten.log_sigmoid_backward.default): 2e-5,
+        (torch.float16, torch.ops.aten._softmax_backward_data.default): 3e-7,
     }
     if ref.is_floating_point():
         orig_diff = (orig - ref).abs().max()
@@ -622,11 +622,7 @@ class TestDecomp(TestCase):
         # rrelu_with_noise behavior depends on a) whether elements in the input
         # are <= 0, and b) whether we're in training mode. Cover all cases:
         dtype = torch.float64
-        x = torch.tensor(
-            [-3.0, -2.0, -1.0, 0.0, 1.0, 2.0],
-            dtype=dtype,
-            device=device,
-        )
+        x = torch.tensor([-3.0, -2.0, -1.0, 0.0, 1.0, 2.0], dtype=dtype, device=device)
         lower = 1.0
         upper = 4.0
         training = False
@@ -1175,7 +1171,7 @@ class DecompOneOffTests(TestCase):
         [
             xfail(
                 "nn.functional.scaled_dot_product_attention",
-                dtypes=[torch.half] + ([torch.bfloat16] if IS_MACOS else []),
+                dtypes=[torch.half],
             ),
         ],
     )
@@ -1183,24 +1179,6 @@ class DecompOneOffTests(TestCase):
     def test_sdpa(self, device, dtype, op):
         # SDPA doesn't support float16, this is aligned with aten/src/ATen/native/transformers/attention.cpp. If we
         # add support for float16 over there we should update this test as well.
-
-        class ScaledDotProductAttention(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(
-                self, query_layer, key_layer, value_layer, mask=None, is_causal=True
-            ):
-                attn_output = op(
-                    query_layer,
-                    key_layer,
-                    value_layer,
-                    attn_mask=mask,
-                    dropout_p=0.0,
-                    is_causal=is_causal,
-                )
-                return attn_output
-
         query_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
         key_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
         value_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
@@ -1210,12 +1188,17 @@ class DecompOneOffTests(TestCase):
 
         for mask in masks:
             is_causal = mask is None
-            attention = ScaledDotProductAttention()
             decomposed_res = (
                 torch._decomp.decompositions.scaled_dot_product_flash_attention_for_cpu(
                     query_layer, key_layer, value_layer, 0.0, is_causal, attn_mask=mask
                 )
             )
+            actual_res = decomposed_res[0]
+            # Output has form (N, H, L, E), but should be continuous on (L, N, H, E)
+            # in order for subsequent view(L * N, H * E) to be valid.
+            # So permute(2, 0, 1, 3) before checking that tensor is contiguous
+            self.assertTrue(actual_res.permute(2, 0, 1, 3).is_contiguous())
+
             eager_res = op(
                 query_layer,
                 key_layer,
@@ -1225,9 +1208,7 @@ class DecompOneOffTests(TestCase):
                 is_causal=is_causal,
             )
 
-            self.assertTrue(
-                torch.allclose(decomposed_res[0], eager_res, atol=atol, rtol=rtol)
-            )
+            self.assertTrue(torch.allclose(actual_res, eager_res, atol=atol, rtol=rtol))
 
 
 instantiate_device_type_tests(DecompOneOffTests, globals())

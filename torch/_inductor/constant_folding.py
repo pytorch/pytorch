@@ -66,7 +66,7 @@ class ConstantFolder(torch.fx.Interpreter):
         skip_constructors: bool = False,
         lifted_constants: Optional[Dict[str, torch.Tensor]] = None,
         skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
-    ):
+    ) -> None:
         super().__init__(gm)
         self.node_replacements: Dict[torch.fx.Node, Any] = {}
         self.replaced_uses: Dict[torch.fx.Node, int] = collections.Counter()
@@ -86,15 +86,34 @@ class ConstantFolder(torch.fx.Interpreter):
         return super().run_node(node)
 
     def is_impure(self, node: torch.fx.node.Node) -> bool:
+        def is_woq_int8_pattern(node: torch.fx.node.Node) -> bool:
+            return (
+                node.target == torch.ops.prims.convert_element_type.default  # type: ignore[return-value]
+                and isinstance(node.args[0], torch.fx.Node)
+                and "val" in node.args[0].meta
+                and node.args[0].meta["val"].dtype == torch.int8  # type: ignore[union-attr]
+                and node.args[1] == torch.bfloat16
+            )
+
         if (
-            node.target == torch.ops.prims.convert_element_type.default
-            and is_const_source(node.args[0], self.lifted_constants)  # type: ignore[arg-type]
-            and node.args[0].meta["val"].dtype == torch.int8  # type: ignore[union-attr]
-            and node.args[1] == torch.bfloat16
+            is_woq_int8_pattern(node)
+            or (
+                node.target == torch.ops.aten.permute.default
+                and len(node.users) == 1
+                and is_woq_int8_pattern(next(iter(node.users)))
+            )
+        ) and is_const_source(
+            node.args[0], self.lifted_constants  # type: ignore[arg-type]
         ):
-            # For int8_weight -> dq -> bf16_weight
+            # Case 1: int8_weight -> dq -> bf16_weight
+            # Case 2: int8_weight -> permute -> dq -> bf16_weight
             return True
-        if node.target in [
+
+        quant_registered = (
+            getattr(torch.ops.quantized_decomposed, "dequantize_per_channel", None)
+            is not None
+        )
+        if quant_registered and node.target in [
             torch.ops.quantized_decomposed.dequantize_per_channel.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
@@ -222,7 +241,7 @@ class ConstantFolder(torch.fx.Interpreter):
     def add_node_replacement(self, node: torch.fx.Node, tensor: torch.Tensor) -> None:
         self.node_replacements[node] = tensor
 
-    def run(self) -> Any:
+    def run(self) -> Any:  # type: ignore[override]
         env: Dict[torch.fx.Node, Any] = {}
         self.insert_placerholder_values(env)
         return super().run(initial_env=env)
@@ -235,55 +254,57 @@ class ConstantFolder(torch.fx.Interpreter):
                 env[n] = self.unknown_value  # type: ignore[assignment]
 
 
-@torch.utils._python_dispatch._disable_current_modes()
 def constant_fold(
     gm: torch.fx.GraphModule,
     constraint_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
 ) -> None:
-    cf = ConstantFolder(gm, skip_constructors=True)
-    cf.run()
+    with torch.utils._python_dispatch._disable_current_modes():
+        cf = ConstantFolder(gm, skip_constructors=True)
+        cf.run()
 
-    for node, constant in cf.node_replacements.items():
-        if constraint_fn is not None and not constraint_fn(node):
-            continue
-        replace_node_with_constant(gm, node, constant)
+        for node, constant in cf.node_replacements.items():
+            if constraint_fn is not None and not constraint_fn(node):
+                continue
+            replace_node_with_constant(gm, node, constant)
 
-    erased_params = []
-    for node in gm.graph.find_nodes(op="get_attr"):
-        if len(node.users) == 0:
-            if hasattr(gm, node.target):
-                delattr(gm, node.target)
-            erased_params.append(node)
+        erased_params = []
+        for node in gm.graph.find_nodes(op="get_attr"):
+            if len(node.users) == 0:
+                if hasattr(gm, node.target):
+                    delattr(gm, node.target)
+                erased_params.append(node)
 
-    for node in erased_params:
-        gm.graph.erase_node(node)
+        for node in erased_params:
+            gm.graph.erase_node(node)
 
-    gm.graph.eliminate_dead_code()
-    gm.graph.lint()
-    gm.recompile()
+        gm.graph.eliminate_dead_code()
+        gm.graph.lint()
+        gm.recompile()
 
 
-@torch.utils._python_dispatch._disable_current_modes()
 def constant_graph_tag(
     gm: torch.fx.GraphModule,
     lifted_constants: Optional[Dict[str, Any]],
     skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]],
 ) -> None:
-    cf = ConstantFolder(gm, skip_constructors=True, lifted_constants=lifted_constants)
-    cf.run()
+    with torch.utils._python_dispatch._disable_current_modes():
+        cf = ConstantFolder(
+            gm, skip_constructors=True, lifted_constants=lifted_constants
+        )
+        cf.run()
 
-    for node in gm.graph.nodes:
-        if skip_folding_node_fn is not None and skip_folding_node_fn(node):
-            node.meta[META_TAG] = MODULE_TAG
-            continue
-        if (
-            is_const_source(node, lifted_constants)
-            or node in cf.node_replacements
-            or node in cf.replaced_uses
-        ):
-            node.meta[META_TAG] = CONST_MODULE_TAG
-        else:
-            node.meta[META_TAG] = MODULE_TAG
+        for node in gm.graph.nodes:
+            if skip_folding_node_fn is not None and skip_folding_node_fn(node):
+                node.meta[META_TAG] = MODULE_TAG
+                continue
+            if (
+                is_const_source(node, lifted_constants)
+                or node in cf.node_replacements
+                or node in cf.replaced_uses
+            ):
+                node.meta[META_TAG] = CONST_MODULE_TAG
+            else:
+                node.meta[META_TAG] = MODULE_TAG
 
 
 def run_and_get_constant_graph(

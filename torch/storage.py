@@ -16,6 +16,9 @@ from torch._utils import _to, _type
 from torch.types import _bool, _int, Storage
 
 
+__all__ = ["TypedStorage", "UntypedStorage"]
+
+
 try:
     import numpy as np
 
@@ -36,6 +39,8 @@ class _StorageBase:
     is_sparse: _bool = False
     is_sparse_csr: _bool = False
     device: torch.device
+    # Used when stashing FakeTensor device onto storage in torch.save(metadata_only=True)
+    _fake_device: _Optional[torch.device] = None
 
     def __init__(self, *args, **kwargs):
         pass
@@ -530,6 +535,9 @@ def _new_dtypes():
         torch.bits2x4,
         torch.bits4x2,
         torch.complex32,
+        torch.uint16,
+        torch.uint32,
+        torch.uint64,
     }
 
 
@@ -646,6 +654,8 @@ def _get_device_from_module(module: str):
 
 class TypedStorage:
     is_sparse: _bool = False
+    # Used when stashing FakeTensor device onto storage in torch.save(metadata_only=True)
+    _fake_device: _Optional[torch.device] = None
 
     dtype: torch.dtype
 

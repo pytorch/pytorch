@@ -70,7 +70,7 @@ In the following, I’ll first have a detailed description for each step, and th
 
 ```
 class LinearReLUModule(torch.nn.Module):
-   def __init__(self):
+   def __init__(self) -> None:
        super().__init__()
        self.linear = torch.nn.Linear(5, 10).float()
        self.relu = torch.nn.ReLU()
