@@ -363,13 +363,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::shared_ptr<NCCLComm> ncclComm_;
 
     // whether this work is a barrier op
-    bool isBarrierOp_ = false;
+    bool isBarrierOp_{false};
 
     // Clone of blockingWait_ from ProcessGroupNCCL.
-    bool blockingWait_ = false;
+    bool blockingWait_{false};
 
     // Clone of avoidRecordStreams_ from ProcessGroupNCCL.
-    bool avoidRecordStreams_ = false;
+    bool avoidRecordStreams_{false};
 
     // Clone of opTimeout_ from ProcessGroupNCCL.
     std::chrono::milliseconds opTimeout_;
