@@ -1,6 +1,5 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-import copy
 import functools
 import itertools
 import logging
@@ -50,7 +49,6 @@ from .b2b_gemm import B2B_GEMM_PASS
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .micro_pipeline_tp import micro_pipeline_tp_pass
-from .numeric_utils import enable_runtime_numeric_check
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
@@ -85,9 +83,7 @@ def apply_pass(pass_fn: Callable[[], object], name: Optional[str] = None) -> Non
     pass_fn()
 
 
-def post_grad_passes(
-    gm: torch.fx.GraphModule, is_inference: bool, example_inputs=None, fake_mode=None
-):
+def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     """
     Passes that run on after grad.  This is called once on the forwards
     graph and once on the backwards graph.
@@ -116,11 +112,6 @@ def post_grad_passes(
 
     if config.pattern_matcher:
         lazy_init()
-        gm_before_fx_passes = None
-        if hasattr(
-            config, "fx_passes_numeric_check"
-        ) and config.fx_passes_numeric_check.get("post_grad", False):
-            gm_before_fx_passes = copy.deepcopy(gm)
         optimus_scuba_log["before_recompile_post_grad"] = upload_graph(gm.graph)
         apply_pass(
             lambda: group_batch_fusion_passes(gm.graph, pre_grad=False),
@@ -142,11 +133,6 @@ def post_grad_passes(
                 optimus_scuba_log[
                     f"{pattern_matcher_pass.pass_name}_post_grad"
                 ] = upload_graph(gm.graph)
-        optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
-        fx_passes_numeric_check = config.fx_passes_numeric_check.get("post_grad", False)
-        enable_runtime_numeric_check(
-            example_inputs, fake_mode, gm_before_fx_passes, gm, fx_passes_numeric_check
-        )
         if config.b2b_gemm_pass:
             B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
 

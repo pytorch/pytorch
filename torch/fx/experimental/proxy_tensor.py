@@ -1260,8 +1260,13 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             # It's for passing the export verifier which needs to verify the meta['val']
             # TODO(tmanlaibaatar): we should systematically couple it with expoert verifier,
             # instead of hardcoding it here.
+            # T203648563
             node = self.tracer.create_node("call_function", func, args, {})  # type: ignore[arg-type]
-            if func is torch._C._set_grad_enabled:
+            if func in [
+                torch._C._set_grad_enabled,
+                torch.amp.autocast_mode._enter_autocast,
+                torch.amp.autocast_mode._exit_autocast,
+            ]:
                 node.meta["val"] = None
             return node
             # Don't actually run the function! We just want to trace the calls

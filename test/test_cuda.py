@@ -125,19 +125,24 @@ class TestCuda(TestCase):
         return EXPANDABLE_SEGMENTS
 
     def test_pinned_memory_with_cudaregister(self):
-        torch.cuda.memory._set_allocator_settings(
-            "pinned_use_cuda_host_register:True,pinned_num_register_threads:8"
-        )
-        t = torch.ones(20)
-        self.assertFalse(t.is_pinned())
         try:
-            pinned_t = torch.ones(1 << 21).pin_memory()
-            self.assertTrue(pinned_t.is_pinned())
-            pinned_t = torch.ones(1 << 24).pin_memory()
-            self.assertTrue(pinned_t.is_pinned())
-        except RuntimeError as e:
-            # Some GPUs don't support same address space on host and device side
-            pass
+            torch.cuda.memory._set_allocator_settings(
+                "pinned_use_cuda_host_register:True,pinned_num_register_threads:8"
+            )
+            t = torch.ones(20)
+            self.assertFalse(t.is_pinned())
+            try:
+                pinned_t = torch.ones(1 << 21).pin_memory()
+                self.assertTrue(pinned_t.is_pinned())
+                pinned_t = torch.ones(1 << 24).pin_memory()
+                self.assertTrue(pinned_t.is_pinned())
+            except RuntimeError as e:
+                # Some GPUs don't support same address space on host and device side
+                pass
+        finally:
+            torch.cuda.memory._set_allocator_settings(
+                "pinned_use_cuda_host_register:False"
+            )
 
     def test_pinned_memory_with_cudaregister_multithread(self):
         num_threads = 4
@@ -151,18 +156,23 @@ class TestCuda(TestCase):
             thread.join()
 
     def test_pinned_memory_empty_cache(self):
-        for alloc_settings in (True, False):
+        try:
+            for alloc_settings in (True, False):
+                torch.cuda.memory._set_allocator_settings(
+                    f"pinned_use_cuda_host_register:{alloc_settings}"
+                )
+                try:
+                    t = torch.ones(1024 * 1024, pin_memory=True)
+                    self.assertTrue(t.is_pinned())
+                    del t
+                    torch._C._host_emptyCache()
+                except RuntimeError as e:
+                    # Some GPUs don't support same address space on host and device side
+                    pass
+        finally:
             torch.cuda.memory._set_allocator_settings(
-                f"pinned_use_cuda_host_register:{alloc_settings}"
+                "pinned_use_cuda_host_register:False"
             )
-            try:
-                t = torch.ones(1024 * 1024, pin_memory=True)
-                self.assertTrue(t.is_pinned())
-                del t
-                torch._C._host_emptyCache()
-            except RuntimeError as e:
-                # Some GPUs don't support same address space on host and device side
-                pass
 
     def test_cudart_register(self):
         t = torch.ones(20)
@@ -3770,6 +3780,43 @@ class TestCudaMallocAsync(TestCase):
                 "pinned_num_register_threads:1024"
             )
 
+    def test_cachingAllocator_raw_alloc(self):
+        # Test that raw_alloc respects the setting that
+        # activates/deactivates the caching allocator
+
+        # Helper function that calls raw_alloc and returns
+        # relevant field in data structure
+        def requested_bytes_alloc_stats(raw_alloc_size, stream):
+            start = torch.cuda.memory_stats()["requested_bytes.all.allocated"]
+            torch._C._cuda_cudaCachingAllocator_raw_alloc(raw_alloc_size, stream)
+            finish = torch.cuda.memory_stats()["requested_bytes.all.allocated"]
+            return finish - start
+
+        torch.cuda.empty_cache()
+        device = torch._C._cuda_getDevice()
+        stream = torch._C._cuda_getCurrentRawStream(device)
+        torch._C._cuda_resetAccumulatedMemoryStats(device)
+
+        # size of allocation
+        raw_alloc_size = 1024 * 1024  # 1 MB
+
+        try:
+            # Deactivate the caching allocator
+            torch.cuda.caching_allocator_enable(False)
+
+            # For a deactivated caching allocator, result is zero
+            cuda_alloc_size = requested_bytes_alloc_stats(raw_alloc_size, stream)
+            self.assertEqual(cuda_alloc_size, 0)
+
+        finally:
+            # Make sure we get back to the default state that is
+            # an activated caching allocator
+            torch.cuda.caching_allocator_enable(True)
+
+            # For an active caching allocator, result matches raw_alloc_size
+            cuda_alloc_size = requested_bytes_alloc_stats(raw_alloc_size, stream)
+            self.assertEqual(cuda_alloc_size, raw_alloc_size)
+
     @parametrize("max_split_size_mb_setting", [False, True])
     def test_raises_oom(self, max_split_size_mb_setting):
         if max_split_size_mb_setting:
@@ -5363,6 +5410,11 @@ class TestCudaAutocast(TestAutocast):
         ):
             with torch.cuda.amp.autocast():
                 _ = torch.ones(10)
+
+    def test_cuda_module_loading_env(self):
+        torch.cuda.init()
+        val = os.environ.get("CUDA_MODULE_LOADING", "")
+        self.assertEqual(val, "LAZY")
 
 
 instantiate_parametrized_tests(TestCuda)
