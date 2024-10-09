@@ -145,7 +145,7 @@ def set_github_output(key: str, value: str) -> None:
 
 
 def _str_comma_separated_to_set(value: str) -> Set[str]:
-    return map(str.strip, value.strip(" \n\t").split(",")).filter(lambda itm: itm != "").set()
+    return filter(lambda itm: itm != "", map(str.strip, value.strip(" \n\t").split(","))).set()
 
 
 def parse_args() -> Any:
