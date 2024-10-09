@@ -75,6 +75,14 @@ def zeros_and_scatter(
     indices: List[Tensor],
     vals: Tensor,
 ) -> Tensor:
+    """Custom Op so that we can register a custom lowering for the new_output + scatter in the backwards pass
+    Args:
+        shape (List[int]): The shape of the output tensor
+        indices (List[Tensor]): List of index tensors
+        vals (Tensor): Values to scatter
+    Returns:
+        Tensor: The resulting tensor after scattering
+    """
     grad = torch.zeros(shape, device=vals.device, dtype=vals.dtype)
 
     for i, idx in enumerate(indices):
@@ -95,6 +103,7 @@ def _(
 
 @zeros_and_scatter.register_vmap  # type: ignore[misc]
 def _(info, in_dims, shape, indices, val):  # type: ignore[no-untyped-def]
+    """The batching rule is special in that it returns a tensor that is not batched"""
     if len(indices) > 1:
         for i, idx in enumerate(indices):
             # TODO: Don't use is_batchedtensor API, use in_dims instead.
