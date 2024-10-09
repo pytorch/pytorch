@@ -339,7 +339,7 @@ MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format) {
   return [NSArray arrayWithObjects:numbers.data() count:numbers.size()];
 }
 
-void printTensorNDArray(const Tensor& t) {
+void printTensorNDArray(const TensorBase& t) {
   if (!t.is_mps())
     return;
   if (t.numel() == 0)
@@ -360,7 +360,7 @@ void printTensorNDArray(const Tensor& t) {
   C10_CLANG_DIAGNOSTIC_POP()
 }
 
-MPSNDArray* ndArrayFromTensor(const Tensor& tensor, MPSShape* shape, MPSDataType mpsType) {
+MPSNDArray* ndArrayFromTensor(const TensorBase& tensor, MPSShape* shape, MPSDataType mpsType) {
   id<MTLBuffer> buffer = getMTLBufferStorage(tensor);
   MPSGraphTensorData* tmpGraphTensorData = [[[MPSGraphTensorData alloc] initWithMTLBuffer:buffer
                                                                                     shape:shape
@@ -590,7 +590,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
   _placeholder = mpsGraphTensor;
 }
 
-MPSGraphTensorData* getMPSGraphTensorData(MPSGraph* mpsGraph, MPSStream* mpsStream, const Tensor& tensor) {
+MPSGraphTensorData* getMPSGraphTensorData(MPSGraph* mpsGraph, MPSStream* mpsStream, const TensorBase& tensor) {
   auto mpsShape = getMPSShape(tensor);
   auto dataType = getMPSDataType(tensor.scalar_type());
 
@@ -693,8 +693,8 @@ MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph* mpsGraph, MPSDataType dataTy
   return [mpsGraph placeholderWithShape:mpsShape dataType:dataType name:nil];
 }
 
-MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph* mpsGraph, const Tensor& tensor) {
-  return [mpsGraph placeholderWithShape:getMPSShape(tensor) dataType:getMPSScalarType(tensor.scalar_type()) name:nil];
+MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph* mpsGraph, const TensorBase& tensor) {
+  return [mpsGraph placeholderWithShape:getMPSShape(tensor) dataType:getMPSScalarType(tensor) name:nil];
 }
 
 MPSGraphTensor* mpsGraphScalarPlaceHolder(MPSGraph* mpsGraph, MPSDataType dataType) {
