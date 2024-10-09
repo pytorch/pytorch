@@ -132,6 +132,10 @@ def fully_shard(
     elif mesh.ndim == 1:
         mesh_info = FSDPMeshInfo(mesh, shard_mesh_dim=0)
     else:
+        if mesh.mesh_dim_names is None:
+            raise AssertionError(
+                "Please init the 2D mesh for HSDP with mesh_dim_names specified"
+            )
         mesh_info = HSDPMeshInfo(mesh, shard_mesh_dim=1, replicate_mesh_dim=0)
     device = _get_device_from_mesh(mesh)
     post_forward_mesh_info = _get_post_forward_mesh_info(
