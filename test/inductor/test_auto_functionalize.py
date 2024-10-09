@@ -1304,7 +1304,7 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
     @unittest.skip(
         reason="This test fails because something else in inductor optimize out the alias. issue #137434"
     )
-    def test_alias_id(self):
+    def test_alias_id_input_to_custom_op(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
                 "mylib::not_eq",
@@ -1324,6 +1324,33 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
 
             compiled = torch.compile(func, backend="inductor", fullgraph=True)
             compiled(torch.rand(2, 2))
+
+    # Test that the alias optimization, were alias is called instead of as_strided, preserve the fact
+    # that id(x) != id(base)
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_alias_id_output(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!) x, Tensor(b!) y) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo(x, y):
+                pass
+
+            def func(x):
+                a = torch.ops.aten.alias.default(x)
+                torch.ops.mylib.foo(a, x)
+                return a
+
+            compiled = torch.compile(func, backend="inductor", fullgraph=True)
+            input = torch.rand(2, 2)
+            output = compiled(torch.rand(2, 2))
+            self.assertNotEqual(id(output), id(input))
 
 
 if __name__ == "__main__":
