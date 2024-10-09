@@ -1,13 +1,20 @@
 # mypy: allow-untyped-defs
+from typing import Dict, Optional, Tuple
+
 import torch
+import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import autograd_not_implemented
-from torch._ops import HigherOrderOperator
+from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses import FakeTensorMode
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
+from torch.overrides import TorchFunctionMode
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 from torch.utils._pytree import tree_map_only
+
+
+Tensor = torch.Tensor
 
 
 __all__ = ["trace_wrapped"]
@@ -41,6 +48,27 @@ __all__ = ["trace_wrapped"]
 # backward hooks to compiled autograd. AOTAutograd performs a make_fx trace which preserves
 # the function call as is in the graph, and only when we Dynamo through the backward graph in
 # compiled autograd do we inline into the function.
+
+
+class TransformGetItemToIndex(TorchFunctionMode):
+    # This is needed since we want to support calling
+    # A[q_idx], where q_idx is a scalar tensor in score_mod.
+    # Today, when q_idx is a scalar tensor, we implicitly convert it to a python
+    # scalar and create a view. We do not want that behavior in this case, so we
+    # use this torchfunctionmode to override that behavior for score_mod
+    # wherever we're running it.
+    def __torch_function__(
+        self,
+        func: OpOverload,
+        types: Tuple[torch._C._TensorMeta, ...],
+        args: Tuple[object, ...] = (),
+        kwargs: Optional[Dict[str, object]] = None,
+    ) -> object:
+        if func == torch.Tensor.__getitem__:
+            index_args = pytree.tree_leaves(args[1])
+            if all(isinstance(x, torch.Tensor) for x in index_args):
+                return torch.ops.aten.index(args[0], index_args)
+        return func(*args, **(kwargs or {}))
 
 
 def trace_wrapped(*args, **kwargs):
