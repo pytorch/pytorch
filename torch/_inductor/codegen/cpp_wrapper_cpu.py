@@ -71,7 +71,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.expr_printer = cexpr
 
     @staticmethod
-    def create(is_subgraph, subgraph_name, parent_wrapper):
+    def create(
+        is_subgraph: bool, subgraph_name: str, parent_wrapper: PythonWrapperCodegen
+    ):
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.
         return CppWrapperCpu()

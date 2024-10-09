@@ -1981,10 +1981,13 @@ class PythonWrapperCodegen(CodeGen):
         # However this does not work with cpp wrapper. With cpp wrapper, we make
         # two passes and the kernels are shared from the first pass to the next.
         # Therefore, both the Python and CppWrapper need to share the some
-        # codegen infra for cpp_wrapper=True case. Therefore for cpp_wrapper, we
-        # fallback to the old way of inlining subgraphs in the output code. Once
-        # we update CppWrapperCpu, we can remove this function.
+        # codegen infra. For now, CppWrapperCpu has not been updated to lift the
+        # subgraph as functions. Therefore for cpp_wrapper first pass with
+        # PythonWrapper, we still fallback to the old way of inlining subgraphs
+        # in the output code. Once we update CppWrapperCpu, we can remove this
+        # function.
         def _codegen_subgraph_prefix():
+            assert len(subgraph.graph.graph_inputs) == len(outer_inputs)
             for inner_input, outer_input in zip(
                 subgraph.graph.graph_inputs, outer_inputs
             ):
@@ -1993,6 +1996,7 @@ class PythonWrapperCodegen(CodeGen):
                 )
 
         def _codegen_subgraph_suffix():
+            assert len(subgraph.graph.graph_outputs) == len(outer_outputs)
             for inner_output, outer_output in zip(
                 subgraph.graph.graph_outputs, outer_outputs
             ):
@@ -2015,10 +2019,14 @@ class PythonWrapperCodegen(CodeGen):
 
     def codegen_subgraph_prefix(self, subgraph, outer_inputs, outer_outputs):
         subgraph.graph.add_symbol_graph_inputs()
-        for inner_input, outer_input in zip(subgraph.graph.graph_inputs, outer_inputs):
+        # NB: Because of symints, the len of graph_inputs might be larger than
+        # outer_inputs
+        explicit_graph_inputs = subgraph.graph.graph_input_names[: len(outer_inputs)]
+        for inner_input, outer_input in zip(explicit_graph_inputs, outer_inputs):
             self.writeline(f"{self.declare}{inner_input} = {outer_input}{self.ending}")
 
     def codegen_subgraph_suffix(self, subgraph, outer_inputs, outer_outputs):
+        assert len(subgraph.graph.graph_outputs) == len(outer_outputs)
         for inner_output, outer_output in zip(
             subgraph.graph.get_output_names(), outer_outputs
         ):
@@ -2026,8 +2034,9 @@ class PythonWrapperCodegen(CodeGen):
 
     def codegen_subgraph_call(self, subgraph, outer_inputs, outer_outputs):
         # Get the input and output names of the subgraph
-        inner_inputs = ", ".join(subgraph.graph.graph_input_names)
-        if len(subgraph.graph.graph_input_names) == 1:
+        input_names = subgraph.graph.graph_input_names
+        inner_inputs = ", ".join(input_names)
+        if len(input_names) == 1:
             inner_inputs += ","
 
         output_names = subgraph.graph.get_output_names()
@@ -2035,36 +2044,42 @@ class PythonWrapperCodegen(CodeGen):
         if len(output_names) == 1:
             inner_outputs += ","
 
+        # Create a list of inputs for the subgraph call
+        self.writeline(f"{subgraph.graph.name}_args = [{inner_inputs}]")
+        for inner_input in input_names[: len(outer_inputs)]:
+            self.writeline(f"del {inner_input}")
+
         # Call the subgraph launcher function
-        self.writeline(f"({inner_outputs}) = {subgraph.graph.name}([{inner_inputs}])")
+        self.writeline(
+            f"({inner_outputs}) = {subgraph.graph.name}({subgraph.graph.name}_args)"
+        )
 
     def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
         # Codegen subgraph by recursively calling the codegen for the subgraph.
         # This lifts the subgraph as a function in the output code.
-        if V.graph.aot_mode:
+        if V.graph.cpp_wrapper:
             self.codegen_subgraph_by_inlining(subgraph, outer_inputs, outer_outputs)
             return
-        try:
-            self.push_codegened_graph(subgraph.graph)
-            self.writeline(f"{self.comment} subgraph: {subgraph.name}")
-            self.codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
 
-            parent_graph = V.graph
-            subgraph.graph.cpp_wrapper = parent_graph.cpp_wrapper
+        self.push_codegened_graph(subgraph.graph)
+        self.writeline(f"{self.comment} subgraph: {subgraph.name}")
+        self.codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
 
-            if subgraph.graph.name not in self.already_codegened_subgraphs:
-                # If its codegened, the parent wrapper already has subgraph fn by name subgraph.graph.name
-                with V.set_graph_handler(subgraph.graph):
-                    # Call the codegen of subgraph recursively
-                    subgraph_code = subgraph.graph.codegen()[0]
-                    self.already_codegened_subgraphs.add(subgraph.graph.name)
-                    self.define_subgraph_launcher_fn(subgraph_code)
+        parent_graph = V.graph
+        subgraph.graph.cpp_wrapper = parent_graph.cpp_wrapper
 
-            self.codegen_subgraph_call(subgraph, outer_inputs, outer_outputs)
+        if subgraph.graph.name not in self.already_codegened_subgraphs:
+            # If it is already codegened, the parent wrapper already has
+            # subgraph fn by name subgraph.graph.name
+            with V.set_graph_handler(subgraph.graph):
+                # Call the codegen of subgraph recursively
+                subgraph_code, _ = subgraph.graph.codegen()
+            self.already_codegened_subgraphs.add(subgraph.graph.name)
+            self.define_subgraph_launcher_fn(subgraph_code)
 
-            self.codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
-        finally:
-            self.pop_codegened_graph()
+        self.codegen_subgraph_call(subgraph, outer_inputs, outer_outputs)
+
+        self.codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
 
     def codegen_conditional(self, conditional):
         name = conditional.get_name()
@@ -2218,8 +2233,8 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
     def write_triton_header_once(self) -> None:
         # TODO: Uncomment in future. This will be needed to support subgraph
         # codegen for cpp wrapper.
-        # import_str = self.triton_header_str()
         # if config.triton.autotune_at_compile_time:
+        #     import_str = self.triton_header_str()
         #     self.kernel_autotune_calls.splice(import_str)
         self.parent_wrapper.write_triton_header_once()
 

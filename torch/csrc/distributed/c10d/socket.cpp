@@ -820,7 +820,7 @@ bool SocketConnectOp::tryConnect(int family) {
 
   deadline_ = Clock::now() + opts_->connect_timeout();
 
-  bool retry; // NOLINT(cppcoreguidelines-init-variables)
+  bool retry = false;
   do {
     retry = false;
 
