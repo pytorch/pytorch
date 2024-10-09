@@ -317,7 +317,7 @@ algorithms.
 How to utilize named parameters to load optimizer state dict
 ------------------------------------------------------------
 
-The function :func:`~Optimizer.load_state_dict` store the optional ``param_names``content in the
+The function :func:`~Optimizer.load_state_dict` stores the optional ``param_names``content from the
 loaded state dict if present. However, the process of loading the optimizer state is not affected,
 as the order of the parameters matters to maintain compatibility (in case of different ordering).
 To utilize the loaded parameters names from the loaded state dict, a custom ``register_load_state_dict_pre_hook``
@@ -341,11 +341,8 @@ Example::
     # training..
     torch.save(optimizer.state_dict(), PATH)
 
-Assuming that ``model`` implements an expert (MoE) and we want to duplicate it and resume training
-for two experts, both initialized same as the ``fc`` layer.
-For the following ``model2`` we create two layers identical to ``fc`` and resume training by loading the model weights
-and optimizer states from ``model`` into both ``fc1`` and ``fc2`` of ``model2``
-(and adjust them accordingly)::
+Let's say that ``model`` implements an expert (MoE), and we want to duplicate it and resume training
+for two experts, both initialized the same way as the ``fc`` layer. For the following ``model2`` wecreate two layers identical to ``fc`` and resume training by loading the model weights and optimizer states from ``model`` into both ``fc1`` and ``fc2`` of ``model2`` (and adjust them accordingly)::
 
     class TwoLayerModel(nn.Module):
         def __init__(self):
@@ -362,7 +359,7 @@ and optimizer states from ``model`` into both ``fc1`` and ``fc2`` of ``model2``
 
 To load the state dict for ``optimizer2`` with the state dict of the previous optimizer such that both
 ``fc1`` and ``fc2`` will be initialized with a copy of ``fc`` optimizer states
-(to resume training for each layer from ``fc``), we need the following hook::
+(to resume training for each layer from ``fc``), we can use the following hook::
 
     def adapt_state_dict_ids(optimizer, state_dict):
         adapted_state_dict = deepcopy(optimizer.state_dict())
@@ -466,7 +463,7 @@ The new bypass layer will be trained from scratch::
 
 
 
-Instead of loading a state according to the order of parameters (the default approach),
+As a third example, instead of loading a state according to the order of parameters (the default approach),
 this hook can be used to load according to the parameters' names::
 
     def names_matching(optimizer, state_dict):
