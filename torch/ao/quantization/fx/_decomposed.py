@@ -8,7 +8,20 @@ from torch._refs import _unsqueeze_multiple
 from torch.ao.quantization.utils import determine_qparams, validate_qmin_qmax
 from torch.library import impl, Library
 
+# Add turing.record_min_max to the default list of ops that are decomposed
 
+turing_lib = Library("turing", "FRAGMENT")
+turing_lib.define("record_min_max(Tensor input, float min, float max) -> Tensor")
+
+
+@impl(turing_lib, "record_min_max", "CompositeExplicitAutograd")
+def record_min_max(input: torch.Tensor, min: float, max: float) -> torch.Tensor:
+    return input
+
+
+@impl(turing_lib, "record_min_max", "Meta")
+def record_min_max_meta(input: torch.Tensor, min: float, max: float) -> torch.Tensor:
+    return input.new_empty(input.shape, dtype=input.dtype)
 # Note: decomposed means decomposed quantized tensor, using decomposed so that the
 # name is not too long
 quantized_decomposed_lib = Library("quantized_decomposed", "DEF")
