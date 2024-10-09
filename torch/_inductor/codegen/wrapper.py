@@ -533,7 +533,9 @@ class PythonWrapperCodegen(CodeGen):
         )
 
     @staticmethod
-    def create(is_subgraph, subgraph_name, parent_wrapper):
+    def create(
+        is_subgraph: bool, subgraph_name: str, parent_wrapper: PythonWrapperCodegen
+    ):
         if is_subgraph:
             return SubgraphPythonWrapperCodegen(subgraph_name, parent_wrapper)
         return PythonWrapperCodegen()
@@ -2057,7 +2059,7 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
         # Codegen subgraph by recursively calling the codegen for the subgraph.
         # This lifts the subgraph as a function in the output code.
-        if V.graph.cpp_wrapper:
+        if V.graph.aot_mode:
             self.codegen_subgraph_by_inlining(subgraph, outer_inputs, outer_outputs)
             return
 
