@@ -74,6 +74,40 @@ cas(uint32_t* addr, uint32_t compare, uint32_t val) {
 #endif
 }
 
+__device__ inline size_t global_timer_ns() {
+  size_t val;
+  asm volatile("mov.u64 %0, %globaltimer;" : "=l"(val) : : "memory");
+  return val;
+}
+
+constexpr size_t ns_per_ms = 1e6;
+
+template <MemOpSem Sem>
+__device__ __forceinline__ bool try_put_signal(
+    uint32_t* addr,
+    size_t timeout_ms) {
+  size_t deadline = global_timer_ns() + timeout_ms * ns_per_ms;
+  while (cas<Sem>(addr, 0, 1) != 0) {
+    if (timeout_ms != 0 && global_timer_ns() > deadline) {
+      return false;
+    }
+  }
+  return true;
+}
+
+template <MemOpSem Sem>
+__device__ __forceinline__ bool try_wait_signal(
+    uint32_t* addr,
+    size_t timeout_ms) {
+  size_t deadline = global_timer_ns() + timeout_ms * ns_per_ms;
+  while (cas<Sem>(addr, 1, 0) != 1) {
+    if (timeout_ms != 0 && global_timer_ns() > deadline) {
+      return false;
+    }
+  }
+  return true;
+}
+
 template <MemOpSem Sem>
 __device__ __forceinline__ void put_signal(uint32_t* addr) {
   while (cas<Sem>(addr, 0, 1) != 0)
