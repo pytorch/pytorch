@@ -46,7 +46,12 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
             do {                                               \\
                 CUresult code = EXPR;                          \\
                 const char *msg;                               \\
-                cuGetErrorString(code, &msg);                  \\
+                CUresult code_get_error = cuGetErrorString(code, &msg); \\
+                if (code_get_error != CUDA_SUCCESS) {          \\
+                    throw std::runtime_error(                  \\
+                        std::string("CUDA driver error: ") +   \\
+                        std::string("invalid error code!"));   \\
+                }                                              \\
                 if (code != CUDA_SUCCESS) {                    \\
                     throw std::runtime_error(                  \\
                         std::string("CUDA driver error: ") +   \\
