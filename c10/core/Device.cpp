@@ -36,6 +36,10 @@ DeviceType parse_type(const std::string& device_string) {
           {"mtia", DeviceType::MTIA},
           {"privateuseone", DeviceType::PrivateUse1},
       }};
+  if (device_string == "mkldnn") {
+    TORCH_WARN("torch.device('mkldnn') is deprecated and will be removed in the future."
+               "Please use torch.device('cpu') instead.");
+  }
   auto device = std::find_if(
       types.begin(),
       types.end(),
