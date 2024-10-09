@@ -79,7 +79,8 @@ static PyObject* THPGenerator_pynew(
   } else if (device.type() == at::kPrivateUse1) {
     self->cdata = at::GetGeneratorForPrivateuse1(device.index());
   } else {
-    TORCH_CHECK(false,
+    TORCH_CHECK(
+        false,
         "Device type ",
         c10::DeviceTypeName(device.type()),
         " is not supported for torch.Generator() api.");

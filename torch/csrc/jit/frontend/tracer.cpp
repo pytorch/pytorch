@@ -56,7 +56,8 @@ void genericAddOptionalInput(
 
 template <typename T>
 void badArgType(const T& v) {
-  TORCH_CHECK(false,
+  TORCH_CHECK(
+      false,
       "Found an unsupported argument type in the JIT tracer: ",
       c10::demangle_type<T>(),
       ". File a bug report.");
@@ -323,7 +324,8 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
     graph->insertNode(dict_node);
     return dict_node->output();
   } else {
-    TORCH_CHECK(false,
+    TORCH_CHECK(
+        false,
         "Only tensors, lists, tuples of tensors, or dictionary of tensors can be output from traced functions");
   }
 }
@@ -416,7 +418,8 @@ static IValue addInput(
       return elems;
     }
   } else {
-    TORCH_CHECK(false,
+    TORCH_CHECK(
+        false,
         "Only tensors or (possibly nested) dict or tuples of tensors can be "
         "inputs to traced functions. Got ",
         type->repr_str());

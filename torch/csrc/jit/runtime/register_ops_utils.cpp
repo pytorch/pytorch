@@ -429,7 +429,8 @@ at::Generator make_generator_for_device(
     }
 #endif
   } else {
-    TORCH_CHECK(false,
+    TORCH_CHECK(
+        false,
         "Unsupported device for at::make_generator_for_device found: ",
         device.str());
   }

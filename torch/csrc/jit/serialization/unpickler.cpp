@@ -199,7 +199,8 @@ static void restoreContainerTypeTags(
   } else if (is<ListType>(*type)) {
     ivalue.toList().unsafeSetElementType(type->containedType(0));
   } else {
-    TORCH_CHECK(false, "Unknown type for tag restoration: " + type->annotation_str());
+    TORCH_CHECK(
+        false, "Unknown type for tag restoration: " + type->annotation_str());
   }
 }
 
@@ -625,7 +626,8 @@ PickleOpCode Unpickler::readInstruction() {
           device.is_hpu() || device.is_mps() || device.is_privateuseone()) {
         tensor = tensor.to(device, tensor.scalar_type());
       } else if (device.type() != DeviceType::CPU) {
-        TORCH_CHECK(false,
+        TORCH_CHECK(
+            false,
             "supported devices include CPU, CUDA, HPU and ",
             c10::get_privateuse1_backend(),
             " however got ",
@@ -660,7 +662,8 @@ PickleOpCode Unpickler::readInstruction() {
           stack_.begin() + static_cast<std::ptrdiff_t>(key_pos), stack_.end());
     } break;
     default: {
-      TORCH_CHECK(false,
+      TORCH_CHECK(
+          false,
           "Unknown opcode for unpickling at ",
           // NOLINTNEXTLINE(performance-no-int-to-ptr)
           reinterpret_cast<void*>(opcode),
