@@ -2541,6 +2541,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.memory._snapshot",
         "torch.cuda.memory.caching_allocator_alloc",
         "torch.cuda.memory.caching_allocator_delete",
+        "torch.cuda.memory.caching_allocator_enable",
         "torch.cuda.memory.change_current_allocator",
         "torch.cuda.memory.empty_cache",
         "torch.cuda.memory.get_allocator_backend",
@@ -2911,6 +2912,9 @@ def get_tensor_method():
             method, (types.MethodDescriptorType, types.WrapperDescriptorType)
         ):
             s.add(method)
+
+    # mlazos: this is a function which we handle specially in TensorVariable
+    s.add(torch.Tensor.__contains__)  # type: ignore[arg-type]
     return frozenset(s)
 
 

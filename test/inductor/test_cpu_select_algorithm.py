@@ -1,8 +1,6 @@
 # Owner(s): ["oncall: cpu inductor"]
 import contextlib
 import functools
-import logging
-import os
 import sys
 import unittest
 from typing import Optional
@@ -31,9 +29,6 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     TEST_MKL,
 )
-
-
-log = logging.getLogger(__name__)
 
 
 try:
@@ -275,19 +270,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             def forward(self, x):
                 return self.epilogue(self.linear(x))
 
-        # TODO: debug utils, safe to remove in Oct 2024
-        if inductor_config.is_fbcode():
-            log.warning(
-                f"DEBUG: torch.backends.mkl.is_available() is {torch.backends.mkl.is_available()}, "  # noqa: G004
-                f"torch.ops.mkldnn._is_mkldnn_fp16_supported() is {torch.ops.mkldnn._is_mkldnn_fp16_supported()}, "
-                f"torch.ops.mkldnn._is_mkldnn_bf16_supported() is {torch.ops.mkldnn._is_mkldnn_bf16_supported()}, "
-                f"inductor_config.freezing is {inductor_config.freezing}, "
-                f"mkldnn._is_mkldnn_acl_supported() is {torch.ops.mkldnn._is_mkldnn_acl_supported()}, "
-                f"torch._C.has_mkl is {torch._C.has_mkl}, "
-                f"PYTORCH_TEST_FBCODE is {os.getenv('PYTORCH_TEST_FBCODE')}, "
-                f"PYTORCH_TEST_REMOTE_GPU is {os.getenv('PYTORCH_TEST_REMOTE_GPU')}, "
-            )
-
         counters.clear()
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
         u = torch.randn(batch_size, out_features).to(dtype=dtype)
@@ -297,7 +279,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         if (
             (
-                dtype == torch.bfloat16
+                (
+                    dtype == torch.bfloat16
+                    and torch.ops.mkldnn._is_mkldnn_bf16_supported()
+                )
                 or (
                     dtype == torch.float16
                     and torch.ops.mkldnn._is_mkldnn_fp16_supported()
@@ -305,7 +290,11 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             )
             and epilogue != "mul"
             and epilogue != "div"
-            or (dtype == torch.half and epilogue == "add" and not bias)
+            or (
+                dtype in (torch.float16, torch.bfloat16)
+                and epilogue == "add"
+                and not bias
+            )
             or (
                 dtype == torch.float32
                 and epilogue == "add"
@@ -319,7 +308,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             #    not fused via scheduler. This will also be true for float16 when
             #    hardware has the float16 instruction. The exception is mul or
             #    div fusion which is not supported for oneDNN linear.
-            # 2. For float16, since oneDNN linear is not applied, linear w/o bias
+            # 2. For bfloat16/float16, when oneDNN linear is not applied, linear w/o bias
             #    plus epilogue add is treated as linear w/ bias.
             # 3. For float32, when dynamic shapes is enabled, mkl linear is not applied.
             #    and linear w/o bias plus epilogue add is treated as addmm.
@@ -749,6 +738,60 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @set_num_threads(1)
+    @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
+    @parametrize("batch_size", (256,))
+    @parametrize("in_features", (3,))
+    @parametrize("out_features", (1024,))
+    @parametrize("out_features2", (2,))
+    @parametrize("bias", (True, False))
+    @dtypes(torch.float)
+    def test_linear_local_and_global_buffer_dynamic_shapes(
+        self, batch_size, in_features, out_features, out_features2, bias, dtype
+    ):
+        # Reproducer from soft_actor_critic
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.linear1 = torch.nn.Linear(out_features, out_features, bias)
+                self.linear2 = torch.nn.Linear(out_features, out_features2, bias)
+
+            def forward(self, arg7_1):
+                addmm_3 = self.linear(arg7_1)
+                relu_2 = torch.ops.aten.relu.default(addmm_3)
+
+                addmm_4 = self.linear1(relu_2)
+                relu_3 = torch.ops.aten.relu.default(addmm_4)
+
+                addmm_5 = self.linear2(relu_3)
+
+                split_1 = torch.ops.aten.split.Tensor(addmm_5, 1, 1)
+                getitem_2 = split_1[0]
+                getitem_3 = split_1[1]
+
+                tanh_1 = torch.ops.aten.tanh.default(getitem_3)
+
+                add_62 = torch.ops.aten.add.Tensor(tanh_1, 1)
+
+                mul_36 = torch.ops.aten.mul.Tensor(add_62, 6.0)
+                add_69 = torch.ops.aten.add.Tensor(mul_36, -10.0)
+
+                exp_1 = torch.ops.aten.exp.default(add_69)
+                return (getitem_2, exp_1)
+
+        counters.clear()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        mod = M(bias=bias).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 3)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 2)
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1528,7 +1571,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @set_num_threads(1)
-    @parametrize("batch_size", (1024,))
+    @parametrize("batch_size", (512,))
     @parametrize("in_features", (1024,))
     @parametrize("out_features", (1024,))
     @parametrize("bias", (True, False))
