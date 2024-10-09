@@ -37,7 +37,7 @@ def main():
     result_file_path = sys.argv[2]
 
     # A path where a new expected results file will be written that can be used to replace expected_results.csv
-    # in case of faluire. In case of no faluire the content of this file will match expected_file_path, values
+    # in case of failure. In case of no failure the content of this file will match expected_file_path, values
     # will be changed for benchmarks that failed only.
     reference_expected_results_path = sys.argv[3]
 
@@ -109,7 +109,7 @@ def main():
             fail = True
             print(
                 f"REGRESSION: benchmark {key} failed, actual result {result} "
-                f"is {ratio:.2f}% higher than expected {entry.expected_value} ±{entry.noise_margin*100:.2f}% "
+                f"is {ratio:.2f}% higher than expected {entry.expected_value} ±{entry.noise_margin*100:+.2f}% "
                 f"if this is an expected regression, please update the expected results.\n"
             )
 
@@ -123,7 +123,7 @@ def main():
             fail = True
 
             print(
-                f"WIN: benchmark {key} failed, actual result {result} is {ratio:.2f}% lower than "
+                f"WIN: benchmark {key} failed, actual result {result} is {ratio:+.2f}% lower than "
                 f"expected {entry.expected_value} ±{entry.noise_margin*100:.2f}% "
                 f"please update the expected results.\n"
             )
@@ -131,10 +131,8 @@ def main():
             log("fail_win")
 
         else:
-            ratio = float(entry.expected_value - result) * 100 / entry.expected_value
-
             print(
-                f"PASS: benchmark {key} pass, actual result {result} {'+' if ratio>0 else ''}{ratio:.2f}% is within "
+                f"PASS: benchmark {key} pass, actual result {result} {ratio:+.2f}% is within "
                 f"expected {entry.expected_value} ±{entry.noise_margin*100:.2f}%\n"
             )
 
@@ -164,7 +162,7 @@ def main():
 
         with open(reference_expected_results_path, "w", newline="") as csvfile:
             writer = csv.writer(csvfile)
-            for entry in expected_data.values():
+            for entry in new_expected.values():
                 # Write the data to the CSV file
                 writer.writerow(
                     [
