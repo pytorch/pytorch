@@ -133,6 +133,7 @@ __all__ = [
     "sym_max",
     "sym_min",
     "sym_not",
+    "sym_sum",
     "typename",
     "unravel_index",
     "use_deterministic_algorithms",
@@ -476,6 +477,12 @@ class SymInt:
         raise TypeError("type stub not overridden")
 
     def __add__(self, other) -> "SymInt":
+        raise TypeError("type stub not overridden")
+
+    def __radd__(self, other) -> "SymInt":
+        raise TypeError("type stub not overridden")
+
+    def __rmul__(self, other) -> "SymInt":
         raise TypeError("type stub not overridden")
 
     def __mod__(self, other: "IntLikeType") -> "SymInt":
@@ -838,6 +845,28 @@ def sym_min(a, b):
         return builtins.float(builtins.min(a, b))
     else:
         return builtins.min(a, b)
+
+
+def sym_sum(args):
+    """
+    N-ary add which is faster to compute for long lists than iterated binary
+    addition.  Only does something special for integers.
+    """
+    if overrides.has_torch_function(args):
+        return overrides.handle_torch_function(sym_sum, args, args)
+
+    found = None
+    for a in args:
+        if not isinstance(a, (SymInt, builtins.int)):
+            return builtins.sum(args)
+        if isinstance(a, SymInt):
+            found = a.node
+    if found is None:
+        return builtins.sum(args)
+
+    from torch.fx.experimental.sym_node import to_node, wrap_node
+
+    return wrap_node(found.sym_sum(tuple(to_node(found, a) for a in args)))
 
 
 # Drop in replacement for math.sqrt, math.sin, math.cos etc
@@ -2180,10 +2209,6 @@ class _TorchCompileInductorWrapper:
         self.apply_mode(mode)
         self.apply_options(options)
 
-        # Stash the compiler_fn to be used for backend match guard.
-        from torch._inductor.compile_fx import compile_fx
-
-        self.compiler_fn = compile_fx
         if self.config.get("triton.cudagraphs", False):
             os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
             # FIXME: CUDA Graph does not work well with CUPTI teardown.
@@ -2382,8 +2407,9 @@ def compile(
           There are other circumstances where CUDA graphs are not applicable; use TORCH_LOG=perf_hints
           to debug.
 
-        - "max-autotune" is a mode that leverages Triton based matrix multiplications and convolutions
-          It enables CUDA graphs by default.
+        - "max-autotune" is a mode that leverages Triton or template based matrix multiplications
+          on supported devices and Triton based convolutions on GPU.
+          It enables CUDA graphs by default on GPU.
 
         - "max-autotune-no-cudagraphs" is a mode similar to "max-autotune" but without CUDA graphs
 
@@ -2667,3 +2693,17 @@ def _is_device_backend_autoload_enabled() -> builtins.bool:
 
 if _is_device_backend_autoload_enabled():
     _import_device_backends()
+
+
+def _as_tensor_fullprec(t):
+    """
+    Like torch.as_tensor, but when given Python data types it will keep
+    them in full precision.  Used for calling convention for Dynamo.
+    """
+    ty = type(t)
+    if ty is builtins.float:
+        return torch.as_tensor(t, dtype=torch.float64)
+    elif ty is builtins.int:
+        return torch.as_tensor(t, dtype=torch.int64)
+    else:
+        return torch.as_tensor(t)

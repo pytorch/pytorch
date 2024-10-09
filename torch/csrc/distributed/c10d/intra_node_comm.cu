@@ -4,6 +4,8 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 
+#include <torch/csrc/distributed/c10d/CUDASymmetricMemory-inl.h>
+
 namespace c10d {
 namespace intra_node_comm {
 
@@ -49,34 +51,13 @@ DEVICE_INLINE bf16x8 add_bf16x8(bf16x8 a, bf16x8 b) {
   return c;
 }
 
-/**
- * NOTE [cross device memory synchronization]
- *
- * The multi-stage algorithms (e.g. two-shot, hcm allreduce) require the writes
- * of a thread to be visible by threads with the same block/thread ID on other
- * devices. To satisfy CUDA's memory consistency model, every thread has to
- * release its writes at the system scope, and the consuming thread has to
- * acquire the writes at the system scope. This incurs high overhead and
- * attempts in optmizing this process can be prone to race condition.
- *
- * Instead, we go around caching by having each thread:
- *
- * - Directly write to global memory via st.cs (cache-streaming).
- * - Synchronize with threads within the block.
- * - Perform cross device synchronization at block level (via system scope
- *   atomic ops).
- * - Synchronize with threads within the block.
- * - Directly read from global memory via ld.nc (non-coherent/non-cached).
- */
 template <typename T>
 DEVICE_INLINE void streamLoad128(bf16x8& val, const T* addr) {
 #if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
   CUDA_KERNEL_ASSERT(false);
 #else
   unsigned long long int low, high;
-  asm("ld.global.nc.v2.u64 {%0, %1}, [%2];"
-      : "=l"(low), "=l"(high)
-      : "l"(addr));
+  asm("ld.global.v2.u64 {%0, %1}, [%2];" : "=l"(low), "=l"(high) : "l"(addr));
   reinterpret_cast<unsigned long long int*>(&val)[0] = low;
   reinterpret_cast<unsigned long long int*>(&val)[1] = high;
 #endif
@@ -89,7 +70,7 @@ __device__ inline void streamStore128(at::BFloat16* addr, const bf16x8& val) {
   unsigned long long int low, high;
   low = reinterpret_cast<const unsigned long long int*>(&val)[0];
   high = reinterpret_cast<const unsigned long long int*>(&val)[1];
-  asm("st.global.cs.v2.u64 [%0], {%1, %2};" : : "l"(addr), "l"(low), "l"(high));
+  asm("st.global.v2.u64 [%0], {%1, %2};" : : "l"(addr), "l"(low), "l"(high));
 #endif
 }
 
@@ -101,26 +82,6 @@ DEVICE_INLINE void load128(bf16x8& val, const T* addr) {
 template <typename T>
 DEVICE_INLINE void store128(T* addr, const bf16x8& val) {
   *reinterpret_cast<uint4*>(addr) = reinterpret_cast<const uint4*>(&val)[0];
-}
-
-DEVICE_INLINE void releaseSignal(uint32_t* addr) {
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
-  CUDA_KERNEL_ASSERT(false);
-#else
-  atomicAdd_system(addr, 1);
-#endif
-}
-
-DEVICE_INLINE void acquireSignal(uint32_t* addr) {
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
-  CUDA_KERNEL_ASSERT(false);
-#else
-  volatile uint32_t* signal = addr;
-  uint32_t val;
-  do {
-    val = *signal;
-  } while (val == 0 || atomicCAS_system(addr, val, val - 1) != val);
-#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -141,45 +102,32 @@ static __global__ void oneShotAllReduceKernel(
     size_t N_aligned,
     P2pState** p2pStates,
     at::BFloat16** buffers,
-    size_t rank,
-    bool fuseInputCopy) {
+    size_t rank) {
   const size_t numelPerThread = kBytesPerThread / sizeof(at::BFloat16);
   const size_t offset =
       (blockDim.x * blockIdx.x + threadIdx.x) * numelPerThread;
   const size_t stride = blockDim.x * gridDim.x * numelPerThread;
 
-  if (fuseInputCopy) {
-    for (size_t i = offset; i < N_aligned; i += stride) {
-      bf16x8 val;
-      streamLoad128(val, &input[i]);
-      streamStore128(&buffers[rank][i], val);
-    }
-  }
-
-  // Wait for all other ranks to enter the kernel
-  if (threadIdx.x < kWorldSize) {
-    auto targetRank = threadIdx.x;
-    releaseSignal(&p2pStates[targetRank]->signals0[blockIdx.x][rank]);
-    acquireSignal(&p2pStates[rank]->signals0[blockIdx.x][targetRank]);
-  }
-  __syncthreads();
+  barrier_and_acquire_previous_kernel_writes(
+      reinterpret_cast<uint32_t**>(p2pStates), rank, kWorldSize);
 
   // The source pointers. Distributed round-robin for the different warps
   const at::BFloat16* srcs[kWorldSize];
+  size_t srcRanks[kWorldSize];
 #pragma unroll kWorldSize
   for (int ii = 0; ii < kWorldSize; ++ii) {
     int srcRank = (rank + ii) % kWorldSize;
     srcs[ii] = buffers[srcRank];
+    srcRanks[ii] = srcRank;
   }
 
   for (size_t i = offset; i < N_aligned; i += stride) {
     bf16x8 vals[kWorldSize];
 #pragma unroll kWorldSize
     for (size_t ii = 0; ii < kWorldSize; ++ii) {
-      // Make sure the values in `vals` are order by rank so that the reduction
-      // results are consistent across ranks.
-      int srcRank = (ii + kWorldSize - rank) % kWorldSize;
-      streamLoad128(vals[srcRank], &srcs[ii][i]);
+      // Make sure the values in `vals` are ordered by rank so that the
+      // reduction results are consistent across ranks.
+      streamLoad128(vals[srcRanks[ii]], &srcs[ii][i]);
     }
 
     bf16x8 sums;
@@ -199,6 +147,8 @@ static __global__ void oneShotAllReduceKernel(
       }
     }
   }
+
+  barrier(reinterpret_cast<uint32_t**>(p2pStates), rank, kWorldSize);
 }
 
 template <uint32_t kWorldSize>
@@ -216,12 +166,8 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
   const size_t N_start = N_per_rank * rank;
 
   // Wait for all other ranks to enter the kernel
-  if (threadIdx.x < kWorldSize) {
-    auto targetRank = threadIdx.x;
-    releaseSignal(&p2pStates[targetRank]->signals0[blockIdx.x][rank]);
-    acquireSignal(&p2pStates[rank]->signals0[blockIdx.x][targetRank]);
-  }
-  __syncthreads();
+  barrier_and_acquire_previous_kernel_writes(
+      reinterpret_cast<uint32_t**>(p2pStates), rank, kWorldSize);
 
   // The source pointers. Distributed round-robin for the different warps
   at::BFloat16* srcs[kWorldSize];
@@ -237,8 +183,8 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
     bf16x8 vals[kWorldSize];
 #pragma unroll kWorldSize
     for (size_t ii = 0; ii < kWorldSize; ++ii) {
-      // Make sure the values in `vals` are order by rank so that the reduction
-      // results are consistent across ranks.
+      // Make sure the values in `vals` are ordered by rank so that the
+      // reduction results are consistent across ranks.
       int srcRank = (ii + kWorldSize - rank) % kWorldSize;
       streamLoad128(vals[srcRank], &srcs[ii][N_start + i]);
     }
@@ -257,12 +203,8 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
   }
   __syncthreads();
 
-  if (threadIdx.x < kWorldSize) {
-    auto targetRank = threadIdx.x;
-    releaseSignal(&p2pStates[targetRank]->signals1[blockIdx.x][rank]);
-    acquireSignal(&p2pStates[rank]->signals1[blockIdx.x][targetRank]);
-  }
-  __syncthreads();
+  barrier_and_acquire_previous_kernel_writes(
+      reinterpret_cast<uint32_t**>(p2pStates), rank, kWorldSize);
 
   for (size_t i = offset; i < N_per_rank; i += stride) {
 #pragma unroll kWorldSize - 1
@@ -273,6 +215,8 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
       streamStore128(&input[k], val);
     }
   }
+
+  barrier(reinterpret_cast<uint32_t**>(p2pStates), rank, kWorldSize);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -375,8 +319,8 @@ static __global__ void hybridCubeMeshAllReduceKernel(
   // Wait for HCM neigbors to enter the kernel
   if (threadIdx.x < 3) {
     auto targetRank = hcmInfo[threadIdx.x];
-    releaseSignal(&p2pStates[targetRank]->signals0[blockIdx.x][rank]);
-    acquireSignal(&p2pStates[rank]->signals0[blockIdx.x][targetRank]);
+    release_signal(&p2pStates[targetRank]->signals0[blockIdx.x][rank]);
+    acquire_signal(&p2pStates[rank]->signals0[blockIdx.x][targetRank]);
   }
   __syncthreads();
 
@@ -413,8 +357,8 @@ static __global__ void hybridCubeMeshAllReduceKernel(
   __syncthreads();
 
   if (threadIdx.x == 0) {
-    releaseSignal(&p2pStates[relayRank]->signals0[blockIdx.x][rank]);
-    acquireSignal(&p2pStates[rank]->signals0[blockIdx.x][relayRank]);
+    release_signal(&p2pStates[relayRank]->signals0[blockIdx.x][rank]);
+    acquire_signal(&p2pStates[rank]->signals0[blockIdx.x][relayRank]);
   }
   __syncthreads();
 
@@ -528,19 +472,12 @@ at::Tensor IntraNodeComm::oneShotAllReduce(
 
   at::cuda::OptionalCUDAGuard guard(input.get_device());
 
-  // When the input data is small, copying inside the kernel is faster. Because
-  // in such cases, the launch overhead of cudaMemcpyAsync outweighs its
-  // efficiency. Here we consider the input data to be small if the copy loop
-  // can finish in a single iteration.
-  const bool fuseInputCopy = isAligned && blocks.x < kMaxAllReduceBlocks;
-  if (!fuseInputCopy) {
-    AT_CUDA_CHECK(cudaMemcpyAsync(
-        symmetricMemory_->get_buffer_ptrs()[rank_],
-        input.data_ptr(),
-        input.numel() * input.element_size(),
-        cudaMemcpyDeviceToDevice,
-        stream));
-  }
+  AT_CUDA_CHECK(cudaMemcpyAsync(
+      symmetricMemory_->get_buffer_ptrs()[rank_],
+      input.data_ptr(),
+      input.numel() * input.element_size(),
+      cudaMemcpyDeviceToDevice,
+      stream));
 
 #define X(kWorldSize, kAligned)                            \
   if (worldSize_ == kWorldSize) {                          \
@@ -551,8 +488,7 @@ at::Tensor IntraNodeComm::oneShotAllReduce(
             N_aligned,                                     \
             reinterpret_cast<P2pState**>(p2pStatesDev_),   \
             reinterpret_cast<at::BFloat16**>(buffersDev_), \
-            rank_,                                         \
-            fuseInputCopy);                                \
+            rank_);                                        \
     C10_CUDA_KERNEL_LAUNCH_CHECK();                        \
   }
 
@@ -741,8 +677,8 @@ static __global__ void barrierKernel(
     size_t worldSize) {
   if (threadIdx.x < worldSize && (mask & (1ULL << threadIdx.x))) {
     auto targetRank = threadIdx.x;
-    releaseSignal(&p2pStates[targetRank]->signals0[0][rank]);
-    acquireSignal(&p2pStates[rank]->signals0[0][targetRank]);
+    release_signal(&p2pStates[targetRank]->signals0[0][rank]);
+    acquire_signal(&p2pStates[rank]->signals0[0][targetRank]);
   }
 }
 

@@ -41,18 +41,15 @@ std::vector<Tensor> foreach_tensor_list_op(
   tensor_lists.emplace_back(std::move(vec_res));
 
   using opmath_t = at::opmath_type<T>;
-  DISPATCH_MULTI_TENSOR_APPLY([&]() {
-    multi_tensor_apply<3>(
-        tensor_lists,
-        BinaryOpListAlphaFunctor<
-            T,
-            /* depth */ 3,
-            /* r_args_depth */ 2,
-            /* res_arg_index */ 2,
-            large_kernel_arg>(),
-        Op<opmath_t>(),
-        alpha.to<opmath_t>());
-  });
+  multi_tensor_apply<3>(
+      tensor_lists,
+      BinaryOpListAlphaFunctor<
+          T,
+          /* depth */ 3,
+          /* r_args_depth */ 2,
+          /* res_arg_index */ 2>(),
+      Op<opmath_t>(),
+      alpha.to<opmath_t>());
 
   return tensor_lists[2];
 }
@@ -67,18 +64,15 @@ void foreach_tensor_list_op_(
   tensor_lists.emplace_back(tensors2.vec());
 
   using opmath_t = at::opmath_type<T>;
-  DISPATCH_MULTI_TENSOR_APPLY([&]() {
-    multi_tensor_apply<2>(
-        tensor_lists,
-        BinaryOpListAlphaFunctor<
-            T,
-            /* depth */ 2,
-            /* r_args_depth */ 2,
-            /* res_arg_index */ 0,
-            large_kernel_arg>(),
-        Op<opmath_t>(),
-        alpha.to<opmath_t>());
-  });
+  multi_tensor_apply<2>(
+      tensor_lists,
+      BinaryOpListAlphaFunctor<
+          T,
+          /* depth */ 2,
+          /* r_args_depth */ 2,
+          /* res_arg_index */ 0>(),
+      Op<opmath_t>(),
+      alpha.to<opmath_t>());
   increment_version(tensors1);
 }
 
@@ -291,44 +285,64 @@ struct Copy<dst_t, c10::complex<float>> {
   }
 };
 
-#define AT_DISPATCH_SOURCE_TYPES(TYPE, NAME, ...)                                  \
-  AT_DISPATCH_SWITCH(                                                              \
-      TYPE,                                                                        \
-      NAME,                                                                        \
-      AT_PRIVATE_CASE_TYPE_USING_HINT(                                             \
-          at::ScalarType::Byte, src_t, __VA_ARGS__)                                \
-          AT_PRIVATE_CASE_TYPE_USING_HINT(                                         \
-              at::ScalarType::Char, src_t, __VA_ARGS__)                            \
-              AT_PRIVATE_CASE_TYPE_USING_HINT(                                     \
-                  at::ScalarType::Long, src_t, __VA_ARGS__)                        \
-                  AT_PRIVATE_CASE_TYPE_USING_HINT(                                 \
-                      at::ScalarType::Short, src_t, __VA_ARGS__)                   \
-                      AT_PRIVATE_CASE_TYPE_USING_HINT(                             \
-                          at::ScalarType::Int, src_t, __VA_ARGS__)                 \
-                          AT_PRIVATE_CASE_TYPE_USING_HINT(                         \
-                              at::ScalarType::Double, src_t, __VA_ARGS__)          \
-                              AT_PRIVATE_CASE_TYPE_USING_HINT(                     \
-                                  at::ScalarType::Float, src_t, __VA_ARGS__)       \
-                                  AT_PRIVATE_CASE_TYPE_USING_HINT(                 \
-                                      at::ScalarType::ComplexDouble,               \
-                                      src_t,                                       \
-                                      __VA_ARGS__)                                 \
-                                      AT_PRIVATE_CASE_TYPE_USING_HINT(             \
-                                          at::ScalarType::ComplexFloat,            \
-                                          src_t,                                   \
-                                          __VA_ARGS__)                             \
-                                          AT_PRIVATE_CASE_TYPE_USING_HINT(         \
-                                              at::ScalarType::Half,                \
-                                              src_t,                               \
-                                              __VA_ARGS__)                         \
-                                              AT_PRIVATE_CASE_TYPE_USING_HINT(     \
-                                                  at::ScalarType::BFloat16,        \
-                                                  src_t,                           \
-                                                  __VA_ARGS__)                     \
-                                                  AT_PRIVATE_CASE_TYPE_USING_HINT( \
-                                                      at::ScalarType::Bool,        \
-                                                      src_t,                       \
-                                                      __VA_ARGS__))
+#define AT_DISPATCH_SOURCE_TYPES(TYPE, NAME, ...)                                                \
+  AT_DISPATCH_SWITCH(                                                                            \
+      TYPE,                                                                                      \
+      NAME,                                                                                      \
+      AT_PRIVATE_CASE_TYPE_USING_HINT(                                                           \
+          at::ScalarType::Byte,                                                                  \
+          src_t,                                                                                 \
+          __VA_ARGS__) AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Char, src_t, __VA_ARGS__) \
+          AT_PRIVATE_CASE_TYPE_USING_HINT(                                                       \
+              at::ScalarType::Long, src_t, __VA_ARGS__)                                          \
+              AT_PRIVATE_CASE_TYPE_USING_HINT(                                                   \
+                  at::ScalarType::Short, src_t, __VA_ARGS__)                                     \
+                  AT_PRIVATE_CASE_TYPE_USING_HINT(                                               \
+                      at::ScalarType::Int, src_t, __VA_ARGS__)                                   \
+                      AT_PRIVATE_CASE_TYPE_USING_HINT(                                           \
+                          at::ScalarType::Double, src_t, __VA_ARGS__)                            \
+                          AT_PRIVATE_CASE_TYPE_USING_HINT(                                       \
+                              at::ScalarType::Float, src_t, __VA_ARGS__)                         \
+                              AT_PRIVATE_CASE_TYPE_USING_HINT(                                   \
+                                  at::ScalarType::ComplexDouble,                                 \
+                                  src_t,                                                         \
+                                  __VA_ARGS__)                                                   \
+                                  AT_PRIVATE_CASE_TYPE_USING_HINT(                               \
+                                      at::ScalarType::ComplexFloat,                              \
+                                      src_t,                                                     \
+                                      __VA_ARGS__)                                               \
+                                      AT_PRIVATE_CASE_TYPE_USING_HINT(                           \
+                                          at::ScalarType::Half,                                  \
+                                          src_t,                                                 \
+                                          __VA_ARGS__)                                           \
+                                          AT_PRIVATE_CASE_TYPE_USING_HINT(                       \
+                                              at::ScalarType::BFloat16,                          \
+                                              src_t,                                             \
+                                              __VA_ARGS__)                                       \
+                                              AT_PRIVATE_CASE_TYPE_USING_HINT(                   \
+                                                  at::ScalarType::Bool,                          \
+                                                  src_t,                                         \
+                                                  __VA_ARGS__)                                   \
+                                                  AT_PRIVATE_CASE_TYPE_USING_HINT(               \
+                                                      at::ScalarType::                           \
+                                                          Float8_e4m3fn,                         \
+                                                      src_t,                                     \
+                                                      __VA_ARGS__)                               \
+                                                      AT_PRIVATE_CASE_TYPE_USING_HINT(           \
+                                                          at::ScalarType::                       \
+                                                              Float8_e4m3fnuz,                   \
+                                                          src_t,                                 \
+                                                          __VA_ARGS__)                           \
+                                                          AT_PRIVATE_CASE_TYPE_USING_HINT(       \
+                                                              at::ScalarType::                   \
+                                                                  Float8_e5m2,                   \
+                                                              src_t,                             \
+                                                              __VA_ARGS__)                       \
+                                                              AT_PRIVATE_CASE_TYPE_USING_HINT(   \
+                                                                  at::ScalarType::               \
+                                                                      Float8_e5m2fnuz,           \
+                                                                  src_t,                         \
+                                                                  __VA_ARGS__))
 
 namespace {
 
@@ -337,15 +351,13 @@ template <
     typename src_t,
     int depth,
     int r_args_depth,
-    int res_arg_index,
-    bool large_kernel_arg>
+    int res_arg_index>
 struct CopyFunctor {
-  static constexpr bool use_large_kernel_arg = large_kernel_arg;
   static_assert(depth == 2 && r_args_depth == 1 && res_arg_index == 1);
   template <typename Op>
   __device__ __forceinline__ void operator()(
       int chunk_size,
-      TensorListMetadata<depth, large_kernel_arg>& tl,
+      TensorListMetadata<depth>& tl,
       Op op) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
@@ -418,27 +430,28 @@ void foreach_tensor_copy_list_kernel_cuda_(
 
   std::vector<std::vector<at::Tensor>> tensor_lists{src.vec(), self.vec()};
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND7(
       ScalarType::Half,
       ScalarType::BFloat16,
       ScalarType::Bool,
+      ScalarType::Float8_e4m3fn,
+      ScalarType::Float8_e4m3fnuz,
+      ScalarType::Float8_e5m2,
+      ScalarType::Float8_e5m2fnuz,
       self[0].scalar_type(),
       "foreach_tensor_copy",
       [&]() {
         using opmath_t = at::opmath_type<scalar_t>;
         AT_DISPATCH_SOURCE_TYPES(src[0].scalar_type(), "foreach_tensor_copy", [&] {
           if constexpr (std::is_same_v<scalar_t, src_t>) {
-            DISPATCH_MULTI_TENSOR_APPLY([&]() {
-              multi_tensor_apply<2>(
-                  tensor_lists,
-                  UnaryOpFunctor<
-                      scalar_t,
-                      /* depth */ 2,
-                      /* r_args_depth */ 1,
-                      /* res_arg_index */ 1,
-                      large_kernel_arg>(),
-                  Copy<opmath_t, opmath_t>());
-            });
+            multi_tensor_apply<2>(
+                tensor_lists,
+                UnaryOpFunctor<
+                    scalar_t,
+                    /* depth */ 2,
+                    /* r_args_depth */ 1,
+                    /* res_arg_index */ 1>(),
+                Copy<opmath_t, opmath_t>());
           } else {
             // Ref:
             // https://github.com/pytorch/pytorch/blob/656134c38f4737d13c3f43fc5c59470bc23c1d2f/aten/src/ATen/native/Copy.cpp#L299-L301
@@ -446,18 +459,15 @@ void foreach_tensor_copy_list_kernel_cuda_(
               TORCH_WARN_ONCE(
                   "Casting complex values to real discards the imaginary part");
             }
-            DISPATCH_MULTI_TENSOR_APPLY([&]() {
-              multi_tensor_apply<2>(
-                  tensor_lists,
-                  CopyFunctor<
-                      scalar_t,
-                      src_t,
-                      /* depth */ 2,
-                      /* r_args_depth */ 1,
-                      /* res_arg_index */ 1,
-                      large_kernel_arg>(),
-                  Copy<scalar_t, src_t>());
-            });
+            multi_tensor_apply<2>(
+                tensor_lists,
+                CopyFunctor<
+                    scalar_t,
+                    src_t,
+                    /* depth */ 2,
+                    /* r_args_depth */ 1,
+                    /* res_arg_index */ 1>(),
+                Copy<scalar_t, src_t>());
           }
         });
       });

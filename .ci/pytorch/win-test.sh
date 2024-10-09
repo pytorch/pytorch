@@ -43,6 +43,9 @@ python -m pip install z3-solver==4.12.2.0
 # Install tlparse for test\dynamo\test_structured_trace.py UTs.
 python -m pip install tlparse==0.3.25
 
+# Install parameterized
+python -m pip install parameterized==0.8.1
+
 run_tests() {
     # Run nvidia-smi if available
     for path in '/c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe' /c/Windows/System32/nvidia-smi.exe; do

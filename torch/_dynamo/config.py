@@ -9,10 +9,7 @@ from os.path import abspath, dirname
 from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
 
 import torch
-
-
-def is_fbcode():
-    return not hasattr(torch.version, "git_version")
+from torch._environment import is_fbcode
 
 
 # to configure logging for dynamo, aot, and inductor
@@ -34,7 +31,7 @@ verify_correctness = False
 # need this many ops to create an FX graph
 minimum_call_count = 1
 
-# turn on/off DCE pass
+# turn on/off DCE pass (deprecated: always true)
 dead_code_elimination = True
 
 # disable (for a function) when cache reaches this size
@@ -47,6 +44,15 @@ cache_size_limit = 8
 
 # [@compile_ignored: runtime_behaviour] safeguarding to prevent horrible recomps
 accumulated_cache_size_limit = 256
+
+# [@compile_ignored: runtime_behaviour] skip tracing recursively if cache limit is hit
+skip_code_recursive_on_cache_limit_hit = True
+
+# raise a hard error if cache limit is hit.  If you are on a model where you
+# know you've sized the cache correctly, this can help detect problems when
+# you regress guards/specialization.  This works best when cache_size_limit = 1.
+# [@compile_ignored: runtime_behaviour]
+fail_on_cache_limit_hit = False
 
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
@@ -98,7 +104,7 @@ force_nn_module_property_static_shapes = True
 allow_ignore_mark_dynamic = False
 
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
-guard_nn_modules = False if is_fbcode() else True
+guard_nn_modules = True
 
 # Uses CPython internal dictionary tags to detect mutation. There is some
 # overlap between guard_nn_modules_using_dict_tags and guard_nn_modules flag.
@@ -328,8 +334,7 @@ raise_on_ctx_manager_usage = True
 # If True, raise when aot autograd is unsafe to use
 raise_on_unsafe_aot_autograd = False
 
-# If true, error if you torch.jit.trace over a dynamo-optimized function.
-# If false, silently suppress dynamo
+# This flag is ignored and maintained for backwards compatibility.
 error_on_nested_jit_trace = True
 
 # If true, error with a better message if we symbolically trace over a
@@ -419,9 +424,10 @@ cudagraph_backend_support_input_mutation = False
 # correctness of custom ops.
 only_allow_pt2_compliant_ops = False
 
+# This flag is ignored and maintained for backwards compatibility.
 capture_autograd_function = True
 
-# enable/disable dynamo tracing for `torch.func` transforms
+# This flag is ignored and maintained for backwards compatbility.
 capture_func_transforms = True
 
 # If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
@@ -463,6 +469,9 @@ fake_tensor_cache_crosscheck_enabled = (
 # Note: AOT Autograd will still trace joint graphs.
 compiled_autograd = False
 
+# Overrides torch.compile() kwargs for Compiled Autograd:
+compiled_autograd_kwargs_override: Dict[str, Any] = {}
+
 # Enables use of collectives *during* compilation to synchronize behavior
 # across ranks.  Today, this is used solely to modify automatic_dynamic_shapes
 # behavior, making it so that we infer that if an input is dynamic by
@@ -473,6 +482,9 @@ compiled_autograd = False
 # invariant is inviolated, you will likely deadlock NCCL and encounter a
 # NCCL timeout.
 enable_compiler_collectives = os.environ.get("TORCH_COMPILER_COLLECTIVES", "0") == "1"
+
+# HACK: this is for testing custom ops profiling only
+_custom_ops_profile: Optional[Any] = None
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

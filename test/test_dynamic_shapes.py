@@ -33,6 +33,7 @@ from torch.fx.experimental.symbolic_shapes import (
     StatelessSymbolicContext,
     statically_known_true,
 )
+from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -191,7 +192,7 @@ def create_symbolic_tensor(name, arg, shape_env, source=None, dynamic_dims=None)
     )
 
 
-def create_symtype(cls, pytype, shape_env, val, duck=True):
+def create_symtype(cls, pytype, shape_env, val, duck=True, **kwargs):
     from torch._dynamo.source import ConstantSource
 
     symbol = shape_env.create_symbol(
@@ -199,13 +200,14 @@ def create_symtype(cls, pytype, shape_env, val, duck=True):
         source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}"),
         dynamic_dim=DimDynamic.DUCK if duck else DimDynamic.DYNAMIC,
         constraint_dim=None,
+        **kwargs,
     )
     return cls(SymNode(symbol, shape_env, pytype, hint=val))
 
 
 # TODO: default duck to False
-def create_symint(shape_env, i: int, duck=True) -> SymInt:
-    return create_symtype(SymInt, int, shape_env, i, duck=duck)
+def create_symint(shape_env, i: int, duck=True, **kwargs) -> SymInt:
+    return create_symtype(SymInt, int, shape_env, i, duck=duck, **kwargs)
 
 
 def create_symbool(shape_env, b: bool) -> SymBool:
@@ -448,6 +450,15 @@ class TestPySymInt(TestCase):
         a0 = create_symint(shape_env, 2)
         self.assertEqual(guard_int(a0), 2)
         self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s0, 2)""")
+
+    def test_sym_sum(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 2)
+        s1 = create_symint(shape_env, 3)
+        s2 = create_symint(shape_env, 4)
+        self.assertEqual(
+            (s0 + s1 + s2).node.expr, torch.sym_sum([s0, s1, s2]).node.expr
+        )
 
     def test_prefer_deferred_runtime_assertions_over_guards(self):
         shape_env = ShapeEnv(prefer_deferred_runtime_asserts_over_guards=True)
@@ -779,6 +790,13 @@ def forward(self, x_1):
                 self.assertTrue(statically_known_true(i0 >= 4))
                 self.assertTrue(statically_known_true(i0 > 3))
 
+    def test_mul_int_oo_nan(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 5, duck=False)
+        s1 = create_symint(shape_env, 6, duck=False)
+        s2 = create_symint(shape_env, 5, duck=False)
+        bool(s0 * (s1 // s0) == s2)
+
     def test_non_overlapping_and_dense(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)
@@ -1059,6 +1077,33 @@ class f(torch.nn.Module):
             self.assertEqual(x.size(), y.size())
             self.assertEqual(x.stride(), y.stride())
             self.assertEqual(x.storage_offset(), y.storage_offset())
+
+    def test_tensor_factory_with_symint(self):
+        args = list(range(0, 3))
+        expected = torch.tensor(args)
+
+        shape_env = ShapeEnv()
+        sym_args = [create_symint(shape_env, i) for i in args]
+
+        # test tensor factories
+        for dt in all_types_and(torch.half, torch.bfloat16):
+            res = torch.tensor(sym_args, dtype=dt)
+            self.assertEqual(res, expected, exact_dtype=False)
+
+        # test legacy tensor factories
+        legacy_ctors = [
+            torch.Tensor,
+            torch.LongTensor,
+            torch.DoubleTensor,
+            torch.FloatTensor,
+            torch.IntTensor,
+            torch.ShortTensor,
+            torch.HalfTensor,
+            torch.ByteTensor,
+        ]
+        for Tensor in legacy_ctors:
+            res = Tensor(sym_args)
+            self.assertEqual(res, expected, exact_dtype=False)
 
 
 @skipIfTorchDynamo(
