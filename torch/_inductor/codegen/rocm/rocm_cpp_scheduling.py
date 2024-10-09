@@ -23,7 +23,7 @@ class ROCmCPPScheduling(BaseScheduling):
     It handles fusion decisions and ROCm C++ specific template code generation.
     """
 
-    def __init__(self, scheduler: Scheduler):
+    def __init__(self, scheduler: Scheduler) -> None:
         super().__init__()
         self.scheduler = scheduler
 
@@ -61,7 +61,9 @@ class ROCmCPPScheduling(BaseScheduling):
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline("async_compile.rocm(r'''")
             compile_wrapper.splice(src_code, strip=True)
-            compile_wrapper.writeline("''', 'so')")
+            compile_wrapper.writeline(
+                f"''', 'so', aot_compile={str(V.graph.aot_mode)})"
+            )
 
             metadata_comment = f"# kernel path: {kernel_path}"
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
