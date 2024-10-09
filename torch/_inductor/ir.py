@@ -6546,7 +6546,7 @@ class Conditional(ExternKernel):
 
         conditional = Conditional(
             predicate=predicate,
-            operands=operands,  # type: ignore[list-item]
+            operands=operands,
             true_subgraph=true_fn,
             false_subgraph=false_fn,
             layout=MultiOutputLayout(device),
