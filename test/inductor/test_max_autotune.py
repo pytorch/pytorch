@@ -1005,7 +1005,7 @@ class TestPrologueFusion(TestCase):
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
-    def _test_multiple_fusions_impl(self, sizes, prologue_fusion=True):
+    def _test_multiple_fusions_impl(self, sizes):
         M, K, N = sizes
 
         def foo(x, y):
@@ -1027,17 +1027,9 @@ class TestPrologueFusion(TestCase):
                 "tl.store"
             ).run(code[0])
 
-    @parametrize("sizes", ((64, 128, 256), (64, 64, 64)))
+    @parametrize("sizes", ((64, 128, 256), (64, 64, 64), (64, 120, 64)))
     def test_multiple_fusions(self, sizes):
         self._test_multiple_fusions_impl(sizes)
-
-    @unittest.expectedFailure  # triton bug
-    def test_multiple_fusions_failure(self):
-        self._test_multiple_fusions_impl((64, 120, 64))
-
-    # and yet, extremely similar code passes..
-    def test_multiple_fusions_prologue_bad_shape_success(self):
-        self._test_multiple_fusions_impl((64, 120, 64), prologue_fusion=False)
 
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_multiple_inputs(self, sizes):

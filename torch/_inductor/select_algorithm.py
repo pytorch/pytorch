@@ -15,11 +15,17 @@ import textwrap
 import time
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
-<<<<<<< HEAD
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
-=======
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
->>>>>>> d4fe6c9fb20 (WIP - Prologue Fusion)
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+    Union,
+)
 from unittest.mock import patch
 
 import sympy
@@ -568,6 +574,8 @@ class TritonTemplateKernel(TritonKernel):
             self.named_input_nodes[input_name].data.freeze_layout()
             self.cse.invalidate(set())
 
+            template_mask = self.template_mask
+
             class StoreOutputSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
                 self.name = name
 
@@ -581,7 +589,17 @@ class TritonTemplateKernel(TritonKernel):
                     V.kernel.store_buffer_names.add(name)
                     V.kernel.cse.store_cache[name] = value
                     if name in V.kernel.prologue_fused_inputs:
-                        V.kernel.compute.writeline(f"{output_name} = {value}")
+                        # We load masked out values with 0, then apply a prologue.
+                        # The masked out values may not necessariliy be 0 any more
+                        # so we need to reapply the mask.
+                        # TODO: do analysis with value ranges if the prologue is 0 preserving, such as
+                        # type casting or multiplication, and omit reapplication of mask.
+                        if template_mask == "None":
+                            V.kernel.compute.writeline(f"{output_name} = {value}")
+                        else:
+                            V.kernel.compute.writeline(
+                                f"{output_name} = tl.where({template_mask}, {value}, {other})"
+                            )
 
             self.ops_handler = StoreOutputSubstitution
 

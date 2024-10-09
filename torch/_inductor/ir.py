@@ -4062,11 +4062,8 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         layout: Layout,
         inputs: List[IRNode],
         choice_timings: Callable[[], Dict[ChoiceCaller, float]],
-<<<<<<< HEAD
         unfiltered_choices: List[ChoiceCaller],
-=======
         allowed_prologue_inps: OrderedSet[str],
->>>>>>> d4fe6c9fb20 (WIP - Prologue Fusion)
     ):
         super().__init__(
             layout=layout,
