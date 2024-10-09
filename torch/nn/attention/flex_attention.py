@@ -656,13 +656,15 @@ def _convert_mask_to_block_mask(
 ) -> Tuple[Tensor, Optional[Tensor]]:
     assert mask.dtype == torch.bool
     mask = _broadcast_to_dim(mask, 4)
+    def padding_needed_for_multiple(x, multiple):
+        return _round_up_to_multiple(x, multiple) - x
     mask = torch.nn.functional.pad(
         mask,
         (
             0,
-            Q_BLOCK_SIZE - (mask.shape[-2] % Q_BLOCK_SIZE),
+            padding_needed_for_multiple(mask.shape[-1], KV_BLOCK_SIZE),
             0,
-            KV_BLOCK_SIZE - (mask.shape[-1] % KV_BLOCK_SIZE),
+            padding_needed_for_multiple(mask.shape[-2], Q_BLOCK_SIZE),
         ),
     )
     B, H, Q, KV = mask.shape
@@ -857,11 +859,9 @@ def create_block_mask(
     else:
         Q_BLOCK_SIZE, KV_BLOCK_SIZE = BLOCK_SIZE
 
-    if Q_LEN < 128:
-        Q_BLOCK_SIZE = Q_LEN
     if _compile:
         warnings.warn(
-            "_compile flag on create_block_mask was originally added to work around a torch.compile limitation. That limitation has since been addressed. So, to compile create_block_mask, we suggest doing torch.compile(create_block_mask)"
+            "_compile flag on create_block_mask was originally added to work around a torch.compile limitation. That limitation has since been addressed. So, to compile create_block_mask, we suggest doing torch.compile(create_block_mask). This still works for now, but will be removed in the future."
         )
         return torch.compile(create_block_mask)(
             mask_mod, B, H, Q_LEN, KV_LEN, device, BLOCK_SIZE
