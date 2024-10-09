@@ -64,66 +64,44 @@ find_package_and_print_version(HIP 1.0 MODULE)
 
 if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
-  set(FOUND_ROCM_VERSION_H FALSE)
-
-  set(PROJECT_RANDOM_BINARY_DIR "${PROJECT_BINARY_DIR}")
-  set(file "${PROJECT_BINARY_DIR}/detect_rocm_version.cc")
 
   # Find ROCM version for checks
   # ROCM 5.0 and later will have header api for version management
   if(EXISTS ${ROCM_INCLUDE_DIRS}/rocm_version.h)
-    set(FOUND_ROCM_VERSION_H TRUE)
-    file(WRITE ${file} ""
-      "#include <rocm_version.h>\n"
-      )
+    set(ROCM_HEADER_FILE ${ROCM_INCLUDE_DIRS}/rocm_version.h)
   elseif(EXISTS ${ROCM_INCLUDE_DIRS}/rocm-core/rocm_version.h)
-    set(FOUND_ROCM_VERSION_H TRUE)
-    file(WRITE ${file} ""
-      "#include <rocm-core/rocm_version.h>\n"
-      )
+    set(ROCM_HEADER_FILE ${ROCM_INCLUDE_DIRS}/rocm-core/rocm_version.h)
   else()
-    message("********************* rocm_version.h couldnt be found ******************\n")
+    message(FATAL_ERROR "********************* rocm_version.h could not be found ******************\n")
   endif()
 
-  if(FOUND_ROCM_VERSION_H)
-    file(APPEND ${file} ""
-      "#include <cstdio>\n"
+  # Read the ROCM headerfile into a variable
+  file(READ ${ROCM_HEADER_FILE} ROCM_HEADER_CONTENT)
 
-      "#ifndef ROCM_VERSION_PATCH\n"
-      "#define ROCM_VERSION_PATCH 0\n"
-      "#endif\n"
-      "#define STRINGIFYHELPER(x) #x\n"
-      "#define STRINGIFY(x) STRINGIFYHELPER(x)\n"
-      "int main() {\n"
-      "  printf(\"%d.%d.%s\", ROCM_VERSION_MAJOR, ROCM_VERSION_MINOR, STRINGIFY(ROCM_VERSION_PATCH));\n"
-      "  return 0;\n"
-      "}\n"
-      )
+  # Below we use a RegEx to find ROCM version numbers.
+  # Note that CMake does not support \s for blank space. That is
+  # why in the regular expressions below we have a blank space in
+  # the square brackets.
+  # There are three streps:
+  # 1. Match regular expression
+  # 2. Strip thie non-numerical part of the string
+  # 3. Strip leading and trailing spaces
+  string(REGEX MATCH "ROCM_VERSION_MAJOR [ ]*[0-9]+" TEMP1 ${ROCM_HEADER_CONTENT})
+  string(REPLACE "ROCM_VERSION_MAJOR" "" TEMP2 ${TEMP1})
+  string(STRIP ${TEMP2} ROCM_VERSION_DEV_MAJOR)
+  string(REGEX MATCH "ROCM_VERSION_MINOR [ ]*[0-9]+" TEMP1 ${ROCM_HEADER_CONTENT})
+  string(REPLACE "ROCM_VERSION_MINOR" "" TEMP2 ${TEMP1})
+  string(STRIP ${TEMP2} ROCM_VERSION_DEV_MINOR)
+  string(REGEX MATCH "ROCM_VERSION_PATCH [ ]*[0-9]+" TEMP1 ${ROCM_HEADER_CONTENT})
+  string(REPLACE "ROCM_VERSION_PATCH" "" TEMP2 ${TEMP1})
+  string(STRIP ${TEMP2} ROCM_VERSION_DEV_PATCH)
 
-    try_run(run_result compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
-      CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
-      RUN_OUTPUT_VARIABLE rocm_version_from_header
-      COMPILE_OUTPUT_VARIABLE output_var
-      )
-    # We expect the compile to be successful if the include directory exists.
-    if(NOT compile_result)
-      message(FATAL_ERROR "Caffe2: Couldn't determine version from header: " ${output_var})
-    endif()
-    message(STATUS "Caffe2: Header version is: " ${rocm_version_from_header})
-    set(ROCM_VERSION_DEV_RAW ${rocm_version_from_header})
-    message("\n***** ROCm version from rocm_version.h ****\n")
-  endif()
+  # Create ROCM_VERSION_DEV_INT which is later used as a preprocessor macros
+  set(ROCM_VERSION_DEV "${ROCM_VERSION_DEV_MAJOR}.${ROCM_VERSION_DEV_MINOR}.${ROCM_VERSION_DEV_PATCH}")
+  math(EXPR ROCM_VERSION_DEV_INT "(${ROCM_VERSION_DEV_MAJOR}*10000) + (${ROCM_VERSION_DEV_MINOR}*100) + ${ROCM_VERSION_DEV_PATCH}")
 
-  string(REGEX MATCH "^([0-9]+)\.([0-9]+)\.([0-9]+).*$" ROCM_VERSION_DEV_MATCH ${ROCM_VERSION_DEV_RAW})
-
-  if(ROCM_VERSION_DEV_MATCH)
-    set(ROCM_VERSION_DEV_MAJOR ${CMAKE_MATCH_1})
-    set(ROCM_VERSION_DEV_MINOR ${CMAKE_MATCH_2})
-    set(ROCM_VERSION_DEV_PATCH ${CMAKE_MATCH_3})
-    set(ROCM_VERSION_DEV "${ROCM_VERSION_DEV_MAJOR}.${ROCM_VERSION_DEV_MINOR}.${ROCM_VERSION_DEV_PATCH}")
-    math(EXPR ROCM_VERSION_DEV_INT "(${ROCM_VERSION_DEV_MAJOR}*10000) + (${ROCM_VERSION_DEV_MINOR}*100) + ${ROCM_VERSION_DEV_PATCH}")
-  endif()
-
+  message(STATUS "Caffe2: Header version is: " ${ROCM_VERSION_DEV})
+  message("\n***** ROCm version from rocm_version.h ****\n")
   message("ROCM_VERSION_DEV: ${ROCM_VERSION_DEV}")
   message("ROCM_VERSION_DEV_MAJOR: ${ROCM_VERSION_DEV_MAJOR}")
   message("ROCM_VERSION_DEV_MINOR: ${ROCM_VERSION_DEV_MINOR}")
