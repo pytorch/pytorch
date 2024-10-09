@@ -1234,7 +1234,7 @@ void ProcessGroupNCCL::abortCommsFromMap(
       gpuGuard.set_index(deviceIndex);
     }
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
-              << ncclComm->ncclComm_ << " on CUDA device: " << devName;
+              << ncclComm->repr() << " on CUDA device: " << devName;
     ncclComm->ncclCommAbort(abortReason);
     // Note that we don't remove the aborted communicators from the
     // cache. The reason is that if we do remove the communicator
@@ -2355,7 +2355,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
       size_); // worldSize
 
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
-            << ncclComm->ncclComm_
+            << ncclComm->repr()
             << " on CUDA device: " << static_cast<int>(deviceIndex);
 
   // At this point NCCL should have been initialized, hence we can accurately
