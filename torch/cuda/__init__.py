@@ -510,12 +510,14 @@ def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]
     return prop.major, prop.minor
 
 
-def get_device_properties(device: _device_t) -> _CudaDeviceProperties:
+def get_device_properties(device: Optional[_device_t] = None) -> _CudaDeviceProperties:
     r"""Get the properties of a device.
 
     Args:
-        device (torch.device or int or str): device for which to return the
-            properties of the device.
+        device (torch.device or int or str, optional): device for which to return the
+            properties of the device.  It uses the current device, given by
+            :func:`~torch.cuda.current_device`, if :attr:`device` is ``None``
+            (default).
 
     Returns:
         _CudaDeviceProperties: the properties of the device
@@ -1576,6 +1578,7 @@ __all__ = [
     "amp",
     "caching_allocator_alloc",
     "caching_allocator_delete",
+    "caching_allocator_enable",
     "can_device_access_peer",
     "check_error",
     "cudaStatus",
