@@ -180,6 +180,7 @@ class CppWrapperGpu(CppWrapperCpu):
 
         self.header.splice("#include <filesystem>")
         if config.abi_compatible:
+            print("should not reach here")
             self.header.splice(self.device_codegen.abi_compatible_header())
         else:
             self.header.splice(
@@ -192,7 +193,9 @@ class CppWrapperGpu(CppWrapperCpu):
     def write_get_raw_stream(self, index, graph=None):
         name = f"stream{index}"
         if self.device == "xpu":
-            self.writeline(f"sycl::queue *{name} = &(at::xpu::getCurrentXPUStream({index}).queue());")
+            self.writeline(
+                f"sycl::queue *{name} = &(at::xpu::getCurrentXPUStream({index}).queue());"
+            )
             return name
 
         self.writeline(
@@ -415,7 +418,9 @@ class CppWrapperGpu(CppWrapperCpu):
             device_index, call_args = self.prepare_triton_kernel_call(
                 device_index, call_args
             )
-            kernel_var_name = self.generate_load_kernel_once(kernel_name, V.graph, stream=stream)
+            kernel_var_name = self.generate_load_kernel_once(
+                kernel_name, V.graph, stream=stream
+            )
 
             # args with value 1 are added into equal_to_1 and constants
             # in triton_meta (in the Python codegen) which makes them
