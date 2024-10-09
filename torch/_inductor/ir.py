@@ -4174,6 +4174,9 @@ class InputsKernel(OperationBuffer):
         for input in self.inputs:
             if isinstance(input, list):
                 reads.update(StarDep(x.get_name()) for x in input)
+            elif isinstance(input, ShapeAsConstantBuffer):
+                # Skip creating dependncy for symbolics as they're visible globally
+                continue
             else:
                 reads.add(StarDep(input.get_name()))
 
