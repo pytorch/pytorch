@@ -5,7 +5,7 @@
 #include "flash_common_hip.hpp"
 
 #include "third_party/composable_kernel/example/ck_tile/01_fmha/fmha_bwd.hpp"
-#include "mask.hpp"
+#include "third_party/composable_kernel/example/ck_tile/01_fmha/mask.hpp"
 
 namespace pytorch_flash {
 
