@@ -84,6 +84,7 @@ from .graph_signature import (  # noqa: F401
 
 
 __all__ = [
+    "CustomDecompTable",
     "ExportedProgram",
     "ModuleCallEntry",
     "ModuleCallSignature",
@@ -313,7 +314,7 @@ def _split_decomp_table_to_cia_and_python_decomp(
     return cia_ops_to_callable, decomp_table
 
 
-def default_decompositions() -> "CustomDecompTable[torch._ops.OperatorBase, Callable]":
+def default_decompositions() -> "CustomDecompTable":
     """
     This is the default decomposition table which contains decomposition of
     all ATEN operators to core aten opset. Use this API together with
@@ -676,14 +677,15 @@ def _decompose_exported_program(
     return exported_program
 
 
-class CustomDecompTable(Dict):
+class CustomDecompTable(Dict[torch._ops.OperatorBase, Callable]):
     """
     This is a custom dictionary that is specifically used for handling decomp_table in export.
     The reason we need this is because in the new world, you can only *delete* an op from decomp
     table to preserve it. This is problematic for custom ops because we don't know when the custom
-    op will actually be loaded to the dispatcher. As a result, we need to record the custom ops operations 
+    op will actually be loaded to the dispatcher. As a result, we need to record the custom ops operations
     until we really need to materialize it (which is when we run decomposition pass.)
     """
+
     def __init__(self):
         super().__init__()
         from torch._decomp import _core_aten_decompositions_post_autograd
@@ -695,7 +697,7 @@ class CustomDecompTable(Dict):
 
         for op in _collect_all_valid_cia_ops_for_aten_namespace():
             self.aten_decomp_table[op] = _get_decomp_for_cia(op)
-        
+
         # This is to track the *pending* deleted custom ops that haven't been materialized yet
         self.deleted_custom_ops = set()
         # When we can materialize a custom op, we use this table
@@ -714,7 +716,7 @@ class CustomDecompTable(Dict):
 
         if key in self.additional_custom_op_decomp:
             return self.additional_custom_op_decomp[key]
-        
+
         # If it is materialized already, only aten_decomp_table and additional_custom_op_decomp can have
         # the ops.
         if self.has_materialized:
@@ -722,7 +724,7 @@ class CustomDecompTable(Dict):
 
         if key in self.deleted_custom_ops:
             raise KeyError(f"Op {key} is not in the decomposition table")
-        
+
         self.additional_custom_op_decomp[key] = _get_decomp_for_cia(key)
         return self.additional_custom_op_decomp[key]
 
@@ -752,8 +754,8 @@ class CustomDecompTable(Dict):
     def __delitem__(self, key):
         self.pop(key)
 
-    def update(self, extra_decomps):
-        for k, v in extra_decomps.items():
+    def update(self, other_dict):  # type: ignore[override]
+        for k, v in other_dict.items():
             if _is_aten_op(k):
                 self.aten_decomp_table[k] = v
             else:

@@ -996,10 +996,7 @@ def _collect_all_valid_cia_ops_for_namespace(namespace: str) -> Set["OperatorBas
     op_namespace = getattr(torch.ops, namespace)
     cia_ops = set()
     for op in op_namespace:
-        try:
-            op_packet = getattr(op_namespace, op)
-        except:
-            breakpoint()
+        op_packet = getattr(op_namespace, op)
         for overload in op_packet.overloads():
             op_overload = getattr(op_packet, overload)
             if _is_preservable_cia_op(op_overload):
