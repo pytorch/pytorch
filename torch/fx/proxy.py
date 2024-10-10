@@ -217,9 +217,16 @@ class TracerBase:
         else:
             proxy = proxy_factory_fn(node)
 
+        def _find_user_frame2_4(stack_trace):
+            stack_trace=stack_trace.split('\n')
+            if 'torch/fx/proxy.py' in stack_trace[-3]:
+                stack_trace=stack_trace[:-1]
+                while len(stack_trace)>2 and '/fx/' in stack_trace[-2]:
+                    stack_trace=stack_trace[:-2]
+            return '\n'.join(stack_trace)
+    
         if self.record_stack_traces and not proxy.node.stack_trace:
-            proxy.node.stack_trace = ''.join(CapturedTraceback.extract().format())
-
+            proxy.node.stack_trace = _find_user_frame2_4(''.join(CapturedTraceback.extract().format()))
 
         return proxy
 
