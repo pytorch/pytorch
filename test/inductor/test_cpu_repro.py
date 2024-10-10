@@ -445,10 +445,120 @@ class CPUReproTests(TestCase):
     @torch._dynamo.config.patch(assume_static_by_default=False)
     @torch._dynamo.config.patch(allow_rnn=True)
     @config.patch(freezing=True)
-    def _test_lstm_packed(self, params_dict, change_input_sizes=False):
+    def _test_lstm_packed(
+        self,
+        unbatched,
+        input_size,
+        hidden_size,
+        num_layers,
+        bidirectional,
+        bias,
+        empty_state,
+        batch_first,
+        batch_size,
+        seq_len,
+        change_input_sizes=False,
+    ):
         from torch._dynamo.utils import counters
 
-        for (
+        dtypes = [torch.float]
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+        for dtype in dtypes:
+            counters.clear()
+            num_directions = 2 if bidirectional else 1
+
+            seq_len_var = seq_len + 3
+            if unbatched:
+                v = torch.randn(seq_len, input_size)
+                v_var = torch.randn(seq_len_var, input_size)
+                h = torch.randn(num_layers * num_directions, hidden_size)
+                c = torch.randn(num_layers * num_directions, hidden_size)
+            else:
+                if batch_first:
+                    v = torch.randn(batch_size, seq_len, input_size)
+                    v_var = torch.randn(batch_size, seq_len_var, input_size)
+                else:
+                    v = torch.randn(seq_len, batch_size, input_size)
+                    v_var = torch.randn(seq_len_var, batch_size, input_size)
+                h = torch.randn(num_layers * num_directions, batch_size, hidden_size)
+                c = torch.randn(num_layers * num_directions, batch_size, hidden_size)
+
+            mod = LstmModule(
+                input_size,
+                hidden_size,
+                num_layers,
+                bias,
+                bidirectional,
+                batch_first,
+            ).eval()
+            maybe_autocast = (
+                torch.cpu.amp.autocast()
+                if dtype == torch.bfloat16
+                else contextlib.nullcontext()
+            )
+
+            with torch.no_grad(), maybe_autocast:
+                inps = [v]
+                if not empty_state:
+                    inps.append((h, c))
+
+                fn_opt = torch._dynamo.optimize("inductor")(mod)
+                _, code = run_and_get_cpp_code(fn_opt, *inps)
+
+                # Check that _flat_weights are not functional_tensor, otherwise
+                # deepcopy will fail during recompilation.
+                fn_opt_copy = copy.deepcopy(fn_opt)
+                _flat_weights = fn_opt_copy.lstm._flat_weights
+                for _flat_weight in _flat_weights:
+                    self.assertFalse(torch._is_functional_tensor(_flat_weight))
+
+                self.assertTrue("aten.mkldnn_rnn_layer" in code)
+                self.assertEqual(fn_opt(*inps), mod(*inps))
+                self.assertEqual(
+                    counters["inductor"]["pattern_matcher_count"],
+                    num_layers * num_directions
+                    + 2,  # num of mkldnn_rnn_layer call + 2 view call on the concatenated hy, cy.
+                )
+
+                # Change input sizes
+                if change_input_sizes:
+                    inps_var = [v_var]
+                    self.assertEqual(fn_opt(*inps_var), mod(*inps_var))
+
+    @parametrize(
+        "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
+        itertools.product(
+            *[
+                [True, False],
+                [1, 2],
+                [2],
+                [1, 2],
+                [False, True],
+                [False, True],
+                [False, True],
+                [True, False],
+                [1, 2],
+                [1, 2],
+            ]
+        ),
+    )
+    def test_lstm_packed(
+        self,
+        unbatched,
+        input_size,
+        hidden_size,
+        num_layers,
+        bidirectional,
+        bias,
+        empty_state,
+        batch_first,
+        batch_size,
+        seq_len,
+    ):
+        self._test_lstm_packed(
             unbatched,
             input_size,
             hidden_size,
@@ -459,108 +569,51 @@ class CPUReproTests(TestCase):
             batch_first,
             batch_size,
             seq_len,
-        ) in itertools.product(*list(params_dict.values())):
-            dtypes = [torch.float]
-            if torch.ops.onednn._is_onednn_bf16_supported():
-                dtypes.append(torch.bfloat16)
-            if torch.ops.onednn._is_onednn_fp16_supported():
-                dtypes.append(torch.float16)
-            for dtype in dtypes:
-                counters.clear()
-                num_directions = 2 if bidirectional else 1
+        )
 
-                seq_len_var = seq_len + 3
-                if unbatched:
-                    v = torch.randn(seq_len, input_size)
-                    v_var = torch.randn(seq_len_var, input_size)
-                    h = torch.randn(num_layers * num_directions, hidden_size)
-                    c = torch.randn(num_layers * num_directions, hidden_size)
-                else:
-                    if batch_first:
-                        v = torch.randn(batch_size, seq_len, input_size)
-                        v_var = torch.randn(batch_size, seq_len_var, input_size)
-                    else:
-                        v = torch.randn(seq_len, batch_size, input_size)
-                        v_var = torch.randn(seq_len_var, batch_size, input_size)
-                    h = torch.randn(
-                        num_layers * num_directions, batch_size, hidden_size
-                    )
-                    c = torch.randn(
-                        num_layers * num_directions, batch_size, hidden_size
-                    )
-
-                mod = LstmModule(
-                    input_size,
-                    hidden_size,
-                    num_layers,
-                    bias,
-                    bidirectional,
-                    batch_first,
-                ).eval()
-                maybe_autocast = (
-                    torch.cpu.amp.autocast()
-                    if dtype == torch.bfloat16
-                    else contextlib.nullcontext()
-                )
-
-                with torch.no_grad(), maybe_autocast:
-                    inps = [v]
-                    if not empty_state:
-                        inps.append((h, c))
-
-                    fn_opt = torch._dynamo.optimize("inductor")(mod)
-                    _, code = run_and_get_cpp_code(fn_opt, *inps)
-
-                    # Check that _flat_weights are not functional_tensor, otherwise
-                    # deepcopy will fail during recompilation.
-                    fn_opt_copy = copy.deepcopy(fn_opt)
-                    _flat_weights = fn_opt_copy.lstm._flat_weights
-                    for _flat_weight in _flat_weights:
-                        self.assertFalse(torch._is_functional_tensor(_flat_weight))
-
-                    self.assertTrue("aten.mkldnn_rnn_layer" in code)
-                    self.assertEqual(fn_opt(*inps), mod(*inps))
-                    self.assertEqual(
-                        counters["inductor"]["pattern_matcher_count"],
-                        num_layers * num_directions
-                        + 2,  # num of mkldnn_rnn_layer call + 2 view call on the concatenated hy, cy.
-                    )
-
-                    # Change input sizes
-                    if change_input_sizes:
-                        inps_var = [v_var]
-                        self.assertEqual(fn_opt(*inps_var), mod(*inps_var))
-
-    @slowTest
-    def test_lstm_packed(self):
-        params_dict = {
-            "unbatched": [True, False],
-            "input_size": [1, 2],
-            "hidden_size": [2],
-            "num_layers": [1, 2],
-            "bidirectional": [False, True],
-            "bias": [False, True],
-            "empty_state": [False, True],
-            "batch_first": [True, False],
-            "batch_size": [1, 2],
-            "seq_len": [1, 2],
-        }
-        self._test_lstm_packed(params_dict)
-
-    def test_lstm_packed_change_input_sizes_cpu(self):
-        params_dict = {
-            "unbatched": [False],
-            "input_size": [2],
-            "hidden_size": [5],
-            "num_layers": [3],
-            "bidirectional": [True],
-            "bias": [True],
-            "empty_state": [False],
-            "batch_first": [False],
-            "batch_size": [2],
-            "seq_len": [3],
-        }
-        self._test_lstm_packed(params_dict, change_input_sizes=True)
+    @parametrize(
+        "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
+        itertools.product(
+            *[
+                [False],
+                [2],
+                [5],
+                [3],
+                [True],
+                [True],
+                [False],
+                [False],
+                [2],
+                [3],
+            ]
+        ),
+    )
+    def test_lstm_packed_change_input_sizes_cpu(
+        self,
+        unbatched,
+        input_size,
+        hidden_size,
+        num_layers,
+        bidirectional,
+        bias,
+        empty_state,
+        batch_first,
+        batch_size,
+        seq_len,
+    ):
+        self._test_lstm_packed(
+            unbatched,
+            input_size,
+            hidden_size,
+            num_layers,
+            bidirectional,
+            bias,
+            empty_state,
+            batch_first,
+            batch_size,
+            seq_len,
+            change_input_sizes=True,
+        )
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
@@ -3432,29 +3485,27 @@ class CPUReproTests(TestCase):
                 return self.group_norm(x)
 
         options = itertools.product(
-            vec_dtypes, [torch.contiguous_format, torch.channels_last]
+            vec_dtypes, [torch.contiguous_format, torch.channels_last], [True, False]
         )
-        for dtype, fmt in options:
+        for dtype, fmt, dynamic in options:
             torch._dynamo.reset()
             metrics.reset()
             mod = M().eval()
             x = torch.randn((2, 90, 6, 6), dtype=dtype).to(memory_format=fmt)
             with torch.no_grad():
-                self.common(mod, (x,))
+                expected = mod(x)
+                compiled_m = torch.compile(mod, dynamic=dynamic)
+                actual, code = run_and_get_cpp_code(compiled_m, x)
+                self.assertEqual(expected, actual)
                 # 2 generated kernels (one for var_mean, the other for result)
                 check_metrics_vec_kernel_count(2)
 
-            # check loop split optimization
-            if fmt == torch.channels_last:
-                torch._dynamo.reset()
-                metrics.reset()
-                with torch.no_grad():
-                    opt_mod = torch.compile(mod)
-                    _, code = run_and_get_cpp_code(opt_mod, x)
-                # check that there are no non_contiguous loads
-                FileCheck().check_count("__at_align__ std::array", 0, exactly=True).run(
-                    code
-                )
+                # check loop split optimization
+                if fmt == torch.channels_last:
+                    # check that there are no non_contiguous loads
+                    FileCheck().check_count(
+                        "__at_align__ std::array", 0, exactly=True
+                    ).run(code)
 
     def test_int_div_vec(self):
         def fn(x, y, mode):
@@ -3735,6 +3786,26 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         # TODO(jgong5): change to 1 with vectorized uint64 load
         assert metrics.generated_cpp_vec_kernel_count == 0
+
+    def test_convert_int8_to_half_vec(self):
+        src_dtypes = [torch.int8, torch.uint8]
+        dst_dtypes = [torch.bfloat16, torch.half]
+        _simd_lens = [isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()]
+        for src_dtype, dst_dtype, _simd_len in itertools.product(
+            src_dtypes, dst_dtypes, _simd_lens
+        ):
+
+            def fn(x):
+                return x.to(dst_dtype)
+
+            low = 0 if src_dtype == torch.uint8 else -100
+
+            x = torch.randint(low, 100, (32, 32), dtype=src_dtype)
+            with config.patch({"cpp.simdlen": _simd_len}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(fn, (x,))
+                check_metrics_vec_kernel_count(1)
 
     def test_convert_int32_to_int64_vec(self):
         def fn(x):
