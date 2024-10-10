@@ -35,7 +35,7 @@ Tensor& mkldnn_tanh_(Tensor& self) {
 
 #else // AT_MKLDNN_ENABLED
 
-#include <ATen/native/onednn/MKLDNNCommon.h>
+#include <ATen/native/onednn/ONEDNNCommon.h>
 
 namespace at {
 namespace native {
