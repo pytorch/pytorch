@@ -49,6 +49,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     skip_if_lt_x_gpu,
     skip_if_rocm_multiprocess,
+    sm_lower_than_70,
     TEST_SKIPS,
     with_dist_debug_levels,
     with_nccl_blocking_wait,
@@ -431,9 +432,13 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_nan_check(self):
         # Not expecting an error, NaN check should not make legit code fail
+        device = torch.device("cuda:%d" % self.rank)
+        # Test needs sm_70, see #135273, #137161
+        if sm_lower_than_70(device):
+            return
+
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
-        device = torch.device("cuda:%d" % self.rank)
         c10d.init_process_group(
             backend="nccl", store=store, rank=self.rank, world_size=self.world_size
         )
@@ -468,7 +473,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         handle = pynvml.nvmlDeviceGetHandleByIndex(self.rank)
         processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
         nprocs = len(processes)
-        c10d.barrier()
+
+        # A barrier for non-0 ranks
+        c10d.all_reduce(x)
+        torch.cuda.synchronize(device)
         c10d.destroy_process_group()
         self.assertEqual(
             nprocs,
@@ -498,7 +506,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             free, total = torch.cuda.mem_get_info(device)
             used_after = float(total - free)
         del work
-        c10d.barrier()
+
+        # A barrier for non-0 ranks
+        c10d.all_reduce(x)
+        torch.cuda.synchronize(device)
         c10d.destroy_process_group()
         if self.rank == 0:
             # If non-0 rank creates a context on device 0, this assert would
@@ -2865,12 +2876,16 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_all_reduce_coalesced_manager_nccl(self):
+        device = torch.device("cuda:%d" % self.rank)
+        # Test needs sm_70, see #135273, #137161
+        if sm_lower_than_70(device):
+            return
+
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="nccl", store=store, rank=self.rank, world_size=self.world_size
         )
         process_group = c10d.distributed_c10d._get_default_group()
-        device = torch.device("cuda:%d" % self.rank)
         tensors = [
             torch.full((60 + i,), self.rank + 1 + i, device=device, dtype=torch.float)
             for i in range(5)
