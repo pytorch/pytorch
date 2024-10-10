@@ -1075,13 +1075,17 @@ def _compile(
                 torch._logging.get_structured_logging_overhead()
             )
 
-            def convert_sets_to_strings(d: Dict[str, Any]) -> Dict[str, Any]:
+            def handle_sets(d: Dict[str, Any]) -> Dict[str, Any]:
+                # Remove entries that have set values which are functions
+                del d["reorderable_logging_functions"]
+
+                #Convert sets to list
                 return {
-                    key: str(value) if isinstance(value, set) else value
+                    key: list(value) if isinstance(value, set) else value
                     for key, value in d.items()
                 }
 
-            config_dict = convert_sets_to_strings(config.shallow_copy_dict())
+            config_dict = handle_sets(config.shallow_copy_dict())
             metrics = CompilationMetrics(
                 str(compile_id),
                 frame_key,
