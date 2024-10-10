@@ -1,4 +1,4 @@
-
+# mypy: allow-untyped-defs
 from torch._inductor.codegen.rocm.ck_template import CKTemplate
 
 
@@ -74,3 +74,34 @@ class CKConvTemplate(CKTemplate):
     } // kernel definition
     } // extern C
 """
+
+    @staticmethod
+    def add_ck_conv_choices(
+        choices,
+        layout,
+        input_nodes,
+    ):
+        template = CKConvTemplate(
+            input_nodes,
+            layout,
+        )
+        ops = template.gen_ops()
+        for op in ops:
+            template.maybe_append_choice(
+                choices,
+                op=op,
+            )
+
+    def __init__(
+        self,
+        input_nodes,
+        layout,
+    ):
+        super().__init__(
+            "ck_conv_template",
+            input_nodes,
+            layout,
+        )
+
+    def gen_ops(self):
+        return []
