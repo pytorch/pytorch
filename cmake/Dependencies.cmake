@@ -1151,6 +1151,24 @@ if(USE_CUDA)
   include_directories(SYSTEM ${CUB_INCLUDE_DIRS})
 endif()
 
+# ---[ XCCL
+if(USE_XCCL)
+  if(NOT USE_XPU)
+    message(WARNING
+        "Not using XPU, so disabling USE_XCCL. Suppress this warning with "
+        "-DUSE_XCCL=OFF.")
+    caffe2_update_option(USE_XCCL OFF)
+  elseif(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(WARNING "USE_XCCL is currently only supported under Linux.")
+    caffe2_update_option(USE_XCCL OFF)
+  else()
+    include(${CMAKE_CURRENT_LIST_DIR}/External/xccl.cmake)
+    if(NOT XCCL_FOUND)
+      caffe2_update_option(USE_XCCL OFF)
+    endif()
+  endif()
+endif()
+
 if(USE_DISTRIBUTED AND USE_TENSORPIPE)
   if(MSVC)
     message(WARNING "Tensorpipe cannot be used on Windows.")

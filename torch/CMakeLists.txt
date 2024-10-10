@@ -282,6 +282,9 @@ if(USE_DISTRIBUTED)
     if(USE_NCCL)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES __caffe2_nccl)
     endif()
+    if(USE_XCCL)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::xccl)
+    endif()
     # Same for MPI.
     if(USE_MPI)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES MPI::MPI_CXX)
@@ -349,6 +352,10 @@ if(BUILD_LIBTORCHLESS)
 
   if(USE_NCCL AND USE_C10D_NCCL)
     target_compile_definitions(torch_python PRIVATE USE_C10D_NCCL)
+  endif()
+
+  if(USE_XPU AND USE_C10D_XCCL)
+    target_compile_definitions(torch_python PRIVATE USE_C10D_XCCL)
   endif()
 
   if(USE_DISTRIBUTED)
