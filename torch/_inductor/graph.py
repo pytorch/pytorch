@@ -97,6 +97,7 @@ from .utils import (
     gather_origins,
     get_cloned_parameter_buffer_name,
     get_sympy_Expr_dtype,
+    is_same_tensor,
     maybe_get_suppress_shape_guards_ctx,
     normalize_name,
     should_assume_input_aligned,
@@ -862,16 +863,7 @@ class GraphLowering(torch.fx.Interpreter):
     ) -> str:
         if not config.aot_inductor.use_runtime_constant_folding:
             for constant_name, value in self.constants.items():
-                if (
-                    not data.is_mkldnn
-                    and data.size() == value.size()
-                    and data.stride() == value.stride()
-                    and data.dtype == value.dtype
-                    and data.device == value.device
-                    and data.untyped_storage().data_ptr()
-                    == value.untyped_storage().data_ptr()
-                    and data.storage_offset() == value.storage_offset()
-                ):
+                if is_same_tensor(data, value):
                     return constant_name
 
         if name is None:
@@ -1304,6 +1296,8 @@ class GraphLowering(torch.fx.Interpreter):
         def debug(msg: str) -> None:
             log.debug("lowering %s %s", LazyString(n.format_node), msg)
 
+        from torch._inductor.bisect_helper import BisectionManager
+
         buffer_watermark = len(self.buffers)
         operation_watermark = len(self.operations)
 
@@ -1320,7 +1314,12 @@ class GraphLowering(torch.fx.Interpreter):
             if (
                 n.op == "call_function"
                 and n.target is not operator.getitem
-                and fallback_node_due_to_unsupported_type(n)
+                and (
+                    fallback_node_due_to_unsupported_type(n)
+                    or BisectionManager.disable_subsystem(
+                        "inductor", "lowerings", lambda: repr(n)
+                    )
+                )
             ):
                 debug("fallback_handler")
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
