@@ -56,6 +56,11 @@ void NCCLComm::waitUntilInitialized() {
         LOG(INFO) << "Rank " << rank_ << ": NCCL communicator is initialized.";
         initialized_ = true;
         break;
+      } else if (result != ncclInProgress) {
+        std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +
+            std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(result) +
+            "\n" + getNcclErrorDetailStr(result);
+        TORCH_CHECK_WITH(DistBackendError, false, err);
       }
     }
     auto currentTimepoint = std::chrono::steady_clock::now();

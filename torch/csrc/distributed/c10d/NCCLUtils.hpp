@@ -2,6 +2,7 @@
 
 #ifdef USE_C10D_NCCL
 
+#include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -116,6 +117,7 @@
           "\n" + getNcclErrorDetailStr(result, failureReason);                \
       TORCH_CHECK_WITH(DistBackendError, false, err);                         \
     }                                                                         \
+    sched_yield();                                                            \
     ncclCommGetAsyncError(comm, &result);                                     \
   }                                                                           \
   if (result != ncclSuccess) {                                                \
@@ -140,6 +142,7 @@
             "\n" + getNcclErrorDetailStr(state, failureReason);                \
         TORCH_CHECK_WITH(DistBackendError, false, err);                        \
       }                                                                        \
+      sched_yield();                                                           \
       ncclCommGetAsyncError(comm->getNcclComm(), &state);                      \
     } while (state == ncclInProgress);                                         \
   }                                                                            \
