@@ -1363,7 +1363,7 @@ class TritonKernel(SIMDKernel):
                     f"{tree.prefix}base = {self.iteration_ranges_ranges_code(tree)}"
                 )
 
-        if not any(tree.is_loop for tree in self.range_trees):
+        if self.inside_reduction and not any(tree.is_loop for tree in self.range_trees):
             self.codegen_reduction_inds(self.body)
 
     def need_numel_args(self):
