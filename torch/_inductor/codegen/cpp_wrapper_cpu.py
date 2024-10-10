@@ -2183,6 +2183,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 op_overload,
                 raw_args,
                 output_args,
+                outputs,
             )
 
     def generate_scoped_gil_acquire(self, declarations_before_scope, lines_in_scope):
@@ -2326,6 +2327,7 @@ if (custom_op_wrapper.get() == NULL) {
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
         output_args: Optional[List[str]] = None,
+        raw_outputs: Optional[List[ir.Buffer]] = None,
     ):
         if not config.abi_compatible:
             # Will update this to use an OSS version ProxyExecutor
@@ -2391,8 +2393,9 @@ if (py_{buf_name}.get() == NULL) {{
 
             declarations_before_scope = [
                 f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg in output_args
+                for output_arg, raw_output_arg in zip(output_args, raw_outputs)  # type: ignore[arg-type]
                 if output_arg is not None
+                and not isinstance(raw_output_arg, ir.MutationOutput)
             ]
             scope_gil_acquire = self.generate_scoped_gil_acquire(
                 declarations_before_scope, lines

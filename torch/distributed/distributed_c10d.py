@@ -4247,9 +4247,7 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group
 
-    .. note:: `ProcessGroupNCCL` now relies on stream synchronization instead of
-              device synchronization to block the CPU. Thus, please do not assume that
-              `barrier()` would perform a device synchronization.
+    .. note:: `ProcessGroupNCCL` now blocks the cpu thread till the completion of the barrier collective.
     """
     if _rank_not_in_group(group):
         _warn_not_in_group("barrier")
