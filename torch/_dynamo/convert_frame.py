@@ -1078,8 +1078,9 @@ def _compile(
             def handle_sets(d: Dict[str, Any]) -> Dict[str, Any]:
                 # Remove entries that have set values which are functions
                 del d["reorderable_logging_functions"]
-
-                #Convert sets to list
+                # Remove entries that have set values which are _TensorMeta
+                del d["traceable_tensor_subclasses"]
+                
                 return {
                     key: list(value) if isinstance(value, set) else value
                     for key, value in d.items()
