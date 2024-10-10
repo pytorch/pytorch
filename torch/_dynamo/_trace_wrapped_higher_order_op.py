@@ -1,4 +1,5 @@
-from typing import Any, Dict, List, Optional, Tuple
+# mypy: allow-untyped-defs
+from typing import Dict, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -49,35 +50,6 @@ __all__ = ["trace_wrapped"]
 # compiled autograd do we inline into the function.
 
 
-class ModIndex(torch.autograd.Function):
-    @staticmethod
-    def forward(x: Tensor, indices: List[Tensor]) -> Tensor:
-        return torch.ops.aten.index(x, indices)
-
-    @staticmethod
-    def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> None:
-        x, indices = inputs
-        ctx.save_for_backward(*indices)
-        ctx.input_shape = x.shape
-
-    generate_vmap_rule = True
-
-    @staticmethod
-    def backward(ctx, gradOut):  # type: ignore[no-untyped-def]
-        indices = ctx.saved_tensors
-        return (
-            torch.ops.mylib.zeros_and_scatter(
-                ctx.input_shape,
-                indices,
-                gradOut,
-            ),
-            None,
-        )
-
-
-mod_index = ModIndex.apply
-
-
 class TransformGetItemToIndex(TorchFunctionMode):
     # This is needed since we want to support calling
     # A[q_idx], where q_idx is a scalar tensor in score_mod.
@@ -95,20 +67,20 @@ class TransformGetItemToIndex(TorchFunctionMode):
         if func == torch.Tensor.__getitem__:
             index_args = pytree.tree_leaves(args[1])
             if all(isinstance(x, torch.Tensor) for x in index_args):
-                return mod_index(args[0], index_args)
+                return torch.ops.aten.index(args[0], index_args)
         return func(*args, **(kwargs or {}))
 
 
-def trace_wrapped(*args: Any, **kwargs: Any) -> Any:
+def trace_wrapped(*args, **kwargs):
     with torch.no_grad():
         return _trace_wrapped_op(*args, **kwargs)
 
 
 class TraceWrapped(HigherOrderOperator):
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__("trace_wrapped")
 
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+    def __call__(self, *args, **kwargs):
         return super().__call__(*args, **kwargs)
 
 
@@ -116,12 +88,7 @@ class TraceWrapped(HigherOrderOperator):
 _trace_wrapped_op = TraceWrapped()
 
 
-def _assert_meta(
-    grad: torch.Tensor,
-    size: Tuple[int, ...],
-    stride: Tuple[int, ...],
-    dtype: torch.dtype,
-) -> torch.Tensor:
+def _assert_meta(grad, size, stride, dtype):
     assert grad.size() == size, "size mismatch"
     assert grad.stride() == stride, "stride mismatch"
     assert grad.dtype == dtype, "dtype mismatch"
@@ -129,19 +96,14 @@ def _assert_meta(
 
 
 @_trace_wrapped_op.py_impl(ProxyTorchDispatchMode)
-def inner_trace(
-    mode: ProxyTorchDispatchMode,
-    *args: Any,
-    bw_state: Optional[BackwardState] = None,
-    **kwargs: Any,
-) -> Any:
-    def self_invoke(*args: Any, **dyn_kwargs: Any) -> Any:
+def inner_trace(mode, *args, bw_state=None, **kwargs):
+    def self_invoke(*args, **dyn_kwargs):
         with torch.no_grad():
             return _trace_wrapped_op(*args, **dyn_kwargs, **kwargs)
 
-    def unwrap_proxies(x: Any) -> Any:
+    def unwrap_proxies(x):
         if isinstance(x, torch.Tensor):
-            return mode.tracer.unwrap_proxy(x)  # type: ignore[union-attr]
+            return mode.tracer.unwrap_proxy(x)
         if isinstance(x, (list, tuple)):
             return type(x)(map(unwrap_proxies, x))
         if x is None:
@@ -170,12 +132,12 @@ def inner_trace(
 
 
 @_trace_wrapped_op.py_impl(FakeTensorMode)
-def inner_fake(*args: Any, **kwargs: Any) -> None:
+def inner_fake(*args, **kwargs):
     raise RuntimeError("This op should never be invoked here")
 
 
 @_trace_wrapped_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def _trace_wrapped_op_dense(*args: Any, fn: Any, **kwargs: Any) -> Any:
+def _trace_wrapped_op_dense(*args, fn, **kwargs):
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
     return fn(*args, **kwargs)
@@ -187,7 +149,7 @@ _trace_wrapped_op.py_impl(DispatchKey.Autograd)(
 
 
 @_trace_wrapped_op.py_functionalize_impl
-def _trace_wrapped_functionalized(ctx: Any, *args: Any, **kwargs: Any) -> Any:
+def _trace_wrapped_functionalized(ctx, *args, **kwargs):
     unwrapped_args = ctx.unwrap_tensors(args)
     with ctx.redispatch_to_next():
         return ctx.wrap_tensors(_trace_wrapped_op(*unwrapped_args, **kwargs))
