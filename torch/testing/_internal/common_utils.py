@@ -36,6 +36,7 @@ import time
 import types
 import unittest
 import warnings
+import yaml
 from collections.abc import Mapping, Sequence
 from contextlib import closing, contextmanager
 from copy import deepcopy
@@ -5317,7 +5318,6 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     s = re.sub(r" +$", "", s, flags=re.MULTILINE)
     return s
 
-
 @contextmanager
 def check_leaked_tensors(limit=1, matched_type=torch.Tensor):
     """Wrap around operations you want to ensure are not leaking tensor memory.
@@ -5360,7 +5360,6 @@ def check_leaked_tensors(limit=1, matched_type=torch.Tensor):
     finally:
         gc.set_debug(0)
 
-
 def remove_cpp_extensions_build_root():
     """
     Removes the default root folder under which extensions are built.
@@ -5373,3 +5372,14 @@ def remove_cpp_extensions_build_root():
             subprocess.run(["rm", "-rf", default_build_root], stdout=subprocess.PIPE)
         else:
             shutil.rmtree(default_build_root, ignore_errors=True)
+
+def get_backend_ops(device='xpu'):
+    backend_ops = {}
+    if TEST_XPU and device == 'xpu':
+        xpu_op_db = CI_TEST_PREFIX + "/" + device + "/op_db.yaml"
+        try:
+            with open(xpu_op_db) as stream:
+                backend_ops = yaml.safe_load(stream)
+        except yaml.YAMLError or FileExistsError:
+            print("Error in loading op_db.yaml.")
+    return backend_ops
