@@ -1,7 +1,8 @@
+#include <ATen/Functions.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/Exceptions.h>
-#include <ATen/Functions.h>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 
@@ -314,5 +315,225 @@ CUDAGraph::~CUDAGraph() {
   }
   reset();
 }
+
+std::vector<std::vector<UpdateAndTensorOffset>> create_device_updates(
+    CUDAGraph* graph1_ptr,
+    const CUDAGraph& graph2,
+    const std::vector<std::pair<at::Tensor, at::Tensor>>& input_pairs) {
+  CUDAGraph& graph1 = *graph1_ptr;
+  // Note: graph1 and graph2 should topologically be the same
+  // they should have come from doing stream capture twice, on two separate
+  // inputs TORCH_CHECK(graph1.descendent_graphs_.empty());
+  // TORCH_CHECK(graph2.descendent_graphs_.empty());
+
+  size_t num_nodes1;
+  AT_CUDA_CHECK(cudaGraphGetNodes(graph1.graph_, nullptr, &num_nodes1));
+  std::vector<cudaGraphNode_t> nodes1(num_nodes1);
+  AT_CUDA_CHECK(cudaGraphGetNodes(graph1.graph_, nodes1.data(), &num_nodes1));
+
+  size_t num_nodes2;
+  AT_CUDA_CHECK(cudaGraphGetNodes(graph2.graph_, nullptr, &num_nodes2));
+  std::vector<cudaGraphNode_t> nodes2(num_nodes2);
+  AT_CUDA_CHECK(cudaGraphGetNodes(graph2.graph_, nodes2.data(), &num_nodes2));
+
+  TORCH_CHECK_EQ(num_nodes1, num_nodes2);
+
+  std::vector<std::vector<UpdateAndTensorOffset>> arguments_to_updates(
+      input_pairs.size());
+
+  for (size_t i = 0; i < num_nodes1; ++i) {
+    cudaGraphNode_t node1 = nodes1[i];
+    cudaGraphNode_t node2 = nodes2[i];
+
+    cudaGraphNodeType type1, type2;
+    AT_CUDA_CHECK(cudaGraphNodeGetType(node1, &type1));
+    AT_CUDA_CHECK(cudaGraphNodeGetType(node2, &type2));
+    TORCH_CHECK_EQ(type1, type2);
+
+    if (type1 == cudaGraphNodeTypeKernel) {
+      cudaKernelNodeParams nodeParams1, nodeParams2;
+      AT_CUDA_CHECK(cudaGraphKernelNodeGetParams(node1, &nodeParams1));
+      AT_CUDA_CHECK(cudaGraphKernelNodeGetParams(node2, &nodeParams2));
+      TORCH_CHECK_EQ(nodeParams1.func, nodeParams2.func);
+      cudaFunction_t func;
+      AT_CUDA_CHECK(cudaGetFuncBySymbol(&func, nodeParams1.func));
+
+      const char* func_name;
+      globalContext().getNVRTC().cuFuncGetName(&func_name, func);
+
+      std::cout << "GALVEZ: kernel name=" << func_name << std::endl;
+
+      size_t param_index = 0;
+      size_t param_offset;
+      size_t param_size;
+      while (globalContext().getNVRTC().cuFuncGetParamInfo(
+                 func, param_index, &param_offset, &param_size) !=
+             CUDA_ERROR_INVALID_VALUE) {
+        char** arg1_speculative_pointer =
+            (char**)nodeParams1.kernelParams[param_index];
+        char** arg2_speculative_pointer =
+            (char**)nodeParams2.kernelParams[param_index];
+        // We are assuming that arg1 and arg2 are both pointer types.
+        std::cout << "GALVEZ: param_index=" << param_index << std::endl;
+        std::cout << "GALVEZ: param_size=" << param_size << std::endl;
+        for (size_t address_start = 0; param_size - address_start >= 8;
+             address_start += 8) {
+          std::cout << "GALVEZ: address_start=" << address_start << std::endl;
+          char* arg1_value = arg1_speculative_pointer[address_start / 8];
+          char* arg2_value = arg2_speculative_pointer[address_start / 8];
+          std::cout << "GALVEZ: arg1_value=" << (void*)arg1_value << std::endl;
+          std::cout << "GALVEZ: arg2_value=" << (void*)arg2_value << std::endl;
+
+          if ((intptr_t)arg1_value % 8 == 0 && (intptr_t)arg2_value % 8 == 0) {
+            for (std::size_t j = 0; j < input_pairs.size(); ++j) {
+              // for (auto&& [input1, input2]: input_pairs) {
+              auto&& [input1, input2] = input_pairs[j];
+              long int input_diff = (char*)input1.const_data_ptr() -
+                  (char*)input2.const_data_ptr();
+              std::cout << "GALVEZ: arg_diff=" << arg1_value - arg2_value
+                        << std::endl;
+              std::cout << "GALVEZ: input_diff=" << input_diff << std::endl;
+              // we have verified that this is possibly a pointer
+              // argument now check whether this parameter is offset by
+              // the same amount
+              if (arg1_value - arg2_value // technically undefined behavior?
+                  ==
+                  // TODO: What is the type here?
+                  (char*)input1.const_data_ptr() -
+                      (char*)input2.const_data_ptr()) {
+                // match!
+
+                ptrdiff_t tensor_offset =
+                    arg1_value - (char*)input1.const_data_ptr();
+                assert(tensor_offset > 0);
+
+                cudaKernelNodeAttrValue attr_value = {
+                    .deviceUpdatableKernelNode = {
+                        .deviceUpdatable = 1,
+                        .devNode = nullptr,
+                    }};
+                AT_CUDA_CHECK(cudaGraphKernelNodeSetAttribute(
+                    node1,
+                    cudaLaunchAttributeDeviceUpdatableKernelNode,
+                    &attr_value));
+
+                AT_CUDA_CHECK(cudaGraphKernelNodeGetAttribute(
+                    node1,
+                    cudaLaunchAttributeDeviceUpdatableKernelNode,
+                    &attr_value));
+                TORCH_CHECK(
+                    attr_value.deviceUpdatableKernelNode.devNode != nullptr);
+
+                cudaGraphKernelNodeUpdate update{};
+                update.node = attr_value.deviceUpdatableKernelNode.devNode;
+                update.field = cudaGraphKernelNodeFieldParam;
+                update.updateData.param.pValue =
+                    nullptr; // the user will have to provide this update. BUT:
+                             // it is not simply data_ptr(). It could be offset!
+                             // This is a bit tricky.
+                update.updateData.param.offset = param_offset + address_start;
+                update.updateData.param.size = 8;
+                // update.updateData.param.offset = param_offset;
+                // update.updateData.param.size = param_size;
+
+                // tensor_offset needed for setting pValue. See comment next to
+                // pValue
+                arguments_to_updates[j].push_back(
+                    UpdateAndTensorOffset{update, tensor_offset});
+
+                // Consider a pathalogical case: The same address gets passed
+                // twice to a kernel.
+              }
+            }
+          }
+        }
+        param_index++;
+      }
+
+    } else if (type1 == cudaGraphNodeTypeMemcpy) {
+      // Do graph surgery to change this memory copy node and replace
+      // it with a kernel doing memory copy instead.
+      throw std::runtime_error("graph node Type not supported yet.");
+      assert(false);
+      // cudaGraphNodeSetParams can modify memory copy nodes, but the
+      // device-side update API can't do that, unfortunately.
+    }
+  }
+  return arguments_to_updates;
+}
+
+// for (auto&& node : new_nodes) {
+//   cudaGraphNodeType type;
+//   AT_CUDA_CHECK(cudaGraphNodeGetType(node, &type));
+//   if (type == cudaGraphNodeTypeKernel) {
+//     cudaKernelNodeParams nodeParams;
+//     AT_CUDA_CHECK(cudaGraphKernelNodeGetParams(node, &nodeParams));
+//     cudaFunction_t func;
+//     AT_CUDA_CHECK(cudaGetFuncBySymbol(&func, nodeParams.func));
+//     // cudaGraphKernelNodeUpdatesApply is what I need for
+//     // running on different arguments, I believe... Need
+//     // to wrap in its own kernel, though.
+
+//     const char* func_name;
+//     globalContext().getNVRTC().cuFuncGetName(&func_name, func);
+
+//     std::cout << "GALVEZ: kernel name=" << func_name << std::endl;
+
+//     size_t param_index = 0;
+//     size_t param_offset;
+//     size_t param_size;
+//     while (globalContext().getNVRTC().cuFuncGetParamInfo(
+//            func, param_index, &param_offset, &param_size) !=
+//            CUDA_ERROR_INVALID_VALUE) {
+//       std::cerr << "GALVEZ: parameters:" << param_index << ", " <<
+//       param_offset << ", " << param_size << std::endl; if (param_size == 8) {
+//         // this value could be a pointer. Do we have access to the input
+//         // tensors???
+//         size_t i = 0;
+//         for (const c10::IValue& i_value : fn.inputs()) {
+//           std::cerr << "GALVEZ: input loop" << i << std::endl;
+//           if (i_value.isTensor()) { // consider tensor list as well...
+//             std::cerr << "GALVEZ: i_value.isTensor()" << std::endl;
+//             const at::Tensor& tensor = i_value.toTensor();
+//             // unclear what type to use here. Maybe it
+//             // could be queried? But does it matter? The
+//             // type could affect alignment, right?
+//             const void* base_address = tensor.const_data_ptr();
+//             std::cerr << "GALVEZ: addresses:" << base_address << ", " <<
+//             nodeParams.kernelParams[param_index] << std::endl; if
+//             (base_address == nodeParams.kernelParams[param_index]) {
+//               // Then we need to create an Update structure.
+//               // we will need to update pValue later
+//               cudaKernelNodeAttrValue value;
+//               // shouldn't this be SetAttribute???
+// cudaKernelNodeAttrValue attr_value = {
+//   .deviceUpdatableKernelNode = {
+//     .deviceUpdatable = 1,
+//     .devNode = nullptr,
+//   }
+// };
+//               AT_CUDA_CHECK(cudaGraphKernelNodeSetAttribute(
+//                   node,
+//                   cudaLaunchAttributeDeviceUpdatableKernelNode,
+//                   &attr_value));
+//               cudaGraphKernelNodeUpdate update{};
+//               update.node = value.deviceUpdatableKernelNode.devNode;
+//               update.field = cudaGraphKernelNodeFieldParam;
+//               update.updateData.param.pValue = nullptr;
+//               update.updateData.param.offset = param_offset;
+//               update.updateData.param.size = param_size;
+
+//               arguments_to_updates[i].push_back(update);
+//             }
+//           }
+//           ++i;
+//         }
+//       }
+//       param_index++;
+//     }
+//   } else {
+//     throw std::runtime_error("graph node Type not supported yet.");
+//   }
+// }
 
 } // namespace at::cuda

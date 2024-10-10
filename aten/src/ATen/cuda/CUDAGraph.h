@@ -18,6 +18,11 @@ namespace cuda {
 // to CUDAGraph::capture_begin
 TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
 
+struct UpdateAndTensorOffset {
+  cudaGraphKernelNodeUpdate update;
+  ptrdiff_t tensor_offset; // TODO: change to intptr_t
+};
+
 struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph();
   ~CUDAGraph();
@@ -37,6 +42,11 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   MempoolId_t pool();
   void enable_debug_mode();
   void debug_dump(const std::string& debug_path);
+
+  friend std::vector<std::vector<UpdateAndTensorOffset>> create_device_updates(
+      CUDAGraph* graph1_ptr,
+      const CUDAGraph& graph2,
+      const std::vector<std::pair<at::Tensor, at::Tensor>>& input_pairs);
 
  protected:
   cudaGraph_t graph_ = nullptr;
@@ -84,6 +94,12 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // captures if needed.
   int capture_dev_{};
 };
+
+TORCH_CUDA_CPP_API std::vector<std::vector<UpdateAndTensorOffset>>
+create_device_updates(
+    CUDAGraph* graph1_ptr,
+    const CUDAGraph& graph2,
+    const std::vector<std::pair<at::Tensor, at::Tensor>>& input_pairs);
 
 } // namespace cuda
 } // namespace at
