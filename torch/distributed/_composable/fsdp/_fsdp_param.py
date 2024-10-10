@@ -790,7 +790,6 @@ class FSDPParam:
         if updated_local_tensor:
             # Only change the local tensor object if needed
             self.sharded_param._local_tensor = local_tensor[: self.sharded_size[0]]
-        self._sharding_spec = self.sharded_param._spec
 
     def __repr__(self):
         return f"FSDPParam(fqn={self._param_fqn}, orig_size={self._orig_size})"

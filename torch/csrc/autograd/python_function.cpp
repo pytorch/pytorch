@@ -297,7 +297,7 @@ auto PyNode::compiled_autograd_should_lift() const -> bool {
 void PyNode::compiled_args(CompiledNodeArgs& args) {
   static PyObject* method_name =
       PyUnicode_InternFromString("_compiled_autograd_key");
-  THPObjectPtr pykey(PyObject_CallMethodObjArgs(obj, method_name, nullptr));
+  THPObjectPtr pykey(PyObject_CallMethodNoArgs(obj, method_name));
   if (!pykey)
     throw_python_error();
   TORCH_CHECK(
