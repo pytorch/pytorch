@@ -9,6 +9,7 @@
 #include <ATen/cuda/tunable/GemmCommon.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/StringUtil.h>
+#include <fmt/printf.h>
 
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -574,15 +575,12 @@ auto GetHipBlasLtTypeStringAndOps() {
 
   int returned_algo_count = heuristic_result.size();
   std::vector<std::pair<std::string, std::unique_ptr<Callable<ParamsT>>>> ret;
-  const int buf_len = 32;
-  char buf[buf_len];
-  int val;
   for (int i = 0; i < returned_algo_count; i++) {
     auto algo = heuristic_result[i].algo;
     int algo_index = hipblaslt_ext::getIndexFromAlgo(algo);
     auto callable = std::make_unique<HipblasltGemmOp<AT, BT, CT, ALayout, BLayout, ParamsT>>(algo);
-    val = snprintf(buf, buf_len, "Gemm_Hipblaslt_%c%c_%d", _charFromhipblasOp(transa_outer), _charFromhipblasOp(transb_outer), algo_index);
-    ret.emplace_back(std::string(buf, val), std::move(callable));
+    std::string type_string = fmt::sprintf("Gemm_Hipblaslt_%c%c_%d", _charFromhipblasOp(transa_outer), _charFromhipblasOp(transb_outer), algo_index);
+    ret.emplace_back(type_string, std::move(callable));
   }
 
   return ret;

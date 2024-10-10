@@ -22,7 +22,7 @@
 #include <ATen/ops/allclose.h>
 #include <ATen/ops/from_blob.h>
 #endif
-#include <cstdio>
+#include <fmt/printf.h>
 
 namespace at::cuda::tunable {
 
@@ -82,15 +82,7 @@ struct GemmParams : OpParams {
   }
 
   std::string Signature() const override {
-    const int buf_len = 64;
-    char buf[buf_len];
-    int ret;
-
-    ret = snprintf(buf, buf_len, "%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
-
-    TORCH_CHECK(ret > 0 && ret < buf_len, "TunableOp: Signature formatting error occured. Return value = ", ret);
-
-    return std::string(buf, ret);
+    return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
   }
 
   size_t GetSizeA() const {
@@ -167,15 +159,7 @@ private:
 template <typename T>
 struct GemmAndBiasParams : OpParams {
   std::string Signature() const override {
-    const int buf_len = 64;
-    char buf[buf_len];
-    int ret;
-
-    ret = snprintf(buf, buf_len, "%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
-
-    TORCH_CHECK(ret > 0 && ret < buf_len, "TunableOp: Signature formatting error occured. Return value = ", ret);
-
-    return std::string(buf, ret);
+    return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
   }
 
   size_t GetSize(bool duplicate_inputs) const {
@@ -245,15 +229,7 @@ struct GemmStridedBatchedParams : OpParams {
   }
 
   std::string Signature() const override {
-    const int buf_len = 64;
-    char buf[buf_len];
-    int ret;
-
-    ret = snprintf(buf, buf_len, "%c%c_%ld_%ld_%ld_B_%ld", transa, transb, m, n, k, batch);
-
-    TORCH_CHECK(ret > 0 && ret < buf_len, "TunableOp: Signature formatting error occured. Return value = ", ret);
-
-    return std::string(buf, ret);
+    return fmt::sprintf("%c%c_%ld_%ld_%ld_B_%ld", transa, transb, m, n, k, batch);
   }
 
   size_t GetSizeA() const {

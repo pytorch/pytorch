@@ -22,7 +22,7 @@
 #include <c10/util/Float8_e5m2.h>
 #include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/StringUtil.h>
-#include <cstdio>
+#include <fmt/printf.h>
 
 namespace at::cuda::tunable {
 
@@ -219,15 +219,7 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
   }
 
   std::string Signature() override {
-    const int buf_len = 64;
-    char buf[buf_len];
-    int ret;
-
-    ret = snprintf(buf, buf_len, "GemmTunableOp_%s_%c%c", TypeName<T>(T{}), BlasOpToString(ALayout), BlasOpToString(BLayout));
-
-    TORCH_CHECK(ret > 0 && ret < buf_len, "TunableOp: Signature formatting error occured. Return value = ", ret);
-
-    return std::string(buf, ret);
+    return fmt::sprintf("GemmTunableOp_%s_%c%c", TypeName<T>(T{}), BlasOpToString(ALayout), BlasOpToString(BLayout));
   }
 };
 
@@ -253,15 +245,7 @@ class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>, StreamTimer>
   }
 
   std::string Signature() override {
-    const int buf_len = 64;
-    char buf[buf_len];
-    int ret;
-
-    ret = snprintf(buf, buf_len, "GemmAndBiasTunableOp_%s_%c%c", TypeName<T>(T{}), BlasOpToString(ALayout), BlasOpToString(BLayout));
-
-    TORCH_CHECK(ret > 0 && ret < buf_len, "TunableOp: Signature formatting error occured. Return value = ", ret);
-
-    return std::string(buf, ret);
+    return fmt::sprintf("GemmAndBiasTunableOp_%s_%c%c", TypeName<T>(T{}), BlasOpToString(ALayout), BlasOpToString(BLayout));
   }
 };
 
@@ -294,15 +278,7 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
   }
 
   std::string Signature() override {
-    const int buf_len = 64;
-    char buf[buf_len];
-    int ret;
-
-    ret = snprintf(buf, buf_len, "GemmStridedBatchedTunableOp_%s_%c%c", TypeName<T>(T{}), BlasOpToString(ALayout), BlasOpToString(BLayout));
-
-    TORCH_CHECK(ret > 0 && ret < buf_len, "TunableOp: Signature formatting error occured. Return value = ", ret);
-
-    return std::string(buf, ret);
+    return fmt::sprintf("GemmStridedBatchedTunableOp_%s_%c%c", TypeName<T>(T{}), BlasOpToString(ALayout), BlasOpToString(BLayout));
   }
 };
 
@@ -320,19 +296,11 @@ class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>, StreamTimer> 
   }
 
   std::string Signature() override {
-    const int buf_len = 128;
-    char buf[buf_len];
-    int ret;
-
-    ret = snprintf(buf, buf_len, "ScaledGemmTunableOp_%s_%s_%s_%c%c",
-            TypeName<AT>(AT{}),
-            TypeName<BT>(BT{}),
-            TypeName<CT>(CT{}),
-            BlasOpToString(ALayout), BlasOpToString(BLayout));
-
-    TORCH_CHECK(ret > 0 && ret < buf_len, "TunableOp: Signature formatting error occured. Return value = ", ret);
-
-    return std::string(buf, ret);
+    return fmt::sprintf("ScaledGemmTunableOp_%s_%s_%s_%c%c",
+      TypeName<AT>(AT{}),
+      TypeName<BT>(BT{}),
+      TypeName<CT>(CT{}),
+      BlasOpToString(ALayout), BlasOpToString(BLayout));
   }
 };
 
