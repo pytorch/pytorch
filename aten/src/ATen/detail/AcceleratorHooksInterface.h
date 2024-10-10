@@ -68,6 +68,10 @@ struct TORCH_API AcceleratorHooksInterface {
       C10_UNUSED DeviceIndex device_index = -1) const {
     TORCH_CHECK(false, "Backend doesn`t support getNewGenerator()");
   }
+
+  virtual Device getDeviceFromPtr(void* data) const {
+    TORCH_CHECK(false, "Backend doesn't support getDeviceFromPtr()");
+  }
 };
 
 } // namespace at
