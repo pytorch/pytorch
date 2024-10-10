@@ -219,7 +219,7 @@ class ComboKernel(Kernel):
             ndim = len(tiled_groups)
             assert ndim >= 2, f"Combokernel not support tile {tiled_groups}"
             if not mixed_sizes and ndim == 3:
-                y_elem = tiled_groups[0]
+                y_elem = tiled_groups["y"]
                 partition_state = yelem_to_partition_state[y_elem]
                 ComboKernel._update_partition(
                     partition_state, read_write_count, node_info
