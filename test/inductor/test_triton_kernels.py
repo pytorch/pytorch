@@ -1634,6 +1634,8 @@ def forward(self, x_1, output_1):
         self.assertEqual(out2, x + y + 1)
         self.assertEqual(out3, z**2)
 
+    @requires_gpu
+    @unittest.skipIf(not has_triton_tma(), "requires Triton TMA support")
     def test_tma_capture_and_functionalize(self):
         def f(a, b):
             BLOCK_SIZE = 256
