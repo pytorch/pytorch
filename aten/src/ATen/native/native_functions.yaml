@@ -12515,6 +12515,11 @@
   dispatch:
     CompositeImplicitAutograd: _pad_circular_symint
 
+- func: _pad_symmetric(Tensor self, SymInt[] pad) -> Tensor
+  python_module: nn
+  dispatch:
+    CompositeImplicitAutograd: _pad_symmetric_symint
+
 - func: _pad_enum(Tensor self, SymInt[] pad, int mode, float? value=None) -> Tensor
   python_module: nn
   dispatch:

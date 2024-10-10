@@ -9,6 +9,7 @@ enum class padding_mode {
   replicate,
   circular,
   constant,
+  symmetric,
 };
 
 static inline c10::string_view padding_mode_string(padding_mode m) {
@@ -21,6 +22,8 @@ static inline c10::string_view padding_mode_string(padding_mode m) {
       return "circular";
     case padding_mode::constant:
       return "constant";
+    case padding_mode::symmetric:
+      return "symmetric";
   }
   TORCH_CHECK(false, "Invalid padding mode (", static_cast<int64_t>(m), ")");
 }

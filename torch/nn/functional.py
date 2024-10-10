@@ -5067,7 +5067,8 @@ def pad(
         input (Tensor): N-dimensional tensor
         pad (tuple): m-elements tuple, where
             :math:`\frac{m}{2} \leq` input dimensions and :math:`m` is even.
-        mode: ``'constant'``, ``'reflect'``, ``'replicate'`` or ``'circular'``.
+        mode: ``'constant'``, ``'reflect'``, ``'replicate'``, ``'circular'``
+            or ``'symmetric'``.
             Default: ``'constant'``
         value: fill value for ``'constant'`` padding. Default: ``0``
 

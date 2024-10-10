@@ -8564,7 +8564,7 @@ class TestNNDeviceType(NNTestCase):
 
         inputs = torch.rand(1, 3, 4, 4, device=device, dtype=dtype)
         # assert that pad doesn't return a view into the input tensor
-        for mode in 'constant', 'reflect', 'replicate', 'circular':
+        for mode in 'constant', 'reflect', 'replicate', 'circular', 'symmetric':
             out = F.pad(inputs, (0, 0, 0, 0), mode=mode)
             out.fill_(4)
             self.assertTrue(torch.all(torch.abs(inputs) < 2))
@@ -8572,6 +8572,35 @@ class TestNNDeviceType(NNTestCase):
             out = F.pad(inputs, (0, 0, -1, -1), mode=mode)
             out.fill_(4)
             self.assertTrue(torch.all(torch.abs(inputs) < 2))
+
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float64, torch.complex128)
+    @unittest.skipIf(not TEST_NUMPY, "numpy not found")
+    def test_pad_symmetric(self, device, dtype):
+        """Test support for symetric padding."""
+        for pad_list in [[(6, 6), (6, 6)],
+                         [(5, 6), (6, 5)],
+                         [(6, 5), (5, 6)],
+                         [(5, 5), (5, 5)],
+                         [(7, 7), (7, 7)],
+                         [(1, 2), (6, 6), (6, 6)],
+                         [(2, 1), (6, 6), (6, 6)]]:
+            for size in [(1, 3, 3), (1, 4, 4), (1, 2, 2), (1, 1, 1), (1, 2, 1),
+                         (1, 1, 2), (1, 2, 3, 3)]:
+                th_array = torch.randn(*size, device=device, dtype=dtype, requires_grad=True)
+                array = th_array.detach().numpy()
+                # torch expects a flat tuple of padding values.
+                th_sym_array_compatible = tuple(p for pad_tuple in pad_list for p in pad_tuple)
+                if len(pad_list) == 3:
+                    th_array = th_array.unsqueeze(0)
+                my_pad = F.pad(th_array, th_sym_array_compatible, mode="symmetric")
+                # numpy expects padding information for every dimension.
+                np_pad = np.pad(array, [(0, 0)] * (len(size) - len(pad_list)) + pad_list, mode="symmetric")
+                if len(pad_list) == 3:
+                    my_pad = my_pad.squeeze(0)
+                assert np.allclose(my_pad.detach().cpu().numpy(), np_pad)
+
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float64, torch.complex128)
