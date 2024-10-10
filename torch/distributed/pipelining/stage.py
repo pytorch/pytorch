@@ -1280,16 +1280,16 @@ class PipelineStage(_PipelineStageBase):
                 "Otherwise, shape inference will be performed at runtime"
             )
         else:
-            logger.warning(
-                "Deprecation warning: passing input_args and performing init-time shape inference is deprecated. "
-                "PipelineStage now supports runtime shape inference using the real inputs provided to schedule step(). "
-                "Either delete `input_args` arg to `PipelineStage` to opt-into runtime shape inference, "
-                "or additionally pass `output_args` to `PipelineStage` to fully override shape inference. "
-            )
             self.inputs_meta = (
                 (input_args,) if isinstance(input_args, torch.Tensor) else input_args
             )
             if output_args is None:
+                logger.warning(
+                    "Deprecation warning: passing input_args and performing init-time shape inference is deprecated. "
+                    "PipelineStage now supports runtime shape inference using the real inputs provided to schedule step(). "
+                    "Either delete `input_args` arg to `PipelineStage` to opt-into runtime shape inference, "
+                    "or additionally pass `output_args` to `PipelineStage` to fully override shape inference. "
+                )
                 try:
                     with torch.no_grad():
                         output_args = submodule(*self.inputs_meta)
@@ -1300,7 +1300,9 @@ class PipelineStage(_PipelineStageBase):
                     raise RuntimeError(
                         "Failed to perform pipeline shape inference- are your inputs on the same device as your module?"
                     ) from e
-            assert output_args is not None  # for mypy
+            assert (
+                output_args is not None
+            ), "If passing input_args, also pass output_args to override shape inference"
             self._configure_outputs_meta(
                 (output_args,) if isinstance(output_args, torch.Tensor) else output_args
             )
@@ -1341,8 +1343,12 @@ class PipelineStage(_PipelineStageBase):
         if kwargs is None:
             kwargs = {}
         assert args is not None, "Args may be an empty tuple but not None"
+
+        # We skip recv communication if we're the first stage, but also if the previous stage is on the same rank
+        # and can pass its output shapes in as args instead of using send/recv.
         if (
             self.is_first
+            # if not first stage, then check if prev stage is on the same rank
             or self.stage_index_to_group_rank[self.stage_index - 1] == self.group_rank
         ):
             logger.debug(
@@ -1397,6 +1403,7 @@ class PipelineStage(_PipelineStageBase):
         #    pass their shape info via return value and function args rather than send/recv.
         if (
             self.is_last
+            # if not last stage, then check if next stage is on the same rank
             or self.stage_index_to_group_rank[self.stage_index + 1] == self.group_rank
         ):
             # Case (2) above: pass shape info via return value and caller passes it as args to next stage's
