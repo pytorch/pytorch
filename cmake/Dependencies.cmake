@@ -718,6 +718,7 @@ endif()
 
 # ---[ FBGEMM
 if(USE_FBGEMM)
+  if(NOT USE_SYSTEM_FBGEMM)
   set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
   if(NOT DEFINED FBGEMM_SOURCE_DIR)
     set(FBGEMM_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/fbgemm" CACHE STRING "FBGEMM source directory")
@@ -758,7 +759,7 @@ if(USE_FBGEMM)
       target_compile_options_if_supported(asmjit -Wno-unused-but-set-variable)
     endif()
   endif()
-
+  endif()
   if(USE_FBGEMM)
     list(APPEND Caffe2_DEPENDENCY_LIBS fbgemm)
   endif()
