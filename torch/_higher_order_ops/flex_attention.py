@@ -807,7 +807,8 @@ def sdpa_dense_backward(
     actual_grad_key = torch.empty_like(key)
     actual_grad_value = torch.empty_like(value)
     actual_grad_score_mod_captured = [
-        torch.empty_like(buffer) for buffer in score_mod_other_buffers
+        torch.empty_like(buffer) if buffer.requires_grad else None
+        for buffer in score_mod_other_buffers
     ]
 
     Bq, Bkv = query.size(0), key.size(0)
@@ -911,18 +912,18 @@ def sdpa_dense_backward(
     actual_grad_key.copy_(grad_key)
     actual_grad_value.copy_(grad_value)
 
+    score_mod_other_buffer_grads = [
+        actual_grad.copy_(grad) if actual_grad is not None else actual_grad
+        for actual_grad, grad in zip(
+            actual_grad_score_mod_captured, grad_score_mod_captured
+        )
+    ]
+
     return (
         actual_grad_query,
         actual_grad_key,
         actual_grad_value,
-        tuple(
-            [
-                actual_grad.copy_(grad) if grad is not None else grad
-                for actual_grad, grad in zip(
-                    actual_grad_score_mod_captured, grad_score_mod_captured
-                )
-            ]
-        ),
+        tuple(score_mod_other_buffer_grads),
     )
 
 
@@ -1160,7 +1161,10 @@ def flex_attention_backward_fake_tensor_mode(
         grad_key = torch.empty_like(key)
         grad_value = torch.empty_like(value)
         grad_score_mod_captured = tuple(
-            [torch.empty_like(buffer) for buffer in score_mod_other_buffers]
+            [
+                torch.empty_like(buffer) if buffer.requires_grad else None
+                for buffer in score_mod_other_buffers
+            ]
         )
         return grad_query, grad_key, grad_value, grad_score_mod_captured
 
