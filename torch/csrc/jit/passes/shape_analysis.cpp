@@ -1032,7 +1032,7 @@ class ShapePropagator : public PropertyPropBase {
             if (isIntegralType(*first_scalar_type, false) &&
                 isFloatingType(*second_scalar_type)) {
               auto default_dtype =
-                  at::typeMetaToScalarType(caffe2::get_default_dtype());
+                  at::typeMetaToScalarType(c10::get_default_dtype());
               return {broadcast(*maybe_tensor_types, default_dtype)};
             }
             if (c10::ScalarType::Bool == *first_scalar_type &&
@@ -1914,8 +1914,7 @@ class ShapePropagator : public PropertyPropBase {
       }
       if (isIntegralType(*first_scalar_type, false) &&
           isFloatingType(*second_scalar_type)) {
-        auto default_dtype =
-            at::typeMetaToScalarType(caffe2::get_default_dtype());
+        auto default_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
         auto type = tensor_types[0]->withScalarType(default_dtype);
         node->output()->setType(std::move(type));
         return true;
