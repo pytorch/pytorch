@@ -34,8 +34,8 @@ void set_disabled_torch_dispatch_impl(PyObject* value) {
 
 typedef struct {
   PyObject_HEAD
-      /* Type-specific fields go here. */
-      at::impl::TorchFunctionDisabledState old_state;
+  /* Type-specific fields go here. */
+  at::impl::TorchFunctionDisabledState old_state;
 } DisableTorchFunctionSubclass;
 
 PyObject* DisableTorchFunctionSubclass__enter(
@@ -80,9 +80,8 @@ static PyMethodDef DisableTorchFunctionSubclass_methods[] = { // NOLINT
     {nullptr, nullptr, 0, nullptr}};
 
 PyTypeObject DisableTorchFunctionSubclassType = {
-    PyVarObject_HEAD_INIT(
-        nullptr,
-        0) "torch._C.DisableTorchFunctionSubclass", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C.DisableTorchFunctionSubclass", /* tp_name */
     sizeof(DisableTorchFunctionSubclass), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
@@ -131,8 +130,8 @@ PyObject* THPModule_DisableTorchFunctionSubclassType() {
 
 typedef struct {
   PyObject_HEAD
-      /* Type-specific fields go here. */
-      at::impl::TorchFunctionDisabledState old_state;
+  /* Type-specific fields go here. */
+  at::impl::TorchFunctionDisabledState old_state;
 } DisableTorchFunction;
 
 PyObject* DisableTorchFunction__enter(PyObject* self, PyObject* unused) {
@@ -155,9 +154,8 @@ static PyMethodDef DisableTorchFunction_methods[] = { // NOLINT
     {nullptr, nullptr, 0, nullptr}};
 
 PyTypeObject DisableTorchFunctionType = {
-    PyVarObject_HEAD_INIT(
-        nullptr,
-        0) "torch._C.DisableTorchFunction", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C.DisableTorchFunction", /* tp_name */
     sizeof(DisableTorchFunction), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
@@ -345,7 +343,7 @@ inline bool array_has_torch_function(PyObject* const* args, Py_ssize_t nargs) {
 }
 
 PyObject* THPModule_has_torch_function(PyObject*, PyObject* arg) {
-  bool result; // NOLINT(cppcoreguidelines-init-variables)
+  bool result = false;
   if (PyTuple_CheckExact(arg) || PyList_CheckExact(arg)) {
     // Fast path:
     //   If we know that we have a tuple or list, we can skip an INCREF and
