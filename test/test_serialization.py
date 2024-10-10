@@ -4307,6 +4307,29 @@ class TestSerialization(TestCase, SerializationMixin):
                 torch.save(torch.randn(2, 3), f)
                 f.seek(0)
                 torch.load(f, weights_only=True)
+    
+    @unittest.skipIf(IS_FBCODE, "miniz version differs between fbcode and oss")
+    @parametrize("compute_crc32", (True, False))
+    def test_crc32_options(self, compute_crc32):
+        sd = torch.nn.Linear(3, 5).state_dict()
+        with tempfile.NamedTemporaryFile() as f:
+            filename = f.name
+            try:
+                print(f"Set default crc32 options to {compute_crc32}")
+                torch.serialization.set_default_crc32_options(compute_crc32)
+                print(f"{torch.serialization._compute_crc32=}")
+                torch.save(sd, filename)
+                sd_loaded = torch.load(filename, weights_only=True)
+                self.assertEqual(sd_loaded, sd)
+            finally:
+                torch.serialization.set_default_crc32_options(True)
+            
+            args = () if compute_crc32 else (zipfile.BadZipFile, "Bad CRC-32 for file")
+            ctx = contextlib.nullcontext if compute_crc32 else self.assertRaisesRegex
+
+            # with ctx(*args):
+            with zipfile.ZipFile(filename) as zip_file:
+                zip_file.extractall()
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
