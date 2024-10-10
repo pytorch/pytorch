@@ -34,6 +34,25 @@ max_block: int = TRITON_MAX_BLOCK["X"]
 @config.patch("triton.use_block_ptr", True)
 @instantiate_parametrized_tests
 class TritonBlockPointerTest(InductorTestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._stack = contextlib.ExitStack()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._stack.close()
+        super().tearDownClass()
+
+    def setUp(self):
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        super().setUp()
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.reset()
+
     def run_and_compare(
         self,
         func: Callable[..., Any],
@@ -289,7 +308,7 @@ class TritonBlockPointerTest(InductorTestCase):
             ((4, 4), 1, 1),
             ((4, 4, 4), 1, 1),
             ((8, 8, 8), 1, 1),
-            ((15, 15), 0, 1),  # Non-power of 2
+            ((15, 15), None, 1),  # Non-power of 2
             ((3 * max_block, 2), 3, 2),  # Multiple of max block. Uses loops.
             (
                 (2, 3 * max_block),
@@ -496,6 +515,48 @@ class TritonBlockPointerTest(InductorTestCase):
                     self.assertIn(tile_name, program)
                 else:
                     self.assertNotIn(tile_name, program)
+
+    @parametrize(
+        "view_size,num_block_pointers,num_triton_kernels,reduction_op",
+        [
+            ((15, 15), 1, 1, torch.sum),  # Non-power-of 2 shapes.
+            ((129, 129), 3, 2, torch.sum),  # Large size, with loops.
+            ((3, 3), 1, 1, torch.argmax),
+            ((11, 11), 1, 1, torch.argmax),
+            ((15, 15), 1, 1, torch.argmax),
+            ((129, 129), 1, 1, torch.argmax),
+        ],
+    )
+    def test_nd_tiling_odd_shapes_reduce(
+        self,
+        view_size: Tuple[int],
+        num_block_pointers: int,
+        num_triton_kernels: int,
+        reduction_op: Callable,
+    ):
+        """
+        Tests a reduction kernel.
+        """
+
+        device = torch.device(GPU_TYPE)
+        full_size = tuple(2 * dim for dim in view_size)
+        full = torch.randn(full_size).to(device)
+        view = torch.as_strided(full, view_size, full.stride())
+
+        # Expect at least 1 block pointer for the input.
+        # Add 2 more if we generate 2 kernels.
+        result, (code,) = self.run_and_compare(
+            reduction_op,
+            view,
+            expected_num_block_pointers=num_block_pointers,
+            expected_num_triton_kernels=num_triton_kernels,
+            config_patches={"triton.prefer_nd_tiling": True},
+        )
+
+        # Check the code for multiple Rn_BLOCK's
+        expected_blocks = ["R0_BLOCK", "R1_BLOCK"]
+        for block in expected_blocks:
+            self.assertIn(block, code)
 
     def test_complex_reshape_block_ptr(self):
         def func(x, y):
