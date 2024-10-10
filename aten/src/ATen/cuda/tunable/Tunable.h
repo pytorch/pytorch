@@ -19,6 +19,7 @@
 #include <string>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -87,6 +88,7 @@ class TORCH_CUDA_CPP_API ResultEntry {
 
 typedef std::unordered_map<std::string, ResultEntry> KernelMap;
 typedef std::unordered_map<std::string, KernelMap> ResultsMap;
+typedef std::unordered_map<std::string, std::unordered_set<std::string>> UntunedMap;
 
 struct TORCH_CUDA_CPP_API TuningResults {
   // Validates if these results are compatible with the libraries
@@ -129,9 +131,12 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
 
     size_t GetSize();
 
+    void RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature, const std::string& params_signature);
   private:
     std::mutex lock_;
     ResultsMap results_;
+    UntunedMap untuned_results_;
+
 };
 
 class TORCH_CUDA_CPP_API TuningResultsValidator {
@@ -173,6 +178,10 @@ class TORCH_CUDA_CPP_API TuningContext {
     void EnableTuning(bool value);
     bool IsTuningEnabled() const;
 
+    void EnableRecordUntuned(bool value);
+    bool IsRecordUntunedEnabled() const;
+    std::ofstream& GetUntunedFile();
+
     void EnableNumericsCheck(bool value);
     bool IsNumericsCheckEnabled() const;
 
@@ -213,6 +222,7 @@ class TORCH_CUDA_CPP_API TuningContext {
   private:
     bool enable_;
     bool tuning_enable_;
+    bool record_untuned_enable_;
     bool manager_initialized_;
     bool write_file_on_exit_;
     bool numerics_check_enable_;
@@ -226,6 +236,7 @@ class TORCH_CUDA_CPP_API TuningContext {
     mutable c10::once_flag manager_init_once_;
     TuningResultsValidator validator_;
     std::string filename_;
+    std::ofstream untuned_file_;
     size_t results_count_from_input_file_;
 };
 
