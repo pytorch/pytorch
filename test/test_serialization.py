@@ -4315,9 +4315,7 @@ class TestSerialization(TestCase, SerializationMixin):
         with tempfile.NamedTemporaryFile() as f:
             filename = f.name
             try:
-                print(f"Set default crc32 options to {compute_crc32}")
                 torch.serialization.set_default_crc32_options(compute_crc32)
-                print(f"{torch.serialization._compute_crc32=}")
                 torch.save(sd, filename)
                 sd_loaded = torch.load(filename, weights_only=True)
                 self.assertEqual(sd_loaded, sd)
