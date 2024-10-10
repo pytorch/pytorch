@@ -2100,25 +2100,3 @@ def should_use_remote_fx_graph_cache():
 
 def normalize_name(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_]", "_", name)
-
-
-def is_same_tensor(data: torch.Tensor, value: torch.Tensor):
-    return (
-        not data.is_mkldnn
-        and data.size() == value.size()
-        and data.stride() == value.stride()
-        and data.dtype == value.dtype
-        and data.device == value.device
-        and data.untyped_storage().data_ptr() == value.untyped_storage().data_ptr()
-        and data.storage_offset() == value.storage_offset()
-    )
-
-
-def is_same_mkldnn_tensor(data: torch.Tensor, value: torch.Tensor):
-    return (
-        data.is_mkldnn
-        and data.size() == value.size()
-        and data.dtype == value.dtype
-        and data.device == value.device
-        and torch.ops.mkldnn.data_ptr(data) == torch.ops.mkldnn.data_ptr(value)
-    )

@@ -14,6 +14,7 @@ import torch._export
 import torch._inductor
 import torch._inductor.config
 import torch.nn as nn
+import torch.nn.functional as F
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
 from torch._inductor import config
@@ -812,6 +813,97 @@ class AOTInductorTestsTemplate:
             Model(dtype, weight),
             (x, input_bias, a_inverse_scale, b_inverse_scale),
             dynamic_shapes=dynamic_shapes,
+        )
+
+    def test_tile_positional_embedding(self):
+        class TilePositionalEmbedding(nn.Module):
+            """
+            Positional embedding for tiles, different for every tile, same for every token within a tile.
+
+            Notice that tile is different from patch (token). For details, please check the documentation of
+            :class:`torchtune.modules.vision_transformer.VisionTransformer`.
+
+            Args:
+                max_num_tiles (int): The maximum number of tiles an image can be divided into.
+                embed_dim (int): The dimensionality of each tile embedding.
+            """
+
+            def __init__(
+                self,
+                max_num_tiles: int,
+                embed_dim: int,
+            ):
+                super().__init__()
+                self.max_num_tiles = max_num_tiles
+                self.embed_dim = embed_dim
+
+                scale = embed_dim**-0.5
+                self.embedding = nn.Parameter(
+                    scale * torch.randn(max_num_tiles, max_num_tiles, 1, embed_dim)
+                )
+                self.gate = nn.Parameter(torch.zeros(1))
+
+            def forward(
+                self, x: torch.Tensor, aspect_ratio: torch.Tensor
+            ) -> torch.Tensor:
+                """
+                args:
+                    x (torch.Tensor): torch.Tensor with shape (bsz * n_imgs, n_tiles, n_tokens, embed_dim).
+                    aspect_ratio (torch.Tensor): torch.Tensor with shape (bsz * n_imgs, 2),
+                        representing the aspect ratio of the image before tile-cropping, e.g. (2,1).
+                returns:
+                    torch.Tensor: The input tensor with added positional embeddings.
+                """
+                bsz_and_n_imgs, n_tiles, n_tokens, embed_dim = x.shape
+                torch._check(n_tiles <= self.max_num_tiles)
+
+                for batch_idx, (n_tiles_h, n_tiles_w) in enumerate(aspect_ratio):
+                    # When we batch images, all are padded to the same amount of tiles.
+                    # The aspect_ratio lets us know the non padded tiles for each image.
+                    # We only add positional encoding to those.
+                    n_tiles_h = n_tiles_h.item()
+                    n_tiles_w = n_tiles_w.item()
+
+                    n_non_padded_tiles = int(n_tiles_h * n_tiles_w)
+
+                    # We get only the positional encoding for non padded tiles,
+                    # i.e. n_tiles_h, n_tiles_w.
+                    torch._check_is_size(n_tiles_h)
+                    torch._check_is_size(n_tiles_w)
+                    torch._check(n_tiles_h > 0)
+                    torch._check(n_tiles_w > 0)
+                    torch._check(n_tiles_h <= self.max_num_tiles)
+                    torch._check(n_tiles_w <= self.max_num_tiles)
+                    padded_embedding = F.pad(self.embedding, (0, 0, 0, 0, 0, 1, 0, 1))
+                    # pos_embed = padded_embedding[:n_tiles_h, :n_tiles_w, :, :]
+                    pos_embed = padded_embedding.narrow(0, 0, n_tiles_h).narrow(
+                        1, 0, n_tiles_w
+                    )
+
+                    # Add pos encoding to the non padded tiles.
+                    pos_embed = pos_embed.clone()
+                    pos_embed = pos_embed.view(n_non_padded_tiles, 1, self.embed_dim)
+
+                    x = F.pad(x, (0, 0, 0, 0, 0, 1, 0, 0))
+                    torch._check_is_size(n_non_padded_tiles)
+                    torch._check(n_non_padded_tiles < x.size(1))
+                    # x[batch_idx, :n_non_padded_tiles, :, :] += pos_embed
+                    updating = x.narrow(0, batch_idx, batch_idx + 1).narrow(
+                        1, 0, n_non_padded_tiles
+                    )
+                    # updating += pos_embed * self.gate.tanh()
+                    updating.add_(pos_embed * self.gate.tanh())
+                    # x = x[:, :n_tiles, :, :]
+                    x = x.narrow(1, 0, n_tiles)
+
+                return x
+
+        x = torch.ones(1, 4, 1600, 1280, device=self.device)
+        aspect_ratio = torch.tensor([[2, 2]], device=self.device)
+
+        self.check_model(
+            TilePositionalEmbedding(4, 1280),
+            (x, aspect_ratio),
         )
 
     def test_poi_multiple_dynamic(self):
