@@ -365,7 +365,7 @@ def get_runner_prefix(
     rollout_state: str,
     workflow_requestors: Iterable[str],
     branch: str,
-    check_experiments: FrozenSet[str] = frozenset(),
+    eligible_experiments: FrozenSet[str] = frozenset(),
     is_canary: bool = False,
 ) -> str:
     settings = parse_settings(rollout_state)
@@ -381,11 +381,11 @@ def get_runner_prefix(
             )
             continue
 
-        if check_experiments:
-            if experiment_name not in check_experiments:
-                exp_list = ", ".join(check_experiments)
+        if eligible_experiments:
+            if experiment_name not in eligible_experiments:
+                exp_list = ", ".join(eligible_experiments)
                 log.info(
-                    f"Skipping experiment '{experiment_name}', as it is not in the check_experiments list: {exp_list}"
+                    f"Skipping experiment '{experiment_name}', as it is not in the eligible_experiments list: {exp_list}"
                 )
                 continue
         elif not experiment_settings.default:
@@ -476,7 +476,7 @@ def main() -> None:
             rollout_state,
             (args.github_issue_owner, username),
             args.github_branch,
-            args.check_experiments,
+            args.eligible_experiments,
             is_canary,
         )
 
