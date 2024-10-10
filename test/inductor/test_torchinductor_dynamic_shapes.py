@@ -942,7 +942,7 @@ class TestInductorDynamic(TestCase):
         def f(x):
             return x.sum()
 
-        x = torch.empty_strided((1, 4), (5, 1), device="cuda")
+        x = torch.empty_strided((1, 4), (5, 1), device=GPU_TYPE)
         torch._dynamo.decorators.mark_unbacked(x, 0)
         f(x)
 

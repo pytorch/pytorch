@@ -7706,6 +7706,9 @@ class CommonTemplate:
             check_lowp = False
 
         for deterministic in [False, True]:
+            if deterministic and self.device == "xpu":
+                # There is no deterministic implementation for scatter_add on Intel GPU.
+                continue
             with DeterministicGuard(deterministic):
                 self.common(
                     fn,
