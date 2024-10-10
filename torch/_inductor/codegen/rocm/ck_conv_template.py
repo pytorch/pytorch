@@ -144,6 +144,7 @@ def parse_instances(str_instances: List[str]) -> List[CKConvOp]:
             if i_next == -1:
                 break
 
+        template_args[0] = -1
         template_args[3] = tuple()
         template_args[9] = tuple()
 
@@ -179,38 +180,38 @@ def gen_conv_ops_library() -> List[CKConvOp]:
 
     log.debug("ck instances from library: %d", len(op_instances))
 
-    return op_instances
     schedulers = [
         "BlockGemmPipelineScheduler::Intrawave",
         "BlockGemmPipelineScheduler::Interwave",
     ]
-    gemm_specs = [
-        "GemmSpecialization::Default",
-        "GemmSpecialization::MPadding",
-        "GemmSpecialization::NPadding",
-        "GemmSpecialization::KPadding",
-        "GemmSpecialization::MNPadding",
-        "GemmSpecialization::MKPadding",
-        "GemmSpecialization::NKPadding",
-        "GemmSpecialization::MNKPadding",
+    conv_specs = [
+        "ConvolutionForwardSpecialization::ConvFwdDefault",
+        "ConvolutionForwardSpecialization::ConvFwd1x1P0",
+        "ConvolutionForwardSpecialization::ConvFwd1x1S1P0",
+        "ConvolutionForwardSpecialization::ConvFwdOddC",
     ]
 
     # substitute templated args by looping through their domains
     substitute_instances = []
     for instance in op_instances:
         sub_scheduler = instance.block_gemm_pipeline_scheduler == "BlkGemmPipeSched"
-        sub_spec = instance.gemm_specialization == "GemmSpec"
+        sub_spec = instance.conv_forward_specialization == "ConvSpec"
         schedulers_range = (
             schedulers if sub_scheduler else [instance.block_gemm_pipeline_scheduler]
         )
-        spec_range = gemm_specs if sub_spec else [instance.gemm_specialization]
+        spec_range = conv_specs if sub_spec else [instance.conv_forward_specialization]
         for scheduler in schedulers_range:
             for spec in spec_range:
                 substitute_instances.append(
                     replace(
                         instance,
                         block_gemm_pipeline_scheduler=scheduler,
-                        gemm_specialization=spec,
+                        conv_forward_specialization=spec,
+                        gemm_specialization="GemmSpecialization::MNKPadding",
+                        n_dim_spatial=2,
+                        a_layout="NHWGC",
+                        b_layout="GKYXC",
+                        e_layout="NHWGK",
                     )
                 )
 
