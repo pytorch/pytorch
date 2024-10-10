@@ -834,6 +834,11 @@ class GraphLowering(torch.fx.Interpreter):
         """
         assert isinstance(name, str)
         self.mutated_buffers.add(name)
+        if name in self.graph_inputs and name not in self.mutated_inputs:
+            for i, key in enumerate(self.graph_inputs.keys()):
+                if key == name:
+                    self.mutated_inputs.add(name)
+                    self.mutated_input_idxs.append(i)
 
         if name not in self.name_to_users:
             return
@@ -1785,16 +1790,10 @@ class GraphLowering(torch.fx.Interpreter):
                         )
                     ]
 
-                if self.mutated_inputs:
+                if len(self.mutated_input_idxs) > 0:
                     from .compile_fx import clone_preserve_strides
 
-                    mutated_input_idxs = [
-                        idx
-                        for idx, name in enumerate(self.graph_inputs)
-                        if name in self.mutated_inputs
-                        and isinstance(real_inputs[idx], torch.Tensor)
-                    ]
-                    for idx in mutated_input_idxs:
+                    for idx in self.mutated_input_idxs:
                         # clone mutated Tensor inputs to avoid mutating them in
                         # the first pass of the CPP wrapper-based compilation, as
                         # this will lead to a side effect on the example inputs:
