@@ -106,7 +106,7 @@ inline Tensor& fill_empty_deterministic_(Tensor& tensor) {
     AT_DISPATCH_V2(
       tensor.scalar_type(), "fill_empty_deterministic_", AT_WRAP([&]() {
         tensor.fill_(std::numeric_limits<scalar_t>::quiet_NaN());
-    }), AT_EXPAND(AT_FLOATING_TYPES), AT_EXPAND(AT_COMPLEX_TYPES), AT_EXPAND(AT_FLOAT8_TYPES), kBFloat16, kHalf);
+    }), AT_EXPAND(AT_FLOATING_TYPES), AT_EXPAND(AT_COMPLEX_TYPES), AT_EXPAND(AT_FLOAT8_TYPES), kBFloat16, kHalf, kComplexHalf);
   } else {
     AT_DISPATCH_V2(
       tensor.scalar_type(), "fill_empty_deterministic_", AT_WRAP([&]() {
