@@ -3,6 +3,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/core/Tensor.h>
 #include <torch/library.h>
+#include <ATen/native/mkldnn/Linear.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -230,12 +231,12 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
   return at::native::onednn_linear_backward(input, grad_output, weight, output_mask);
 }
 
-static Tensor onednn_linear_pointwise(
+Tensor onednn_linear_pointwise(
     const Tensor& input_t,
     const Tensor& weight_t,
     const std::optional<Tensor>& bias_opt,
     c10::string_view attr,
-    torch::List<std::optional<at::Scalar>> scalars,
+    c10::List<std::optional<at::Scalar>> scalars,
     std::optional<c10::string_view> algorithm) {
   auto input = input_t.contiguous();
   auto input_size = input.sizes();
@@ -304,7 +305,7 @@ static Tensor onednn_linear_pointwise(
   return output;
 }
 
-static Tensor onednn_linear_pointwise_binary(
+Tensor onednn_linear_pointwise_binary(
     const Tensor& input_t,
     const Tensor& other_t,
     const Tensor& weight_t,
