@@ -737,6 +737,69 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
             return LayoutType.VNNI2
 
 
+# extra check for CppMicroBrgemm
+def check_brgemm_extra(config, m, n, k, alpha, num_threads):
+    assert config.input_dtype == torch.half and config.output_dtype == torch.float
+    vnni_size = 2
+    # use brgemm for Half when amx_fp16 is supported
+    return torch.cpu._is_amx_fp16_supported() and k % vnni_size == 0 and alpha == 1
+
+
+@register_micro_gemm(
+    *generate_gemm_config(
+        VecAMX,
+        [(32, 32, 32), (48, 16, 32), (16, 48, 32)],
+        input_dtype=torch.half,
+        output_dtype=torch.float,
+        extra_check=check_brgemm_extra,
+    ),
+)
+class CppMicroBrgemm(CppMicroGemm):
+    """
+    This class generates the code for micro gemm using oneDNN brgemm.
+    It supports input types of torch.half.
+    """
+
+    TEMPLATE_ENTRY = r"""
+#include <ATen/native/CPUBlas.h>
+{{declare_kernel}} {
+    at::native::cpublas::brgemm(
+      M, N, K,
+      lda, ldb, ldc,
+      1.f, accum ? 1.f : 0.f,
+      A,
+      B,
+      C);
+}
+"""
+
+    def codegen_define(self, kernel: CppTemplateKernel) -> str:
+        options = {
+            "declare_kernel": self.get_kernel_declaration(),
+            "kernel": kernel,
+            "block_m": self.register_blocking.block_m,
+            "block_n": self.register_blocking.block_n,
+            "block_k": self.register_blocking.block_k,
+            "restrict_keyword": get_restrict_keyword(),
+            **self.get_common_options(),
+        }
+        result = ""
+        result += KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(
+            options
+        )
+        return result
+
+    def codegen_finalize(
+        self,
+        kernel: CppTemplateKernel,
+    ) -> str:
+        return "at::native::cpublas::brgemm_release();"
+
+    def get_b_layout(self):
+        assert self.input_dtype == torch.half
+        return LayoutType.VNNI2
+
+
 def create_micro_gemm(
     name,
     m,
