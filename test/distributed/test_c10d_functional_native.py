@@ -701,7 +701,7 @@ class CompileTest(TestCase):
             FileCheck()
             .check(
                 "buf0 = torch.ops._c10d_functional.all_gather_into_tensor_coalesced"
-                ".default([arg0_1, arg1_1, arg2_1, arg3_1]"
+                ".default([arg3_1, arg2_1, arg1_1, arg0_1]"
             )
             .check("buf1 = buf0[0]")
             .check("buf2 = buf0[1]")
@@ -722,12 +722,23 @@ class CompileTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "This is a GPU test!")
     @fresh_inductor_cache()
-    def test_wait_tensor_temp(self):
+    def test_wait_tensor(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
-            return funcol.wait_tensor(arg)
+            t = torch.ops._c10d_functional.all_reduce(arg, "avg", "0")
+            return funcol.wait_tensor(t)
 
         # Test aoti
         arg = torch.rand(4, 4, device="cuda")
+        compiled = torch.compile(func)
+        code = run_and_get_triton_code(compiled, arg)
+        (
+            FileCheck()
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
+            .check("return (buf0, )")
+            .run(code)
+        )
+
+        # Test aoti
         out = AOTIRunnerUtil.run("cuda", func, (arg,))
         torch.cuda.synchronize()
 

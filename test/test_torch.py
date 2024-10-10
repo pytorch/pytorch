@@ -63,7 +63,7 @@ from torch.testing._internal.common_mkldnn import bf32_on_and_off
 from torch.testing._internal.common_dtype import (
     floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
     all_types_and, floating_types, floating_and_complex_types, integral_types_and,
-    get_all_qint_dtypes,
+    get_all_qint_dtypes, all_types_complex_float8_and,
 )
 from torch.testing._internal.two_tensor import TwoTensor
 
@@ -1337,7 +1337,8 @@ else:
     # point tensors with NaN and integer tensors with MAX_INT
     @skipXLA
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64))
+    @dtypes(*all_types_and_complex_and(
+        torch.half, torch.bool, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64, torch.complex32))
     def test_deterministic_empty(self, device, dtype):
         gen_fns = [
             lambda: torch.empty(10, 9, device=device, dtype=dtype),
@@ -3554,7 +3555,7 @@ else:
     # FIXME: move to test indexing
     # The test fails for zero-dimensional tensors on XLA
     @onlyNativeDeviceTypes
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypes(*all_types_complex_float8_and(torch.half, torch.bool, torch.bfloat16))
     def test_index_select(self, device, dtype):
         num_src, num_out = 3, 5
 
@@ -3563,11 +3564,12 @@ else:
             return make_tensor(size_arg, dtype=dtype, device=device, low=None, high=None, noncontiguous=not contig)
 
         def ref_index_select(src, dim, idx):
-            # bfloat16 is just used on GPU, so it's not supported on numpy
-            if dtype == torch.bfloat16:
+            # some types not supported on numpy
+            not_np_dtypes = (torch.bfloat16, torch.float8_e5m2, torch.float8_e5m2fnuz, torch.float8_e4m3fn, torch.float8_e4m3fnuz)
+            if dtype in not_np_dtypes:
                 src = src.float()
             out = torch.from_numpy(np.take(src.cpu().numpy(), idx.cpu().numpy(), axis=dim))
-            if dtype == torch.bfloat16:
+            if dtype in not_np_dtypes:
                 out = out.to(device=device, dtype=dtype)
             return out
 
@@ -6381,12 +6383,21 @@ else:
                     atol = 1e-2
                 self.assertEqual(src, dst.copy_(t), rtol=rtol, atol=atol)
 
-    @dtypes(*all_types_and_complex_and(
+    @dtypes(*all_types_complex_float8_and(
         torch.bool, torch.half, torch.bfloat16, torch.complex32,
         torch.uint16, torch.uint32, torch.uint64))
     def test_item(self, device, dtype):
-        if torch.device(device).type == 'xla' and dtype in [torch.uint16, torch.uint32, torch.uint64]:
-            self.skipTest('uint16,32,64 not implemented on XLA')
+        xla_unsupported_dtypes = [
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2fnuz,
+        ]
+        if torch.device(device).type == 'xla' and dtype in xla_unsupported_dtypes:
+            self.skipTest('uint16,32,64,float8 not implemented on XLA')
         t = torch.ones((), device=device, dtype=dtype)
         self.assertEqual(1, t.item())
 
