@@ -4,7 +4,19 @@
 
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
-#if defined(CPU_CAPABILITY_NEON)
+#if defined(__ARM_NEON)
+template <typename src_t>
+struct VecConvert<
+    float,
+    1,
+    src_t,
+    1,
+    typename std::enable_if_t<is_8bit_integer_v<src_t>,
+        void>> {
+  static inline VectorizedN<float, 1> apply(const VectorizedN<src_t, 1>& src) {
+    return convert_int8_half_register_to_float<src_t>(src[0]);
+  }
+};
 template <typename src_t>
 struct VecConvert<
     float,
@@ -34,7 +46,18 @@ struct VecConvert<float, 2, BFloat16, 1> {
     return result;
   }
 };
+// Half register to full register.
+template <>
+struct VecConvert<float, 1, BFloat16, 1> {
+  static inline VectorizedN<float, 1> apply(
+      const VectorizedN<BFloat16, 1>& src) {
+    VectorizedN<float, 1> result;
+    uint16x4_t u16_8 = vld1_u16(reinterpret_cast<const uint16_t*>(&src[0]));
+    float32x4_t f32x4_0 = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(u16_8), 16));
+    result[0] = f32x4_0;
+    return result;
+  }
+};
 #endif
-
 } // namespace CPU_CAPABILITY
 } // namespace at::vec

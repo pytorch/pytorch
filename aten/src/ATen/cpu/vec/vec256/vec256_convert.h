@@ -299,7 +299,6 @@ struct VecConvert<
 };
 #endif
 
-
 template <typename src_t>
 struct VecConvert<
     float,
