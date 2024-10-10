@@ -1318,8 +1318,10 @@ class ReduceLROnPlateau(LRScheduler):
                 raise ValueError(
                     f"expected {len(optimizer.param_groups)} min_lrs, got {len(min_lr)}"
                 )
+            self.default_min_lr = None
             self.min_lrs = list(min_lr)
         else:
+            self.default_min_lr = min_lr
             self.min_lrs = [min_lr] * len(optimizer.param_groups)
 
         self.patience = patience
@@ -1375,6 +1377,20 @@ class ReduceLROnPlateau(LRScheduler):
         self._last_lr = [group["lr"] for group in self.optimizer.param_groups]
 
     def _reduce_lr(self, epoch):
+        if len(self.optimizer.param_groups) != len(self.min_lrs):
+            if self.default_min_lr is None:
+                raise RuntimeError(
+                    "The number of param groups in the `optimizer` "
+                    f"({len(self.optimizer.param_groups)}) differs "
+                    f"from when `ReduceLROnPlateau` was initialized "
+                    f"({len(self.min_lrs)}), usually due to a new "
+                    "param group being added to the optimizer. Please "
+                    "modify the `min_lrs` field to match the length "
+                    "of the `optimizer` param groups."
+                )
+            else:
+                self.min_lrs = [self.default_min_lr] * len(self.optimizer.param_groups)
+
         for i, param_group in enumerate(self.optimizer.param_groups):
             old_lr = float(param_group["lr"])
             new_lr = max(old_lr * self.factor, self.min_lrs[i])

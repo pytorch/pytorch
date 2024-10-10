@@ -67,7 +67,7 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
         """
 
     def cpp_stream_type(self):
-        return "xpuStream_t"
+        return "sycl::queue*"
 
     def aoti_get_stream(self):
         return "aoti_torch_get_current_xpu_stream"
