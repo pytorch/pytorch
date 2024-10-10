@@ -1255,15 +1255,15 @@ class TestMkldnn(TestCase):
             x2 = x.clone().to_mkldnn().requires_grad_()
             linear = torch.nn.Linear(in_features, out_features).float()
             linear.weight = torch.nn.Parameter(w.t())
-            mkldnn_linear = copy.deepcopy(linear)
+            onednn_linear = copy.deepcopy(linear)
             y1 = linear(x1).sum()
-            y2 = mkldnn_linear(x2).to_dense().sum()
+            y2 = onednn_linear(x2).to_dense().sum()
             y1.backward()
             y2.backward()
             self.assertEqual(x1.grad, x2.grad.to_dense())
-            self.assertEqual(linear.weight.grad, mkldnn_linear.weight.grad)
+            self.assertEqual(linear.weight.grad, onednn_linear.weight.grad)
             if bias:
-                self.assertEqual(linear.bias.grad, mkldnn_linear.bias.grad)
+                self.assertEqual(linear.bias.grad, onednn_linear.bias.grad)
 
     def test_linear(self):
         in_features = torch.randint(3, 10, (1,)).item()
@@ -1272,13 +1272,13 @@ class TestMkldnn(TestCase):
 
         for bias in [True, False]:
             linear = torch.nn.Linear(in_features, out_features, bias=bias).float()
-            mkldnn_linear = mkldnn_utils.to_mkldnn(copy.deepcopy(linear))
+            onednn_linear = mkldnn_utils.to_mkldnn(copy.deepcopy(linear))
             self.assertEqual(
                 linear(x),
-                mkldnn_linear(x.to_mkldnn()).to_dense())
+                onednn_linear(x.to_mkldnn()).to_dense())
 
-            self._test_serialization(mkldnn_linear, (x.to_mkldnn(),))
-            self._test_tracing(mkldnn_linear, (x.to_mkldnn(),))
+            self._test_serialization(onednn_linear, (x.to_mkldnn(),))
+            self._test_tracing(onednn_linear, (x.to_mkldnn(),))
 
     def test_linear_backward(self):
         in_features = torch.randint(3, 10, (1,)).item()
@@ -1288,15 +1288,15 @@ class TestMkldnn(TestCase):
             x1 = x.clone().requires_grad_()
             x2 = x.clone().to_mkldnn().requires_grad_()
             linear = torch.nn.Linear(in_features, out_features).float()
-            mkldnn_linear = copy.deepcopy(linear)
+            onednn_linear = copy.deepcopy(linear)
             y1 = linear(x1).sum()
-            y2 = mkldnn_linear(x2).to_dense().sum()
+            y2 = onednn_linear(x2).to_dense().sum()
             y1.backward()
             y2.backward()
             self.assertEqual(x1.grad, x2.grad.to_dense())
-            self.assertEqual(linear.weight.grad, mkldnn_linear.weight.grad)
+            self.assertEqual(linear.weight.grad, onednn_linear.weight.grad)
             if bias:
-                self.assertEqual(linear.bias.grad, mkldnn_linear.bias.grad)
+                self.assertEqual(linear.bias.grad, onednn_linear.bias.grad)
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_linear_lowp(self, dtype):
@@ -1307,8 +1307,8 @@ class TestMkldnn(TestCase):
 
         for bias in [True, False]:
             linear = torch.nn.Linear(in_features, out_features, bias=bias).float()
-            mkldnn_linear = mkldnn_utils.to_mkldnn(copy.deepcopy(linear))
-            mkldnn_linear_lowp = mkldnn_utils.to_mkldnn(
+            onednn_linear = mkldnn_utils.to_mkldnn(copy.deepcopy(linear))
+            onednn_linear_lowp = mkldnn_utils.to_mkldnn(
                 copy.deepcopy(linear), dtype
             )
             lowp_support = {
@@ -1316,8 +1316,8 @@ class TestMkldnn(TestCase):
                 torch.half: torch.ops.onednn._is_onednn_fp16_supported,
             }
             if lowp_support[dtype]():
-                y = mkldnn_linear(x.to_mkldnn()).to_dense()
-                y_lowp = mkldnn_linear_lowp(x_lowp.to_mkldnn()).to_dense(
+                y = onednn_linear(x.to_mkldnn()).to_dense()
+                y_lowp = onednn_linear_lowp(x_lowp.to_mkldnn()).to_dense(
                     torch.float32
                 )
                 if dtype == torch.bfloat16:
@@ -1332,7 +1332,7 @@ class TestMkldnn(TestCase):
                 self.assertRaisesRegex(
                     RuntimeError,
                     msg[dtype],
-                    lambda: mkldnn_linear_lowp(x_lowp.to_mkldnn()),
+                    lambda: onednn_linear_lowp(x_lowp.to_mkldnn()),
                 )
 
     def test_softmax(self):
