@@ -54,21 +54,15 @@
 #include <climits>
 
 #else
-#if __has_include("filesystem")
 #include <filesystem>
 namespace fs = std::filesystem;
-#else
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
-#endif
-
 #endif
 
 // HACK for failed builds in ARVR, where it cannot find these symbols within
 // std::experimental::filesystem
 namespace {
 std::string get_current_path() {
-#if __has_include("filesystem") && !defined(__linux__)
+#ifdef _WIN32
   return fs::current_path().string();
 #else
   char currentPath[PATH_MAX];
@@ -81,7 +75,7 @@ std::string get_current_path() {
 }
 
 bool file_exists(std::string& path) {
-#if __has_include("filesystem") && !defined(__linux__)
+#ifdef _WIN32
   return fs::exists(path);
 #else
   struct stat rc {};
@@ -90,7 +84,7 @@ bool file_exists(std::string& path) {
 }
 
 bool create_directories(const std::string& path) {
-#if __has_include("filesystem") && !defined(__linux__)
+#ifdef _WIN32
   return fs::create_directories(path);
 #else
   if (mkdir(path.c_str(), 0777) == -1) {

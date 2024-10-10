@@ -13,15 +13,8 @@
 #ifndef _WIN32
 #include <sys/stat.h>
 #else
-// TODO: Investigate why this is necessary, but fixes build problems in FRL
-#if __has_include("filesystem")
 #include <filesystem>
 namespace fs = std::filesystem;
-#else
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
-#endif
-
 #endif
 
 // TODO: C++17 has the filesystem header, which may replace these
