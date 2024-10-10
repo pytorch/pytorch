@@ -470,6 +470,13 @@ class GraphLowering(torch.fx.Interpreter):
         assert isinstance(feature, BackendFeature), feature
         return feature in self.get_backend_features(get_device_type(device))
 
+    def get_training_phase(self) -> str:
+        if self.is_inference:
+            return "inference"
+        if self.is_backward:
+            return "backward"
+        return "forward"
+
     @staticmethod
     def decide_layout_opt(gm: GraphModule, *, is_inference: bool) -> bool:
         """
