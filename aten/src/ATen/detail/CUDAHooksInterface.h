@@ -129,12 +129,12 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
   }
 
   c10::Stream getCurrentStream(DeviceIndex device) const override {
-    TORCH_CHECK(false, "Cannot call getCurrentStream(", device_index, ") without ATen_cuda library. ", CUDA_HELP);
+    TORCH_CHECK(false, "Cannot call getCurrentStream(", device, ") without ATen_cuda library. ", CUDA_HELP);
     return c10::Stream::unpack3(-1, 0, c10::DeviceType::CUDA);
   }
 
   c10::Stream getDefaultStream(DeviceIndex device) const override {
-    TORCH_CHECK(false, "Cannot call getDefaultStream(", device_index, ") without ATen_cuda library. ", CUDA_HELP);
+    TORCH_CHECK(false, "Cannot call getDefaultStream(", device, ") without ATen_cuda library. ", CUDA_HELP);
     return c10::Stream::unpack3(-1, 0, c10::DeviceType::CUDA);
   }
 
