@@ -19,22 +19,22 @@ if(NOT __AOTRITON_INCLUDED)
 
   # AOTriton package information from GitHub Release Pages
   # Replaces .ci/docker/aotriton_version.txt
+  # Note packages information may have versions skipped (due to no ABI breaks)
+  # But they must be listed from lower version to higher version
   set(__AOTRITON_VER "0.7b")
-  string(JOIN ";"
-         __AOTRITON_MANYLINUX_LIST
-         "manylinux_2_17"  # rocm6.1
-         "manylinux_2_17"  # rocm6.2
-         )
-  string(JOIN ";"
-         __AOTRITON_ROCM_LIST
-         "rocm6.1"
-         "rocm6.2")
+  set(__AOTRITON_MANYLINUX_LIST
+      "manylinux_2_17"  # rocm6.1
+      "manylinux_2_17"  # rocm6.2
+      )
+  set(__AOTRITON_ROCM_LIST
+      "rocm6.1"
+      "rocm6.2"
+      )
   set(__AOTRITON_CI_COMMIT "9be04068c3c0857a4cfd17d7e39e71d0423ebac2")
-  string(JOIN ";"
-         __AOTRITON_SHA256_LIST
-         "006f4d982c9a9c768f31f0095128705fecb792136827e2456241fe79764de7a4"  # rocm6.1
-         "3e9e1959d23b93d78a08fcc5f868125dc3854dece32fd9458be9ef4467982291"  # rocm6.2
-         )
+  set(__AOTRITON_SHA256_LIST
+      "006f4d982c9a9c768f31f0095128705fecb792136827e2456241fe79764de7a4"  # rocm6.1
+      "3e9e1959d23b93d78a08fcc5f868125dc3854dece32fd9458be9ef4467982291"  # rocm6.2
+      )
   set(__AOTRITON_Z "gz")
 
   # Note it is INSTALL"ED"
@@ -70,19 +70,20 @@ if(NOT __AOTRITON_INCLUDED)
     add_dependencies(__caffe2_aotriton aotriton_external)
     message(STATUS "Using AOTriton compiled from source directory ${__AOTRITON_EXTERN_PREFIX}")
   else()
-    list(GET __AOTRITON_ROCM_LIST 0 __AOTRITON_ROCM_LOW_STR)
-    list(GET __AOTRITON_ROCM_LIST -1 __AOTRITON_ROCM_HIGH_STR)
-    # len("rocm") == 4
-    string(SUBSTRING ${__AOTRITON_ROCM_LOW_STR} 4 -1 __AOTRITON_ROCM_LOW)
-    string(SUBSTRING ${__AOTRITON_ROCM_HIGH_STR} 4 -1 __AOTRITON_ROCM_HIGH)
     set(__AOTRITON_SYSTEM_ROCM "${ROCM_VERSION_DEV_MAJOR}.${ROCM_VERSION_DEV_MINOR}")
-    if(__AOTRITON_SYSTEM_ROCM VERSION_LESS __AOTRITON_ROCM_LOW)
-      set(__AOTRITON_ROCM ${__AOTRITON_ROCM_LOW})
-    elseif(__AOTRITON_SYSTEM_ROCM VERSION_GREATER __AOTRITON_ROCM_HIGH)
-      set(__AOTRITON_ROCM ${__AOTRITON_ROCM_HIGH})
-    else()
-      set(__AOTRITON_ROCM ${__AOTRITON_SYSTEM_ROCM})
-    endif()
+    list(GET __AOTRITON_ROCM_LIST 0 __AOTRITON_ROCM_DEFAULT_STR)
+    # Initialize __AOTRITON_ROCM to lowest version, in case all builds > system's ROCM
+    string(SUBSTRING ${__AOTRITON_ROCM_DEFAULT_STR} 4 -1 __AOTRITON_ROCM)
+    foreach(AOTRITON_ROCM_BUILD_STR IN LISTS __AOTRITON_ROCM_LIST)
+      # len("rocm") == 4
+      string(SUBSTRING ${AOTRITON_ROCM_BUILD_STR} 4 -1 AOTRITON_ROCM_BUILD)
+      # Find the last build that <= system's ROCM
+      # Assume the list is from lower to higher
+      if(AOTRITON_ROCM_BUILD VERSION_GREATER __AOTRITON_SYSTEM_ROCM)
+        break()
+      endif()
+      set(__AOTRITON_ROCM ${AOTRITON_ROCM_BUILD})
+    endforeach()
     list(FIND __AOTRITON_ROCM_LIST "rocm${__AOTRITON_ROCM}" __AOTRITON_ROCM_INDEX)
     list(GET __AOTRITON_SHA256_LIST ${__AOTRITON_ROCM_INDEX} __AOTRITON_SHA256)
     list(GET __AOTRITON_MANYLINUX_LIST ${__AOTRITON_ROCM_INDEX} __AOTRITON_MANYLINUX)
