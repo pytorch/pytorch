@@ -379,9 +379,11 @@ std::string format_invalid_args(
     PyObject *key = nullptr, *value = nullptr;
     Py_ssize_t pos = 0;
 
+    Py_BEGIN_CRITICAL_SECTION(given_kwargs);
     while (PyDict_Next(given_kwargs, &pos, &key, &value)) {
       kwargs.emplace(THPUtils_unpackString(key), value);
     }
+    Py_END_CRITICAL_SECTION();
   }
 
   if (options.size() == 1) {
