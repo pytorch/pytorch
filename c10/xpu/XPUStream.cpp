@@ -244,13 +244,13 @@ XPUStream getCurrentXPUStream(DeviceIndex device) {
   return XPUStreamForId(device, current_streams[device]);
 }
 
-XPUStream getDefaultXPUStream(DeviceIndex device_index) {
+XPUStream getDefaultXPUStream(DeviceIndex device) {
   initXPUStreamsOnce();
-  if (device_index == -1) {
-    device_index = current_device();
+  if (device == -1) {
+    device = current_device();
   }
-  check_device(device_index);
-  return XPUStreamForId(device_index, makeStreamId(StreamIdType::NORMAL, 0));
+  check_device(device);
+  return XPUStreamForId(device, makeStreamId(StreamIdType::NORMAL, 0));
 }
 
 // Note: The stream pools will be initialized if needed, at the first invocation

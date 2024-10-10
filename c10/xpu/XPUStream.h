@@ -169,7 +169,7 @@ C10_XPU_API XPUStream getCurrentXPUStream(DeviceIndex device = -1);
  * where most computation occurs when you aren't explicitly using
  * streams.
  */
-C10_API XPUStream getDefaultXPUStream(DeviceIndex device_index = -1);
+C10_API XPUStream getDefaultXPUStream(DeviceIndex device = -1);
 
 /**
  * Set the current stream on the device of the passed in stream to be the passed
