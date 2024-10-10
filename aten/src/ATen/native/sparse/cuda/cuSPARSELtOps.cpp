@@ -416,7 +416,11 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
       n,
       (transpose_result) ? m: n,
       16,
+#ifdef USE_ROCM
+      sparseLtDataTypes.at(C_type),
+#else
       C_type,
+#endif
       (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW));
 
   // initialize matmul
