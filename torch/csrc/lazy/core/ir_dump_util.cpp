@@ -10,8 +10,7 @@
 #include <sstream>
 #include <unordered_map>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 namespace {
 
 using NodeIdMap = std::unordered_map<const Node*, size_t>;
@@ -36,7 +35,10 @@ std::optional<AttrTag> ParseAttrTag(
   std::smatch match;
   // @lint-ignore-every CLANGTIDY facebook-hte-StdRegexIsAwful
   if (!std::regex_search(
-          node_string.begin() + pos, node_string.end(), match, tag_regex)) {
+          node_string.begin() + static_cast<std::ptrdiff_t>(pos),
+          node_string.end(),
+          match,
+          tag_regex)) {
     return std::nullopt;
   }
 
@@ -51,6 +53,7 @@ std::optional<AttrTag> ParseAttrTag(
       if (SkipTagSeparator(node_string, pos) != pos) {
         break;
       }
+      // NOLINTNEXTLINE(bugprone-switch-missing-default-case)
       switch (node_string[pos]) {
         case '(':
           nested_open = node_string[pos];
@@ -255,5 +258,4 @@ std::string DumpUtil::ToBackend(
   return getBackend()->GetComputationBackendText(computation);
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy
