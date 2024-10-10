@@ -69,6 +69,10 @@ Number: TypeAlias = Union[int, float, bool]
 Device: TypeAlias = Union[_device, str, int, None]
 
 
+# Similar to Device, but for dtype.
+# None means default dtype (typically torch.float32)
+Dtype = _dtype | None
+
 # Storage protocol implemented by ${Type}StorageBase classes
 class Storage:
     _cdata: int

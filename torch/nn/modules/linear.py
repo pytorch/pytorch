@@ -6,7 +6,7 @@ import torch
 from torch import Tensor
 from torch.nn import functional as F, init
 from torch.nn.parameter import Parameter, UninitializedParameter
-
+from torch.types import Device, Dtype
 from .lazy import LazyModuleMixin
 from .module import Module
 
@@ -59,6 +59,10 @@ class Linear(Module):
         out_features: size of each output sample
         bias: If set to ``False``, the layer will not learn an additive bias.
             Default: ``True``
+        device: device on which the weight and bias tensors will be allocated.
+            ``None`` uses the default device.
+        dtype: data type of the weight and bias tensors, must be differentiable (float or complex).
+            ``None`` uses the default dtype.
 
     Shape:
         - Input: :math:`(*, H_{in})` where :math:`*` means any number of
@@ -95,18 +99,17 @@ class Linear(Module):
         in_features: int,
         out_features: int,
         bias: bool = True,
-        device=None,
-        dtype=None,
+        device: Device = None,
+        dtype: Dtype = None
     ) -> None:
-        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.weight = Parameter(
-            torch.empty((out_features, in_features), **factory_kwargs)
+            torch.empty((out_features, in_features), device=device, dtype=dtype)
         )
         if bias:
-            self.bias = Parameter(torch.empty(out_features, **factory_kwargs))
+            self.bias = Parameter(torch.empty(out_features, device=device, dtype=dtype))
         else:
             self.register_parameter("bias", None)
         self.reset_parameters()
