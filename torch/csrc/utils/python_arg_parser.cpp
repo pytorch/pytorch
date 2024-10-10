@@ -1447,6 +1447,8 @@ static Py_ssize_t find_param(FunctionSignature& signature, PyObject* name) {
   PyObject* value = nullptr;
   Py_ssize_t pos = 0;
 
+  // Note that this dict traversal is NoGil safe as the kwargs dict is only
+  // accessible within this thread.
   while (PyDict_Next(kwargs, &pos, &key, &value)) {
     if (!THPUtils_checkString(key)) {
       throw TypeError("keywords must be strings");
