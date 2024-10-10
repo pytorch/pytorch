@@ -1080,7 +1080,7 @@ def _compile(
                 del d["reorderable_logging_functions"]
                 # Remove entries that have set values which are _TensorMeta
                 del d["traceable_tensor_subclasses"]
-                
+
                 return {
                     key: list(value) if isinstance(value, set) else value
                     for key, value in d.items()
