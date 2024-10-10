@@ -1864,7 +1864,7 @@ class AotCodeCompiler:
 
             def get_nbytes_of_tensor(tensor: torch.Tensor, all_cuda: bool) -> int:
                 n_bytes = (
-                    torch.ops.mkldnn._nbytes(tensor)
+                    torch.ops.onednn._nbytes(tensor)
                     if tensor.is_mkldnn
                     else tensor.untyped_storage().nbytes()
                 )
@@ -1930,8 +1930,8 @@ class AotCodeCompiler:
                     return b""
 
                 if t.is_mkldnn:
-                    data_ptr = torch.ops.mkldnn.data_ptr(t)
-                    nbytes = torch.ops.mkldnn._nbytes(t)
+                    data_ptr = torch.ops.onednn.data_ptr(t)
+                    nbytes = torch.ops.onednn._nbytes(t)
                 else:
                     t_cpu = t.untyped_storage().cpu()
                     data_ptr = t_cpu.data_ptr()

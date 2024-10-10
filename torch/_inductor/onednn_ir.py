@@ -253,7 +253,7 @@ class ConvolutionUnary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.mkldnn._convolution_pointwise.default,
+            op_overload=torch.ops.onednn._convolution_pointwise.default,
             cpp_kernel_name="aoti_torch_cpu_mkldnn__convolution_pointwise"
             if config.abi_compatible
             else None,
@@ -334,7 +334,7 @@ class ConvolutionBinary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.mkldnn._convolution_pointwise.binary,
+            op_overload=torch.ops.onednn._convolution_pointwise.binary,
             cpp_kernel_name="aoti_torch_cpu_mkldnn__convolution_pointwise_binary"
             if config.abi_compatible
             else None,
@@ -434,7 +434,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             reordered_inputs,
             constant_args,
             None,
-            op_overload=torch.ops.mkldnn._convolution_pointwise_.binary,
+            op_overload=torch.ops.onednn._convolution_pointwise_.binary,
             cpp_kernel_name="aoti_torch_cpu_mkldnn__convolution_pointwise_binary_"
             if config.abi_compatible
             else None,
@@ -540,7 +540,7 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.mkldnn._convolution_transpose_pointwise.default,
+            op_overload=torch.ops.onednn._convolution_transpose_pointwise.default,
             cpp_kernel_name="aoti_torch_cpu_mkldnn__convolution_transpose_pointwise"
             if config.abi_compatible
             else None,
@@ -1214,7 +1214,7 @@ class LinearUnary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.mkldnn._linear_pointwise.default,
+            op_overload=torch.ops.onednn._linear_pointwise.default,
             cpp_kernel_name="aoti_torch_cpu__linear_pointwise"
             if config.abi_compatible
             else None,
@@ -1281,7 +1281,7 @@ class LinearUnary(ExternKernelAlloc):
 
 
 class LinearBinary(ExternKernelAlloc):
-    kernel = "torch.ops.mkldnn._linear_pointwise.binary"
+    kernel = "torch.ops.onednn._linear_pointwise.binary"
 
     def __init__(
         self,
@@ -1294,7 +1294,7 @@ class LinearBinary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.mkldnn._linear_pointwise.binary,
+            op_overload=torch.ops.onednn._linear_pointwise.binary,
             cpp_kernel_name="aoti_torch_cpu__linear_pointwise_binary"
             if config.abi_compatible
             else None,

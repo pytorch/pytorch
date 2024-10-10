@@ -215,7 +215,7 @@
   "test_linear_static_shapes_batch_size_1000_in_features_1000_out_features_1024_bias_False_input_3d_True_cpu_float16 (__main__.TestSelectAlgorithmCPU)": 128.8496,
   "test_linear_static_shapes_batch_size_1000_in_features_1000_out_features_1024_bias_True_input_3d_False_cpu_float16 (__main__.TestSelectAlgorithmCPU)": 71.0599,
   "test_linear_static_shapes_batch_size_1000_in_features_1000_out_features_1024_bias_True_input_3d_True_cpu_float16 (__main__.TestSelectAlgorithmCPU)": 132.49540000000005,
-  "test_lstm_cpu (__main__.TestMkldnnCPU)": 94.47895454545456,
+  "test_lstm_cpu (__main__.TestOnednnCPU)": 94.47895454545456,
   "test_lstm_packed_change_input_sizes_cpu_cpp_wrapper (__main__.TestCppWrapper)": 62.3839,
   "test_lstm_packed_change_input_sizes_cpu_dynamic_shapes_cpp_wrapper (__main__.DynamicShapesCppWrapperCpuTests)": 60.9987,
   "test_max_autotune_cutlass_backend_addmm_dynamic_False_max_autotune_gemm_backends_ATen,Triton,CUTLASS (__main__.TestCutlassBackend)": 81.91425,

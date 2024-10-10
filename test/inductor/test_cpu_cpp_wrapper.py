@@ -170,10 +170,10 @@ if RUN_CPU:
             func_inputs=[
                 ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary("]
                 if config.abi_compatible
-                else ["op_mkldnn__convolution_pointwise_binary.call"],
+                else ["op_onednn__convolution_pointwise_binary.call"],
                 ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary_("]
                 if config.abi_compatible
-                else ["op_mkldnn__convolution_pointwise__binary.call"],
+                else ["op_onednn__convolution_pointwise__binary.call"],
             ],
         ),
         BaseTest(
@@ -184,10 +184,10 @@ if RUN_CPU:
             func_inputs=[
                 ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary_("]
                 if config.abi_compatible
-                else ["op_mkldnn__convolution_pointwise__binary.call"],
+                else ["op_onednn__convolution_pointwise__binary.call"],
                 ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary("]
                 if config.abi_compatible
-                else ["op_mkldnn__convolution_pointwise_binary.call"],
+                else ["op_onednn__convolution_pointwise_binary.call"],
             ],
         ),
         BaseTest(
@@ -222,7 +222,7 @@ if RUN_CPU:
             "",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             torch.backends.mkldnn.is_available()
-            and torch.ops.mkldnn._is_onednn_bf16_supported(),
+            and torch.ops.onednn._is_onednn_bf16_supported(),
         ),
         BaseTest(
             "test_linear_packed",
@@ -230,8 +230,8 @@ if RUN_CPU:
             test_cpu_repro.CPUReproTests(),
             torch.backends.mkldnn.is_available()
             and (
-                torch.ops.mkldnn._is_onednn_bf16_supported()
-                or torch.ops.mkldnn._is_onednn_fp16_supported()
+                torch.ops.onednn._is_onednn_bf16_supported()
+                or torch.ops.onednn._is_onednn_fp16_supported()
             ),
         ),
         *[

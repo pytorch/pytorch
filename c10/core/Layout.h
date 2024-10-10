@@ -37,7 +37,7 @@ inline Layout layout_from_backend(Backend backend) {
     case Backend::SparseXPU:
     case Backend::SparsePrivateUse1:
       return Layout::Sparse;
-    case Backend::MkldnnCPU:
+    case Backend::OnednnCPU:
       return Layout::Mkldnn;
     case Backend::SparseCsrCPU:
     case Backend::SparseCsrCUDA:

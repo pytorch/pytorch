@@ -758,8 +758,8 @@ class CppPackedGemmTemplate(CppTemplate):
                                 or (
                                     W.is_mkldnn
                                     and (
-                                        torch.ops.mkldnn.data_ptr(W)
-                                        == torch.ops.mkldnn.data_ptr(comp_tensor)
+                                        torch.ops.onednn.data_ptr(W)
+                                        == torch.ops.onednn.data_ptr(comp_tensor)
                                     )
                                 )
                             )

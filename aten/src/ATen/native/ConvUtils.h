@@ -388,7 +388,7 @@ inline bool onednn_conv_use_channels_last(const at::Tensor& input, const at::Ten
     return false;
   }
 
-  // disable NHWC for MkldnnCPU tensor.
+  // disable NHWC for OnednnCPU tensor.
   if (input.is_mkldnn() || weight.is_mkldnn()) {
     return false;
   }
