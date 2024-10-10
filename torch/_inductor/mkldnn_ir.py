@@ -1219,15 +1219,6 @@ class LinearUnary(ExternKernelAlloc):
             if config.abi_compatible
             else None,
         )
-        self.cpp_kernel_key = "linear_pointwise"
-        self.cpp_op_schema = """
-            at::Tensor(
-                const at::Tensor& input_t,
-                const at::Tensor& weight_t,
-                const std::optional<at::Tensor>& bias_opt,
-                c10::string_view attr,
-                torch::List<std::optional<at::Scalar>> scalars,
-                std::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
         if config.abi_compatible:

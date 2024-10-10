@@ -185,9 +185,9 @@ Tensor mkldnn_linear_pointwise(
     const Tensor& input_t,
     const Tensor& weight_t,
     const std::optional<Tensor>& bias_opt,
-    c10::string_view attr,
+    std::string attr,
     c10::List<std::optional<at::Scalar>> scalars,
-    std::optional<c10::string_view> algorithm) {
+    std::optional<std::string> algorithm) {
   auto input = input_t.contiguous();
   auto input_size = input.sizes();
 

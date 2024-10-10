@@ -9,7 +9,6 @@ import functools
 import inspect
 import logging
 import operator
-import re
 import tempfile
 from itertools import count
 from typing import (
@@ -87,27 +86,86 @@ def convert_arg_type(arg: torch.Argument) -> str:
     # use x.real_type instead of x.type so that we get ScalarType instead of int
     python_type = repr(arg.real_type)  # type: ignore[attr-defined]
 
-    if python_type == "Tensor":
+    def type_alias(python_type, alias_info, cpp_container=""):
+        left, right = ("<", ">") if cpp_container else ("", "")
+        const = "" if alias_info is not None and alias_info.is_write else " const"
+
         # Conversions rules follow https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/native#func
-        if arg.alias_info is not None and arg.alias_info.is_write:
-            return f"at::{python_type}&"
-        else:
-            return f"at::{python_type} const&"
+        return f"{cpp_container}{left}at::{python_type}{right}{const}&"
+
+    if python_type == "Tensor":
+        return type_alias(python_type, arg.alias_info)
 
     if python_type in PYTHON_TO_CPP:
         cpp_type = PYTHON_TO_CPP[python_type]
         return cpp_type
 
-    # Convert args of container types e.g. Optional[*]
-    for py_container, cpp_container in CONTAINER_PYTHON_TO_CPP.items():
-        container_match = re.findall(py_container + r"\[([a-zA-Z_]+)]", python_type)
-        if len(container_match) == 1:
-            contained_type = container_match[0]
+    # Convert args of container types e.g. Optional[*], List[Optional[*]]
+    def get_word_list(python_type):
+        stack = []
+        word = ""
+        word_list = []
+        for char in python_type:
+            if char == "[":
+                stack.append(char)
+                word_list.append(word)
+                word = ""
+            elif char == "]":
+                assert stack and stack[-1] == "["
+                stack.pop()
+                if word:
+                    word_list.append(word)
+                    word = ""
+            else:
+                word += char
+
+        return word_list
+
+    def get_cpp_container_type(contained_type, container_list):
+        assert len(container_list) >= 1
+
+        cpp_container_type = ""
+        while container_list:
+            container = container_list[-1]
+            container_list.pop()
+
+    def may_convert_container_type(python_type):
+        word_list = get_word_list(python_type)
+        if len(word_list) < 2:
+            return ""
+
+        contained_type = word_list[-1]
+        container_list = word_list[:-1]
+
+        if not all(
+            py_container in CONTAINER_PYTHON_TO_CPP for py_container in container_list
+        ):
+            return ""
+
+        py_container = container_list[-1]
+        container_list.pop()
+        cpp_container = CONTAINER_PYTHON_TO_CPP[py_container]
+        if contained_type == "Tensor":
+            inner = type_alias(contained_type, arg.alias_info, cpp_container)
+        else:
             assert (
                 contained_type in PYTHON_TO_CPP
             ), f"unsupported {py_container} type in convert_arg_type: {contained_type}"
             cpp_contained_type = PYTHON_TO_CPP[contained_type]
-            return f"{cpp_container}<{cpp_contained_type}>"
+            inner = f"{cpp_container}<{cpp_contained_type}>"
+
+        cpp_container_type = inner
+        while container_list:
+            py_container = container_list[-1]
+            container_list.pop()
+            cpp_container = CONTAINER_PYTHON_TO_CPP[py_container]
+            cpp_container_type = f"{cpp_container}<{cpp_container_type}>"
+
+        return cpp_container_type
+
+    cpp_container_type = may_convert_container_type(python_type)
+    if cpp_container_type:
+        return cpp_container_type
 
     raise AssertionError(f"unsupport python_type: {python_type}")
 
