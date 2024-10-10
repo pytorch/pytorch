@@ -45,6 +45,7 @@ SystemEnv = namedtuple('SystemEnv', [
     'caching_allocator_config',
     'is_xnnpack_available',
     'cpu_info',
+    'xpu_env_info'
 ])
 
 DEFAULT_CONDA_PATTERNS = {
@@ -316,6 +317,31 @@ def get_cpu_info(run_lambda):
         cpu_info = err
     return cpu_info
 
+def get_xpu_env_info():
+    if not (TORCH_AVAILABLE and torch.xpu.is_available()):
+        return "N/A"
+
+    run_lambda = run
+
+    keywords = ['gpu']
+    xpu_driver_version = run_and_read_all(run_lambda, 'sycl-ls')
+    xpu_driver_info = "\n".join(
+        line
+        for line in xpu_driver_version.splitlines()
+        if any(keyword in line.lower() for keyword in keywords))
+
+    icpx_version = run_and_return_first_line(run_lambda, 'icpx --version')
+
+    xpu_mutable_dict = {
+        'xpu_driver_info': xpu_driver_info,
+        'icpx_version': icpx_version,
+    }
+
+    xpu_env_info = """
+XPU Device Driver:\n{xpu_driver_info}
+Compiler version:\n{icpx_version}
+""".strip().format(**xpu_mutable_dict)
+    return xpu_env_info
 
 def get_platform():
     if sys.platform.startswith('linux'):
@@ -504,6 +530,7 @@ def get_env_info():
         caching_allocator_config=get_cachingallocator_config(),
         is_xnnpack_available=is_xnnpack_available(),
         cpu_info=get_cpu_info(run_lambda),
+        xpu_env_info=get_xpu_env_info(),
     )
 
 env_info_fmt = """
@@ -529,6 +556,9 @@ cuDNN version: {cudnn_version}
 HIP runtime version: {hip_runtime_version}
 MIOpen runtime version: {miopen_runtime_version}
 Is XNNPACK available: {is_xnnpack_available}
+
+XPU:
+{xpu_env_info}
 
 CPU:
 {cpu_info}
