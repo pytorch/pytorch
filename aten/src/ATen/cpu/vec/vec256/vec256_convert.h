@@ -298,7 +298,7 @@ struct VecConvert<
   }
 };
 #endif
-#if defined(__ARM_NEON)
+#if (defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256))
 template <typename src_t>
 struct VecConvert<
     float,
@@ -326,7 +326,7 @@ struct VecConvert<
 };
 #endif
 
-#if defined(__ARM_NEON)
+#if (defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256))
 template <>
 struct VecConvert<float, 2, BFloat16, 1> {
   static inline VectorizedN<float, 2> apply(
