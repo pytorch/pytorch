@@ -112,6 +112,7 @@ environment variables take precedence over any setting you manipulate using the
 C++ or Python APIs.
 
 """
+import warnings
 from typing import Optional, Tuple
 
 import torch
@@ -122,6 +123,8 @@ __all__ = [
     "is_enabled",
     "tuning_enable",
     "tuning_is_enabled",
+    "record_untuned_enable",
+    "record_untuned_is_enabled",
     "set_max_tuning_duration",
     "get_max_tuning_duration",
     "set_max_tuning_iterations",
@@ -133,6 +136,7 @@ __all__ = [
     "write_file_on_exit",
     "write_file",
     "read_file",
+    "tune_gemm_in_file",
 ]
 
 
@@ -158,6 +162,19 @@ def tuning_enable(val: bool = True) -> None:
 def tuning_is_enabled() -> bool:
     r"""Returns whether TunableOp implementations can be tuned."""
     return torch._C._cuda_tunableop_tuning_is_enabled()  # type: ignore[attr-defined]
+
+
+def record_untuned_enable(val: bool = True) -> None:
+    r"""Enable recording untuned of TunableOp perations for offline tuning.
+
+    When enabled, if a tuned entry isn't found, write it to the untuned file.
+    """
+    torch._C._cuda_record_untuned_enable(val)  # type: ignore[attr-defined]
+
+
+def record_untuned_is_enabled() -> bool:
+    r"""Returns whether TunableOp operations are recorded for offline tuning."""
+    return torch._C._cuda_record_untuned_is_enabled()  # type: ignore[attr-defined]
 
 
 def set_max_tuning_duration(duration: int) -> None:
@@ -240,3 +257,64 @@ def read_file(filename: Optional[str] = None) -> bool:
     if filename is None:
         filename = get_filename()
     return torch._C._cuda_tunableop_read_file(filename)  # type: ignore[attr-defined]
+
+
+def tune_gemm_in_file(filename: str) -> None:
+    r"""tune GEMM in file."""
+
+    assert is_enabled()
+    assert tuning_is_enabled()
+
+    with open(filename) as file:
+        for line in file:
+            if line.startswith("Gemm"):
+                untuned_gemm = line.strip().split(",")[:]
+                [op_sig, data_type, layout] = untuned_gemm[0].split("_")
+
+                transA = True if layout[0] == "T" else False
+                transB = True if layout[1] == "T" else False
+
+                dtype = {
+                    "float": torch.float32,
+                    "double": torch.float64,
+                    "BFloat16": torch.bfloat16,
+                    "Half": torch.half,
+                    "c10::complex<double>": torch.complex128,
+                    "c10::complex<float>": torch.complex64,
+                    "Float8_e4m3fn": torch.float8_e4m3fn,
+                    "Float8_e5m2": torch.float8_e5m2,
+                    "Float8_e4m3fnuz": torch.float8_e4m3fnuz,
+                    "Float8_e5m2fnuz": torch.float8_e5m2fnuz,
+                }.get(data_type, torch.half)
+
+                if op_sig == "GemmTunableOp":
+                    [n, m, k] = [int(g) for g in untuned_gemm[1].split("_")[1:]]
+                    matA = (
+                        torch.rand(k, m, dtype=dtype, device="cuda").t()
+                        if transB
+                        else torch.rand(m, k, dtype=dtype, device="cuda")
+                    )
+                    matB = (
+                        torch.rand(n, k, dtype=dtype, device="cuda").t()
+                        if transA
+                        else torch.rand(k, n, dtype=dtype, device="cuda")
+                    )
+                    torch.mm(matA, matB)
+                elif op_sig == "GemmStridedBatchedTunableOp":
+                    [n, m, k] = [int(g) for g in untuned_gemm[1].split("_")[1:4]]
+                    [b] = [int(g) for g in untuned_gemm[1].split("_")[5:6]]
+                    matA = (
+                        torch.rand(b, k, m, dtype=dtype, device="cuda")
+                        if transB
+                        else torch.rand(b, m, k, dtype=dtype, device="cuda")
+                    )
+                    matB = (
+                        torch.rand(b, n, k, dtype=dtype, device="cuda")
+                        if transA
+                        else torch.rand(b, k, n, dtype=dtype, device="cuda")
+                    )
+                    matA = matA.transpose(1, 2) if transB else matA
+                    matB = matB.transpose(1, 2) if transA else matB
+                    torch.bmm(matA, matB)
+                else:
+                    warnings.warn(f"error: unkown op {op_sig}")
