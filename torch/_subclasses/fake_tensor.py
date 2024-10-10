@@ -1214,7 +1214,10 @@ class FakeTensorMode(TorchDispatchMode):
             assert not torch.cuda._is_compiled()
             return not torch.xpu.is_available()
 
-        return not torch.cuda.is_available()
+        return not (
+            torch.cuda.is_available()
+            or (hasattr(torch, "hpu") and torch.hpu.is_available())
+        )
 
     @property
     def stack(self) -> str:
@@ -1989,6 +1992,11 @@ class FakeTensorMode(TorchDispatchMode):
                 return maybe_propagate_real_tensors(
                     func.prim_meta_impl(*args, **kwargs)
                 )
+
+        profiles = torch._dynamo.config._custom_ops_profile
+        if profiles is not None:
+            if func in profiles.data:
+                return profiles.generic_fake_kernel(func, self, *args, **kwargs)
 
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.

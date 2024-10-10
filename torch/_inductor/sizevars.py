@@ -415,14 +415,16 @@ class SizeVarAllocator:
             left = sympy_subs(left, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         if isinstance(right, Expr):
             right = sympy_subs(right, self.inv_precomputed_replacements)  # type: ignore[arg-type]
-        assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
+        assert self.shape_env.defer_runtime_assert(
+            sympy.Eq(left, right), "guard_equals"
+        )
         return left
 
     def guard_leq(self, left: Expr, right: Expr) -> None:
         return self.guard_lt(left, right + 1)
 
     def guard_lt(self, left: Expr, right: Expr) -> None:
-        assert self.shape_env.evaluate_expr(sympy.Lt(left, right))
+        assert self.shape_env.defer_runtime_assert(sympy.Lt(left, right), "guard_lt")
 
     def guarded_order(self, seq):
         """
