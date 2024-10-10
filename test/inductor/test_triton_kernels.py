@@ -18,7 +18,6 @@ from torch._inductor.utils import run_and_get_code
 from torch._library import capture_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_device_type import expectedFailureXPU
 from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
@@ -2691,8 +2690,6 @@ if HAS_GPU:
 class CustomOpTests(torch._inductor.test_case.TestCase):
     """Tests for custom ops wrapping triton kernels"""
 
-    device_type = GPU_TYPE
-
     @requires_gpu
     @common_utils.parametrize("autotuned", [False, True])
     @common_utils.parametrize("dynamic", [False, True])
@@ -2913,7 +2910,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         gm = make_fx(f, tracing_mode=tracing_mode)(x, x)
         self.assertEqual(gm(x, x), x + x)
 
-    @expectedFailureXPU
+    @skipIfXpu
     @requires_gpu
     @patch.object(torch._inductor.config, "cpp_wrapper", True)
     @patch.object(torch._inductor.config, "triton.autotune_at_compile_time", True)
