@@ -7,8 +7,7 @@ namespace F = torch::nn::functional;
 
 using namespace torch::indexing;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 ASMoutput::ASMoutput(Tensor output_, double loss_)
     : output(std::move(output_)), loss(loss_) {}
@@ -25,7 +24,7 @@ AdaptiveLogSoftmaxWithLossImpl::AdaptiveLogSoftmaxWithLossImpl(
 
 void AdaptiveLogSoftmaxWithLossImpl::reset() {
   TORCH_CHECK(
-      options.cutoffs().size() > 0,
+      !options.cutoffs().empty(),
       "cutoffs should be a sequence of length larger than 0");
   TORCH_CHECK(
       std::is_sorted(options.cutoffs().begin(), options.cutoffs().end()) &&
@@ -220,5 +219,4 @@ void AdaptiveLogSoftmaxWithLossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::AdaptiveLogSoftmaxWithLoss";
 }
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

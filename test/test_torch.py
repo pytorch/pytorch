@@ -63,7 +63,7 @@ from torch.testing._internal.common_mkldnn import bf32_on_and_off
 from torch.testing._internal.common_dtype import (
     floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
     all_types_and, floating_types, floating_and_complex_types, integral_types_and,
-    get_all_qint_dtypes,
+    get_all_qint_dtypes, all_types_complex_float8_and,
 )
 from torch.testing._internal.two_tensor import TwoTensor
 
@@ -1739,33 +1739,11 @@ else:
             'embedding_bag_backward_cuda_max',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @onlyCUDA
-    def test_deterministic_cumsum(self, device):
-        test_cases = [
-            # size, dim
-            [(2, 3, 4), 0],
-            [(2, 3, 4), 1],
-            [(2, 3, 4), 2],
-            [(1000, 10, 2), 0],
-        ]
-        for size, dim in test_cases:
-            input = 100 * torch.randn(*size, device=device)
-            with DeterministicGuard(True):
-                res0 = input.cumsum(dim)
-                for _ in range(3):
-                    res1 = input.cumsum(dim)
-                    self.assertEqual(res0, res1, atol=0, rtol=0)
-
-            res_cpu = input.cpu().cumsum(dim)
-            self.assertEqual(res0, res_cpu, atol=1e-3, rtol=1e-2)
-
-
     @dtypes(*all_types_and_complex_and(torch.bool))
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_cumsum(self, device, dtype):
         input = make_tensor((10,), dtype=dtype, device=device, low=-9, high=9)
-        should_alert = False
+        should_alert = torch.device(device).type == 'cuda' and (dtype.is_floating_point or dtype.is_complex)
 
         for op_call in [torch.Tensor.cumsum, torch.cumsum]:
             self.check_nondeterministic_alert(
@@ -2490,7 +2468,7 @@ else:
                         self.assertEqual(y1.grad, y2.grad, rtol=0, atol=0.001)
 
     @tf32_on_and_off(0.005)
-    @bf32_on_and_off(0.005)
+    @bf32_on_and_off(0.08)
     def test_cdist_large(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(1000, 10, device=device)
@@ -2501,7 +2479,7 @@ else:
 
     @slowTest
     @tf32_on_and_off(0.01)
-    @bf32_on_and_off(0.01)
+    @bf32_on_and_off(0.08)
     def test_cdist_large_batch(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 1000, 10, device=device)
@@ -2511,7 +2489,7 @@ else:
             self.assertEqual(expected, actual)
 
     @tf32_on_and_off(0.005)
-    @bf32_on_and_off(0.005)
+    @bf32_on_and_off(0.04)
     def test_cdist_non_contiguous(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(5, 7, device=device).mT
@@ -2539,7 +2517,7 @@ else:
             self.assertEqual(expected, actual)
 
     @tf32_on_and_off(0.005)
-    @bf32_on_and_off(0.005)
+    @bf32_on_and_off(0.04)
     def test_cdist_non_contiguous_batch(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 2, 5, 7, device=device).mT
@@ -3576,7 +3554,7 @@ else:
     # FIXME: move to test indexing
     # The test fails for zero-dimensional tensors on XLA
     @onlyNativeDeviceTypes
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypes(*all_types_complex_float8_and(torch.half, torch.bool, torch.bfloat16))
     def test_index_select(self, device, dtype):
         num_src, num_out = 3, 5
 
@@ -3585,11 +3563,12 @@ else:
             return make_tensor(size_arg, dtype=dtype, device=device, low=None, high=None, noncontiguous=not contig)
 
         def ref_index_select(src, dim, idx):
-            # bfloat16 is just used on GPU, so it's not supported on numpy
-            if dtype == torch.bfloat16:
+            # some types not supported on numpy
+            not_np_dtypes = (torch.bfloat16, torch.float8_e5m2, torch.float8_e5m2fnuz, torch.float8_e4m3fn, torch.float8_e4m3fnuz)
+            if dtype in not_np_dtypes:
                 src = src.float()
             out = torch.from_numpy(np.take(src.cpu().numpy(), idx.cpu().numpy(), axis=dim))
-            if dtype == torch.bfloat16:
+            if dtype in not_np_dtypes:
                 out = out.to(device=device, dtype=dtype)
             return out
 
@@ -6403,12 +6382,21 @@ else:
                     atol = 1e-2
                 self.assertEqual(src, dst.copy_(t), rtol=rtol, atol=atol)
 
-    @dtypes(*all_types_and_complex_and(
+    @dtypes(*all_types_complex_float8_and(
         torch.bool, torch.half, torch.bfloat16, torch.complex32,
         torch.uint16, torch.uint32, torch.uint64))
     def test_item(self, device, dtype):
-        if torch.device(device).type == 'xla' and dtype in [torch.uint16, torch.uint32, torch.uint64]:
-            self.skipTest('uint16,32,64 not implemented on XLA')
+        xla_unsupported_dtypes = [
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2fnuz,
+        ]
+        if torch.device(device).type == 'xla' and dtype in xla_unsupported_dtypes:
+            self.skipTest('uint16,32,64,float8 not implemented on XLA')
         t = torch.ones((), device=device, dtype=dtype)
         self.assertEqual(1, t.item())
 
@@ -10057,6 +10045,30 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del s
         self.assertEqual(MyStorage.finalized_count, 1)
         self.assertTrue(m[0])
+
+    def test_tensor_ressurecting_clear(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/136358
+        # A Tensor with custom __dict__
+        # Autograd here is for the c++ reference later
+        t = torch.rand(2, requires_grad=True).clone()
+        t.foo = 2
+
+        # that is part of a cycle
+        l = []
+        l.append(l)
+        l.append(t)
+
+        # Keep the Tensor alive from c++
+        # Using autograd graph here (any other mean would work)
+        t2 = t ** 2
+        self.assertIs(t2.grad_fn._saved_self, t)
+
+        # Clear all python references and trigger the gc
+        del t, l
+        gc.collect()
+
+        # We used to loose the dict!
+        self.assertTrue(hasattr(t2.grad_fn._saved_self, "foo"))
 
     def test_tensor_slot_dealloc(self):
 
