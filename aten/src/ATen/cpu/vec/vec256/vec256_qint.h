@@ -1289,10 +1289,9 @@ Vectorized<c10::quint8> inline maximum(const Vectorized<c10::quint8>& a, const V
 
 #endif // if defined(CPU_CAPABILITY_AVX2)
 
-#if defined(CPU_CAPABILITY_NEON)
-template <typename T>
-typename std::enable_if_t<std::is_same_v<T, int8_t>, std::pair<Vectorized<float>, Vectorized<float>>>
-inline convert_int8_to_float(at::vec::Vectorized<T> src) {
+#if defined(__ARM_NEON)
+std::pair<Vectorized<float>, Vectorized<float>>
+inline convert_int8_to_float(at::vec::Vectorized<int8_t> src) {
     auto s8x8 = vld1_s8(src.operator const int8_t*());
     auto s16x8 = vmovl_s8(s8x8);
 
@@ -1302,15 +1301,33 @@ inline convert_int8_to_float(at::vec::Vectorized<T> src) {
     return std::make_pair(Vectorized<float>(vcvtq_f32_s32(s32x4_lo)), Vectorized<float>(vcvtq_f32_s32(s32x4_hi)));
 }
 
-template <typename T>
-typename std::enable_if_t<std::is_same_v<T, uint8_t>, std::pair<Vectorized<float>, Vectorized<float>>>
-inline convert_int8_to_float(at::vec::Vectorized<T> src) {
+std::pair<Vectorized<float>, Vectorized<float>>
+inline convert_int8_to_float(at::vec::Vectorized<uint8_t> src) {
     auto u8x8 = vld1_u8(src.operator const uint8_t*());
     auto u16x8 = vmovl_u8(u8x8);
     auto u32x4_hi = vmovl_u16(vget_high_u16(u16x8));
     auto u32x4_lo = vmovl_u16(vget_low_u16(u16x8));
 
     return std::make_pair(Vectorized<float>(vcvtq_f32_u32(u32x4_lo)), Vectorized<float>(vcvtq_f32_u32(u32x4_hi)));
+}
+
+Vectorized<float>
+inline convert_int8_half_register_to_float(at::vec::Vectorized<int8_t> src) {
+    auto s8x8 = vld1_s8(src.operator const int8_t*());
+    auto s16x8 = vmovl_s8(s8x8);
+
+    auto s32x4_lo = vmovl_s16(vget_low_s16(s16x8));
+
+    return Vectorized<float>(vcvtq_f32_s32(s32x4_lo));
+}
+
+Vectorized<float>
+inline convert_int8_half_register_to_float(at::vec::Vectorized<uint8_t> src) {
+    auto u8x8 = vld1_u8(src.operator const uint8_t*());
+    auto u16x8 = vmovl_u8(u8x8);
+    auto u32x4_lo = vmovl_u16(vget_low_u16(u16x8));
+
+    return Vectorized<float>(vcvtq_f32_u32(u32x4_lo));
 }
 
 #endif
