@@ -13,6 +13,7 @@ from tools.stats.test_dashboard import upload_additional_info
 from tools.stats.upload_stats_lib import (
     download_s3_artifacts,
     get_job_id,
+    remove_nan_inf,
     unzip,
     upload_workflow_stats_to_s3,
 )
@@ -266,7 +267,7 @@ if __name__ == "__main__":
         args.workflow_run_id,
         args.workflow_run_attempt,
         "test_run_summary",
-        test_case_summary,
+        remove_nan_inf(test_case_summary),
     )
 
     # Separate out the failed test cases.
@@ -281,13 +282,16 @@ if __name__ == "__main__":
         args.workflow_run_id,
         args.workflow_run_attempt,
         "failed_test_runs",
-        failed_tests_cases,
+        remove_nan_inf(failed_tests_cases),
     )
 
     if args.head_branch == "main" and args.head_repository == "pytorch/pytorch":
         # For jobs on main branch, upload everything.
         upload_workflow_stats_to_s3(
-            args.workflow_run_id, args.workflow_run_attempt, "test_run", test_cases
+            args.workflow_run_id,
+            args.workflow_run_attempt,
+            "test_run",
+            remove_nan_inf(test_cases),
         )
 
     upload_additional_info(args.workflow_run_id, args.workflow_run_attempt, test_cases)

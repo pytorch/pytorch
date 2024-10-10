@@ -301,14 +301,15 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     bool isSuccess() const override;
 
-    // Same as calling synchronize() for NCCL work.
+    // Same as calling synchronize() for NCCL work if timeout is not set.
+    // Otherwise, it will block the CPU thread until the NCCL work is completed
+    // or timed out. If timeout, exception will be thrown.
     bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
 
     void abort() override;
 
-    // Let current stream wait on the completing of the NCCL work
-    // Throws on exceptions. Blocking operation, which will wait for work
-    // completion.
+    // Let current stream wait on the completion of the NCCL work
+    // Throws on exceptions.
     void synchronize() override;
 
     // Synchronize streams by blocking each on the NCCL stream
@@ -361,14 +362,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // The NCCL communicator used for this work item.
     std::shared_ptr<NCCLComm> ncclComm_;
 
-    // Tensors used for barrier op
-    at::Tensor barrierTensor_;
+    // whether this work is a barrier op
+    bool isBarrierOp_{false};
 
     // Clone of blockingWait_ from ProcessGroupNCCL.
-    bool blockingWait_ = false;
+    bool blockingWait_{false};
 
     // Clone of avoidRecordStreams_ from ProcessGroupNCCL.
-    bool avoidRecordStreams_ = false;
+    bool avoidRecordStreams_{false};
 
     // Clone of opTimeout_ from ProcessGroupNCCL.
     std::chrono::milliseconds opTimeout_;
@@ -404,9 +405,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
         const WorkNCCL& workNCCL);
 
    private:
-    // Helper function for synchronize
-    void synchronizeInternal(std::chrono::milliseconds timeout);
-
     // Checks for NCCL errors and sets an appropriate exception_ptr.
     void checkAndSetException();
 
