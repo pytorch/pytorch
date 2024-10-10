@@ -220,12 +220,20 @@ skip:
   control_flow:
     - cm3leon_generate
     - detectron2_fcos_r_50_fpn
+    - doctr_reco_predictor
     - fastNLP_Bert
     - hf_Longformer
     - hf_Reformer
     - hf_T5_generate
     - opacus_cifar10
     - speech_transformer
+    - timm_efficientdet
+
+  export_unsupported:
+    # unsupported: inline in skipfiles: DistributedDataParallel
+    - moco
+    # unsupported: call_method NNModuleVariable() flatten_parameters
+    - tts_angular
 
   # Models that should only run in --multiprocess mode
   multiprocess:
