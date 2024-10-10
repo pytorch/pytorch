@@ -39,8 +39,12 @@ def myFunc(a, b, c):
     temp = torch.ones_like(c) # we can even allocate :)
     temp += 1
     a += temp
-    a[5:] += 2
+    a[3:] += 2
     a[4] += 1000
+    a[5] += b[1]
+    a[6] = b[1]
+    a[7:8] = 123
+    #a[2] = torch.tensor(5)
     c = torch.clamp(c, min=2, max=5)
     a += c
 

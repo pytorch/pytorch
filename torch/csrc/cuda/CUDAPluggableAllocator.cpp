@@ -268,7 +268,7 @@ void CUDAPluggableAllocator::beginAllocateToPool(
 void CUDAPluggableAllocator::beginAllocateSentinelPointers(
       c10::DeviceIndex device,
       std::function<bool(cudaStream_t)> streamFilter,
-      std::function<void*(size_t)> allocatorOverride,
+      std::function<void(void*, size_t)> allocatorOverride,
       size_t captureUniqueToken
 ) {
   TORCH_CHECK(

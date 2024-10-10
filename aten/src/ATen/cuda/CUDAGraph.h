@@ -35,6 +35,11 @@ struct DynamicGraphOtherNodeUpdate {
   std::function<cudaGraphNodeParams(std::vector<void*>)> computeNewParams;
 };
 
+struct TrackedAllocation {
+  void* ptr;
+  size_t size;
+};
+
 struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph();
   ~CUDAGraph();
@@ -79,8 +84,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
 
   size_t sentinelCaptureUniqueToken;
   int sentinelAllocationsMode;
-  int sentinelAllocationIdx;
-  std::vector<size_t> allocationSizes;
+  std::vector<TrackedAllocation> allocations;
 
   std::vector<DynamicGraphKernelParamUpdate> kernelParamUpdates;
   std::vector<DynamicGraphOtherNodeUpdate> graphNodeParamUpdates;

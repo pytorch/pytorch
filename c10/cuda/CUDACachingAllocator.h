@@ -227,7 +227,7 @@ class CUDAAllocator : public Allocator {
   virtual void beginAllocateSentinelPointers(
       c10::DeviceIndex device,
       std::function<bool(cudaStream_t)> streamFilter,
-      std::function<void*(size_t)> allocatorOverride,
+      std::function<void(void*, size_t)> allocatorOverride,
       size_t captureUniqueToken
   ) = 0;
   virtual void endAllocateSentinelPointers(size_t captureUniqueToken) = 0;
@@ -396,7 +396,7 @@ inline void beginAllocateToPool(
 inline void beginAllocateSentinelPointers(
   c10::DeviceIndex device,
   std::function<bool(cudaStream_t)> streamFilter,
-  std::function<void*(size_t)> allocatorOverride,
+  std::function<void(void*, size_t)> allocatorOverride,
   size_t captureUniqueToken
 ) {
   get()->beginAllocateSentinelPointers(device, std::move(streamFilter), std::move(allocatorOverride), captureUniqueToken);

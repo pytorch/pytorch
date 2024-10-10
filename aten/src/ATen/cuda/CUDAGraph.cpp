@@ -86,51 +86,6 @@ void CUDAGraph::register_generator_state(const at::Generator& generator) {
 std::atomic<size_t> captureUniqueToken{1};
 
 
-// Assume that all pointers must be divisible by this, for alignment reasons
-// 64 is probably safe, let's do 128 just to be extra safe
-constexpr int kMinimumAlignment = 128;
-
-// The natural choice would be nullptr, however, there are various checks throughout torch that assert pointers are never null
-// Therefore, an arbitrary value:
-constexpr int kAllocationBase = 2048;
-static_assert(kAllocationBase % kMinimumAlignment == 0, "Base allocation must not lead to misaligned pointers");
-static_assert(kAllocationBase, "Base allocation must never return nullptr");
-
-// How much should we stride between each allocation?
-constexpr int kAllocationStride = 256;
-static_assert(kAllocationStride % kMinimumAlignment == 0, "Every allocation in the second run must be aligned");
-
-/**
- * This check is critical to ensure that we can never false positive and modify data that is not truly a data pointer
- * We CAN false positive on arbitrary 8-byte sections of uninitialized memory
- * But, that's fine, because it's uninitialized so we can overwrite it, or not, to no ill effect
- *
- * The only thing we MUST avoid is modifying actual data that just so happened to look like our sentinel values
- * Due to struct padding, we can sometimes have an 8-byte section that is nondeterministic, but only SOME of it is uninitialized
- * At least 1 byte of it COULD be actual data, that we MUST not overwrite
- * To see how, consider this case: struct SomeData { int8_t fieldA; int64_t fieldB; };
- * Note that fieldA will be have offsetof == 0, fieldB will have offsetof == 8
- * This means that between these fields, there are 7 bytes of uninitialized memory.
- * We must NEVER misidentify this as a pointer!
- * But if those 7 bytes can be anything, how could we guarantee that? Sure we could call it unlikely, but we'd prefer a guarantee!
- * This data will have a constant fieldA, meaning its least significant byte is constant
- * All we need to do is ensure that our two sentinel values have DIFFERENT least significant bytes!
- * The actual data will look like this:
- * [constant byte, varying byte, ..., varying byte]
- * Note that subtracting two runs will always result in the first byte being 0!
- * Our sentinel values will look like this:
- * [0, varying byte, ..., varying byte] (first run)
- * [128, varying byte, ..., varying byte] (second run)
- * Subtracting these runs will ALWAYS result in a first byte of 128!
- * Therefore, these values can NEVER false positive as equal to each other, because at least one byte is guaranteed to be different!
- * The following static_asserts guarantee this - we add kStrideBetweenRuns to the second run but not the first
- */
-constexpr int kStrideBetweenRuns = 128;
-static_assert(kStrideBetweenRuns % 256 != 0, "First run and second run must guarantee unique least significant byte");
-static_assert(kAllocationStride % 256 == 0, "We need EVERY allocIdx to have this uniqueness property, not just the even ones!");
-static_assert(kStrideBetweenRuns % kMinimumAlignment == 0, "Every allocation in the second run must be aligned");
-
-
 void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capture_mode, int sentinel_allocations_mode) {
   TORCH_CHECK(!has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "
@@ -185,7 +140,6 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
 
   if (sentinelAllocationsMode) {
     sentinelCaptureUniqueToken = captureUniqueToken++;
-    sentinelAllocationIdx = 0;
 
     // captures_underway is pretty complicated - no reason to duplicate that effort. let's call it regardless
     // just let's also intercept the malloc calls
@@ -194,16 +148,12 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
         CaptureId_t stream_capture_id;
         AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &stream_capture_id));
         return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == capture_id_;
-    }, [this](size_t allocSz) {
-      allocationSizes.push_back(allocSz);
-      size_t ptr;
-      if (sentinelAllocationsMode == 1) {
-        ptr = kAllocationBase;
-      } else {
-        ptr = kAllocationBase + kStrideBetweenRuns + kAllocationStride * sentinelAllocationIdx++;
-      }
-      std::cout << "intercepted alloc " << sentinelAllocationIdx << " of size " << allocSz << " returning " << ptr << " since mode=" << sentinelAllocationsMode << std::endl;
-      return (void*)((char*)nullptr + ptr);
+    }, [this](void* ptr, size_t size) {
+      std::cout << "tracked alloc " << allocations.size() << " of size " << size << " returning " << ptr << " since mode=" << sentinelAllocationsMode << std::endl;
+      allocations.push_back(TrackedAllocation{
+        .ptr = ptr,
+        .size = size,
+      });
     }, sentinelCaptureUniqueToken);
   }
 
@@ -239,7 +189,7 @@ void CUDAGraph::capture_end() {
 
   if (sentinelAllocationsMode) {
     c10::cuda::CUDACachingAllocator::endAllocateSentinelPointers(sentinelCaptureUniqueToken);
-    std::cout << "capture_end, recorded allocation sizes were: " << allocationSizes << std::endl;
+    //std::cout << "capture_end, recorded allocation sizes were: " << allocations << std::endl;
   }
 
   TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
@@ -404,6 +354,18 @@ CUDAGraph::~CUDAGraph() {
   reset();
 }
 
+std::optional<std::tuple<size_t, size_t>> checkAllocationWithinGraph(void* ptr, const std::vector<TrackedAllocation>& allocations) {
+  for (size_t i = 0; i < allocations.size(); i++) {
+    void* begin = allocations[i].ptr;
+    void* end = (void*)((char*) begin + allocations[i].size);
+    if (ptr >= begin && ptr < end) {
+      size_t offset = (size_t)((char*)ptr - (char*)begin);
+      return std::make_tuple(i, offset);
+    }
+  }
+  return std::nullopt;
+};
+
 void CUDAGraph::compare_with_recapture(const CUDAGraph& graph2) {
   // Note: graph1 and graph2 should topologically be the same
   // they should have come from doing stream capture twice, on two separate
@@ -412,7 +374,10 @@ void CUDAGraph::compare_with_recapture(const CUDAGraph& graph2) {
 
   TORCH_CHECK(sentinelAllocationsMode == 1, "This graph must have been captured in sentinel mode 1");
   TORCH_CHECK(graph2.sentinelAllocationsMode == 2, "The other graph must have been captured in sentinel mode 2");
-  TORCH_CHECK(allocationSizes == graph2.allocationSizes, "Both graphs must have done the exact same allocations in the exact same order with the exact same sizes");
+  TORCH_CHECK(allocations.size() == graph2.allocations.size(), "Both graphs must have done the exact same allocations in the exact same order with the exact same sizes");
+  for (size_t i = 0; i < allocations.size(); i++) {
+    TORCH_CHECK(allocations[i].size == graph2.allocations[i].size, "Both graphs must have done the exact same allocations in the exact same order with the exact same sizes");
+  }
   TORCH_CHECK(has_graph_, "must have graph");
   TORCH_CHECK(!has_graph_exec_, "must not have graph exec");
 
@@ -432,42 +397,15 @@ void CUDAGraph::compare_with_recapture(const CUDAGraph& graph2) {
 
   TORCH_CHECK_EQ(num_nodes1, num_nodes2);
 
-  auto checkAllocation = [this](void* ptr1, void* ptr2) -> std::optional<std::tuple<size_t, size_t>> {
-    // reverse engineer the sentinel pointers to determine which allocation this is (allocIdx) and the offset into the tensor (offset)
-    int64_t whichAlloc = (int64_t)((char*)ptr2 - (char*)ptr1);
-    if (whichAlloc % 256 != kStrideBetweenRuns) {
-      std::cout << "LEIJURV: MISMATCH the allocation strided between runs by "
-                << whichAlloc
-                << " which has least significant byte "
-                << (whichAlloc % 256)
-                << " which does not match our value of "
-                << kStrideBetweenRuns
-                << std::endl;
+  auto checkAllocation = [&](void* ptr1, void* ptr2) -> std::optional<std::tuple<size_t, size_t>> {
+    auto withinFirstGraph = checkAllocationWithinGraph(ptr1, graph1.allocations);
+    auto withinSecondGraph = checkAllocationWithinGraph(ptr2, graph2.allocations);
+    if (withinFirstGraph == withinSecondGraph) {
+      return withinFirstGraph;
+    } else {
+      std::cout << "LEIJURV: MISMATCH" << std::endl;
       return std::nullopt;
     }
-    // at this point, we are SURE that this is EITHER one of our pointers, OR a full 8 bytes of nondeterministic / uninitialized memory
-    // we could just do the math and return early here with no checks, but, that would have poor performance since we could overwrite a bit much
-    // so, let's do some more checks:
-    whichAlloc -= kStrideBetweenRuns;
-    if (whichAlloc % kAllocationStride != 0) {
-      std::cout << "LEIJURV: MISMATCH the allocation strided by " << whichAlloc
-                << " which is not divisible by our stride " << kAllocationStride 
-                << " so this is not one of ours :(" << std::endl;
-      return std::nullopt;
-    }
-    
-    int64_t allocIdx = whichAlloc / kAllocationStride;
-    if (allocIdx < 0 || allocIdx >= (int64_t)allocationSizes.size()) {
-      std::cout << "LEIJURV: MISMATCH it did stride in units of " << kAllocationStride << " but to a total count of " << allocIdx << " while we expected between 0 and " << allocationSizes.size() << " exclusive" << std::endl;
-      return std::nullopt;
-    }
-
-    int64_t offset = (int64_t) ptr1 - kAllocationBase;
-    if (offset < 0 || offset >= (int64_t)allocationSizes[allocIdx]) {
-      std::cout << "LEIJURV: MISMATCH the base offset was " << offset << " while we expected between 0 and " << allocationSizes[allocIdx] << " exclusive" << std::endl;
-      return std::nullopt;
-    }
-    return std::make_tuple(allocIdx, offset);
   };
 
   for (size_t i = 0; i < num_nodes1; ++i) {
@@ -664,7 +602,7 @@ void CUDAGraph::replay_dynamic(std::vector<void*> prefilledDataPtrs, std::vector
   TORCH_CHECK(hasComparedAgainstRecapture, "Must compare against a pointer offsetted sentinel recapture");
   TORCH_CHECK(has_graph_exec_,
               "Called CUDAGraph::replay without a preceding successful capture.");
-  TORCH_CHECK(prefilledDataPtrs.size() <= allocationSizes.size());
+  TORCH_CHECK(prefilledDataPtrs.size() <= allocations.size());
   TORCH_CHECK(prefilledLens.size() == prefilledDataPtrs.size());
   c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -672,14 +610,14 @@ void CUDAGraph::replay_dynamic(std::vector<void*> prefilledDataPtrs, std::vector
   // take the allocations that were requested during the capture, and allocate them "for real"
   std::vector<void*> actualDataPtrs;
   auto allocator = c10::cuda::CUDACachingAllocator::get();
-  for (size_t i = 0; i < allocationSizes.size(); i++) {
+  for (size_t i = 0; i < allocations.size(); i++) {
     if (i < prefilledDataPtrs.size()) {
       // the first few are inputs/outputs, so they are "prefilled"
-      TORCH_CHECK(prefilledLens[i] == allocationSizes[i], "Prefilled tensors must be same shape");
+      TORCH_CHECK(prefilledLens[i] == allocations[i].size, "Prefilled tensors must be same shape");
       actualDataPtrs.push_back(prefilledDataPtrs[i]);
     } else {
       // the rest are allocated empty
-      actualDataPtrs.push_back(allocator->raw_alloc_with_stream(allocationSizes[i], stream));
+      actualDataPtrs.push_back(allocator->raw_alloc_with_stream(allocations[i].size, stream));
     }
   }
 

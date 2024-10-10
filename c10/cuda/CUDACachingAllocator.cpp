@@ -49,9 +49,6 @@ using namespace c10::CachingDeviceAllocator;
 const size_t kLargeBuffer =
     20971520; // "large" allocations may be packed in 20 MiB blocks
 
-// sentinel values can only go up to this value. all real device ptrs are assumed to be greater than it.
-const size_t sentinelLimit = 1000000;
-
 namespace Native {
 
 //
@@ -3170,7 +3167,7 @@ void local_raw_delete(void* ptr);
 struct SentinelCapture {
   c10::DeviceIndex device;
   std::function<bool(cudaStream_t)> streamFilter;
-  std::function<void*(size_t)> allocatorOverride;
+  std::function<void(void*, size_t)> allocatorOverride;
   size_t captureUniqueToken;
 };
 
@@ -3255,22 +3252,18 @@ class NativeCachingAllocator : public CUDAAllocator {
         "Allocator not initialized for device ",
         device,
         ": did you call init?");
+    Block* block = device_allocator[device]->malloc(device, size, stream);
+    add_allocated_block(block);
+    *devPtr = (void*)block->ptr;
     if (C10_UNLIKELY(!sentinel_captures_underway.empty())) {
       for (auto& it : sentinel_captures_underway) {
         if (device == it.device) {
           if (it.streamFilter(stream)) {
-            void* ptr = it.allocatorOverride(size);
-            // note that "ptr" is a totally fake ptr, there is no Block* tracking it or anything
-            TORCH_CHECK((size_t) ptr < sentinelLimit, "need to be able to tell apart real from fake pointers");
-            *devPtr = ptr;
-            return;
+            it.allocatorOverride(*devPtr, size);
           }
         }
       }
     }
-    Block* block = device_allocator[device]->malloc(device, size, stream);
-    add_allocated_block(block);
-    *devPtr = (void*)block->ptr;
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_memory_allocation(
@@ -3283,10 +3276,6 @@ class NativeCachingAllocator : public CUDAAllocator {
       return;
     }
     Block* block = get_allocated_block(ptr, true /* remove */);
-    if ((size_t) ptr < sentinelLimit) {
-      TORCH_CHECK(!block, "oopsie, I don't know if this pointer is fake or real!");
-      return;
-    }
     if (!block) {
       TORCH_CHECK(false, "invalid device pointer: ", ptr);
     }
@@ -3577,7 +3566,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   void beginAllocateSentinelPointers(
       c10::DeviceIndex device,
       std::function<bool(cudaStream_t)> streamFilter,
-      std::function<void*(size_t)> allocatorOverride,
+      std::function<void(void*, size_t)> allocatorOverride,
       size_t captureUniqueToken
   ) override {
     assertValidDevice(device);
