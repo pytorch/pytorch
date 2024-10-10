@@ -1702,3 +1702,13 @@ target_include_directories(httplib SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_
 # Include nlohmann-json
 add_library(nlohmann INTERFACE IMPORTED)
 include_directories(nlohmann SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_party/nlohmann/include)
+
+# ---[ ARMPL for Arm architecture
+set(AT_ARMPL_ENABLED 0)
+if(USE_ARMPL)
+  find_package(ARMPL REQUIRED)
+  if(ARMPL_FOUND)
+    message(INFO " USING ARMPL ")
+    set(AT_ARMPL_ENABLED 1)
+  endif()
+endif()
