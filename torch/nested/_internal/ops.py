@@ -567,6 +567,9 @@ def to_copy_default(func, *args, **kwargs):
 
     new_values = func(inp._values, **new_kwargs)
     new_offsets = inp._offsets.to(device=new_values.device)
+    new_lengths = None
+    if inp._lengths is not None:
+        new_lengths = inp._lengths.to(device=new_values.device)
 
     from torch._subclasses.fake_tensor import FakeTensor
     from torch._subclasses.functional_tensor import (
@@ -574,17 +577,21 @@ def to_copy_default(func, *args, **kwargs):
         mb_unwrap_functional_tensor,
     )
 
-    if isinstance(new_offsets, (FakeTensor, FunctionalTensor)):
+    ragged_source = inp._offsets if inp._lengths is None else inp._lengths
+    new_thing = new_offsets if new_lengths is None else new_lengths
+    if isinstance(new_thing, (FakeTensor, FunctionalTensor)):
         # Temporary hack until we have the union find
-        tgt = mb_unwrap_functional_tensor(new_offsets)
-        src = mb_unwrap_functional_tensor(inp._offsets)
+        tgt = mb_unwrap_functional_tensor(new_thing)
+        src = mb_unwrap_functional_tensor(ragged_source)
         tgt.nested_int_memo = src.nested_int_memo
     else:
-        _tensor_symint_registry[new_offsets] = _tensor_symint_registry[inp._offsets]
+        _tensor_symint_registry[new_thing] = _tensor_symint_registry[ragged_source]
     inp_kwargs = extract_kwargs(inp)
     inp_kwargs["offsets"] = new_offsets
+    inp_kwargs["lengths"] = new_lengths
 
-    return NestedTensor(new_values, **inp_kwargs)
+    output = NestedTensor(new_values, **inp_kwargs)
+    return output
 
 
 @register_jagged_func(
