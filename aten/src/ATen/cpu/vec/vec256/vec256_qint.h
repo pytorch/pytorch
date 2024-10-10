@@ -1289,7 +1289,7 @@ Vectorized<c10::quint8> inline maximum(const Vectorized<c10::quint8>& a, const V
 
 #endif // if defined(CPU_CAPABILITY_AVX2)
 
-#if defined(__ARM_NEON)
+#if (defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256))
 std::pair<Vectorized<float>, Vectorized<float>>
 inline convert_int8_to_float(at::vec::Vectorized<int8_t> src) {
     auto s8x8 = vld1_s8(src.operator const int8_t*());
