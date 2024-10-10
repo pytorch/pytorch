@@ -302,6 +302,9 @@ aten::_foreach_reciprocal_
 aten::_foreach_round
 aten::_foreach_round.out
 aten::_foreach_round_
+aten::_foreach_rsqrt
+aten::_foreach_rsqrt.out
+aten::_foreach_rsqrt_
 aten::_foreach_sigmoid
 aten::_foreach_sigmoid.out
 aten::_foreach_sigmoid_
