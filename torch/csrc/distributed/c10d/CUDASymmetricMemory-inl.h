@@ -184,49 +184,50 @@ __device__ __inline__ Vec<Alignment> multimem_ld_reduce_add(T* mc_ptr) {
 }
 
 #if defined(USE_ROCM) || !defined(NVCC_SUPPORTS_MULTICAST)
-#define SPECIALIZE_MULTIMEM_LD_REDUCE_VEC_32(type, asm_type)        \
-  template <>                                                       \
-  struct MultimemLdReduce<type> {                                   \
-    template <int Alignment>                                        \
-    __device__ __inline__ Vec<Alignment> operator()(type* mc_ptr) { \
-      CUDA_KERNEL_ASSERT(false);                                    \
-    }                                                               \
+#define SPECIALIZE_MULTIMEM_LD_REDUCE_VEC_32(type, asm_type, acc_prec) \
+  template <>                                                          \
+  struct MultimemLdReduce<type> {                                      \
+    template <int Alignment>                                           \
+    __device__ __inline__ Vec<Alignment> operator()(type* mc_ptr) {    \
+      CUDA_KERNEL_ASSERT(false);                                       \
+    }                                                                  \
   };
 #else
-#define SPECIALIZE_MULTIMEM_LD_REDUCE_VEC_32(type, asm_type)                   \
-  template <>                                                                  \
-  struct MultimemLdReduce<type> {                                              \
-    template <int Alignment>                                                   \
-    __device__ __inline__ Vec<Alignment> operator()(type* mc_ptr) {            \
-      Vec<Alignment> vec;                                                      \
-      if constexpr (Alignment == 16) {                                         \
-        asm("multimem.ld_reduce.relaxed.sys.global.add.v4." asm_type           \
-            " {%0,%1,%2,%3}, [%4];"                                            \
-            : "=r"(vec.u32[0]),                                                \
-              "=r"(vec.u32[1]),                                                \
-              "=r"(vec.u32[2]),                                                \
-              "=r"(vec.u32[3])                                                 \
-            : "l"(mc_ptr)                                                      \
-            : "memory");                                                       \
-      } else if constexpr (Alignment == 8) {                                   \
-        asm("multimem.ld_reduce.relaxed.sys.global.add.v2." asm_type           \
-            " {%0,%1}, [%2];"                                                  \
-            : "=r"(vec.u32[0]), "=r"(vec.u32[1])                               \
-            : "l"(mc_ptr)                                                      \
-            : "memory");                                                       \
-      } else if constexpr (Alignment == 4) {                                   \
-        asm("multimem.ld_reduce.relaxed.sys.global.add." asm_type " %0, [%1];" \
-            : "=r"(vec.u32)                                                    \
-            : "l"(mc_ptr)                                                      \
-            : "memory");                                                       \
-      }                                                                        \
-      return vec;                                                              \
-    }                                                                          \
+#define SPECIALIZE_MULTIMEM_LD_REDUCE_VEC_32(type, asm_type, acc_prec)    \
+  template <>                                                             \
+  struct MultimemLdReduce<type> {                                         \
+    template <int Alignment>                                              \
+    __device__ __inline__ Vec<Alignment> operator()(type* mc_ptr) {       \
+      Vec<Alignment> vec;                                                 \
+      if constexpr (Alignment == 16) {                                    \
+        asm("multimem.ld_reduce.relaxed.sys.global.add" acc_prec          \
+            ".v4" asm_type " {%0,%1,%2,%3}, [%4];"                        \
+            : "=r"(vec.u32[0]),                                           \
+              "=r"(vec.u32[1]),                                           \
+              "=r"(vec.u32[2]),                                           \
+              "=r"(vec.u32[3])                                            \
+            : "l"(mc_ptr)                                                 \
+            : "memory");                                                  \
+      } else if constexpr (Alignment == 8) {                              \
+        asm("multimem.ld_reduce.relaxed.sys.global.add" acc_prec          \
+            ".v2" asm_type " {%0,%1}, [%2];"                              \
+            : "=r"(vec.u32[0]), "=r"(vec.u32[1])                          \
+            : "l"(mc_ptr)                                                 \
+            : "memory");                                                  \
+      } else if constexpr (Alignment == 4) {                              \
+        asm("multimem.ld_reduce.relaxed.sys.global.add" acc_prec asm_type \
+            " %0, [%1];"                                                  \
+            : "=r"(vec.u32)                                               \
+            : "l"(mc_ptr)                                                 \
+            : "memory");                                                  \
+      }                                                                   \
+      return vec;                                                         \
+    }                                                                     \
   };
 #endif
 
-SPECIALIZE_MULTIMEM_LD_REDUCE_VEC_32(at::BFloat16, "bf16x2");
-SPECIALIZE_MULTIMEM_LD_REDUCE_VEC_32(float, "f32");
+SPECIALIZE_MULTIMEM_LD_REDUCE_VEC_32(at::BFloat16, ".bf16x2", ".acc::f32");
+SPECIALIZE_MULTIMEM_LD_REDUCE_VEC_32(float, ".f32", "");
 
 template <int Alignment, typename T>
 __device__ __inline__ void multimem_st(T* mc_ptr, Vec<Alignment>& vec) {
