@@ -106,11 +106,18 @@ class TritonSplitScanKernel(TritonKernel):
         nbytes = scratch_nbytes_per_block * max_blocks
         scratch_base, offset = self.args.workspace(nbytes=nbytes, zero_fill=True)
         if offset != 0:
-            scratch_base = cse_load(f"{scratch_base} + {self.index_to_str(offset)}")
-        runtime_rblocks = cse_load(f"tl.num_programs({self.range_trees[-1].index})")
+            scratch_base = cse_load(
+                f"{scratch_base} + {self.index_to_str(offset)}",
+                dtype=dtype,
+            )
+        runtime_rblocks = cse_load(
+            f"tl.num_programs({self.range_trees[-1].index})",
+            dtype=dtype,
+        )
         scratch_base = cse_load(
             f"{scratch_base}.to(tl.pointer_type({scratch_type})) + xoffset * "
-            f"{scratch_elems_per_block} * {runtime_rblocks}"
+            f"{scratch_elems_per_block} * {runtime_rblocks}",
+            dtype=dtype,
         )
 
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
@@ -118,15 +125,26 @@ class TritonSplitScanKernel(TritonKernel):
         masks = sorted(masks)
         assert not self._load_mask, "ops.scan not supported inside ops.masked"
 
-        value = cse_compute(f"{value}.to({compute_type})")
-        value = cse_compute(f"tl.broadcast_to({value}, {self.dense_size_str()})")
+        value = cse_compute(
+            f"{value}.to({compute_type})",
+            dtype=dtype,
+        )
+        value = cse_compute(
+            f"tl.broadcast_to({value}, {self.dense_size_str()})",
+            dtype=dtype,
+        )
 
         combine_helper_fn = self._lift_helper(combine_fn, 1)
         dim = self.triton_tensor_ndim() - 1
         assert dim == 0, ""
 
-        block_sum = cse_compute(f"tl.reduce({value}, {dim}, {combine_helper_fn})")
-        exclusive_prefix = self.cse.newvar()
+        block_sum = cse_compute(
+            f"tl.reduce({value}, {dim}, {combine_helper_fn})",
+            dtype=dtype,
+        )
+        exclusive_prefix = self.cse.newvar(
+            dtype=dtype,
+        )
         if element_nbits == 64:
             self.compute.splice(
                 f"""
@@ -159,13 +177,18 @@ class TritonSplitScanKernel(TritonKernel):
             )
         # Compute final cumsum
         block_scan = cse_compute(
-            f"tl.associative_scan({value}, {dim}, {combine_helper_fn})"
+            f"tl.associative_scan({value}, {dim}, {combine_helper_fn})",
+            dtype=dtype,
         )
         combined_result = cse_compute(
-            f"{combine_helper_fn}({exclusive_prefix}, {block_scan})"
+            f"{combine_helper_fn}({exclusive_prefix}, {block_scan})",
+            dtype=dtype,
         )
         return (
-            cse_compute(f"tl.where(roffset == 0, {block_scan}, {combined_result})"),
+            cse_compute(
+                f"tl.where(roffset == 0, {block_scan}, {combined_result})",
+                dtype=dtype,
+            ),
         )
 
     def _get_heuristic(self):

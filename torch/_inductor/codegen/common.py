@@ -1480,11 +1480,17 @@ class CSEVariable:
     See example of TritonCSEVariable in triton.py
     """
 
-    def __init__(self, name, bounds: ValueRanges[Any]):
+    def __init__(
+        self,
+        name,
+        bounds: ValueRanges[Any],
+        dtype: Optional[torch.dtype] = None,
+    ):
         assert isinstance(bounds, ValueRanges)
         self.name = name
         self.bounds = bounds
         self.use_count = 1  # track how many tims this expression is used
+        self.dtype = dtype
 
     def __str__(self):
         return self.name
@@ -1563,6 +1569,7 @@ class CSE:
         buffer: IndentedBuffer,
         expr: Union[str, CSEVariable, OpsValue, IndentedBuffer],
         *,
+        dtype: Optional[torch.dtype] = None,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
         write=True,
         assignment=True,
@@ -1582,7 +1589,7 @@ class CSE:
         cache_key = expr.getvalue() if isinstance(expr, IndentedBuffer) else expr
         var = self.cache.get(cache_key, None)
         if not var:
-            var = self.newvar(bounds)
+            var = self.newvar(dtype, bounds)
             self.cache[cache_key] = var
             if write:
                 if V.kernel.current_node:
@@ -1606,11 +1613,186 @@ class CSE:
 
         return var
 
-    def newvar(self, bounds: ValueRanges[Any] = ValueRanges.unknown()) -> CSEVariable:
+    def newvar(
+        self,
+        dtype: Optional[torch.dtype] = None,
+        bounds: ValueRanges[Any] = ValueRanges.unknown(),
+    ) -> CSEVariable:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
-        var = V.kernel.create_cse_var(var_name, bounds)
+        var = V.kernel.create_cse_var(var_name, bounds, dtype)
         self.varname_map[var_name] = var
         return var
+
+
+def promote_types(args):
+    arg_dtypes = []
+    for arg in args:
+        if isinstance(arg, CSEVariable):
+            arg_dtypes.append(arg.dtype)
+        elif isinstance(arg, OpsValue) and isinstance(arg.value, CSEVariable):
+            arg_dtypes.append(arg.value.dtype)
+
+    arg_dtypes = [dtype for dtype in arg_dtypes if dtype is not None]
+    if len(arg_dtypes) == 2:
+        return torch.promote_types(*arg_dtypes)
+    elif len(arg_dtypes) == 1:
+        return arg_dtypes[0]
+    else:
+        # Fallback to default dtype of torch.float32
+        return torch.float32
+
+
+class DtypePropagationOpsHandler:
+    """
+    Propagate dtype from args to output
+    """
+
+    @staticmethod
+    def randint64(*args, **kwargs):
+        return torch.int64
+
+    @staticmethod
+    def where(*args, **kwargs):
+        return args[2].dtype
+
+    @staticmethod
+    def to_dtype_bitcast(*args, **kwargs):
+        return args[1]  # Inputs[SrcTensor, target_dtype, original_dtype]
+
+    @staticmethod
+    def load_seed(*args, **kwargs):
+        return torch.float32
+
+    @staticmethod
+    def masked(*args, **kwargs):
+        if isinstance(args[0], CSEVariable):
+            return args[0].dtype
+
+        return torch.float32
+
+    @staticmethod
+    def index_expr(*args, **kwargs):
+        return args[1]
+
+    @staticmethod
+    def isnan(*args, **kwargs):
+        return torch.bool
+
+    @staticmethod
+    def lt(*args, **kwargs):
+        return torch.bool
+
+    @staticmethod
+    def to_dtype(*args, **kwargs):
+        return args[1]  # Inputs[SrcTensor, target_dtype, original_dtype]
+
+    @staticmethod
+    def constant(*args, **kwargs):
+        return args[1]  # dtype
+
+    @staticmethod
+    def mul(*args, **kwargs):
+        return promote_types(args)
+
+    @staticmethod
+    def sub(*args, **kwargs):
+        return promote_types(args)
+
+    @staticmethod
+    def add(*args, **kwargs):
+        return promote_types(args)
+
+    @staticmethod
+    def div(*args, **kwargs):
+        return promote_types(args)
+
+    @staticmethod
+    def abs(*args, **kwargs):
+        return promote_types(args)
+
+    @staticmethod
+    def exp(*args, **kwargs):
+        return promote_types(args)
+
+    @staticmethod
+    def truediv(*args, **kwargs):
+        return promote_types(args)
+
+    @staticmethod
+    def pow(*args, **kwargs):
+        return promote_types(args)
+
+    @staticmethod
+    def sqrt(*args, **kwargs):
+        return promote_types(args)
+
+    @staticmethod
+    def rsqrt(*args, **kwargs):
+        return promote_types(args)
+
+    @staticmethod
+    def sigmoid(*args, **kwargs):
+        return promote_types(args)
+
+    @staticmethod
+    def gelu(*args, **kwargs):
+        return promote_types(args)
+
+    @staticmethod
+    def neg(*args, **kwargs):
+        return promote_types(args)
+
+    @staticmethod
+    def minimum(*args, **kwargs):
+        return promote_types(args)
+
+    @staticmethod
+    def maximum(*args, **kwargs):
+        return promote_types(args)
+
+    @staticmethod
+    def log(*args, **kwargs):
+        return promote_types(args)
+
+    @staticmethod
+    def log1p(*args, **kwargs):
+        return promote_types(args)
+
+    @staticmethod
+    def gt(*args, **kwargs):
+        return torch.bool
+
+    @staticmethod
+    def ge(*args, **kwargs):
+        return torch.bool
+
+    @staticmethod
+    def reciprocal(*args, **kwargs):
+        return promote_types(args)
+
+    @staticmethod
+    def and_(*args, **kwargs):
+        return torch.bool
+
+    @staticmethod
+    def bitwise_right_shift(*args, **kwargs):
+        return args[0].dtype
+
+    @staticmethod
+    def bitwise_left_shift(*args, **kwargs):
+        return args[0].dtype
+
+    @staticmethod
+    def sin(*args, **kwargs):
+        return promote_types(args)
+
+    @staticmethod
+    def cos(*args, **kwargs):
+        return promote_types(args)
+
+    @staticmethod
+    def mod(*args, **kwargs):
+        return promote_types(args)
 
 
 class CodeGen:
@@ -1848,8 +2030,17 @@ class Kernel(CodeGen):
                     value = getattr(parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
 
                     def do_cse(v):
+                        try:
+                            output_dtype = getattr(
+                                DtypePropagationOpsHandler,
+                                name,
+                            )(*args, **kwargs)
+                        except AttributeError:
+                            # Fallback to default dtype of torch.float32
+                            output_dtype = torch.float32
+
                         csevar = V.kernel.cse.generate(
-                            V.kernel.compute, v, bounds=bounds
+                            V.kernel.compute, v, dtype=output_dtype, bounds=bounds
                         )
                         csevar.update_on_args(name, args, kwargs)
                         return csevar
