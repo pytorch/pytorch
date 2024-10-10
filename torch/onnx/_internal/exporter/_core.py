@@ -264,7 +264,7 @@ def _get_node_namespace(node: torch.fx.Node) -> tuple[str, list[str], list[str]]
     namespaces = []
     class_hierarchy = []
     name_scopes = []
-    for name, nn_module in nn_module_stack.values():
+    for name, nn_module, _ in nn_module_stack.values():
         name_scopes.append(name)
         nn_module_name = _get_qualified_module_name(nn_module)
         class_hierarchy.append(nn_module_name)

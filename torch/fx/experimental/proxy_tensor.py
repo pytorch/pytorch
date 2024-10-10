@@ -1747,11 +1747,12 @@ class _ModuleStackTracer(PythonKeyTracer):
             if "nn_module_stack" not in node.meta:
                 node.meta["nn_module_stack"] = self.module_stack
             # convert nn_module_stack from Dict[key, (FQN, class)] -> Dict[str, Tuple[str, str]]
-            for key, (fqn, mod_cls) in node.meta["nn_module_stack"].items():
+            for key, (fqn, mod_cls, num_calls) in node.meta["nn_module_stack"].items():
                 if isinstance(mod_cls, type):
                     node.meta["nn_module_stack"][key] = (
                         fqn,
                         mod_cls.__module__ + "." + mod_cls.__qualname__,
+                        num_calls,
                     )
 
         # torch_fn

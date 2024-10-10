@@ -308,6 +308,7 @@ class Tracer(TracerBase):
         self.scope = Scope("", None)
         # Records the module call stack
         self.module_stack = collections.OrderedDict()
+        self.num_calls: Dict[str, int] = {}
         # Mapping of node name to module scope
         self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
 
@@ -514,7 +515,9 @@ class Tracer(TracerBase):
         with ScopeContextManager(self.scope, Scope(module_qualified_name, type(m))) as _scope:
             # module_stack is an ordered dict so writing then deleting the
             # entry is equivalent to push/pop on a list
-            self.module_stack[_scope.module_path] = (module_qualified_name, _scope.module_type)
+            num_calls = self.num_calls.get(module_qualified_name, 0)
+            self.module_stack[_scope.module_path] = (module_qualified_name, _scope.module_type, num_calls)
+            self.num_calls[module_qualified_name] = num_calls + 1
             if not self.is_leaf_module(m, module_qualified_name):
                 ret_val = forward(*args, **kwargs)
             else:

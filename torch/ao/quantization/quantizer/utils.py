@@ -77,7 +77,7 @@ def _get_module_name_filter(module_name: str):
                 prefix = len("L['self'].")
             return n[prefix:]
 
-        names = [_normalize_path(n) for n, _ in nn_module_stack.values()]
+        names = [_normalize_path(n) for n, _, _ in nn_module_stack.values()]
         return module_name in names
 
     return module_name_filter

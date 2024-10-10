@@ -262,7 +262,7 @@ def _swap_module_helper(
     # TODO: Handle the duplicate module case
     for node in gm.graph.nodes:
         if nn_module_stack := node.meta.get("nn_module_stack"):
-            for path, _ in nn_module_stack.values():
+            for path, _, _ in nn_module_stack.values():
                 if path in modules_to_swap:
                     partitions[path].append(node)
                     break
