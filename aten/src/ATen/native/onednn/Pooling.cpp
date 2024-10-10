@@ -16,11 +16,17 @@
 #include <ATen/ops/avg_pool3d_backward_native.h>
 #include <ATen/ops/avg_pool3d_native.h>
 #include <ATen/ops/mkldnn_adaptive_avg_pool2d_backward_native.h>
+#include <ATen/ops/onednn_adaptive_avg_pool2d_backward_native.h>
 #include <ATen/ops/mkldnn_adaptive_avg_pool2d_native.h>
+#include <ATen/ops/onednn_adaptive_avg_pool2d_native.h>
 #include <ATen/ops/mkldnn_max_pool2d_backward_native.h>
+#include <ATen/ops/onednn_max_pool2d_backward_native.h>
 #include <ATen/ops/mkldnn_max_pool2d_native.h>
+#include <ATen/ops/onednn_max_pool2d_native.h>
 #include <ATen/ops/mkldnn_max_pool3d_backward_native.h>
+#include <ATen/ops/onednn_max_pool3d_backward_native.h>
 #include <ATen/ops/mkldnn_max_pool3d_native.h>
+#include <ATen/ops/onednn_max_pool3d_native.h>
 #endif
 
 
@@ -28,6 +34,16 @@
 
 namespace at {
 namespace native {
+
+Tensor onednn_max_pool2d(
+    const Tensor& self,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    bool ceil_mode) {
+  TORCH_CHECK(false, "onednn_max_pool2d: ATen not compiled with ONEDNN support");
+}
 
 Tensor mkldnn_max_pool2d(
     const Tensor& self,
@@ -37,6 +53,16 @@ Tensor mkldnn_max_pool2d(
     IntArrayRef dilation,
     bool ceil_mode) {
   TORCH_CHECK(false, "mkldnn_max_pool2d: ATen not compiled with ONEDNN support");
+}
+
+Tensor onednn_max_pool3d(
+    const Tensor& self,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    bool ceil_mode) {
+  TORCH_CHECK(false, "onednn_max_pool3d: ATen not compiled with ONEDNN support");
 }
 
 Tensor mkldnn_max_pool3d(
@@ -93,6 +119,10 @@ Tensor& onednn_avg_pool3d_out(const Tensor& self,
   TORCH_CHECK(false, "onednn_avg_pool3d_out: ATen not compiled with ONEDNN support");
 }
 
+Tensor onednn_adaptive_avg_pool2d(Tensor const& input, IntArrayRef output_size) {
+  TORCH_CHECK(false, "onednn_adaptive_avg_pool2d: ATen not compiled with ONEDNN support");
+}
+
 Tensor mkldnn_adaptive_avg_pool2d(Tensor const& input, IntArrayRef output_size) {
   TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d: ATen not compiled with ONEDNN support");
 }
@@ -109,6 +139,18 @@ Tensor& onednn_adaptive_avg_pool2d_out(const Tensor& input,
   TORCH_CHECK(false, "onednn_adaptive_avg_pool2d_out: ATen not compiled with ONEDNN support");
 }
 
+Tensor onednn_max_pool2d_backward(
+    const Tensor& grad_output,
+    const Tensor& output,
+    const Tensor& input,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    bool ceil_mode) {
+  TORCH_CHECK(false, "onednn_max_pool2d_backward: ATen not compiled with ONEDNN support");
+}
+
 Tensor mkldnn_max_pool2d_backward(
     const Tensor& grad_output,
     const Tensor& output,
@@ -119,6 +161,18 @@ Tensor mkldnn_max_pool2d_backward(
     IntArrayRef dilation,
     bool ceil_mode) {
   TORCH_CHECK(false, "mkldnn_max_pool2d_backward: ATen not compiled with ONEDNN support");
+}
+
+Tensor onednn_max_pool3d_backward(
+    const Tensor& grad_output,
+    const Tensor& output,
+    const Tensor& input,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    bool ceil_mode) {
+  TORCH_CHECK(false, "onednn_max_pool3d_backward: ATen not compiled with ONEDNN support");
 }
 
 Tensor mkldnn_max_pool3d_backward(
@@ -179,6 +233,12 @@ Tensor onednn_avg_pool3d_backward(
     bool count_include_pad,
     std::optional<int64_t> divisor_override) {
   TORCH_CHECK(false, "onednn_avg_pool3d_backward: ATen not compiled with ONEDNN support");
+}
+
+Tensor onednn_adaptive_avg_pool2d_backward(
+    const Tensor& grad_output,
+    const Tensor& input) {
+  TORCH_CHECK(false, "onednn_adaptive_avg_pool2d_backward: ATen not compiled with ONEDNN support");
 }
 
 Tensor mkldnn_adaptive_avg_pool2d_backward(
@@ -363,7 +423,7 @@ static Tensor _onednn_pooling_backward(
                                  grad_output.options().device_opt());
 }
 
-Tensor mkldnn_max_pool2d(
+Tensor onednn_max_pool2d(
     const Tensor& input,
     IntArrayRef kernel_size,
     IntArrayRef stride,
@@ -371,10 +431,44 @@ Tensor mkldnn_max_pool2d(
     IntArrayRef dilation,
     bool ceil_mode) {
   TORCH_CHECK(std::all_of(dilation.cbegin(), dilation.cend(), [](int64_t i) { return 1 == i; }),
-      "mkldnn_max_pool2d does not support dilation case");
+      "onednn_max_pool2d does not support dilation case");
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(onednn_bf16_device_check(),
-        "mkldnn_max_pool2d: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+        "onednn_max_pool2d: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+  }
+
+  return _onednn_pooling(
+      input,
+      kernel_size,
+      stride,
+      padding,
+      dilation,
+      ceil_mode,
+      ideep::algorithm::pooling_max);
+}
+
+Tensor mkldnn_max_pool2d(
+    const Tensor& input,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    bool ceil_mode) {
+  return at::native::onednn_max_pool2d(input, kernel_size, stride, padding, dilation, ceil_mode);
+}
+
+Tensor onednn_max_pool3d(
+    const Tensor& input,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    bool ceil_mode) {
+  TORCH_CHECK(std::all_of(dilation.cbegin(), dilation.cend(), [](int64_t i) { return 1 == i; }),
+      "onednn_max_pool3d does not support dilation case");
+  if (input.scalar_type() == ScalarType::BFloat16) {
+    TORCH_CHECK(onednn_bf16_device_check(),
+        "onednn_max_pool3d: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
 
   return _onednn_pooling(
@@ -394,21 +488,7 @@ Tensor mkldnn_max_pool3d(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
-  TORCH_CHECK(std::all_of(dilation.cbegin(), dilation.cend(), [](int64_t i) { return 1 == i; }),
-      "mkldnn_max_pool3d does not support dilation case");
-  if (input.scalar_type() == ScalarType::BFloat16) {
-    TORCH_CHECK(onednn_bf16_device_check(),
-        "mkldnn_max_pool3d: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
-  }
-
-  return _onednn_pooling(
-      input,
-      kernel_size,
-      stride,
-      padding,
-      dilation,
-      ceil_mode,
-      ideep::algorithm::pooling_max);
+  return at::native::onednn_max_pool3d(input, kernel_size, stride, padding, dilation, ceil_mode);
 }
 
 Tensor onednn_avg_pool2d(
@@ -484,13 +564,13 @@ Tensor& onednn_avg_pool3d_out(const Tensor& input,
   TORCH_CHECK(false, "onednn_avg_pool3d_out: in-place onednn operations are not supported yet");
 }
 
-Tensor mkldnn_adaptive_avg_pool2d(
+Tensor onednn_adaptive_avg_pool2d(
     Tensor const& input,
     IntArrayRef output_size) {
-  TORCH_CHECK(input.dim() == 4, "mkldnn_adaptive_avg_pool2d: Expect 2D input");
+  TORCH_CHECK(input.dim() == 4, "onednn_adaptive_avg_pool2d: Expect 2D input");
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(onednn_bf16_device_check(),
-        "mkldnn_adaptive_avg_pool2d: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+        "onednn_adaptive_avg_pool2d: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
   auto output_size_vec =
       expand_param_if_needed(output_size, "output_size", input.dim() - 2);
@@ -514,6 +594,12 @@ Tensor mkldnn_adaptive_avg_pool2d(
       /*algo*/ ideep::algorithm::pooling_avg_exclude_padding);
 }
 
+Tensor mkldnn_adaptive_avg_pool2d(
+    Tensor const& input,
+    IntArrayRef output_size) {
+  return at::native::onednn_adaptive_avg_pool2d(input, output_size);
+}
+
 Tensor& onednn_adaptive_avg_pool2d_out_stub(const Tensor& input,
     IntArrayRef output_size,
     Tensor& output) {
@@ -523,13 +609,46 @@ Tensor& onednn_adaptive_avg_pool2d_out_stub(const Tensor& input,
 Tensor& onednn_adaptive_avg_pool2d_out(const Tensor& input,
     IntArrayRef output_size,
     Tensor& output) {
-  auto tmp_output = at::native::mkldnn_adaptive_avg_pool2d(input, output_size);
+  auto tmp_output = at::native::onednn_adaptive_avg_pool2d(input, output_size);
   at::native::resize_output(output, tmp_output.sizes());
   output.copy_(tmp_output);
   return output;
 }
 
+Tensor onednn_max_pool2d_backward(
+    const Tensor& grad_output,
+    const Tensor& output,
+    const Tensor& input,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    bool ceil_mode) {
+  return _onednn_pooling_backward(
+      grad_output,
+      output,
+      input,
+      kernel_size,
+      stride,
+      padding,
+      dilation,
+      ceil_mode,
+      ideep::algorithm::pooling_max);
+}
+
 Tensor mkldnn_max_pool2d_backward(
+    const Tensor& grad_output,
+    const Tensor& output,
+    const Tensor& input,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    bool ceil_mode) {
+  return at::native::onednn_max_pool2d_backward(grad_output, output, input, kernel_size, stride, padding, dilation, ceil_mode);
+}
+
+Tensor onednn_max_pool3d_backward(
     const Tensor& grad_output,
     const Tensor& output,
     const Tensor& input,
@@ -559,16 +678,7 @@ Tensor mkldnn_max_pool3d_backward(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
-  return _onednn_pooling_backward(
-      grad_output,
-      output,
-      input,
-      kernel_size,
-      stride,
-      padding,
-      dilation,
-      ceil_mode,
-      ideep::algorithm::pooling_max);
+  return at::native::onednn_max_pool3d_backward(grad_output, output, input, kernel_size, stride, padding, dilation, ceil_mode);
 }
 
 Tensor onednn_avg_pool2d_backward(
@@ -639,10 +749,10 @@ Tensor& onednn_avg_pool3d_backward_out(const Tensor & grad_output,
   TORCH_CHECK(false, "onednn_avg_pool3d_backward_out: in-place onednn operations are not supported yet");
 }
 
-Tensor mkldnn_adaptive_avg_pool2d_backward(
+Tensor onednn_adaptive_avg_pool2d_backward(
     const Tensor& grad_output,
     const Tensor& input) {
-  TORCH_CHECK(input.dim() == 4, "mkldnn_adaptive_avg_pool2d: Input is expected a 4D tensor");
+  TORCH_CHECK(input.dim() == 4, "onednn_adaptive_avg_pool2d: Input is expected a 4D tensor");
 
   auto output_size_vec = grad_output.sizes();
   std::vector<int64_t> kernel_size(input.dim() - 2);
@@ -665,6 +775,12 @@ Tensor mkldnn_adaptive_avg_pool2d_backward(
       /*dilation*/{1, 1},
       false,
       /*algo*/ ideep::algorithm::pooling_avg_exclude_padding);
+}
+
+Tensor mkldnn_adaptive_avg_pool2d_backward(
+    const Tensor& grad_output,
+    const Tensor& input) {
+  return at::native::onednn_adaptive_avg_pool2d_backward(grad_output, input);
 }
 
 } // namespace native

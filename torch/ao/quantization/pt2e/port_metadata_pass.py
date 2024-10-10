@@ -117,7 +117,7 @@ def _port_metadata_for_input_quant_nodes(
                 torch.ops.aten.transpose_,
                 torch.ops.aten.view_copy.default,
                 torch.ops.aten.view.default,
-                torch.ops.aten._mkldnn_transpose,
+                torch.ops.aten._onednn_transpose,
             ]
         ):
             q_to_get_attr_nodes.append(q_node_input)
