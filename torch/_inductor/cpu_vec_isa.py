@@ -150,7 +150,7 @@ cdll.LoadLibrary("__lib_path__")
 
 @dataclasses.dataclass
 class VecNEON(VecISA):
-    _bit_width = 256  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec256/vec256_float_neon.h
+    _bit_width = 128  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec128/vec128_float_neon.h
 
     # NOTE: CPU_CAPABILITY_NEON is no longer used (it didn't fit well with the rest of
     # the CPU_CAPABILITY system and was defined only by inductor), but we continue to
@@ -158,7 +158,7 @@ class VecNEON(VecISA):
     # doing so doesn't cost us anything.
     _macro = ["CPU_CAPABILITY_NEON", "AT_BUILD_ARM_VEC256_WITH_SLEEF"]
     _arch_flags = ""  # Unused
-    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
+    _dtype_nelements = {torch.float: 4, torch.bfloat16: 8, torch.float16: 8}
 
     def __str__(self) -> str:
         return "asimd"  # detects the presence of advanced SIMD on armv8-a kernels
