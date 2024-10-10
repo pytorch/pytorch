@@ -69,7 +69,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
         numTensors_(numTensors),
         numDevices_(cudaNumDevices()) {
     // Allocate inputs on available devices in a round robin fashion.
-    ::at::globalContext().lazyInitCUDA();
+    ::at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
     inputs_.resize(numTensors_);
     for (const auto i : c10::irange(numTensors_)) {
       inputs_[i] = at::empty(
