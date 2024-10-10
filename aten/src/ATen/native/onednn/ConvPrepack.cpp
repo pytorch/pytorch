@@ -145,8 +145,8 @@ static void _mkldnn_convolution_out(
 
 static void mkldnn_convolution_out(
     const Tensor& input,
-    ideep::tensor& mkldnn_output,
-    const ideep::tensor& mkldnn_weight,
+    ideep::tensor& onednn_output,
+    const ideep::tensor& onednn_weight,
     const std::optional<Tensor>& bias_opt,
     IntArrayRef padding,
     IntArrayRef stride,
@@ -159,17 +159,17 @@ static void mkldnn_convolution_out(
   const Tensor& bias = *bias_maybe_owned;
 
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
-  const ideep::tensor mkldnn_input = itensor_from_tensor(input);
-  std::optional<ideep::tensor> mkldnn_bias{std::nullopt};
+  const ideep::tensor onednn_input = itensor_from_tensor(input);
+  std::optional<ideep::tensor> onednn_bias{std::nullopt};
   if (bias.defined()) {
-    mkldnn_bias = itensor_from_tensor(bias);
+    onednn_bias = itensor_from_tensor(bias);
   }
 
   _mkldnn_convolution_out(
-      mkldnn_input,
-      mkldnn_output,
-      mkldnn_weight,
-      mkldnn_bias,
+      onednn_input,
+      onednn_output,
+      onednn_weight,
+      onednn_bias,
       padding,
       stride,
       dilation,
@@ -181,12 +181,12 @@ static void mkldnn_convolution_out(
 static std::vector<int64_t> get_output_sizes(
     ContextConv& context,
     const Tensor& input) {
-  const ideep::tensor& mkldnn_weight = context.weight_packed_;
+  const ideep::tensor& onednn_weight = context.weight_packed_;
   IntArrayRef padding = context.padding_;
   IntArrayRef stride = context.stride_;
   IntArrayRef dilation = context.dilation_;
 
-  auto kernel_size = mkldnn_weight.get_dims();
+  auto kernel_size = onednn_weight.get_dims();
 
   std::vector<int64_t> input_size = input.sizes().vec();
   return conv_output_size(input_size, kernel_size, padding, stride, dilation);
@@ -203,12 +203,12 @@ Tensor run(ContextConv& context, const Tensor& input) {
   ideep::tensor y;
 
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
-  ideep::tensor mkldnn_output = itensor_from_tensor(output);
+  ideep::tensor onednn_output = itensor_from_tensor(output);
 
   if (is_channels_last) {
     mkldnn_convolution_out(
         input,
-        mkldnn_output,
+        onednn_output,
         context.weight_packed_,
         context.at_bias_,
         context.padding_,
@@ -229,7 +229,7 @@ Tensor run(ContextConv& context, const Tensor& input) {
         output_sizes,
         context.groups_,
         context.attr_);
-    mkldnn_output.feed_from(y);
+    onednn_output.feed_from(y);
   }
   return output;
 }
@@ -243,13 +243,13 @@ void run(ContextConv& context, const Tensor& input, void* output) {
 
   ideep::tag o_tag = is_channels_last ? ideep::tag::nhwc : ideep::tag::nchw;
   ideep::tensor::desc o_desc = {
-      output_sizes, get_mkldnn_dtype(input.scalar_type()), o_tag};
-  ideep::tensor mkldnn_output = {o_desc, output};
+      output_sizes, get_onednn_dtype(input.scalar_type()), o_tag};
+  ideep::tensor onednn_output = {o_desc, output};
 
   if (is_channels_last) {
     mkldnn_convolution_out(
         input,
-        mkldnn_output,
+        onednn_output,
         context.weight_packed_,
         context.at_bias_,
         context.padding_,
@@ -270,7 +270,7 @@ void run(ContextConv& context, const Tensor& input, void* output) {
         output_sizes,
         context.groups_,
         context.attr_);
-    mkldnn_output.feed_from(y);
+    onednn_output.feed_from(y);
   }
 }
 

@@ -1183,7 +1183,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   bool is_mkldnn() const {
-    return key_set_.has_all(c10::mkldnn_ks);
+    return key_set_.has_all(c10::onednn_ks);
   }
 
   bool is_vulkan() const {
@@ -1271,9 +1271,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // strided case first.
     // This keyset must also be kept in sync with the logic in
     // is_sparse() / is_sparse_csr() / is_mkldnn()
-    constexpr auto sparse_and_sparsecsr_and_mkldnn_ks =
-        c10::sparse_ks | c10::sparse_csr_ks | c10::mkldnn_ks;
-    if (!key_set_.has_any(sparse_and_sparsecsr_and_mkldnn_ks)) {
+    constexpr auto sparse_and_sparsecsr_and_onednn_ks =
+        c10::sparse_ks | c10::sparse_csr_ks | c10::onednn_ks;
+    if (!key_set_.has_any(sparse_and_sparsecsr_and_onednn_ks)) {
       return kStrided;
     } else if (is_sparse()) {
       return kSparse;

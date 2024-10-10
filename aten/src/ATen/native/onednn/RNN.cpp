@@ -258,31 +258,31 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
   ideep::tensor w1_, w2_;
   auto x = itensor_view_from_dense(
       input,
-      rnn.src_layer_desc(input_size, get_mkldnn_dtype(input)));
+      rnn.src_layer_desc(input_size, get_onednn_dtype(input)));
   auto hx = itensor_view_from_dense(
-      hx_, rnn.src_iter_desc(get_mkldnn_dtype(hx_)));
+      hx_, rnn.src_iter_desc(get_onednn_dtype(hx_)));
   auto cx = itensor_view_from_dense(
-      cx_, rnn.src_iter_c_desc(get_mkldnn_dtype(cx_)));
+      cx_, rnn.src_iter_c_desc(get_onednn_dtype(cx_)));
   auto b = itensor_view_from_dense(
-      bias, rnn.bias_desc(get_mkldnn_dtype(bias)));
+      bias, rnn.bias_desc(get_onednn_dtype(bias)));
   auto y = itensor_view_from_dense(
-      output, rnn.dst_layer_desc(get_mkldnn_dtype(output)));
+      output, rnn.dst_layer_desc(get_onednn_dtype(output)));
   auto hy = itensor_view_from_dense(
-      hy_, rnn.dst_iter_desc(get_mkldnn_dtype(hy_)));
+      hy_, rnn.dst_iter_desc(get_onednn_dtype(hy_)));
   auto cy = itensor_view_from_dense(
-      cy_, rnn.dst_iter_c_desc(get_mkldnn_dtype(cy_)));
-  w1_ = weight_ih.is_mkldnn() ? itensor_from_tensor(weight_ih) : itensor_view_from_dense(weight_ih, rnn.weights_layer_desc(input_size, get_mkldnn_dtype(weight_ih)));
-  w2_ = weight_hh.is_mkldnn() ? itensor_from_tensor(weight_hh) : itensor_view_from_dense(weight_hh, rnn.weights_iter_desc(get_mkldnn_dtype(weight_hh)));
+      cy_, rnn.dst_iter_c_desc(get_onednn_dtype(cy_)));
+  w1_ = weight_ih.is_mkldnn() ? itensor_from_tensor(weight_ih) : itensor_view_from_dense(weight_ih, rnn.weights_layer_desc(input_size, get_onednn_dtype(weight_ih)));
+  w2_ = weight_hh.is_mkldnn() ? itensor_from_tensor(weight_hh) : itensor_view_from_dense(weight_hh, rnn.weights_iter_desc(get_onednn_dtype(weight_hh)));
   if (at::GradMode::is_enabled()) {
     Tensor workspace = Tensor();
     auto pd = ideep::lstm_forward_training::prepare(
         x, hx, cx, w1_, w2_, b, y, hy, cy, reverse);
     workspace = at::empty(pd.workspace_desc().get_size() / sizeof(uint8_t), input.options().dtype(at::kByte));
-    ideep::tensor mkldnn_workspace;
-    mkldnn_workspace.init(
+    ideep::tensor onednn_workspace;
+    onednn_workspace.init(
         pd.workspace_desc(), workspace.template data_ptr<uint8_t>());
     ideep::lstm_forward_training::compute(
-        pd, x, hx, cx, w1_, w2_, b, mkldnn_workspace, y, hy, cy, reverse, ideep::prop_kind::forward_training);
+        pd, x, hx, cx, w1_, w2_, b, onednn_workspace, y, hy, cy, reverse, ideep::prop_kind::forward_training);
     return std::make_tuple(output, hy_, cy_, workspace);
   } else {
     ideep::lstm_forward_inference::compute(
@@ -347,26 +347,26 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
   int64_t input_size = input.size(2);
   auto x = itensor_view_from_dense(
       input,
-      rnn.src_layer_desc(input_size, get_mkldnn_dtype(input.scalar_type())));
+      rnn.src_layer_desc(input_size, get_onednn_dtype(input.scalar_type())));
   auto hx = itensor_view_from_dense(
-      hx_, rnn.src_iter_desc(get_mkldnn_dtype(hx_.scalar_type())));
+      hx_, rnn.src_iter_desc(get_onednn_dtype(hx_.scalar_type())));
   auto cx = itensor_view_from_dense(
-      cx_, rnn.src_iter_c_desc(get_mkldnn_dtype(cx_.scalar_type())));
+      cx_, rnn.src_iter_c_desc(get_onednn_dtype(cx_.scalar_type())));
   auto w1 = itensor_view_from_dense(
       weight_ih,
       rnn.weights_layer_desc(
-          input_size, get_mkldnn_dtype(weight_ih.scalar_type())));
+          input_size, get_onednn_dtype(weight_ih.scalar_type())));
   auto w2 = itensor_view_from_dense(
       weight_hh,
-      rnn.weights_iter_desc(get_mkldnn_dtype(weight_hh.scalar_type())));
+      rnn.weights_iter_desc(get_onednn_dtype(weight_hh.scalar_type())));
   auto b = itensor_view_from_dense(
-      bias, rnn.bias_desc(get_mkldnn_dtype(bias.scalar_type())));
+      bias, rnn.bias_desc(get_onednn_dtype(bias.scalar_type())));
   auto y = itensor_view_from_dense(
-      output, rnn.dst_layer_desc(get_mkldnn_dtype(output.scalar_type())));
+      output, rnn.dst_layer_desc(get_onednn_dtype(output.scalar_type())));
   auto hy = itensor_view_from_dense(
-      hy_, rnn.dst_iter_desc(get_mkldnn_dtype(hy_.scalar_type())));
+      hy_, rnn.dst_iter_desc(get_onednn_dtype(hy_.scalar_type())));
   auto cy = itensor_view_from_dense(
-      cy_, rnn.dst_iter_c_desc(get_mkldnn_dtype(cy_.scalar_type())));
+      cy_, rnn.dst_iter_c_desc(get_onednn_dtype(cy_.scalar_type())));
 
   // Create diff_* ATen tensor and corresponding ideep tensor as fp32
   auto diff_x_ =
@@ -412,11 +412,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
     grad_cy_.copy_(grad_cy);
 
     diff_y = itensor_view_from_dense(
-        grad_y_, rnn.dst_layer_desc(get_mkldnn_dtype(grad_y_.scalar_type())));
+        grad_y_, rnn.dst_layer_desc(get_onednn_dtype(grad_y_.scalar_type())));
     diff_hy = itensor_view_from_dense(
-        grad_hy_, rnn.dst_iter_desc(get_mkldnn_dtype(grad_hy_.scalar_type())));
+        grad_hy_, rnn.dst_iter_desc(get_onednn_dtype(grad_hy_.scalar_type())));
     diff_cy = itensor_view_from_dense(
-        grad_cy_, rnn.dst_iter_desc(get_mkldnn_dtype(grad_cy_.scalar_type())));
+        grad_cy_, rnn.dst_iter_desc(get_onednn_dtype(grad_cy_.scalar_type())));
   } else {
     diff_y = itensor_view_from_dense(
         grad_output, rnn.dst_layer_desc(ideep::tensor::data_type::f32));
@@ -427,10 +427,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
   }
 
   auto forward_hint = ideep::lstm_forward_training::prepare(x, hx, cx, w1, w2, b, y, hy, cy, reverse);
-  ideep::tensor mkldnn_workspace;
-  mkldnn_workspace.init(
+  ideep::tensor onednn_workspace;
+  onednn_workspace.init(
       forward_hint.workspace_desc(), workspace.template data_ptr<uint8_t>());
-  ideep::lstm_backward::compute(forward_hint, x, hx, cx, w1, w2, b, y, hy, cy, diff_y, diff_hy, diff_cy, mkldnn_workspace, diff_x, diff_hx, diff_cx, diff_w1, diff_w2, diff_b, reverse);
+  ideep::lstm_backward::compute(forward_hint, x, hx, cx, w1, w2, b, y, hy, cy, diff_y, diff_hy, diff_cy, onednn_workspace, diff_x, diff_hx, diff_cx, diff_w1, diff_w2, diff_b, reverse);
   auto diff_b2_ = at::clone(diff_b_);
   return std::make_tuple(diff_x_, diff_w1_, diff_w2_, diff_b_, diff_b2_, diff_hx_, diff_cx_);
 }
@@ -451,15 +451,15 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
 //   b. padded sequence input support
 //
 
-static std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
+static std::tuple<Tensor, Tensor, Tensor> onednn_rnn(
     const Tensor& input_, TensorList weight, int64_t weight_stride0,
     const Tensor& hx_, const Tensor& cx_,
     int64_t mode, int64_t hidden_size,
     int64_t num_layers, bool has_biases, bool batch_first, double dropout_p,
     bool train, bool bidirectional, IntArrayRef batch_sizes) {
-  TORCH_CHECK(batch_sizes.size() == 0, "mkldnn_rnn doesn't support packed input");
+  TORCH_CHECK(batch_sizes.size() == 0, "onednn_rnn doesn't support packed input");
   if (static_cast<ideep::rnn_kind>(mode) != ideep::rnn_kind::LSTM) {
-    TORCH_CHECK(!cx_.defined(), "mkldnn_rnn: illegal defined cx for non-LSTM RNN");
+    TORCH_CHECK(!cx_.defined(), "onednn_rnn: illegal defined cx for non-LSTM RNN");
   }
 
   auto input = input_;
@@ -532,26 +532,26 @@ std::tuple<Tensor, Tensor> pack_hidden<std::tuple<Tensor, Tensor>>(const Tensor&
 }
 
 template<typename hidden_type>
-std::pair<Tensor, hidden_type> mkldnn_impl(
+std::pair<Tensor, hidden_type> onednn_impl(
     const Tensor& input, const hidden_type& hidden,
     TensorList params, bool has_biases, ideep::rnn_kind mode,
     int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
   auto [hx, cx] = unpack_hidden(hidden);
   int64_t hidden_size = hx.size(2);
 
-  auto mkldnn_output = mkldnn_rnn(
+  auto onednn_output = onednn_rnn(
       input, params, has_biases ? 4 : 2,
       hx, cx, static_cast<int>(mode), hidden_size, num_layers, has_biases, batch_first, dropout_p,
       train, bidirectional, /*batch_sizes*/{});
 
-  return {std::get<0>(mkldnn_output),
-          pack_hidden<hidden_type>(std::get<1>(mkldnn_output), std::get<2>(mkldnn_output))};
+  return {std::get<0>(onednn_output),
+          pack_hidden<hidden_type>(std::get<1>(onednn_output), std::get<2>(onednn_output))};
 }
 
 void lstm_mkldnn(Tensor& output, Tensor& hy, Tensor& cy,
     const Tensor& input, TensorList hx, TensorList params, bool has_biases,
     int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
-  auto result = mkldnn_impl(input, std::make_tuple(hx[0], hx[1]), params, has_biases,
+  auto result = onednn_impl(input, std::make_tuple(hx[0], hx[1]), params, has_biases,
       ideep::rnn_kind::LSTM, num_layers, dropout_p, train, bidirectional, batch_first);
   output = result.first;
   hy = std::get<0>(result.second);

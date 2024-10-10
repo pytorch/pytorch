@@ -184,7 +184,7 @@ sycl::event deconvolution(
   dnnl::post_ops po = attr.extract_post_ops(dst);
   pattr.set_post_ops(po);
   #if ONEDNN_SUPPORT_DETERMINISTIC
-    if(at::globalContext().deterministicAlgorithms() || at::globalContext().deterministicMkldnn())
+    if(at::globalContext().deterministicAlgorithms() || at::globalContext().deterministicOnednn())
         pattr.set_deterministic(true);
   #endif
 
@@ -266,7 +266,7 @@ sycl::event deconvolution_backward_data(
   dnnl::primitive_attr pattr;
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   #if ONEDNN_SUPPORT_DETERMINISTIC
-    if(at::globalContext().deterministicAlgorithms() || at::globalContext().deterministicMkldnn())
+    if(at::globalContext().deterministicAlgorithms() || at::globalContext().deterministicOnednn())
         pattr.set_deterministic(true);
   #endif
 
@@ -362,7 +362,7 @@ sycl::event deconvolution_backward_weights(
   dnnl::primitive_attr pattr;
 
   #if ONEDNN_SUPPORT_DETERMINISTIC
-    if(at::globalContext().deterministicAlgorithms() || at::globalContext().deterministicMkldnn())
+    if(at::globalContext().deterministicAlgorithms() || at::globalContext().deterministicOnednn())
         pattr.set_deterministic(true);
   #endif
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
