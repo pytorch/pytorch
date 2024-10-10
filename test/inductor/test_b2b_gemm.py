@@ -6,7 +6,7 @@ import torch
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 class B2BGEMMTest(TestCase):
@@ -37,9 +37,9 @@ class B2BGEMMTest(TestCase):
             return f(m1, m2, m3).to(torch.float16)
 
         f_opt = torch.compile(f)
-        A = torch.randn((256, 32), device="cuda", dtype=torch.float16)
-        B = torch.randn((32, 256), device="cuda", dtype=torch.float16)
-        C = torch.randn((256, 32), device="cuda", dtype=torch.float16)
+        A = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
+        B = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
+        C = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
         res, (code,) = run_and_get_code(f_opt, A, B, C)
         self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" in code)
@@ -63,9 +63,9 @@ class B2BGEMMTest(TestCase):
             return f(m1, m2, m3).to(torch.float16)
 
         f_opt = torch.compile(f)
-        A = torch.randn((32, 256), device="cuda", dtype=torch.float16)
-        B = torch.randn((256, 32), device="cuda", dtype=torch.float16)
-        C = torch.randn((32, 256), device="cuda", dtype=torch.float16)
+        A = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
+        B = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
+        C = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
         res, (code,) = run_and_get_code(f_opt, A, B, C)
         self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" in code)
@@ -88,9 +88,9 @@ class B2BGEMMTest(TestCase):
             return f(m1, m2, m3).to(torch.float16)
 
         f_opt = torch.compile(f)
-        A = torch.randn((256, 32), device="cuda", dtype=torch.float16)
-        B = torch.randn((32, 256), device="cuda", dtype=torch.float16)
-        C = torch.randn((256, 32), device="cuda", dtype=torch.float16)
+        A = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
+        B = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
+        C = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
         res, (code,) = run_and_get_code(f_opt, A, B, C)
         self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" in code)
@@ -113,9 +113,9 @@ class B2BGEMMTest(TestCase):
             return f(m1, m2, m3).to(torch.float16)
 
         f_opt = torch.compile(f)
-        A = torch.randn((32, 256), device="cuda", dtype=torch.float16)
-        B = torch.randn((256, 32), device="cuda", dtype=torch.float16)
-        C = torch.randn((32, 256), device="cuda", dtype=torch.float16)
+        A = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
+        B = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
+        C = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
         res, (code,) = run_and_get_code(f_opt, A, B, C)
         self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" in code)
@@ -133,9 +133,9 @@ class B2BGEMMTest(TestCase):
             return torch.mm(mm1, mm2)
 
         f_opt = torch.compile(f)
-        A = torch.randn((256, 32), device="cuda", dtype=torch.float16)
-        B = torch.randn((32, 256), device="cuda", dtype=torch.float16)
-        C = torch.randn((256, 32), device="cuda", dtype=torch.float16)
+        A = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
+        B = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
+        C = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
         res, (code,) = run_and_get_code(f_opt, A, B, C)
         self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" not in code)
@@ -152,9 +152,9 @@ class B2BGEMMTest(TestCase):
             return torch.mm(torch.mm(m1, m2), m3)
 
         f_opt = torch.compile(f)
-        A = torch.randn((100, 100), device="cuda", dtype=torch.float16)
-        B = torch.randn((100, 100), device="cuda", dtype=torch.float16)
-        C = torch.randn((100, 100), device="cuda", dtype=torch.float16)
+        A = torch.randn((100, 100), device=GPU_TYPE, dtype=torch.float16)
+        B = torch.randn((100, 100), device=GPU_TYPE, dtype=torch.float16)
+        C = torch.randn((100, 100), device=GPU_TYPE, dtype=torch.float16)
         res, (code,) = run_and_get_code(f_opt, A, B, C)
         self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" not in code)
@@ -198,9 +198,9 @@ class B2BGEMMTest(TestCase):
             print(f"M = {M}".ljust(10), end="")
             for N in Ns:
                 O, P = M, N
-                A = torch.randn((M, N), device="cuda", dtype=torch.float16)
-                B = torch.randn((N, O), device="cuda", dtype=torch.float16)
-                C = torch.randn((O, P), device="cuda", dtype=torch.float16)
+                A = torch.randn((M, N), device=GPU_TYPE, dtype=torch.float16)
+                B = torch.randn((N, O), device=GPU_TYPE, dtype=torch.float16)
+                C = torch.randn((O, P), device=GPU_TYPE, dtype=torch.float16)
                 speedup = run_with_b2b_gemm_off(A, B, C) / run_with_b2b_gemm_on(A, B, C)
                 print(f"{round(speedup, 3)}".ljust(10), end="")
                 speedups.append(speedup)
@@ -255,9 +255,9 @@ class B2BGEMMTest(TestCase):
             print(f"M = {M}".ljust(10), end="")
             for N in Ns:
                 O, P = M, N
-                A = torch.randn((M, N), device="cuda", dtype=torch.float16)
-                B = torch.randn((N, O), device="cuda", dtype=torch.float16)
-                C = torch.randn((O, P), device="cuda", dtype=torch.float16)
+                A = torch.randn((M, N), device=GPU_TYPE, dtype=torch.float16)
+                B = torch.randn((N, O), device=GPU_TYPE, dtype=torch.float16)
+                C = torch.randn((O, P), device=GPU_TYPE, dtype=torch.float16)
                 speedup = run_with_b2b_gemm_off(A, B, C) / run_with_b2b_gemm_on(A, B, C)
                 print(f"{round(speedup, 3)}".ljust(10), end="")
                 speedups.append(speedup)
@@ -312,9 +312,9 @@ class B2BGEMMTest(TestCase):
             print(f"M = {M}".ljust(10), end="")
             for N in Ns:
                 O, P = N, N
-                A = torch.randn((M, N), device="cuda", dtype=torch.float16)
-                B = torch.randn((N, O), device="cuda", dtype=torch.float16)
-                C = torch.randn((O, P), device="cuda", dtype=torch.float16)
+                A = torch.randn((M, N), device=GPU_TYPE, dtype=torch.float16)
+                B = torch.randn((N, O), device=GPU_TYPE, dtype=torch.float16)
+                C = torch.randn((O, P), device=GPU_TYPE, dtype=torch.float16)
                 speedup = run_with_b2b_gemm_off(A, B, C) / run_with_b2b_gemm_on(A, B, C)
                 print(f"{round(speedup, 3)}".ljust(10), end="")
                 speedups.append(speedup)
@@ -331,5 +331,5 @@ class B2BGEMMTest(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA:
+    if HAS_GPU:
         run_tests()
