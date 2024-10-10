@@ -29,7 +29,7 @@ from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_device_type import expectedFailureXPU
+from torch.testing._internal.common_device_type import expectedFailureXPU, skipCUDAIf
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -42,6 +42,8 @@ from torch.utils import _pytree as pytree
 
 
 class TestPatternMatcher(TestCase):
+    device_type = GPU_TYPE
+
     def common(
         self,
         fn,
@@ -129,7 +131,7 @@ class TestPatternMatcher(TestCase):
 
     @skipIfRocm
     @expectedFailureXPU
-    @unittest.skipIf(HAS_CUDA ^ bool(SM80OrLater), "need sm_80")
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(force_fuse_int_mm_with_mul=True)
     def test_fused_int_mm_mul(self):
         def fn1(a, b, c):
@@ -164,7 +166,7 @@ class TestPatternMatcher(TestCase):
 
     @skipIfRocm
     @expectedFailureXPU
-    @unittest.skipIf(HAS_CUDA ^ bool(SM80OrLater), "need sm_80")
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(force_fuse_int_mm_with_mul=True)
     def test_fused_int_mm_mul_gating(self):
         def fn1(a, b, c):
@@ -204,7 +206,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual("fallback_mixed_mm" in code, fallback_mixed_mm_expected)
 
     @expectedFailureXPU
-    @unittest.skipIf(HAS_CUDA ^ bool(SM80OrLater), "need sm_80")
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(mixed_mm_choice="triton")
     def test_mixed_mm(self):
         def fn(a, b):
@@ -233,7 +235,7 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, False)
 
     @expectedFailureXPU
-    @unittest.skipIf(HAS_CUDA ^ bool(SM80OrLater), "need sm_80")
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(mixed_mm_choice="triton")
     def test_mixed_mm_exhaustive_dtypes(self):
         def fn(a, b):
@@ -258,7 +260,7 @@ class TestPatternMatcher(TestCase):
             )
 
     @expectedFailureXPU
-    @unittest.skipIf(HAS_CUDA ^ bool(SM80OrLater), "need sm_80")
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(mixed_mm_choice="triton")
     def test_mixed_mm_bad_cases(self):
         def fn(a, b):
@@ -284,7 +286,7 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, True)
 
     @expectedFailureXPU
-    @unittest.skipIf(HAS_CUDA ^ bool(SM80OrLater), "need sm_80")
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(mixed_mm_choice="triton", max_autotune_gemm=True)
     def test_mixed_mm_epi_works(self):
         def fn(a, b, c, d):
@@ -315,9 +317,9 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, False)
 
     @expectedFailureXPU
-    @unittest.skipIf(HAS_CUDA ^ bool(SM80OrLater), "need sm_80")
-    @unittest.skipIf(HAS_CUDA ^ bool(IS_A100), "heuristic only run on Linux A100")
-    @unittest.skipIf(HAS_CUDA ^ bool(IS_BIG_GPU), "tests fail on small GPU")
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
+    @skipCUDAIf(not IS_A100, "heuristic only run on Linux A100")
+    @skipCUDAIf(not IS_BIG_GPU, "tests fail on small GPU")
     @inductor_config.patch(
         mixed_mm_choice="heuristic",
         autoheuristic_use="",
@@ -386,9 +388,9 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, True)
 
     @expectedFailureXPU
-    @unittest.skipIf(HAS_CUDA ^ bool(SM80OrLater), "need sm_80")
-    @unittest.skipIf(HAS_CUDA ^ bool(IS_A100), "heuristic only run on Linux A100")
-    @unittest.skipIf(HAS_CUDA ^ bool(IS_BIG_GPU), "tests fail on small GPU")
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
+    @skipCUDAIf(not IS_A100, "heuristic only run on Linux A100")
+    @skipCUDAIf(not IS_BIG_GPU, "tests fail on small GPU")
     @inductor_config.patch(
         mixed_mm_choice="heuristic",
         autoheuristic_use="",
@@ -451,7 +453,7 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, False, rtol=0.01, atol=0.04)
 
     @expectedFailureXPU
-    @unittest.skipIf(HAS_CUDA ^ bool(SM80OrLater), "need sm_80")
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
     def test_mixed_mm_gating(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -508,7 +510,7 @@ class TestPatternMatcher(TestCase):
         self._test_mixed_impl(fn, args, False, False)
 
     @expectedFailureXPU
-    @unittest.skipIf(HAS_CUDA ^ bool(SM80OrLater), "need sm_80")
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(use_mixed_mm=True)
     def test_uint4x2_mixed_mm(self):
         def fn(a, b):
@@ -561,7 +563,7 @@ class TestPatternMatcher(TestCase):
             check_uint4x2_mixed_mm(args, False)
 
     @expectedFailureXPU
-    @unittest.skipIf(HAS_CUDA ^ bool(SM80OrLater), "need sm_80")
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(use_mixed_mm=True)
     def test_uint4x2_mixed_mm_epi(self):
         def fn(a, b, c, d):

@@ -11,10 +11,21 @@ import unittest
 from collections import namedtuple
 from enum import Enum
 from functools import partial, wraps
-from typing import Any, ClassVar, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import (
+    Any,
+    ClassVar,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 
 import torch
-from torch._inductor.utils import is_gpu
+from torch._inductor.utils import GPU_TYPES
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     _get_torch_rocm_version,
@@ -1206,8 +1217,8 @@ class skipIf:
                 self.device_type is None
                 or self.device_type == slf.device_type
                 or (
-                    self.device_type == "gpu"
-                    and is_gpu(slf.device_type)
+                    isinstance(self.device_type, Iterable)
+                    and slf.device_type in self.device_type
                 )
             ):
                 if (isinstance(self.dep, str) and getattr(slf, self.dep, True)) or (
@@ -1241,7 +1252,7 @@ class skipXPUIf(skipIf):
 # Skips a test on XPU or CUDA if the condition is true.
 class skipGPUIf(skipIf):
     def __init__(self, dep, reason):
-        super().__init__(dep, reason, device_type="gpu")
+        super().__init__(dep, reason, device_type=GPU_TYPES)
 
 
 # Skips a test on Lazy if the condition is true.

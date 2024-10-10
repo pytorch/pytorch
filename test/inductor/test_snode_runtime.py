@@ -82,6 +82,8 @@ class TestCase(InductorTestCase):
 
 
 class UnsupportedTests(TestCase):
+    device = DEVICE
+
     def test_no_op(self):
         def f(a):
             return a
@@ -98,6 +100,9 @@ class UnsupportedTests(TestCase):
 
 
 class ComputeBoundedTests(TestCase):
+    device = DEVICE
+
+    # lack of profiler on XPU
     @expectedFailureXPU
     def test_conv1d(self):
         def f(x, y):
@@ -106,6 +111,7 @@ class ComputeBoundedTests(TestCase):
         inp = (T(33, 16, 30), T(20, 16, 5))
         self.assertNotZero(calculate_runtime(f, *inp))
 
+    # lack of profiler on XPU
     @expectedFailureXPU
     def test_conv2d(self):
         def f(x, y):
@@ -114,6 +120,7 @@ class ComputeBoundedTests(TestCase):
         inp = (T(8, 4, 3, 3), T(1, 4, 5, 5))
         self.assertNotZero(calculate_runtime(f, *inp))
 
+    # lack of profiler on XPU
     @expectedFailureXPU
     def test_conv2d_transpose(self):
         def f(x, y):
@@ -122,6 +129,7 @@ class ComputeBoundedTests(TestCase):
         inp = (T(8, 1, 1, 1), T(1, 4, 5, 5))
         self.assertNotZero(calculate_runtime(f, *inp))
 
+    # lack of profiler on XPU
     @expectedFailureXPU
     def test_conv3d(self):
         def f(x, y):
@@ -130,6 +138,7 @@ class ComputeBoundedTests(TestCase):
         inp = (T(20, 16, 50, 10, 20), T(33, 16, 3, 3, 3))
         self.assertNotZero(calculate_runtime(f, *inp))
 
+    # lack of profiler on XPU
     @expectedFailureXPU
     def test_mm(self):
         def f(a, b):
@@ -141,6 +150,7 @@ class ComputeBoundedTests(TestCase):
         )
         self.assertNotZero(calculate_runtime(f, *inp))
 
+    # lack of profiler on XPU
     @expectedFailureXPU
     def test_addmm(self):
         def f(a, b, c):
@@ -153,6 +163,7 @@ class ComputeBoundedTests(TestCase):
         )
         self.assertNotZero(calculate_runtime(f, *inp))
 
+    # lack of profiler on XPU
     @expectedFailureXPU
     def test_bmm(self):
         def f(a, b):
@@ -166,6 +177,9 @@ class ComputeBoundedTests(TestCase):
 
 
 class MemoryBoundedTests(TestCase):
+    device = DEVICE
+
+    # lack of profiler on XPU
     @expectedFailureXPU
     def test_relu(self):
         def f(a):
@@ -174,6 +188,7 @@ class MemoryBoundedTests(TestCase):
         inp = (T(10, 10),)
         self.assertNotZero(calculate_runtime(f, *inp))
 
+    # lack of profiler on XPU
     @expectedFailureXPU
     def test_horizontal_reduction_pointwise(self):
         def f(a):
@@ -184,6 +199,7 @@ class MemoryBoundedTests(TestCase):
         inp = (T(10, 10),)
         self.assertNotZero(calculate_runtime(f, *inp))
 
+    # lack of profiler on XPU
     @expectedFailureXPU
     def test_pointwise(self):
         def f(x):
@@ -192,6 +208,7 @@ class MemoryBoundedTests(TestCase):
         inp = (T(10),)
         self.assertNotZero(calculate_runtime(f, *inp))
 
+    # lack of profiler on XPU
     @expectedFailureXPU
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_dynamic(self):
@@ -204,6 +221,8 @@ class MemoryBoundedTests(TestCase):
 
 @skipIf(not dist.is_available(), "requires distributed")
 class TestCommAnalysis(TestCase):
+    device = DEVICE
+
     WORLD_SIZE: int = 8
     RANKS = list(range(8))
 
@@ -235,6 +254,7 @@ class TestCommAnalysis(TestCase):
         finally:
             dist.destroy_process_group()
 
+    # lack of profiler on XPU
     @expectedFailureXPU
     def test_legacy_all_reduce(self):
         def fn(x):
@@ -244,6 +264,7 @@ class TestCommAnalysis(TestCase):
         inp = T(10, 10)
         self._verify_runtime_estimation(fn, (inp,))
 
+    # lack of profiler on XPU
     @expectedFailureXPU
     def test_legacy_all_reduce_coalesced(self):
         def fn(x):
@@ -253,6 +274,7 @@ class TestCommAnalysis(TestCase):
         inp = [T(10, 10), T(15, 15)]
         self._verify_runtime_estimation(fn, (inp,))
 
+    # lack of profiler on XPU
     @expectedFailureXPU
     def test_legacy_all_gather_into_tensor_coalesced(self):
         def fn(x):
@@ -267,6 +289,7 @@ class TestCommAnalysis(TestCase):
         inp = [T(10, 10), T(15, 15)]
         self._verify_runtime_estimation(fn, (inp,))
 
+    # lack of profiler on XPU
     @expectedFailureXPU
     def test_all_reduce(self):
         def fn(x):
@@ -276,6 +299,7 @@ class TestCommAnalysis(TestCase):
         inp = T(10, 10)
         self._verify_runtime_estimation(fn, (inp,))
 
+    # lack of profiler on XPU
     @expectedFailureXPU
     def test_all_reduce_coalesced(self):
         def fn(x):
@@ -285,6 +309,7 @@ class TestCommAnalysis(TestCase):
         inp = [T(10, 10), T(15, 15)]
         self._verify_runtime_estimation(fn, (inp,))
 
+    # lack of profiler on XPU
     @expectedFailureXPU
     def test_all_gather_into_tensor(self):
         def fn(x):
@@ -298,6 +323,7 @@ class TestCommAnalysis(TestCase):
         inp = T(10, 10)
         self._verify_runtime_estimation(fn, (inp,))
 
+    # lack of profiler on XPU
     @expectedFailureXPU
     def test_all_gather_into_tensor_coalesced(self):
         def fn(x):
@@ -311,6 +337,7 @@ class TestCommAnalysis(TestCase):
         inp = [T(10, 10), T(15, 15)]
         self._verify_runtime_estimation(fn, (inp,))
 
+    # lack of profiler on XPU
     @expectedFailureXPU
     def test_reduce_scatter_tensor(self):
         def fn(x):
@@ -325,6 +352,7 @@ class TestCommAnalysis(TestCase):
         inp = T(self.WORLD_SIZE, 10)
         self._verify_runtime_estimation(fn, (inp,))
 
+    # lack of profiler on XPU
     @expectedFailureXPU
     def test_reduce_scatter_tensor_coalesced(self):
         def fn(x):
