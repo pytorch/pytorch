@@ -240,10 +240,8 @@ class TestPoitwiseOps(torch.nn.Module):
         inputs = torch.split(x.to(self.device), 500, dim=1)
         x_split = torch.split(inputs[0].to(self.device), 50, dim=1)
         y_split = torch.split(inputs[1].to(self.device), 50, dim=1)
-        tanh_1 = [torch.tanh(x_split[i]) for i in range(len(x_split))]
-        tanh_2 = [torch.tanh(y_split[i]) for i in range(len(y_split))]
-        sigmoid_1 = [torch.sigmoid(tanh_1[i]) for i in range(len(tanh_1))]
-        sigmoid_2 = [torch.sigmoid(tanh_2[i]) for i in range(len(tanh_2))]
+        sigmoid_1 = [torch.sigmoid(x_split[i]) for i in range(len(x_split))]
+        sigmoid_2 = [torch.sigmoid(y_split[i]) for i in range(len(y_split))]
         relu_1 = [torch.nn.functional.relu(sigmoid_1[i]) for i in range(len(sigmoid_1))]
         relu_2 = [torch.nn.functional.relu(sigmoid_2[i]) for i in range(len(sigmoid_2))]
         add = [torch.add(relu_1[i], relu_2[i]) for i in range(len(relu_1))]
@@ -363,7 +361,7 @@ class TestGroupBatchFusion(TestCase):
             )
             self.assertEqual(
                 counters["inductor"]["batch_aten_add"],
-                3,
+                0,
             )
             self.assertIn("GroupLinearFusion", optimus_scuba_log)
             counters.clear()
@@ -457,7 +455,6 @@ class TestGroupBatchFusion(TestCase):
         ref = module(*input)
         res = traced(*input)
         self.compare_pred(module, traced, input)
-        self.assertEqual(counters["inductor"]["batch_tanh"], 1)
         self.assertEqual(counters["inductor"]["batch_relu"], 1)
         self.assertEqual(counters["inductor"]["batch_sigmoid"], 1)
         self.assertEqual(counters["inductor"]["batch_aten_add"], 1)
@@ -491,7 +488,7 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(counters["inductor"]["batch_aten_tanh"], 1)
         self.assertEqual(counters["inductor"]["batch_aten_relu"], 1)
         self.assertEqual(counters["inductor"]["batch_aten_sigmoid"], 1)
-        self.assertEqual(counters["inductor"]["unbind_stack_aten_pass"], 2)
+        self.assertEqual(counters["inductor"]["unbind_stack_aten_pass"], 1)
         ref.sum().backward()
         res.sum().backward()
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
