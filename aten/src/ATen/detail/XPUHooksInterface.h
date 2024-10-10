@@ -4,7 +4,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 
-#include <ATen/core/Generator.h>
 #include <ATen/detail/AcceleratorHooksInterface.h>
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
@@ -32,12 +31,15 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
     TORCH_CHECK(false, "Cannot get XPU global device index without ATen_xpu library.");
   }
 
-  virtual Generator getXPUGenerator(C10_UNUSED DeviceIndex device_index = -1) const {
-    TORCH_CHECK(false, "Cannot get XPU generator without ATen_xpu library.");
+  const Generator& getDefaultGenerator(
+      C10_UNUSED DeviceIndex device_index = -1) const override {
+    TORCH_CHECK(
+        false, "Cannot get default XPU generator without ATen_xpu library.");
   }
 
-  virtual const Generator& getDefaultXPUGenerator(C10_UNUSED DeviceIndex device_index = -1) const {
-    TORCH_CHECK(false, "Cannot get default XPU generator without ATen_xpu library.");
+  Generator getNewGenerator(
+      C10_UNUSED DeviceIndex device_index = -1) const override {
+    TORCH_CHECK(false, "Cannot get XPU generator without ATen_xpu library.");
   }
 
   virtual DeviceIndex getNumGPUs() const {
