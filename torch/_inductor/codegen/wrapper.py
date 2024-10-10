@@ -49,6 +49,7 @@ from ..utils import (
     cache_on_self,
     get_benchmark_name,
     LineContext,
+    normalize_name,
     sympy_product,
     sympy_str,
 )
@@ -1021,20 +1022,17 @@ class PythonWrapperCodegen(CodeGen):
             s.total_allocated_buffer_size for s in past_planning_states
         )
 
-    def cleanup_name(self, name: str):
-        return name.replace("[", "_").replace("]", "_")
-
     def codegen_input_size_var_decl(
         self, code: Union[IndentedBuffer, PythonWrapperCodegen], name: str
     ):
-        lhs = f"{self.cleanup_name(name)}_size"
+        lhs = f"{normalize_name(name)}_size"
         code.writeline(f"{self.declare}{lhs} = {name}.{self.size}{self.ending}")
         return lhs
 
     def codegen_input_stride_var_decl(
         self, code: Union[IndentedBuffer, PythonWrapperCodegen], name: str
     ):
-        lhs = f"{self.cleanup_name(name)}_stride"
+        lhs = f"{normalize_name(name)}_stride"
         code.writeline(f"{self.declare}{lhs} = {name}.{self.stride}{self.ending}")
         return lhs
 
