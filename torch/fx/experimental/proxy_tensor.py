@@ -801,6 +801,10 @@ def proxy_call(
             if r is not NotImplemented:
                 return r
 
+    if func is torch.ops.aten.is_nonzero.default:
+        with proxy_mode:
+            return (args[0] != 0).item()  # type: ignore[attr-defined]
+
     tracer = proxy_mode.tracer
     f_flat_args_kwargs = [
         (

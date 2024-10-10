@@ -309,6 +309,9 @@ class FunctionalTensor(torch.Tensor):
     def layout(self):
         return self.elem.layout
 
+    def __bool__(self):
+        return bool(self.item())
+
 
 class FunctionalTensorMode(TorchDispatchMode):
     def __init__(self, pre_dispatch=False, export=False, _allow_token_discovery=False):
