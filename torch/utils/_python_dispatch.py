@@ -152,20 +152,15 @@ def is_eager_only_torch_dispatch_mode_enabled():
     return getattr(_eager_only_torch_dispatch_mode_enabled, "value", True)
 
 
-def set_eager_only_torch_dispatch_mode_enabled(value):
-    global _eager_only_torch_dispatch_mode_enabled
-    old_value = is_eager_only_torch_dispatch_mode_enabled()
-    _eager_only_torch_dispatch_mode_enabled.value = value
-    return old_value
-
-
 @contextlib.contextmanager
 def disable_eager_only_torch_dispatch_mode():
+    global _eager_only_torch_dispatch_mode_enabled
     try:
-        prior = set_eager_only_torch_dispatch_mode_enabled(False)
+        prior = is_eager_only_torch_dispatch_mode_enabled()
+        _eager_only_torch_dispatch_mode_enabled.value = False
         yield
     finally:
-        set_eager_only_torch_dispatch_mode_enabled(prior)
+        _eager_only_torch_dispatch_mode_enabled.value = prior
 
 
 def _get_current_dispatch_mode():
