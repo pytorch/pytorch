@@ -629,11 +629,22 @@ class SideEffects:
             elif isinstance(
                 var, variables.torch_function.TorchFunctionModeStackVariable
             ):
+                # Needed in the finally block for stack restoration
+                cg.add_push_null(
+                    lambda: cg.load_import_from(
+                        utils.__name__, "get_torch_function_mode_stack"
+                    )
+                )
+                cg.call_function(0, False)
+                name = variables.torch_function.get_prev_stack_var_name()
+                cg.code_options["co_varnames"] += (name,)
+                cg.append_output(create_instruction("STORE_FAST", argval=name))
                 cg.add_push_null(
                     lambda: cg.load_import_from(
                         utils.__name__, "set_torch_function_mode_stack"
                     )
                 )
+
                 cg.foreach(var.symbolic_stack)
                 cg.append_output(
                     create_instruction("BUILD_LIST", arg=len(var.symbolic_stack))

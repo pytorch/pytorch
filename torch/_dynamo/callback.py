@@ -1,10 +1,11 @@
+from dataclasses import dataclass, field  # noqa: F811
 from typing import Callable, List
 
 
+@dataclass
 class CompilationCallbackHandler:
-    def __init__(self) -> None:
-        self.start_callbacks: List[Callable[[], None]] = []
-        self.end_callbacks: List[Callable[[], None]] = []
+    start_callbacks: List[Callable[[], None]] = field(default_factory=list)
+    end_callbacks: List[Callable[[], None]] = field(default_factory=list)
 
     def register_start_callback(
         self, callback: Callable[[], None]
