@@ -83,8 +83,9 @@ class TestExportTorchbind(TestCase):
 
         @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
         class FakeTensorQueue:
-            def __init__(self, queue):
+            def __init__(self, init_tensor, queue):
                 self.queue = queue
+                self.init_tensor = init_tensor
 
             @classmethod
             def __obj_unflatten__(cls, flattened_ctx):
