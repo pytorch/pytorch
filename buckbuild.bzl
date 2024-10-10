@@ -895,7 +895,7 @@ def define_buck_targets(
             # Remove the following after modifying codegen for mobile.
             ("aten/src", "ATen/mkl/*.h"),
             ("aten/src", "ATen/native/mkl/*.h"),
-            ("aten/src", "ATen/native/mkldnn/*.h"),
+            ("aten/src", "ATen/native/onednn/*.h"),
         ]),
         visibility = ["PUBLIC"],
         labels = labels,
