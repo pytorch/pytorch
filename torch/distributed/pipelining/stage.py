@@ -831,22 +831,6 @@ class _PipelineStage(_PipelineStageBase):
         for i, node in enumerate(submod_nodes):
             self.submod_to_stage_index.setdefault(node.name, i)
 
-        # Cast submodule to device
-        self._move_submod_to_device()
-
-    def _move_submod_to_device(self):
-        # Move submodule to indicated device if possible
-        # Note: we cannot move meta module to real devices because meta tensors
-        # do not support to() method. One needs to do an in-place tensor swap in
-        # that case.
-        has_meta_param = any(
-            isinstance(p, FakeTensor) or p.is_meta for p in self.submod.parameters()
-        )
-        if has_meta_param:
-            logger.debug("%s Found meta parameters!", self.log_prefix)
-        else:
-            self.submod.to(self.device)
-
     def _prepare_forward_infra(
         self,
         num_microbatches: int,
