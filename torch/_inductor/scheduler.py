@@ -2037,12 +2037,10 @@ class Scheduler:
             )
             # if a kernel takes unbacked symints, register dependencies
             for s in unbacked_symbol_uses:
-                assert (
-                    s in unbacked_symbol_to_origin_node
-                ), f"{s} not in {unbacked_symbol_to_origin_node}"
-                if (r := unbacked_symbol_to_origin_node[s]) is not None:
-                    for buf in self.name_to_node[r].get_outputs():
-                        node.add_fake_dep(StarDep(buf.get_name()))
+                if s in unbacked_symbol_to_origin_node:
+                    if (r := unbacked_symbol_to_origin_node[s]) is not None:
+                        for buf in self.name_to_node[r].get_outputs():
+                            node.add_fake_dep(StarDep(buf.get_name()))
 
             if (
                 len(node.read_writes.writes) == 1
@@ -2099,15 +2097,15 @@ class Scheduler:
         # make sure unbacked symints aren't dead-code-eliminated
         for out in V.graph.graph_outputs:
             for s in out.get_unbacked_symbol_uses():
-                assert (
-                    s in unbacked_symbol_to_origin_node
-                ), f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
-                if r := unbacked_symbol_to_origin_node[s]:
-                    for buf_name in self.name_to_node[r].get_buffer_names():
-                        log.debug(
-                            "scheduling output %s for unbacked symint %s", buf_name, s
-                        )
-                        add_user(buf_name, OutputNode(StarDep(buf_name)))
+                if s in unbacked_symbol_to_origin_node:
+                    if r := unbacked_symbol_to_origin_node[s]:
+                        for buf_name in self.name_to_node[r].get_buffer_names():
+                            log.debug(
+                                "scheduling output %s for unbacked symint %s",
+                                buf_name,
+                                s,
+                            )
+                            add_user(buf_name, OutputNode(StarDep(buf_name)))
 
         # make sure input mutation isn't dead-code-eliminated
         for name in self.mutation_renames:

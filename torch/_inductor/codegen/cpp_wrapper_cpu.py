@@ -4,7 +4,7 @@ import math
 import os
 import sys
 from itertools import count
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import sympy
 from sympy import Expr
@@ -657,7 +657,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # cpp wrapper code.
             code.writeline(f"auto {name}_dtype = {name}.dtype();")
 
-    def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
+    def codegen_input_size_var_decl(
+        self, code: Union[IndentedBuffer, PythonWrapperCodegen], name
+    ):
         if config.abi_compatible:
             code.writeline(f"int64_t* {name}_size;")
             code.writeline(
@@ -666,7 +668,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         else:
             super().codegen_input_size_var_decl(code, name)
 
-    def codegen_input_stride_var_decl(self, code: IndentedBuffer, name):
+    def codegen_input_stride_var_decl(
+        self, code: Union[IndentedBuffer, PythonWrapperCodegen], name
+    ):
         if config.abi_compatible:
             code.writeline(f"int64_t* {name}_stride;")
             code.writeline(

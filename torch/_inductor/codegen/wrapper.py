@@ -485,6 +485,7 @@ class PythonWrapperCodegen(CodeGen):
         self.user_defined_kernel_cache: Dict[Tuple[Any, ...], Tuple[str, Any]] = {}
         self.unbacked_symbol_decls: Set[str] = set()  # str of sympy.Symbol
         self.computed_sizes: Set[sympy.Symbol] = set()
+        self.bound_vars = set()
         self.launcher_fn_name = None
         # This function can be overridden to change the launcher name
         self.set_launcher_fn_name()
@@ -1020,32 +1021,39 @@ class PythonWrapperCodegen(CodeGen):
             s.total_allocated_buffer_size for s in past_planning_states
         )
 
-    def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"{self.declare}{name}_size = {name}.{self.size}{self.ending}")
+    def cleanup_name(self, name: str):
+        return name.replace("[", "_").replace("]", "_")
 
-    def codegen_input_stride_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(
-            f"{self.declare}{name}_stride = {name}.{self.stride}{self.ending}"
-        )
+    def codegen_input_size_var_decl(
+        self, code: Union[IndentedBuffer, PythonWrapperCodegen], name: str
+    ):
+        lhs = f"{self.cleanup_name(name)}_size"
+        code.writeline(f"{self.declare}{lhs} = {name}.{self.size}{self.ending}")
+        return lhs
+
+    def codegen_input_stride_var_decl(
+        self, code: Union[IndentedBuffer, PythonWrapperCodegen], name: str
+    ):
+        lhs = f"{self.cleanup_name(name)}_stride"
+        code.writeline(f"{self.declare}{lhs} = {name}.{self.stride}{self.ending}")
+        return lhs
 
     def codegen_inputs(
-        self, code: IndentedBuffer, graph_inputs: Dict[str, ir.TensorBox]
+        self,
+        code: Union[IndentedBuffer, PythonWrapperCodegen],
+        graph_inputs: Dict[str, ir.TensorBox],
     ):
         """Assign all symbolic shapes to locals"""
 
         @functools.lru_cache(None)
         def sizeof(name):
-            self.codegen_input_size_var_decl(code, name)
-            return f"{name}_size"
+            return self.codegen_input_size_var_decl(code, name)
 
         @functools.lru_cache(None)
         def strideof(name):
-            self.codegen_input_stride_var_decl(code, name)
-            return f"{name}_stride"
+            return self.codegen_input_stride_var_decl(code, name)
 
         # Assign all symbolic shapes needed to local variables
-        bound_vars: Set[sympy.Symbol] = set()
-
         def is_expr(x):
             return isinstance(x[1], sympy.Expr)
 
@@ -1055,27 +1063,27 @@ class PythonWrapperCodegen(CodeGen):
         )
 
         for name, shape in graph_inputs_expr:
-            if isinstance(shape, sympy.Symbol) and shape not in bound_vars:
+            if isinstance(shape, sympy.Symbol) and shape not in self.bound_vars:
                 code.writeline(f"{self.declare}{shape} = {name}{self.ending}")
-                bound_vars.add(shape)
+                self.bound_vars.add(shape)
 
         for name, value in graph_inputs_tensors:
             shapes = value.get_size()
             for dim, shape in enumerate(shapes):
-                if isinstance(shape, sympy.Symbol) and shape not in bound_vars:
+                if isinstance(shape, sympy.Symbol) and shape not in self.bound_vars:
                     code.writeline(
                         f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
                     )
-                    bound_vars.add(shape)
+                    self.bound_vars.add(shape)
 
         for name, value in graph_inputs_tensors:
             shapes = value.get_stride()
             for dim, shape in enumerate(shapes):
-                if isinstance(shape, sympy.Symbol) and shape not in bound_vars:
+                if isinstance(shape, sympy.Symbol) and shape not in self.bound_vars:
                     code.writeline(
                         f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
                     )
-                    bound_vars.add(shape)
+                    self.bound_vars.add(shape)
 
     def ensure_size_computed(self, sym: sympy.Symbol):
         if isinstance(sym, sympy.Symbol) and symbol_is_type(sym, SymT.PRECOMPUTED_SIZE):
@@ -2029,6 +2037,7 @@ class PythonWrapperCodegen(CodeGen):
 
     def codegen_subgraph_suffix(self, subgraph, outer_inputs, outer_outputs):
         assert len(subgraph.graph.graph_outputs) == len(outer_outputs)
+
         for inner_output, outer_output in zip(
             subgraph.graph.get_output_names(), outer_outputs
         ):
@@ -2103,6 +2112,13 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(EnterSubgraphLine(self, conditional.false_subgraph.graph))
         self.codegen_subgraph(conditional.false_subgraph, outer_inputs, outer_outputs)
         self.writeline(ExitSubgraphLine(self))
+
+        # If there are new unbacked symbols in the outputs of the subgraph, add
+        # a line to extract the symbols from the output tensors.
+        graph_outputs = dict(
+            zip(outer_outputs, conditional.true_subgraph.graph.graph_outputs)
+        )
+        self.codegen_inputs(self, graph_outputs)
 
     def codegen_while_loop(self, while_loop):
         name = while_loop.get_name()
