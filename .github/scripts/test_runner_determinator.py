@@ -211,7 +211,9 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         @User2,lf,otherExp
 
         """
-        prefix = rd.get_runner_prefix(settings_text, ["User2"], USER_BRANCH, {"lf", "otherExp"})
+        prefix = rd.get_runner_prefix(
+            settings_text, ["User2"], USER_BRANCH, {"lf", "otherExp"}
+        )
         self.assertEqual("lf.otherExp.", prefix, "Runner prefix not correct for User2")
 
     def test_opted_in_user_two_experiments_default_exp_2(self) -> None:
@@ -230,7 +232,9 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
 
         """
         prefix = rd.get_runner_prefix(settings_text, ["User2"], USER_BRANCH, {"otherExp"})
-        self.assertEqual("otherExp.", prefix, "Runner prefix not correct for User2")
+        self.assertEqual(
+            "otherExp.", prefix, "Runner prefix not correct for User2"
+        )
 
     @patch("random.uniform", return_value=50)
     def test_opted_out_user(self, mock_uniform: Mock) -> None:
@@ -271,7 +275,9 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         self.assertEqual("lf.otherExp.", prefix, "Runner prefix not correct for user")
 
     @patch("random.uniform", return_value=10)
-    def test_opted_out_user_was_pulled_in_by_rollout_excl_nondefault(self, mock_uniform: Mock) -> None:
+    def test_opted_out_user_was_pulled_in_by_rollout_excl_nondefault(
+        self, mock_uniform: Mock
+    ) -> None:
         settings_text = """
         experiments:
             lf:
@@ -292,7 +298,9 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         self.assertEqual("lf.", prefix, "Runner prefix not correct for user")
 
     @patch("random.uniform", return_value=10)
-    def test_opted_out_user_was_pulled_in_by_rollout_filter_exp(self, mock_uniform: Mock) -> None:
+    def test_opted_out_user_was_pulled_in_by_rollout_filter_exp(
+        self, mock_uniform: Mock
+    ) -> None:
         settings_text = """
         experiments:
             lf:
@@ -309,11 +317,15 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         """
 
         # User3 is opted out, but is pulled into default experiments by the 10% rollout
-        prefix = rd.get_runner_prefix(settings_text, ["User3"], USER_BRANCH, check_experiments={"otherExp"})
+        prefix = rd.get_runner_prefix(
+            settings_text, ["User3"], USER_BRANCH, check_experiments={"otherExp"}
+        )
         self.assertEqual("otherExp.", prefix, "Runner prefix not correct for user")
 
     @patch("random.uniform", return_value=25)
-    def test_opted_out_user_was_pulled_out_by_rollout_filter_exp(self, mock_uniform: Mock) -> None:
+    def test_opted_out_user_was_pulled_out_by_rollout_filter_exp(
+        self, mock_uniform: Mock
+    ) -> None:
         settings_text = """
         experiments:
             lf:

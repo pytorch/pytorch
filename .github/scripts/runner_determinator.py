@@ -58,7 +58,7 @@ import os
 import random
 from argparse import ArgumentParser
 from logging import LogRecord
-from typing import Any, Dict, Iterable, List, NamedTuple, Tuple, Set
+from typing import Any, Dict, FrozenSet, Iterable, List, NamedTuple, Tuple
 
 import yaml
 from github import Auth, Github
@@ -144,8 +144,10 @@ def set_github_output(key: str, value: str) -> None:
         f.write(f"{key}={value}\n")
 
 
-def _str_comma_separated_to_set(value: str) -> Set[str]:
-    return set(filter(lambda itm: itm != "", map(str.strip, value.strip(" \n\t").split(","))))
+def _str_comma_separated_to_set(value: str) -> FrozenSet[str]:
+    return frozenset(
+        filter(lambda itm: itm != "", map(str.strip, value.strip(" \n\t").split(",")))
+    )
 
 
 def parse_args() -> Any:
@@ -187,7 +189,7 @@ def parse_args() -> Any:
         type=_str_comma_separated_to_set,
         required=False,
         default="",
-        help="comma separated list of experiments to check, if omitted all experiments marked with default=True are checked"
+        help="comma separated list of experiments to check, if omitted all experiments marked with default=True are checked",
     )
 
     return parser.parse_args()
@@ -363,7 +365,7 @@ def get_runner_prefix(
     rollout_state: str,
     workflow_requestors: Iterable[str],
     branch: str,
-    check_experiments: Set[str] = set(),
+    check_experiments: FrozenSet[str] = frozenset(),
     is_canary: bool = False,
 ) -> str:
     settings = parse_settings(rollout_state)
@@ -391,14 +393,20 @@ def get_runner_prefix(
         if check_experiments:
             if experiment_name not in check_experiments:
                 exp_list = ", ".join(check_experiments)
-                log.info(f"Skipping experiment '{experiment_name}', as it is not in the check_experiments list: {exp_list}")
+                log.info(
+                    f"Skipping experiment '{experiment_name}', as it is not in the check_experiments list: {exp_list}"
+                )
                 do_check = False
         elif not experiment_settings.default:
-            log.info(f"Skipping experiment '{experiment_name}', as it is not a default experiment")
+            log.info(
+                f"Skipping experiment '{experiment_name}', as it is not a default experiment"
+            )
             do_check = False
 
         if opted_in_users and do_check:
-            log.info(f"{', '.join(opted_in_users)} have opted into experiment {experiment_name}.")
+            log.info(
+                f"{', '.join(opted_in_users)} have opted into experiment {experiment_name}."
+            )
             enabled = True
 
         elif experiment_settings.rollout_perc:
