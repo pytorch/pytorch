@@ -9,6 +9,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.test_case import TestCase
 from torch._export.converter import TS2EPConverter
 from torch.export import ExportedProgram
+from torch.testing import FileCheck
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
 from torch.testing._internal.torchbind_impls import (
@@ -1393,7 +1394,7 @@ class TestConverter(TestCase):
         IS_WINDOWS,
         "Windows does not support qnnpack",
     )
-    def test_ts2ep_convert_quantized_model(self):
+    def test_ts2ep_convert_quantized_model1(self):
         class Standalone(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1431,6 +1432,17 @@ class TestConverter(TestCase):
             ts_model = torch.jit.script(model)
             converter = TS2EPConverter(ts_model, inp)
             ep = converter.convert()
+
+            FileCheck().check_count(
+                "torch.ops.quantized_decomposed.quantize_per_tensor.default",
+                3,
+                exactly=True,
+            ).run(ep.graph_module.code)
+            FileCheck().check_count(
+                "torch.ops.quantized_decomposed.dequantize_per_tensor.default",
+                3,
+                exactly=True,
+            ).run(ep.graph_module.code)
 
             orig_out, _ = pytree.tree_flatten(original_ts_model(*inp))
             ep_out, _ = pytree.tree_flatten(ep.module()(*inp))
