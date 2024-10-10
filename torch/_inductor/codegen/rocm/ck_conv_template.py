@@ -395,6 +395,17 @@ class CKConvTemplate(CKTemplate):
         )
 
     def filter_op(self, op: CKConvOp) -> bool:
+        metas = [T.get_layout() for T in [*self.input_nodes, self.output_node]]
+        X_meta = metas[0]
+        W_meta = metas[1]
+        Y_meta = metas[-1]
+        # disable the instance if dtypes don't match
+        if op.a_element_dtype != self._TORCH_DTYPE_TO_CK[X_meta.dtype]:
+            return None
+        if op.b_element_dtype != self._TORCH_DTYPE_TO_CK[W_meta.dtype]:
+            return None
+        if op.e_element_dtype != self._TORCH_DTYPE_TO_CK[Y_meta.dtype]:
+            return None
         return op
 
     def gen_ops(self):
