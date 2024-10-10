@@ -1,5 +1,5 @@
 
-// Copyright (c) 2023, Tri Dao.
+// Copyright (c) 2024, Tri Dao.
 
 // Splitting the different head dimensions to different files to speed up compilation.
 // This file is auto-generated. See "generate_kernels.py"
@@ -8,5 +8,5 @@
 namespace pytorch_flash{
 
 
-template void run_mha_fwd_splitkv_dispatch<cutlass::half_t, 192>(Flash_fwd_params &params, cudaStream_t stream);
+template void run_mha_fwd_splitkv_dispatch<cutlass::half_t, 192, false>(Flash_fwd_params &params, cudaStream_t stream);
 } // namespace pytorch_flash
