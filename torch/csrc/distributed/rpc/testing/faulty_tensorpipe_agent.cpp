@@ -3,9 +3,7 @@
 #include <torch/csrc/distributed/rpc/testing/faulty_tensorpipe_agent.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 static std::string fromVecToString(const std::vector<char>& vec) {
   return std::string(vec.begin(), vec.end());
@@ -98,7 +96,7 @@ c10::intrusive_ptr<JitFuture> FaultyTensorPipeAgent::send(
 
 void FaultyTensorPipeAgent::pipeWrite(
     const std::shared_ptr<tensorpipe::Pipe>& pipe,
-    c10::intrusive_ptr<Message> rpcMessage,
+    const c10::intrusive_ptr<Message>& rpcMessage,
     std::vector<c10::Device>&& devices,
     std::vector<c10::Stream> streams,
     std::function<void(const tensorpipe::Error&)> fn) noexcept {
@@ -146,8 +144,6 @@ MessageType FaultyTensorPipeAgent::messageStringToType(
   return it->second;
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc
 
 #endif // USE_TENSORPIPE

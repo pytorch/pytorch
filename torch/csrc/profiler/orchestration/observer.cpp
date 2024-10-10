@@ -4,9 +4,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 
 using GlobalManager = GlobalStateManager<ProfilerStateBase>;
 
@@ -182,6 +180,4 @@ torch::profiler::impl::ProfilerConfig getProfilerConfig() {
   return state_ptr->config();
 }
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl
