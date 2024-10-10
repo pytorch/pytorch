@@ -29,6 +29,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
 )
 from torch.testing._internal.common_utils import (
+    check_leaked_tensors,
     instantiate_parametrized_tests,
     parametrize,
     skip_but_pass_in_sandcastle_if,
@@ -457,18 +458,23 @@ class ScheduleTest(MultiProcContinousTest):
                     self.assertEqual(a, b)
 
         # Run
-        for _ in range(2):
-            # Zero gradients
-            for stage_module in stage_modules:
-                stage_module.zero_grad()
-            if self.rank == 0:
-                schedule.step(x)
-            elif self.rank == self.world_size - 1:
-                losses = []
-                out = schedule.step(target=target, losses=losses)
-            else:
-                schedule.step()
-
+        with check_leaked_tensors() as garbage_tensors:
+            for _ in range(2):
+                # Zero gradients
+                for stage_module in stage_modules:
+                    stage_module.zero_grad()
+                if self.rank == 0:
+                    schedule.step(x)
+                elif self.rank == self.world_size - 1:
+                    losses = []
+                    out = schedule.step(target=target, losses=losses)
+                else:
+                    schedule.step()
+        self.assertEqual(
+            len(garbage_tensors),
+            0,
+            "Found leaked tensors, check logs above for debug info",
+        )
         dist.barrier()
 
         # Last rank checks result
@@ -556,15 +562,21 @@ class ScheduleTest(MultiProcContinousTest):
             ref_loss = loss_fn(ref_out, target)
             ref_loss.backward()
 
-        # Run pipelined stages
-        for _ in range(num_steps):
-            if self.rank == 0:
-                schedule.step(x)
-            elif self.rank == self.world_size - 1:
-                losses = []
-                out = schedule.step(target=target, losses=losses)
-            else:
-                schedule.step()
+        with check_leaked_tensors() as garbage_tensors:
+            # Run pipelined stages
+            for _ in range(num_steps):
+                if self.rank == 0:
+                    schedule.step(x)
+                elif self.rank == self.world_size - 1:
+                    losses = []
+                    out = schedule.step(target=target, losses=losses)
+                else:
+                    schedule.step()
+        self.assertEqual(
+            len(garbage_tensors),
+            0,
+            "Found leaked tensors, check logs above for debug info",
+        )
 
         # Every rank checks parameters compared with the reference model
         for stage_module, submod_name in zip(stage_modules, submod_names):
