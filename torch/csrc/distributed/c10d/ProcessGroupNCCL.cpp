@@ -698,6 +698,14 @@ void ProcessGroupNCCL::WorkNCCL::handleException(
     LOG(ERROR) << logPrefix() << exceptionMsg;
     C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.WorkNCCL.handleException");
 
+    auto logger = c10d::C10dLogger::getLogger();
+    if (logger) {
+      ::c10d::C10dLoggingData data;
+      data.strings["work_nccl_exception"] =
+          getExceptionMsgFromExceptionPtr(exception_);
+      logger->log(data);
+    }
+
     if (SHOULD_TEAR_DOWN(errorHandling)) {
       auto tearDownMsg = c10::str(
           "To avoid data inconsistency, we are taking the entire process down.");
