@@ -921,7 +921,7 @@ class ComboKernel(Kernel):
                     device = V.graph.scheduler.get_current_device_or_throw()
                     nbytes = V.graph.sizevars.size_hint(arg_sig.nbytes)
                     result.writeline(
-                        f"{var_name} = torch.zeros({nbytes}, device='{device}', dtype=torch.uint8)"
+                        f"{var_name} = torch.zeros({nbytes}, device='{device}', dtype={arg_sig.dtype})"
                     )
                 else:
                     raise KeyError(
