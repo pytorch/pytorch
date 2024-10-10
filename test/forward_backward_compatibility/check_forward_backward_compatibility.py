@@ -435,7 +435,7 @@ if __name__ == "__main__":
         sys.exit(1)
     # TODO in case there is FC breaking changes,
     # we just warn for now until there is a policy.
-    check_fc(non_core_aten_schema_list)
+    check_fc(slist)
 
     if not check_bc(non_core_aten_schema_list):
         sys.exit(1)
