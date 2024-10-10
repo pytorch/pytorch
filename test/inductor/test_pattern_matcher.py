@@ -33,7 +33,6 @@ from torch.testing._internal.common_device_type import expectedFailureXPU, skipC
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CUDA,
     HAS_GPU,
     IS_A100,
     IS_BIG_GPU,
