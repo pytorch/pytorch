@@ -70,7 +70,7 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
                 return func(*args, **kwargs)
 
             @classmethod
-            def is_infra_mode(cls):
+            def is_eager_only_mode(cls):
                 return True
 
         class TestModel(torch.nn.Module):

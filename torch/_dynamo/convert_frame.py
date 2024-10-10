@@ -1283,7 +1283,7 @@ class CatchErrorsWrapper:
             or is_skipfile
             or config.disable
             or (
-                is_in_torch_dispatch_mode(include_infra_modes=False)
+                is_in_torch_dispatch_mode(include_infra_modes=False, include_eager_only_modes=False)
                 and not getattr(self._torchdynamo_orig_callable, "_export", False)
             )
         ):
@@ -1294,7 +1294,7 @@ class CatchErrorsWrapper:
                     skip_reason = "traced frame already"
                 elif trace_rules.check(frame.f_code):
                     skip_reason = "in skipfiles"
-                elif is_in_torch_dispatch_mode(include_infra_modes=False):
+                elif is_in_torch_dispatch_mode(include_infra_modes=False, include_eager_only_modes=False):
                     skip_reason = "non-infra torch dispatch mode present, this is not supported today in torch.compile"
                 else:
                     skip_reason = "dynamo tracing is disabled"

@@ -30,9 +30,17 @@ from contextlib import contextmanager
 
 _is_in_torch_dispatch_mode = False
 _is_in_non_infra_torch_dispatch_mode = False
+_is_in_non_eager_only_torch_dispatch_mode = False
 
-def is_in_torch_dispatch_mode(include_infra_modes=True) -> bool:
-    return _is_in_torch_dispatch_mode if include_infra_modes else _is_in_non_infra_torch_dispatch_mode
+def is_in_torch_dispatch_mode(include_infra_modes=True, include_eager_only_modes=True) -> bool:
+    if include_infra_modes and include_eager_only_modes:
+        return _is_in_torch_dispatch_mode
+    elif not include_infra_modes and not include_eager_only_modes:
+        return _is_in_non_infra_torch_dispatch_mode and _is_in_non_eager_only_torch_dispatch_mode
+    elif not include_infra_modes:
+        return _is_in_non_infra_torch_dispatch_mode
+    elif not include_eager_only_modes:
+        return _is_in_non_eager_only_torch_dispatch_mode
 
 
 class TorchDispatchMode:
@@ -73,6 +81,7 @@ class TorchDispatchMode:
 
         self.old_dispatch_mode_flags: Deque[bool] = deque()
         self.old_non_infra_dispatch_mode_flags: Deque[bool] = deque()
+        self.old_non_eager_only_dispatch_mode_flags: Deque[bool] = deque()
 
     def _lazy_init_old_dispatch_mode_flags(self):
         if not hasattr(self, "old_dispatch_mode_flags"):
@@ -81,6 +90,9 @@ class TorchDispatchMode:
         if not hasattr(self, "old_non_infra_dispatch_mode_flags"):
             self.old_non_infra_dispatch_mode_flags: Deque[bool] = deque()  # type: ignore[no-redef]
 
+        if not hasattr(self, "old_non_eager_only_dispatch_mode_flags"):
+            self.old_non_eager_only_dispatch_mode_flags: Deque[bool] = deque()  # type: ignore[no-redef]
+
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError
@@ -88,6 +100,7 @@ class TorchDispatchMode:
     def __enter__(self):
         global _is_in_torch_dispatch_mode
         global _is_in_non_infra_torch_dispatch_mode
+        global _is_in_non_eager_only_torch_dispatch_mode
         # Previously, there wasn't any state in this class' constructor
         # super calls were added to existing modes, but for any new modes
         # this will replicate the previous behavior of not strictly needing
@@ -97,6 +110,8 @@ class TorchDispatchMode:
         _is_in_torch_dispatch_mode = True
         self.old_non_infra_dispatch_mode_flags.append(_is_in_non_infra_torch_dispatch_mode)
         _is_in_non_infra_torch_dispatch_mode = _is_in_non_infra_torch_dispatch_mode or not self.is_infra_mode()
+        self.old_non_eager_only_dispatch_mode_flags.append(_is_in_non_eager_only_torch_dispatch_mode)
+        _is_in_non_eager_only_torch_dispatch_mode = _is_in_non_eager_only_torch_dispatch_mode or not self.is_eager_only_mode()
         _push_mode(self)
         return self
 
@@ -110,6 +125,8 @@ class TorchDispatchMode:
         _is_in_torch_dispatch_mode = self.old_dispatch_mode_flags.pop()
         global _is_in_non_infra_torch_dispatch_mode
         _is_in_non_infra_torch_dispatch_mode = self.old_non_infra_dispatch_mode_flags.pop()
+        global _is_in_non_eager_only_torch_dispatch_mode
+        _is_in_non_eager_only_torch_dispatch_mode = self.old_non_eager_only_dispatch_mode_flags.pop()
         _pop_mode(mb_dk_or_mode_key)
 
     @classmethod
@@ -122,6 +139,10 @@ class TorchDispatchMode:
 
     @classmethod
     def is_infra_mode(cls):
+        return False
+
+    @classmethod
+    def is_eager_only_mode(cls):
         return False
 
 
