@@ -1182,6 +1182,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return device_opt_.has_value() && device_opt_->type() == kPrivateUse1;
   }
 
+  bool is_onednn() const {
+    return key_set_.has_all(c10::onednn_ks);
+  }
+
   bool is_mkldnn() const {
     return key_set_.has_all(c10::onednn_ks);
   }
@@ -1270,7 +1274,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // strided is also the most common layout type, so we check for
     // strided case first.
     // This keyset must also be kept in sync with the logic in
-    // is_sparse() / is_sparse_csr() / is_mkldnn()
+    // is_sparse() / is_sparse_csr() / is_onednn()
     constexpr auto sparse_and_sparsecsr_and_onednn_ks =
         c10::sparse_ks | c10::sparse_csr_ks | c10::onednn_ks;
     if (!key_set_.has_any(sparse_and_sparsecsr_and_onednn_ks)) {
@@ -1291,7 +1295,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return layout_impl();
     } else {
       TORCH_INTERNAL_ASSERT(
-          is_mkldnn(), "There is an error in the layout calculation logic.");
+          is_onednn(), "There is an error in the layout calculation logic.");
       return kMkldnn;
     }
   }

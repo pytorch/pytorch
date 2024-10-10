@@ -495,10 +495,16 @@ class TORCH_API TensorBase {
     return impl_->is_sparse_csr();
   }
 
-  /// Returns if a `Tensor` is mkldnn tensor.
+  /// Returns if a `Tensor` is mkldnn tensor. Will be deprecated.
   bool is_mkldnn() const {
     // NB: this is not a native function to avoid dispatching overhead.
     return impl_->is_mkldnn();
+  }
+
+   /// Returns if a `Tensor` is onednn tensor.
+  bool is_onednn() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_onednn();
   }
 
   /// Returns if a `Tensor` is mps tensor.

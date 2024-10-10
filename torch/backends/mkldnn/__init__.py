@@ -83,7 +83,7 @@ def flags(enabled=False, deterministic=False):
             set_flags(*orig_flags)
 
 
-class MkldnnModule(PropModule):
+class OnednnModule(PropModule):
     def __init__(self, m, name):
         super().__init__(m, name)
 
@@ -97,4 +97,4 @@ if TYPE_CHECKING:
     enabled: ContextProp
     deterministic: ContextProp
 
-sys.modules[__name__] = MkldnnModule(sys.modules[__name__], __name__)
+sys.modules[__name__] = OnednnModule(sys.modules[__name__], __name__)

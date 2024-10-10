@@ -153,7 +153,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
     Node* last = nullptr;
     for (const auto& v : *set.second) {
       auto k = v->node()->kind();
-      if (k == prim::Constant || k == prim::ConstantMKLDNNTensor ||
+      if (k == prim::Constant || k == prim::ConstantONEDNNTensor ||
           k == prim::Param) {
         last = graph->return_node();
         continue;
@@ -184,9 +184,9 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
   for (Node* node : graph->nodes()) {
     auto k = node->kind();
     if (k == aten::relu || k == aten::sigmoid || k == aten::dropout ||
-        k == prim::MKLDNNHardSwish || k == prim::MKLDNNHardSigmoid ||
-        k == prim::MKLDNNHardTanh || k == aten::tanh ||
-        k == prim::MKLDNNClamp || k == Symbol::prim("MKLDNNScalarMul") ||
+        k == prim::ONEDNNHardSwish || k == prim::ONEDNNHardSigmoid ||
+        k == prim::ONEDNNHardTanh || k == aten::tanh ||
+        k == prim::ONEDNNClamp || k == Symbol::prim("MKLDNNScalarMul") ||
         k == Symbol::prim("MKLDNNLayerNorm")) {
       if (set_liveness[alias_mapping[node->inputs().at(0)]]->isAfter(node)) {
         continue;
@@ -411,9 +411,9 @@ static std::function<void(at::Tensor output, at::Tensor input)> clamp_helper(
 
 // any op added to this registry needs to meet
 // the precondition: `aten_op(0) == 0`
-const RegisterOperators MKLDNNHardSwishOpReg({
+const RegisterOperators ONEDNNHardSwishOpReg({
     torch::jit::Operator(
-        "prim::MKLDNNHardSwish_(Tensor(a!) self) -> Tensor(a!)",
+        "prim::ONEDNNHardSwish_(Tensor(a!) self) -> Tensor(a!)",
         createUnaryOp(
             [](at::Tensor output, at::Tensor input) {
               at::cpu::hardswish_out(output, input);
@@ -421,7 +421,7 @@ const RegisterOperators MKLDNNHardSwishOpReg({
             true),
         AliasAnalysisKind::FROM_SCHEMA),
     torch::jit::Operator(
-        "prim::MKLDNNHardSigmoid_(Tensor(a!) self) -> Tensor(a!)",
+        "prim::ONEDNNHardSigmoid_(Tensor(a!) self) -> Tensor(a!)",
         createUnaryOp(
             [](at::Tensor output, at::Tensor input) {
               at::cpu::hardsigmoid_out(output, input);
@@ -429,19 +429,19 @@ const RegisterOperators MKLDNNHardSwishOpReg({
             true),
         AliasAnalysisKind::FROM_SCHEMA),
     torch::jit::Operator(
-        "prim::MKLDNNHardTanh_(Tensor(a!) self) -> Tensor(a!)",
+        "prim::ONEDNNHardTanh_(Tensor(a!) self) -> Tensor(a!)",
         [](const Node* n) -> Operation {
           return createUnaryOp(hardtanh_helper(n), true);
         },
         AliasAnalysisKind::FROM_SCHEMA),
     torch::jit::Operator(
-        "prim::MKLDNNClamp_(Tensor(a!) self) -> Tensor(a!)",
+        "prim::ONEDNNClamp_(Tensor(a!) self) -> Tensor(a!)",
         [](const Node* n) -> Operation {
           return createUnaryOp(clamp_helper(n), true);
         },
         AliasAnalysisKind::FROM_SCHEMA),
     torch::jit::Operator(
-        "prim::MKLDNNHardSwish(Tensor a) -> Tensor",
+        "prim::ONEDNNHardSwish(Tensor a) -> Tensor",
         createUnaryOp(
             [](at::Tensor output, at::Tensor input) {
               at::cpu::hardswish_out(output, input);
@@ -449,7 +449,7 @@ const RegisterOperators MKLDNNHardSwishOpReg({
             false),
         AliasAnalysisKind::FROM_SCHEMA),
     torch::jit::Operator(
-        "prim::MKLDNNHardSigmoid(Tensor a) -> Tensor",
+        "prim::ONEDNNHardSigmoid(Tensor a) -> Tensor",
         createUnaryOp(
             [](at::Tensor output, at::Tensor input) {
               at::cpu::hardsigmoid_out(output, input);
@@ -457,13 +457,13 @@ const RegisterOperators MKLDNNHardSwishOpReg({
             false),
         AliasAnalysisKind::FROM_SCHEMA),
     torch::jit::Operator(
-        "prim::MKLDNNHardTanh(Tensor self) -> Tensor",
+        "prim::ONEDNNHardTanh(Tensor self) -> Tensor",
         [](const Node* n) -> Operation {
           return createUnaryOp(hardtanh_helper(n), false);
         },
         AliasAnalysisKind::FROM_SCHEMA),
     torch::jit::Operator(
-        "prim::MKLDNNClamp(Tensor self) -> Tensor",
+        "prim::ONEDNNClamp(Tensor self) -> Tensor",
         [](const Node* n) -> Operation {
           return createUnaryOp(clamp_helper(n), false);
         },
@@ -472,7 +472,7 @@ const RegisterOperators MKLDNNHardSwishOpReg({
 
 const RegisterOperators BroadOpReg({
     torch::jit::Operator(
-        prim::BroadcastMKLDNNTensors,
+        prim::BroadcastONEDNNTensors,
         BroadOp,
         AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
 });
@@ -488,7 +488,7 @@ const RegisterOperators MKLDNNLayerNormOpReg({
         AliasAnalysisKind::FROM_SCHEMA),
 });
 
-Operation ConstantMKLDNNTensorOp(const Node* node) {
+Operation ConstantONEDNNTensorOp(const Node* node) {
   const auto& t = node->t(attr::value);
   return [t](Stack& stack) {
     push(stack, t);
@@ -601,14 +601,14 @@ jit::RegisterOperators reg_fut_ops({
 // TODO: make mkldnn tensor serialize...
 const RegisterOperators MKLDNNConstantOp({
     torch::jit::Operator(
-        prim::ConstantMKLDNNTensor,
-        ConstantMKLDNNTensorOp,
+        prim::ConstantONEDNNTensor,
+        ConstantONEDNNTensorOp,
         AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
 });
 
-Node* createConstantMKLDNNTensorOp(Graph* g, const Tensor& onednn_tensor) {
-  TORCH_INTERNAL_ASSERT(onednn_tensor.is_mkldnn());
-  auto op = g->create(prim::ConstantMKLDNNTensor);
+Node* createConstantONEDNNTensorOp(Graph* g, const Tensor& onednn_tensor) {
+  TORCH_INTERNAL_ASSERT(onednn_tensor.is_onednn());
+  auto op = g->create(prim::ConstantONEDNNTensor);
   op->t_(attr::value, onednn_tensor);
   return op;
 }
@@ -622,7 +622,7 @@ void replaceInputWithMKLDNNTensor(Node* n, size_t index) {
   Value* input = n->inputs().at(index);
   auto onednn_tensor = constant_as<Tensor>(input)->to_mkldnn();
   auto onednn_tensor_value =
-      createConstantMKLDNNTensorOp(n->owningGraph(), onednn_tensor)
+      createConstantONEDNNTensorOp(n->owningGraph(), onednn_tensor)
           ->insertBefore(n)
           ->output();
   onednn_tensor_value->setDebugName(input->debugName() + "_mkldnn");
@@ -635,7 +635,7 @@ void replaceInputWithMKLDNNTensor(
     const at::Tensor& onednn_tensor) {
   Value* input = n->namedInput(name);
   auto onednn_tensor_value =
-      createConstantMKLDNNTensorOp(n->owningGraph(), onednn_tensor)
+      createConstantONEDNNTensorOp(n->owningGraph(), onednn_tensor)
           ->insertBefore(n)
           ->output();
   onednn_tensor_value->setDebugName(input->debugName() + "_mkldnn");
@@ -756,7 +756,7 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
         (body_node->kind() == aten::mul &&
          body_node->input(1)->type()->cast<TensorType>())) {
       auto node = body_node->owningGraph()->create(
-          Symbol::prim("BroadcastMKLDNNTensors"),
+          Symbol::prim("BroadcastONEDNNTensors"),
           {body_node->inputs().at(0), body_node->inputs().at(1)},
           2);
       node->insertBefore(body_node);
@@ -778,19 +778,19 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
     }
 
     if (body_node->kind() == aten::hardswish) {
-      body_node->replaceWithNewSymbol(prim::MKLDNNHardSwish);
+      body_node->replaceWithNewSymbol(prim::ONEDNNHardSwish);
       body_node->destroy();
       continue;
     }
 
     if (body_node->kind() == aten::hardsigmoid) {
-      body_node->replaceWithNewSymbol(prim::MKLDNNHardSigmoid);
+      body_node->replaceWithNewSymbol(prim::ONEDNNHardSigmoid);
       body_node->destroy();
       continue;
     }
 
     if (body_node->kind() == aten::relu6) {
-      clamp_node_creator(body_node, prim::MKLDNNHardTanh, 0., 6.);
+      clamp_node_creator(body_node, prim::ONEDNNHardTanh, 0., 6.);
       continue;
     }
 
@@ -799,14 +799,14 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
           constant_as<double>(body_node->namedInput("min_val")).value();
       auto max_val =
           constant_as<double>(body_node->namedInput("max_val")).value();
-      clamp_node_creator(body_node, prim::MKLDNNHardTanh, min_val, max_val);
+      clamp_node_creator(body_node, prim::ONEDNNHardTanh, min_val, max_val);
       continue;
     }
 
     if (body_node->kind() == aten::clamp) {
       auto min_val = constant_as<double>(body_node->namedInput("min")).value();
       auto max_val = constant_as<double>(body_node->namedInput("max")).value();
-      clamp_node_creator(body_node, prim::MKLDNNClamp, min_val, max_val);
+      clamp_node_creator(body_node, prim::ONEDNNClamp, min_val, max_val);
       continue;
     }
 
@@ -831,7 +831,7 @@ bool nonConstantParameters(Node* n) {
   return false;
 }
 
-bool frozenMkldnnCompatibleLinearNode(Node* n) {
+bool frozenOnednnCompatibleLinearNode(Node* n) {
   if (nonConstantParameters(n)) {
     return false;
   }
@@ -844,7 +844,7 @@ bool frozenMkldnnCompatibleLinearNode(Node* n) {
   return supportedMKLDNNWeight(weight);
 }
 
-bool frozenMkldnnCompatibleConvNode(Node* n) {
+bool frozenOnednnCompatibleConvNode(Node* n) {
   if (nonConstantParameters(n)) {
     return false;
   }
@@ -933,13 +933,13 @@ class MKLDNNSubgraphSlicer {
     }
   }
 
-  static bool MKLDNNGroupStart(Node* node) {
+  static bool ONEDNNGroupStart(Node* node) {
     // if we're already in the process of merging
-    if (node->kind() == prim::MKLDNNGroup) {
+    if (node->kind() == prim::ONEDNNGroup) {
       return true;
     }
     // see [mkldnn perf strategy]
-    return frozenMkldnnCompatibleConvNode(node);
+    return frozenOnednnCompatibleConvNode(node);
   }
 
  private:
@@ -952,7 +952,7 @@ class MKLDNNSubgraphSlicer {
       return supportedMKLDNNWeight(*const_tensor);
     }
     auto k = v->node()->kind();
-    if (k == prim::MKLDNNGroup || k == prim::ConstantMKLDNNTensor ||
+    if (k == prim::ONEDNNGroup || k == prim::ConstantONEDNNTensor ||
         k == aten::to_mkldnn) {
       return true;
     }
@@ -1045,7 +1045,7 @@ class MKLDNNSubgraphSlicer {
     auto curNode = *block_->nodes().begin();
     while (curNode != *block_->nodes().end()) {
       auto nextNode = curNode->next();
-      if (curNode->kind() == prim::MKLDNNGroup) {
+      if (curNode->kind() == prim::ONEDNNGroup) {
         ComputeSubgraphInMKLDNN(curNode);
         InplaceMKLDNNSubgraph(SubgraphUtils::getSubgraph(curNode));
         SubgraphUtils::unmergeSubgraph(curNode);
@@ -1061,18 +1061,18 @@ class MKLDNNSubgraphSlicer {
 
   bool shouldConsiderForMerge(Node* node) {
     // if we're already in the process of merging
-    if (node->kind() == prim::MKLDNNGroup) {
+    if (node->kind() == prim::ONEDNNGroup) {
       return true;
     }
-    return frozenMkldnnCompatibleLinearNode(node) ||
-        frozenMkldnnCompatibleConvNode(node) || computableInMKLDNN(node);
+    return frozenOnednnCompatibleLinearNode(node) ||
+        frozenOnednnCompatibleConvNode(node) || computableInMKLDNN(node);
   }
 
   std::pair<graph_node_list::iterator, bool> scanNode(Node* producer) {
-    if (MKLDNNGroupStart(producer)) {
-      if (producer->kind() != prim::MKLDNNGroup) {
+    if (ONEDNNGroupStart(producer)) {
+      if (producer->kind() != prim::ONEDNNGroup) {
         producer = SubgraphUtils::createSingletonSubgraphAndUpdateAliasing(
-            producer, prim::MKLDNNGroup, aliasDb_);
+            producer, prim::ONEDNNGroup, aliasDb_);
       }
       std::vector<Node*> output_nodes;
       for (Value* v : producer->outputs()) {
@@ -1099,7 +1099,7 @@ class MKLDNNSubgraphSlicer {
   // Try to merge `consumer` into `producer`. If successful, this destroys
   // `consumer` and returns the `producer` group.
   std::optional<Node*> tryMerge(Node* producer, Node* consumer) {
-    AT_ASSERT(producer->kind() == prim::MKLDNNGroup);
+    AT_ASSERT(producer->kind() == prim::ONEDNNGroup);
     bool canMerge = shouldConsiderForMerge(consumer) &&
         aliasDb_.moveAfterTopologicallyValid(consumer, producer);
 
@@ -1118,14 +1118,14 @@ class MKLDNNSubgraphSlicer {
   AliasDb& aliasDb_;
 };
 
-bool containsMKLDNNGroup(Block* b) {
+bool containsONEDNNGroup(Block* b) {
   for (Node* n : b->nodes()) {
     for (Block* block : n->blocks()) {
-      if (containsMKLDNNGroup(block)) {
+      if (containsONEDNNGroup(block)) {
         return true;
       }
     }
-    if (MKLDNNSubgraphSlicer::MKLDNNGroupStart(n)) {
+    if (MKLDNNSubgraphSlicer::ONEDNNGroupStart(n)) {
       return true;
     }
   }
@@ -1138,7 +1138,7 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("Before convert frozen ops to mkldnn", graph);
   // TODO: replace conv1d with conv2d ?
   graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
-  if (containsMKLDNNGroup(graph->block())) {
+  if (containsONEDNNGroup(graph->block())) {
     // Only remove tensor mutation if we know we're going to create speedups
     // with mkldnn. Only supporting functional ops simplifies this pass bc
     // running an op in mkldnn removes the aliasing relationships that

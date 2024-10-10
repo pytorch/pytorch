@@ -102,9 +102,9 @@ enum class ConvBackend {
   Miopen,
   MiopenDepthwise,
   MiopenTranspose,
-  Mkldnn,
-  MkldnnTranspose,
-  MkldnnEmpty,
+  Onednn,
+  OnednnTranspose,
+  OnednnEmpty,
   NnpackSpatial,
   Overrideable,
   Slow2d,
@@ -389,7 +389,7 @@ inline bool onednn_conv_use_channels_last(const at::Tensor& input, const at::Ten
   }
 
   // disable NHWC for OnednnCPU tensor.
-  if (input.is_mkldnn() || weight.is_mkldnn()) {
+  if (input.is_onednn() || weight.is_onednn()) {
     return false;
   }
 

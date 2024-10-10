@@ -271,8 +271,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
       hy_, rnn.dst_iter_desc(get_onednn_dtype(hy_)));
   auto cy = itensor_view_from_dense(
       cy_, rnn.dst_iter_c_desc(get_onednn_dtype(cy_)));
-  w1_ = weight_ih.is_mkldnn() ? itensor_from_tensor(weight_ih) : itensor_view_from_dense(weight_ih, rnn.weights_layer_desc(input_size, get_onednn_dtype(weight_ih)));
-  w2_ = weight_hh.is_mkldnn() ? itensor_from_tensor(weight_hh) : itensor_view_from_dense(weight_hh, rnn.weights_iter_desc(get_onednn_dtype(weight_hh)));
+  w1_ = weight_ih.is_onednn() ? itensor_from_tensor(weight_ih) : itensor_view_from_dense(weight_ih, rnn.weights_layer_desc(input_size, get_onednn_dtype(weight_ih)));
+  w2_ = weight_hh.is_onednn() ? itensor_from_tensor(weight_hh) : itensor_view_from_dense(weight_hh, rnn.weights_iter_desc(get_onednn_dtype(weight_hh)));
   if (at::GradMode::is_enabled()) {
     Tensor workspace = Tensor();
     auto pd = ideep::lstm_forward_training::prepare(

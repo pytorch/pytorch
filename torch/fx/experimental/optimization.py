@@ -122,9 +122,9 @@ mkldnn_supported = [
 # TODO: Determine whether this can be removed after type inference.
 mkldnn_supported_unknown = [operator.add, operator.mul]
 mkldnn_map = {
-    nn.Conv2d: th_mkldnn.MkldnnConv2d,
-    nn.Linear: th_mkldnn.MkldnnLinear,
-    nn.BatchNorm2d: lambda a, _: th_mkldnn.MkldnnBatchNorm(a)
+    nn.Conv2d: th_mkldnn.OnednnConv2d,
+    nn.Linear: th_mkldnn.OnednnLinear,
+    nn.BatchNorm2d: lambda a, _: th_mkldnn.OnednnBatchNorm(a)
 }
 
 

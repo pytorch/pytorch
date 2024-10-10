@@ -656,7 +656,7 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeInstanceNorm(node);
     case prim::GradOf:
       return analyzeGradOf(node);
-    case prim::BroadcastMKLDNNTensors: {
+    case prim::BroadcastONEDNNTensors: {
       makePointerTo(node->outputs().at(0), node->inputs().at(0));
       makePointerTo(node->outputs().at(1), node->inputs().at(1));
       return;
@@ -664,8 +664,8 @@ void AliasDb::analyzeImpl(Node* node) {
     // TODO: think more about TensorExpr alias correctness
     case prim::TensorExprGroup:
     case prim::TensorExprDynamicGroup:
-    case prim::MKLDNNGroup:
-    case prim::ConstantMKLDNNTensor:
+    case prim::ONEDNNGroup:
+    case prim::ConstantONEDNNTensor:
     case prim::StaticSubgraph:
     case prim::Constant:
     case prim::AutogradZero:

@@ -36,7 +36,7 @@ Tensor mkldnn_softmax(
     const bool half_to_float) {
   TORCH_CHECK(
       !half_to_float,
-      "softmax with half to float conversion is not supported on Mkldnn");
+      "softmax with half to float conversion is not supported on Onednn");
   const int64_t wrapped_dim = maybe_wrap_dim(dim, self.dim());
   ideep::tensor& x = itensor_from_onednn(self);
   ideep::tensor y;

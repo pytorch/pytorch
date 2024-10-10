@@ -83,7 +83,7 @@ Tensor linear(const Tensor& input, const Tensor& weight, const std::optional<Ten
   auto bias = bias_opt.has_value()
     ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
     : c10::MaybeOwned<Tensor>::owned(std::in_place);
-  if (input.is_mkldnn()) {
+  if (input.is_onednn()) {
     return at::mkldnn_linear(input, weight, *bias);
   }
 #if defined(C10_MOBILE)
@@ -122,7 +122,7 @@ Tensor linear(const Tensor& input, const Tensor& weight, const std::optional<Ten
 }
 
 Tensor& linear_out(const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt, Tensor& output) {
-  TORCH_CHECK(!input.is_mkldnn(), "linear doesn't support out for MKLDNN tensors");
+  TORCH_CHECK(!input.is_onednn(), "linear doesn't support out for MKLDNN tensors");
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
               ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)

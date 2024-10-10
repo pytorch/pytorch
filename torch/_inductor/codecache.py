@@ -536,7 +536,7 @@ def _reduce_tensor(
     PyCodeCache would need more complexity to create a new module from its
     cache, but with the right constants attached as attributes.
     """
-    if t.is_mkldnn:
+    if t.is_onednn:
         # TODO: These tensors don't currently pickle, so we can't cache a
         # compiled graph containing them. Just fail now. If mkldnn tensors
         # get pickling support, we can remove this.
@@ -1929,7 +1929,7 @@ class AotCodeCompiler:
                 if t.numel() == 0:
                     return b""
 
-                if t.is_mkldnn:
+                if t.is_onednn:
                     data_ptr = torch.ops.onednn.data_ptr(t)
                     nbytes = torch.ops.onednn._nbytes(t)
                 else:

@@ -489,7 +489,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
 template struct PackedConvWeightsOnednn<2>;
 template struct PackedConvWeightsOnednn<3>;
 
-// Return the packed weight as Mkldnn Tensor
+// Return the packed weight as Onednn Tensor
 at::Tensor _qconv_prepack_onednn(
     at::Tensor weight, // from CPU backend instead of QuantizedCPU
     at::Tensor weight_scales, // Weight zero points must be 0 for onednn

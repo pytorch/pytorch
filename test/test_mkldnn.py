@@ -270,7 +270,7 @@ class TestMkldnn(TestCase):
             elif dim != 1:
                 loss2 = y_mkldnn.sum()
                 loss2.backward()
-                self.assertTrue(x2.grad.is_mkldnn)
+                self.assertTrue(x2.grad.is_onednn)
                 self.assertEqual(x1.grad, x2.grad.to_dense())
                 self.assertEqual(conv.weight.grad,
                                  mkldnn_conv.weight.grad,
@@ -1403,10 +1403,10 @@ class TestMkldnn(TestCase):
             x2.zero_().to_dense(),
         )
 
-    def test_is_mkldnn(self):
+    def test_is_onednn(self):
         x = torch.randn(1, dtype=torch.float32)
-        self.assertFalse(x.is_mkldnn)
-        self.assertTrue(x.to_mkldnn().is_mkldnn)
+        self.assertFalse(x.is_onednn)
+        self.assertTrue(x.to_mkldnn().is_onednn)
 
     # legacy constructor/new doesn't support mkldnn tensors
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1992")
@@ -1419,18 +1419,18 @@ class TestMkldnn(TestCase):
         self.assertRaises(RuntimeError, lambda: x_mkldnn.new(torch.Size([2, 3])))
         self.assertRaises(RuntimeError, lambda: x_mkldnn.new([6]))
 
-    def test_is_mkldnn_jit(self):
-        class EnsureMkldnn(torch.jit.ScriptModule):
+    def test_is_onednn_jit(self):
+        class EnsureOnednn(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, x):
-                if not x.is_mkldnn:
+                if not x.is_onednn:
                     x = x.to_mkldnn()
                 return x
 
-        m = EnsureMkldnn()
+        m = EnsureOnednn()
         x = torch.randn(1, dtype=torch.float32)
-        self.assertTrue(m(x).is_mkldnn)
-        self.assertTrue(m(x.to_mkldnn()).is_mkldnn)
+        self.assertTrue(m(x).is_onednn)
+        self.assertTrue(m(x.to_mkldnn()).is_onednn)
 
     def _test_imagenet_model(self, model):
         model = model.train(False).float()

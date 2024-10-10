@@ -38,7 +38,7 @@ void check_onednn_binary_fusion_inputs(
     const Tensor& other,
     const Tensor& weight,
     const Tensor& bias) {
-  if (!weight.is_mkldnn()) {
+  if (!weight.is_onednn()) {
     TORCH_CHECK(
         input.options().type_equal(weight.options()),
         "Input type (",
