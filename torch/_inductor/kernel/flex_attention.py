@@ -1881,7 +1881,7 @@ def flex_attention_backward(*args, **kwargs):
         input_gen_fns=input_gen_fns,
     )  # [Bq, Hkv, seq_len_kv, k_head_dim]
 
-    if k_requires_grad and v_requires_grad:
+    if k_requires_grad or v_requires_grad:
         if V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv)):
             grad_key = broadcasted_grad_key
             grad_value = broadcasted_grad_value
