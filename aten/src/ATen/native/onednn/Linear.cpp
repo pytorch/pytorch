@@ -3,7 +3,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/core/Tensor.h>
 #include <torch/library.h>
-#include <ATen/native/mkldnn/Linear.h>
+#include <ATen/native/onednn/Linear.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
