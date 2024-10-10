@@ -345,9 +345,13 @@ def _decompose_and_get_gm_with_new_signature_constants(
     )
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-    # TODO Merge this path with inference IR decomp, but it will require some additional work
-    # so I will leave it for now. T200307782
-    if ep.verifier.dialect == "TRAINING":
+    def _is_joint_ir_decomp(ep, joint_loss_index):
+        return (
+            joint_loss_index is not None
+            or ep.graph_signature.backward_signature is not None
+        )
+
+    if not _is_joint_ir_decomp(ep, joint_loss_index):
         mod = ep.module()
 
         fake_args = []
@@ -356,7 +360,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 fake_args.append(node.meta["val"])
 
         fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
-        fake_mode = _detect_fake_mode_from_gm(mod)
+        # TODO T204030333
+        fake_mode = _detect_fake_mode_from_gm(ep.graph_module)
         if fake_mode is None:
             fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
 
@@ -531,9 +536,10 @@ def _decompose_and_get_gm_with_new_signature_constants(
         )
         for i, spec in enumerate(ep.graph_signature.input_specs)
     ]
+
     output_specs = [
         OutputSpec(
-            spec.kind,
+            OutputKind.LOSS_OUTPUT if joint_loss_index is not None else spec.kind,
             update_arg(spec.arg, new_outputs[i]),
             old_new_placeholder_map.get(spec.target, spec.target),
         )
