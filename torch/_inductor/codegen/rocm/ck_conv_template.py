@@ -1,8 +1,23 @@
 # mypy: allow-untyped-defs
 from dataclasses import asdict, dataclass
+import logging
+import os
 from typing import Tuple, Optional
 from torch._inductor.codegen.rocm.ck_template import CKTemplate
 from torch._inductor.utils import IndentedBuffer
+
+from ck4inductor.util import library_path
+
+log = logging.getLogger(__name__)
+
+def _ck_conv_instances_path():
+    conv_instances_path = os.path.join(  # noqa: F821
+        library_path(), "include", "ck", "library", "tensor_operation_instance", "gpu", "grouped_conv_fwd"
+    )
+    if not os.path.exists(conv_instances_path):
+        log.error("CK library conv instances path %s does not exist", conv_instances_path)
+        return None
+    return conv_instances_path
 
 @dataclass
 class CKConvOp:
@@ -15,7 +30,7 @@ class CKConvOp:
     b_element_dtype: str
     acc_dtype: str
     c_shuffle_dtype: str
-    ds_element_dtype: str
+    ds_element_dtype: Tuple[str]
     e_element_dtype: str
     a_elementwise_op: str
     b_elementwise_op: str
