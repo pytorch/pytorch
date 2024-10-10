@@ -510,7 +510,7 @@ class CppMicroGemmAMX(CppMicroGemm):
 {{declare_kernel}} {
     {{kernel.assert_function}}(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
     {{kernel.assert_function}}(K % 2 == 0, "K dimension must be multiple of 2");
-{%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
+{%- if need_to_dequantize_B %}
     // Create a stack-allocated buffer for tiles of B.
     // Except maybe for the tail-case, an AMX tile of B has 16x32 BF16 elements,
     // but to make things simple, we'll allocate space for a 16x32 tile even for the tail.
@@ -560,7 +560,7 @@ class CppMicroGemmAMX(CppMicroGemm):
         int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
         int64_t m_tail = m;
         for (int64_t n = 0; n < N; n += {{block_n}}) {
-{%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
+{%- if need_to_dequantize_B %}
         if C10_UNLIKELY(m == 0) {
             // Dequantize K * 32 int8 B elements into BF16
             load_dequantized_B(n / {{block_n}});
@@ -574,7 +574,7 @@ class CppMicroGemmAMX(CppMicroGemm):
                 {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}<accum>(
                     amx_state,
                     A + m * lda,
-{%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
+{%- if need_to_dequantize_B %}
                     dequantized_B_buf +  n * buf_size_per_nr_block,
 {%- else %}
                     B + n,
@@ -594,7 +594,7 @@ class CppMicroGemmAMX(CppMicroGemm):
                 {{kernel_name}}_amx_kernel_16_{{num_columns}}<accum>(
                     amx_state,
                     A + m_tail * lda,
-{%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
+{%- if need_to_dequantize_B %}
                     dequantized_B_buf +  n * buf_size_per_nr_block,
 {%- else %}
                     B + n,
@@ -731,6 +731,8 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         num_columns = block_n // 16
         options = {
             "declare_kernel": self.get_kernel_declaration(),
+            "need_to_dequantize_B": self.input_dtype == torch.bfloat16
+            and self.input2_dtype == torch.int8,
             "kernel": kernel,
             "block_m": block_m,
             "block_n": block_n,
