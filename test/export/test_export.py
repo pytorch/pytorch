@@ -64,6 +64,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     run_tests,
+    skipIfCrossRef,
     TEST_TRANSFORMERS,
     TestCase as TorchTestCase,
 )
@@ -229,8 +230,14 @@ class TestDynamismExpression(TestCase):
 
         inp = torch.zeros([3])
         dim_x = torch.export.Dim("dim_x", min=6)
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "not in range"):
-            torch.export.export(
+
+        if is_non_strict_test(self._testMethodName):
+            error_type = torch.fx.experimental.symbolic_shapes.ConstraintViolationError
+        else:
+            error_type = torch._dynamo.exc.UserError
+
+        with self.assertRaisesRegex(error_type, "not in range"):
+            export(
                 InvalidInputConflictWithInputConstraints(),
                 (inp,),
                 dynamic_shapes={"x": {0: dim_x}},
@@ -791,8 +798,8 @@ graph():
                 # z = 4
                 return x + y + z + w2
 
-        ep = torch.export.export(M(), (torch.randn(2, 3),), strict=False)
-        self.assertEqual(ep.graph_signature.buffers_to_mutate, {"add_2": "buf"})
+        ep = export(M(), (torch.randn(2, 3),), strict=False)
+        self.assertEqual(list(ep.graph_signature.buffers_to_mutate.values()), ["buf"])
         self.assertTrue(
             torch.allclose(ep.module()(torch.ones(2, 3) + 1), torch.ones(2, 3) * 12)
         )
@@ -815,7 +822,7 @@ graph():
             ValueError,
             "The tensor attribute self.buf was assigned during export",
         ):
-            torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+            export(M(), (torch.randn(2, 3),), strict=False)
 
         class M(torch.nn.Module):  # complex with register buffer
             def __init__(self) -> None:
@@ -840,9 +847,9 @@ graph():
                 # z = 3 + 3
                 return x + y + z
 
-        ep = torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+        ep = export(M(), (torch.randn(2, 3),), strict=False)
         self.assertEqual(
-            ep.graph_signature.buffers_to_mutate, {"add_1": "buf_0", "add_2": "buf_1"}
+            list(ep.graph_signature.buffers_to_mutate.values()), ["buf_0", "buf_1"]
         )
         self.assertTrue(
             torch.allclose(ep.module()(torch.ones(2, 3) + 1), torch.ones(2, 3) * 10)
@@ -873,7 +880,7 @@ graph():
             ValueError,
             "The tensor attributes self.tensors\\[0\\], self.tensors\\[1\\] were assigned during export",
         ):
-            torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+            export(M(), (torch.randn(2, 3),), strict=False)
 
     def test_state_primitives(self):
         class M(torch.nn.Module):
@@ -893,6 +900,22 @@ graph():
         self.assertTrue(
             torch.allclose(ep.module()(torch.zeros(2, 3)), torch.ones(2, 3) * 21)
         )
+
+    def test_state_shape_attribute_assignment(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.last_z_shape = self.linear.weight.shape
+
+            def forward(self, x):
+                self.last_z_shape = x.shape
+                return self.linear(x)
+
+        model = TestModule()
+        x = torch.randn(20, 10)
+        ep_model = export(model, (x,), strict=False).module()
+        self.assertTrue(torch.allclose(model(x), ep_model(x)))
 
     @testing.expectedFailureTrainingIRToRunDecompNonStrict  # TODO(pianpwk): user_output signature
     def test_real_tensor_for_max_op(self):
@@ -5104,12 +5127,12 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
                 return {"prediction": (x + y, self.bff)}
 
         mod = ModuleConstant()
-        ep = torch.export.export(mod, ())
+        ep = export(mod, ())
         self.assertEqual(ep.module()(), mod())
 
         args = (torch.randn(3, 2), torch.randn(3, 2))
         mod = ModuleNestedConstant()
-        ep = torch.export.export(mod, args)
+        ep = export(mod, args)
         self.assertEqual(ep.module()(*args), mod(*args))
 
     def test_non_arg_name_dynamic_shapes_api_with_kwarg(self):
@@ -6002,6 +6025,43 @@ graph():
         gm_flat_strict = ep_strict.module()
 
         self.assertEqual(gm_flat_non_strict(*inp), gm_flat_strict(*inp))
+
+    def test_preserve_module_call_signature_unflatten_specialization(self):
+        class N(torch.nn.Module):
+            def forward(self, x, b):
+                if b:
+                    return x + 1
+                else:
+                    return x + 2
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n = N()
+
+            def forward(self, x):
+                x0 = x + 3
+                x1 = self.n(x0, True)
+                return x1 + 4
+
+        inp = (torch.ones(1),)
+        m = M()
+        eager_result = m(*inp)
+
+        if not is_retracebility_test(self._testMethodName):
+            ep = export(M(), inp, preserve_module_call_signature=("n",))
+            epm = ep.module()
+            ufm = torch.export.unflatten(ep)
+
+            exported_result = epm(*inp)
+            self.assertTrue(torch.allclose(exported_result, eager_result))
+
+            unflattened_result = ufm(*inp)
+            self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
+            ufm.set_submodule("n", N())
+            unflattened_result = ufm(*inp)
+            self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
     def test_unflatten_multiple_graphs_preserve_signature_error(self):
         class N(torch.nn.Module):
@@ -6936,6 +6996,7 @@ def forward(self, x):
         real_names_and_ops = [(node.name, node.op) for node in ep.graph.nodes]
         self.assertEqual(expected_names_and_ops, real_names_and_ops)
 
+    @skipIfCrossRef  # Dynamo changes the order of ops under Torch function modes
     def test_placeholder_naming_collisions_hoo_subgraphs(self):
         # test collisions between user inputs, top-level nodes, and HOO subgraph nodes
         class Foo(torch.nn.Module):
@@ -7368,7 +7429,7 @@ def forward(self, x, y):
         m2 = M2()
         m1 = M1(m2, m2.foo)
         inps = (torch.ones(3, 3),)
-        ep = torch.export.export(m1, inps, strict=False)
+        ep = export(m1, inps, strict=False)
         # check both constants appear in list
         self.assertEqual(sorted(list(ep.constants)), ["foo", "m2.foo"])
         # check only one input spec exists
@@ -8272,6 +8333,7 @@ class TestOneOffModelExportResult(TestCase):
     #     getitem = _scaled_dot_product_flash_attention_for_cpu[0];  _scaled_dot_product_flash_attention_for_cpu = None
     #     return (getitem,)""")
 
+    @skipIfCrossRef
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Can't run fused SDPA on this platform",
