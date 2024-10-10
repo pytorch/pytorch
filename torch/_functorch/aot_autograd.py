@@ -21,7 +21,10 @@ from torch._inductor.utils import BoxedBool
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass, disable_eager_only_torch_dispatch_mode
+from torch.utils._python_dispatch import (
+    disable_eager_only_torch_dispatch_mode,
+    is_traceable_wrapper_subclass,
+)
 
 
 static_inputs_log = torch._logging.getArtifactLogger(

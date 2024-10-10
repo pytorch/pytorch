@@ -18,7 +18,6 @@ from torch._C import (
     DispatchKey,
 )
 import threading
-from contextlib import contextmanager
 
 
 
@@ -41,6 +40,7 @@ def is_in_torch_dispatch_mode(include_infra_modes=True, include_eager_only_modes
         return _is_in_non_infra_torch_dispatch_mode
     elif not include_eager_only_modes:
         return _is_in_non_eager_only_torch_dispatch_mode
+    raise AssertionError("This should never be reached")
 
 
 class TorchDispatchMode:

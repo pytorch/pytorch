@@ -10,11 +10,13 @@ from torch._C import (
     _push_on_torch_function_stack,
 )
 from torch._dynamo.utils import counters
+from torch._inductor.utils import run_and_get_code
 from torch.overrides import _get_current_function_mode_stack, BaseTorchFunctionMode
 from torch.utils._device import DeviceContext
-from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._python_dispatch import is_eager_only_torch_dispatch_mode_enabled
-from torch._inductor.utils import run_and_get_code
+from torch.utils._python_dispatch import (
+    is_eager_only_torch_dispatch_mode_enabled,
+    TorchDispatchMode,
+)
 
 
 class TestMode(BaseTorchFunctionMode):
@@ -64,8 +66,6 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
 
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 if is_eager_only_torch_dispatch_mode_enabled():
-                    import traceback
-                    traceback.print_stack()
                     self.funcs.append(func.__name__)
                 return func(*args, **kwargs)
 
@@ -85,7 +85,7 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
                 z = self.mul_graph_break(z)
                 z = torch.matmul(z, z)
                 return z
-            
+
             @torch.compiler.disable
             def relu_graph_break(self, x):
                 return self.relu(x)
@@ -112,8 +112,12 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out_ref, out_compiled)
         self.assertEqual(len(custom_mode.funcs), 2)
         self.assertEqual(len(counters["graph_break"]), 2)
-        self.assertIn("relu_graph_break", list(counters["graph_break"].keys())[0])
-        self.assertIn("mul_graph_break", list(counters["graph_break"].keys())[1])
+        self.assertIn(
+            "relu_graph_break", list(counters["graph_break"].keys())[0]  # noqa: RUF015
+        )
+        self.assertIn(
+            "mul_graph_break", list(counters["graph_break"].keys())[1]  # noqa: RUF015
+        )
         self.assertEqual(len(triton_codes), 3)
 
 

@@ -24,7 +24,6 @@ from types import CodeType, FrameType, FunctionType, ModuleType
 from typing import Any, Callable, Dict, List, Optional, Set, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
-from torch.utils._python_dispatch import disable_eager_only_torch_dispatch_mode
 
 import torch
 import torch._logging
@@ -48,6 +47,7 @@ from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 from torch.nn.parallel.distributed import DistributedDataParallel
 from torch.utils._python_dispatch import (
     _disable_current_modes,
+    disable_eager_only_torch_dispatch_mode,
     is_in_torch_dispatch_mode,
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
@@ -948,7 +948,7 @@ def _compile(
         try:
             with disable_eager_only_torch_dispatch_mode():
                 guarded_code = compile_inner(code, one_graph, hooks, transform)
-                return guarded_code
+            return guarded_code
         except Exception as e:
             fail_type = type(e).__qualname__
             fail_reason = str(e)
@@ -1283,7 +1283,9 @@ class CatchErrorsWrapper:
             or is_skipfile
             or config.disable
             or (
-                is_in_torch_dispatch_mode(include_infra_modes=False, include_eager_only_modes=False)
+                is_in_torch_dispatch_mode(
+                    include_infra_modes=False, include_eager_only_modes=False
+                )
                 and not getattr(self._torchdynamo_orig_callable, "_export", False)
             )
         ):
@@ -1294,7 +1296,9 @@ class CatchErrorsWrapper:
                     skip_reason = "traced frame already"
                 elif trace_rules.check(frame.f_code):
                     skip_reason = "in skipfiles"
-                elif is_in_torch_dispatch_mode(include_infra_modes=False, include_eager_only_modes=False):
+                elif is_in_torch_dispatch_mode(
+                    include_infra_modes=False, include_eager_only_modes=False
+                ):
                     skip_reason = "non-infra torch dispatch mode present, this is not supported today in torch.compile"
                 else:
                     skip_reason = "dynamo tracing is disabled"
