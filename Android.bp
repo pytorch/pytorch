@@ -1,0 +1,9 @@
+filegroup {
+    name: "torchgen_native_functions",
+    srcs: ["aten/src/ATen/native/native_functions.yaml"],
+}
+
+filegroup {
+    name: "torchgen_tags",
+    srcs: ["aten/src/ATen/native/tags.yaml"],
+}
