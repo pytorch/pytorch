@@ -1304,9 +1304,8 @@ class PipelineStage(_PipelineStageBase):
                 else dist.get_global_rank(self.group, peer_rank)
             )
 
-        # TODO: we name this 'stage' but we really mean 'rank'! this is bad!
-        self.prev_stage = stage_global_rank((self.group_rank - 1) % self.group_size)
-        self.next_stage = stage_global_rank((self.group_rank + 1) % self.group_size)
+        self.prev_rank = stage_global_rank((self.group_rank - 1) % self.group_size)
+        self.next_rank = stage_global_rank((self.group_rank + 1) % self.group_size)
 
         dbg_str = (
             f"Finished pipeline stage init, {self.stage_index=}, {self.is_first=}, "  # noqa: G004
@@ -1354,7 +1353,7 @@ class PipelineStage(_PipelineStageBase):
                 self.stage_index - 1,
             )
             dist.recv_object_list(
-                objects, src=self.prev_stage, group=self.group, device=self.device
+                objects, src=self.prev_rank, group=self.group, device=self.device
             )
             recv_args = objects[0]
             assert isinstance(recv_args, tuple), type(recv_args)
@@ -1409,7 +1408,7 @@ class PipelineStage(_PipelineStageBase):
             )
             dist.send_object_list(
                 [outputs_meta],
-                dst=self.next_stage,
+                dst=self.next_rank,
                 group=self.group,
                 device=self.device,
             )
@@ -1506,15 +1505,15 @@ class PipelineStage(_PipelineStageBase):
         send_tensor = torch.ones(1, device="cuda")
         # forward
         if not self.is_first:
-            ops.append(dist.P2POp(dist.irecv, recv_tensor, self.prev_stage, self.group))
+            ops.append(dist.P2POp(dist.irecv, recv_tensor, self.prev_rank, self.group))
         if not self.is_last:
-            ops.append(dist.P2POp(dist.isend, send_tensor, self.next_stage, self.group))
+            ops.append(dist.P2POp(dist.isend, send_tensor, self.next_rank, self.group))
 
         # backward
         if not self.is_first:
-            ops.append(dist.P2POp(dist.isend, send_tensor, self.prev_stage, self.group))
+            ops.append(dist.P2POp(dist.isend, send_tensor, self.prev_rank, self.group))
         if not self.is_last:
-            ops.append(dist.P2POp(dist.irecv, recv_tensor, self.next_stage, self.group))
+            ops.append(dist.P2POp(dist.irecv, recv_tensor, self.next_rank, self.group))
 
         return True
 
