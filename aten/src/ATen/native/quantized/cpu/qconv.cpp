@@ -1388,10 +1388,10 @@ static at::Tensor _quantized_convolution_onednn(
     at::Tensor act, // contains quantized values but not QTensor
     double act_scale,
     int64_t act_zero_point,
-    at::Tensor weight, // MKLDNN tensor with quantized values
+    at::Tensor weight, // ONEDNN tensor with quantized values
     at::Tensor weight_scales,
     at::Tensor weight_zero_points,
-    std::optional<at::Tensor> bias, // Bias is not packed into MKLDNN tensor
+    std::optional<at::Tensor> bias, // Bias is not packed into ONEDNN tensor
     torch::List<int64_t> stride,
     torch::List<int64_t> padding,
     torch::List<int64_t> dilation,
@@ -1466,7 +1466,7 @@ static at::Tensor _quantized_convolution_onednn(
   }
   TORCH_CHECK(
     weight.is_onednn(),
-    func_name, ": Weight should be prepacked as an MKLDNN tensor"
+    func_name, ": Weight should be prepacked as an ONEDNN tensor"
   );
   if (transposed) {
     TORCH_CHECK(

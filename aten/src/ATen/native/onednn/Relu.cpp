@@ -5,24 +5,24 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/relu_native.h>                // for mkldnn_relu, mkldnn_...
-#include <ATen/ops/threshold_backward_native.h>  // for mkldnn_relu_backward
+#include <ATen/ops/relu_native.h>                // for onednn_relu, mkldnn_...
+#include <ATen/ops/threshold_backward_native.h>  // for onednn_relu_backward
 #endif
 
 #if !AT_ONEDNN_ENABLED()
 
 namespace at { namespace native {
 
-Tensor mkldnn_relu(const Tensor& input) {
-  TORCH_CHECK(false, "mkldnn_relu: ATen not compiled with MKLDNN support");
+Tensor onednn_relu(const Tensor& input) {
+  TORCH_CHECK(false, "onednn_relu: ATen not compiled with ONEDNN support");
 }
 
-Tensor& mkldnn_relu_(Tensor& input) {
-  TORCH_CHECK(false, "mkldnn_relu_: ATen not compiled with MKLDNN support");
+Tensor& onednn_relu_(Tensor& input) {
+  TORCH_CHECK(false, "onednn_relu_: ATen not compiled with ONEDNN support");
 }
 
-Tensor mkldnn_relu_backward(const Tensor& grad_output, const Tensor& input, const Scalar& threshold) {
-  TORCH_CHECK(false, "mkldnn_relu_backward: ATen not compiled with MKLDNN support");
+Tensor onednn_relu_backward(const Tensor& grad_output, const Tensor& input, const Scalar& threshold) {
+  TORCH_CHECK(false, "onednn_relu_backward: ATen not compiled with ONEDNN support");
 }
 
 }}
@@ -34,10 +34,10 @@ Tensor mkldnn_relu_backward(const Tensor& grad_output, const Tensor& input, cons
 
 namespace at { namespace native {
 
-Tensor mkldnn_relu(const Tensor& input) {
+Tensor onednn_relu(const Tensor& input) {
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(onednn_bf16_device_check(),
-        "mkldnn_relu: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+        "onednn_relu: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
 
   const ideep::tensor& x = itensor_from_onednn(input);
@@ -48,10 +48,10 @@ Tensor mkldnn_relu(const Tensor& input) {
                                  input.options().device_opt());
 }
 
-Tensor& mkldnn_relu_(Tensor& input) {
+Tensor& onednn_relu_(Tensor& input) {
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(onednn_bf16_device_check(),
-        "mkldnn_relu_: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+        "onednn_relu_: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
 
   ideep::tensor& x = itensor_from_onednn(input);
@@ -60,7 +60,7 @@ Tensor& mkldnn_relu_(Tensor& input) {
   return input;
 }
 
-Tensor mkldnn_relu_backward(const Tensor& grad_output, const Tensor& input, const Scalar& threshold) {
+Tensor onednn_relu_backward(const Tensor& grad_output, const Tensor& input, const Scalar& threshold) {
   ideep::tensor& x = itensor_from_onednn(input);
   ideep::tensor grady = itensor_from_onednn(grad_output);
   ideep::tensor gradx;

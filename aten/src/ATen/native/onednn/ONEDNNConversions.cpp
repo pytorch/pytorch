@@ -26,13 +26,13 @@ namespace at { namespace native {
 
 #if AT_ONEDNN_ENABLED()
 
-Tensor mkldnn_to_dense(const Tensor& onednn_tensor, std::optional<ScalarType> dtype, std::optional<bool> masked_grad) {
+Tensor onednn_to_dense(const Tensor& onednn_tensor, std::optional<ScalarType> dtype, std::optional<bool> masked_grad) {
   TORCH_CHECK(onednn_tensor.scalar_type() == ScalarType::Float ||
               onednn_tensor.scalar_type() == ScalarType::BFloat16 ||
               onednn_tensor.scalar_type() == ScalarType::Half ||
               onednn_tensor.scalar_type() == ScalarType::Byte ||
               onednn_tensor.scalar_type() == ScalarType::Char,
-              "mkldnn_to_dense expects float, bfloat16, half, uint8, int8 tensor input");
+              "onednn_to_dense expects float, bfloat16, half, uint8, int8 tensor input");
   ideep::tensor& stensor = itensor_from_onednn(onednn_tensor);
   auto dims = stensor.get_dims();
   auto data_type = dtype.has_value() ? dtype.value() : onednn_tensor.scalar_type();
@@ -41,7 +41,7 @@ Tensor mkldnn_to_dense(const Tensor& onednn_tensor, std::optional<ScalarType> dt
               data_type == ScalarType::Half ||
               data_type == ScalarType::Byte ||
               data_type == ScalarType::Char,
-              "mkldnn tensor only can be converted to be a float, bfloat16, Half, uint8, int8 cpu tensor")
+              "onednn tensor only can be converted to be a float, bfloat16, Half, uint8, int8 cpu tensor")
   if (onednn_tensor.scalar_type() == ScalarType::Byte || onednn_tensor.scalar_type() == ScalarType::Char) {
     // For int8, uint8 input, we should not change the data type.
     TORCH_CHECK(onednn_tensor.scalar_type() == data_type,
@@ -75,17 +75,17 @@ Tensor mkldnn_to_dense(const Tensor& onednn_tensor, std::optional<ScalarType> dt
   return cpu_tensor.contiguous().resize_(dims, c10::MemoryFormat::Contiguous);
 }
 
-Tensor dense_to_mkldnn(const Tensor& cpu_tensor, std::optional<ScalarType> dtype) {
+Tensor dense_to_onednn(const Tensor& cpu_tensor, std::optional<ScalarType> dtype) {
   TORCH_CHECK(cpu_tensor.device().is_cpu(),
-             "dense_to_mkldnn expects CPU tensor input");
+             "dense_to_onednn expects CPU tensor input");
   TORCH_CHECK(cpu_tensor.layout() == Layout::Strided,
-             "dense_to_mkldnn expects strided tensor input");
+             "dense_to_onednn expects strided tensor input");
   TORCH_CHECK(cpu_tensor.scalar_type() == ScalarType::Float ||
               cpu_tensor.scalar_type() == ScalarType::BFloat16 ||
               cpu_tensor.scalar_type() == ScalarType::Half ||
               cpu_tensor.scalar_type() == ScalarType::Byte ||
               cpu_tensor.scalar_type() == ScalarType::Char,
-             "dense_to_mkldnn expects float, bfloat16, half, uint8, int8 tensor input");
+             "dense_to_onednn expects float, bfloat16, half, uint8, int8 tensor input");
   TORCH_CHECK(cpu_tensor.dim() <= 5,
              "Can't convert cpu tensor with the number of dimensions > 5");
   // NOTE: forbid direct convert from non-contiguous (or channels last) to `ideep::tensor`.
@@ -101,8 +101,8 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor, std::optional<ScalarType> dtype
               data_type == ScalarType::Half ||
               data_type == ScalarType::Byte ||
               data_type == ScalarType::Char,
-              "cpu tensor only can be converted to be a float, bfloat16, half, uint8, int8 mkldnn tensor")
-  Tensor onednn_tensor = empty_mkldnn(cpu_tensor_cont.sizes(), data_type,
+              "cpu tensor only can be converted to be a float, bfloat16, half, uint8, int8 onednn tensor")
+  Tensor onednn_tensor = empty_onednn(cpu_tensor_cont.sizes(), data_type,
                                       cpu_tensor_cont.options().layout_opt(), cpu_tensor_cont.options().device_opt(),
                                       cpu_tensor_cont.options().pinned_memory_opt());
   ideep::tensor& dtensor = itensor_from_onednn(onednn_tensor);
@@ -133,7 +133,7 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor, std::optional<ScalarType> dtype
 }
 
 // Onednn tensor has special non-public format for conv2d weights
-// (dense_to_mkldnn only converts dense tensor to mkldnn tensor with
+// (dense_to_onednn only converts dense tensor to onednn tensor with
 // public format). Ideep conv kernel will do implicit reorder if the
 // weight is not already in this optimized format. By the time I'm
 // writing this note, we are seeing ~20% perf cost of doing the
@@ -163,7 +163,7 @@ Tensor mkldnn_reorder_conv2d_weight(
   auto self_ = self.is_onednn() ? self : self.contiguous(memory_format);
   auto w = itensor_from_tensor(self_);
 
-  // Legacy mkldnn conv2d jitted module may contain a 5-d weight with an extra
+  // Legacy onednn conv2d jitted module may contain a 5-d weight with an extra
   // dimension when groups > 1, having dimension [g, o/g, i, h, w] instead of
   // [o, i, h, w]. Ideally we should reorder the weight back in serialization.
   // For backward compatibility, we squash the first two dims (g * o/g) back to
@@ -561,11 +561,11 @@ TORCH_LIBRARY_IMPL(onednn, OnednnCPU, m) {
 
 #else
 
-Tensor mkldnn_to_dense(const Tensor& onednn_tensor, std::optional<ScalarType> dtype, std::optional<bool> masked_grad) {
+Tensor onednn_to_dense(const Tensor& onednn_tensor, std::optional<ScalarType> dtype, std::optional<bool> masked_grad) {
   TORCH_CHECK(false, "MKL-DNN build is disabled");
 }
 
-Tensor dense_to_mkldnn(const Tensor& cpu_tensor, std::optional<ScalarType> dtype) {
+Tensor dense_to_onednn(const Tensor& cpu_tensor, std::optional<ScalarType> dtype) {
   TORCH_CHECK(false, "MKL-DNN build is disabled");
 }
 
@@ -606,7 +606,7 @@ static Tensor mkl_reorder_linear_weight(
   auto K = weight.size(1);
   int64_t pack_size =
       (int64_t)(cblas_sgemm_pack_get_size(CblasBMatrix, M, N, K) / sizeof(float) + 1);
-  auto packed_weight = empty_mkldnn(
+  auto packed_weight = empty_onednn(
       {pack_size, 1},
       weight.scalar_type(),
       weight.options().layout_opt(),

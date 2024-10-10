@@ -62,7 +62,7 @@ def change_cos_pass(graph):
 
 
 class TestPostGradCustomPrePostPass(TestCustomPassBase):
-    #  mkldnn fusion's pattern_matcher
+    #  onednn fusion's pattern_matcher
     # (torch/_inductor/fx_passes/onednn_fusion.py),
     # and apply it to custom post_grad_passes.
     def _register_mkldnn_conv_relu_fusion(self, custom_pass_dict):
@@ -160,7 +160,7 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             # define pattern match as custom post grad opt pass
             post_grad_custom_post_pass=None,
         ):
-            # init mkldnn fusion on custom_matcher
+            # init onednn fusion on custom_matcher
             self._register_mkldnn_conv_relu_fusion(config.post_grad_custom_pre_pass)
 
             mod = self._ConvReLU(16, 16).eval()
@@ -185,7 +185,7 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             post_grad_custom_pre_pass=None,
             post_grad_custom_post_pass=self._CustomPass(),
         ):
-            # init mkldnn fusion on custom_matcher
+            # init onednn fusion on custom_matcher
             self._register_mkldnn_conv_relu_fusion(config.post_grad_custom_post_pass)
 
             mod = self._ConvReLU(16, 16).eval()

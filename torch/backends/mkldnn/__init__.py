@@ -38,7 +38,7 @@ class verbose:
 
         import torch
         model(data)
-        with torch.backends.mkldnn.verbose(torch.backends.mkldnn.VERBOSE_ON):
+        with torch.backends.onednn.verbose(torch.backends.onednn.VERBOSE_ON):
             model(data)
 
     Args:
@@ -57,7 +57,7 @@ class verbose:
         st = torch._C._verbose.onednn_set_verbose(self.level)
         assert (
             st
-        ), "Failed to set MKLDNN into verbose mode. Please consider to disable this verbose scope."
+        ), "Failed to set ONEDNN into verbose mode. Please consider to disable this verbose scope."
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):

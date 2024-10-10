@@ -1177,7 +1177,7 @@ class MetaConverter:
                     sizes, strides, _storage_offset = sym_sizes_strides_storage_offset(
                         t, source
                     )
-                    # TODO: This doesn't seem right, where's the MKLDNN'ness
+                    # TODO: This doesn't seem right, where's the ONEDNN'ness
                     # lol
                     r = callback(
                         lambda: torch.empty_strided(

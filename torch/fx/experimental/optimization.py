@@ -116,9 +116,9 @@ mkldnn_supported = [
     torch.relu, torch.transpose, torch.sigmoid,
     F.relu, F.avg_pool2d, F.adaptive_avg_pool2d
 ]
-# These are operators that may not be convertible into MKLDNN ops (e.g. the
+# These are operators that may not be convertible into ONEDNN ops (e.g. the
 # args are scalar values). Thus, we only include them in the subgraph if their
-# arguments are already in MKLDNN.
+# arguments are already in ONEDNN.
 # TODO: Determine whether this can be removed after type inference.
 mkldnn_supported_unknown = [operator.add, operator.mul]
 mkldnn_map = {
@@ -130,8 +130,8 @@ mkldnn_map = {
 
 def modules_to_mkldnn(nodes: List[fx.Node], modules: Dict[str, nn.Module]):
     """
-    For each node, if it's a module that can be preconverted into MKLDNN,
-    then we do so and create a mapping to allow us to convert from the MKLDNN
+    For each node, if it's a module that can be preconverted into ONEDNN,
+    then we do so and create a mapping to allow us to convert from the ONEDNN
     version of the module to the original.
     """
     old_modules: Dict[nn.Module, nn.Module] = {}
@@ -286,10 +286,10 @@ def optimize_for_inference(
         YES = 2
         UNKNOWN = 3
 
-    # Inserts to_mkldnn and to_dense around every node we want to be a MKLDNN node.
-    # If the op is in `mkldnn_supported` then we always treat it as a MKLDNN node.
+    # Inserts to_mkldnn and to_dense around every node we want to be a ONEDNN node.
+    # If the op is in `mkldnn_supported` then we always treat it as a ONEDNN node.
     # However, if it's in `mkldnn_supported_unknown`, then we only treat it as
-    # a MKLDNN node if its inputs are MKLDNN nodes.
+    # a ONEDNN node if its inputs are ONEDNN nodes.
     for node in list(fx_graph.nodes):
         supports_mkldnn = MklSupport.NO
         if node.op == 'call_module':
@@ -320,7 +320,7 @@ def optimize_for_inference(
                 node.replace_all_uses_with(dense_x)
                 dense_x.args = (node,)
 
-    # Does pre-conversion of all modules into MKLDNN (when possible)
+    # Does pre-conversion of all modules into ONEDNN (when possible)
     old_modules = modules_to_mkldnn(list(fx_graph.nodes), modules)
     fx_graph.old_modules = old_modules  # type: ignore[attr-defined]
 
@@ -348,10 +348,10 @@ def optimize_for_inference(
         return None
 
 
-    # This code is to find each MKLDNN subgraph. Each MKLDNN subgraph consists
+    # This code is to find each ONEDNN subgraph. Each ONEDNN subgraph consists
     # of input nodes (which are only `to_mkldnn` calls), output nodes
     # (`to_dense` calls), and intermediate nodes, which are run entirely on
-    # MKLDNN layout tensors.
+    # ONEDNN layout tensors.
     #
     # Specifically, this code does a flood fill on a directed acyclic graph
     # (DAG), starting from each possible "start node" (i.e: `to_mkldnn` nodes).
@@ -388,8 +388,8 @@ def optimize_for_inference(
             mkldnn_graphs[uf.find(node.end_color)].end_nodes.append(node)
 
 
-    # Now that we have all the subgraphs, we need to decide which MKLDNN
-    # subgraphs we actually want to keep in MKLDNN.
+    # Now that we have all the subgraphs, we need to decide which ONEDNN
+    # subgraphs we actually want to keep in ONEDNN.
     for graph in mkldnn_graphs.values():
         if not use_mkl_heuristic(graph):
             for node in graph.start_nodes + graph.end_nodes:
@@ -403,7 +403,7 @@ def optimize_for_inference(
         if node.target == 'to_mkldnn' or node.target == 'to_dense':
             mkldnn_conversions += 1
 
-    logging.getLogger(__name__).info("mkldnn conversions: %s", mkldnn_conversions)
+    logging.getLogger(__name__).info("onednn conversions: %s", mkldnn_conversions)
     fx_graph.lint()
     result = fx.GraphModule(model, fx_graph)
     return result

@@ -270,7 +270,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     if (tensor_.is_quantized()) {
       tensor = tensor_.dequantize().to(kCPU, kDouble).contiguous();
     } else if (tensor_.is_onednn()) {
-      stream << "MKLDNN Tensor: ";
+      stream << "ONEDNN Tensor: ";
       tensor = tensor_.to_dense().to(kCPU, kDouble).contiguous();
     } else if (tensor_.is_mps()) {
       // MPS does not support double tensors, so first copy then convert

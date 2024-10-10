@@ -58,7 +58,7 @@ thread_local std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES>
     autocast_dtype = {
         at::kBFloat16, // CPU
         at::kHalf, // CUDA.
-        at::ScalarType::Undefined, // Reserved for explicit MKLDNN
+        at::ScalarType::Undefined, // Reserved for explicit ONEDNN
         at::ScalarType::Undefined, // OpenGL
         at::ScalarType::Undefined, // OpenCL
         at::ScalarType::Undefined, // IDEEP.

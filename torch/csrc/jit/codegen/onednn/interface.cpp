@@ -145,7 +145,7 @@ static Operation createLlgaGuardKernel(const Node* node) {
       }
       const at::Tensor& tensor = input.toTensor();
 
-      // If input tensor is of mkldnn, it's originated from an upstream
+      // If input tensor is of onednn, it's originated from an upstream
       // LLGA partition that has passed the check on input shapes.
       // It is valid to continue here as long as the output shapes from
       // oneDNN graph partitions are determined by the input shapes.

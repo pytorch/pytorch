@@ -21,59 +21,59 @@
 namespace at {
 namespace native {
 
-std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
+std::tuple<Tensor, Tensor, Tensor> onednn_batch_norm(
     const Tensor& self, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
     bool train,
     double momentum,
     double eps) {
-  TORCH_CHECK(false, "mkldnn_batch_norm: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "onednn_batch_norm: ATen not compiled with ONEDNN support");
 }
 
-std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(
+std::tuple<Tensor, Tensor, Tensor> onednn_batch_norm_backward(
     const Tensor& grad_output,
     const Tensor& input, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt, const std::optional<Tensor>& save_mean_opt, const std::optional<Tensor>& save_invstd_opt,
     bool train,
     double eps,
     std::array<bool,3> grad_input_mask) {
-  TORCH_CHECK(false, "mkldnn_batch_norm_backward: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "onednn_batch_norm_backward: ATen not compiled with ONEDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> onednn_layer_norm_last_index_weight_bias_f32(
     const Tensor& input,
     IntArrayRef normalized_shape, const Tensor& weight, const Tensor& bias,
     double eps, bool inplace) {
-  TORCH_CHECK(false, "onednn_layer_norm_last_index_weight_bias_f32: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "onednn_layer_norm_last_index_weight_bias_f32: ATen not compiled with ONEDNN support");
 }
 
-std::tuple<Tensor, Tensor, Tensor> _mkldnn_batch_norm_legit(
+std::tuple<Tensor, Tensor, Tensor> _onednn_batch_norm_legit(
     const Tensor& input, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt, Tensor& running_mean, Tensor& running_var,
     bool train,
     double momentum,
     double eps) {
-  TORCH_CHECK(false, "_mkldnn_batch_norm_legit: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "_onednn_batch_norm_legit: ATen not compiled with ONEDNN support");
 }
 
 
-std::tuple<Tensor, Tensor, Tensor> _mkldnn_batch_norm_legit_no_stats(
+std::tuple<Tensor, Tensor, Tensor> _onednn_batch_norm_legit_no_stats(
     const Tensor& input, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt,
     bool train,
     double momentum,
     double eps) {
-  TORCH_CHECK(false, "_mkldnn_batch_norm_legit_no_stats: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "_onednn_batch_norm_legit_no_stats: ATen not compiled with ONEDNN support");
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_with_update_mkldnn(
+std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_with_update_onednn(
     const Tensor& input, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt,
     Tensor& running_mean, Tensor& running_var, double momentum, double eps) {
-  TORCH_CHECK(false, "_batch_norm_with_update_mkldnn: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "_batch_norm_with_update_onednn: ATen not compiled with ONEDNN support");
 }
 
-std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
+std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_onednn(
     const Tensor& grad_output, const Tensor& input, const Tensor& weight,
     const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
     const std::optional<Tensor>& save_mean_opt, const std::optional<Tensor>& save_var_opt,
     bool update, double eps, std::array<bool,3> grad_input_mask, const Tensor& reserve) {
-  TORCH_CHECK(false, "_new_batch_norm_backward_mkldnn: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "_new_batch_norm_backward_onednn: ATen not compiled with ONEDNN support");
 }
 
 } // namespace native
@@ -98,13 +98,13 @@ std::tuple<Tensor, Tensor, Tensor> onednn_layer_norm_last_index_weight_bias_f32(
   auto M_N = at::native::_check_layer_norm_inputs(input, normalized_shape, weight, bias);
   auto M = M_N.first;
 
-  auto mean = empty_mkldnn(
+  auto mean = empty_onednn(
         {M},
         input.scalar_type(),
         input.options().layout_opt(),
         input.options().device_opt(),
         input.options().pinned_memory_opt());
-  auto rstd = empty_mkldnn(
+  auto rstd = empty_onednn(
         {M},
         input.scalar_type(),
         input.options().layout_opt(),
@@ -130,7 +130,7 @@ std::tuple<Tensor, Tensor, Tensor> onednn_layer_norm_last_index_weight_bias_f32(
 }
 
 
-std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
+std::tuple<Tensor, Tensor, Tensor> onednn_batch_norm(
     const Tensor& input, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
     bool train,
     double momentum,
@@ -144,10 +144,10 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
 
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(onednn_bf16_device_check(),
-        "mkldnn_batch_norm: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+        "onednn_batch_norm: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
   TORCH_CHECK(weight.defined() && bias.defined(),
-             "mkldnn_batch_norm: currently mkldnn only support affine model");
+             "onednn_batch_norm: currently onednn only support affine model");
 
   ideep::tensor& x = itensor_from_onednn(input);
   ideep::tensor w = itensor_from_tensor(weight);
@@ -159,7 +159,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
   if (train) {
     // TODO: enable 3d batchnorm.
     TORCH_CHECK(input.dim() == 4,
-        "mkldnn_batch_norm: currently mkldnn training only support 2d batchnorm");
+        "onednn_batch_norm: currently onednn training only support 2d batchnorm");
     ideep::tensor saved_mean;
     ideep::tensor saved_var;
     ideep::batch_normalization_forward_training::compute(
@@ -186,7 +186,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
                                  weight.options().device_opt()));
   } else {
     TORCH_CHECK(input.dim() == 4 || input.dim() == 5,
-        "mkldnn_batch_norm: currently mkldnn inference only support 2d and 3d batchnorm");
+        "onednn_batch_norm: currently onednn inference only support 2d and 3d batchnorm");
     if (use_running_stat) {
       ideep::tensor m = itensor_from_tensor(running_mean);
       ideep::tensor v = itensor_from_tensor(running_var);
@@ -195,7 +195,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
           x, m, v, w, b, y, eps);
     } else {
       // TODO: keep running estimates.
-      TORCH_CHECK(false, "mkldnn_batch_norm: mkldnn inference is not keep running estimates.");
+      TORCH_CHECK(false, "onednn_batch_norm: onednn inference is not keep running estimates.");
     }
     return std::make_tuple(
         new_with_itensor_onednn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
@@ -208,44 +208,44 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
 }
 
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_with_update_mkldnn(
+std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_with_update_onednn(
     const Tensor& input, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt,
     Tensor& running_mean, Tensor& running_var, double momentum, double eps) {
   auto [output, save_mean, save_var] =
-    mkldnn_batch_norm(input, weight_opt, bias_opt, running_mean, running_var, /*train*/true, momentum, eps);
-  Tensor reserve = empty_mkldnn({0}, input.scalar_type());
+    onednn_batch_norm(input, weight_opt, bias_opt, running_mean, running_var, /*train*/true, momentum, eps);
+  Tensor reserve = empty_onednn({0}, input.scalar_type());
   return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, save_mean, save_var, reserve);
 }
 
 
-std::tuple<Tensor, Tensor, Tensor> _mkldnn_batch_norm_legit(
+std::tuple<Tensor, Tensor, Tensor> _onednn_batch_norm_legit(
     const Tensor& input, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt, Tensor& running_mean, Tensor& running_var,
     bool train,
     double momentum,
     double eps) {
-  return mkldnn_batch_norm(input, weight_opt, bias_opt, running_mean, running_var, train, momentum, eps);
+  return onednn_batch_norm(input, weight_opt, bias_opt, running_mean, running_var, train, momentum, eps);
 }
 
 
-std::tuple<Tensor, Tensor, Tensor> _mkldnn_batch_norm_legit_no_stats(
+std::tuple<Tensor, Tensor, Tensor> _onednn_batch_norm_legit_no_stats(
     const Tensor& input, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt,
     bool train,
     double momentum,
     double eps) {
-  return mkldnn_batch_norm(input, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, eps);
+  return onednn_batch_norm(input, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, eps);
 }
 
 
-std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
+std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_onednn(
     const Tensor& grad_output, const Tensor& input, const Tensor& weight,
     const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
     const std::optional<Tensor>& save_mean_opt, const std::optional<Tensor>& save_var_opt,
     bool update, double eps, std::array<bool,3> grad_input_mask, const Tensor& reserve) {
-  return mkldnn_batch_norm_backward(grad_output, input, weight, running_mean_opt, running_var_opt, save_mean_opt, save_var_opt, update, eps, grad_input_mask);
+  return onednn_batch_norm_backward(grad_output, input, weight, running_mean_opt, running_var_opt, save_mean_opt, save_var_opt, update, eps, grad_input_mask);
 }
 
 
-std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad_output,
+std::tuple<Tensor, Tensor, Tensor> onednn_batch_norm_backward(const Tensor& grad_output,
     const Tensor& input, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt, const std::optional<Tensor>& save_mean_opt, const std::optional<Tensor>& save_invstd_opt,
     bool train,
     double eps,
@@ -256,7 +256,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad
   const Tensor& save_mean = c10::value_or_else(save_mean_opt, [] {return Tensor();});
   const Tensor& save_invstd = c10::value_or_else(save_invstd_opt, [] {return Tensor();});
 
-  TORCH_CHECK(train, "mkldnn_batch_norm_backward: currently mkldnn only support train model");
+  TORCH_CHECK(train, "onednn_batch_norm_backward: currently onednn only support train model");
   ideep::tensor& grady = itensor_from_onednn(grad_output);
   ideep::tensor& x = itensor_from_onednn(input);
   ideep::tensor w = itensor_from_tensor(weight);
@@ -271,10 +271,10 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad
   return std::make_tuple(
       new_with_itensor_onednn(std::move(gradx), optTypeMetaToScalarType(input.options().dtype_opt()),
                               input.options().device_opt()),
-      mkldnn_to_dense(new_with_itensor_onednn(std::move(gradw),
+      onednn_to_dense(new_with_itensor_onednn(std::move(gradw),
                                               optTypeMetaToScalarType(weight.options().dtype_opt()),
                                               weight.options().device_opt())),
-      mkldnn_to_dense(new_with_itensor_onednn(std::move(gradb),
+      onednn_to_dense(new_with_itensor_onednn(std::move(gradb),
                                               optTypeMetaToScalarType(weight.options().dtype_opt()),
                                               weight.options().device_opt())));
 }

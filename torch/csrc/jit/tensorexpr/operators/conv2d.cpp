@@ -334,7 +334,7 @@ bool mkldnnPrepackedConvIsSupported(
     return false;
   }
 
-  // Do not rewrite for cases where native is faster than mkldnn
+  // Do not rewrite for cases where native is faster than onednn
   // Conditions are from: aten/src/ATen/native/Convolution.cpp:use_onednn
   bool use_onednn = groups > 1 || (weight.dims[2] > 3 && weight.dims[3] > 3) ||
       input.dims[0] > 1 ||
