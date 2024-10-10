@@ -637,6 +637,11 @@ def coverage_experiment(args, model_iter_fn, model, example_inputs):
         ]
         + coverage_result.tocsv(),
     )
+    scribe.open_source_signpost(
+        subsystem="dynamic",
+        name="maybe_evaluate_static_worker",
+        parameters=lambda: json.dumps(entry),
+    )
     return coverage_result
 
 
