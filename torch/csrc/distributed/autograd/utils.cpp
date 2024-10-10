@@ -157,7 +157,7 @@ c10::intrusive_ptr<JitFuture> sendMessageWithAutograd(
   if (!forceDisableProfiling) {
     switch (torch::profiler::impl::profilerType()) {
       case torch::profiler::impl::ActiveProfilerType::LEGACY: {
-        auto profilerConfig = torch::autograd::profiler::getProfilerConfig();
+        auto profilerConfig = *torch::autograd::profiler::getProfilerConfig();
         auto msgWithProfiling = getMessageWithProfiling(
             std::move(msg),
             rpc::MessageType::RUN_WITH_PROFILING_REQ,
