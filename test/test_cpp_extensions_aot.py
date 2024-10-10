@@ -11,7 +11,7 @@ import torch.backends.cudnn
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfTorchDynamo
+from torch.testing._internal.common_utils import IS_WINDOWS, skipIfTorchDynamo, TEST_XPU
 
 
 try:
@@ -104,6 +104,22 @@ class TestCppExtensionAOT(common.TestCase):
         mps_output = mps_extension.get_mps_add_output(x.to("mps"), y.to("mps"))
 
         self.assertEqual(cpu_output, mps_output.to("cpu"))
+
+    @unittest.skipIf(not TEST_XPU, "XPU not found")
+    @unittest.skipIf(
+        os.getenv("USE_NINJA", "0") == "0",
+        "sycl extension requires ninja to build",
+    )
+    def test_sycl_extension(self):
+        import torch_test_cpp_extension.sycl as sycl_extension
+
+        x = torch.zeros(100, device="xpu", dtype=torch.float32)
+        y = torch.zeros(100, device="xpu", dtype=torch.float32)
+
+        z = sycl_extension.sigmoid_add(x, y).cpu()
+
+        # 2 * sigmoid(0) = 2 * 0.5 = 1
+        self.assertEqual(z, torch.ones_like(z))
 
     @common.skipIfRocm
     @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
