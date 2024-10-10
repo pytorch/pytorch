@@ -4144,7 +4144,8 @@ class TestSerialization(TestCase, SerializationMixin):
                 self.assertEqual(sd_loaded2['weight'], sd_loaded['weight'])
             self.assertTrue(torch.serialization.get_default_mmap_options() == MAP_PRIVATE)
 
-    @parametrize('dtype', (torch.float8_e5m2, torch.float8_e4m3fn, torch.complex32))
+    @parametrize('dtype',
+                 (torch.float8_e5m2, torch.float8_e4m3fn, torch.complex32, torch.uint16, torch.uint32, torch.uint64))
     @parametrize('weights_only', (True, False))
     def test_serialization_dtype(self, dtype, weights_only):
         """ Tests that newer dtypes can be serialized using `_rebuild_tensor_v3` """
@@ -4155,9 +4156,13 @@ class TestSerialization(TestCase, SerializationMixin):
             y = torch.load(f, weights_only=weights_only)
             self.assertEqual(y['x'], x)
             # Check that views are actually views
-            y['odd'][0] = torch.tensor(0.25, dtype=dtype)
-            y['even'][0] = torch.tensor(-0.25, dtype=dtype)
-            self.assertEqual(y['x'][:2].to(dtype=torch.float32), torch.tensor([-0.25, 0.25]))
+            if dtype.is_signed:
+                val1, val2, check_dtype = 0.25, -0.25, torch.float32
+            else:
+                val1, val2, check_dtype = 1, 2, torch.int64
+            y['odd'][0] = torch.tensor(val1, dtype=dtype)
+            y['even'][0] = torch.tensor(val2, dtype=dtype)
+            self.assertEqual(y['x'][:2].to(dtype=check_dtype), torch.tensor([val2, val1]))
 
     @parametrize('byte_literals', (b'byte', bytearray(b'bytearray')))
     @parametrize('weights_only', (True, False))
@@ -4258,7 +4263,10 @@ class TestSerialization(TestCase, SerializationMixin):
         # Test that without materialize_fake_tensor, behavior for fake_tensors is not altered by ctx
         if not materialize_fake:
             ft = converter.from_real_tensor(mode, torch.randn(2, device=t_device))
-            with self.assertRaisesRegex(AttributeError, "Can't pickle local object 'WeakValueDictionary.__init__.<locals>.remove'"):
+            with self.assertRaisesRegex(
+                AttributeError,
+                "Can't (get|pickle) local object 'WeakValueDictionary.__init__.<locals>.remove'"
+            ):
                 with skip_data(), BytesIOContext() as f:
                     torch.save(ft, f)
 
