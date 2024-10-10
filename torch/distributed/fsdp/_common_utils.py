@@ -94,7 +94,8 @@ class _FSDPDeviceHandle:
         """
         if device.type == "cuda":
             handle = cast(_FSDPDeviceHandle, torch.cuda)
-            handle.set_device(device)
+            if device.index is not None:
+                handle.set_device(device)
             return handle
         elif device.type == "mtia":
             return cast(_FSDPDeviceHandle, torch.mtia)
