@@ -246,7 +246,7 @@ AOTITorchError aoti_torch_cpu__linear_pointwise(
         pointer_to_optional<at::Tensor>(B),
         attr,
         scalars_list,
-        pointer_to_optional<c10::string_view>(algorithm));
+        pointer_to_optional<std::string>(algorithm));
     *ret0 = new_tensor_handle(std::move(tmp_result));
   });
 }

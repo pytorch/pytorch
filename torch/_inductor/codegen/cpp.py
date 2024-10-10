@@ -117,7 +117,7 @@ PYTHON_TO_CPP = {
     "int": "long",
     "float": "double",
     "bool": "bool",
-    "str": "c10::string_view",  # TODO: std::string or c10::string_view?
+    "str": "std::string",
     "ScalarType": "c10::ScalarType",
     "MemoryFormat": "at::MemoryFormat",
     "Layout": "at::Layout",
