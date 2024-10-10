@@ -36,6 +36,7 @@ from torch.nn.functional import (
 from torch.onnx import _type_utils, errors, symbolic_helper, utils
 from torch.onnx._internal import jit_utils, registration
 
+
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=16)
 
 
@@ -55,7 +56,9 @@ def grid_sampler(
     if symbolic_helper._get_tensor_rank(input) == 5:
         return symbolic_helper._onnx_unsupported("GridSample with 5D volumetric input")
     mode_s = {v: k for k, v in GRID_SAMPLE_INTERPOLATION_MODES.items()}[mode_enum]  # type: ignore[call-arg]
-    padding_mode_s = {v: k for k, v in GRID_SAMPLE_PADDING_MODES.items()}[padding_mode_enum]  # type: ignore[call-arg]
+    padding_mode_s = {v: k for k, v in GRID_SAMPLE_PADDING_MODES.items()}[  # type: ignore[call-arg]
+        padding_mode_enum
+    ]
     return g.op(
         "GridSample",
         input,

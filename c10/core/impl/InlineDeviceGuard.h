@@ -223,7 +223,7 @@ class InlineOptionalDeviceGuard {
   {}
 
   /// Set the current device to the passed Device, if it is not nullopt.
-  explicit InlineOptionalDeviceGuard(optional<Device> device_opt)
+  explicit InlineOptionalDeviceGuard(std::optional<Device> device_opt)
       : guard_() { // See Note [Explicit initialization of optional fields]
     if (device_opt.has_value()) {
       guard_.emplace(device_opt.value());
@@ -235,7 +235,8 @@ class InlineOptionalDeviceGuard {
       typename U = T,
       typename =
           typename std::enable_if_t<!std::is_same_v<U, VirtualGuardImpl>>>
-  explicit InlineOptionalDeviceGuard(optional<DeviceIndex> device_index_opt)
+  explicit InlineOptionalDeviceGuard(
+      std::optional<DeviceIndex> device_index_opt)
       : guard_() { // See Note [Explicit initialization of optional fields]
     if (device_index_opt.has_value()) {
       guard_.emplace(device_index_opt.value());

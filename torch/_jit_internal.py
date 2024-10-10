@@ -293,9 +293,11 @@ def createResolutionCallbackFromFrame(frames_up: int = 0):
             cb = createResolutionCallbackFromFrame(1)
             print(cb("foo"))
 
+
         def baz():
             foo = 2
             bar()
+
 
         baz()
     """
@@ -723,6 +725,7 @@ def unused(fn):
             import torch
             import torch.nn as nn
 
+
             class MyModule(nn.Module):
                 def __init__(self, use_memory_efficient):
                     super().__init__()
@@ -731,6 +734,7 @@ def unused(fn):
                 @torch.jit.unused
                 def memory_efficient(self, x):
                     import pdb
+
                     pdb.set_trace()
                     return x + 10
 
@@ -740,6 +744,7 @@ def unused(fn):
                         return self.memory_efficient(x)
                     else:
                         return x + 10
+
 
             m = torch.jit.script(MyModule(use_memory_efficient=False))
             m.save("m.pt")
@@ -787,10 +792,12 @@ def ignore(drop=False, **kwargs):
         import torch
         import torch.nn as nn
 
+
         class MyModule(nn.Module):
             @torch.jit.ignore
             def debugger(self, x):
                 import pdb
+
                 pdb.set_trace()
 
             def forward(self, x):
@@ -800,6 +807,7 @@ def ignore(drop=False, **kwargs):
                 # to Python
                 self.debugger(x)
                 return x
+
 
         m = torch.jit.script(MyModule())
 

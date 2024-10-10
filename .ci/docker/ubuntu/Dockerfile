@@ -50,7 +50,7 @@ RUN  bash ./install_lcov.sh && rm install_lcov.sh
 
 # Install cuda and cudnn
 ARG CUDA_VERSION
-RUN wget -q https://raw.githubusercontent.com/pytorch/builder/main/common/install_cuda.sh -O install_cuda.sh
+COPY ./common/install_cuda.sh install_cuda.sh
 RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh
 ENV DESIRED_CUDA ${CUDA_VERSION}
 ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
@@ -146,6 +146,13 @@ COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/triton.txt triton.txt
 RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
 RUN rm install_triton.sh common_utils.sh triton.txt
+
+ARG TRITON_CPU
+COPY ./common/install_triton.sh install_triton.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/triton-cpu.txt triton-cpu.txt
+RUN if [ -n "${TRITON_CPU}" ]; then bash ./install_triton.sh; fi
+RUN rm install_triton.sh common_utils.sh triton-cpu.txt
 
 ARG EXECUTORCH
 # Build and install executorch

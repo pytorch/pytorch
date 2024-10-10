@@ -14,9 +14,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 enum IRNodeType {
   kPrimitive,
@@ -68,7 +66,7 @@ class TORCH_API Expr : public std::enable_shared_from_this<Expr> {
    * All sub-expressions inside the given expressions are also cloned. Note
    * that the variables are not deep-copied since they are immutable.
    */
-  static ExprPtr clone(ExprPtr s);
+  static ExprPtr clone(const ExprPtr& s);
 
  protected:
   std::shared_ptr<Expr> getptr() {
@@ -208,7 +206,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
       const std::vector<ExprHandle>& dims,
       Dtype dtype,
       std::optional<ExprHandle> initializer = std::nullopt,
-      std::optional<std::vector<ExprHandle>> strides = std::nullopt,
+      const std::optional<std::vector<ExprHandle>>& strides = std::nullopt,
       std::optional<ExprHandle> qscale = std::nullopt,
       std::optional<ExprHandle> qzero = std::nullopt);
 
@@ -490,8 +488,6 @@ TORCH_API ExprHandle Relu(const ExprHandle& v1);
 TORCH_API ExprHandle
 ifThenElse(const ExprHandle& c, const ExprHandle& t, const ExprHandle& f);
 
-TORCH_API ExprHandle expr_to_vec(ExprHandle v, int lanes);
+TORCH_API ExprHandle expr_to_vec(const ExprHandle& v, int lanes);
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

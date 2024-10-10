@@ -7,10 +7,12 @@ import dataclasses
 import itertools
 from typing import Generator, List, Type, TYPE_CHECKING, TypeVar
 
+
 if TYPE_CHECKING:
     from _typeshed import DataclassInstance
 
-__all__ = ("dataclass_slots",)
+
+__all__ = ["dataclass_slots"]
 
 _T = TypeVar("_T", bound="DataclassInstance")
 

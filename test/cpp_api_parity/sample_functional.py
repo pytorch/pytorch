@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 from torch.testing._internal.common_nn import wrap_functional
 
+
 """
 `sample_functional` is used by `test_cpp_api_parity.py` to test that Python / C++ API
 parity test harness works for `torch.nn.functional` functions.

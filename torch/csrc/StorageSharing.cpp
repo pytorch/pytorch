@@ -313,7 +313,6 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
   THPObjectPtr _event_sync_required(Py_None);
   Py_INCREF(Py_None);
   if (storage.data()) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     auto shandle =
         c10::cuda::CUDACachingAllocator::shareIpcHandle(storage.mutable_data());
     _handle = PyBytes_FromStringAndSize(
@@ -421,7 +420,6 @@ static std::string THPStorage_bytesAsHandleString(PyObject* handle) {
   if (PyBytes_AsStringAndSize(handle, &buffer, &handle_size) == -1) {
     TORCH_CHECK(handle_size == CUDA_IPC_HANDLE_SIZE, "incorrect handle");
   }
-  TORCH_CHECK(handle_size == CUDA_IPC_HANDLE_SIZE, "incorrect handle size");
   return std::string(buffer, handle_size);
   END_HANDLE_TH_ERRORS_RET("")
 }
@@ -471,8 +469,7 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
     }
     auto ipc_event_handle = reinterpret_cast<const cudaIpcEventHandle_t*>(
         s_ipc_event_handle.c_str());
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    cudaEvent_t event;
+    cudaEvent_t event = nullptr;
     cudaIpcOpenEventHandle(&event, *ipc_event_handle);
     C10_CUDA_CHECK(
         cudaStreamWaitEvent(c10::cuda::getCurrentCUDAStream(device), event, 0));

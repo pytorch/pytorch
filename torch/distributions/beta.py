@@ -6,6 +6,8 @@ from torch.distributions import constraints
 from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
+from torch.types import _size
+
 
 __all__ = ["Beta"]
 
@@ -72,7 +74,7 @@ class Beta(ExponentialFamily):
         total = self.concentration1 + self.concentration0
         return self.concentration1 * self.concentration0 / (total.pow(2) * (total + 1))
 
-    def rsample(self, sample_shape=()):
+    def rsample(self, sample_shape: _size = ()) -> torch.Tensor:
         return self._dirichlet.rsample(sample_shape).select(-1, 0)
 
     def log_prob(self, value):

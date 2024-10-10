@@ -18,17 +18,19 @@ from torch._functorch._aot_autograd.autograd_cache import (
 )
 from torch._functorch._aot_autograd.schemas import AOTConfig
 from torch._inductor import config as inductor_config
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfWindows,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 @instantiate_parametrized_tests
-class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
+class AOTAutogradCacheTests(InductorTestCase):
     def setUp(self):
         """
         Reset all counters and caches before each unit test
@@ -54,6 +56,7 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
             os.remove(m.__file__)
         torch._inductor.codecache.PyCodeCache.cache_clear()
 
+    @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_basic(self):
@@ -84,8 +87,12 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
+    @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
+    @skipIfWindows(
+        msg="Known issue: Window can't delete loaded modules, so we can't clear module cache."
+    )
     def test_clear_fx_graph_cache(self):
         """
         Verify the interactions between FXGraphCache and AOTAutogradCache.
@@ -114,6 +121,7 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
         # We save again into the cache
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
 
+    @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", False)
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_fx_graph_cache_off(self):
@@ -143,6 +151,7 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
 
+    @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
     @dynamo_config.patch("compiled_autograd", True)
@@ -165,6 +174,7 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
             counters["aot_autograd"]["autograd_cache_bypass"], 1
         )  # from compiled autograd
 
+    @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
     @dynamo_config.patch("compiled_autograd", True)
@@ -188,6 +198,7 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
 
+    @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch({"fx_graph_cache": True})
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_autograd_lazy_backward(self):
@@ -237,6 +248,7 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(a.grad, a2.grad)
         self.assertEqual(b.grad, b2.grad)
 
+    @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_autograd_function(self):
@@ -287,12 +299,123 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
     @largeTensorTest("64GB", device=GPU_TYPE)
     @parametrize("device", (GPU_TYPE,))
     @parametrize("dtype", (torch.float16, torch.bfloat16))
+    @inductor_config.patch("fx_graph_cache", True)
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_autograd_guard_single_entry(self, device, dtype):
+        """
+        Test caching the same graph, but under conditions that introduce guards
+        for tensor sizes < int32. See test_codecache::TestFxGraphCache::test_cache_load_with_guards_int32_bounds.
+
+        This test in particular tests the behavior of a single entry cache. If we ever make AOTAutogradCache
+        support multiple entries under the same key, this test should be updated.
+        """
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+        if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
+            raise unittest.SkipTest("requires CUDA SM80 or later")
+
+        def fn(x, y):
+            return (x + x, y + y)
+
+        def expect_miss(compiled_fn, a, b):
+            self._clear_dynamo_and_codecache()
+            counters.clear()
+            res = compiled_fn(a, b)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_guard_miss"],
+                0,
+            )
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            return res
+
+        def expect_hit(compiled_fn, a, b):
+            self._clear_dynamo_and_codecache()
+            counters.clear()
+            res = compiled_fn(a, b)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_guard_miss"],
+                0,
+            )
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_hit"],
+                1,
+            )
+            return res
+
+        def expect_guard_miss(compiled_fn, a, b):
+            self._clear_dynamo_and_codecache()
+            counters.clear()
+            res = compiled_fn(a, b)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_guard_miss"],
+                1,
+            )
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_hit"],
+                0,
+            )
+            return res
+
+        compiled_fn = torch.compile(fn, dynamic=True)
+
+        a_shape = (5, 6)
+        b_shape = (7, 8)
+        a = torch.rand(a_shape, device=device, dtype=dtype)
+        b = torch.rand(b_shape, device=device, dtype=dtype)
+        res1 = expect_miss(compiled_fn, a, b)
+
+        # Same shape, should cache hit
+        a2 = a.detach().clone()
+        b2 = b.detach().clone()
+
+        res2 = expect_hit(compiled_fn, a2, b2)
+
+        self.assertEqual(res1, res2)
+
+        # By changing the shape greatly, despite the same exact input
+        # graph, inductor should report a guard miss, leading
+        # to a cache miss on our end.
+        a_shape = (5, 6)
+        b_shape = (47000, 47001)
+        a3 = torch.rand(a_shape, device=device, dtype=dtype)
+        b3 = torch.rand(b_shape, device=device, dtype=dtype)
+
+        expect_guard_miss(compiled_fn, a3, b3)
+
+        # Wobble the shape a bit, but not enough
+        # to trigger a guard miss (since 6, 7 is still less than int32)
+        # Should result in a cache hit
+        a_shape = (6, 7)
+        b_shape = (47000, 47001)
+        a4 = torch.rand(a_shape, device=device, dtype=dtype)
+        b4 = torch.rand(b_shape, device=device, dtype=dtype)
+        expect_hit(compiled_fn, a4, b4)
+
+        # Change the shape back to the original,
+        # FXGraphCache should hit because it stores
+        # multiple entries
+        a_shape = (5, 6)
+        b_shape = (7, 8)
+        a5 = torch.rand(a_shape, device=device, dtype=dtype)
+        b5 = torch.rand(b_shape, device=device, dtype=dtype)
+        expect_hit(compiled_fn, a5, b5)
+
+    @largeTensorTest("64GB", device=GPU_TYPE)
+    @parametrize("device", (GPU_TYPE,))
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
     @parametrize("requires_grad", (True, False))
     @inductor_config.patch("fx_graph_cache", True)
+    @inductor_config.patch("fx_graph_remote_cache", False)
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_autograd_inductor_guards(self, device, dtype, requires_grad):
         """
-        Tests that functions that would add inductor guards are cached properly
+        Test caching the same graph, but under conditions that introduce guards
+        for tensor sizes < int32.
+        See test_codecache::TestFxGraphCache::test_cache_load_with_guards_int32_bounds.
         """
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
@@ -314,6 +437,7 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
             ((47000, 47001), (5, 6)),
         )
         expected_hits = expected_misses = expected_saves = 0
+        expected_guard_misses = 0
         for a_shape, b_shape in shapes:
             a = torch.rand(
                 a_shape, device=device, dtype=dtype, requires_grad=requires_grad
@@ -327,15 +451,15 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
             # see a recompilation (along with a cache miss).
             res1 = compiled_fn(a, b)
             # A first call should miss in the cache.
-            # NOTE: Currently, this cache miss is *not* due to guards,
-            # but instead because the AOTAutogradCache key calculation specializes on input shapes.
-            # Once we allow tensors with symints as part of the cache key calculation, it will
-            # instead cache miss because of guard failure.
             expected_misses += 1
-
             self.assertEqual(
                 counters["aot_autograd"]["autograd_cache_miss"], expected_misses
             )
+            self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_guard_miss"],
+                expected_guard_misses,
+            )
+
             self.assertEqual(
                 counters["aot_autograd"]["autograd_cache_hit"], expected_hits
             )
@@ -367,6 +491,12 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
                 counters["aot_autograd"]["autograd_cache_miss"], expected_misses
             )
             self.assertEqual(
+                counters["aot_autograd"]["autograd_cache_guard_miss"],
+                expected_guard_misses,
+            )
+            # First compile is a regular cache miss, subsequent are guard misses
+            expected_guard_misses += 1
+            self.assertEqual(
                 counters["aot_autograd"]["autograd_cache_hit"], expected_hits
             )
             self.assertEqual(
@@ -378,12 +508,13 @@ class AOTAutogradCacheTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(a.grad, a2.grad)
 
     @inductor_config.patch("fx_graph_cache", True)
+    @inductor_config.patch("fx_graph_remote_cache", False)
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_nn_module_with_params_global_constant(self):
         class MyMod(torch.nn.Module):
             CONSTANT = torch.tensor([[2, 2], [2, 2]])
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.param = torch.nn.Parameter(torch.randn([2, 2]))
 
@@ -461,7 +592,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         if inputs is None:
             inputs = [torch.ones(3)]
         _, fx_g, example_inputs = self._get_dynamo_output(f, *inputs)
-        return autograd_cache_key(fx_g, example_inputs, config)
+        return autograd_cache_key(fx_g, example_inputs, config, {})
 
     def test_basic_hash_key(self):
         def fn(x):
@@ -605,7 +736,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
     def test_nn_module_with_params(self):
         class MyMod(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.seq = torch.nn.Parameter(torch.ones((3, 3)))
 

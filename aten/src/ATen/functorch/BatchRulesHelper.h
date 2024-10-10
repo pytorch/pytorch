@@ -33,7 +33,7 @@ TORCH_API Tensor reshape_dim_outof_symint(int64_t src, const c10::SymInt& size1,
 Tensor moveBatchDimToFront(const Tensor& tensor, std::optional<int64_t> maybe_batch_dim);
 int64_t rankWithoutBatchDim(const Tensor& tensor, std::optional<int64_t> maybe_batch_dim);
 int64_t numelWithoutBatchDim(const Tensor& tensor, std::optional<int64_t> maybe_batch_dim);
-optional<int64_t> valIfNonempty(optional<int64_t> maybe_empty, int64_t new_val);
+std::optional<int64_t> valIfNonempty(std::optional<int64_t> maybe_empty, int64_t new_val);
 int64_t getPhysicalDim(const Tensor& tensor, bool has_batch_dim, int64_t logical_dim);
 VmapDimVector getPhysicalDims(const Tensor& tensor, bool has_batch_dim, IntArrayRef logical_dims);
 
@@ -71,7 +71,7 @@ struct BasicUnaryBatchRuleHelper;
 
 template <typename F, F Func, typename A, typename... T>
 struct BasicUnaryBatchRuleHelper<F, Func, c10::guts::typelist::typelist<A, T...>> {
-  static std::tuple<Tensor,optional<int64_t>> apply(
+  static std::tuple<Tensor, std::optional<int64_t>> apply(
       const Tensor& tensor,
       std::optional<int64_t> batch_dim,
       T... extra_args) {
@@ -96,7 +96,7 @@ struct VariadicBdimsBatchRuleHelper;
 
 template <typename F, F Func, typename A, typename... T>
 struct VariadicBdimsBatchRuleHelper<F, Func, c10::guts::typelist::typelist<A, T...>> {
-  static std::tuple<Tensor,optional<int64_t>> apply(
+  static std::tuple<Tensor, std::optional<int64_t>> apply(
       const Tensor& tensor,
       std::optional<int64_t> batch_dim,
       T... extra_args) {
@@ -201,7 +201,7 @@ inline void handle_variadic_bdims(std::vector<std::pair<Tensor, std::optional<in
 #define VARIADIC_BDIMS_BOXED(op) \
   m.impl(#op, torch::CppFunction::makeFromBoxedFunction<boxed_tensor_inputs_batch_rule<decltype(&handle_variadic_bdims), &handle_variadic_bdims>>());
 
-using UnpackedBatchedTensor = std::tuple<Tensor,optional<int64_t>>;
+using UnpackedBatchedTensor = std::tuple<Tensor, std::optional<int64_t>>;
 
 inline void find_and_unpack_tensors(
     const torch::jit::Stack* stack,
@@ -384,7 +384,7 @@ struct ExistingBdimBatchRuleHelper;
 
 template <typename F, F Func, typename A, typename... T>
 struct ExistingBdimBatchRuleHelper<F, Func, c10::guts::typelist::typelist<A, T...>> {
-  static std::tuple<Tensor,optional<int64_t>> apply(
+  static std::tuple<Tensor, std::optional<int64_t>> apply(
       const Tensor& self,
       std::optional<int64_t> self_bdim,
       T... extra_args) {
@@ -455,6 +455,16 @@ inline int64_t get_bdim_size2(
     return a_value.size(*a_bdim);
   if (b_bdim)
     return b_value.size(*b_bdim);
+  TORCH_INTERNAL_ASSERT(false);
+}
+
+inline c10::SymInt get_bdim_size2_symint(
+    const Tensor& a_value, std::optional<int64_t> a_bdim,
+    const Tensor& b_value, std::optional<int64_t> b_bdim) {
+  if (a_bdim)
+    return a_value.sym_size(*a_bdim);
+  if (b_bdim)
+    return b_value.sym_size(*b_bdim);
   TORCH_INTERNAL_ASSERT(false);
 }
 

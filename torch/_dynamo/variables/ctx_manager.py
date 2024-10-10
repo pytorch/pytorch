@@ -6,9 +6,6 @@ import warnings
 from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch._C
-
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
 from torch._guards import Guard
 
 from .. import variables
@@ -30,6 +27,10 @@ from .functions import (
     WrappedUserMethodVariable,
 )
 from .user_defined import UserDefinedObjectVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 @dataclasses.dataclass
@@ -62,7 +63,9 @@ class ContextWrappingVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, target_values, initial_values=None, *, state=None, **kwargs):
+    def __init__(
+        self, target_values, initial_values=None, *, state=None, **kwargs
+    ) -> None:
         super().__init__(**kwargs)
         self.target_values = target_values
         self.initial_values = initial_values
@@ -122,11 +125,17 @@ class ContextWrappingVariable(VariableTracker):
         if isinstance(args[0], UserFunctionVariable):
             return WrappedUserFunctionVariable(args[0], self)
 
+    def supports_graph_breaks(self):
+        return True
+
+    def exit_on_graph_break(self):
+        return True
+
 
 class GenericContextWrappingVariable(UserDefinedObjectVariable):
     # Some methods in ContextWrappingVariable assumes the arguments are
     # python contants. Which might not always be the case here.
-    def __init__(self, cm_obj, **kwargs):
+    def __init__(self, cm_obj, **kwargs) -> None:
         assert cm_obj is not None
         super().__init__(
             value=cm_obj,
@@ -179,6 +188,12 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
 
         tx.generic_context_manager_depth -= 1
         return x
+
+    def supports_graph_breaks(self):
+        return False
+
+    def exit_on_graph_break(self):
+        return True
 
 
 class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
@@ -388,7 +403,7 @@ class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
             initial_values=None,
         )
 
-    def __init__(self, catch_warnings_args, **kwargs):
+    def __init__(self, catch_warnings_args, **kwargs) -> None:
         assert isinstance(catch_warnings_args, dict), catch_warnings_args
         super().__init__(**kwargs)
         self.catch_warnings_args = catch_warnings_args
@@ -430,12 +445,21 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     def enter(self, tx):
         install_guard(self._guards_singleton)
         batch_size, randomness = self.target_values
-        vmap_level = torch._C._functorch._vmap_increment_nesting(batch_size, randomness)
+        if isinstance(batch_size, variables.SymNodeVariable):
+            batch_size_value = batch_size.sym_num
+            batch_size_node = batch_size.as_proxy().node
+        else:
+            batch_size_value = batch_size.as_python_constant()
+            batch_size_node = batch_size.as_python_constant()
+        randomness = randomness.as_python_constant()
+        vmap_level = torch._C._functorch._vmap_increment_nesting(
+            batch_size_value, randomness
+        )
         self.set_cleanup_hook(tx, lambda: torch._C._functorch._vmap_decrement_nesting())
         self.state.proxy = tx.output.create_node(
             "call_function",
             torch._C._functorch._vmap_increment_nesting,
-            (batch_size, randomness),
+            (batch_size_node, randomness),
             {},
         )
         return variables.ConstantVariable.create(vmap_level)
@@ -464,7 +488,9 @@ class GradModeVariable(ContextWrappingVariable):
             var._call_func(tx, var.target_values)
         return var
 
-    def __init__(self, target_values, initial_values=None, initialized=True, **kwargs):
+    def __init__(
+        self, target_values, initial_values=None, initialized=True, **kwargs
+    ) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
@@ -517,7 +543,7 @@ class InferenceModeVariable(ContextWrappingVariable):
         target_values,
         initial_values=None,
         **kwargs,
-    ):
+    ) -> None:
         if initial_values is None:
             # This must be called here since function defaults are evaluated at import time
             initial_values = torch.is_inference_mode_enabled()
@@ -554,6 +580,56 @@ class InferenceModeVariable(ContextWrappingVariable):
         return "inference_mode"
 
 
+class CUDADeviceVariable(ContextWrappingVariable):
+    """represents torch.cuda.device"""
+
+    @staticmethod
+    def create(tx: "InstructionTranslator", device, **kwargs):
+        var = CUDADeviceVariable(
+            target_values=[torch.cuda._get_device_index(device, optional=True)],
+            initial_values=None,
+            **kwargs,
+        )
+        return var
+
+    def __init__(
+        self,
+        target_values,
+        initial_values=None,
+        **kwargs,
+    ) -> None:
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+        self.target_values = target_values
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        self.state.cleanup_assert()
+        tx.output.create_node(
+            "call_function",
+            torch.cuda._maybe_exchange_device,
+            (self.state.proxy,),
+            {},
+        )
+        return variables.ConstantVariable.create(False)
+
+    def enter(self, tx):
+        prev_idx = torch.cuda._exchange_device(*self.target_values)
+        self.set_cleanup_hook(tx, lambda: torch.cuda._maybe_exchange_device(prev_idx))
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch.cuda._exchange_device,
+            (*self.target_values,),
+            {},
+        )
+
+    def module_name(self):
+        return "torch.cuda"
+
+    def fn_name(self):
+        return "device"
+
+
 class TorchFunctionDisableVariable(ContextWrappingVariable):
     """represents whether torch function overrides are enabled or not"""
 
@@ -571,7 +647,7 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
         var.set_cleanup_hook(tx)
         return var
 
-    def __init__(self, target_values, initial_values=None, **kwargs):
+    def __init__(self, target_values, initial_values=None, **kwargs) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
@@ -582,6 +658,8 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
 
     def _call_func(self, tx: "InstructionTranslator", values):
         assert len(values) == 1
+        tx.symbolic_torch_function_state.torch_function_subclass_enabled = values[0]
+        tx.symbolic_torch_function_state.torch_function_mode_enabled = values[0]
         tx.output.set_torch_function_state(values[0])
 
 
@@ -603,7 +681,7 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
         var.set_cleanup_hook(tx)
         return var
 
-    def __init__(self, target_values, initial_values=None, **kwargs):
+    def __init__(self, target_values, initial_values=None, **kwargs) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
@@ -643,7 +721,7 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
         var.set_cleanup_hook(tx)
         return var
 
-    def __init__(self, target_values, initial_values=None, **kwargs):
+    def __init__(self, target_values, initial_values=None, **kwargs) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
@@ -712,7 +790,7 @@ class AutocastModeVariable(ContextWrappingVariable):
         var = AutocastModeVariable(target_values, initial_values=None, **kwargs)
         return var
 
-    def __init__(self, target_values, initial_values=None, **kwargs):
+    def __init__(self, target_values, initial_values=None, **kwargs) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
@@ -745,7 +823,7 @@ class NullContextVariable(ContextWrappingVariable):
     support yet, e.g, torch.autograd.profiler.record_function.
     """
 
-    def __init__(self, target_values=None, **kwargs):
+    def __init__(self, target_values=None, **kwargs) -> None:
         super().__init__(target_values=target_values, **kwargs)
 
     def enter(self, tx):
@@ -786,7 +864,7 @@ class StreamContextVariable(ContextWrappingVariable):
             **kwargs,
         )
 
-    def __init__(self, target_values, device, initial_values=None, **kwargs):
+    def __init__(self, target_values, device, initial_values=None, **kwargs) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
@@ -839,7 +917,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
             )
         )
 
-    def __init__(self, tensor, prev_version, **kwargs):
+    def __init__(self, tensor, prev_version, **kwargs) -> None:
         kwargs.setdefault("target_values", None)
         super().__init__(**kwargs)
         self.tensor = tensor
@@ -874,7 +952,9 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
         )
         return var
 
-    def __init__(self, param_group_var, target_values, initial_values=None, **kwargs):
+    def __init__(
+        self, param_group_var, target_values, initial_values=None, **kwargs
+    ) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
@@ -920,8 +1000,82 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
         return "use_training_state"
 
 
+class SDPAKernelVariable(ContextWrappingVariable):
+    """represents torch.nn.attention.sdpa_kernel"""
+
+    @staticmethod
+    def create(tx: "InstructionTranslator", backends, **kwargs):
+        if isinstance(backends, torch.nn.attention.SDPBackend):
+            backends = [backends]
+        var = SDPAKernelVariable(
+            target_values=backends,
+            initial_values=None,
+            **kwargs,
+        )
+        return var
+
+    def __init__(
+        self,
+        target_values: List[torch.nn.attention.SDPBackend],
+        initial_values=None,
+        **kwargs,
+    ) -> None:
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+
+    @staticmethod
+    def _backends_to_nodes(tx, backends):
+        nodes = []
+        for backend in backends:
+            # convert to/from string in order to bake the backend into FX graph
+            nodes.append(
+                tx.output.create_node(
+                    "call_function",
+                    torch.nn.attention._backend_from_string,
+                    (backend.name,),
+                    {},
+                )
+            )
+        return nodes
+
+    def enter(self, tx):
+        self.prev_backends = torch.nn.attention._cur_sdpa_kernel_backends()
+        self.set_cleanup_hook(
+            tx, lambda: torch.nn.attention._sdpa_kernel(self.prev_backends)
+        )
+        torch.nn.attention._sdpa_kernel(self.target_values)
+        arg = self._backends_to_nodes(tx, self.target_values)
+        tx.output.create_node(
+            "call_function",
+            torch.nn.attention._sdpa_kernel,
+            (arg,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        self.state.cleanup_assert()
+        arg = self._backends_to_nodes(tx, self.prev_backends)
+        tx.output.create_node(
+            "call_function",
+            torch.nn.attention._sdpa_kernel,
+            (arg,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+    def module_name(self):
+        return "torch.nn.attention"
+
+    # use a private version of sdpa_kernel that accepts variadic arguments
+    # since dynamo reconstructs the contents of target_values one-by-one
+    def fn_name(self):
+        return "_sdpa_kernel_variadic"
+
+
 class StreamVariable(VariableTracker):
-    def __init__(self, proxy, value, device, **kwargs):
+    def __init__(self, proxy, value, device, **kwargs) -> None:
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
         assert (
@@ -994,7 +1148,7 @@ class StreamVariable(VariableTracker):
 
 
 class EventVariable(VariableTracker):
-    def __init__(self, proxy, value, **kwargs):
+    def __init__(self, proxy, value, **kwargs) -> None:
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
         super().__init__(**kwargs)
@@ -1030,6 +1184,15 @@ class EventVariable(VariableTracker):
     def as_proxy(self):
         return self.proxy
 
+    def reconstruct(self, codegen):
+        # If we got here, this event is fully subsumed by the graph - this means it is
+        # not an input or global
+        assert not self.source
+        # Similar to stream handling, we lift the event into a global and then codegen bytecode to load it from there.
+        prefix = "_event"
+        name = codegen.tx.output.install_global_by_id(prefix, self.value)
+        codegen.append_output(codegen.create_load_global(name, add=True))
+
 
 class WithExitFunctionVariable(VariableTracker):
     _nonvar_fields = {
@@ -1042,7 +1205,7 @@ class WithExitFunctionVariable(VariableTracker):
         ctx: Union[ContextWrappingVariable, GenericContextWrappingVariable],
         target,
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(**kwargs)
         assert isinstance(
             ctx, (ContextWrappingVariable, GenericContextWrappingVariable)

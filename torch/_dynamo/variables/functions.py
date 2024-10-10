@@ -5,21 +5,20 @@ import functools
 import inspect
 import itertools
 import types
-from typing import Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torch
 
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
-
-from .. import polyfill, variables
+from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented, Unsupported
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import (
     check_constant_args,
+    check_unspec_or_constant_args,
     identity,
+    is_function,
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
@@ -27,13 +26,19 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
 
-if TYPE_CHECKING:
-    from torch._guards import Source
 
 try:
     from torch.distributed._composable.fsdp import _fsdp_param_group
 except ModuleNotFoundError:
     _fsdp_param_group = None
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._guards import Source
+
+
+_F = TypeVar("_F", bound=Callable)
 
 
 def wrap_bound_arg(tx: "InstructionTranslator", val, source=None):
@@ -134,12 +139,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     @classmethod
     def create_with_source(cls, value, source):
         install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
-        return cls(
-            value,
-            source=source,
-        )
+        return cls(value, source=source)
 
-    def __init__(self, fn, is_constant=False, **kwargs):
+    def __init__(self, fn, is_constant=False, **kwargs) -> None:
         super().__init__(**kwargs)
         if getattr(fn, "_dynamo_marked_constant", False):
             # This method should be treated as a constant for the purposes of compilation
@@ -150,6 +152,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         assert isinstance(
             fn, (types.FunctionType, torch.jit.ScriptFunction)
         ), f"expected FunctionType found {typestr(fn)} {fn}"
+        # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
+        # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
         # unpack @torch._dynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
         self.fn: types.FunctionType = fn
@@ -318,18 +322,31 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), args, kwargs
             )
-
+        if (
+            tx.output.current_tracer.under_activation_checkpoint
+            and not tx.output.current_tracer.allow_side_effects_under_checkpoint
+        ):
+            try:
+                from torch.distributed._composable.fsdp._fsdp_state import FSDPState
+            except Exception:
+                FSDPState = None
+            if FSDPState is not None and self.fn in [
+                FSDPState._pre_forward,
+                FSDPState._post_forward,
+            ]:
+                with torch._dynamo.side_effects.allow_side_effects_under_checkpoint(tx):
+                    return super().call_function(tx, args, kwargs)
         return super().call_function(tx, args, kwargs)
 
 
 class UserMethodVariable(UserFunctionVariable):
     """Some unsupported user-defined method"""
 
-    def __init__(self, fn, obj, **kwargs):
+    def __init__(self, fn, obj, **kwargs) -> None:
         super().__init__(fn=fn, **kwargs)
         self.obj = obj
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.__class__.__name__}({self.fn}, {self.obj})"
 
     def self_args(self):
@@ -387,7 +404,7 @@ class UserMethodVariable(UserFunctionVariable):
 
 
 class WrappedUserMethodVariable(UserMethodVariable):
-    def __init__(self, wrapped, context, **kwargs):
+    def __init__(self, wrapped, context, **kwargs) -> None:
         kwargs.pop("fn", None)
         kwargs.pop("obj", None)
         super().__init__(wrapped.fn, wrapped.obj, **kwargs)
@@ -407,7 +424,7 @@ class WrappedUserMethodVariable(UserMethodVariable):
 
 
 class WrappedUserFunctionVariable(UserFunctionVariable):
-    def __init__(self, wrapped, context, **kwargs):
+    def __init__(self, wrapped, context, **kwargs) -> None:
         kwargs.pop("fn", None)
         kwargs.pop("obj", None)
         super().__init__(wrapped.fn, **kwargs)
@@ -461,7 +478,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         closure_scope,
         wrapped_reconstructible=None,
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(**kwargs)
         assert isinstance(fn_name.as_python_constant(), str)
         assert isinstance(code.as_python_constant(), types.CodeType)
@@ -521,7 +538,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         return self.f_globals
 
     def bind_args(self, parent, args, kwargs):
-        from .misc import InlinedClosureVariable
+        # Avoid circular import
+        from .misc import ClosureVariable, NewCellVariable
 
         code = self.get_code()
         func = types.FunctionType(
@@ -542,23 +560,15 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         for idx, name in enumerate(code.co_freevars):
             cell = self.closure.items[idx]
             assert name not in result
-            if isinstance(cell, InlinedClosureVariable):
-                # InlinedClosureVariable's are created from LOAD_CLOSURE's from
-                # InliningInstructionTranslators when the variable name is not found in closure_cells.
-                # They should remain outside of closure_cells, so that our callee (the
-                # InliningInstructionTranslator that traces `func`) handles
-                # the cell correctly - that is, the cell's contents are treated as if they
-                # are local variables, like in UserFunctionVariable's bind_args for freevars.
-                cand = parent
-                while cand and name not in cand.symbolic_locals:
-                    cand = cand.parent
-                if cand is None:
-                    raise RuntimeError(
-                        f"Couldn't find {name} in the symbolic_locals of the inline interpreter stack"
-                    )
-                result[name] = cand.symbolic_locals[name]
+            # In the regular case, a cell is either a `ClosureVariable` or
+            # `NewCellVariable`.
+            if isinstance(cell, (ClosureVariable, NewCellVariable)):
+                closure_cells[name] = cell
             else:
-                closure_cells[name] = self.closure.items[idx]
+                # We model unmodified cells captured by `UserFunctionVariable` as
+                # their contents, in tracer's `symbolic_locals`. See
+                # `UserFunctionVariable::bind_args`.
+                result[name] = cell
 
         return result, closure_cells
 
@@ -619,13 +629,10 @@ class SkipFunctionVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, value, reason=None, **kwargs):
+    def __init__(self, value, reason=None, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
         self.reason = reason
-
-    def python_type(self):
-        return type(self.value)
 
     def as_python_constant(self):
         return self.value
@@ -637,10 +644,7 @@ class SkipFunctionVariable(VariableTracker):
             # attribute lookup. They are unlikely to be changed, so we can skip
             # guarding them.
             install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
-        return cls(
-            value,
-            source=source,
-        )
+        return cls(value, source=source)
 
     @staticmethod
     @functools.lru_cache(None)
@@ -727,6 +731,12 @@ class SkipFunctionVariable(VariableTracker):
                     )
                     # also warn on it because most users won't see the graph break message
                     torch._dynamo.utils.warn_once(msg)
+            if self.value.__qualname__ == "allow_in_graph":
+                msg = (
+                    "Found an allow_in_graph decorator to a function which "
+                    "is created inside the parent function that is getting "
+                    "compiled. This is not supported for now."
+                )
             msg += f"', {self.reason}'" if self.reason else ""
             unimplemented(msg)
 
@@ -764,7 +774,9 @@ class WrapperUserFunctionVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        return variables.UserFunctionVariable(polyfill.getattr_and_trace).call_function(
+        return variables.UserFunctionVariable(
+            polyfills.getattr_and_trace
+        ).call_function(
             tx, [self, variables.ConstantVariable(self.attr_to_trace), *args], kwargs
         )
 
@@ -800,7 +812,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
     than status-quo as we currently graph-break on all distributed.* collectives.
     """
 
-    def __init__(self, fn, *, replacement_var, **kwargs):
+    def __init__(self, fn, *, replacement_var, **kwargs) -> None:
         super().__init__(fn, **kwargs)
         assert isinstance(replacement_var, UserFunctionVariable)
         self.replacement_var = replacement_var
@@ -869,7 +881,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
 
 
 class FunctoolsPartialVariable(VariableTracker):
-    def __init__(self, func: VariableTracker, args, keywords, **kwargs):
+    def __init__(self, func: VariableTracker, args, keywords, **kwargs) -> None:
         super().__init__(**kwargs)
         self.func = func
         assert isinstance(args, list)
@@ -925,6 +937,105 @@ class FunctoolsPartialVariable(VariableTracker):
             *[v.guard_as_python_constant() for v in self.args],
             **{k: v.guard_as_python_constant() for k, v in self.keywords.items()},
         )
+
+
+class PolyfilledFunctionVariable(VariableTracker):
+    _nonvar_fields = {
+        "fn",
+        "wrapped_fn",
+        "traceable_fn",
+        *VariableTracker._nonvar_fields,
+    }
+
+    @classmethod
+    @functools.lru_cache(None)
+    def _get_polyfill_handlers(cls) -> Dict[Callable[..., Any], types.FunctionType]:
+        return {}
+
+    @classmethod
+    def create_with_source(cls, value, source):
+        install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
+
+        return cls(value, source=source)
+
+    def __init__(self, fn: _F, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.fn: _F = fn
+
+        handler = self._get_polyfill_handlers().get(fn, fn)
+        assert callable(handler), f"Polyfill handler {handler} is not callable for {fn}"
+        for candidate_attr in (
+            "__torch_dynamo_polyfill__",  # registered polyfill
+            "__python_implementation__",  # self handler from third-party libraries
+        ):
+            candidate = getattr(handler, candidate_attr, None)
+            if candidate:
+                assert callable(candidate)
+                traceable_fn = candidate
+                break
+        else:
+            raise RuntimeError(
+                f"Polyfill handler {handler} does not have a traceable function"
+            )
+
+        self.wrapped_fn: _F = handler
+        self.traceable_fn: _F = traceable_fn
+
+    @property
+    def polyfill_fn(self) -> _F:
+        return self.traceable_fn
+
+    def can_constant_fold_through(self):
+        return getattr(
+            self.wrapped_fn, "__torch_dynamo_can_constant_fold_through__", False
+        )
+
+    def get_function(self):
+        return self.as_python_constant()
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        from torch._dynamo.variables.builder import SourcelessBuilder
+
+        if self.can_constant_fold_through() and check_unspec_or_constant_args(
+            args, kwargs
+        ):
+            result = (
+                self.fn(  # use the original function which is faster than the polyfill
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                )
+            )
+            return SourcelessBuilder.create(tx, result)
+
+        traceable_function_variable = SourcelessBuilder.create(tx, self.traceable_fn)
+        return traceable_function_variable.call_function(tx, args, kwargs)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "__call__":
+            return self.call_function(tx, args, kwargs)
+
+        method = getattr(self.fn, name, None)
+        assert method is not None, f"Member {name} not found in {self.fn}"
+        assert is_function(method), f"Member {name} is not callable in {self.fn}"
+        options = {}
+        if self.source:
+            options["source"] = AttrSource(self.source, name)
+        polyfilled_method_variable = PolyfilledFunctionVariable(method, **options)
+        return polyfilled_method_variable.call_function(tx, args, kwargs)
+
+    def as_python_constant(self):
+        return self.fn
 
 
 from torch._higher_order_ops.triton_kernel_wrap import TritonHOPifier
@@ -1006,7 +1117,7 @@ dynamo_triton_hopifier_singleton = DynamoTritonHOPifier()
 
 
 class TritonKernelVariable(VariableTracker):
-    def __init__(self, kernel, kernel_idx, grid, **kwargs):
+    def __init__(self, kernel, kernel_idx, grid, **kwargs) -> None:
         super().__init__(**kwargs)
         dynamo_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
 
@@ -1034,3 +1145,12 @@ class TritonKernelVariable(VariableTracker):
 
         # Bail out to parent's implementation
         return super().call_method(tx, name, args, kwargs)
+
+    def specialize_symbolic(self, arg: Any) -> Any:
+        from .constant import ConstantVariable
+        from .tensor import SymNodeVariable
+
+        # See [Note: Specialize tl.constexpr args in user-defined triton kernels]
+        if isinstance(arg, SymNodeVariable):
+            return ConstantVariable.create(arg.evaluate_expr())
+        return arg

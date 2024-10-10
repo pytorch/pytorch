@@ -61,16 +61,16 @@ std::string BlockAnalysis::getInputName(const BufPtr& buf) const {
   }
 }
 
-void BlockAnalysis::visit(StorePtr v) {
+void BlockAnalysis::visit(const StorePtr& v) {
   store_targets_.insert(v->buf());
   v->value()->accept(this);
 }
 
-void BlockAnalysis::visit(LoadPtr v) {
+void BlockAnalysis::visit(const LoadPtr& v) {
   loads_.insert(v->buf());
 }
 
-void BlockAnalysis::visit(ForPtr v) {
+void BlockAnalysis::visit(const ForPtr& v) {
   const LoopOptions& loop_options = v->loop_options();
   if (loop_options.is_gpu_block_index()) {
     map_input_to_tensor_bufs_ = loop_options.get_buffer_mapping();
@@ -91,21 +91,21 @@ void BlockAnalysis::visit(ForPtr v) {
 // TODO: When handling fused ops d = a + b + c, the correct
 // way would be to mutate the expression to Block version and print.
 
-void BlockPrinter::visit(AddPtr v) {
+void BlockPrinter::visit(const AddPtr& v) {
   emitIndent();
   os() << "add(";
   v->lhs()->accept(this);
   v->rhs()->accept(this);
 }
 
-void BlockPrinter::visit(MulPtr v) {
+void BlockPrinter::visit(const MulPtr& v) {
   emitIndent();
   os() << "mul(";
   v->lhs()->accept(this);
   v->rhs()->accept(this);
 }
 
-void BlockPrinter::visit(ForPtr v) {
+void BlockPrinter::visit(const ForPtr& v) {
   const LoopOptions& loop_options = v->loop_options();
 
   auto buf_reads = block_analysis_->loads();
@@ -239,7 +239,6 @@ void BlockPrinter::PrintDistribution(const std::unordered_set<BufPtr>& bufs) {
   for (auto& buf : bufs) {
     emitIndent();
     emitIndent();
-    auto buf_name = buf->name_hint();
     os() << block_analysis_->getFlatInputName(buf) << " = ";
     os() << "{(0, 1, )}" << '\n';
   }
@@ -296,16 +295,16 @@ void BlockPrinter::PrintAdjustBuffers(const std::unordered_set<BufPtr>& bufs) {
   }
 }
 
-void BlockPrinter::visit(LoadPtr v) {
+void BlockPrinter::visit(const LoadPtr& v) {
   os() << block_analysis_->getFlatInputName(v->buf()) << ".buffer, ";
 }
-void BlockPrinter::visit(StorePtr v) {
+void BlockPrinter::visit(const StorePtr& v) {
   emitIndent();
   os() << *v->value() << block_analysis_->getFlatInputName(v->buf())
        << ".tensor)" << '\n';
 }
 
-void BlockPrinter::visit(BlockPtr v) {
+void BlockPrinter::visit(const BlockPtr& v) {
   os() << "{" << '\n';
   indent_++;
   for (const StmtPtr& s : v->stmts()) {

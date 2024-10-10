@@ -42,7 +42,7 @@ class TestLiteScriptModule(TestCase):
             id: torch.Tensor
 
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = Foo(torch.tensor(1))
 
@@ -101,7 +101,7 @@ class TestLiteScriptModule(TestCase):
             id: torch.Tensor
 
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = Foo(torch.tensor(1))
 
@@ -144,7 +144,7 @@ class TestLiteScriptModule(TestCase):
             baz: Baz
 
         class Bar(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = Foo(torch.tensor(1), Baz(torch.tensor(1)))
 

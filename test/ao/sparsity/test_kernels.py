@@ -9,7 +9,6 @@ import numpy as np
 
 import torch
 import torch.ao.quantization as tq
-
 from torch import nn
 from torch.ao.pruning.sparsifier.utils import fqn_to_module
 from torch.testing._internal.common_quantized import (
@@ -20,8 +19,8 @@ from torch.testing._internal.common_quantized import (
     qengine_is_qnnpack,
     qengine_is_x86,
 )
-
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+
 
 # TODO: Once more test files are created, move the contents to a ao folder.
 

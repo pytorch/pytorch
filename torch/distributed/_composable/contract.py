@@ -47,7 +47,7 @@ def contract(state_cls: Type[_State] = _State):
         >>> import torch.nn as nn
         >>>
         >>> class MyModel(nn.Module):
-        >>>     def __init__(self):
+        >>>     def __init__(self) -> None:
         >>>         super().__init__()
         >>>         self.l1 = nn.Linear(10, 10)
         >>>         self.l2 = nn.Linear(10, 10)

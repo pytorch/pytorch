@@ -19,7 +19,7 @@ class EnabledProxy:
     This is just a wrapper for a bool, so that we get reference semantics
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.enabled = self.parse_env(
             "PYTORCH_JIT", True, "> Using PyTorch JIT", "> PyTorch JIT DISABLED"
         )

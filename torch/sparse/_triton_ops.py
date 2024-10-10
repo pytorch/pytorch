@@ -7,8 +7,11 @@ from functools import lru_cache
 from typing import Optional, Tuple
 
 import torch
+from torch._dynamo.utils import warn_once
 from torch.utils._triton import has_triton
+
 from ._triton_ops_meta import get_meta
+
 
 TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE = int(
     os.getenv("TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE", 2)
@@ -86,14 +89,14 @@ def make_triton_contiguous(t):
     """Return input as a triton-contiguous tensor.
 
     A triton-contiguous tensor is defined as a tensor that has strides
-    with minimal value equal to 1.
+    with minimal value smaller than or equal to 1.
 
     While triton kernels support triton-non-contiguous tensors (all
-    strides being greater than 1 or having 0 strides) arguments, a
-    considerable slow-down occurs because tensor data is copied
-    element-wise rather than chunk-wise.
+    strides being greater than 1) arguments, a considerable slow-down
+    occurs because tensor data is copied element-wise rather than
+    chunk-wise. Zero strides is assumed to not have this defect.
     """
-    if min(t.stride()) != 1:
+    if min(t.stride()) > 1:
         # TODO: investigate if contiguity along other axes than the
         # last one can be beneficial for performance
         return t.contiguous()
@@ -746,8 +749,12 @@ def bsr_dense_addmm_meta(
     num_stages=None,
     sparsity=None,
     dtype=None,
+    _version=0,
     **extra,
 ):
+    # Specifying _version is useful for situations when one wants to
+    # discard existing triton kernel tuning results, say, in testing
+    # bsr_dense_addmm_meta functionality.
     if dtype is None:
         dtype = torch.float16
     if sparsity is None:
@@ -756,27 +763,40 @@ def bsr_dense_addmm_meta(
         device_name = torch.cuda.get_device_name()
         key = (M, K, N, Ms, Ks, beta == 0, beta == 1, alpha == 1)
         meta = get_meta(
-            "bsr_dense_addmm", key, device_name, version=(0, dtype, sparsity)
+            "bsr_dense_addmm", key, device_name, version=(_version, dtype, sparsity)
         )
         if meta is None and sparsity != 0.5:
             meta = get_meta(
-                "bsr_dense_addmm", key, device_name, version=(0, dtype, 0.5)
+                "bsr_dense_addmm", key, device_name, version=(_version, dtype, 0.5)
             )
-            if meta is None:
-                # find approximate meta such that N % SPLIT_N == 0.
-                matching_meta = get_meta(
-                    "bsr_dense_addmm",
-                    (*key[:2], "*", *key[3:]),
-                    device_name,
-                    version=(0, dtype, 0.5),
-                )
-                for mkey in sorted(matching_meta or {}):
-                    meta_ = matching_meta[mkey]
-                    if N % meta_["SPLIT_N"] == 0 and mkey[2] <= N:
-                        meta = meta_
+        if meta is None:
+            # find approximate meta such that N % SPLIT_N == 0.
+            matching_meta = get_meta(
+                "bsr_dense_addmm",
+                (*key[:2], "*", *key[3:]),
+                device_name,
+                version=(_version, dtype, 0.5),
+            )
+            for mkey in sorted(matching_meta or {}):
+                meta_ = matching_meta[mkey]
+                n = mkey[2]
+                split_n = meta_["SPLIT_N"]
+                c = n // split_n
+                if N % c == 0 and n <= N:
+                    meta = dict(meta_)
+                    meta["SPLIT_N"] = N // c
         if meta is not None:
             meta.update(**extra)
             return meta
+        else:
+            # see [Computing optimal kernel parameters] in
+            # _triton_ops_meta.py for ways to avoid this warning
+            # message
+            warn_once(
+                "bsr_dense_addmm uses non-optimal triton kernel parameters"
+                f" for {M=} {K=} {N=} {Ms=}, {Ks=} {beta=} {alpha=} {dtype=}"
+            )
+
     SPLIT_N = SPLIT_N or max(N // Ms, 1)
     GROUP_SIZE_ROW = GROUP_SIZE_ROW or 4
     num_stages = num_stages or 1
@@ -1071,6 +1091,47 @@ def bsr_scatter_mm(bsr, other, indices_data=None, out=None):
     return out.view(out_shape)
 
 
+def _int_bsr_dense_addmm(
+    input: torch.Tensor,
+    bsr: torch.Tensor,
+    dense: torch.Tensor,
+    *,
+    beta=1,
+    alpha=1,
+    left_alpha: Optional[torch.Tensor] = None,
+    right_alpha: Optional[torch.Tensor] = None,
+    out: Optional[torch.Tensor] = None,
+    skip_checks: bool = False,
+    max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
+    meta: Optional[dict] = None,
+):
+    if out is None and dense.dtype is torch.int8:
+        f_name = "_int_bsr_dense_addmm"
+        crow_indices = bsr.crow_indices()
+        batch_ndim = crow_indices.dim() - 1
+        M = bsr.shape[batch_ndim]
+        N = dense.shape[-1]
+        original_batch_dims_broadcasted = broadcast_batch_dims(f_name, bsr, dense)
+        out = torch.empty(
+            original_batch_dims_broadcasted + (M, N),
+            dtype=torch.int32,
+            device=dense.device,
+        )
+    return bsr_dense_addmm(
+        input,
+        bsr,
+        dense,
+        beta=beta,
+        alpha=alpha,
+        left_alpha=left_alpha,
+        right_alpha=right_alpha,
+        out=out,
+        skip_checks=skip_checks,
+        max_grid=max_grid,
+        meta=meta,
+    )
+
+
 def bsr_dense_addmm(
     input: torch.Tensor,
     bsr: torch.Tensor,
@@ -1078,11 +1139,21 @@ def bsr_dense_addmm(
     *,
     beta=1,
     alpha=1,
+    left_alpha: Optional[torch.Tensor] = None,
+    right_alpha: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
     skip_checks: bool = False,
     max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
     meta: Optional[dict] = None,
 ):
+    """Compute
+
+      out = beta * input + left_alpha.reshape(-1, 1) * (alpha * (bsr @ dense)) * right_alpha.reshape(1, -1)
+
+    where left_alpha, right_alpha are (* + 1)-D tensors when
+    specified, otherwise, these are treated as tensors filled with
+    ones.
+    """
     f_name = "bsr_dense_addmm"
     values = bsr.values()
     crow_indices = bsr.crow_indices()
@@ -1094,8 +1165,8 @@ def bsr_dense_addmm(
 
     # todo: implement checks
 
+    original_batch_dims_broadcasted = broadcast_batch_dims(f_name, bsr, dense)
     if out is None:
-        original_batch_dims_broadcasted = broadcast_batch_dims(f_name, bsr, dense)
         out = dense.new_empty(original_batch_dims_broadcasted + (M, N))
 
     if bsr._nnz() == 0 or alpha == 0 or N == 0 or M == 0 or K == 0:
@@ -1106,6 +1177,30 @@ def bsr_dense_addmm(
             if beta != 1:
                 out.mul_(beta)
         return out
+
+    left_alpha_is_one = False
+    right_alpha_is_one = False
+    if left_alpha is None:
+        left_alpha_is_one = True
+        left_alpha = dense.new_empty(()).expand(
+            *original_batch_dims_broadcasted, M, N
+        )  # not referenced
+    else:
+        left_alpha = left_alpha.view(*original_batch_dims_broadcasted, M, 1).expand(
+            *original_batch_dims_broadcasted, M, N
+        )
+
+    if right_alpha is None:
+        right_alpha_is_one = True
+        right_alpha = dense.new_empty(()).expand(
+            *original_batch_dims_broadcasted, M, N
+        )  # not referenced
+    else:
+        right_alpha = right_alpha.view(*original_batch_dims_broadcasted, 1, N).expand(
+            *original_batch_dims_broadcasted, M, N
+        )
+    assert left_alpha.stride()[-1] == 0
+    assert right_alpha.stride()[-2] == 0
 
     if meta is None:
         sparsity = round(1 - bsr._nnz() * blocksize[0] * blocksize[1] / (M * K), 2)
@@ -1122,9 +1217,16 @@ def bsr_dense_addmm(
         )
     out_backup = out
 
-    crow_indices, col_indices, values, input, dense, out = prepare_inputs(
-        bsr, input, dense, out
-    )
+    (
+        crow_indices,
+        col_indices,
+        values,
+        input,
+        dense,
+        left_alpha,
+        right_alpha,
+        out,
+    ) = prepare_inputs(bsr, input, dense, left_alpha, right_alpha, out)
 
     BM, BK = blocksize
     SPLIT_N = meta.get("SPLIT_N", N // BM)
@@ -1134,12 +1236,17 @@ def bsr_dense_addmm(
     out = tile_to_blocksize(out, (BM, BN))
     dense = tile_to_blocksize(dense, (BK, BN))
     input = tile_to_blocksize(input, (BM, BN))
+    left_alpha = tile_to_blocksize(left_alpha, (BM, BN))
+    right_alpha = tile_to_blocksize(right_alpha, (BM, BN))
 
+    # tl.dot supports float16, float32, int32 as accumulator types.
     dot_out_dtype = {
         torch.float16: tl.float32,
         torch.bfloat16: tl.float32,
         torch.float32: tl.float64,
         torch.float64: tl.float64,
+        torch.int8: tl.int32,
+        torch.int32: tl.int32,
     }[out.dtype]
 
     n_batches = dense.size(0)
@@ -1158,6 +1265,8 @@ def bsr_dense_addmm(
         col_indices: (0, None, None),
         input: (0, -3, -4),
         dense: (0, -3, None),
+        left_alpha: (0, -3, -4),
+        right_alpha: (0, -3, -4),
         out: (0, -3, -4),
     }
 
@@ -1171,6 +1280,8 @@ def bsr_dense_addmm(
             beta_is_one=beta == 1,
             beta_is_nonzero=beta != 0,
             alpha_is_one=alpha == 1,
+            left_alpha_is_one=left_alpha_is_one,
+            right_alpha_is_one=right_alpha_is_one,
             BLOCKSIZE_ROW=BM,
             BLOCKSIZE_INNER=BK,
             BLOCKSIZE_COL=BN,
@@ -1607,7 +1718,7 @@ if has_triton():
         if not skip_checks:
             check_bsr_layout(f_name, bsr)
             check_device(f_name, bsr, dense.device)
-            check_dtype(f_name, bsr, dense.dtype)
+            check_dtype(f_name, bsr, dense.dtype, (torch.int8,))
             check_mm_compatible_shapes(f_name, bsr, dense)
 
             n = dense.size(-1)
@@ -2220,6 +2331,22 @@ if has_triton():
         dense_row_block_stride,
         dense_col_block_stride,
         # dense epilogue
+        # left_alpha prologue
+        left_alpha_ptr,
+        left_alpha_batch_stride,
+        left_alpha_tiled_row_stride,
+        left_alpha_tiled_col_stride: tl.constexpr,
+        left_alpha_row_block_stride,
+        left_alpha_col_block_stride: tl.constexpr,
+        # left_alpha epilogue
+        # right_alpha prologue
+        right_alpha_ptr,
+        right_alpha_batch_stride,
+        right_alpha_tiled_row_stride: tl.constexpr,
+        right_alpha_tiled_col_stride,
+        right_alpha_row_block_stride: tl.constexpr,
+        right_alpha_col_block_stride,
+        # right_alpha epilogue
         # output prologue
         output_ptr,
         output_batch_stride,
@@ -2233,6 +2360,8 @@ if has_triton():
         beta_is_one: tl.constexpr,
         beta_is_nonzero: tl.constexpr,
         alpha_is_one: tl.constexpr,
+        left_alpha_is_one: tl.constexpr,
+        right_alpha_is_one: tl.constexpr,
         BLOCKSIZE_ROW: tl.constexpr,
         BLOCKSIZE_COL: tl.constexpr,
         BLOCKSIZE_INNER: tl.constexpr,
@@ -2241,6 +2370,12 @@ if has_triton():
         GROUP_SIZE_ROW: tl.constexpr,
         SPLIT_N: tl.constexpr,
     ):
+        # left/right_alpha tensors are originally (* + 1)-dimensional
+        assert left_alpha_tiled_col_stride == 0
+        assert left_alpha_col_block_stride == 0
+        assert right_alpha_tiled_row_stride == 0
+        assert right_alpha_row_block_stride == 0
+
         batch_pid = tl.program_id(axis=2)
         row_block_pid = tl.program_id(axis=0)
         col_block_pid = tl.program_id(axis=1)
@@ -2265,17 +2400,6 @@ if has_triton():
         row_block_arange = tl.arange(0, BLOCKSIZE_ROW)
         inner_block_arange = tl.arange(0, BLOCKSIZE_INNER)
         col_block_arange = tl.arange(0, BLOCKSIZE_COL)
-
-        if beta_is_nonzero:
-            # Pointers are set to exact write-to locations
-            input_ptrs = (
-                input_ptr
-                + input_batch_stride * batch_pid
-                + input_tiled_row_stride * row_block_pid
-                + input_tiled_col_stride * col_block_pid
-                + input_row_block_stride * row_block_arange[:, None]
-                + input_col_block_stride * col_block_arange[None, :]
-            )
 
         # Pointers are set to the first block of the current row.
         values_block_ptrs = (
@@ -2313,14 +2437,7 @@ if has_triton():
             + col_indices_stride * nnz_offset
         )
 
-        # alpha is never 0
-        if beta_is_nonzero:
-            output_acc_block = tl.load(input_ptrs).to(acc_dtype)  # type: ignore[possibly-undefined]
-            if not (beta_is_one and alpha_is_one):
-                beta_alpha = beta / alpha
-                output_acc_block *= beta_alpha
-        else:
-            output_acc_block = tl.zeros((BLOCKSIZE_ROW, BLOCKSIZE_COL), dtype=acc_dtype)
+        output_acc_block = tl.zeros((BLOCKSIZE_ROW, BLOCKSIZE_COL), dtype=acc_dtype)
 
         for _ in range(row_nnz):
             values_block = tl.load(values_block_ptrs)
@@ -2343,6 +2460,42 @@ if has_triton():
 
         if not alpha_is_one:
             output_acc_block *= alpha
+
+        if not left_alpha_is_one:
+            left_alpha_ptrs = (
+                left_alpha_ptr
+                + left_alpha_batch_stride * batch_pid
+                + left_alpha_tiled_row_stride * row_block_pid
+                + left_alpha_tiled_col_stride * col_block_pid
+                + left_alpha_row_block_stride * row_block_arange[:, None]
+                + left_alpha_col_block_stride * col_block_arange[None, :]
+            )
+            output_acc_block *= tl.load(left_alpha_ptrs)
+
+        if not right_alpha_is_one:
+            right_alpha_ptrs = (
+                right_alpha_ptr
+                + right_alpha_batch_stride * batch_pid
+                + right_alpha_tiled_row_stride * row_block_pid
+                + right_alpha_tiled_col_stride * col_block_pid
+                + right_alpha_row_block_stride * row_block_arange[:, None]
+                + right_alpha_col_block_stride * col_block_arange[None, :]
+            )
+            output_acc_block *= tl.load(right_alpha_ptrs)
+
+        if beta_is_nonzero:
+            input_ptrs = (
+                input_ptr
+                + input_batch_stride * batch_pid
+                + input_tiled_row_stride * row_block_pid
+                + input_tiled_col_stride * col_block_pid
+                + input_row_block_stride * row_block_arange[:, None]
+                + input_col_block_stride * col_block_arange[None, :]
+            )
+            if beta_is_one:
+                output_acc_block += tl.load(input_ptrs)
+            else:
+                output_acc_block += beta * tl.load(input_ptrs)
 
         # write back the result
         tl.store(output_ptrs, output_acc_block.to(output_ptr.dtype.element_ty))

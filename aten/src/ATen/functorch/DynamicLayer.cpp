@@ -175,7 +175,7 @@ const std::shared_ptr<bool>& getLifeHandleForLevel(int64_t level) {
   return dynamic_layer.interpreter().is_alive_ptr();
 }
 
-optional<DynamicLayer> maybeCurrentDynamicLayer() {
+std::optional<DynamicLayer> maybeCurrentDynamicLayer() {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
   if (dynamicLayerStack.empty()) {
     return {};
