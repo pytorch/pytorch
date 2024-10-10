@@ -69,8 +69,14 @@ SUPPORTED_OPS = {
     torch.ops.aten.sub.Tensor,
     torch.ops.aten.div.Tensor,
     torch.ops.aten.pow.Tensor_Tensor,
-    torch.ops.aten.floor_divide.Tensor,
+    torch.ops.aten.floor_divide.default,
     torch.ops.aten.remainder.Tensor,
+    # torch.ops.aten.fmod.Tensor
+    # torch.ops.aten.eq.Tensor
+    # torch.ops.aten.lt.Tensor
+    # torch.ops.aten.le.Tensor
+    # torch.ops.aten.gt.Tensor
+    # torch.ops.aten.ge.Tensor
 }
 
 
