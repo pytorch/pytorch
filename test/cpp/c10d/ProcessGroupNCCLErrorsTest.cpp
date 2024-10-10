@@ -24,8 +24,9 @@ class WorkNCCLSimulateErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
       bool simulate_error,
       int rank,
       c10d::OpType opType,
-      uint64_t seq)
-      : WorkNCCL("0", "default_pg", device, rank, opType, seq),
+      uint64_t seq,
+      bool isP2P)
+      : WorkNCCL("0", "default_pg", device, rank, opType, seq, isP2P),
         simulateError_(simulate_error) {}
 
   std::exception_ptr checkForNCCLErrors() override {
@@ -65,12 +66,18 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
       at::Device& device,
       int rank,
       c10d::OpType opType,
+      bool isP2P,
       const char* profilingTitle,
       const std::vector<at::Tensor>& inputs = {},
       const std::vector<at::Tensor>& outputs = {},
       bool record = false) override {
     return c10::make_intrusive<WorkNCCLSimulateErrors>(
-        device, simulateError_, rank, opType, seqCollective_);
+        device,
+        simulateError_,
+        rank,
+        opType,
+        isP2P ? seqP2P_ : seqCollective_,
+        isP2P);
   }
 
   size_t getNCCLCommCacheSize() {
@@ -96,8 +103,9 @@ class WorkNCCLTimedoutErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
       bool set_timedout_error,
       int rank,
       c10d::OpType opType,
-      uint64_t seq)
-      : WorkNCCL("0", "default_pg", device, rank, opType, seq),
+      uint64_t seq,
+      bool isP2P)
+      : WorkNCCL("0", "default_pg", device, rank, opType, seq, isP2P),
         setTimedoutError_(set_timedout_error) {}
 
  private:
@@ -127,12 +135,18 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
       at::Device& device,
       int rank,
       c10d::OpType opType,
+      bool isP2P,
       const char* profilingTitle,
       const std::vector<at::Tensor>& inputs = {},
       const std::vector<at::Tensor>& outputs = {},
       bool record = false) override {
     return c10::make_intrusive<WorkNCCLTimedoutErrors>(
-        device, setTimedoutError_, rank, opType, seqCollective_);
+        device,
+        setTimedoutError_,
+        rank,
+        opType,
+        isP2P ? seqP2P_ : seqCollective_,
+        isP2P);
   }
 
   void setTimedoutError() {
