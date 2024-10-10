@@ -696,6 +696,7 @@ class SizeVariable(TupleVariable):
             index = arg.sym_num
         else:
             index = arg.as_python_constant()
+
         if isinstance(index, slice):
             return SizeVariable(self.items[index])
         else:
