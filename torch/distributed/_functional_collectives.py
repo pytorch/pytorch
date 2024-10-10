@@ -1126,6 +1126,22 @@ def all_gather_inplace(
     return tensor_list
 
 
+def broadcast_inplace(
+    tensor: torch.Tensor,
+    src: int,
+    group=None,
+    async_op=False,
+    tag: str = "",
+):
+    assert (
+        not async_op
+    ), "Can't remap async version of inplace op to functional collective"
+    group = group or dist.group.WORLD
+    assert group is not None
+
+    return tensor.copy_(broadcast(tensor, src, group, tag))
+
+
 from torch.distributed.distributed_c10d import (
     _all_gather_base as legacy_all_gather_base,
     _reduce_scatter_base as legacy_reduce_scatter_base,
@@ -1133,6 +1149,7 @@ from torch.distributed.distributed_c10d import (
     all_gather_into_tensor as legacy_allgather,
     all_reduce as legacy_allreduce,
     all_to_all_single as legacy_all_to_all_single,
+    broadcast as legacy_broadcast,
     reduce_scatter_tensor as legacy_reducescatter,
 )
 
@@ -1147,4 +1164,5 @@ traceable_collective_remaps = {
     legacy_all_gather: all_gather_inplace,
     legacy_reduce_scatter_base: reduce_scatter_tensor_inplace,
     legacy_all_gather_base: all_gather_tensor_inplace,
+    legacy_broadcast: broadcast_inplace,
 }
