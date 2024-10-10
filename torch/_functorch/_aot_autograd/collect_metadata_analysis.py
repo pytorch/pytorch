@@ -152,6 +152,7 @@ def run_functionalized_fw_and_collect_metadata(
     # Note: this is guaranteed to be set when running under dynamo
     static_input_indices: Optional[List[int]] = None,
     pre_dispatch: bool = False,
+    is_export: bool = False,
 ) -> Callable[..., ViewAndMutationMeta]:
     memo: Dict[Tensor, Tensor] = {}
 
@@ -183,7 +184,7 @@ def run_functionalized_fw_and_collect_metadata(
 
         # It doesn't matter if we run this under predispatch or not because it is
         # only for figuring out metadata
-        mode = FunctionalTensorMode(_allow_token_discovery=True)
+        mode = FunctionalTensorMode(export=is_export, _allow_token_discovery=True)
         suppress_pending = contextlib.nullcontext()
         fake_mode = detect_fake_mode()
         if fake_mode and (shape_env := fake_mode.shape_env):
@@ -298,6 +299,11 @@ def run_functionalized_fw_and_collect_metadata(
             if isinstance(o, torch.Tensor):
                 curr_storage = StorageWeakRef(o.untyped_storage())
                 out_tensor_alias_counts[curr_storage] += 1
+
+                if isinstance(o, FunctionalTensor):
+                    out_storage = StorageWeakRef(o.elem.untyped_storage())
+                    if torch._is_mutated(o.elem) and out_storage in mode._partial_frozen_storage:  # type: ignore[attr-defined]
+                        raise RuntimeError("Cannot return on mutated frozen tensor")
                 # Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
                 # This is an optimization on top of the "alias of intermediates" logic,
                 # which you can read more about under Note [AOT Autograd: outputs aliasing inputs or intermediates!]

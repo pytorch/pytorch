@@ -3,13 +3,24 @@ import contextlib
 import warnings
 import weakref
 from abc import ABC, abstractmethod
-from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    ContextManager,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch._ops import _get_dispatch_mode_pre_dispatch
 from torch._subclasses.meta_utils import is_sparse_any
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     _detect_infra_mode,
     _disable_infra_mode,
@@ -342,6 +353,8 @@ class FunctionalTensorMode(TorchDispatchMode):
             torch.storage.UntypedStorage, Optional[FunctionalTensor]
         ] = weakref.WeakKeyDictionary()
 
+        self._partial_frozen_storage: Set = set()
+
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):
         def _get_prev_mode():
@@ -533,6 +546,20 @@ class FunctionalTensorMode(TorchDispatchMode):
                         torch.Tensor, wrap, outs_unwrapped
                     )
                 else:
+                    # Check args before the operation
+                    for arg in args_unwrapped:
+                        if isinstance(arg, torch.Tensor):
+                            # arg_storage =  id(arg.untyped_storage())  # type: ignore[attr-defined]
+                            arg_storage = StorageWeakRef(arg.untyped_storage())
+                            if (
+                                torch._is_functional_tensor(arg)
+                                and torch._is_mutated(arg)
+                                and arg_storage in self._partial_frozen_storage
+                            ):  # type: ignore[attr-defined]
+                                raise RuntimeError(
+                                    "Cannot do computation on mutated frozen tensor"
+                                )
+
                     # When we dispatch to the C++ functionalization kernel, we might need to jump back to the
                     # PreDispatch mode stack afterwards, to handle any other PreDispatch modes underneath
                     # FunctionalTensorMode. If we call func() directly, we would need to exclude PreDispatch
@@ -544,12 +571,19 @@ class FunctionalTensorMode(TorchDispatchMode):
                         **kwargs_unwrapped,
                     )
                     # We don't allow any mutation on result of dropout or _to_copy
+                    # TODO: allow it in draft export mode and attach to FailureReport
                     if self.export:
                         if func in (
                             torch.ops.aten.dropout.default,
                             torch.ops.aten._to_copy.default,
                         ):
-                            torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
+                            # torch._partial_freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
+                            # storage = torch._get_functional_storage(outs_unwrapped)  # type: ignore[attr-defined]
+                            # storage = id(outs_unwrapped.untyped_storage())
+                            storage = StorageWeakRef(outs_unwrapped.untyped_storage())
+                            # print("out", func, storage)
+                            self._partial_frozen_storage.add(storage)
+
                     outs_wrapped = pytree.tree_map_only(
                         torch.Tensor, wrap, outs_unwrapped
                     )

@@ -156,6 +156,12 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
     return inductor_storage_resized_;
   }
 
+  // TODO: not sure how this is different from
+  // has_data_mutation which looks at generation?
+  bool is_mutated() const {
+    return mutation_counter_ > 0;
+  }
+
  private:
   // NB: base_ should always point to a tensor BELOW the current
   // functionalization layer. This is mainly to avoid reference cycles. e.g.

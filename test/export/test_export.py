@@ -3767,17 +3767,91 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         for op in ops:
             self.assertIn(op, (torch.ops.aten._to_copy.default,))
 
-    def test_device_to_mutation(self):
+    def test_device_to_mutation_return(self):
         class Module(torch.nn.Module):
             def forward(self, x):
                 y = x.to("cpu")
                 y.add_(1)
                 return y, x
 
+        torch.export.export_for_training(Module(), (torch.tensor(1, device="cpu"),))
+
         with self.assertRaisesRegex(
-            RuntimeError, "cannot mutate tensors with frozen storage"
+            RuntimeError, "Cannot return on mutated frozen tensor"
         ):
-            export(Module(), (torch.tensor(1, device="cpu"),))
+            torch.export.export_for_inference(
+                Module(), (torch.tensor(1, device="cpu"),)
+            )
+        # with self.assertRaisesRegex(
+        #     RuntimeError, "Cannot return on mutated frozen tensor"
+        # ):
+        #     export(
+        #         Module(), (torch.tensor(1, device="cpu"),)
+        #     )
+
+    def test_device_to_mutation_return_float(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = x.float()
+                y.add_(1)
+                return y, x
+
+        torch.export.export_for_training(Module(), (torch.tensor(1, device="cpu"),))
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Cannot return on mutated frozen tensor"
+        ):
+            torch.export.export_for_inference(
+                Module(), (torch.tensor(1, device="cpu"),)
+            )
+
+        # with self.assertRaisesRegex(
+        #     RuntimeError, "Cannot return on mutated frozen tensor"
+        # ):
+        #     export(
+        #         Module(), (torch.tensor(1, device="cpu"),)
+        #     )
+
+    def test_device_to_mutation_computation(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = x.to("cpu")
+                y.add_(1)
+                l = x + 1
+                return l
+
+        inp = (torch.tensor(1, device="cpu"),)
+        m = Module()
+        with self.assertRaisesRegex(
+            RuntimeError, "Cannot do computation on mutated frozen tensor"
+        ):
+            inp = (torch.tensor(1, device="cpu"),)
+            m = torch.export.export_for_inference(
+                Module(), (torch.tensor(1, device="cpu"),)
+            )
+
+        # with self.assertRaisesRegex(
+        #     RuntimeError, "Cannot do computation on mutated frozen tensor"
+        # ):
+        #     export(
+        #         Module(), (torch.tensor(1, device="cpu"),)
+        #     )
+
+    def test_device_to_mutation_no_computation(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                z = x + 1
+                y = x.to("cpu")
+                y.add_(1)
+                z = z + 2
+                return z
+
+        m = Module()
+        ep = torch.export.export_for_inference(m, (torch.tensor(1, device="cpu"),))
+        self.assertEqual(ep.module()(torch.tensor(1, device="cpu")), m(torch.tensor(1, device="cpu")))
+
+        # ep = export(m, (torch.tensor(1, device="cpu"),))
+        # self.assertEqual(ep.module()(torch.tensor(1, device="cpu")), m(torch.tensor(1, device="cpu")))
 
     def test_float_conversion(self):
         class Module(torch.nn.Module):
@@ -3792,18 +3866,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertGreater(len(ops), 0)
         for op in ops:
             self.assertIn(op, (torch.ops.aten._to_copy.default,))
-
-    def test_device_to_mutation_float(self):
-        class Module(torch.nn.Module):
-            def forward(self, x):
-                y = x.float()
-                y.add_(1)
-                return y, x
-
-        with self.assertRaisesRegex(
-            RuntimeError, "cannot mutate tensors with frozen storage"
-        ):
-            export(Module(), (torch.tensor(1, dtype=torch.float),))
 
     def test_module(self):
         class MyLinear(torch.nn.Module):
