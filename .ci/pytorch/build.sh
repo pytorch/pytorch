@@ -203,6 +203,9 @@ if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *-clang18*-asan* ]]; then
+    sudo apt-get update && sudo apt-get install libclang-rt-18-dev -y
+  fi
   export LDSHARED="clang --shared"
   export USE_CUDA=0
   export USE_ASAN=1
