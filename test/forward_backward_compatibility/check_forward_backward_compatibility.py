@@ -314,7 +314,7 @@ def check_core_aten_ops_bc(existing_schemas):
     broken_ops = []
 
     for existing_schema in existing_schemas:
-        logging.info(
+        logging.debug(
             "processing existing core ATen op: %s::%s ",
             existing_schema.name,
             existing_schema.overload_name,
