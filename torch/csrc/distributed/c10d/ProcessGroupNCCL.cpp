@@ -4124,8 +4124,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
                " using GPU ",
                barDevIdx,
                " to perform barrier as devices used by this process are currently unknown. ",
-               "This can potentially cause a hang if this rank to GPU mapping is incorrect.",
-               "Specify device_ids in barrier() to force use of a particular device,",
+               "This can potentially cause a hang if this rank to GPU mapping is incorrect. ",
+               "Specify device_ids in barrier() to force use of a particular device, ",
                "or call init_process_group() with a device_id.");
   }
 
