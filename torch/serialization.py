@@ -169,7 +169,7 @@ def set_default_load_endianness(endianness):
     _default_load_endian = endianness
 
 
-_compute_crc32 : bool = True
+_compute_crc32: bool = True
 
 
 def get_default_crc32_options() -> bool:
@@ -185,7 +185,7 @@ def set_default_crc32_options(compute_crc32: bool):
     """
     Set whether :func:`torch.save` computes and writes crc32 for each record.
 
-    .. note:: 
+    .. note::
         Setting this to ``False`` may make unzip of the ``torch.save`` output
         fail or warn due to corrupted CRC32. However ``torch.load`` will be
         able to load the file correctly.
@@ -712,7 +712,9 @@ class _open_zipfile_writer_file(_opener):
             # For filenames with non-ascii characters, we rely on Python
             # for writing out the file.
             self.file_stream = io.FileIO(self.name, mode="w")
-            super().__init__(torch._C.PyTorchFileWriter(self.file_stream, _compute_crc32))
+            super().__init__(
+                torch._C.PyTorchFileWriter(self.file_stream, _compute_crc32)
+            )
         else:
             super().__init__(torch._C.PyTorchFileWriter(self.name, _compute_crc32))
 
