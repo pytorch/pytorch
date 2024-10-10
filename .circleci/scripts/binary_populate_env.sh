@@ -142,18 +142,22 @@ export PYTORCH_BUILD_NUMBER="$PYTORCH_BUILD_NUMBER"
 export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"
 export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}"
 
-# TODO: We don't need this anymore IIUC
-export TORCH_PACKAGE_NAME='torch'
-export TORCH_CONDA_BUILD_FOLDER='pytorch-nightly'
-export ANACONDA_USER='pytorch'
-
-export USE_FBGEMM=1
-export PIP_UPLOAD_FOLDER="$PIP_UPLOAD_FOLDER"
-export DOCKER_IMAGE="$DOCKER_IMAGE"
 
 
-export USE_GOLD_LINKER="${USE_GOLD_LINKER}"
-export USE_GLOO_WITH_OPENSSL="ON"
+if [[ "\$BUILD_ENVIRONMENT" != *aarch64* ]]; then
+  # TODO: We don't need this anymore IIUC
+  export TORCH_PACKAGE_NAME='torch'
+  export TORCH_CONDA_BUILD_FOLDER='pytorch-nightly'
+  export ANACONDA_USER='pytorch'
+
+  export USE_FBGEMM=1
+  export PIP_UPLOAD_FOLDER="$PIP_UPLOAD_FOLDER"
+  export DOCKER_IMAGE="$DOCKER_IMAGE"
+
+
+  export USE_GOLD_LINKER="${USE_GOLD_LINKER}"
+  export USE_GLOO_WITH_OPENSSL="ON"
+fi
 # =================== The above code will be executed inside Docker container ===================
 EOL
 
