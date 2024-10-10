@@ -1024,10 +1024,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // SEGMENT_FREE action occurs.
   // We attach hooks only once at the first PG creation.
   // Attaching hooks fails if CUDACachingAllocator is not initialized, so
-  // Init for CUDA is called (and is a no-op if CUDA is already
-  // initialized).
+  // lazyInitCUDA is called (and is a no-op if CUDA is already initialized).
   if (useTensorRegisterAllocatorHook_ && !allocatorHooksAttached) {
-    at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
+    at::globalContext().lazyInitCUDA();
     c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
         &cacheAllocatorRegisterHook);
     c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
