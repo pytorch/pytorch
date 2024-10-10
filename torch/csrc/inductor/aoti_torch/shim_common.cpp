@@ -65,7 +65,8 @@ std::string get_current_path() {
 #ifdef _WIN32
   return fs::current_path().string();
 #else
-  char currentPath[PATH_MAX];
+  // NOLINTNEXTLINE(*array*)
+  char currentPath[PATH_MAX]{};
   if (getcwd(currentPath, sizeof(currentPath)) != nullptr) {
     return std::string(currentPath);
   } else {
@@ -1064,7 +1065,7 @@ AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
 
   auto bytes = torch::jit::pickle_save(c10::IValue(*t));
   std::ofstream fout(tensor_filepath_to_save, std::ios::out | std::ios::binary);
-  fout.write(bytes.data(), bytes.size());
+  fout.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
   fout.close();
 
   std::cout << "aoti_torch_save_tensor_handle: Saved tensor to "
