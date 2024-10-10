@@ -18,7 +18,10 @@ import torch
 import torch._prims as prims
 import torch.utils._pytree as pytree
 from torch._prims.context import TorchRefsMode
-from torch._prims_common.wrappers import _maybe_remove_out_wrapper
+from torch._prims_common.wrappers import (
+    _maybe_remove_out_wrapper,
+    is_cpu_scalar,
+)
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_utils import outputs_alias_inputs
 from torch.testing import make_tensor
@@ -1001,6 +1004,8 @@ class TestCommon(TestCase):
                 out = _apply_out_transform(_case_three_transform, expected)
 
                 if op.is_factory_function and sample.kwargs.get("device", None) is None:
+                    op_out(out=out)
+                elif is_cpu_scalar(sample.input):
                     op_out(out=out)
                 else:
                     msg_fail = (
