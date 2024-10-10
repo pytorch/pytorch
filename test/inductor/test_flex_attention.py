@@ -2784,7 +2784,7 @@ class TestBlockMask(InductorTestCase):
 
     @supported_platform
     def test_compiling_create_block_mask(self):
-        seq = torch.arange(512) // 127
+        seq = torch.arange(512, device="cuda") // 127
 
         def mask_mod(b, h, q, kv):
             return (q >= kv) & (seq[q] == seq[kv])

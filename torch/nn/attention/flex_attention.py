@@ -656,8 +656,10 @@ def _convert_mask_to_block_mask(
 ) -> Tuple[Tensor, Optional[Tensor]]:
     assert mask.dtype == torch.bool
     mask = _broadcast_to_dim(mask, 4)
+
     def padding_needed_for_multiple(x, multiple):
         return _round_up_to_multiple(x, multiple) - x
+
     mask = torch.nn.functional.pad(
         mask,
         (
@@ -861,7 +863,8 @@ def create_block_mask(
 
     if _compile:
         warnings.warn(
-            "_compile flag on create_block_mask was originally added to work around a torch.compile limitation. That limitation has since been addressed. So, to compile create_block_mask, we suggest doing torch.compile(create_block_mask). This still works for now, but will be removed in the future."
+            "_compile flag on create_block_mask was originally added to work around a torch.compile limitation. That limitation has since been addressed. So, to compile create_block_mask, we suggest doing torch.compile(create_block_mask). This still works for now, but will be removed in the future.",
+            DeprecationWarning
         )
         return torch.compile(create_block_mask)(
             mask_mod, B, H, Q_LEN, KV_LEN, device, BLOCK_SIZE
