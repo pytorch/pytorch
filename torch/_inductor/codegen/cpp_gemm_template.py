@@ -443,8 +443,9 @@ class CppPackedGemmTemplate(CppTemplate):
             if dtype_A is torch.bfloat16 and dtype_B is torch.int8 and Kr != 1:
                 # We will cache dequantized weights (BF16) in L1D for AMX micro-kernel.
                 # In this case, the choice of the micro-kernel being used can't be decoupled from
-                # the cache blocking
-                num_byte_B *= 2
+                # the cache blocking.
+                # TODO: Decouple the choice of micro-kernel from cache blocking
+                num_byte_B *= num_byte_A
 
             # NOTE [CPP GEMM Cache Blocking Algorithm]
             # Our overall strategy is to

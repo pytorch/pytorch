@@ -512,13 +512,14 @@ class CppMicroGemmAMX(CppMicroGemm):
     {{kernel.assert_function}}(K % 2 == 0, "K dimension must be multiple of 2");
 {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
     // Create a stack-allocated buffer for tiles of B.
-    // Except maybe for the tail-case, an AMX tile of B has 16x32 BF16 elements
+    // Except maybe for the tail-case, an AMX tile of B has 16x32 BF16 elements,
+    // but to make things simple, we'll allocate space for a 16x32 tile even for the tail.
     // It's possible that N may not be equal to Nr, but might be a multiple of it.
     // In that case, Kc (which is K in the microkernel) would be smaller (than the case in which N == Nr).
     const auto num_elements_per_b_tile = 512;
     const auto buf_size_per_nr_block = ((K + {{block_k}} - 1) / {{block_k}}) * num_elements_per_b_tile * 2;
     const auto buf_size = buf_size_per_nr_block * (N / {{block_n}});
-    alignas(4096) {{input_t}} bf16_weights_buf[buf_size];
+    alignas(4096) {{input_t}} dequantized_B_buf[buf_size];
 
     const auto last_k_offset = K / {{block_k}} * {{block_k}};
     const auto tail_k_size = K - last_k_offset;
@@ -531,8 +532,8 @@ class CppMicroGemmAMX(CppMicroGemm):
         b_bf16.store(dst);
     };
 
-    auto load_B_in_buf = [&]({{input2_t}}* B_ptr, int idx) {
-        {{input_t}}* base_addr = bf16_weights_buf + idx;
+    auto load_B_tile = [&]({{input2_t}}* B_ptr, int idx) {
+        {{input_t}}* base_addr = dequantized_B_buf + idx;
         {{kernel.unroll_pragma(8)}}
         for (int i = 0; i < num_b_rows; i++) {
             load_B_row(
@@ -541,14 +542,14 @@ class CppMicroGemmAMX(CppMicroGemm):
             );
         }
     };
-    auto load_weights = [&](int n) {
-        // Load weights & cache them in L1D.
+    auto load_dequantized_B = [&](int n) {
+        // Load a tile of B & cache it in L1D.
         const int64_t init_idx =  n * buf_size_per_nr_block;
         {{kernel.unroll_pragma(4)}}
         for (int k = 0; k < last_k_offset; k += {{block_k}}) {
             {{kernel.unroll_pragma(2)}}
             for (int tile_col = 0; tile_col <= 1; tile_col++) {
-                load_B_in_buf(const_cast<{{input2_t}}*>(B) + k * ldb + tile_col * {{16 * vnni_size}},
+                load_B_tile(const_cast<{{input2_t}}*>(B) + k * ldb + tile_col * {{16 * vnni_size}},
                               (k / {{block_k // 2}} + tile_col) * num_elements_per_b_tile + init_idx);
             }
         }
@@ -561,8 +562,8 @@ class CppMicroGemmAMX(CppMicroGemm):
         for (int64_t n = 0; n < N; n += {{block_n}}) {
 {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
         if C10_UNLIKELY(m == 0) {
-            // Dequantize K * 32 int8 weight elements into BF16
-            load_weights(n / {{block_n}});
+            // Dequantize K * 32 int8 B elements into BF16
+            load_dequantized_B(n / {{block_n}});
         }
 {%- endif %}
 {%- for num_rows in range(block_m, 0, -16) %}
@@ -574,7 +575,7 @@ class CppMicroGemmAMX(CppMicroGemm):
                     amx_state,
                     A + m * lda,
 {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
-                    bf16_weights_buf +  n * buf_size_per_nr_block,
+                    dequantized_B_buf +  n * buf_size_per_nr_block,
 {%- else %}
                     B + n,
 {%- endif %}
@@ -594,7 +595,7 @@ class CppMicroGemmAMX(CppMicroGemm):
                     amx_state,
                     A + m_tail * lda,
 {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
-                    bf16_weights_buf +  n * buf_size_per_nr_block,
+                    dequantized_B_buf +  n * buf_size_per_nr_block,
 {%- else %}
                     B + n,
 {%- endif %}
