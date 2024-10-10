@@ -2694,6 +2694,8 @@ if HAS_GPU:
 class CustomOpTests(torch._inductor.test_case.TestCase):
     """Tests for custom ops wrapping triton kernels"""
 
+    device_type = GPU_TYPE
+
     @requires_gpu
     @common_utils.parametrize("autotuned", [False, True])
     @common_utils.parametrize("dynamic", [False, True])
