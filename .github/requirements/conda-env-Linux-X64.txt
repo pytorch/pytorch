@@ -1,0 +1,8 @@
+cmake=3.22.*
+mkl=2022.1.0
+mkl-include=2022.1.0
+ninja=1.10.2
+numpy=1.23.3
+pyyaml=6.0
+setuptools=68.2.2
+typing-extensions=4.9.0

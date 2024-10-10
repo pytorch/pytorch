@@ -1,0 +1,225 @@
+// To regenerate header, use:
+// flatc --cpp --gen-mutable --no-prefix --scoped-enums mobile_bytecode.fbs
+
+file_identifier "PTMF";
+
+namespace torch.jit.mobile.serialization;
+
+struct Int {
+  int_val:long;
+}
+
+struct Bool {
+  bool_val:bool;
+}
+
+struct Double{
+  double_val:double;
+}
+
+struct PerTensorAffineSchema {
+  q_scale:double;
+  q_zero_point:int;
+}
+
+table QuantizedSchema {
+  qscheme:byte;
+  scale:double;
+  zero_point:int;
+  scales:TensorMetadata;
+  zero_points:TensorMetadata;
+  axis:int;
+}
+
+table TensorMetadata {
+  // torch._utils _rebuild_tensor_v2
+  storage_location_index:uint;
+  // enum ScalarType
+  scalar_type:byte;
+  storage_offset:int;
+  sizes:[int];
+  strides:[int];
+  requires_grad:bool;
+
+  // only set for quantized tensors
+  quantized_schema:QuantizedSchema;
+}
+
+table String {
+  data:string;
+}
+
+table Device {
+  str:string;
+}
+
+table List {
+  items:[uint];
+  annotation_str:string;  // to recover key/val type
+}
+
+table IntList {
+  items:[long];
+}
+
+table DoubleList {
+  items:[double];
+}
+
+table BoolList {
+  items:[bool];
+}
+
+table Tuple {
+  items:[uint];
+}
+
+table Dict {
+  keys:[uint];
+  values:[uint];
+  annotation_str:string;  // to recover key/val type
+}
+
+enum TypeType :ubyte {
+  UNSET,
+  CLASS_WITH_FIELD,
+  CUSTOM_CLASS,
+  CLASS_WITH_SETSTATE,
+  NON_OBJ,
+}
+
+table ObjectType {
+  type_name:string;
+  type:TypeType;
+  // Below fields are optional
+  attr_names:[string];
+}
+
+table Object {
+  type_index:uint;
+  state:uint;
+  attrs:[uint];
+  setstate_func:uint;
+}
+
+struct ComplexDouble {
+  real:double;
+  imag:double;
+}
+
+table EnumValue {
+  type_name:string;
+  value:uint;  // index to ivalues;
+}
+
+
+struct Instruction {
+  // Should op be enum instead?
+  op:byte;
+  n:ushort;
+  x:int;
+}
+
+table Operator {
+  name:string;
+  overload_name:string;
+  num_args_serialized:int = -1;
+}
+
+table Arg {
+  name:string;
+  // Why do we use string to represent types
+  // rather than index into Code.types?
+  type:string;
+  default_value:uint;  // position into ivalues
+}
+
+table Schema {
+  arguments:[Arg];
+  returns:[Arg];
+}
+
+table DebugInfo {
+  debug_handle:[long];
+}
+
+table Function {
+  qn:string;
+  instructions:[Instruction];
+  operators:[Operator];
+  constants:[uint];  // index to ivalue
+  type_annotations:[string];
+  register_size:int;
+  schema:Schema;
+  debug_info:DebugInfo;
+  class_type:uint; // index into type table
+}
+
+table StorageData {
+  data:[ubyte] (force_align:16);
+}
+
+// Is it needed to represent other types?
+union IValueUnion {
+  Int,
+  Bool,
+  Double,
+  ComplexDouble,
+  TensorMetadata,
+  String,
+  List,
+  Tuple,
+  Dict,
+  Object,
+  IntList,
+  DoubleList,
+  BoolList,
+  Device,
+  EnumValue,
+  Function,
+}
+
+table IValue {
+  val:IValueUnion;
+}
+
+table ExtraFile {
+  name:string;
+  content:string;
+}
+
+table Module {
+  // denotes the bytecode version of the mobile Module
+  // this starts from 9 for a flatbuffer file
+  // versions 8 and below are reserved pickle
+  // Version is bumped when changes in model serialization/execution
+  // can no longer work in current version
+  // To read more:
+  // https://github.com/pytorch/pytorch/blob/master/caffe2/serialize/versions.h#L96
+  bytecode_version:uint;
+
+  extra_files:[ExtraFile];
+  methods:[uint];  // index to ivalues
+  state_obj:uint; // index to ivalues
+  ivalues:[IValue];
+  storage_data_size:int;  // number of storage data;
+  storage_data:[StorageData];
+  object_types:[ObjectType];
+  jit_sources:[ExtraFile];
+  jit_constants:[uint];  // index to ivalues
+
+  // version of operator
+  // Version is bumped when changes in operator
+  // can no longer work in current version
+  // To read more:
+  // https://github.com/pytorch/rfcs/blob/master/RFC-0017-PyTorch-Operator-Versioning.md
+  operator_version:uint;
+
+  // Size of ivalue that comes from the mobile module.
+  // Because the ivalues array above can also have ivalues that cames from
+  // the jit::Module that got it's source attached to flatbuffer file.
+  // this should be smaller than ivalues.size()
+  mobile_ivalue_size:uint;
+}
+
+root_type Module;
