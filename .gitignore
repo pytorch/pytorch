@@ -1,3 +1,4 @@
+
 # READ THIS BEFORE YOU REFACTOR ME
 #
 # setup.py uses the list of patterns in this file to decide
@@ -378,3 +379,23 @@ android/pytorch_android_torchvision/.cxx
 .arcconfig
 .stable_pyre_client
 .pyre_client
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# Test coverage results
+.coverage
+*.cover
+
+# PyTorch cached datasets
+~/.torchtext/
+
+# Virtual environment directories
+venv/
+.env/
+
+# Other unnecessary files
+.DS_Store
+
+

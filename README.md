@@ -1,3 +1,4 @@
+
 ![PyTorch Logo](https://github.com/pytorch/pytorch/raw/main/docs/source/_static/img/pytorch-logo-dark.png)
 
 --------------------------------------------------------------------------------
@@ -499,3 +500,45 @@ Note: This project is unrelated to [hughperkins/pytorch](https://github.com/hugh
 ## License
 
 PyTorch has a BSD-style license, as found in the [LICENSE](LICENSE) file.
+
+# Naive Bayes Text Classification Using PyTorch and TorchText
+
+This project implements a **Naive Bayes classifier** for binary text classification using the **IMDB movie reviews dataset**. The classifier is built using **PyTorch** and **TorchText** to predict whether a given movie review is **positive** or **negative** based on the text content.
+
+---
+
+## Key Features
+
+- **Naive Bayes Classifier**: A simple, yet effective probabilistic classifier commonly used for text classification tasks. It predicts sentiment by computing the likelihood of words occurring in positive or negative reviews.
+  
+- **IMDB Dataset**: Utilizes the IMDB movie review dataset, a benchmark dataset for binary sentiment classification tasks, to train and evaluate the model.
+  
+- **Text Preprocessing**: Implements text preprocessing steps such as tokenization and conversion of text into **Bag-of-Words (BoW)** vectors for feature extraction.
+
+- **Model Training and Evaluation**: Trains the model on the IMDB training data and evaluates its performance on the test data.
+
+- **Comprehensive Unit Tests**: Provides a suite of unit tests to ensure the correctness of the classifier, handle various edge cases, and evaluate its performance on different types of input.
+
+---
+
+## Project Structure
+
+- **`naive_bayes_text_classification.py`**: Main script that implements the Naive Bayes classifier, including functions for loading the IMDB dataset, building the vocabulary, training the model, and evaluating its accuracy.
+
+- **`test_naive_bayes.py`**: Unit tests for verifying the correctness of the Naive Bayes classifier, its helper functions, and its handling of edge cases.
+
+- **`README.md`**: This file, which provides instructions for setup, usage, and testing.
+
+---
+
+## Installation Instructions
+
+### Prerequisites
+
+Before running the code, ensure that you have the following installed:
+
+- **Python 3.x** (preferably 3.7 or above)
+- **PyTorch**
+- **TorchText**
+- **Virtualenv**
+
