@@ -1363,7 +1363,7 @@ class TritonKernel(SIMDKernel):
             self.codegen_reduction_inds(self.body)
 
     def need_numel_args(self):
-        r"""
+        """
         Indicate whether we need provide numel as arguments for the generated
         kernel calls in the benchmark.
 
@@ -2973,21 +2973,6 @@ class TritonKernel(SIMDKernel):
             if tree.prefix == "x" and self.no_x_dim:
                 code.writeline("XBLOCK: tl.constexpr = 1")
 
-        # Compute rnumel and RBLOCK. These are products over all reduction dimensions.
-        if self.inside_reduction:
-            # rnumel = r0_numel * ... * r(n-1)_numel
-            reduction_trees = [tree for tree in self.range_trees if tree.is_reduction]
-            rnumel = " * ".join(
-                sorted(f"{tree.prefix}numel" for tree in reduction_trees)
-            )
-            code.writeline(f"rnumel = {rnumel}")
-
-            # RBLOCK = R0_BLOCK * ... * R(N-1)_BLOCK
-            rblock = sympy_product(
-                TritonSymbols.block_sizes[tree.symt] for tree in reduction_trees
-            )
-            code.writeline(f"RBLOCK: tl.constexpr = {self.kexpr(rblock)}")
-
     def _get_grid_fn_str(self):
         return "grid"
 
@@ -3152,24 +3137,40 @@ class TritonKernel(SIMDKernel):
         """
         Converts ND reduction indices into rindex, rbase, roffset, etc.
         """
-        rprefixes = self.get_reduction_prefixes()
-        if len(rprefixes) < 1:
+        rn_prefixes = self.get_reduction_prefixes()
+        if len(rn_prefixes) < 1:
             return
 
         def get_rsymbols(suffix: str, **kwargs) -> List[sympy.Symbol]:
-            return [sympy.Symbol(f"{prefix}{suffix}", **kwargs) for prefix in rprefixes]
+            return [
+                sympy.Symbol(f"{prefix}{suffix}", **kwargs) for prefix in rn_prefixes
+            ]
 
         # Gather relevant numels, indices, etc.
-        rnumels = get_rsymbols("numel", integer=True, positive=True)
+        rn_numels = get_rsymbols("numel", integer=True, positive=True)
         rn_bases = get_rsymbols("base", integer=True, nonnegative=True)
         rn_offsets = get_rsymbols("offset", integer=True, nonnegative=True)
         rn_inds = get_rsymbols("index", integer=True, nonnegative=True)
+        rn_blocks = [
+            TritonSymbols.block_sizes[tree.symt]
+            for tree in self.range_trees
+            if tree.is_reduction
+        ]
+
+        # rnumel = r0_numel * ... * r(n-1)_numel
+        reduction_trees = [tree for tree in self.range_trees if tree.is_reduction]
+        rnumel = sympy_product(rn_numels)
+        buffer.splice(f"rnumel = {self.kexpr(rnumel)}")
+
+        # RBLOCK = R0_BLOCK * ... * R(N-1)_BLOCK
+        rblock = sympy_product(rn_blocks)
+        buffer.splice(f"RBLOCK: tl.constexpr = {self.kexpr(rblock)}")
 
         # Compute coefficients to convert ND indices to linear.
         # For example:
         #   rindex = r0_index * r1_numel * ... * rn_numel + ... + rn_index.
         ridx_coeffs = [
-            sympy_product(rnumels[idx + 1 :]) for idx in range(len(rprefixes) - 1)
+            sympy_product(rn_numels[idx + 1 :]) for idx in range(len(rn_prefixes) - 1)
         ] + [sympy.Integer(1)]
 
         # Compute roffset and rindex.
