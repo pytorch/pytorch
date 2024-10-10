@@ -269,4 +269,4 @@ AOTITorchError aoti_torch_cpu__linear_pointwise_binary(
   });
 }
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()
