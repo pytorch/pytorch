@@ -450,7 +450,7 @@ BufHandle Buf::make(
     const std::vector<ExprHandle>& dims,
     Dtype dtype,
     std::optional<ExprHandle> initializer,
-    std::optional<std::vector<ExprHandle>> strides,
+    const std::optional<std::vector<ExprHandle>>& strides,
     std::optional<ExprHandle> qscale,
     std::optional<ExprHandle> qzero) {
   std::optional<std::vector<ExprPtr>> opt_strides;
@@ -552,7 +552,7 @@ bool Buf::is_stride_one(int cur_dim) const {
   return exprEquals(strides_[cur_dim], alloc<LongImm>(1));
 }
 
-ExprHandle expr_to_vec(ExprHandle v, int lanes) {
+ExprHandle expr_to_vec(const ExprHandle& v, int lanes) {
   if (lanes == 1) {
     return v;
   } else {

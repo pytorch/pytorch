@@ -47,7 +47,7 @@ load_tests = load_tests
 
 class TestLRScheduler(TestCase):
     class SchedulerTestNet(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.conv1 = torch.nn.Conv2d(1, 1, 1)
             self.conv2 = torch.nn.Conv2d(1, 1, 1)
@@ -1572,7 +1572,7 @@ class TestLRScheduler(TestCase):
 
         # Case 3: Custom `scale_fn`, a callable class
         class ScaleFn:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.x = 0.5
 
             def __call__(self, _):
@@ -2404,6 +2404,60 @@ class TestLRScheduler(TestCase):
             scheduler2 = LRClass(self.opt)
             scheduler2.load_state_dict(state_dict_loaded)
             self.assertEqual(scheduler2.state_dict(), state_dict)
+
+    @parametrize("min_lr", ["scalar", "list"])
+    def test_add_param_group_does_not_break_reduce_lr_on_plateau(self, min_lr):
+        epochs = 20
+        for param_group in self.opt.param_groups:
+            param_group["lr"] = 0.5
+        targets = [[0.5] * 6 + [0.05] * (5 + 6) + [0.005] * 4]
+        metrics = [1] * 7 + [0.6] + [0.5] * 12
+        scheduler = ReduceLROnPlateau(
+            self.opt,
+            mode="min",
+            threshold_mode="rel",
+            threshold=0.1,
+            patience=5,
+            cooldown=5,
+            min_lr=0 if min_lr == "scalar" else [1e-5, 1e-4],
+        )
+        for epoch in range(epochs):
+            # Point is to test the use case in #104361
+            if epoch == 8:
+                param = torch.nn.Parameter(torch.rand(2, 3))
+                self.opt.add_param_group({"params": [param], "lr": 0.05})
+                if min_lr == "list":
+                    scheduler.min_lrs.append(1e-6)
+            self.opt.step()
+            scheduler.step(metrics[epoch])
+            for param_group, target in zip(self.opt.param_groups, targets):
+                self.assertEqual(
+                    target[epoch],
+                    param_group["lr"],
+                    msg="LR is wrong in epoch {}: expected {}, got {}".format(
+                        epoch, target[epoch], param_group["lr"]
+                    ),
+                    atol=1e-5,
+                    rtol=0,
+                )
+
+    def test_add_param_group_errors_reduce_lr_on_plateau(self):
+        scheduler = ReduceLROnPlateau(
+            self.opt,
+            mode="min",
+            threshold_mode="rel",
+            threshold=1e-5,
+            patience=0,
+            cooldown=0,
+            min_lr=[1e-5, 1e-4],
+        )
+        param = torch.nn.Parameter(torch.rand(2, 3))
+        self.opt.add_param_group({"params": [param], "lr": 0.05})
+        self.opt.step()
+        scheduler.step(1)
+        with self.assertRaisesRegex(RuntimeError, "The number of param groups in the"):
+            self.opt.step()
+            scheduler.step(1.3)
 
     @parametrize(
         "LRClass",

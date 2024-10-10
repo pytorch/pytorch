@@ -169,7 +169,7 @@ class TestPackageFX(PackageTestCase):
 
     def test_package_fx_wrap(self):
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, a):

@@ -145,6 +145,14 @@ void Context::setSDPUseMath(bool e) {
   enabled_mathSDP = e;
 }
 
+bool Context::allowFP16BF16ReductionMathSDP() const {
+  return allow_fp16_bf16_reduction_mathSDP;
+}
+
+void Context::setAllowFP16BF16ReductionMathSDP(bool e) {
+  allow_fp16_bf16_reduction_mathSDP = e;
+}
+
 bool Context::userEnabledCuDNNSDP() const {
   return enabled_cudnnSDP;
 }
@@ -471,7 +479,7 @@ Allocator* getCPUAllocator() {
 }
 
 // override_allow_tf32_flag = true
-//    means the allow_tf32 flags are overrided and tf32 is force disabled
+//    means the allow_tf32 flags are overridden and tf32 is force disabled
 // override_allow_tf32_flag = false
 //    means the original allow_tf32 flags are followed
 thread_local bool override_allow_tf32_flag = false;

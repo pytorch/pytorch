@@ -136,7 +136,8 @@ class StoreTestBase:
 
     def _test_append(self, store):
         if not store.has_extended_api():
-            self.skipTest("Store doesn't support extended APIs")
+            # Just return for stores that don't support extended APIs.
+            return
         store.set("foo", "po")
         store.append("foo", "tato")
         store.append("bar", "po")
@@ -149,7 +150,8 @@ class StoreTestBase:
 
     def _test_multi_set(self, store):
         if not store.has_extended_api():
-            self.skipTest("Store doesn't support extended APIs")
+            # Just return for stores that don't support extended APIs.
+            return
         store.multi_set(["foo", "bar"], ["po", "tato"])
         self.assertEqual(b"po", store.get("foo"))
         self.assertEqual(b"tato", store.get("bar"))
@@ -159,7 +161,8 @@ class StoreTestBase:
 
     def _test_multi_get(self, store):
         if not store.has_extended_api():
-            self.skipTest("Store doesn't support extended APIs")
+            # Just return for stores that don't support extended APIs.
+            return
         store.set("foo", "po")
         store.set("bar", "tato")
         v0, v1 = store.multi_get(["foo", "bar"])
@@ -246,6 +249,10 @@ class PrefixStoreTest(TestCase):
             with self.subTest(f"Testing getting underlying_store for {type(store)}"):
                 prefix_store = dist.PrefixStore("prefix", store)
                 self.assertEqual(prefix_store.underlying_store, store)
+
+        # We do not allow passing in None as the underlying store, this would cause a segfault if used
+        with self.assertRaises(ValueError):
+            dist.PrefixStore("prefix", None)
 
 
 class PrefixFileStoreTest(TestCase, StoreTestBase):
@@ -578,7 +585,7 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
 
 
 class MyPythonStore(dist.Store):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.store = {}
 
@@ -780,7 +787,7 @@ class RendezvousTCPTest(TestCase):
 
 
 class DummyStore(dist.Store):
-    def __init__(self):
+    def __init__(self) -> None:
         self.appends = []
         self.multi_sets = []
         self.multi_gets = []

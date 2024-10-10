@@ -210,6 +210,47 @@ class UninitializedParameter(UninitializedTensorMixin, Parameter):
             return result
 
 
+# Metaclass to combine _TensorMeta and the instance check override for Buffer.
+class _BufferMeta(torch._C._TensorMeta):
+    # Make `isinstance(t, Buffer)` return True for custom tensor instances that have the _is_buffer flag.
+    def __instancecheck__(self, instance):
+        if self is Buffer:
+            if isinstance(instance, torch.Tensor) and getattr(
+                instance, "_is_buffer", False
+            ):
+                return True
+        return super().__instancecheck__(instance)
+
+
+class Buffer(torch.Tensor, metaclass=_BufferMeta):
+    r"""A kind of Tensor that should not be considered a model
+    parameter. For example, BatchNorm's ``running_mean`` is not a parameter, but is part of the module's state.
+
+    Buffers are :class:`~torch.Tensor` subclasses, that have a
+    very special property when used with :class:`Module` s -- when they're
+    assigned as Module attributes they are automatically added to the list of
+    its buffers, and will appear e.g. in :meth:`~torch.nn.Module.buffers` iterator.
+    Assigning a Tensor doesn't have such effect. One can still assign a Tensor as explicitly by using
+    the :meth:`~torch.nn.Module.register_buffer` function.
+
+    Args:
+        data (Tensor): buffer tensor.
+        persistent (bool, optional): whether the buffer is part of the module's
+            :attr:`state_dict`. Default: ``True``
+    """
+
+    def __new__(cls, data=None, *, persistent=True):
+        if data is None:
+            data = torch.empty(0)
+
+        t = data.detach().requires_grad_(data.requires_grad)
+        t.persistent = persistent
+        t._is_buffer = True
+        return t
+
+    __torch_function__ = _disabled_torch_function_impl
+
+
 class UninitializedBuffer(UninitializedTensorMixin, torch.Tensor):
     r"""A buffer that is not initialized.
 
@@ -228,7 +269,12 @@ class UninitializedBuffer(UninitializedTensorMixin, torch.Tensor):
 
     cls_to_become = torch.Tensor
 
-    def __new__(cls, requires_grad=False, device=None, dtype=None) -> None:
+    def __new__(
+        cls, requires_grad=False, device=None, dtype=None, persistent=True
+    ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         data = torch.empty(0, **factory_kwargs)
-        return torch.Tensor._make_subclass(cls, data, requires_grad)
+        ret = torch.Tensor._make_subclass(cls, data, requires_grad)
+        ret.persistent = persistent
+        ret._is_buffer = True
+        return ret

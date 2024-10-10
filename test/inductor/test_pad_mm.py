@@ -9,10 +9,12 @@ from torch._inductor.fx_passes.pad_mm import (
     get_pad_cache,
     get_padded_length,
     should_pad_common,
+    should_pad_mm_bf16,
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -30,7 +32,7 @@ class PadMMTest(TestCase):
         N = 30
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w = rand_strided(
                     (K2, N), (1, K2), device="cuda", dtype=torch.float32
@@ -62,7 +64,7 @@ class PadMMTest(TestCase):
         N = 100
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w = rand_strided(
                     (K2, N), (1, K2), device="cuda", dtype=torch.float32
@@ -95,7 +97,7 @@ class PadMMTest(TestCase):
         N = 30
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, a, b):
@@ -122,7 +124,7 @@ class PadMMTest(TestCase):
         N = 30
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, a, b):
@@ -151,7 +153,7 @@ class PadMMTest(TestCase):
         N = 30
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, a, b):
@@ -190,7 +192,7 @@ class PadMMTest(TestCase):
         N = 40
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, a, b):
@@ -219,7 +221,7 @@ class PadMMTest(TestCase):
         N = 41
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, a, b):
@@ -248,7 +250,7 @@ class PadMMTest(TestCase):
         N = 41
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, a, b):
@@ -277,7 +279,7 @@ class PadMMTest(TestCase):
         N = 40
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, a, b, c):
@@ -306,7 +308,7 @@ class PadMMTest(TestCase):
         N = 40
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, a, b, c):
@@ -448,6 +450,44 @@ class PadMMTest(TestCase):
         FileCheck().check_count("exclude_pad:False", 3, exactly=True).run(
             repr(get_pad_cache().get_local_cache())
         )
+
+    @unittest.skipIf(
+        not torch.cuda.is_available() or torch.cuda.get_device_capability() >= (9, 0),
+        "No perf regression on H100+ with BF16",
+    )
+    @skipIfRocm
+    @fresh_inductor_cache()
+    @inductor_config.patch(
+        post_grad_fusion_options={"pad_aten_mm_pass": {"k_threshold_to_pad": 8388608}}
+    )
+    def test_pad_mm_bf16(self):
+        m = 2
+        n = 13
+        k = 15691904
+        mat1 = torch.ones((m, k), device="cuda", dtype=torch.bfloat16)
+        mat2 = torch.ones((k, n), device="cuda", dtype=torch.bfloat16)
+        expected_alignment = get_alignment_size(mat1)
+
+        assert expected_alignment == 8, "Alignment for bfloat16 should be 8"
+        assert should_pad_common(
+            mat1, mat2
+        ), "This should pass the common padding criteria"
+        assert should_pad_mm_bf16(
+            mat1.dtype, m, n, k
+        ), "This should pass the should_pad_mm_bf16 padding criteria"
+
+        @torch.compile()
+        def mm(mat1, mat2):
+            return torch.mm(mat1, mat2)
+
+        res2, (code,) = run_and_get_code(mm, mat1, mat2)
+        mm_expected_result = torch.mm(mat1, mat2)
+        # in call code, expect to see a single pad per input, and then we should see padded allocation for output
+        FileCheck().check("del async_compile").check_count(
+            ".run(", 2, exactly=True
+        ).check("empty_strided_cuda((8, 16)").run(code)
+
+        assert torch.allclose(res2, mm_expected_result), "MM results are not identical"
 
 
 if __name__ == "__main__":

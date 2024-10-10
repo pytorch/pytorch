@@ -1,10 +1,10 @@
 import logging
-
 from typing import Dict, Optional, Tuple, Type
 
 import sympy
 
 from torch.utils._sympy.functions import FloorDiv
+
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ def try_solve(
     thing: sympy.Basic,
     trials: int = 5,
     floordiv_inequality: bool = True,
-) -> Optional[Tuple[sympy.Rel, sympy.Basic]]:
+) -> Optional[Tuple[sympy.Rel, sympy.Expr]]:
     mirror = mirror_rel_op(type(expr))
 
     # Ignore unsupported expressions:

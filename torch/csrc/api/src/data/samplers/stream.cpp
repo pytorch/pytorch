@@ -20,14 +20,14 @@ BatchSize::operator size_t() const noexcept {
 
 StreamSampler::StreamSampler(size_t epoch_size) : epoch_size_(epoch_size) {}
 
-void StreamSampler::reset(optional<size_t> new_size) {
+void StreamSampler::reset(std::optional<size_t> new_size) {
   if (new_size.has_value()) {
     epoch_size_ = *new_size;
   }
   examples_retrieved_so_far_ = 0;
 }
 
-optional<BatchSize> StreamSampler::next(size_t batch_size) {
+std::optional<BatchSize> StreamSampler::next(size_t batch_size) {
   AT_ASSERT(examples_retrieved_so_far_ <= epoch_size_);
   if (examples_retrieved_so_far_ == epoch_size_) {
     return nullopt;

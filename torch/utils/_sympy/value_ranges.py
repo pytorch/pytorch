@@ -24,8 +24,8 @@ from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
 from torch._logging import LazyString
-
 from torch._prims_common import dtype_to_type
+
 from .functions import (
     _keep_float,
     FloatTrueDiv,
@@ -44,6 +44,7 @@ from .functions import (
 )
 from .interp import sympy_interp
 from .numbers import int_oo, IntInfinity, NegativeIntInfinity
+
 
 log = logging.getLogger(__name__)
 
@@ -86,7 +87,9 @@ def simple_sympify(e):
 def sympy_generic_le(lower, upper):
     if isinstance(lower, sympy.Expr):
         assert isinstance(upper, sympy.Expr)
-        return lower <= upper
+        # instead of lower <= upper, we do upper >= lower since upper is mostly int_oo
+        # and we have better code paths there.
+        return upper >= lower
     else:
         # only negative condition is True > False
         assert isinstance(lower, SympyBoolean) and isinstance(upper, SympyBoolean), (
@@ -551,9 +554,9 @@ class SymPyValueRangeAnalysis:
 
         def safe_mul(a, b):
             # Make unknown() * wrap(0.0) == wrap(0.0)
-            if a == 0.0:
+            if a == 0.0 or a == 0:
                 return a
-            elif b == 0.0:
+            elif b == 0.0 or b == 0:
                 return b
             else:
                 return a * b
@@ -589,7 +592,7 @@ class SymPyValueRangeAnalysis:
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
         if 0 in b:
-            return ValueRanges.unknown()
+            return ValueRanges.unknown_int()
         products = []
         for x, y in itertools.product([a.lower, a.upper], [b.lower, b.upper]):
             r = FloorDiv(x, y)
@@ -936,7 +939,7 @@ class SymPyValueRangeAnalysis:
 
 
 class ValueRangeAnalysis(SymPyValueRangeAnalysis):
-    def __init__(self):
+    def __init__(self) -> None:
         self.name = "ValueRangeAnalysis"
         boolean_operators = (
             "xor",
@@ -1060,26 +1063,24 @@ def bound_sympy(
     # If there's a tracing context, augment available constrained ranges.
     context = torch._guards.TracingContext.try_get()
     if context and context.fake_mode.shape_env:
-        ranges = {**context.fake_mode.shape_env.var_to_range, **ranges}
+        if ranges:
+            ranges = {**context.fake_mode.shape_env.var_to_range, **ranges}
+        else:
+            ranges = context.fake_mode.shape_env.var_to_range
 
-    unbounded_vars = expr.free_symbols - ranges.keys()
-    if unbounded_vars:
-        # Give some bounds to the free variables via their SymPy assumptions
-        # TODO A better way of doing this would be to assign them a range upon creation, as
-        #      size variables can come with a lower bound of 2, as we specialize on 0 and 1
-        unbounded_ranges: Dict[sympy.Symbol, ValueRanges] = {}
-        for s in unbounded_vars:
-            if s.is_integer:  # type: ignore[attr-defined]
-                if s.is_positive:  # type: ignore[attr-defined]
-                    vr = ValueRanges(1, int_oo)
-                elif s.is_nonnegative:  # type: ignore[attr-defined]
-                    vr = ValueRanges(0, int_oo)
-                else:
-                    vr = ValueRanges.unknown_int()
+    def missing_handler(s):
+        if s.is_integer:  # type: ignore[attr-defined]
+            if s.is_positive:  # type: ignore[attr-defined]
+                vr = ValueRanges(1, int_oo)
+            elif s.is_nonnegative:  # type: ignore[attr-defined]
+                vr = ValueRanges(0, int_oo)
             else:
-                # Don't bother trying very hard here
-                vr = ValueRanges.unknown()
-            unbounded_ranges[s] = vr  # type: ignore[index]
-        ranges = {**ranges, **unbounded_ranges}
+                vr = ValueRanges.unknown_int()
+        else:
+            # Don't bother trying very hard here
+            vr = ValueRanges.unknown()
+        return vr
 
-    return sympy_interp(SymPyValueRangeAnalysis, ranges, expr)
+    return sympy_interp(
+        SymPyValueRangeAnalysis, ranges, expr, missing_handler=missing_handler
+    )

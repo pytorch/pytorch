@@ -10,7 +10,7 @@ from torch.fx._lazy_graph_module import _force_skip_lazy_graph_module
 
 
 class Seq(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layers = torch.nn.Sequential(
             torch.nn.Linear(10, 10),

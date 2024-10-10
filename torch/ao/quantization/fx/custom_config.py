@@ -63,7 +63,7 @@ class PrepareCustomConfig:
             .set_preserved_attributes(["attr1", "attr2"])
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.standalone_module_names: Dict[str, StandaloneModuleConfigEntry] = {}
         self.standalone_module_classes: Dict[Type, StandaloneModuleConfigEntry] = {}
         self.float_to_observed_mapping: Dict[QuantType, Dict[Type, Type]] = {}
@@ -382,7 +382,7 @@ class ConvertCustomConfig:
             .set_preserved_attributes(["attr1", "attr2"])
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.observed_to_quantized_mapping: Dict[QuantType, Dict[Type, Type]] = {}
         self.preserved_attributes: List[str] = []
 
@@ -477,7 +477,7 @@ class FuseCustomConfig:
         fuse_custom_config = FuseCustomConfig().set_preserved_attributes(["attr1", "attr2"])
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.preserved_attributes: List[str] = []
 
     def __repr__(self):

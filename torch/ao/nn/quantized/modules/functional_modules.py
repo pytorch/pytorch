@@ -36,7 +36,7 @@ class FloatFunctional(torch.nn.Module):
         - mul_scalar
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.activation_post_process = torch.nn.Identity()
 
@@ -190,7 +190,7 @@ class QFunctional(torch.nn.Module):
         - mul_scalar
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.scale = 1.0
         self.zero_point = 0

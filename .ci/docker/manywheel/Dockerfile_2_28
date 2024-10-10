@@ -87,10 +87,10 @@ RUN yum install -y \
         xz \
         gcc-toolset-${DEVTOOLSET_VERSION}-toolchain \
         glibc-langpack-en
-
 RUN yum install -y \
     https://repo.ius.io/ius-release-el7.rpm \
-    https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+    https://ossci-linux.s3.amazonaws.com/epel-release-7-14.noarch.rpm
+
 RUN yum swap -y git git236-core
 # git236+ would refuse to run git commands in repos owned by other users
 # Which causes version check to fail, as pytorch repo is bind-mounted into the image
@@ -145,9 +145,13 @@ ADD ./common/install_miopen.sh install_miopen.sh
 RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh
 
 FROM cpu_final as xpu_final
+# XPU CD use rolling driver
+ENV XPU_DRIVER_TYPE ROLLING
 # cmake-3.28.4 from pip
 RUN python3 -m pip install --upgrade pip && \
     python3 -mpip install cmake==3.28.4
+# Install setuptools and wheel for python 3.13
+RUN /opt/python/cp313-cp313/bin/python -m pip install setuptools wheel
 ADD ./common/install_xpu.sh install_xpu.sh
 RUN bash ./install_xpu.sh && rm install_xpu.sh
 RUN pushd /opt/_internal && tar -xJf static-libs-for-embedding-only.tar.xz && popd

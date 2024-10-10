@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/Allocator.h>
+#include <c10/core/CachingDeviceAllocator.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
@@ -48,74 +48,11 @@ C10_DECLARE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
 
 namespace c10::cuda::CUDACachingAllocator {
 
+// Preserved only for BC reasons
+// NOLINTNEXTLINE(misc-unused-using-decls)
+using c10::CachingDeviceAllocator::DeviceStats;
+
 extern const size_t kLargeBuffer;
-
-struct Stat {
-  int64_t current = 0;
-  int64_t peak = 0;
-  int64_t allocated = 0;
-  int64_t freed = 0;
-};
-
-enum struct StatType : uint64_t {
-  AGGREGATE = 0,
-  SMALL_POOL = 1,
-  LARGE_POOL = 2,
-  NUM_TYPES = 3 // remember to update this whenever a new stat type is added
-};
-
-typedef std::array<Stat, static_cast<size_t>(StatType::NUM_TYPES)> StatArray;
-
-// Struct containing memory allocator summary statistics for a device.
-struct DeviceStats {
-  // COUNT: allocations requested by client code
-  StatArray allocation;
-  // COUNT: number of allocated segments from cudaMalloc().
-  StatArray segment;
-  // COUNT: number of active memory blocks (allocated or used by stream)
-  StatArray active;
-  // COUNT: number of inactive, split memory blocks (unallocated but can't be
-  // released via cudaFree)
-  StatArray inactive_split;
-
-  // SUM: bytes allocated by this memory alocator
-  StatArray allocated_bytes;
-  // SUM: bytes reserved by this memory allocator (both free and used)
-  StatArray reserved_bytes;
-  // SUM: bytes within active memory blocks
-  StatArray active_bytes;
-  // SUM: bytes within inactive, split memory blocks
-  StatArray inactive_split_bytes;
-  // SUM: bytes requested by client code
-  StatArray requested_bytes;
-
-  // COUNT: total number of failed calls to CUDA malloc necessitating cache
-  // flushes.
-  int64_t num_alloc_retries = 0;
-
-  // COUNT: total number of OOMs (i.e. failed calls to CUDA after cache flush)
-  int64_t num_ooms = 0;
-
-  // COUNT: total number of oversize blocks allocated from pool
-  Stat oversize_allocations;
-
-  // COUNT: total number of oversize blocks requiring malloc
-  Stat oversize_segments;
-
-  // COUNT: total number of synchronize_and_free_events() calls
-  int64_t num_sync_all_streams = 0;
-
-  // COUNT: total number of CUDA allocation calls. This includes both cuMemMap
-  // and cudaMalloc.
-  int64_t num_device_alloc = 0;
-
-  // COUNT: total number of CUDA free calls. This includes both cuMemUnmap
-  // and cudaFree.
-  int64_t num_device_free = 0;
-
-  // SIZE: maximum block size that is allowed to be split.
-  int64_t max_split_size = 0;
-};
 
 typedef std::shared_ptr<GatheredContext> (*CreateContextFn)();
 
@@ -247,9 +184,6 @@ enum struct RecordContext {
   ALL = 3, // additionally record stacks for when something is freed
 };
 
-// Size pretty-printer
-std::string format_size(uint64_t size);
-
 using OutOfMemoryObserver = std::function<void(
     int64_t device,
     size_t allocated,
@@ -272,10 +206,13 @@ class CUDAAllocator : public Allocator {
   virtual bool initialized() = 0;
   virtual void setMemoryFraction(double fraction, c10::DeviceIndex device) = 0;
   virtual void emptyCache() = 0;
+  virtual void enable(bool value) = 0;
+  virtual bool isEnabled() const = 0;
   virtual void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) = 0;
   virtual void* getBaseAllocation(void* ptr, size_t* size) = 0;
   virtual void recordStream(const DataPtr&, CUDAStream stream) = 0;
-  virtual DeviceStats getDeviceStats(c10::DeviceIndex device) = 0;
+  virtual c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
+      c10::DeviceIndex device) = 0;
   virtual void resetAccumulatedStats(c10::DeviceIndex device) = 0;
   virtual void resetPeakStats(c10::DeviceIndex device) = 0;
   virtual SnapshotInfo snapshot() = 0;
@@ -392,6 +329,14 @@ inline void emptyCache() {
   return get()->emptyCache();
 }
 
+inline void enable(bool value) {
+  return get()->enable(value);
+}
+
+inline bool isEnabled() {
+  return get()->isEnabled();
+}
+
 inline void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) {
   return get()->cacheInfo(device, largestBlock);
 }
@@ -404,7 +349,8 @@ inline void recordStream(const DataPtr& dataPtr, CUDAStream stream) {
   return get()->recordStream(dataPtr, stream);
 }
 
-inline DeviceStats getDeviceStats(c10::DeviceIndex device) {
+inline c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
+    c10::DeviceIndex device) {
   return get()->getDeviceStats(device);
 }
 
@@ -513,3 +459,51 @@ inline void enablePeerAccess(
 }
 
 } // namespace c10::cuda::CUDACachingAllocator
+
+namespace c10::cuda {
+
+// MemPool represents a pool of memory in a caching allocator. Currently,
+// it's just the ID of the pool object maintained in the CUDACachingAllocator.
+//
+// An allocator pointer can be passed to the MemPool to define how the
+// allocations should be done in the pool. For example: using a different
+// system allocator such as ncclMemAlloc.
+struct C10_CUDA_API MemPool {
+  MemPool(
+      CUDACachingAllocator::CUDAAllocator* allocator = nullptr,
+      bool is_user_created = true);
+
+  MempoolId_t id();
+  CUDACachingAllocator::CUDAAllocator* allocator();
+
+ private:
+  static std::atomic<CaptureId_t> uid_;
+  static std::atomic<CaptureId_t> uuid_;
+  CUDACachingAllocator::CUDAAllocator* allocator_;
+  bool is_user_created_;
+  MempoolId_t id_;
+};
+
+// MemPoolContext holds the currently active pool and stashes the previous
+// pool. On deletion it makes the previous pool active.
+struct C10_CUDA_API MemPoolContext {
+  MemPoolContext(MemPool* mempool);
+
+  ~MemPoolContext();
+
+  // getActiveMemPool() can be used to get the currently active pool.
+  // For instance: in CUDACachingAllocator, we can route allocations
+  // to a user provided allocator, by doing:
+  //
+  //  auto active_pool = MemPoolContext::getActiveMemPool();
+  //  if (active_pool && active_pool->allocator()) {
+  //    ptr = active_pool->allocator()->raw_alloc(size);
+  //  }
+  //
+  static MemPool* getActiveMemPool();
+
+ private:
+  MemPool* prev_mempool_;
+};
+
+} // namespace c10::cuda

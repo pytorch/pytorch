@@ -6,14 +6,16 @@ from typing import Dict, List, TYPE_CHECKING
 import torch
 from torch._dynamo.source import GetItemSource
 
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
-
 from .. import variables
 from ..exc import unimplemented, UserError, UserErrorType
 from ..guards import GuardBuilder, install_guard
 from ..utils import common_constant_types, istype, np
 from .base import typestr, VariableTracker
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
 
 _type_to_assert_reason = {
     # NB - We CAN have ConstantVariable.create(set) because of how sets interact with guards.
@@ -42,7 +44,12 @@ class ConstantVariable(VariableTracker):
                 assert not isinstance(value, disallowed_type), reason
 
         # Routing for list and tuple literals.
-        if is_literal and isinstance(value, (list, tuple, set, frozenset)):
+        if is_literal and isinstance(value, (set, frozenset)):
+            items = []
+            for i, x in enumerate(value):
+                items.append(ConstantVariable.create(x))
+            return variables.SetVariable(items, **kwargs)
+        elif is_literal and isinstance(value, (list, tuple)):
             items = []
             for i, x in enumerate(value):
                 item_source = GetItemSource(source, i) if source else None
@@ -54,15 +61,11 @@ class ConstantVariable(VariableTracker):
                         source=item_source,
                     )
                 )
-            if isinstance(value, (list, tuple)):
-                return variables.BaseListVariable.cls_for(type(value))(items, **kwargs)
-            else:
-                assert isinstance(value, (set, frozenset)), type(value)
-                return variables.SetVariable(items)
+            return variables.BaseListVariable.cls_for(type(value))(items, **kwargs)
 
         return ConstantVariable(value, **kwargs)
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         if not ConstantVariable.is_literal(value):
             for disallowed_type, reason in _type_to_assert_reason.items():
@@ -79,11 +82,8 @@ class ConstantVariable(VariableTracker):
     def as_proxy(self):
         return self.value
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"ConstantVariable({type(self.value).__name__}: {repr(self.value)})"
-
-    def python_type(self):
-        return type(self.value)
 
     def as_python_constant(self):
         return self.value
@@ -99,7 +99,7 @@ class ConstantVariable(VariableTracker):
         """
         return self.unpack_var_sequence(tx=None)
 
-    def getitem_const(self, arg: VariableTracker):
+    def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         return ConstantVariable.create(
             self.value[arg.as_python_constant()],
         )
@@ -189,6 +189,9 @@ class ConstantVariable(VariableTracker):
                     return SymNodeVariable.create(tx, proxy, add_target)
                 else:
                     return ConstantVariable.create(op(self.value, add_target))
+        elif isinstance(self.value, bytes) and name == "decode":
+            method = getattr(self.value, name)
+            return ConstantVariable.create(method(*const_args, **const_kwargs))
 
         if name == "__len__" and not (args or kwargs):
             return ConstantVariable.create(len(self.value))
@@ -206,7 +209,7 @@ class ConstantVariable(VariableTracker):
 
 
 class EnumVariable(VariableTracker):
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
 
@@ -219,13 +222,12 @@ class EnumVariable(VariableTracker):
         unimplemented("Enum variable is constructed with non constant values")
 
     def as_proxy(self):
+        if isinstance(self.value, int):
+            return int(self.value)  # convert IntEnum to a normal int
         return self.value
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"EnumVariable({type(self.value)})"
-
-    def python_type(self):
-        return type(self.value)
 
     def as_python_constant(self):
         return self.value

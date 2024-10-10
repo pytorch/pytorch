@@ -179,7 +179,7 @@ class TestFSDPFineTune(FSDPTest):
         torch.manual_seed(42)
 
         class TestModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layer_0 = nn.Linear(5, 5, device="cuda")
                 self.layer_no_grad = nn.Linear(5, 5, device="cuda")

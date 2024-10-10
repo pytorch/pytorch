@@ -45,7 +45,7 @@ FX’s front-end makes use of the dynamic nature of Python to intercept call-sit
 import torch
 
 class MyModule(torch.nn.Module):
-  def __init__(self):
+  def __init__(self) -> None:
     super().__init__()
     self.param = torch.nn.Parameter(
         torch.rand(3, 4))
