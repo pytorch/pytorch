@@ -66,6 +66,7 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 SUPPORTED_OPS = {
     torch.ops.aten.mul.Tensor,
     torch.ops.aten.add.Tensor,
+    torch.ops.aten.sub.Tensor,
 }
 
 
