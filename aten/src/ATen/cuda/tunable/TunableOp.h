@@ -54,9 +54,15 @@ class TunableOp {
         auto params_sig = params->Signature();
         result = mgr.Lookup(op_sig, params_sig);
         // If there is not previous tuning result been found, we do the tuning iff tuning is enabled
-        if (result == ResultEntry::Null() && ctx->IsTuningEnabled()) {
-          result = FindFastest(params);
-          mgr.Add(op_sig, params_sig, result);
+        if (result == ResultEntry::Null()) {
+          if (ctx->IsTuningEnabled()) {
+            result = FindFastest(params);
+            mgr.Add(op_sig, params_sig, result);
+          }
+          else if (ctx->IsRecordUntunedEnabled()) {
+            // or record the gemm into file
+            mgr.RecordUntuned(ctx->GetUntunedFile(), op_sig, params_sig);
+          }
         }
       }
       else {
@@ -278,7 +284,7 @@ class TunableOp {
 };
 
 struct OpParams {
-  OpParams() {}
+  OpParams() = default;
   virtual ~OpParams() = default;
   virtual std::string Signature() const = 0;
 };
