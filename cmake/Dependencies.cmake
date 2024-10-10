@@ -15,24 +15,6 @@ set(CMAKE_INSTALL_RPATH "${_rpath_portable_origin}")
 # the rpath (per library?)
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
- # UBSAN triggers when compiling protobuf, so we need to disable it.
-set(UBSAN_FLAG "-fsanitize=undefined")
-
-macro(disable_ubsan)
-  if(CMAKE_C_FLAGS MATCHES ${UBSAN_FLAG} OR CMAKE_CXX_FLAGS MATCHES ${UBSAN_FLAG})
-    set(CAFFE2_UBSAN_ENABLED ON)
-    string(REPLACE ${UBSAN_FLAG} "" CMAKE_C_FLAGS ${CMAKE_C_FLAGS})
-    string(REPLACE ${UBSAN_FLAG} "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-  endif()
-endmacro()
-
-macro(enable_ubsan)
-  if(CAFFE2_UBSAN_ENABLED)
-    set(CMAKE_C_FLAGS "${UBSAN_FLAG} ${CMAKE_C_FLAGS}")
-    set(CMAKE_CXX_FLAGS "${UBSAN_FLAG} ${CMAKE_CXX_FLAGS}")
-  endif()
-endmacro()
-
 # ---[ CUDA
 if(USE_CUDA)
   # public/*.cmake uses CAFFE2_USE_*
@@ -102,13 +84,6 @@ if(USE_XPU)
   endif()
 endif()
 
-# ---[ Custom Protobuf
-if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_BUILD_MOBILE)
-  disable_ubsan()
-  include(${CMAKE_CURRENT_LIST_DIR}/ProtoBuf.cmake)
-  enable_ubsan()
-endif()
-
 if(USE_ASAN OR USE_TSAN)
   find_package(Sanitizer REQUIRED)
   if(USE_ASAN)
@@ -139,13 +114,6 @@ if(TARGET Threads::Threads)
 else()
   message(FATAL_ERROR
       "Cannot find threading library. PyTorch requires Threads to compile.")
-endif()
-
-# ---[ protobuf
-if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  if(USE_LITE_PROTO)
-    set(CAFFE2_USE_LITE_PROTO 1)
-  endif()
 endif()
 
 # ---[ BLAS
@@ -563,6 +531,15 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     # be PIC to successfully link this static libXNNPACK with pytorch
     set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE_FLAG ${CMAKE_POSITION_INDEPENDENT_CODE})
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+    # Update xnnpack memory target name.
+    # Otherwise, there is a CMake target conflict with ONNX.
+    if(NOT EXISTS "${XNNPACK_SOURCE_DIR}/CMakeLists.txt.tag")
+      file(READ "${XNNPACK_SOURCE_DIR}/CMakeLists.txt" FILE_CONTENTS)
+      string(REPLACE "memory " "xnnpack_memory " FILE_CONTENTS "${FILE_CONTENTS}")
+      file(WRITE "${XNNPACK_SOURCE_DIR}/CMakeLists.txt" "${FILE_CONTENTS}")
+      file(WRITE "${XNNPACK_SOURCE_DIR}/CMakeLists.txt.tag" "xnnpack_memory")
+    endif()
 
     add_subdirectory(
       "${XNNPACK_SOURCE_DIR}"
@@ -1273,32 +1250,25 @@ endif()
 
 # ---[ Onnx
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
-  if(EXISTS "${CAFFE2_CUSTOM_PROTOC_EXECUTABLE}")
-    set(ONNX_CUSTOM_PROTOC_EXECUTABLE ${CAFFE2_CUSTOM_PROTOC_EXECUTABLE})
-  endif()
-  set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
-  set(BUILD_SHARED_LIBS OFF)
-  set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
-  set(ONNX_USE_LITE_PROTO ${CAFFE2_USE_LITE_PROTO})
-  # If linking local protobuf, make sure ONNX has the same protobuf
-  # patches as Caffe2 and Caffe proto. This forces some functions to
-  # not be inline and instead route back to the statically-linked protobuf.
-  if(CAFFE2_LINK_LOCAL_PROTOBUF)
-    set(ONNX_PROTO_POST_BUILD_SCRIPT ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake)
-  endif()
   if(ONNX_ML)
     add_definitions(-DONNX_ML=1)
   endif()
   add_definitions(-DONNXIFI_ENABLE_EXT=1)
-  if(NOT USE_SYSTEM_ONNX)
-    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
-    if(NOT MSVC)
-      set_target_properties(onnx_proto PROPERTIES CXX_STANDARD 17)
-    endif()
-  endif()
-
   add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
   if(NOT USE_SYSTEM_ONNX)
+    set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS OFF)
+    set(ONNX_USE_PROTOBUF_SHARED_LIBS OFF)
+    set(ONNX_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx")
+    set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
+    set(protobuf_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
+    file(READ "${ONNX_SOURCE_DIR}/CMakeLists.txt" FILE_CONTENTS)
+    string(REPLACE "if(Protobuf_PROTOC_EXECUTABLE)" "if(OFF)" FILE_CONTENTS "${FILE_CONTENTS}")
+    if(MSVC)
+      string(REPLACE "find_package(Protobuf)" "" FILE_CONTENTS "${FILE_CONTENTS}")
+    endif()
+    file(WRITE "${ONNX_SOURCE_DIR}/CMakeLists.txt" "${FILE_CONTENTS}")
+    add_subdirectory(${ONNX_SOURCE_DIR} EXCLUDE_FROM_ALL)
     include_directories(${ONNX_INCLUDE_DIRS})
     # In mobile build we care about code size, and so we need drop
     # everything (e.g. checker) in onnx but the pb definition.
@@ -1308,6 +1278,14 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
       caffe2_interface_library(onnx onnx_library)
     endif()
     list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library)
+    file(READ "${CMAKE_BINARY_DIR}/_deps/protobuf-src/src/google/protobuf/port.h" FILE_CONTENTS)
+    string(FIND "${FILE_CONTENTS}" "#include <cstdint>" has_cstdint)
+    if(has_cstdint EQUAL -1)
+      string(REPLACE "#include \"google/protobuf/port_def.inc\"" "#include \"google/protobuf/port_def.inc\"\n#include <cstdint>" FILE_CONTENTS "${FILE_CONTENTS}")
+    endif()
+    file(WRITE "${CMAKE_BINARY_DIR}/_deps/protobuf-src/src/google/protobuf/port.h" "${FILE_CONTENTS}")
+    # Recover the build shared libs option.
+    set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
   else()
     add_library(onnx SHARED IMPORTED)
     find_library(ONNX_LIBRARY onnx)
@@ -1322,10 +1300,8 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
     endif()
     set_property(TARGET onnx_proto PROPERTY IMPORTED_LOCATION ${ONNX_PROTO_LIBRARY})
     message("-- Found onnx: ${ONNX_LIBRARY} ${ONNX_PROTO_LIBRARY}")
-    list(APPEND Caffe2_DEPENDENCY_LIBS onnx_proto onnx)
+    caffe2_interface_library(onnx onnx_library)
   endif()
-  # Recover the build shared libs option.
-  set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
 endif()
 
 # --[ ATen checks

@@ -208,14 +208,9 @@ endif()
 include(CMakeDependentOption)
 option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
 option(BUILD_BINARY "Build C++ binaries" OFF)
-option(BUILD_CUSTOM_PROTOBUF
-       "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
 option(BUILD_LITE_INTERPRETER "Master flag to build Lite Interpreter" OFF)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
-cmake_dependent_option(
-  CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
-  "BUILD_SHARED_LIBS AND BUILD_CUSTOM_PROTOBUF" OFF)
 cmake_dependent_option(
   CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
   "NOT BUILD_SHARED_LIBS" OFF)
@@ -474,7 +469,6 @@ if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_CPUINFO ON)
   set(USE_SYSTEM_SLEEF ON)
   set(USE_SYSTEM_GLOO ON)
-  set(BUILD_CUSTOM_PROTOBUF OFF)
   set(USE_SYSTEM_EIGEN_INSTALL ON)
   set(USE_SYSTEM_FP16 ON)
   set(USE_SYSTEM_PTHREADPOOL ON)
@@ -794,33 +788,6 @@ if(NOT IOS
    AND CMAKE_SYSTEM_NAME STREQUAL "Darwin"
    AND CMAKE_OSX_ARCHITECTURES MATCHES "^(x86_64|arm64)$")
   set(CROSS_COMPILING_MACOSX TRUE)
-  # We need to compile a universal protoc to not fail protobuf build We set
-  # CMAKE_TRY_COMPILE_TARGET_TYPE to STATIC_LIBRARY (vs executable) to succeed
-  # the cmake compiler check for cross-compiling
-  set(protoc_build_command
-      "./scripts/build_host_protoc.sh --other-flags -DCMAKE_OSX_ARCHITECTURES=\"x86_64;arm64\" -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY -DCMAKE_C_COMPILER_WORKS=1 -DCMAKE_CXX_COMPILER_WORKS=1"
-  )
-  # We write to a temp scriptfile because CMake COMMAND dislikes double quotes
-  # in commands
-  file(WRITE ${PROJECT_SOURCE_DIR}/tmp_protoc_script.sh
-       "#!/bin/bash\n${protoc_build_command}")
-  file(
-    COPY ${PROJECT_SOURCE_DIR}/tmp_protoc_script.sh
-    DESTINATION ${PROJECT_SOURCE_DIR}/scripts/
-    FILE_PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ)
-  execute_process(
-    COMMAND ./scripts/tmp_protoc_script.sh
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-    RESULT_VARIABLE BUILD_HOST_PROTOC_RESULT)
-  file(REMOVE ${PROJECT_SOURCE_DIR}/tmp_protoc_script.sh
-       ${PROJECT_SOURCE_DIR}/scripts/tmp_protoc_script.sh)
-  if(NOT BUILD_HOST_PROTOC_RESULT EQUAL "0")
-    message(FATAL_ERROR "Could not compile universal protoc.")
-  endif()
-  set(PROTOBUF_PROTOC_EXECUTABLE
-      "${PROJECT_SOURCE_DIR}/build_host_protoc/bin/protoc")
-  set(CAFFE2_CUSTOM_PROTOC_EXECUTABLE
-      "${PROJECT_SOURCE_DIR}/build_host_protoc/bin/protoc")
 endif()
 
 # ---[ Misc checks to cope with various compiler modes
@@ -1053,6 +1020,7 @@ if(NOT MSVC)
   endif()
 
   append_cxx_flag_if_supported("-Wno-error=old-style-cast" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-error=inconsistent-missing-destructor-override" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-aligned-allocation-unavailable"
                                CMAKE_CXX_FLAGS)
@@ -1263,10 +1231,9 @@ endif()
 # access to Caffe2.
 
 if((NOT USE_GLOG)
-   OR(NOT USE_GFLAGS)
-   OR BUILD_CUSTOM_PROTOBUF)
+   OR(NOT USE_GFLAGS))
   message(WARNING "Generated cmake files are only fully tested if one builds "
-                  "with system glog, gflags, and protobuf. Other settings may "
+                  "with system glog, gflags. Other settings may "
                   "generate files that are not well tested.")
 endif()
 
@@ -1296,7 +1263,6 @@ if(BUILD_SHARED_LIBS)
           ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/mkl.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/mkldnn.cmake
-          ${PROJECT_SOURCE_DIR}/cmake/public/protobuf.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/utils.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/LoadHIP.cmake
     DESTINATION share/cmake/Caffe2/public
