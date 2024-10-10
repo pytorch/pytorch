@@ -653,9 +653,9 @@ struct NCCLTraceBuffer {
     std::optional<c10::time_t> time_discovered_completed_;
 
     // size information for input/output tensors
-    c10::SmallVector<int, 4> input_dims_;
+    c10::SmallVector<int64_t, 4> input_dims_;
     std::vector<c10::ScalarType> input_dtypes_;
-    c10::SmallVector<int, 4> output_dims_;
+    c10::SmallVector<int64_t, 4> output_dims_;
     std::vector<c10::ScalarType> output_dtypes_;
     c10::SmallVector<int64_t, 8> sizes_; // flattened from inputs, outputs
     bool retired_ = false; // is this work entry no longer in the workMetaList_?

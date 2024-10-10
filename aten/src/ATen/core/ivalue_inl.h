@@ -863,6 +863,19 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   Future& operator=(const Future&) = delete;
   Future& operator=(Future&&) = delete;
 
+  // Destructor
+  // Explicitly destroy events under device guard, otherwise it can lead to
+  // extra context being created on device 0.  Reason: python garbage collector
+  // calls this destructor, but python GC does not have a device context, so a
+  // "default" one (usually on device 0) could be created when we go down the
+  // line of event destroy.
+  ~Future() override {
+    while (!events_.empty()) {
+      c10::OptionalDeviceGuard deviceGuard(events_.back().device());
+      events_.pop_back();
+    }
+  }
+
   struct TORCH_API FutureError final : public std::exception {
     explicit FutureError(std::string&& error_msg_)
         : error_msg(std::move(error_msg_)) {}
