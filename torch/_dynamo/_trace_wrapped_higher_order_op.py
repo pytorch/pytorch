@@ -50,7 +50,7 @@ __all__ = ["trace_wrapped"]
 
 
 if not torch._running_with_deploy():
-    """torch.library.custom_op does not work with torch.deploy/multipy"""
+    # torch.library.custom_op does not work with torch.deploy/multipy
 
     @torch.library.custom_op("FlexAttentionLib::zeros_and_scatter", mutates_args=())  # type: ignore[misc]
     def zeros_and_scatter(
