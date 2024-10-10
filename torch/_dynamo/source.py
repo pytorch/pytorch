@@ -764,7 +764,3 @@ def is_from_defaults(source: Source):
     if isinstance(source, ChainedSource):
         return is_from_defaults(source.base)
     return False
-
-
-def is_cell_contents(source: Source):
-    return isinstance(source, AttrSource) and source.member == "cell_contents"

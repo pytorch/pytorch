@@ -353,6 +353,9 @@ def dynamo_timed(
                                 inductor_compile_time = None
                                 code_gen_time = None
                                 remote_cache_time_saved = None
+                            structured_logging_overhead_s = (
+                                torch._logging.get_structured_logging_overhead()
+                            )
                             metrics = BwdCompilationMetrics(
                                 compile_id,
                                 inductor_compile_time,
@@ -360,6 +363,7 @@ def dynamo_timed(
                                 fail_type,
                                 fail_reason,
                                 remote_cache_time_saved,
+                                structured_logging_overhead_s,
                             )
                             record_compilation_metrics(metrics)
 
@@ -799,6 +803,10 @@ class CompilationMetrics:
     has_guarded_code: bool
     possibly_missed_reinplacing_opportunities: Optional[int]
     remote_cache_time_saved_s: Optional[float]
+    structured_logging_overhead_s: Optional[float]
+    config_suppress_errors: Optional[bool]
+    config_inline_inbuilt_nn_modules: Optional[bool]
+    specialize_float: Optional[bool]
 
 
 @dataclasses.dataclass
@@ -809,6 +817,7 @@ class BwdCompilationMetrics:
     fail_type: Optional[str]
     fail_reason: Optional[str]
     remote_cache_time_saved_s: Optional[float]
+    structured_logging_overhead_s: Optional[float]
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -834,6 +843,11 @@ def record_compilation_metrics(
             k: list(v) if isinstance(v, set) else v
             for k, v in dataclasses.asdict(compilation_metrics).items()
         },
+        # NB: Because compilation metrics *includes* the logging overhead time,
+        # we can't both *measure* the logging overhead of compilation metrics
+        # without making it inconsistent with compilation metrics itself, so
+        # we ignore the (hopefully small) time spent logging compilation metrics
+        record_logging_overhead=False,
     )
     if config.log_compilation_metrics:
         log_compilation_event(compilation_metrics)
@@ -891,13 +905,20 @@ class ChromiumEventLogger:
         :param time_ns Timestamp in nanoseconds
         :param metadata: Any extra metadata associated with this event
         """
+
+        # Add compile id to metadata
+        if metadata is None:
+            metadata = {}
+        compile_id = str(torch._guards.CompileContext.current_compile_id())
+        metadata["compile_id"] = compile_id
+
         event = self._log_timed_event(
             event_name,
             time_ns,
             "B",
             metadata,
         )
-        log_chromium_event_internal(event, self.get_stack(), self.id_)
+        log_chromium_event_internal(event, self.get_stack(), compile_id, self.id_)
         self.get_stack().append(event_name)
 
     def reset(self) -> None:
@@ -921,6 +942,12 @@ class ChromiumEventLogger:
         :param time_ns: Timestamp in nanoseconds
         :param metadata: Any extra metadata associated with this event
         """
+        # Add compile id to metadata
+        if metadata is None:
+            metadata = {}
+        compile_id = str(torch._guards.CompileContext.current_compile_id())
+        metadata["compile_id"] = compile_id
+
         # These stack health checks currently never happen,
         # but they're written this way to future proof any weird event
         # overlaps in the future.
@@ -947,7 +974,7 @@ class ChromiumEventLogger:
             )
             stack.pop()
 
-        log_chromium_event_internal(event, stack, self.id_, start_time_ns)
+        log_chromium_event_internal(event, stack, compile_id, self.id_, start_time_ns)
         # Finally pop the actual event off the stack
         stack.pop()
 
@@ -992,6 +1019,10 @@ class ChromiumEventLogger:
         :param Optional[Dict[str, Any]] metadata: Any extra metadata associated with this event
         :param str cname optional color for the arrow in the trace
         """
+        if metadata is None:
+            metadata = {}
+        compile_id = str(torch._guards.CompileContext.current_compile_id())
+        metadata["compile_id"] = compile_id
         event = {
             "name": event_name,
             "ts": time_ns / 1000,
@@ -1010,7 +1041,7 @@ class ChromiumEventLogger:
             expect_trace_id=True,
         )
         # Log an instant event with the same start and end time
-        log_chromium_event_internal(event, self.get_stack(), self.id_)
+        log_chromium_event_internal(event, self.get_stack(), compile_id, self.id_)
 
 
 CHROMIUM_EVENT_LOG: Optional[ChromiumEventLogger] = None
@@ -2321,9 +2352,7 @@ def tensor_always_has_static_shape(
 
     if (
         tensor_source.guard_source().is_specialized_nn_module()
-        # Marking the tensor attributes of nn modules static to keep the behavior same as before
-        # inline_inbuilt_nn_module flag was introduced.
-        or tensor_source.guard_source().is_unspecialized_nn_module()
+        or tensor_source.guard_source().is_unspecialized_builtin_nn_module()
     ) and config.force_nn_module_property_static_shapes:
         return True, TensorStaticReason.NN_MODULE_PROPERTY
 
@@ -2883,18 +2912,28 @@ def is_torch_function_object(value):
 
 
 def has_torch_function(vt: torch._dynamo.variables.base.VariableTracker) -> bool:
-    from torch._dynamo.variables import LazyVariableTracker, UserDefinedObjectVariable
+    from torch._dynamo.variables import UserDefinedObjectVariable
     from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 
-    if isinstance(vt, TensorWithTFOverrideVariable):
-        return True
+    # Note on lazy vars: The value will either be realized or not throughout the course of execution
+    # if the value has a torch function, it will eventually be realized so we can realize it here
+    # if the value does not have a torch function, it may or may not be realized
+    # if it is realized it will be used and guards will be installed properly
+    # if it is not used, guards won't be installed, and it doesn't matter
+    # if the value has a torch function or not, so we should *not* realize it.
+    # NB: We technically know that if is_realized is False, LazyVariableTracker has the peek_value method
+    # but mypy does not unfortunately
+    if vt.is_realized() or (
+        hasattr(vt, "peek_value") and hasattr(vt.peek_value(), "__torch_function__")
+    ):
+        if isinstance(vt, TensorWithTFOverrideVariable):
+            return True
 
-    if isinstance(vt, LazyVariableTracker):
-        LazyVariableTracker.realize(vt)
+        return isinstance(vt, UserDefinedObjectVariable) and hasattr(
+            vt.value, "__torch_function__"
+        )
 
-    return isinstance(vt, UserDefinedObjectVariable) and hasattr(
-        vt.value, "__torch_function__"
-    )
+    return False
 
 
 # see note [Tensor Fakification and Symbol Caching]

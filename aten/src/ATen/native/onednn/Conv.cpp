@@ -3,6 +3,7 @@
 #include <torch/library.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/mkldnn/Conv.h>
 #include <ATen/native/utils/ParamUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -313,7 +314,6 @@ Tensor mkldnn_convolution(
   return at::native::onednn_convolution(input_t, weight_t, bias_opt, padding, stride, dilation, groups);
 }
 
-namespace{
 Tensor onednn_convolution_pointwise(
     const Tensor& input_t,
     const Tensor& weight_t,
@@ -341,6 +341,7 @@ Tensor onednn_convolution_pointwise(
       scalars,
       algorithm);
 }
+
 
 // Fuse convolution+binary_op+unary_op for good performance, which doing such
 // operation: output=unary_op(binary_op(conv(input_t, ...), other_t, alpha)).
@@ -607,6 +608,7 @@ Tensor& onednn_convolution_pointwise_binary_(
   return other_t;
 }
 
+namespace{
 std::vector<int64_t> _original_deconv_weight_size(
     const Tensor& weight_t,
     int64_t groups) {
@@ -727,37 +729,6 @@ Tensor _onednn_convolution_transpose(
   } else {
     return output;
   }
-}
-
-Tensor onednn_convolution_transpose_pointwise(
-    const Tensor& input_t,
-    const Tensor& weight_t,
-    const std::optional<Tensor>& bias_opt,
-    IntArrayRef padding,
-    IntArrayRef output_padding,
-    IntArrayRef stride,
-    IntArrayRef dilation,
-    int64_t groups,
-    c10::string_view attr,
-    torch::List<std::optional<at::Scalar>> scalars,
-    std::optional<c10::string_view> algorithm) {
-  c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
-  bool use_channels_last =
-      weight_t.is_onednn() || onednn_conv_use_channels_last(input_t, weight_t);
-  return _onednn_convolution_transpose(
-      input_t,
-      weight_t,
-      bias_opt,
-      padding,
-      output_padding,
-      stride,
-      dilation,
-      groups,
-      use_channels_last,
-      attr,
-      scalars,
-      algorithm
-  );
 }
 
 Tensor onednn_convolution_transpose_pointwise_meta(
@@ -905,6 +876,37 @@ std::tuple<Tensor, Tensor, Tensor> onednn_convolution_backward(
   }
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
+}
+
+Tensor onednn_convolution_transpose_pointwise(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const std::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef output_padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    c10::string_view attr,
+    torch::List<std::optional<at::Scalar>> scalars,
+    std::optional<c10::string_view> algorithm) {
+  c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+  bool use_channels_last =
+      weight_t.is_mkldnn() || mkldnn_conv_use_channels_last(input_t, weight_t);
+  return _onednn_convolution_transpose(
+      input_t,
+      weight_t,
+      bias_opt,
+      padding,
+      output_padding,
+      stride,
+      dilation,
+      groups,
+      use_channels_last,
+      attr,
+      scalars,
+      algorithm
+  );
 }
 
 REGISTER_ALL_CPU_DISPATCH(onednn_convolution_backward_stub, &onednn_convolution_backward);

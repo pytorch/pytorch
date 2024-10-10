@@ -12681,6 +12681,7 @@
   dispatch:
     CPU: upsample_bicubic2d_out_cpu
     CUDA: upsample_bicubic2d_out_cuda
+    MPS: upsample_bicubic2d_out_mps
 
 - func: upsample_bicubic2d(Tensor self, SymInt[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   python_module: nn
@@ -12692,6 +12693,7 @@
   dispatch:
     CPU: upsample_bicubic2d_backward_out_cpu
     CUDA: upsample_bicubic2d_backward_out_cuda
+    MPS: upsample_bicubic2d_backward_out_mps
 
 - func: upsample_bicubic2d_backward(Tensor grad_output, SymInt[2] output_size, SymInt[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   python_module: nn
@@ -13115,7 +13117,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: isposinf_out
+    CPU, CUDA, MPS: isposinf_out
     SparseCPU, SparseCUDA: isposinf_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: isposinf_sparse_csr_out
   tags: pointwise
@@ -13132,7 +13134,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: isneginf_out
+    CPU, CUDA, MPS: isneginf_out
     SparseCPU, SparseCUDA: isneginf_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: isneginf_sparse_csr_out
   tags: pointwise
@@ -13145,7 +13147,7 @@
   variants: function
 
 # See NOTE [_add_batch_dim and _remove_batch_dim]
-- func: _remove_batch_dim(Tensor self, int level, int batch_size, int out_dim) -> Tensor
+- func: _remove_batch_dim(Tensor self, int level, SymInt batch_size, int out_dim) -> Tensor
   variants: function
 
 ## Functions related to the `torch.special` namespace
