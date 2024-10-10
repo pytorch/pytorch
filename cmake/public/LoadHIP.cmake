@@ -181,6 +181,10 @@ if(HIP_FOUND)
   find_package_and_print_version(hipsolver REQUIRED)
   find_package_and_print_version(hiprtc REQUIRED)
 
+  # Short term work around for github issue filed here: https://github.com/ROCm/rocprofiler-sdk/issues/21
+  if(NOT TARGET rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+    find_package_and_print_version(rocprofiler-sdk-roctx REQUIRED)
+  endif()
 
   find_library(PYTORCH_HIP_LIBRARIES amdhip64 HINTS ${ROCM_PATH}/lib)
   # TODO: miopen_LIBRARIES should return fullpath to the library file,
@@ -198,8 +202,6 @@ if(HIP_FOUND)
     find_library(PYTORCH_RCCL_LIBRARIES ${rccl_LIBRARIES} HINTS ${ROCM_PATH}/lib)
   endif()
   find_library(ROCM_HIPRTC_LIB hiprtc HINTS ${ROCM_PATH}/lib)
-  # roctx is part of roctracer
-  find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCM_PATH}/lib)
 
   # check whether HIP declares new types
   set(file "${PROJECT_BINARY_DIR}/hip_new_types.cc")
