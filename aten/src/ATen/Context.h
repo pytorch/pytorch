@@ -178,6 +178,10 @@ class TORCH_API Context {
   static bool hasMAIA() {
     return c10::impl::hasDeviceGuardImpl(c10::DeviceType::MAIA);
   }
+  static bool hasHPU() {
+    return detail::getHPUHooks().hasHPU();
+  }
+
   static const at::cuda::NVRTC& getNVRTC() {
     return detail::getCUDAHooks().nvrtc();
   }
