@@ -142,6 +142,13 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         ):
             torch.utils.rename_privateuse1_backend("dev")
 
+        # backend unregister
+        torch._C._unregister_privateuse1_backend()
+        torch.utils.rename_privateuse1_backend("dev")
+
+        torch._C._unregister_privateuse1_backend()
+        torch.utils.rename_privateuse1_backend("foo")
+
         # generator tensor and module can be registered only once
         with self.assertRaisesRegex(RuntimeError, "The custom device module of"):
             torch.utils.generate_methods_for_privateuse1_backend()
