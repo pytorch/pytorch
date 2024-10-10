@@ -1363,9 +1363,8 @@ class TritonKernel(SIMDKernel):
                     f"{tree.prefix}base = {self.iteration_ranges_ranges_code(tree)}"
                 )
 
-        # Compute linear reduction indices.
-        if self.inside_reduction:
-            self.codegen_reduction_inds(self.indexing_code)
+        if not any(tree.is_loop for tree in self.range_trees):
+            self.codegen_reduction_inds(self.body)
 
     def need_numel_args(self):
         r"""
@@ -2514,10 +2513,9 @@ class TritonKernel(SIMDKernel):
         ):
             return
 
-        innermost_tree = self.range_trees[-1]
-        if self.inside_reduction and innermost_tree.is_loop:
+        loop_trees = [tree for tree in self.range_trees if tree.is_loop]
+        if self.inside_reduction and len(loop_trees) > 0:
             # Write the loop headers.
-            loop_trees = [tree for tree in self.range_trees if tree.is_loop]
             for level, tree in enumerate(loop_trees):
                 with self.body.indent(offset=level):
                     prefix = tree.prefix
@@ -2529,6 +2527,7 @@ class TritonKernel(SIMDKernel):
 
             # The innermost loop performs the reduction.
             with self.body.indent(offset=len(loop_trees)):
+                self.codegen_reduction_inds(self.body)
                 self.body.splice(self.indexing_code)
                 self.body.splice(self.loads)
                 self.body.splice(self.compute)

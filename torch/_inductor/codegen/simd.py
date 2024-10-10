@@ -2028,7 +2028,7 @@ class SIMDScheduling(BaseScheduling):
                 candidate_tiles[candidate_tiling] += candidate_tiling.score
 
         ranked_tilings: List[Dict[str, sympy.Expr]] = [
-            andidate_tiling.tiling
+            candidate_tiling.tiling
             for candidate_tiling, score in candidate_tiles.most_common()
         ]
 
