@@ -1461,8 +1461,6 @@ class PipelineStage(_PipelineStageBase):
         # only need the rank that is being sent to
         self.act_send_info: Dict[int, List] = {}
 
-        # TODO: we didn't require output args at __init__ before, but now we do. enforce it. until we enable lazy-init
-        # get_outputs_meta will assert for us
         for idx in range(len(self.get_outputs_meta())):
             # We assume we always send to stage + 1
             if not self.is_last:
