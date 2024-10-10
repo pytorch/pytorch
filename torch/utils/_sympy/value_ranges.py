@@ -417,7 +417,8 @@ class ValueRanges(Generic[_T]):
             fn(a, b)
             for a, b in itertools.product([x.lower, x.upper], [y.lower, y.upper])
         ]
-        return ValueRanges(min(products), max(products))
+        products_no_nan = [x for x in products if str(x) != "nan"]
+        return ValueRanges(min(products_no_nan), max(products_no_nan))
 
 
 class SymPyValueRangeAnalysis:
