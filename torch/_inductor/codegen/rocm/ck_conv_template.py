@@ -2,6 +2,7 @@
 from dataclasses import asdict, dataclass
 from typing import Tuple, Optional
 from torch._inductor.codegen.rocm.ck_template import CKTemplate
+from torch._inductor.utils import IndentedBuffer
 
 @dataclass
 class CKConvOp:
@@ -150,6 +151,80 @@ class CKConvTemplate(CKTemplate):
     } // kernel definition
     } // extern C
 """
+
+    def globals(self) -> IndentedBuffer:
+        res = super().globals()
+        res.splice(
+            """
+                // CK conv globals
+
+                using NWC   = ck::tensor_layout::convolution::NWC;
+                using NHWC  = ck::tensor_layout::convolution::NHWC;
+                using NDHWC = ck::tensor_layout::convolution::NDHWC;
+
+                using KXC   = ck::tensor_layout::convolution::KXC;
+                using KYXC  = ck::tensor_layout::convolution::KYXC;
+                using KZYXC = ck::tensor_layout::convolution::KZYXC;
+
+                using NWK   = ck::tensor_layout::convolution::NWK;
+                using NHWK  = ck::tensor_layout::convolution::NHWK;
+                using NDHWK = ck::tensor_layout::convolution::NDHWK;
+
+                using GNWC   = ck::tensor_layout::convolution::GNWC;
+                using GNHWC  = ck::tensor_layout::convolution::GNHWC;
+                using GNDHWC = ck::tensor_layout::convolution::GNDHWC;
+
+                using GKXC   = ck::tensor_layout::convolution::GKXC;
+                using GKYXC  = ck::tensor_layout::convolution::GKYXC;
+                using GKZYXC = ck::tensor_layout::convolution::GKZYXC;
+
+                using GNWK   = ck::tensor_layout::convolution::GNWK;
+                using GNHWK  = ck::tensor_layout::convolution::GNHWK;
+                using GNDHWK = ck::tensor_layout::convolution::GNDHWK;
+
+                using NGKW   = ck::tensor_layout::convolution::NGKW;
+                using NGKHW  = ck::tensor_layout::convolution::NGKHW;
+                using NGKDHW = ck::tensor_layout::convolution::NGKDHW;
+
+                using NWGC   = ck::tensor_layout::convolution::NWGC;
+                using NHWGC  = ck::tensor_layout::convolution::NHWGC;
+                using NDHWGC = ck::tensor_layout::convolution::NDHWGC;
+
+                using KXGC   = ck::tensor_layout::convolution::KXGC;
+                using KYXGC  = ck::tensor_layout::convolution::KYXGC;
+                using KZYXGC = ck::tensor_layout::convolution::KZYXGC;
+
+                using NWGK   = ck::tensor_layout::convolution::NWGK;
+                using NHWGK  = ck::tensor_layout::convolution::NHWGK;
+                using NDHWGK = ck::tensor_layout::convolution::NDHWGK;
+
+                using NGCW   = ck::tensor_layout::convolution::NGCW;
+                using NGCHW  = ck::tensor_layout::convolution::NGCHW;
+                using NGCDHW = ck::tensor_layout::convolution::NGCDHW;
+
+                using G_K    = ck::tensor_layout::convolution::G_K;
+
+                using BlockGemmPipelineScheduler = ck::BlockGemmPipelineScheduler;
+                using GemmSpecialization = ck::tensor_operation::device::GemmSpecialization;
+                using BlockGemmPipelineVersion = ck::BlockGemmPipelineVersion;
+
+                using ConvolutionForwardSpecialization = ck::tensor_operation::device::ConvolutionForwardSpecialization;
+            """
+        )
+        return res
+
+    def header(self) -> IndentedBuffer:
+        res = super().header()
+        res.splice(
+            """
+                // CK conv headers
+
+                #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_fwd_multiple_abd_xdl_cshuffle.hpp"
+                #include "ck/tensor_operation/gpu/device/convolution_forward_specialization.hpp"
+                #include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
+            """
+        )
+        return res
 
     @staticmethod
     def add_ck_conv_choices(
