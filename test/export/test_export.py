@@ -1047,7 +1047,7 @@ graph():
             warnings.simplefilter("error")
             torch.export.export(Foo(), (x,))
 
-        ops_registered_before = set(op for op in torch.ops.mylib)
+        ops_registered_before = set(torch.ops.mylib)
 
         # Assert warning for CompositeImplictAutograd op
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -1065,7 +1065,7 @@ graph():
                     warnings.simplefilter("always")
                     torch.export.export(Bar(), (x,))
 
-        ops_registered_after = set(op for op in torch.ops.mylib)
+        ops_registered_after = set(torch.ops.mylib)
         self.assertEqual(ops_registered_after, ops_registered_before)
 
     def test_export_preserve_linear_at_aot_level(self):
