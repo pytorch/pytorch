@@ -52,10 +52,12 @@ struct TORCH_API AcceleratorHooksInterface {
 
   virtual c10::Stream getCurrentStream(DeviceIndex device) const {
     TORCH_CHECK(false, "Backend doesn't support getCurrentStream()");
+    return c10::Stream::unpack3(-1, 0, c10::DeviceType::CPU);
   }
 
   virtual c10::Stream getDefaultStream(DeviceIndex device) const {
     TORCH_CHECK(false, "Backend doesn't support getDefaultStream()");
+    return c10::Stream::unpack3(-1, 0, c10::DeviceType::CPU);
   }
 
   virtual void setCurrentStream(const c10::Stream& stream) const {
