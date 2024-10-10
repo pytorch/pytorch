@@ -26,6 +26,11 @@
 #define NCCL_HAS_COMM_SPLIT
 #endif
 
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
+    (NCCL_MINOR >= 23)
+#define NCCL_HAS_INIT_RANK_SCALABLE
+#endif
+
 // ncclGetLastError() is enabled only for NCCL versions 2.13+
 // ncclRemoteError only exists in NCCL versions 2.13+
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
@@ -333,7 +338,48 @@ class NCCLComm {
       int rank,
       ncclConfig_t& config,
       std::vector<uint64_t>& ranks_ull);
-#endif
+
+#ifdef NCCL_HAS_INIT_RANK_SCALABLE
+  static std::shared_ptr<NCCLComm> create_scalable(
+      int numRanks,
+      int rank,
+      std::vector<ncclUniqueId>& commIds,
+      ncclConfig_t& config) {
+    auto comm = std::make_shared<NCCLComm>();
+    bool isInitialized = false;
+    if (nccl_use_nonblocking()) {
+      config.blocking = 0;
+      LOG(INFO) << "Rank " << rank
+                << ": creating NCCL communicator in nonblocking mode";
+      C10D_NCCL_CHECK_NONBLOCKING(
+          ncclCommInitRankScalable(
+              &(comm->ncclComm_),
+              numRanks,
+              rank,
+              commIds.size(),
+              commIds.data(),
+              &config),
+          std::nullopt);
+    } else {
+      C10D_NCCL_CHECK(
+          ncclCommInitRankScalable(
+              &(comm->ncclComm_),
+              numRanks,
+              rank,
+              commIds.size(),
+              commIds.data(),
+              &config),
+          std::nullopt);
+      // under blocking mode, comm is initialized after NCCL CHECK
+      isInitialized = true;
+    }
+    comm->ncclId_ = commIds[rank];
+    comm->rank_ = rank;
+    comm->initialized_ = isInitialized;
+    return comm;
+  }
+#endif // NCCL_HAS_INIT_RANK_SCALABLE
+#endif // NCCL_HAS_COMM_NONBLOCKING
 
 #if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
   std::unordered_map<std::string, std::string> ncclCommDump() {
