@@ -703,7 +703,7 @@ class TestBenchmarkUtils(TestCase):
                 90090  ???:pthread_mutex_lock [/usr/lib64/libpthread-2.28.so]
                 90000  build/../c10/core/TensorImpl.h:c ... ch/torch/lib/libtorch_python.so]
                 90000  build/../aten/src/ATen/record_fu ... torch/torch/lib/libtorch_cpu.so]
-                90000  /data/users/test_user/repos/pyto ... uard(c10::optional<c10::Device>)
+                90000  /data/users/test_user/repos/pyto ... uard(std::optional<c10::Device>)
                 90000  /data/users/test_user/repos/pyto ... ersionCounter::~VersionCounter()
                 88000  /data/users/test_user/repos/pyto ... ratorKernel*, at::Tensor const&)""",
         )
