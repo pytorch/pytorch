@@ -710,7 +710,10 @@ resize_out(out, sizes, strides, options);
             raise RuntimeError(f"Unsupported SchemaKind {k}")
 
         if self.backend_index.dispatch_key == DispatchKey.CUDA:
-            guard_field = "c10::cuda::OptionalCUDAGuard guard_;"
+            if self.rocm:
+                guard_field = "c10::hip::OptionalHIPGuardMasqueradingAsCUDA guard_;"
+            else:
+                guard_field = "c10::cuda::OptionalCUDAGuard guard_;"
         elif (
             self.backend_index.dispatch_key
             == DispatchKey.CompositeExplicitAutogradNonFunctional

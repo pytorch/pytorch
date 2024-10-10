@@ -230,8 +230,14 @@ class TestDynamismExpression(TestCase):
 
         inp = torch.zeros([3])
         dim_x = torch.export.Dim("dim_x", min=6)
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "not in range"):
-            torch.export.export(
+
+        if is_non_strict_test(self._testMethodName):
+            error_type = torch.fx.experimental.symbolic_shapes.ConstraintViolationError
+        else:
+            error_type = torch._dynamo.exc.UserError
+
+        with self.assertRaisesRegex(error_type, "not in range"):
+            export(
                 InvalidInputConflictWithInputConstraints(),
                 (inp,),
                 dynamic_shapes={"x": {0: dim_x}},
@@ -894,6 +900,22 @@ graph():
         self.assertTrue(
             torch.allclose(ep.module()(torch.zeros(2, 3)), torch.ones(2, 3) * 21)
         )
+
+    def test_state_shape_attribute_assignment(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.last_z_shape = self.linear.weight.shape
+
+            def forward(self, x):
+                self.last_z_shape = x.shape
+                return self.linear(x)
+
+        model = TestModule()
+        x = torch.randn(20, 10)
+        ep_model = export(model, (x,), strict=False).module()
+        self.assertTrue(torch.allclose(model(x), ep_model(x)))
 
     @testing.expectedFailureTrainingIRToRunDecompNonStrict  # TODO(pianpwk): user_output signature
     def test_real_tensor_for_max_op(self):
@@ -3925,18 +3947,64 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 torch.ops.aten._assert_async.msg(torch.tensor(True), "Fail")
                 return x
 
-        from torch._decomp import decomposition_table
+        from torch._decomp import (
+            _decomp_table_to_post_autograd_aten,
+            decomposition_table,
+        )
 
-        ep = export(M(), (torch.randn(2, 2),)).run_decompositions(decomposition_table)
+        decomp_table = {**_decomp_table_to_post_autograd_aten(), **decomposition_table}
+
+        ep = export(M(), (torch.randn(2, 2),)).run_decompositions(decomp_table)
 
         # The difference seems fine because export_for_training catches const tensor little differently.
+        # Training IR produces:
+        # graph():
+        #     %c_lifted_tensor_0 : [num_users=1] = placeholder[target=c_lifted_tensor_0]
+        #     %x : [num_users=1] = placeholder[target=x]
+        #     %lift_fresh_copy : [num_users=1] = call_function[target=torch.ops.aten.lift_fresh_copy.default](args = (%c_lifted_tensor_0,), kwargs = {})
+        #     %detach_ : [num_users=1] = call_function[target=torch.ops.aten.detach_.default](args = (%lift_fresh_copy,), kwargs = {})
+        #     %_assert_async : [num_users=0] = call_function[target=torch.ops.aten._assert_async.msg](args = (%detach_, Fail), kwargs = {})
+        #     return (x,)
+        #
+        # Pre-dispatch functionalization produces:
+        # graph():
+        #     %c_lifted_tensor_0 : [num_users=1] = placeholder[target=c_lifted_tensor_0]
+        #     %x : [num_users=1] = placeholder[target=x]
+        #     %lift_fresh_copy : [num_users=1] = call_function[target=torch.ops.aten.lift_fresh_copy.default](args = (%c_lifted_tensor_0,), kwargs = {})
+        #     %detach : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%lift_fresh_copy,), kwargs = {})
+        #     %_assert_async : [num_users=0] = call_function[target=torch.ops.aten._assert_async.msg](args = (%detach, Fail), kwargs = {})
+        #     return (x,)
+        #
+        # Retracing:
+        # graph():
+        #     %c_lifted_tensor_0 : [num_users=1] = placeholder[target=c_lifted_tensor_0]
+        #     %x : [num_users=1] = placeholder[target=x]
+        #     %clone : [num_users=1] = call_function[target=torch.ops.aten.clone.default](args = (%c_lifted_tensor_0,), kwargs = {})
+        #     %detach : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%clone,), kwargs = {})
+        #     %_assert_async : [num_users=0] = call_function[target=torch.ops.aten._assert_async.msg](args = (%detach, Fail), kwargs = {})
+        #     return (x,)
+        # The difference comes from the fact that prim has registration for aten.detach while not for aten.detach_.
+        # The diference in retracing comes from the fact that we retrace at pre-dispatch level while the usual flow
+        # traces to post-dispatch.
         if is_training_ir_test(self._testMethodName):
             self.assertExpectedInline(
                 str(ep.graph_module.code).strip(),
                 """\
 def forward(self, c_lifted_tensor_0, x):
+    lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(c_lifted_tensor_0);  c_lifted_tensor_0 = None
+    _assert_async = torch.ops.aten._assert_async.msg(lift_fresh_copy, 'Fail');  lift_fresh_copy = _assert_async = None
+    return (x,)""",
+            )
+        elif is_retracebility_test(self._testMethodName):
+            self.assertExpectedInline(
+                str(ep.graph_module.code).strip(),
+                """\
+def forward(self, c_lifted_tensor_0, x):
     clone = torch.ops.prims.clone.default(c_lifted_tensor_0, memory_format = torch.preserve_format);  c_lifted_tensor_0 = None
-    _assert_async = torch.ops.aten._assert_async.msg(clone, 'Fail');  clone = _assert_async = None
+    view_of = torch.ops.prims.view_of.default(clone);  clone = None
+    view_of_1 = torch.ops.prims.view_of.default(view_of);  view_of = None
+    view_of_2 = torch.ops.prims.view_of.default(view_of_1);  view_of_1 = None
+    _assert_async = torch.ops.aten._assert_async.msg(view_of_2, 'Fail');  view_of_2 = _assert_async = None
     return (x,)""",
             )
         else:
@@ -3944,8 +4012,8 @@ def forward(self, c_lifted_tensor_0, x):
                 str(ep.graph_module.code).strip(),
                 """\
 def forward(self, c_lifted_tensor_0, x):
-    clone = torch.ops.prims.clone.default(c_lifted_tensor_0, memory_format = torch.preserve_format);  c_lifted_tensor_0 = None
-    view_of = torch.ops.prims.view_of.default(clone);  clone = None
+    lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(c_lifted_tensor_0);  c_lifted_tensor_0 = None
+    view_of = torch.ops.prims.view_of.default(lift_fresh_copy);  lift_fresh_copy = None
     view_of_1 = torch.ops.prims.view_of.default(view_of);  view_of = None
     view_of_2 = torch.ops.prims.view_of.default(view_of_1);  view_of_1 = None
     _assert_async = torch.ops.aten._assert_async.msg(view_of_2, 'Fail');  view_of_2 = _assert_async = None
@@ -5105,12 +5173,12 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
                 return {"prediction": (x + y, self.bff)}
 
         mod = ModuleConstant()
-        ep = torch.export.export(mod, ())
+        ep = export(mod, ())
         self.assertEqual(ep.module()(), mod())
 
         args = (torch.randn(3, 2), torch.randn(3, 2))
         mod = ModuleNestedConstant()
-        ep = torch.export.export(mod, args)
+        ep = export(mod, args)
         self.assertEqual(ep.module()(*args), mod(*args))
 
     def test_non_arg_name_dynamic_shapes_api_with_kwarg(self):

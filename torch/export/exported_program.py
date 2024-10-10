@@ -92,6 +92,7 @@ class ModuleCallSignature:
     outputs: List[ArgumentSpec]
     in_spec: pytree.TreeSpec
     out_spec: pytree.TreeSpec
+    forward_arg_names: Optional[List[str]] = None
 
     def replace_all_uses_with(self, original_node, new_node):
         for i in self.inputs:

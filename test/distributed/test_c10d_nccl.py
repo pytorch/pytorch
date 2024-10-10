@@ -49,6 +49,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     skip_if_lt_x_gpu,
     skip_if_rocm_multiprocess,
+    sm_lower_than_70,
     TEST_SKIPS,
     with_dist_debug_levels,
     with_nccl_blocking_wait,
@@ -431,9 +432,13 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_nan_check(self):
         # Not expecting an error, NaN check should not make legit code fail
+        device = torch.device("cuda:%d" % self.rank)
+        # Test needs sm_70, see #135273, #137161
+        if sm_lower_than_70(device):
+            return
+
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
-        device = torch.device("cuda:%d" % self.rank)
         c10d.init_process_group(
             backend="nccl", store=store, rank=self.rank, world_size=self.world_size
         )
@@ -445,6 +450,95 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         c10d.destroy_process_group()
         # reset env
         os.environ["TORCH_NCCL_NAN_CHECK"] = "0"
+
+    def _helper_test_extra_cuda_context_by_nvml(self):
+        """
+        A helper for `test_extra_cuda_context`, if pynvml is avaiable.
+        pynvml provides python bindings for NVIDIA NVML functionalities.
+        Here we are interested in: nvmlDeviceGetComputeRunningProcesses
+        """
+        import pynvml
+
+        pynvml.nvmlInit()
+
+        device = torch.device("cuda:%d" % self.rank)
+        x = torch.empty((1,), device=device)
+        work = c10d.all_reduce(x, async_op=True)
+
+        # Wait for non-0 ranks to garbage collect Work -- this is the latest
+        # point where extra CUDA context can be created
+        if self.rank == 0:
+            time.sleep(5)
+        del work
+        handle = pynvml.nvmlDeviceGetHandleByIndex(self.rank)
+        processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+        nprocs = len(processes)
+
+        # A barrier for non-0 ranks
+        c10d.all_reduce(x)
+        torch.cuda.synchronize(device)
+        c10d.destroy_process_group()
+        self.assertEqual(
+            nprocs,
+            1,
+            f"Found {nprocs} processes creating contexts on {device}, expecting 1 only",
+        )
+
+    def _helper_test_extra_cuda_context_by_memory(self):
+        """
+        A helper for `test_extra_cuda_context`, if pynvml is NOT avaiable.
+        If extra context is created, it would manifest into device 0's memory usage.
+        """
+        device = torch.device("cuda:%d" % self.rank)
+        x = torch.empty((1,), device=device)
+        # Rank 0 takes a snapshot before collective -- this snapshot should have
+        # included rank 0's own context.
+        if self.rank == 0:
+            free, total = torch.cuda.mem_get_info(device)
+            used_before = float(total - free)
+
+        work = c10d.all_reduce(x, async_op=True)
+
+        # Wait for non-0 ranks to garbage collect Work -- this is the latest
+        # point where extra CUDA context can be created
+        if self.rank == 0:
+            time.sleep(5)
+            free, total = torch.cuda.mem_get_info(device)
+            used_after = float(total - free)
+        del work
+
+        # A barrier for non-0 ranks
+        c10d.all_reduce(x)
+        torch.cuda.synchronize(device)
+        c10d.destroy_process_group()
+        if self.rank == 0:
+            # If non-0 rank creates a context on device 0, this assert would
+            # fail because one context takes about 1 GB -- much more than the
+            # tensor size created in this test.
+            self.assertTrue(
+                used_after < used_before * 1.5,
+                f"{device} used {used_after} bytes after collective, "
+                f"50% more than the status before ({used_before} bytes). "
+                f"Extra CUDA context may have been created.",
+            )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_extra_cuda_context(self):
+        # Check if non-0 ranks would create extra CUDA context on device 0
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device("cuda:%d" % self.rank)
+        c10d.init_process_group(
+            backend="nccl",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            device_id=device,
+        )
+        try:
+            self._helper_test_extra_cuda_context_by_nvml()
+        except ModuleNotFoundError:
+            self._helper_test_extra_cuda_context_by_memory()
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -769,8 +863,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         backend = pg._get_backend(torch.device(device))
 
         tensor = torch.full((1,), self.rank).cuda(device)
-        ng1 = c10d.split_group(pg, [[0, 1]])
-        backend1 = pg._get_backend(torch.device(device))
+        # Create subgroup between ranks 0, 1
+        subg_ranks = [0, 1]
+        ng1 = c10d.split_group(pg, [subg_ranks])
+        backend1 = ng1._get_backend(torch.device(device))
 
         # check basic options are the same between parent and child
         self.assertEqual(backend.options._timeout, backend1.options._timeout)
@@ -782,10 +878,18 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         # comm split happens eagerly since device_id is passed to init_process_group.
         self.assertEqual(backend.comm_split_count(), 1)
-        dist.broadcast(tensor, 0, group=ng1)
-        self.assertEqual(tensor, torch.full((1,), 0))
+        # dist.get_process_group_ranks returns the global ranks in the subgroup.
+        self.assertEqual(
+            dist.get_process_group_ranks(ng1),
+            subg_ranks if self.rank in subg_ranks else [],
+        )
 
-        ng2 = c10d.split_group(pg, [[0, 1]])
+        # is part of ng1; otherwise, -1
+        if dist.get_rank(ng1) >= 0:
+            dist.broadcast(tensor, dist.get_global_rank(ng1, 0), group=ng1)
+            self.assertEqual(tensor, torch.full((1,), 0))
+
+        ng2 = c10d.split_group(pg, [subg_ranks])
         self.assertEqual(ng2.group_desc, "default_pg:split:1")
         self.assertEqual(backend.comm_split_count(), 2)
 
@@ -2554,6 +2658,24 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             del process_group
             func()
 
+    def _test_barrier_error(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(
+            store,
+            self.rank,
+            self.world_size,
+            timeout=timedelta(seconds=10),
+        )
+        process_group.barrier().wait()
+        if self.rank == 0:
+            with self.assertRaisesRegex(dist.DistBackendError, ""):
+                # It seems the error message would be different depending on
+                # whether the test is run on CI machine and devGPU.  Skipping
+                # the error message check to make both sides happy.
+                process_group.barrier().wait(
+                    timeout=timedelta(seconds=self.op_timeout_sec)
+                )
+
     @with_nccl_blocking_wait
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
@@ -2602,22 +2724,23 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     def test_nccl_blocking_wait_with_barrier(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(
-            store,
-            self.rank,
-            self.world_size,
-            timeout=timedelta(seconds=10),
+        self._test_barrier_error()
+
+    @requires_nccl()
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
+    @skip_if_lt_x_gpu(3)
+    def test_nccl_non_blocking_wait_with_barrier(self):
+        # test the barrier behavior in the non blocking wait setting
+        prev_nccl_async_error_handling = os.environ.get(
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING", None
         )
-        process_group.barrier().wait()
-        if self.rank == 0:
-            with self.assertRaisesRegex(dist.DistBackendError, ""):
-                # It seems the error message would be different depending on
-                # whether the test is run on CI machine and devGPU.  Skipping
-                # the error message check to make both sides happy.
-                process_group.barrier().wait(
-                    timeout=timedelta(seconds=self.op_timeout_sec)
-                )
+        # avoid watchdog thread interference
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
+        self._test_barrier_error()
+        if prev_nccl_async_error_handling is not None:
+            os.environ[
+                "TORCH_NCCL_ASYNC_ERROR_HANDLING"
+            ] = prev_nccl_async_error_handling
 
     def _run_invalid_nccl_blocking_wait_env(self, val):
         os.environ["TORCH_NCCL_BLOCKING_WAIT"] = val
@@ -2782,12 +2905,16 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_all_reduce_coalesced_manager_nccl(self):
+        device = torch.device("cuda:%d" % self.rank)
+        # Test needs sm_70, see #135273, #137161
+        if sm_lower_than_70(device):
+            return
+
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="nccl", store=store, rank=self.rank, world_size=self.world_size
         )
         process_group = c10d.distributed_c10d._get_default_group()
-        device = torch.device("cuda:%d" % self.rank)
         tensors = [
             torch.full((60 + i,), self.rank + 1 + i, device=device, dtype=torch.float)
             for i in range(5)
@@ -4017,9 +4144,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 self.assertEqual(
                     t["entries"][p2p_op_idx]["profiling_name"], profiling_name
                 )
-                self.assertEqual(
-                    t["entries"][p2p_op_idx]["collective_seq_id"], expected_seq
-                )
+                # we don't increment collective_seq_id for p2p ops.
+                self.assertEqual(t["entries"][p2p_op_idx]["collective_seq_id"], 0)
+                self.assertEqual(t["entries"][p2p_op_idx]["p2p_seq_id"], expected_seq)
                 self.assertEqual(t["entries"][p2p_op_idx]["op_id"], expected_op_id)
                 expected_op_id += 1
                 self.assertEqual(t["entries"][p2p_op_idx]["input_sizes"], [input_sizes])
@@ -4039,9 +4166,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             self.assertEqual(
                 t["entries"][coalesced_op]["profiling_name"], "nccl:coalesced"
             )
-            self.assertEqual(
-                t["entries"][coalesced_op]["collective_seq_id"], expected_seq
-            )
+            self.assertEqual(t["entries"][coalesced_op]["p2p_seq_id"], expected_seq)
             expected_seq += 1
             self.assertEqual(t["entries"][coalesced_op]["state"], "completed")
             self.assertEqual(t["entries"][coalesced_op]["input_sizes"], [])
@@ -4098,6 +4223,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
             input_sizes = op_sizes[seq % ops_per_repeat]
             profiling_name = "nccl:recv 0<-1" if self.rank == 0 else "nccl:send 1->0"
             self.assertEqual(t["entries"][seq]["profiling_name"], profiling_name)
+            # we don't increment collective_seq_id for p2p ops.
+            self.assertEqual(t["entries"][seq]["collective_seq_id"], 0)
             self.assertEqual(t["entries"][seq]["p2p_seq_id"], expected_seq)
             expected_seq += 1
             self.assertEqual(t["entries"][seq]["op_id"], expected_op_id)
@@ -4154,10 +4281,11 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         self.assertEqual(
             len(t["entries"]), 1
-        )  # one for the reduce_scatter_tensor_coalesced, one for the endCoalescing
+        )  # one for the reduce_scatter_tensor_coalesced
         self.assertEqual(
             t["entries"][0]["profiling_name"], "nccl:reduce_scatter_tensor_coalesced"
         )
+        # collective_seq_id should be incremented once.
         self.assertEqual(t["entries"][0]["collective_seq_id"], 1)
         self.assertEqual(t["entries"][0]["input_sizes"], [[2, 2], [2, 2]])
         self.assertEqual(

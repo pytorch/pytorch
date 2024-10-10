@@ -622,6 +622,8 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
 
     def test_graph_input_is_async(self):
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         def fn(x):
@@ -633,6 +635,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         x_dt = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
         x2 = x_dt.redistribute(mesh, [Replicate()], async_op=True)
         x2 = x2.to_local()
+        self.assertTrue(isinstance(x2, AsyncCollectiveTensor))
         out = opt_fn(x2)
         # The important part: we get a wait_tensor() in the graph.
         # At runtime, the input to the graph is an AsyncCollectiveTensor,
