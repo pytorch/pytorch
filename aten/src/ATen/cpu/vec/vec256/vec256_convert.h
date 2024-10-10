@@ -308,7 +308,7 @@ struct VecConvert<
     typename std::enable_if_t<is_8bit_integer_v<src_t>,
         void>> {
   static inline VectorizedN<float, 1> apply(const VectorizedN<src_t, 1>& src) {
-    return convert_int8_half_register_to_float<src_t>(src[0]);
+    return convert_int8_half_register_to_float(src[0]);
   }
 };
 template <typename src_t>
@@ -320,7 +320,7 @@ struct VecConvert<
     typename std::enable_if_t<is_8bit_integer_v<src_t>,
         void>> {
   static inline VectorizedN<float, 2> apply(const VectorizedN<src_t, 1>& src) {
-    const auto [v0, v1] = convert_int8_to_float<src_t>(src[0]);
+    const auto [v0, v1] = convert_int8_to_float(src[0]);
     return VectorizedN<float, 2>(v0, v1);
   }
 };
