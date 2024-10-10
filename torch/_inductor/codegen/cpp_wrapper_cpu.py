@@ -2391,12 +2391,19 @@ if (py_{buf_name}.get() == NULL) {{
 {output_arg} =
     reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}.get(), {idx}), NULL));"""
 
-            declarations_before_scope = [
-                f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg, raw_output_arg in zip(output_args, raw_outputs)  # type: ignore[arg-type]
-                if output_arg is not None
-                and not isinstance(raw_output_arg, ir.MutationOutput)
-            ]
+            if raw_outputs:
+                declarations_before_scope = [
+                    f"RAIIAtenTensorHandle {output_arg};"
+                    for output_arg, raw_output_arg in zip(output_args, raw_outputs)  # type: ignore[arg-type]
+                    if output_arg is not None
+                    and not isinstance(raw_output_arg, ir.MutationOutput)
+                ]
+            else:
+                declarations_before_scope = [
+                    f"RAIIAtenTensorHandle {output_arg};"
+                    for output_arg in output_args  # type: ignore[arg-type]
+                    if output_arg is not None
+                ]
             scope_gil_acquire = self.generate_scoped_gil_acquire(
                 declarations_before_scope, lines
             )
