@@ -10,17 +10,11 @@
 #include <fstream>
 #include <iostream>
 
-// TODO: Investigate why this is necessary, but fixes build problems in FRL
-#if __has_include("filesystem")
-#include <filesystem>
-namespace fs = std::filesystem;
-#else
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
-#endif
-
 #ifndef _WIN32
 #include <sys/stat.h>
+#else
+#include <filesystem>
+namespace fs = std::filesystem;
 #endif
 
 // TODO: C++17 has the filesystem header, which may replace these
@@ -42,7 +36,7 @@ bool file_exists(std::string& path) {
 #ifdef _WIN32
   return fs::exists(path);
 #else
-  struct stat rc;
+  struct stat rc {};
   return lstat(path.c_str(), &rc) == 0;
 #endif
 }

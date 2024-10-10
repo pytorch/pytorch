@@ -27,8 +27,11 @@ FaultyTensorPipeAgent::FaultyTensorPipeAgent(
           std::move(reverseDeviceMaps),
           std::move(devices),
           std::move(callback)),
+      // NOLINTNEXTLINE(bugprone-use-after-move)
       numFailSends_(opts.numFailSends),
+      // NOLINTNEXTLINE(bugprone-use-after-move)
       messageTypesToFail_(parseMessagesToFailInput(opts.messagesToFail)),
+      // NOLINTNEXTLINE(bugprone-use-after-move)
       messageTypesToDelay_(parseMessagesToDelay(opts.messagesToDelay)) {}
 
 std::vector<MessageType> FaultyTensorPipeAgent::parseMessagesToFailInput(
