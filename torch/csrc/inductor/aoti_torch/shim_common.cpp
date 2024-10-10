@@ -125,6 +125,10 @@ AOTI_TORCH_DEVICE_TYPE_IMPL(cuda, CUDA)
 AOTI_TORCH_DEVICE_TYPE_IMPL(privateuse1, PrivateUse1)
 #undef AOTI_TORCH_DEVICE_TYPE_IMPL
 
+int32_t aoti_torch_device_type_xpu() {
+  return (int32_t)c10::DeviceType::XPU;
+}
+
 #define AOTI_TORCH_DTYPE_IMPL(dtype, stype) \
   int32_t aoti_torch_dtype_##dtype() {      \
     return (int32_t)c10::ScalarType::stype; \

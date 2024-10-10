@@ -191,12 +191,6 @@ class CppWrapperGpu(CppWrapperCpu):
 
     def write_get_raw_stream(self, index, graph=None):
         name = f"stream{index}"
-        if self.device == "xpu":
-            self.writeline(
-                f"sycl::queue *{name} = &(at::xpu::getCurrentXPUStream({index}).queue());"
-            )
-            return name
-
         self.writeline(
             maybe_hipify_code_wrapper(
                 f"{self.device_codegen.cpp_stream_type()} {name};"
