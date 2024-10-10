@@ -314,15 +314,7 @@ struct ScaledGemmParams : OpParams {
   }
 
   std::string Signature() const override {
-    const int buf_len = 64;
-    char buf[buf_len];
-    int ret;
-
-    ret = snprintf(buf, buf_len, "%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
-
-    TORCH_CHECK(ret > 0 && ret < buf_len, "TunableOp: Signature formatting error occured. Return value = ", ret);
-
-    return std::string(buf, ret);
+    return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
   }
 
   size_t GetSizeA() const {
