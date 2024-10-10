@@ -142,10 +142,9 @@ static MPSGraphTensor* unfoldConvolution2d(MPSGraph* mpsGraph, MPSGraphTensor* i
         MPSGraphTensor* ones_k = [mpsGraph constantWithScalar:1.0f shape:@[@(k_D),@(k_D)]  dataType:datatype];
         MPSGraphTensor* eye_k_ = [mpsGraph bandPartWithTensor:ones_k numLower:0 numUpper:0 name:nil];
     MPSGraphTensor* eye_k;
-    if(not_transp){
+    if (not_transp) {
         eye_k = [mpsGraph reshapeTensor:eye_k_ withShape:@[@(k_D),@1,@(k_D),@1] name:nil];
-    }
-    else{ //transpose unfold kernel
+    } else{ //transpose unfold kernel
         eye_k = [mpsGraph reshapeTensor:eye_k_ withShape:@[@1,@(k_D),@(k_D),@1] name:nil];
     }
     if(outshape==nil){
@@ -1097,9 +1096,7 @@ Tensor _mps_convolution_transpose(const Tensor& input_t,
 
     if(is3DConv){
         return _mps_convTrans3d_impl(input_t, weight_t, padding, output_padding, stride, dilation, groups);
-
-    }
-    else{
+    } else{
         return mps_convolution_transpose_forward(input_t, weight_t, padding, output_padding, stride, dilation, groups);
     }
 }
