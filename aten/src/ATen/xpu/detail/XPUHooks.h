@@ -22,6 +22,7 @@ struct XPUHooks : public at::XPUHooksInterface {
   bool isPinnedPtr(const void* data) const override;
   bool hasPrimaryContext(DeviceIndex device_index) const override;
   DeviceIndex deviceCount() const override;
+  void setCurrentDevice(DeviceIndex device) const override;
   DeviceIndex getCurrentDevice() const override;
 };
 
