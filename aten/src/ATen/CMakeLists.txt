@@ -266,6 +266,9 @@ endif()
 
 if(USE_CUDA)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/cuda)
+  # Next two lines are needed because TunableOp uses third-party/fmt
+  list(APPEND ATen_CUDA_INCLUDE $<TARGET_PROPERTY:fmt::fmt-header-only,INTERFACE_INCLUDE_DIRECTORIES>)
+  list(APPEND ATen_CUDA_DEPENDENCY_LIBS fmt::fmt-header-only)
   list(APPEND ATen_CUDA_CU_SRCS
     ${cuda_cu}
     ${native_cuda_cu}
@@ -309,6 +312,9 @@ if(USE_ROCM)
   list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/hip)
   list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/include)
   list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/library/include)
+  # Next two lines are needed because TunableOp uses third-party/fmt
+  list(APPEND ATen_HIP_INCLUDE $<TARGET_PROPERTY:fmt::fmt-header-only,INTERFACE_INCLUDE_DIRECTORIES>)
+  list(APPEND ATen_HIP_DEPENDENCY_LIBS fmt::fmt-header-only)
   list(APPEND ATen_HIP_SRCS
     ${ATen_HIP_SRCS}
     ${hip_hip}
