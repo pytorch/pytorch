@@ -5,6 +5,7 @@
   - .ci/docker/common/install_onnx.sh
   - aten/src/ATen/core/interned_strings.h
   - benchmarks/dynamo/**
+  - docs/source/conf.py
   - docs/source/onnx.rst
   - docs/source/onnx*
   - docs/source/scripts/onnx/**
