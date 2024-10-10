@@ -272,6 +272,25 @@ class TestPoitwiseOpsPostGrad(torch.nn.Module):
         return torch.cat(add, dim=1)
 
 
+class TestMathOps(torch.nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.device = device
+
+    def forward(self, x):
+        inputs = [x.to(self.device) for i in range(10)]
+        others = [x.to(self.device) for i in range(10)]
+        clamp_input = [x.clamp(min=-1000.1, max=1000.1) for x in inputs]
+        clamp_other = [x.clamp(min=-1000.1, max=1000.1) for x in others]
+        nan_to_num_input = [torch.nan_to_num(x, 0.0) for x in clamp_input]
+        nan_to_num_other = [torch.nan_to_num(x, 0.0) for x in clamp_other]
+        detach_input = [x.detach() for x in nan_to_num_input]
+        detach_other = [x.detach() for x in nan_to_num_other]
+        stack_input = torch.stack(detach_input, dim=0)
+        stack_other = torch.stack(detach_other, dim=0)
+        return torch.stack((stack_input, stack_other), dim=0)
+
+
 @requires_cuda
 @torch._inductor.config.patch(
     pre_grad_fusion_options={
@@ -518,6 +537,39 @@ class TestGroupBatchFusion(TestCase):
         res.sum().backward()
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+        counters.clear()
+
+    @requires_cuda
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "normalization_pass": {},
+            "batch_detach": {},
+            "batch_nan_to_num": {},
+            "batch_clamp": {},
+            "unbind_stack_pass": {},
+            "unbind_stack_to_slices_pass": {},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_math_op_fusion(self):
+        counters.clear()
+        module = TestMathOps("cuda")
+        input = [
+            torch.tensor(
+                [float("nan"), float("inf"), -float("inf"), 3.14], device="cuda"
+            )
+        ]
+        traced = torch.compile(module)
+        ref = module(*input)
+        res = traced(*input)
+        self.compare_pred(module, traced, input)
+        self.assertEqual(counters["inductor"]["normalization_pass"], 3)
+        self.assertEqual(counters["inductor"]["batch_clamp"], 1)
+        self.assertEqual(counters["inductor"]["batch_detach"], 1)
+        self.assertEqual(counters["inductor"]["batch_nan_to_num"], 1)
+        self.assertEqual(counters["inductor"]["unbind_stack_to_slices_pass"], 2)
+        self.assertEqual(counters["inductor"]["unbind_stack_pass"], 2)
+        self.assertTrue(torch.allclose(ref, res))
         counters.clear()
 
 
