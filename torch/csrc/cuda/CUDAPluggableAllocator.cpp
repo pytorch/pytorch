@@ -14,7 +14,7 @@ CUDAPluggableAllocatorDeleterContext::CUDAPluggableAllocatorDeleterContext(
     size_t size,
     int device,
     cudaStream_t stream)
-    : free_fn_(free_fn),
+    : free_fn_(std::move(free_fn)),
       data_(data),
       size_(size),
       device_(device),
@@ -204,7 +204,7 @@ void* CUDAPluggableAllocator::getBaseAllocation(void* ptr, size_t* size) {
 
 void CUDAPluggableAllocator::recordStream(
     const c10::DataPtr& ptr,
-    c10::cuda::CUDAStream stream) {
+    streamType stream) {
   if (record_stream_fn_) {
     record_stream_fn_(ptr.get(), stream);
   }
