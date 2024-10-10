@@ -5,9 +5,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 
 // ----------------------------------------------------------------------------
 // -- Profiler Config ---------------------------------------------------------
@@ -161,6 +159,4 @@ TORCH_API bool profilerEnabled();
 TORCH_API ActiveProfilerType profilerType();
 TORCH_API ProfilerConfig getProfilerConfig();
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl

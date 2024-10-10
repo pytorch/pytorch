@@ -40,7 +40,33 @@ def aoti_compile_and_package(
 ) -> str:
     """
     Compiles the exported program with AOTInductor, and packages it into a .pt2
-    file specified by the input package_path.
+    artifact specified by the input package_path. To load the package, you can
+    call `torch._inductor.aoti_load_package(package_path)`.
+
+    To compile and save multiple models into a single .pt2 artifact, you can do
+    the following:
+    ```
+    ep1 = torch.export.export(M1(), ...)
+    aoti_file1 = torch._inductor.aot_compile(ep1, ...)
+    ep2 = torch.export.export(M2(), ...)
+    aoti_file2 = torch._inductor.aot_compile(ep2, ...)
+
+    from torch._inductor.package import package_aoti, load_package
+    package_aoti("my_package.pt2", {"model1": aoti_file1, "model2": aoti_file2})
+
+    compiled_model1 = load_package("my_package.pt2", "model1")
+    compiled_model2 = load_package("my_package.pt2", "model2")
+    ```
+
+    Args:
+        exported_program: An exported program created through a call from torch.export
+        args: Example positional inputs
+        kwargs: Optional example keyword inputs
+        package_path: Optional specified path to the generated .pt2 artifact.
+        inductor_configs: Optional dictionary of configs to control inductor.
+
+    Returns:
+        Path to the generated artifact
     """
     from torch._inductor.package import package_aoti
     from torch.export import ExportedProgram
@@ -70,6 +96,27 @@ def aoti_compile_and_package(
     res = package_aoti(package_path, aoti_files)
     assert res == package_path
     return package_path
+
+
+def aoti_load_package(path: str) -> Any:  # type: ignore[type-arg]
+    """
+    Loads the model from the PT2 package.
+
+    If multiple models were packaged into the PT2, this will load the default
+    model. To load a specific model, you can directly call the load API
+    ```
+    from torch._inductor.package import load_package
+
+    compiled_model1 = load_package("my_package.pt2", "model1")
+    compiled_model2 = load_package("my_package.pt2", "model2")
+    ```
+
+    Args:
+        path: Path to the .pt2 package
+    """
+    from torch._inductor.package import load_package
+
+    return load_package(path)
 
 
 def aot_compile(
