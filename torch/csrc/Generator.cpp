@@ -4,7 +4,6 @@
 #include <ATen/CPUGeneratorImpl.h>
 #include <structmember.h>
 
-#include <ATen/core/GeneratorForPrivateuseone.h>
 #include <ATen/detail/XPUHooksInterface.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Exceptions.h>
