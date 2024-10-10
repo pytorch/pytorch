@@ -941,7 +941,7 @@ def forward(self, x_1, output_1):
         f(x_cloned)
         out.sum().backward()
 
-    @requires_cuda
+    @requires_gpu
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     def test_triton_kernel_inputs_buffer_reuse(self):
         def _mul2(x):
@@ -962,15 +962,15 @@ def forward(self, x_1, output_1):
                 x = _mul2(x)
             return x + 1
 
-        x = torch.randn(10, device="cuda", dtype=torch.float32)
+        x = torch.randn(10, device=GPU_TYPE, dtype=torch.float32)
         eager_out = f(x)
         compiled_out, (code,) = run_and_get_code(torch.compile(f), x)
         self.assertEqual(compiled_out, eager_out)
 
         # Check that we're allocating the minimal # of buffers.
-        num_bufs_allocated = code.count(
-            "empty_strided_cuda((10, ), (1, ), torch.float32)"
-        )
+        code_string = f"empty_strided_{GPU_TYPE}((10, ), (1, ), torch.float32)"
+
+        num_bufs_allocated = code.count(code_string)
         self.assertEqual(num_bufs_allocated, 2)
 
         # Check we're re-using buffers if not allocating.
@@ -1745,7 +1745,7 @@ def forward(self, x_1, output_1):
             self.assertEqual(out_e[1], out_c[1])
 
     # TODO enable this test case on XPU.
-    @requires_cuda
+    @requires_gpu
     def test_i64_input(self):
         # The i64 "seed" input needs to be marked as "i64", not "i32".
         @triton.jit
@@ -2031,7 +2031,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             expected,
         )
 
-    @requires_cuda
+    @requires_gpu
     @skipIfRocm
     def test_triton_kernel_inference_mode(self):
         def f(x, y, out):
@@ -2040,8 +2040,8 @@ class MutationTests(torch._inductor.test_case.TestCase):
             add_kernel[grid](x, y, out, n_elements, BLOCK_SIZE=4)
 
         with torch.inference_mode():
-            x = torch.ones(32, device="cuda")
-            y = torch.ones(32, device="cuda")
+            x = torch.ones(32, device=GPU_TYPE)
+            y = torch.ones(32, device=GPU_TYPE)
             out_ref = torch.zeros_like(x)
             out_test = torch.zeros_like(x)
             f(x, y, out_ref)
@@ -2910,6 +2910,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         gm = make_fx(f, tracing_mode=tracing_mode)(x, x)
         self.assertEqual(gm(x, x), x + x)
 
+    @skipIfXpu
     @requires_gpu
     @patch.object(torch._inductor.config, "cpp_wrapper", True)
     @patch.object(torch._inductor.config, "triton.autotune_at_compile_time", True)
@@ -3018,8 +3019,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             return z
 
         M, K, N = 128, 64, 32
-        x = torch.randn(M, K, device="cuda")
-        w = torch.randn(K, N, device="cuda")
+        x = torch.randn(M, K, device=GPU_TYPE)
+        w = torch.randn(K, N, device=GPU_TYPE)
 
         torch._dynamo.decorators.mark_unbacked(x, 0)
         torch._logging.set_logs(output_code=True)

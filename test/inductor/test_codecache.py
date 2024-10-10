@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-import functools
 import os
 import pickle
 import tempfile
@@ -37,10 +36,11 @@ from torch.testing._internal.inductor_utils import (
     HAS_CUDA,
     HAS_GPU,
     HAS_MULTIGPU,
+    HAS_TRITON,
     requires_gpu,
+    requires_triton,
 )
 from torch.testing._internal.triton_utils import requires_cuda
-from torch.utils._triton import has_triton
 
 
 try:
@@ -49,14 +49,10 @@ except ImportError:
     from mock_cache import global_stats, PatchCaches, Stats  # @manual
 
 
-HAS_TRITON = has_triton()
-
 if HAS_TRITON:
     import triton  # @manual
 
     from torch.testing._internal.triton_utils import add_kernel
-
-requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 
 torch._dynamo.config.fake_tensor_cache_enabled = True
 torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
