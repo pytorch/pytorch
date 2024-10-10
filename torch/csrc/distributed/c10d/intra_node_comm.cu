@@ -108,8 +108,9 @@ static __global__ void oneShotAllReduceKernel(
       (blockDim.x * blockIdx.x + threadIdx.x) * numelPerThread;
   const size_t stride = blockDim.x * gridDim.x * numelPerThread;
 
-  barrier_and_acquire_previous_kernel_writes(
+  sync_remote_blocks<MemOpSem::Relaxed>(
       reinterpret_cast<uint32_t**>(p2pStates), rank, kWorldSize);
+  __syncthreads();
 
   // The source pointers. Distributed round-robin for the different warps
   const at::BFloat16* srcs[kWorldSize];
@@ -148,7 +149,9 @@ static __global__ void oneShotAllReduceKernel(
     }
   }
 
-  barrier(reinterpret_cast<uint32_t**>(p2pStates), rank, kWorldSize);
+  __syncthreads();
+  sync_remote_blocks<MemOpSem::Relaxed>(
+      reinterpret_cast<uint32_t**>(p2pStates), rank, kWorldSize);
 }
 
 template <uint32_t kWorldSize>
@@ -166,8 +169,9 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
   const size_t N_start = N_per_rank * rank;
 
   // Wait for all other ranks to enter the kernel
-  barrier_and_acquire_previous_kernel_writes(
+  sync_remote_blocks<MemOpSem::Relaxed>(
       reinterpret_cast<uint32_t**>(p2pStates), rank, kWorldSize);
+  __syncthreads();
 
   // The source pointers. Distributed round-robin for the different warps
   at::BFloat16* srcs[kWorldSize];
@@ -201,10 +205,11 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
     // a global memory access later for it.
     streamStore128(&input[N_start + i], sums);
   }
-  __syncthreads();
 
-  barrier_and_acquire_previous_kernel_writes(
+  __syncthreads();
+  sync_remote_blocks<MemOpSem::AcqRel>(
       reinterpret_cast<uint32_t**>(p2pStates), rank, kWorldSize);
+  __syncthreads();
 
   for (size_t i = offset; i < N_per_rank; i += stride) {
 #pragma unroll kWorldSize - 1
@@ -216,7 +221,9 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
     }
   }
 
-  barrier(reinterpret_cast<uint32_t**>(p2pStates), rank, kWorldSize);
+  __syncthreads();
+  sync_remote_blocks<MemOpSem::Relaxed>(
+      reinterpret_cast<uint32_t**>(p2pStates), rank, kWorldSize);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -319,8 +326,10 @@ static __global__ void hybridCubeMeshAllReduceKernel(
   // Wait for HCM neigbors to enter the kernel
   if (threadIdx.x < 3) {
     auto targetRank = hcmInfo[threadIdx.x];
-    release_signal(&p2pStates[targetRank]->signals0[blockIdx.x][rank]);
-    acquire_signal(&p2pStates[rank]->signals0[blockIdx.x][targetRank]);
+    put_signal<MemOpSem::Relaxed>(
+        &p2pStates[targetRank]->signals0[blockIdx.x][rank]);
+    wait_signal<MemOpSem::Relaxed>(
+        &p2pStates[rank]->signals0[blockIdx.x][targetRank]);
   }
   __syncthreads();
 
@@ -357,8 +366,10 @@ static __global__ void hybridCubeMeshAllReduceKernel(
   __syncthreads();
 
   if (threadIdx.x == 0) {
-    release_signal(&p2pStates[relayRank]->signals0[blockIdx.x][rank]);
-    acquire_signal(&p2pStates[rank]->signals0[blockIdx.x][relayRank]);
+    put_signal<MemOpSem::Release>(
+        &p2pStates[relayRank]->signals0[blockIdx.x][rank]);
+    wait_signal<MemOpSem::Acquire>(
+        &p2pStates[rank]->signals0[blockIdx.x][relayRank]);
   }
   __syncthreads();
 
@@ -677,8 +688,8 @@ static __global__ void barrierKernel(
     size_t worldSize) {
   if (threadIdx.x < worldSize && (mask & (1ULL << threadIdx.x))) {
     auto targetRank = threadIdx.x;
-    release_signal(&p2pStates[targetRank]->signals0[0][rank]);
-    acquire_signal(&p2pStates[rank]->signals0[0][targetRank]);
+    put_signal<MemOpSem::Relaxed>(&p2pStates[targetRank]->signals0[0][rank]);
+    wait_signal<MemOpSem::Relaxed>(&p2pStates[rank]->signals0[0][targetRank]);
   }
 }
 

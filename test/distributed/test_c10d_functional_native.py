@@ -720,6 +720,17 @@ class CompileTest(TestCase):
         # out = AOTIRunnerUtil.run("cuda", func, (args,))
         # torch.cuda.synchronize()
 
+    @unittest.skipIf(not HAS_GPU, "This is a GPU test!")
+    @fresh_inductor_cache()
+    def test_wait_tensor_temp(self):
+        def func(arg: torch.Tensor) -> torch.Tensor:
+            return funcol.wait_tensor(arg)
+
+        # Test aoti
+        arg = torch.rand(4, 4, device="cuda")
+        out = AOTIRunnerUtil.run("cuda", func, (arg,))
+        torch.cuda.synchronize()
+
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
     def test_inductor_reduce_scatter_tensor_single(self):

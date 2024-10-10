@@ -163,7 +163,7 @@ public:
            typename = std::enable_if_t<(sizeof...(Args) == size())>>
   Vectorized(Args... vals) : values{vals...}{
   }
-  Vectorized(T(&arr)[kSize]) {
+  Vectorized(const T(&arr)[kSize]) {
     std::memcpy(values, arr, sizeof(values));
   }
   // This also implies const T& operator[](int idx) const
