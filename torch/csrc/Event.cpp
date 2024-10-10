@@ -276,7 +276,8 @@ static PyMethodDef THPEvent_methods[] = {
     {nullptr}};
 
 PyTypeObject THPEventType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.Event", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.Event", /* tp_name */
     sizeof(THPEvent), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)THPEvent_dealloc, /* tp_dealloc */
