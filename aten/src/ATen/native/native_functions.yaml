@@ -13120,7 +13120,7 @@
   variants: function
 
 # See NOTE [_add_batch_dim and _remove_batch_dim]
-- func: _remove_batch_dim(Tensor self, int level, int batch_size, int out_dim) -> Tensor
+- func: _remove_batch_dim(Tensor self, int level, SymInt batch_size, int out_dim) -> Tensor
   variants: function
 
 ## Functions related to the `torch.special` namespace

@@ -225,11 +225,9 @@ struct LiftedIValueArgs {
 };
 
 struct AutogradCompilerCall {
-  AutogradCompilerCall() = delete;
-  AutogradCompilerCall(bool opaque_cpp_node)
+  AutogradCompilerCall()
       : tensor_args(active_node_call_idx),
-        lifted_ivalue_args(active_node_call_idx),
-        opaque_cpp_node(opaque_cpp_node) {}
+        lifted_ivalue_args(active_node_call_idx) {}
   void add_size_input(const c10::SymInt& s) {
     all_size_inputs.emplace_back(
         default_dyn_type, s.guard_int(__FILE__, __LINE__));
@@ -254,19 +252,6 @@ struct AutogradCompilerCall {
   std::vector<c10::SafePyObject> hooks;
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type = SizeInput::STATIC;
-  const bool opaque_cpp_node;
-
-  // Currently, these lift untraceable CppNodes as one-time use custom ops
-  std::function<at::IValue*(
-      CompiledNodeArgs&,
-      Node*,
-      std::function<variable_list(variable_list)>,
-      const std::vector<bool>&,
-      const std::vector<VariableInfo>&)>
-      collect;
-  std::function<variable_list(SwapSavedVariables&, PyObject*, variable_list)>
-      lift;
-
   // NodeCall id of each size, only when verbose logging is enabled
   std::vector<uint32_t> size_input_origins;
   std::optional<size_t> active_node_call_idx;
@@ -358,16 +343,6 @@ class CompiledNodeArgs {
       collect(k);
       collect(m.at(k));
     }
-  }
-  void collect(
-      Node* fn,
-      std::function<variable_list(variable_list)>&& lambda,
-      const std::vector<bool>& is_variable_input,
-      const std::vector<VariableInfo>& output_metas) {
-    at::IValue* ptr = _compiler.collect(
-        *this, fn, std::move(lambda), is_variable_input, output_metas);
-    TORCH_INTERNAL_ASSERT(ptr->isInt(), "Unexpected non-int index");
-    _compiler.lifted_ivalue_args.args.emplace_back(ptr);
   }
   void collect(const at::IValue& iv, bool nested = false) {
     // used by AutogradContext::saved_data from CppNode
@@ -616,14 +591,6 @@ class CompiledNodeArgs {
   }
   CompiledNodeArgs(const CompiledNodeArgs&) = delete;
 
-  NodeCall* get_node_call() {
-    return &_node_call;
-  }
-
-  bool opaque_cpp_node() {
-    return _compiler.opaque_cpp_node;
-  }
-
  private:
   template <typename T>
   void specialize_on_bytes(const T& t) {
@@ -703,9 +670,7 @@ class SwapSavedVariables {
   void after(c10::SymInt& t) {
     stashed_symints.restore(&t);
   }
-  variable_list lift(variable_list&& inputs) {
-    return compiler.lift(*this, py_compiler, std::move(inputs));
-  }
+
   void before(at::IValue& iv) {
     if (iv.isTensor()) {
       before(iv.toTensor());
@@ -873,10 +838,6 @@ class SwapSavedVariables {
     stashed_variables.debug_assert();
     stashed_tensors.debug_assert();
     stashed_symints.debug_assert();
-  }
-
-  bool opaque_cpp_node() {
-    return compiler.opaque_cpp_node;
   }
 
  private:

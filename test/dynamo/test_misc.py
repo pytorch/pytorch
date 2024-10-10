@@ -79,7 +79,6 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
     IS_FBCODE,
-    scoped_load_inline,
     set_default_dtype,
     skipIfNNModuleInlined,
     skipIfWindows,
@@ -331,7 +330,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             return x.clone();
         }
         """
-        module, _ = scoped_load_inline(
+        module = torch.utils.cpp_extension.load_inline(
             name="mylib",
             cpp_sources=cpp_source,
             functions="foobar",
@@ -363,7 +362,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             return x.clone();
         }
         """
-        module2, _ = scoped_load_inline(
+        module2 = torch.utils.cpp_extension.load_inline(
             name="mylib2",
             cpp_sources=cpp_source,
             functions="baz",

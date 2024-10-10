@@ -33,7 +33,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
-    scoped_load_inline,
     skipIfTorchDynamo,
     subtest,
     TestCase,
@@ -2111,13 +2110,13 @@ torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x) {
   return CustomOpAutogradFunction::apply(x);
 }
 
-TORCH_LIBRARY(test_autograd_function_backed_op, m) {
+TORCH_LIBRARY(mylib, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
 
-        module = scoped_load_inline(
-            name="test_autograd_function_backed_op",
+        module = torch.utils.cpp_extension.load_inline(
+            name="mylib",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
@@ -2125,11 +2124,7 @@ TORCH_LIBRARY(test_autograd_function_backed_op, m) {
 
         x = torch.ones(2, 2, requires_grad=True)
         temp = x.clone().detach()
-        out = (
-            torch.ops.test_autograd_function_backed_op.custom_op_backed_by_autograd_fn(
-                x
-            )
-        )
+        out = torch.ops.mylib.custom_op_backed_by_autograd_fn(x)
         loss = out.sum()
         loss.backward()
         self.assertEqual(x.grad, temp)
@@ -3563,6 +3558,11 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertTrue(called)
         self.assertEqual(result, x * y)
 
+        x = torch.randn(3)
+        y = torch.randn(3)
+        result = torch.vmap(torch.vmap(f, in_dims=(0, None)), in_dims=(None, 0))(x, y)
+        self.assertEqual(result, y.unsqueeze(-1) * x)
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_vmap_op_decorator(self):
         @torch.library.custom_op("mylib::f", mutates_args=())
@@ -3588,6 +3588,11 @@ Please use `add.register_fake` to add an fake impl.""",
         result = torch.vmap(f)(x, y)
         self.assertTrue(called)
         self.assertEqual(result, x * y)
+
+        x = torch.randn(3)
+        y = torch.randn(2)
+        result = torch.vmap(torch.vmap(f, in_dims=(0, None)), in_dims=(None, 0))(x, y)
+        self.assertEqual(result, y.unsqueeze(-1) * x)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_vmap_register_multiple_times(self):
