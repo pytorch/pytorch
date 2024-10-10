@@ -4,6 +4,7 @@ from typing import cast, List, NamedTuple, Optional, Tuple, Union
 import torch
 import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
+from torch.autograd.grad_mode import _unsafe_preserve_version_counters
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.distributed_c10d import ReduceOp
 from torch.distributed.tensor import DTensor
@@ -253,8 +254,6 @@ def foreach_all_gather_copy_out(
         all_gather_work.wait()
     world_size, device = group.size(), all_gather_output.device
 
-    split_with_sizes_out: List[torch.Tensor] = []
-    shard_i_copy_infos: List[Tuple[FSDPParam, List[torch.Tensor]]] = []
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
         param_all_gather_input_numels, param_all_gather_input_dtypes, fsdp_params
     ):
@@ -270,50 +269,32 @@ def foreach_all_gather_copy_out(
         )
         if not force_recreate:
             fsdp_param.alloc_all_gather_outputs()
-        param_all_gather_outputs = fsdp_param.all_gather_outputs
-        if fsdp_param.fsdp_placement.dim != 0:
-            # Copy to a temporary and then chunk-cat into the final all-gather
-            # output tensors
-            param_all_gather_outputs = [
-                torch.empty_like(t) for t in param_all_gather_outputs
-            ]
-            shard_i_copy_infos.append((fsdp_param, param_all_gather_outputs))
-        split_with_sizes_out.extend(param_all_gather_outputs)
 
     all_gather_output = all_gather_output.view(world_size, -1)
-    if all_gather_output.dtype == torch.uint8:
-        out = [t.view(world_size, -1).view(torch.uint8) for t in split_with_sizes_out]
-    else:
-        out = [t.view(world_size, -1) for t in split_with_sizes_out]
-    torch.ops.fsdp.split_with_sizes_copy(
-        all_gather_output, all_gather_input_split_sizes, dim=1, out=out
-    )
+    split_sizes: List[int] = []
+    out_views: List[torch.Tensor] = []
+    for fsdp_param in fsdp_params:
+        assert len(fsdp_param.all_gather_outputs) == 1
+        if fsdp_param.fsdp_placement.dim == 1:
+            split_sizes.extend(
+                [fsdp_param._orig_numel // fsdp_param._orig_size[0] // world_size]
+                * fsdp_param._orig_size[0]
+            )
+            out_views.extend(
+                fsdp_param.all_gather_outputs[0].chunk(fsdp_param._orig_size[0])
+            )
+        elif fsdp_param.fsdp_placement.dim == 0:
+            split_sizes.extend([fsdp_param._orig_numel // world_size])
+            out_views.append(fsdp_param.all_gather_outputs[0])
+        else:
+            raise NotImplementedError(
+                f"only support Shard(0) and Shard(1) but got {fsdp_param.fsdp_placement}"
+            )
 
-    for fsdp_param, param_all_gather_outputs in shard_i_copy_infos:
-        # Chunk-cat from the temporary to the final all-gather output tensors
-        shard_dim = fsdp_param.fsdp_placement.dim
-        for param_all_gather_output, target_all_gather_output in zip(
-            param_all_gather_outputs, fsdp_param.all_gather_outputs
-        ):
-            padded_sharded_size = (
-                fsdp_param.padded_sharded_param_size
-                if fsdp_param.sharded_state == ShardedState.SHARDED
-                else cast(
-                    torch.Tensor, fsdp_param._sharded_post_forward_param_data
-                ).size()
-            )
-            pre_param_size = list(padded_sharded_size)
-            pre_param_size[0] *= world_size
-            chunks = torch.chunk(
-                param_all_gather_output.view(pre_param_size), world_size, dim=0
-            )
-            post_param_size = list(padded_sharded_size)
-            post_param_size[shard_dim] *= world_size
-            cat_out = target_all_gather_output.view(post_param_size)
-            torch.cat(chunks, dim=shard_dim, out=cat_out)
-            torch._C._autograd._unsafe_set_version_counter(
-                target_all_gather_output, target_all_gather_output._version - 1
-            )
+    with _unsafe_preserve_version_counters(out_views):
+        torch.ops.fsdp.split_with_sizes_copy(
+            all_gather_output, split_sizes, dim=1, out=out_views
+        )
 
 
 @torch.no_grad()

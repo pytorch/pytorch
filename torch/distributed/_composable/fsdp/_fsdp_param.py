@@ -352,6 +352,7 @@ class FSDPParam:
                 f"Shard dim {shard_dim} is invalid for {param_data.ndim}D tensor: {param.shape}"
             )
         self._orig_size = param_data.size()
+        self._orig_numel = param_data.numel()
         self._contiguous_orig_stride = make_contiguous_strides_for(self._orig_size)
         shard_rank = self.mesh_info.shard_mesh_rank
         shard_world_size = self.mesh_info.shard_mesh_size

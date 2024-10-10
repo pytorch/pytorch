@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any
+from typing import Any, List
 
 import torch
 from torch.utils._contextlib import (
@@ -395,3 +395,38 @@ class _unsafe_preserve_version_counter(_DecoratorContextManager):
 
     def __exit__(self, *args) -> None:
         torch._C._autograd._unsafe_set_version_counter(self.tensor, self.prev_version)
+
+
+class _unsafe_preserve_version_counters(_DecoratorContextManager):
+    r"""DO NOT USE THIS UNLESS YOU KNOW EXACTLY WHAT YOU'RE DOING.
+
+    This context manager can lead to arbitrary silent-correctness issues in any other part of your code
+    (even the ones not touched directly by the context manager)!
+
+    Ordinarily, autograd will track mutations to tensors by incrementing it's `._version` attribute.
+    This is generally important for correctness, as for example, mutating a tensor that autograd has saved
+    for the backwards pass can result in incorrect gradients, and autograd uses the version counter to detect
+    and error out in this situation.
+
+    However, there are rare instances where it might be useful to hide mutations from autograd. For example:
+    if a tensor is very large, and you'd like to free its memory by storing it elsewhere, and re-populate
+    the tensor right before it is needed by autograd.
+
+    Args:
+        tensor (torch.Tensor): the tensor in question, that you would like to preserve the version counter of.
+
+    .. note::
+        This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
+
+    """
+
+    def __init__(self, tensors: List[torch.Tensor]) -> None:
+        self.tensors = tensors
+        self.prev_versions = [tensor._version for tensor in tensors]
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(self, *args) -> None:
+        for tensor, prev_version in zip(self.tensors, self.prev_versions):
+            torch._C._autograd._unsafe_set_version_counter(tensor, prev_version)
