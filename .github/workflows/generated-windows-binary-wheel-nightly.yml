@@ -115,7 +115,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -234,7 +234,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -362,7 +362,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -482,7 +482,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -611,7 +611,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -731,7 +731,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -860,7 +860,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -980,7 +980,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1107,7 +1107,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1150,7 +1150,7 @@ jobs:
     needs:
       - wheel-py3_9-xpu-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+    runs-on: "windows.mtl.xpu"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1226,7 +1226,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1353,7 +1353,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1472,7 +1472,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1600,7 +1600,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1720,7 +1720,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1849,7 +1849,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1969,7 +1969,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -2098,7 +2098,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -2218,7 +2218,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -2345,7 +2345,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -2388,7 +2388,7 @@ jobs:
     needs:
       - wheel-py3_10-xpu-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+    runs-on: "windows.mtl.xpu"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2464,7 +2464,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -2591,7 +2591,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -2710,7 +2710,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -2838,7 +2838,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -2958,7 +2958,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -3087,7 +3087,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -3207,7 +3207,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -3336,7 +3336,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -3456,7 +3456,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -3583,7 +3583,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -3626,7 +3626,7 @@ jobs:
     needs:
       - wheel-py3_11-xpu-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+    runs-on: "windows.mtl.xpu"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3702,7 +3702,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -3757,7 +3757,7 @@ jobs:
   wheel-py3_12-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3829,7 +3829,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -3948,7 +3948,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -4076,7 +4076,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -4196,7 +4196,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -4325,7 +4325,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -4445,7 +4445,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -4574,7 +4574,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -4694,7 +4694,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -4821,7 +4821,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -4864,7 +4864,7 @@ jobs:
     needs:
       - wheel-py3_12-xpu-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+    runs-on: "windows.mtl.xpu"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -4940,7 +4940,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: refs/pull/1992/head
           submodules: recursive
           repository: pytorch/builder
           path: builder
