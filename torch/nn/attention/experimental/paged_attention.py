@@ -1,11 +1,13 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-"""This module implements an experimental feature, Paged Attention, on top of flex_attention."""
+"""
+This module implements Paged Attention on top of flex_attention.
+This module is experimental and subject to change.
+"""
 
 from typing import Optional, Union
 
 import torch
-from torch import Tensor
 from torch.nn.attention.flex_attention import (
     _identity,
     _mask_mod_signature,
@@ -15,7 +17,12 @@ from torch.nn.attention.flex_attention import (
 )
 
 
-def _cdiv(x: Union[int, float, Tensor], multiple: Union[int, float, Tensor]):
+__all__ = ["PagedAttention"]
+
+
+def _cdiv(
+    x: Union[int, float, torch.Tensor], multiple: Union[int, float, torch.Tensor]
+):
     return (x + multiple - 1) // multiple
 
 
@@ -59,7 +66,7 @@ class PagedAttention:
             (max_batch_size, n_pages), dtype=torch.int64, device=device
         )
 
-    def reserve(self, batch_idx: Tensor, seq_len: Tensor) -> None:
+    def reserve(self, batch_idx: torch.Tensor, seq_len: torch.Tensor) -> None:
         """
         Requests the capacity of a given batch to be at least enough to
         hold `seq_len` elements.
@@ -105,7 +112,7 @@ class PagedAttention:
         )
         self.capacity[batch_idx] += num_pages_to_allocate * self.page_size
 
-    def erase(self, batch_idx: Tensor) -> None:
+    def erase(self, batch_idx: torch.Tensor) -> None:
         """
         Removes a single batch from paged attention.
 
@@ -125,12 +132,12 @@ class PagedAttention:
 
     def assign(
         self,
-        batch_idx: Tensor,
-        input_pos: Tensor,
-        k_val: Tensor,
-        v_val: Tensor,
-        k_cache: Tensor,
-        v_cache: Tensor,
+        batch_idx: torch.Tensor,
+        input_pos: torch.Tensor,
+        k_val: torch.Tensor,
+        v_val: torch.Tensor,
+        k_cache: torch.Tensor,
+        v_cache: torch.Tensor,
     ) -> None:
         """
         Assigns new contents `val` to the storage `cache` at the location
@@ -193,7 +200,7 @@ class PagedAttention:
     def convert_logical_block_mask(
         self,
         block_mask: BlockMask,
-        batch_idx: Optional[Tensor] = None,
+        batch_idx: Optional[torch.Tensor] = None,
     ) -> BlockMask:
         """
         Converts a logical block mask by mapping its logical kv indices to the corresponding
@@ -283,7 +290,12 @@ class PagedAttention:
         if mask_mod is None:
             mask_mod = noop_mask
 
-        def new_mask_mod(b: Tensor, h: Tensor, q_idx: Tensor, physical_kv_idx: Tensor):
+        def new_mask_mod(
+            b: torch.Tensor,
+            h: torch.Tensor,
+            q_idx: torch.Tensor,
+            physical_kv_idx: torch.Tensor,
+        ):
             physical_kv_block = physical_kv_idx // self.page_size
             physical_kv_offset = physical_kv_idx % self.page_size
             logical_block_idx = self.physical_to_logical[b, physical_kv_block]
@@ -308,7 +320,11 @@ class PagedAttention:
             score_mod = _identity
 
         def new_score_mod(
-            score: Tensor, b: Tensor, h: Tensor, q_idx: Tensor, physical_kv_idx: Tensor
+            score: torch.Tensor,
+            b: torch.Tensor,
+            h: torch.Tensor,
+            q_idx: torch.Tensor,
+            physical_kv_idx: torch.Tensor,
         ):
             physical_kv_block = physical_kv_idx // self.page_size
             physical_kv_offset = physical_kv_idx % self.page_size

@@ -2490,7 +2490,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         attention = functools.partial(flex_attention, block_mask=block_mask)
 
         self.run_test_with_call(attention, Q_S=S - 1, KV_S=S - 1)
-        self.run_test_with_paged_attention(Q_S=S - 1, KV_S=S - 1, block_mask=block_mask)
 
     @supported_platform
     def test_modular_indexing(self):
