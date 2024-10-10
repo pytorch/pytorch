@@ -32,10 +32,14 @@ bool is_pinned(const Tensor& self, std::optional<c10::Device> device) {
         "The argument 'device' of Tensor.is_pinned() ",
         "is deprecated. Please do not pass this argument.")
     opt_device_type = device.value().type();
+  } else {
+    opt_device_type = at::getAccelerator();
   }
 
-  // Only CPU tensors can be pinned
-  if (!self.is_cpu()) {
+  if (!self.is_cpu() || // Only CPU tensors can be pinned
+      !opt_device_type.has_value() || // there is no accelerator
+      !at::isAccelerator(
+          opt_device_type.value())) { // passed device not an accelerator
     return false;
   }
 
