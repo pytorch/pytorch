@@ -2,11 +2,7 @@
 
 #ifdef USE_PTHREADPOOL
 
-#ifdef USE_INTERNAL_PTHREADPOOL_IMPL
-#include <caffe2/utils/threadpool/pthreadpool.h>
-#else
 #include <pthreadpool.h>
-#endif
 
 #include <functional>
 #include <memory>
