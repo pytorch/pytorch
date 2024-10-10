@@ -261,7 +261,7 @@ public:
   Vectorized<double> nextafter(const Vectorized<double> &b) const {
     USE_SLEEF(
       {
-        return Vectorized<double>(Sleef_nextafterfx_sve(values, b));
+        return Vectorized<double>(Sleef_nextafterdx_sve(values, b));
       },
       {
         __at_align__ double tmp[size()];

@@ -10,8 +10,8 @@ import torch.utils.cpp_extension
 
 
 try:
-    from extension_backends.triton.device_interface import (
-        DeviceInterface,  # @manual=fbcode//caffe2/test/inductor/extension_backends:extension_codegen_backend
+    from extension_backends.triton.device_interface import (  # @manual=fbcode//caffe2/test/inductor/extension_backends:extension_codegen_backend  # noqa: B950
+        DeviceInterface,
     )
     from extension_backends.triton.extension_codegen_backend import (  # @manual=fbcode//caffe2/test/inductor/extension_backends:extension_codegen_backend  # noqa: B950
         CPUDeviceOpOverrides,

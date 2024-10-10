@@ -269,10 +269,13 @@ import torch._refs
 #    is mutating or aliasing.
 # TODO (tmanlaibaatar) make this utility function and share it with functional_tensor
 # decomp part. (https://github.com/pytorch/pytorch/issues/129431)
-def _check_valid_to_preserve(op_overload):
+def _check_valid_to_preserve(op_overload: "OperatorBase"):
     if op_overload in FunctionalTensor.maybe_aliasing_or_mutating_ops:
         return False
     if op_overload in FunctionalTensor.metadata_fns:
+        return False
+
+    if not hasattr(op_overload, "_schema"):
         return False
 
     alias_info = len(
@@ -290,13 +293,17 @@ def _check_valid_to_preserve(op_overload):
     return True
 
 
-def _is_cia_op(op: "OpOverload") -> bool:
+def _is_cia_op(op: "OperatorBase") -> bool:
     return (
         torch._C._dispatch_has_kernel_for_dispatch_key(
             op.name(), torch._C.DispatchKey.CompositeImplicitAutograd
         )
         or torch._C.DispatchKey.CompositeImplicitAutograd in op.py_kernels
     )
+
+
+def _is_preservable_cia_op(op: "OperatorBase") -> bool:
+    return _check_valid_to_preserve(op) and _is_cia_op(op)
 
 
 @lru_cache(maxsize=1)
@@ -339,7 +346,7 @@ def _collect_all_valid_cia_ops() -> Set["OperatorBase"]:
         op_packet = getattr(torch.ops.aten, op)
         for overload in op_packet.overloads():
             op_overload = getattr(op_packet, overload)
-            if _check_valid_to_preserve(op_overload) and _is_cia_op(op_overload):
+            if _is_preservable_cia_op(op_overload):
                 cia_ops.add(op_overload)
     return cia_ops
 
@@ -541,6 +548,8 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.logsumexp.default,
             aten.masked_fill,
             aten.masked_fill_,
+            aten.max_unpool2d,
+            aten.max_unpool3d,
             aten.mish,
             aten.mish_,
             aten.mse_loss,
@@ -620,6 +629,7 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.special_xlog1py,
             aten.split.Tensor,
             aten.split_with_sizes_copy,
+            aten.squeeze_copy,
             aten.squeeze.default,
             aten.squeeze.dim,
             aten.std,
