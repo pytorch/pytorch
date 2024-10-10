@@ -37,7 +37,7 @@
 #ifdef USE_FLASH_ATTENTION
 #include <ATen/core/Tensor.h>
 #include <ATen/hip/HIPContext.h>
-#include <c10/hip/HIPGuard.h>
+#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
 #include <ATen/hip/HIPGraphsUtils.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -297,7 +297,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         const bool deterministic,
         const at::Tensor philox_seed,
         const at::Tensor philox_offset) {
-  auto stream = at::cuda::getCurrentCUDAStream().stream();
+  auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
   check_gpu_arch(stream);
 
   bool is_dropout = p_dropout > 0.0;
@@ -385,7 +385,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
 
   // Otherwise the kernel will be launched from cuda:0 device
   // Cast to char to avoid compiler warning about narrowing
-  at::cuda::CUDAGuard device_guard{(char)q.get_device()};
+  at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
 
   auto opts = q.options();
   auto softmax_d = at::empty({batch_size, num_heads, seqlen_q_rounded}, opts.dtype(at::kFloat));

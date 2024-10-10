@@ -2,8 +2,9 @@
 import functools
 import os
 import pickle
+import tempfile
 import unittest
-from typing import List
+from typing import List, Optional, Union
 from unittest import mock
 
 import torch
@@ -20,6 +21,7 @@ from torch._inductor.codecache import (
     TensorMetadata,
     TensorMetadataAndValues,
 )
+from torch._inductor.custom_graph_pass import CustomGraphPass, get_hash_for_files
 from torch._inductor.graph import GraphLowering
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
@@ -804,6 +806,61 @@ class TestFxGraphCacheHashing(TestCase):
             FxGraphCachePickler.dumps(details3),
         )
 
+    def test_hash_custom_passes(self):
+        """
+        Test CustomGraphPass usage.
+        """
+
+        class TestCustomGraphPass(CustomGraphPass):
+            def __init__(self):
+                self._uuid = None
+
+            def __call__(self, graph: torch.fx.graph.Graph) -> None:
+                return None
+
+            def uuid(self) -> Optional[Union[bytes, str]]:
+                return self._uuid
+
+        custom_pass = TestCustomGraphPass()
+        with config.patch({"post_grad_custom_pre_pass": custom_pass}):
+            custom_pass._uuid = "1"
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+
+            custom_pass._uuid = "2"
+            details3 = FxGraphHashDetails(None, [], {}, [])
+
+            self.assertEqual(
+                FxGraphCachePickler.dumps(details1),
+                FxGraphCachePickler.dumps(details2),
+            )
+            self.assertNotEqual(
+                FxGraphCachePickler.dumps(details1),
+                FxGraphCachePickler.dumps(details3),
+            )
+
+    def test_get_hash_for_files(self):
+        """
+        Test the get_hash_for_files helper.
+        """
+        with tempfile.NamedTemporaryFile(delete=True) as temp:
+            temp.write(b"contents")
+            temp.flush()
+
+            hash1 = get_hash_for_files((temp.name,))
+            get_hash_for_files.cache_clear()
+            hash2 = get_hash_for_files((temp.name,))
+
+            temp.write(b" ")
+            temp.flush()
+            get_hash_for_files.cache_clear()
+            hash3 = get_hash_for_files((temp.name,))
+
+            self.assertEqual(hash1, hash2)
+            self.assertNotEqual(hash1, hash3)
+
+
+class TestCudaCompileCommand(TestCase):
     @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_cuda_compile_command(self):
