@@ -662,8 +662,8 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
 
     auto compute = [&](int k) {
 {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
-    // base index for dequantized weights
-    const int64_t base_idx_of_weights = (k / {{block_k // 2}}) * 512;
+    // base index for dequantized B
+    const int64_t base_idx_of_deq_B = (k / {{block_k // 2}}) * 512;
 {%- endif %}
 {%- set tile_offset_a = num_rows // 16 * num_columns %}
 {%- set tile_offset_b = tile_offset_a + num_rows // 16 %}
@@ -677,7 +677,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         {%- endif %}
         {%- if tile_row == 0 %}
             {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
-        _tile_loadd({{tile_idx_b}}, B + base_idx_of_weights + {{tile_col}} * 512, 64);
+        _tile_loadd({{tile_idx_b}}, B + base_idx_of_deq_B + {{tile_col}} * 512, 64);
             {%- else %}
         _tile_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * vnni_size}}, ldb * {{vnni_size}} * sizeof({{input_t}}));
             {%- endif %}
