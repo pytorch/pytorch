@@ -3,7 +3,7 @@
 #include <torch/library.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/ConvUtils.h>
-#include <ATen/native/mkldnn/Conv.h>
+#include <ATen/native/onednn/Conv.h>
 #include <ATen/native/utils/ParamUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
