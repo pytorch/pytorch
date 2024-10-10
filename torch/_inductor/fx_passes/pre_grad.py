@@ -124,6 +124,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
     Consider adding a new pass to post_grad.py or joint_graph.py which
     are after functionalization and normalization.
     """
+    return gm
     if config.pattern_matcher:
         lazy_init()
         if hasattr(
