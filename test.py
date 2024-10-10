@@ -35,6 +35,8 @@ def make_dynamic(func):
 
 def myFunc(a, b, c):
     print("myFunc is running") # Can't actually print a,b,c here, because when it's run in capture mode, their data_ptrs are nullptr
+
+    # check that simple kernels work:
     a += b.sum() * c
     temp = torch.ones_like(c) # we can even allocate :)
     temp += 1
@@ -44,9 +46,21 @@ def myFunc(a, b, c):
     a[5] += b[1]
     a[6] = b[1]
     a[7:8] = 123
-    #a[2] = torch.tensor(5)
+
+    # check that GPU_LAMBDA works:
     c = torch.clamp(c, min=2, max=5)
     a += c
+
+    # check that cudaMemcpyAsync device-to-device works
+    torch.sort(a, out=(a, torch.empty_like(a).to(dtype=torch.int64)))
+    a[4] += a[5].clone().clone().clone() # this line does three cudaMemcpyAsyncs
+
+    # torch very rarely uses cudaMemsetAsync
+    # to trigger that case, we need to call top-k and get it to use its multiblock kernel
+    # this is an easy way to do that:
+    temp = torch.empty(100000, device=a.device)
+    temp[:] = a[0] - 1000
+    a[0] = torch.topk(temp, 1).values
 
 myFuncWrapped = make_dynamic(myFunc)
 

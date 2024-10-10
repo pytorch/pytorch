@@ -428,8 +428,6 @@ void CUDAGraph::compare_with_recapture(const CUDAGraph& graph2) {
       const char* func_name;
       globalContext().getNVRTC().cuFuncGetName(&func_name, func);
 
-      std::cout << "GALVEZ: kernel name=" << func_name << std::endl;
-
       size_t param_index = 0;
       size_t param_offset;
       size_t param_size;
@@ -495,7 +493,8 @@ void CUDAGraph::compare_with_recapture(const CUDAGraph& graph2) {
       if (!srcPtrResult && !dstPtrResult) {
         continue; // unable to figure it out
       }
-      
+
+      std::cout << "MEMCPY NODE" << std::endl;
       
       graphNodeParamUpdates.push_back({
         .node = node1,
@@ -546,6 +545,8 @@ void CUDAGraph::compare_with_recapture(const CUDAGraph& graph2) {
       if (!dstPtrResult) {
         continue; // unable to figure it out
       }
+
+      std::cout << "MEMSET NODE" << std::endl;
       
       graphNodeParamUpdates.push_back({
         .node = node1,
