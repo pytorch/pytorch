@@ -160,7 +160,6 @@ void _csr_matmult(
     }
 
     for (C10_UNUSED const auto jj : c10::irange(length)) {
-
       // NOTE: the linked list that encodes col indices
       // is not guaranteed to be sorted.
       Cj[nnz] = head;
