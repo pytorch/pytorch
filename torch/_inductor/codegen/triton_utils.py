@@ -7,7 +7,7 @@ import torch
 
 from .. import config
 from ..runtime.hints import instance_descriptor
-from ..utils import _type_of
+from ..utils import _type_of, expr_fits_within_32bit
 from ..virtualized import V
 from .common import KernelArgType, SizeArg, TensorArg, WorkspaceArg
 
@@ -23,7 +23,7 @@ def should_unwrap_unspec_arg(name: str):
     return False
 
 
-def signature_of(arg: KernelArgType, *, size_dtype: str) -> str:
+def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
     if isinstance(arg, TensorArg):
         # TODO: Remove fp8 special handling when Triton supports PyTorch fp8 dtypes.
         # Related PR: https://github.com/openai/triton/pull/2279/
@@ -53,10 +53,20 @@ def signature_of(arg: KernelArgType, *, size_dtype: str) -> str:
             return "*i8"
         elif isinstance(arg.expr, (float, sympy.Float)):
             return "fp32"
+
+        # if this is a integer
         if size_dtype == "tl.int32":
             return "i32"
         elif size_dtype == "tl.int64":
             return "i64"
+        elif size_dtype is None:
+            # no hint: we'll see if we know that this is a 32-bit int, and guard if possible.
+            int_max = torch.iinfo(torch.int32).max
+            if expr_fits_within_32bit(arg.expr):
+                V.graph.sizevars.guard_leq(arg.expr, int_max)
+                return "i32"
+            else:
+                return "i64"
         else:
             raise NotImplementedError(f"unhandled size_dtype {size_dtype}")
     if isinstance(arg, WorkspaceArg):
@@ -67,7 +77,7 @@ def signature_of(arg: KernelArgType, *, size_dtype: str) -> str:
 def signature_to_meta(
     signature: List[KernelArgType],
     *,
-    size_dtype: str,
+    size_dtype: Optional[str],
     argdefs: List[str],
     indices: Optional[List[int]] = None,
 ) -> Dict[str, str]:
