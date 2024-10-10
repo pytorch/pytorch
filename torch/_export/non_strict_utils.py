@@ -40,13 +40,16 @@ from torch.fx.experimental.symbolic_shapes import (
     RelaxedUnspecConstraint,
     ShapeEnv,
     StatelessSymbolicContext,
+    ValueRangeError,
     ValueRanges,
 )
 from torch.utils._pytree import (
     GetAttrKey,
     KeyPath,
+    keystr,
     MappingKey,
     SequenceKey,
+    tree_flatten_with_path,
     tree_map_with_path,
 )
 
@@ -246,7 +249,9 @@ def _flatten_dynamic_shapes(
         nonlocal flat_shapes
         flat_shapes.append(shape)
 
-    _tree_map_with_path(_tree_map_helper, combined_args, dynamic_shapes)
+    _tree_map_with_path(
+        _tree_map_helper, combined_args, dynamic_shapes, tree_name="inputs"
+    )
     return flat_shapes
 
 
@@ -342,6 +347,8 @@ def make_constraints(
         num_lifted_inputs: the number of non-user-input placeholder nodes in the graph
         (used only to enumerate the user-input nodes)
     """
+    from torch._dynamo.exc import UserError, UserErrorType
+    from torch.utils._sympy.numbers import int_oo
 
     shape_env = fake_mode.shape_env
     assert shape_env is not None
@@ -362,6 +369,7 @@ def make_constraints(
         assert isinstance(dynamic_shapes, (tuple, list))
         combined_args = type(dynamic_shapes)(combined_args.values())  # type: ignore[assignment, misc]
     flat_dynamic_shapes = _flatten_dynamic_shapes(combined_args, dynamic_shapes)
+    flat_paths = tree_flatten_with_path(combined_args)[0]
 
     # check number of shapes vs. number of inputs
     num_placeholders = [node.op == "placeholder" for node in gm.graph.nodes].count(True)
@@ -377,6 +385,7 @@ def make_constraints(
         ):
             continue
         shape_spec = flat_dynamic_shapes[input_index - num_lifted_inputs]
+        keypath, _ = flat_paths[input_index - num_lifted_inputs]
         for i, d in enumerate(node.meta["val"].shape):
             if isinstance(d, torch.SymInt) and not d.node.expr.is_number:
                 # Look up the range constraint for the symbol corresponding to this shape dimension
@@ -389,6 +398,21 @@ def make_constraints(
                     range_constraints[d.node.expr] = shape_env.var_to_range[
                         d.node._expr
                     ]
+                    if isinstance(dim, _DimHint):
+                        _min = dim.min or 0
+                        _max = dim.max or int_oo
+                        try:
+                            range_constraints[d.node.expr] &= ValueRanges(
+                                lower=_min, upper=_max
+                            )
+                        except ValueRangeError as exc:
+                            vr = range_constraints[d.node.expr]
+                            raise UserError(
+                                UserErrorType.INVALID_INPUT,
+                                "`dynamic_shapes` input contains user-specified range of "
+                                f"{_min} <= inputs{keystr(keypath)}.shape[{i}] <= {_max}, "
+                                f"but tracing produced valid range of [{vr.lower}, {vr.upper}]",
+                            ) from exc
                 else:
                     range_constraints[d.node.expr] = ValueRanges(
                         lower=dim.min, upper=dim.max
