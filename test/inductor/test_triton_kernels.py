@@ -3,6 +3,7 @@
 # Skip do not assign a lambda expression, use a def
 import functools
 import logging
+import re
 from unittest.mock import patch
 
 import torch
@@ -29,7 +30,7 @@ from torch.testing._internal.logging_utils import logs_to_string
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
-from torch.utils._triton import has_triton_package
+from torch.utils._triton import has_triton_package, has_triton_tma
 
 
 if HAS_GPU:
@@ -99,6 +100,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             kernel_idx=add_kernel_id,
             constant_args_idx=constant_args_idx,
             grid=[grid],
+            tma_descriptor_metadata={},
             kwargs={
                 "in_ptr0": t1,
                 "in_ptr1": t2,
@@ -115,6 +117,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             kernel_idx=add_kernel_id,
             constant_args_idx=constant_args_idx,
             grid=[grid],
+            tma_descriptor_metadata={},
             kwargs={
                 "in_ptr0": t1,
                 "in_ptr1": t2,
@@ -145,6 +148,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
                     {"n_elements": output.numel(), "BLOCK_SIZE": 16}
                 ),
                 grid=[(x.numel(),)],
+                tma_descriptor_metadata={},
                 kwargs={
                     "in_ptr0": x,
                     "out_ptr": output,
@@ -173,7 +177,7 @@ class KernelTests(torch._inductor.test_case.TestCase):
             gm.code.strip(),
             """\
 def forward(self, x_1, output_1):
-    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 3, grid = [(5,)], kwargs = {'in_ptr0': x_1, 'out_ptr': output_1}, tensors_to_clone = ['in_ptr0', 'out_ptr']);  x_1 = output_1 = None
+    triton_kernel_wrapper_functional_proxy = torch.ops.higher_order.triton_kernel_wrapper_functional(kernel_idx = 0, constant_args_idx = 3, grid = [(5,)], tma_descriptor_metadata = {}, kwargs = {'in_ptr0': x_1, 'out_ptr': output_1}, tensors_to_clone = ['in_ptr0', 'out_ptr']);  x_1 = output_1 = None
     getitem = triton_kernel_wrapper_functional_proxy['in_ptr0'];  getitem = None
     getitem_1 = triton_kernel_wrapper_functional_proxy['out_ptr'];  triton_kernel_wrapper_functional_proxy = None
     return getitem_1""",
@@ -217,6 +221,7 @@ def forward(self, x_1, output_1):
                         {"n_elements": x_func.numel(), "BLOCK_SIZE": 16}
                     ),
                     grid=[(x_func.numel(),)],
+                    tma_descriptor_metadata={},
                     kwargs={
                         "ptr": x_func,
                     },
@@ -238,6 +243,7 @@ def forward(self, x_1, output_1):
                         {"n_elements": x_func.numel(), "BLOCK_SIZE": 16}
                     ),
                     grid=[(x_func.numel(),)],
+                    tma_descriptor_metadata={},
                     kwargs={
                         "ptr": x_func,
                     },
@@ -1629,6 +1635,158 @@ def forward(self, x_1, output_1):
         self.assertEqual(out, x + y)
         self.assertEqual(out2, x + y + 1)
         self.assertEqual(out3, z**2)
+
+    @requires_gpu
+    @unittest.skipIf(not has_triton_tma(), "requires Triton TMA support")
+    def test_tma_capture_and_functionalize(self):
+        def f(a, b):
+            BLOCK_SIZE = 256
+            out = torch.zeros_like(a)
+            n_elements = out.numel()
+
+            desc_a, desc_b, desc_out = (
+                triton.tools.experimental_descriptor.create_1d_tma_descriptor(
+                    t.data_ptr(),
+                    n_elements,
+                    BLOCK_SIZE,
+                    t.element_size(),
+                )
+                for t in (a, b, out)
+            )
+
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel_with_tma_1d[grid](
+                desc_a,
+                desc_b,
+                desc_out,
+                BLOCK_SIZE=BLOCK_SIZE,
+            )
+
+            return out
+
+        a = torch.randn(301, device=GPU_TYPE)
+        b = torch.randn(301, device=GPU_TYPE)
+
+        torch._logging.set_logs(aot=logging.INFO)
+        with self.assertLogs(
+            logger="torch._functorch._aot_autograd.dispatch_and_compile_graph.__aot_graphs"
+        ) as log:
+            compiled_out = torch.compile(
+                f,
+                fullgraph=True,
+                backend="aot_eager",
+                dynamic=False,
+            )(a, b)
+        # reset logging state
+        torch._logging.set_logs()
+
+        output = "\n".join(record.getMessage() for record in log.records)
+        output = re.sub(r"\033\[[0-9;]*m", "", output)  # remove coloring
+
+        # structured capturing of the TMA descriptor metadata
+        self.assertIn(
+            "tma_descriptor_metadata = {'in_desc_ptr0': ([301], [256], 4), 'in_desc_ptr1': ([301], [256], 4), 'out_desc_ptr': ([301], [256], 4)}",
+            output,
+        )
+        # functionalization: the output should be marked as mutated
+        self.assertIn("tensors_to_clone = ['out_desc_ptr']", output)
+
+    @requires_gpu
+    @unittest.skipIf(not has_triton_tma(), "requires Triton TMA support")
+    @common_utils.parametrize("dynamic", [False, True])
+    @common_utils.parametrize("backend", ["eager", "aot_eager"])
+    def test_tma_descriptor_1d(self, dynamic, backend):
+        def f(a, b):
+            BLOCK_SIZE = 256
+            out = torch.zeros_like(a)
+            n_elements = out.numel()
+
+            desc_a, desc_b, desc_out = (
+                triton.tools.experimental_descriptor.create_1d_tma_descriptor(
+                    t.data_ptr(),
+                    n_elements,
+                    BLOCK_SIZE,
+                    t.element_size(),
+                )
+                for t in (a, b, out)
+            )
+
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel_with_tma_1d[grid](
+                desc_a,
+                desc_b,
+                desc_out,
+                BLOCK_SIZE=BLOCK_SIZE,
+            )
+
+            return out
+
+        a = torch.randn(301, device=GPU_TYPE)
+        b = torch.randn(301, device=GPU_TYPE)
+
+        expected_out = a + b
+        eager_out = f(a, b)
+        compiled_out = torch.compile(
+            f,
+            fullgraph=True,
+            backend=backend,
+            dynamic=dynamic,
+        )(a, b)
+
+        torch.testing.assert_close(eager_out, expected_out)
+        torch.testing.assert_close(compiled_out, expected_out)
+
+    @requires_gpu
+    @unittest.skipIf(not has_triton_tma(), "requires Triton TMA support")
+    @common_utils.parametrize("dynamic", [False, True])
+    @common_utils.parametrize("backend", ["eager", "aot_eager"])
+    def test_tma_descriptor_2d(self, dynamic, backend):
+        def f(a, b):
+            BLOCK_SIZE_X = 16
+            BLOCK_SIZE_Y = 32
+            out = torch.zeros_like(a)
+            x_size, y_size = out.size()
+
+            desc_a, desc_b, desc_out = (
+                triton.tools.experimental_descriptor.create_2d_tma_descriptor(
+                    t.data_ptr(),
+                    x_size,
+                    y_size,
+                    BLOCK_SIZE_X,
+                    BLOCK_SIZE_Y,
+                    t.element_size(),
+                )
+                for t in (a, b, out)
+            )
+
+            grid = lambda meta: (
+                triton.cdiv(x_size, meta["BLOCK_SIZE_X"]),
+                triton.cdiv(y_size, meta["BLOCK_SIZE_Y"]),
+            )
+            add_kernel_with_tma_2d[grid](
+                desc_a,
+                desc_b,
+                desc_out,
+                BLOCK_SIZE_X=BLOCK_SIZE_X,
+                BLOCK_SIZE_Y=BLOCK_SIZE_Y,
+            )
+
+            return out
+
+        a = torch.randn((25, 16), device=GPU_TYPE)
+        b = torch.randn((25, 16), device=GPU_TYPE)
+
+        expected_out = a + b
+        eager_out = f(a, b)
+        compiled_out = torch.compile(
+            f,
+            fullgraph=True,
+            backend=backend,
+            dynamic=dynamic,
+        )(a, b)
+
+        torch.testing.assert_close(eager_out, expected_out)
+        torch.testing.assert_close(compiled_out, expected_out)
 
     @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
