@@ -849,12 +849,12 @@ class Optimizer:
             The names of the parameters (if they exist under the "param_names" key of each param group
             in :meth:`state_dict`) will not affect the loading process.
             To use the parameters' names for custom cases (such as when the parameters in the loaded state dict
-             differ from those initialized in the optimizer),
+            differ from those initialized in the optimizer),
             a custom ``register_load_state_dict_pre_hook`` should be implemented to adapt the loaded dict
-             accordingly.
-             If ``param_names`` exist in loaded state dict ``param_groups`` they will be saved and override
-             the current names, if present, in the optimizer state. If they do not exist in loaded state dict,
-             the optimizer ``param_names`` will remain unchanged.
+            accordingly.
+            If ``param_names`` exist in loaded state dict ``param_groups`` they will be saved and override
+            the current names, if present, in the optimizer state. If they do not exist in loaded state dict,
+            the optimizer ``param_names`` will remain unchanged.
         """
         # shallow copy, to be consistent with module API
         state_dict = state_dict.copy()
