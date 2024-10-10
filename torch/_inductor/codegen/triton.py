@@ -448,12 +448,8 @@ def triton_reshape(
     """Workaround https://github.com/openai/triton/issues/2836"""
     assert isinstance(old_shape, list) and isinstance(new_shape, list)
 
-    def shape_to_str(shape: List[sympy.Expr]) -> List[str]:
-        return [str(dim) for dim in shape]
-
-    old_shape_str, new_shape_str = tuple(
-        shape_to_str(shape) for shape in (old_shape, new_shape)
-    )
+    old_shape_str = [V.kernel.index_to_str(shape) for shape in old_shape]
+    new_shape_str = [V.kernel.index_to_str(shape) for shape in new_shape]
 
     if old_shape_str == new_shape_str:
         return value
@@ -2764,10 +2760,16 @@ class TritonKernel(SIMDKernel):
             "constants": {},
         }
 
+        # Skip memory optimization for forward of the training loop where we expect
+        # every new node will increase the peak memory and our greedy approach would
+        # introduce a lot of unnecessary cpu copies.
+        optimize_mem = V.graph.is_inference or V.graph.is_backward
+
         inductor_meta = {
             "autotune_hints": set(self.autotune_hints),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
+            "optimize_mem": optimize_mem,
             "no_x_dim": self.no_x_dim,
             "num_load": self.num_load,
             "num_reduction": self.num_reduction,

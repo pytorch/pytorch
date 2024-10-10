@@ -497,6 +497,27 @@ class TritonBlockPointerTest(InductorTestCase):
                 else:
                     self.assertNotIn(tile_name, program)
 
+    def test_complex_reshape_block_ptr(self):
+        def func(x, y):
+            add_ = x + y
+            reshape_0 = add_.reshape([8, 16, 128])
+            permute_0 = reshape_0.permute([0, 2, 1])
+            reshape_1 = permute_0.reshape([1024, 16])
+            clone_0 = reshape_1.clone(memory_format=torch.contiguous_format)
+            permute_1 = clone_0.permute([1, 0])
+            clone_1 = permute_1.clone(memory_format=torch.contiguous_format)
+
+            return clone_0, clone_1
+
+        inps = (torch.rand((8, 2048), device=GPU_TYPE, dtype=torch.float32),) * 2
+        result, code = self.run_and_compare(
+            func,
+            *inps,
+            expected_num_triton_kernels=2,
+            expected_num_block_pointers=4,
+        )
+        self.assertTrue("Min" not in code[0])
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
