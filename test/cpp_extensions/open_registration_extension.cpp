@@ -1,28 +1,28 @@
-#include <unordered_map>
-#include <c10/core/impl/alloc_cpu.h>
 #include <c10/core/Allocator.h>
 #include <c10/core/ScalarType.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/impl/alloc_cpu.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 
 #include <torch/csrc/Device.h>
 #include <torch/csrc/jit/serialization/pickler.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
-#include <c10/macros/Macros.h>
 #include <torch/extension.h>
 
-#include <ATen/native/cpu/Loops.h>
-#include <ATen/native/quantized/AffineQuantizer.h>
+#include <ATen/EmptyTensor.h>
+#include <ATen/detail/PrivateUse1HooksInterface.h>
+#include <ATen/native/CPUFallback.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/UnaryOps.h>
-#include <ATen/native/CPUFallback.h>
-#include <ATen/ops/abs_native.h>
-#include <ATen/EmptyTensor.h>
-#include <ATen/core/GeneratorForPrivateuseone.h>
-#include <ATen/detail/PrivateUse1HooksInterface.h>
-#include <ATen/ops/view.h>
-#include <ATen/native/transformers/sdp_utils_cpp.h>
+#include <ATen/native/cpu/Loops.h>
+#include <ATen/native/quantized/AffineQuantizer.h>
 #include <ATen/native/transformers/attention.h>
+#include <ATen/native/transformers/sdp_utils_cpp.h>
+#include <ATen/ops/abs_native.h>
+#include <ATen/ops/view.h>
+
+#include <unordered_map>
 
 static uint64_t add_counter = 0;
 static uint64_t last_saved_value = 0;
@@ -551,8 +551,15 @@ bool custom_add_called() {
   return called;
 }
 
+void set_custom_device_index(c10::DeviceIndex device_index) {
+  custom_device_index = device_index;
+}
+
+// a global flag used for dummy pin_memory of custom device
+bool custom_pinned_flag = false;
+
 class PrivateGeneratorImpl : public at::CPUGeneratorImpl {
-public:
+ public:
   // Constructors
   PrivateGeneratorImpl(c10::DeviceIndex device_index) {
     device_ = c10::Device(c10::DeviceType::PrivateUse1, device_index);
@@ -561,45 +568,33 @@ public:
   ~PrivateGeneratorImpl() override = default;
 };
 
-// this is used to register generator
-at::Generator make_generator_privateuse1(c10::DeviceIndex device_index) {
-  return at::make_generator<PrivateGeneratorImpl>(device_index);
-}
-
-void register_generator_first() {
-  REGISTER_GENERATOR_PRIVATEUSE1(make_generator_privateuse1)
-}
-
-void register_generator_second() {
-  REGISTER_GENERATOR_PRIVATEUSE1(make_generator_privateuse1)
-}
-
-void set_custom_device_index(c10::DeviceIndex device_index) {
-  custom_device_index = device_index;
-}
-
-// a global flag used for dummy pin_memory of custom device
-bool custom_pinned_flag = false;
-
 struct FooHooksArgs : public at::PrivateUse1HooksArgs {};
 
 struct FooHooksInterface : public at::PrivateUse1HooksInterface {
-    FooHooksInterface(FooHooksArgs) {}
-    ~FooHooksInterface() override = default;
-    const at::Generator& getDefaultGenerator(c10::DeviceIndex device_index) const override {
-      static auto device_gen = make_generator_privateuse1(device_index);
-      return device_gen;
-    }
-    // this is a simple implementation, custom_pinned_flag will be set as true
-    // once tensor.pin_memory() is called. And then tensor.is_pinned()
-    // always return true no matter what tensor it's called on.
-    bool isPinnedPtr(const void* data) const override {
-      return custom_pinned_flag;
-    }
-    c10::Allocator* getPinnedMemoryAllocator() const override {
-      custom_pinned_flag = true;
-      return c10::GetCPUAllocator();
-    }
+  FooHooksInterface(FooHooksArgs) {}
+  ~FooHooksInterface() override = default;
+
+  const at::Generator& getDefaultGenerator(
+      c10::DeviceIndex device_index) const override {
+    static auto device_gen = at::make_generator<PrivateGeneratorImpl>(device_index);
+    return device_gen;
+  }
+
+  at::Generator getNewGenerator(c10::DeviceIndex device_index) const {
+    return at::make_generator<PrivateGeneratorImpl>(device_index);
+  }
+
+  // this is a simple implementation, custom_pinned_flag will be set as true
+  // once tensor.pin_memory() is called. And then tensor.is_pinned()
+  // always return true no matter what tensor it's called on.
+  bool isPinnedPtr(const void* data) const override {
+    return custom_pinned_flag;
+  }
+
+  c10::Allocator* getPinnedMemoryAllocator() const override {
+    custom_pinned_flag = true;
+    return c10::GetCPUAllocator();
+  }
 };
 
 TORCH_DECLARE_REGISTRY(PrivateUse1HooksRegistry, FooHooksInterface, FooHooksArgs);
@@ -682,8 +677,6 @@ at::Tensor custom_autograd_fn_aliasing(at::Tensor x) {
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_device", &get_custom_device, "get custom device object");
     m.def("custom_add_called", &custom_add_called, "check if our custom add function was called");
-    m.def("register_generator_first", &register_generator_first, "register generator for custom device firstly");
-    m.def("register_generator_second", &register_generator_second, "register generator for custom device secondly");
     m.def("set_custom_device_index", &set_custom_device_index, "set custom device index");
     m.def("custom_storage_registry", &custom_storage_registry, "set custom storageImpl creat method");
     m.def("custom_storageImpl_called", &custom_storageImpl_called, "check if our custom abs function was called");
