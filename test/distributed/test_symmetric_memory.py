@@ -100,6 +100,9 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         self.assertEqual(symm_mem.world_size, 2)
 
         buf = symm_mem.get_buffer(0, (symm_mem.buffer_size // 4,), torch.float32)
+        self.assertEqual(buf.storage_offset(), 0)
+        self.assertEqual(buf.storage().size(), symm_mem.buffer_size // 4)
+
         if symm_mem.rank == 0:
             symm_mem.wait_signal(src_rank=1)
             self.assertTrue(buf.eq(42).all())
