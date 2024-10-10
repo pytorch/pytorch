@@ -156,9 +156,9 @@ class TestConvolutionNN(NNTestCase):
             )
             self.assertFalse(weight.is_contiguous())
             y = torch.nn.functional.conv2d(x, weight, None)
-            if torch.backends.mkldnn.is_available():
+            if torch.backends.onednn.is_available():
                 # Disable MKLDNN explicitly, so that either NNPACK or THCNN will be used
-                with torch.backends.mkldnn.flags(enabled=False):
+                with torch.backends.onednn.flags(enabled=False):
                     y_ = torch.nn.functional.conv2d(x, weight, None)
                     self.assertEqual(y, y_)
             self.assertEqual(y.sum(), 4186112.0)
@@ -492,7 +492,7 @@ class TestConvolutionNN(NNTestCase):
             1, in_channels, 5, 5, requires_grad=True, dtype=torch.double
         )
         for enabled in (False, True):
-            with torch.backends.mkldnn.flags(enabled=enabled):
+            with torch.backends.onednn.flags(enabled=enabled):
                 gradcheck(F.conv2d, (input, mod.weight))
 
     def test_Conv2d_OneDNN(self):
@@ -519,10 +519,10 @@ class TestConvolutionNN(NNTestCase):
 
         for gorup_val in (24, 48, 23, 25):
             for dilation in (1, 2):
-                with torch.backends.mkldnn.flags(enabled=False):
+                with torch.backends.onednn.flags(enabled=False):
                     without_onednn = run_once(gorup_val, dilation)
 
-                with torch.backends.mkldnn.flags(enabled=True):
+                with torch.backends.onednn.flags(enabled=True):
                     with_onednn = run_once(gorup_val, dilation)
 
                 self.assertEqual(without_onednn, with_onednn)
@@ -3029,10 +3029,10 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 (0, 1),
                 1,
             ]
-            if torch.backends.mkldnn.is_available():
+            if torch.backends.onednn.is_available():
                 y = conv(x2)
                 # Disable MKLDNN explicitly
-                with torch.backends.mkldnn.flags(enabled=False):
+                with torch.backends.onednn.flags(enabled=False):
                     y_ = conv(x2)
                     self.assertEqual(y, y_)
 
@@ -3045,10 +3045,10 @@ class TestConvolutionNNDeviceType(NNTestCase):
             )
             conv = conv.to(memory_format=torch.channels_last).to(dtype=dtype)
             x = torch.rand(2, 1, 100, 100).to(dtype=dtype)
-            if torch.backends.mkldnn.is_available():
+            if torch.backends.onednn.is_available():
                 y = conv(x)
                 # Disable MKLDNN explicitly
-                with torch.backends.mkldnn.flags(enabled=False):
+                with torch.backends.onednn.flags(enabled=False):
                     y_ = conv(x)
                     self.assertEqual(y, y_)
 
@@ -3507,7 +3507,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             self.assertEqual(conv.bias.grad, ref_conv.bias.grad, exact_dtype=False)
             self.assertEqual(input.grad, ref_input.grad, exact_dtype=False)
 
-        with torch.backends.mkldnn.flags(enabled=False):
+        with torch.backends.onednn.flags(enabled=False):
             formats = [
                 [torch.channels_last, torch.channels_last],
                 [torch.channels_last, torch.contiguous_format],

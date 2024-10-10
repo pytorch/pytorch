@@ -672,7 +672,7 @@ class TestProfiler(TestCase):
                 ],
             )
 
-        if torch.backends.mkldnn.is_available():
+        if torch.backends.onednn.is_available():
             create_onednn_tensor()
             stats = run_profiler(create_onednn_tensor)
             check_metrics(
