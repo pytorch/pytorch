@@ -1645,6 +1645,14 @@ def _non_strict_export(
                 def forward(self, *args, **kwargs):
                     nonlocal out_spec
                     if isinstance(self._export_root, torch.fx.GraphModule):
+                        # NOTE: We're going to run this graph module with an fx interpreter,
+                        # which will not run any forward hooks. Thus, ideally, we should run
+                        # all forward hooks here. But the general logic for running them is
+                        # complicated (see nn/module.py), and probably not worth duplicating here.
+                        # Instead we only look for, and run, an export-specific forward hook.
+                        from torch.export._unlift import _check_input_constraints_pre_hook
+                        if _check_input_constraints_pre_hook in self._export_root._forward_pre_hooks.values():
+                            _check_input_constraints_pre_hook(self._export_root, args, kwargs)
                         with torch.fx.traceback.preserve_node_meta():
                             tree_out = torch.fx.Interpreter(self._export_root).run(
                                 *args, **kwargs
