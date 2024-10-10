@@ -259,10 +259,8 @@ def _has_tag_must_be_in_backward(node: fx.Node) -> bool:
 
 
 def _must_be_in_backward(node: fx.Node) -> bool:
-    return (
-        node.target is torch.ops.subclass_utils.wrap_subclass.default
-        or _has_tag_must_be_in_backward(node)
-        or (_has_tag_is_backward(node) and is_with_effects(node))
+    return _has_tag_must_be_in_backward(node) or (
+        _has_tag_is_backward(node) and is_with_effects(node)
     )
 
 
@@ -1163,8 +1161,8 @@ def solve_min_cut(
                         heapq.heappush(fusible, (node_info.get_fw_order(user), user))
 
     try:
-        visualize_min_cut_graph(nx_graph)
         cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
+        print("\n".join(nx.readwrite.edgelist.generate_edgelist(nx_graph)))
     except Exception:
         print("Failed to compute min-cut on following graph:")
         print("\n".join(nx.readwrite.edgelist.generate_edgelist(nx_graph)))
@@ -1205,7 +1203,7 @@ def visualize_min_cut_graph(nx_graph):
         if weight == float("inf"):
             edge.set_color("red")
     print("Visualizing the failed graph to min_cut_failed.svg")
-    dot_graph.write_svg("min_cut_bad2.svg")
+    dot_graph.write_svg("min_cut_failed.svg")
 
 
 def get_default_op_list() -> OpTypes:
@@ -1285,7 +1283,6 @@ def get_default_op_list() -> OpTypes:
         aten.unsqueeze,
         aten.rsub,
         aten._to_copy,
-        torch.ops.subclass_utils.wrap_subclass.default,
     ]  # noqa: E501,B950
     recomputable_view_ops = [aten.squeeze, aten.unsqueeze, aten.alias]
     recomputable_view_ops += [
@@ -1297,7 +1294,7 @@ def get_default_op_list() -> OpTypes:
         aten.as_strided,
         aten.permute,
         aten.select,
-        torch.ops.subclass_utils.wrap_subclass.default,
+        torch.ops.subclass_utils.wrap_subclass,
     ]
     view_ops = recomputable_view_ops
     default_recomputable_ops += [

@@ -384,6 +384,8 @@ def is_subclass_untracked_but_inner_tensors_tracked(obj, tracer):
 # Then we will generate a fresh proxy on the fly for the subclass in our graph:
 #     arg = wrap_subclass(arg_a, arg_b, ...)
 def maybe_track_subclass(obj, tracer):
+    if not isinstance(obj, Tensor):
+        return None
     if has_proxy_slot(obj, tracer):
         return get_proxy_slot(obj, tracer, default=None)
     if not is_traceable_wrapper_subclass(obj):
@@ -546,7 +548,8 @@ def set_meta(proxy: Proxy, val: _ExtractValType) -> Proxy:
         elif isinstance(val, Tensor) and not val.is_sparse:
             proxy.node.meta["tensor_meta"] = _extract_tensor_metadata(val)
         if any(
-            "tangent_compute" in x.meta for x in pytree.tree_leaves(proxy.node.args)
+            isinstance(x, torch.fx.Node) and "tangent_compute" in x.meta
+            for x in pytree.tree_leaves(proxy.node.args)
         ):
             proxy.node.meta["tangent_compute"] = True
 
@@ -838,8 +841,10 @@ def proxy_call(
     # However: any compute that happens during the backward that does *not* depend on tangents should be traced directly in post-dispatch ATen.
     if proxy_mode.pre_dispatch and proxy_mode.pre_dispatch_joint_tracing:
         flat_args_kwargs = pytree.tree_flatten((args, kwargs))[0]
+        # check if any inputs to this op are marked as tangents
         if not any(
-            has_proxy_slot(x, proxy_mode.tracer)
+            isinstance(x, torch.Tensor)
+            and has_proxy_slot(x, proxy_mode.tracer)
             and "tangent_compute"
             in get_proxy_slot(x, proxy_mode.tracer).proxy.node.meta
             for x in flat_args_kwargs
@@ -865,7 +870,9 @@ def proxy_call(
         return r
 
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
-    if not pre_dispatch and func not in [
+    # But for pre-dispatch backward tracing, we *are* ok with CIA decomps running
+    # (they are safe to run, and make the joint graph IR cleaner)
+    if (not pre_dispatch or proxy_mode.pre_dispatch_joint_tracing) and func not in [
         torch.ops.aten.size.default,
         torch.ops.aten.stride.default,
         torch.ops.aten.storage_offset.default,
@@ -1430,12 +1437,14 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         assert self._dispatch_key == torch._C.DispatchKey.PreDispatch
 
         self.pre_dispatch = False
+        self.pre_dispatch_joint_tracing = False
         self._dispatch_key = None
         try:
             with self:
                 yield
         finally:
             self.pre_dispatch = True
+            self.pre_dispatch_joint_tracing = True
             self._dispatch_key = torch._C.DispatchKey.PreDispatch
 
     @contextmanager
@@ -2302,7 +2311,13 @@ def maybe_handle_decomp(
     args: Tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> object:
-    if op in CURRENT_DECOMPOSITION_TABLE:
+    # don't run any decomps during predispatch joint tracing;
+    # since we are capturing the backward in pre-dispatch IR,
+    # we need to wait to runs decomps until they other dispatch keys
+    # have run (e.g. autocast).
+    # Note that we **could** run decompositions here,
+    # if instead we chose to put our backward IR right above the Python key.
+    if not proxy_mode.pre_dispatch_joint_tracing and op in CURRENT_DECOMPOSITION_TABLE:
         with proxy_mode:
             proxy_mode.decomp_layers += 1
             out = CURRENT_DECOMPOSITION_TABLE[op](*args, **kwargs)

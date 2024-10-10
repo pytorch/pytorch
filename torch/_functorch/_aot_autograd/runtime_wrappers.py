@@ -2023,7 +2023,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                                 "%s",
                                 lazy_format_graph_code(
                                     "Backward graph (retraced with runtime tangents)",
-                                    bw_module,
+                                    bw_module_retraced,
                                     CompiledFunction._aot_id,
                                     include_stride=True,
                                     include_device=True,
