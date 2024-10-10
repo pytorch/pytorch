@@ -1251,7 +1251,7 @@ class TestLinalg(TestCase):
         # have to use torch.randn(...).to(bfloat16) instead of
         # This test compares torch.linalg.vector_norm's output with
         # torch.linalg.norm given a flattened tensor
-        ord_vector = [0, 0.9, 1, 2, 3, inf, -0.5, -1, -2, -3, -inf]
+        ord_vector = [0, 0.9, 1, 2, 3, inf, -0.5, -1, -2, -3, -inf, 1 + 2j]
         input_sizes = [
             (1, ),
             (10, ),
@@ -1275,9 +1275,13 @@ class TestLinalg(TestCase):
             return result
 
         def run_test_case(input, ord, dim, keepdim, norm_dtype):
-            if (input.numel() == 0 and
-                (ord < 0. or ord == inf) and
-               (dim is None or input.shape[dim] == 0)):
+            if isinstance(ord, complex):
+                error_msg = "Expected a non-complex scalar"
+                with self.assertRaisesRegex(RuntimeError, error_msg):
+                    torch.linalg.vector_norm(input, ord, dim=dim, keepdim=keepdim, dtype=norm_dtype)
+            elif (input.numel() == 0 and
+                  (ord < 0. or ord == inf) and
+                  (dim is None or input.shape[dim] == 0)):
                 # The operation does not have an identity.
                 error_msg = "linalg.vector_norm cannot compute"
                 with self.assertRaisesRegex(RuntimeError, error_msg):
@@ -1706,6 +1710,8 @@ class TestLinalg(TestCase):
             torch.linalg.matrix_norm(A, ord=0)
         with self.assertRaisesRegex(RuntimeError, r'.*not supported.*'):
             torch.linalg.matrix_norm(A, ord=3.0)
+        with self.assertRaisesRegex(RuntimeError, "Expected a non-complex scalar"):
+            torch.linalg.matrix_norm(A, ord=1 + 2j)
 
         # Test dim=None behavior
         ref = torch.linalg.norm(A, dim=(-2, -1))
