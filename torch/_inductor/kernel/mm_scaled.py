@@ -189,7 +189,9 @@ scaled_mm_bias_template = TritonTemplate(
 )
 
 
-aten__fp8_mm = ExternKernelChoice(torch._scaled_mm, "at::_scaled_mm")
+aten__fp8_mm = ExternKernelChoice(
+    torch._scaled_mm, "at::_scaled_mm_out", op_overload=aten._scaled_mm.out
+)
 
 
 def are_compatible_scales(size_a: List[int], size_b: List[int]) -> bool:
