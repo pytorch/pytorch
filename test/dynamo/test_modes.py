@@ -112,12 +112,9 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out_ref, out_compiled)
         self.assertEqual(len(custom_mode.funcs), 2)
         self.assertEqual(len(counters["graph_break"]), 2)
-        self.assertIn(
-            "relu_graph_break", list(counters["graph_break"].keys())[0]  # noqa: RUF015
-        )
-        self.assertIn(
-            "mul_graph_break", list(counters["graph_break"].keys())[1]  # noqa: RUF015
-        )
+        graph_break_keys = list(counters["graph_break"].keys())
+        self.assertIn("relu_graph_break", graph_break_keys[0])
+        self.assertIn("mul_graph_break", graph_break_keys[1])
         self.assertEqual(len(triton_codes), 3)
 
 
