@@ -80,9 +80,6 @@ if not torch._running_with_deploy():
     ) -> Tensor:
         """Custom Op so that we can register a custom lowering for the new_output + scatter in the backwards pass"""
         grad = torch.zeros(shape, device=vals.device, dtype=vals.dtype)
-        for i, idx in enumerate(indices):
-            assert isinstance(idx, torch.Tensor)  # Appease the mypy overlords
-            indices[i] = idx.expand(vals.shape)
         return torch.ops.aten.index_put(grad, indices, vals, accumulate=True)
 
     @zeros_and_scatter.register_fake  # type: ignore[misc]
@@ -94,17 +91,23 @@ if not torch._running_with_deploy():
         return vals.new_empty(shape)
 
     @zeros_and_scatter.register_vmap  # type: ignore[misc]
-    def _(info, indims, shape, indices, val):  # type: ignore[no-untyped-def]
+    def _(info, indims, shape, indices, value):  # type: ignore[no-untyped-def]
         """The batching rule is special in that it returns a tensor that is not batched"""
-        if len(indices) > 1:
-            for i, idx in enumerate(indices):
-                # TODO: Don't use is_batchedtensor API, use in_dims instead.
-                if torch._C._functorch.is_batchedtensor(idx):
-                    indices[i] = idx.unsqueeze(-1)
+        indices_indims = indims[1]
+        expanded_indices = []
+        for idx, idx_indim in zip(indices, indices_indims):
+            # The index is not a being batched, we should unsqueeze and expand to val
+            if idx_indim is None:
+                expanded_indices.append(idx.unsqueeze(0).expand(value.shape))
+            else:
+                # the index is being part of the vmap batch, it should be the same size as val
+                assert idx.shape == value.shape
+                expanded_indices.append(idx)
+
         out = torch.ops.FlexAttentionLib.zeros_and_scatter(
             shape,
-            indices,
-            val,
+            expanded_indices,
+            value,
         )
         return out, None
 

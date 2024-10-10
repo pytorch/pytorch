@@ -2070,7 +2070,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 )
 
     @supported_platform
-    @expectedFailure
+    # @expectedFailure
     def test_head_bias_req_grad(self):
         # TODO vmap_scatter is not adding the unsqueeze dims..
         # RuntimeError: The expanded size of the tensor (256) must match the existing size (4) at non-singleton dimension 3.  Target sizes: [1, 4, 256, 256].  Tensor sizes: [4]
@@ -2083,13 +2083,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return score + bias_flex[h]
 
         bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
-        bias_sdpa_ref = bias_sdpa_ref.view(H, 1, 1).expand(H, S, S)
         implicit_bias_sdpa_ref = bias_sdpa_ref
+        implicit_bias_sdpa_ref = implicit_bias_sdpa_ref.view(H, 1, 1).expand(H, S, S)
         bias_sdpa_gold = (
             bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
         )
-        bias_sdpa_gold = bias_sdpa_gold.view(H, 1, 1).expand(H, S, S)
         implicit_bias_sdpa_gold = bias_sdpa_gold
+        implicit_bias_sdpa_gold = implicit_bias_sdpa_gold.view(H, 1, 1).expand(H, S, S)
+
 
         self._test_learnable_bias_inner(
             B,
@@ -2304,7 +2305,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             ref_error = rmse(ref, gold)
             flex_error = rmse(flex, gold)
             self.assertTrue(
-                ref_error * 1.2 > flex_error,
+                ref_error * 1.2 >= flex_error,
                 f"{name} -> Ref error: {ref_error}, Flex eager Error: {flex_error}",
             )
 
