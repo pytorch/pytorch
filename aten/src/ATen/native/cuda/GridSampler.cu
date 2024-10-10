@@ -30,7 +30,8 @@ namespace {
       TensorInfo<scalar_t, index_t> output,
       const GridSamplerInterpolation interpolation_mode,
       const GridSamplerPadding padding_mode,
-      bool align_corners) {
+      bool align_corners,
+      const double value) {
 
     using opmath_t = at::opmath_type<scalar_t>;
     index_t C = input.sizes[1];
@@ -88,15 +89,23 @@ namespace {
           opmath_t out_acc = 0;
           if (within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)) {
             out_acc += inp_ptr_NC[iy_nw * inp_sH + ix_nw * inp_sW] * nw;
+          } else {
+            out_acc += static_cast<scalar_t>(value) * nw;
           }
           if (within_bounds_2d(iy_ne, ix_ne, inp_H, inp_W)) {
             out_acc += inp_ptr_NC[iy_ne * inp_sH + ix_ne * inp_sW] * ne;
+          } else {
+            out_acc += static_cast<scalar_t>(value) * ne;
           }
           if (within_bounds_2d(iy_sw, ix_sw, inp_H, inp_W)) {
             out_acc += inp_ptr_NC[iy_sw * inp_sH + ix_sw * inp_sW] * sw;
+          } else {
+            out_acc += static_cast<scalar_t>(value) * sw;
           }
           if (within_bounds_2d(iy_se, ix_se, inp_H, inp_W)) {
             out_acc += inp_ptr_NC[iy_se * inp_sH + ix_se * inp_sW] * se;
+          } else {
+            out_acc += static_cast<scalar_t>(value) * se;
           }
           *out_ptr_NCHW = out_acc;
         }
@@ -111,7 +120,7 @@ namespace {
           if (within_bounds_2d(iy_nearest, ix_nearest, inp_H, inp_W)) {
             *out_ptr_NCHW = inp_ptr_NC[iy_nearest * inp_sH + ix_nearest * inp_sW];
           } else {
-            *out_ptr_NCHW = static_cast<scalar_t>(0);
+            *out_ptr_NCHW = static_cast<scalar_t>(value);
           }
         }
       } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
@@ -133,10 +142,10 @@ namespace {
           #pragma unroll 4
           for (index_t i = 0; i < 4; ++i) {
             coefficients[i] = cubic_interp1d(
-              get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
-              get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 0, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
-              get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
-              get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 2, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
+              get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners, value),
+              get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 0, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners, value),
+              get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners, value),
+              get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 2, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners, value),
               tx);
           }
 
@@ -160,7 +169,8 @@ namespace {
       TensorInfo<scalar_t, index_t> output,
       const GridSamplerInterpolation interpolation_mode,
       const GridSamplerPadding padding_mode,
-      bool align_corners) {
+      bool align_corners,
+      const double value) {
 
     using opmath_t = at::opmath_type<scalar_t>;
     index_t C = input.sizes[1];
@@ -258,27 +268,43 @@ namespace {
           opmath_t out_acc = 0;
           if (within_bounds_3d(iz_tnw, iy_tnw, ix_tnw, inp_D, inp_H, inp_W)) {
             out_acc += inp_ptr_NC[iz_tnw * inp_sD + iy_tnw * inp_sH + ix_tnw * inp_sW] * tnw;
+          } else {
+            out_acc += static_cast<scalar_t>(value) * tnw;
           }
           if (within_bounds_3d(iz_tne, iy_tne, ix_tne, inp_D, inp_H, inp_W)) {
             out_acc += inp_ptr_NC[iz_tne * inp_sD + iy_tne * inp_sH + ix_tne * inp_sW] * tne;
+          } else {
+            out_acc += static_cast<scalar_t>(value) * tne;
           }
           if (within_bounds_3d(iz_tsw, iy_tsw, ix_tsw, inp_D, inp_H, inp_W)) {
             out_acc += inp_ptr_NC[iz_tsw * inp_sD + iy_tsw * inp_sH + ix_tsw * inp_sW] * tsw;
+          } else {
+            out_acc += static_cast<scalar_t>(value) * tsw;
           }
           if (within_bounds_3d(iz_tse, iy_tse, ix_tse, inp_D, inp_H, inp_W)) {
             out_acc += inp_ptr_NC[iz_tse * inp_sD + iy_tse * inp_sH + ix_tse * inp_sW] * tse;
+          } else {
+            out_acc += static_cast<scalar_t>(value) * tse;
           }
           if (within_bounds_3d(iz_bnw, iy_bnw, ix_bnw, inp_D, inp_H, inp_W)) {
             out_acc += inp_ptr_NC[iz_bnw * inp_sD + iy_bnw * inp_sH + ix_bnw * inp_sW] * bnw;
+          } else {
+            out_acc += static_cast<scalar_t>(value) * bnw;
           }
           if (within_bounds_3d(iz_bne, iy_bne, ix_bne, inp_D, inp_H, inp_W)) {
             out_acc += inp_ptr_NC[iz_bne * inp_sD + iy_bne * inp_sH + ix_bne * inp_sW] * bne;
+          } else {
+            out_acc += static_cast<scalar_t>(value) * bne;
           }
           if (within_bounds_3d(iz_bsw, iy_bsw, ix_bsw, inp_D, inp_H, inp_W)) {
             out_acc += inp_ptr_NC[iz_bsw * inp_sD + iy_bsw * inp_sH + ix_bsw * inp_sW] * bsw;
+          } else {
+            out_acc += static_cast<scalar_t>(value) * bsw;
           }
           if (within_bounds_3d(iz_bse, iy_bse, ix_bse, inp_D, inp_H, inp_W)) {
             out_acc += inp_ptr_NC[iz_bse * inp_sD + iy_bse * inp_sH + ix_bse * inp_sW] * bse;
+          } else {
+            out_acc += static_cast<scalar_t>(value) * bse;
           }
           *out_ptr_NCDHW = out_acc;
         }
@@ -294,7 +320,7 @@ namespace {
           if (within_bounds_3d(iz_nearest, iy_nearest, ix_nearest, inp_D, inp_H, inp_W)) {
             *out_ptr_NCDHW = inp_ptr_NC[iz_nearest * inp_sD + iy_nearest * inp_sH + ix_nearest * inp_sW];
           } else {
-            *out_ptr_NCDHW = static_cast<scalar_t>(0);
+            *out_ptr_NCDHW = static_cast<scalar_t>(value);
           }
         }
       }
@@ -498,7 +524,7 @@ namespace {
 
               // set grid gradient
               scalar_t val = get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1 + i, iy_nw - 1 + j,
-                inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners);
+                inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners, 0);
 
               gix -= val * x_coeffs_grad[i] * y_coeffs[j] * gOut;
               giy -= val * y_coeffs_grad[j] * x_coeffs[i] * gOut;
@@ -749,7 +775,7 @@ namespace {
 
 void launch_grid_sampler_2d_forward_kernel(
     const TensorBase &output, const TensorBase &input, const TensorBase &grid,
-    int64_t interpolation_mode, int64_t padding_mode, bool align_corners) {
+    int64_t interpolation_mode, int64_t padding_mode, bool align_corners, const double value) {
   // See NOTE [ grid_sampler Native Functions ].
   // Add checks here in case this is called instead of grid_sampler.
   check_grid_sampler_common(input, grid);
@@ -773,7 +799,8 @@ void launch_grid_sampler_2d_forward_kernel(
             getTensorInfo<scalar_t, int>(output),
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
-            align_corners);
+            align_corners,
+            value);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         grid_sampler_2d_kernel<scalar_t>
@@ -784,7 +811,8 @@ void launch_grid_sampler_2d_forward_kernel(
             getTensorInfo<scalar_t, int64_t>(output),
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
-            align_corners);
+            align_corners,
+            value);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     });
@@ -793,7 +821,7 @@ void launch_grid_sampler_2d_forward_kernel(
 
 void launch_grid_sampler_3d_forward_kernel(
     const TensorBase &output, const TensorBase &input, const TensorBase &grid,
-    int64_t interpolation_mode, int64_t padding_mode, bool align_corners) {
+    int64_t interpolation_mode, int64_t padding_mode, bool align_corners, const double value) {
   // See NOTE [ grid_sampler Native Functions ].
   // Add checks here in case this is called instead of grid_sampler.
   check_grid_sampler_common(input, grid);
@@ -818,7 +846,8 @@ void launch_grid_sampler_3d_forward_kernel(
             getTensorInfo<scalar_t, int>(output),
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
-            align_corners);
+            align_corners,
+            value);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         grid_sampler_3d_kernel<scalar_t>
@@ -829,7 +858,8 @@ void launch_grid_sampler_3d_forward_kernel(
             getTensorInfo<scalar_t, int64_t>(output),
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
-            align_corners);
+            align_corners,
+            value);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     });
