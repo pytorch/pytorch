@@ -545,9 +545,11 @@ class FunctionalTensorMode(TorchDispatchMode):
                     )
                     # We don't allow any mutation on result of dropout or _to_copy
                     if self.export:
-                        if func in (
-                            torch.ops.aten.dropout.default,
-                            torch.ops.aten._to_copy.default,
+                        from torch.export._trace import _ALLOW_WRITE_TO_COPY
+
+                        if func == torch.ops.aten.dropout.default or (
+                            func == torch.ops.aten._to_copy.default
+                            and not _ALLOW_WRITE_TO_COPY
                         ):
                             torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
                     outs_wrapped = pytree.tree_map_only(
