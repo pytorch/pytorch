@@ -6251,6 +6251,7 @@ mz_bool mz_zip_writer_add_mem_ex_v2(mz_zip_archive *pZip, const char *pArchive_n
     mz_uint8 extra_data[MZ_ZIP64_MAX_CENTRAL_EXTRA_FIELD_SIZE];
     mz_uint16 bit_flags = 0;
     mz_bool write_metadata_only = buf_size && !pBuf;
+    mz_bool skip_crc32 = write_metadata_only || (level_and_flags & MZ_ZIP_FLAG_DO_NOT_COMPUTE_CRC32);
 
     if ((int)level_and_flags < 0)
         level_and_flags = MZ_DEFAULT_LEVEL;
@@ -6309,7 +6310,7 @@ mz_bool mz_zip_writer_add_mem_ex_v2(mz_zip_archive *pZip, const char *pArchive_n
 
 	if (!(level_and_flags & MZ_ZIP_FLAG_COMPRESSED_DATA))
 	{
-        if (!write_metadata_only) {
+        if (!skip_crc32) {
             uncomp_crc32 = (mz_uint32)mz_crc32(MZ_CRC32_INIT, (const mz_uint8 *)pBuf, buf_size);
         }
 		uncomp_size = buf_size;

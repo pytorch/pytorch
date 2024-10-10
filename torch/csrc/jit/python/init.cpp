@@ -1389,8 +1389,11 @@ void initJITBindings(PyObject* module) {
           "fallback", [](GraphExecutorState& s) { return s.fallback; });
 
   py::class_<PyTorchStreamWriter>(m, "PyTorchFileWriter")
-      .def(py::init<std::string>())
-      .def(py::init([](const py::object& buffer) {
+      .def(
+          py::init<std::string, bool>(),
+          py::arg("file_name"),
+          py::arg("compute_crc32") = true)
+      .def(py::init([](const py::object& buffer, bool compute_crc32 = true) {
         auto writer_func = [=](const void* data, size_t size) {
           // Writing an empty file is a noop
           if (size == 0) {
@@ -1408,9 +1411,13 @@ void initJITBindings(PyObject* module) {
           }
           return size;
         };
-        return std::make_unique<PyTorchStreamWriter>(std::move(writer_func));
+        return std::make_unique<PyTorchStreamWriter>(
+            std::move(writer_func), compute_crc32);
       }))
-      .def(py::init<const std::function<size_t(const void*, size_t)>&>())
+      .def(
+          py::init<const std::function<size_t(const void*, size_t)>&, bool>(),
+          py::arg("writer_func"),
+          py::arg("compute_crc32") = true)
       // [Note: write_record_metadata]
       // The write_record_metadata function is intended to write metadata (i.e.
       // the zipfile header and end of central directory record) for a file

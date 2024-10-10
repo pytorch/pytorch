@@ -94,12 +94,14 @@ else:
 # (1) map_location (needed for wrapper subclasses/third party devices to torch._utils)
 # (2) skip_data (needed for torch.Tensor.__reduce_ex__ for skip_data ctx)
 # (3) materialize_fake_tensors (needed for torch.Tensor.__reduce_ex__ for skip_data ctx)
+# (4) compute_crc32 (needed for torch.save)
 class _SerializationLocal(threading.local):
     def __init__(self):
         super().__init__()
         self.map_location: Optional[MAP_LOCATION] = None
         self.skip_data: bool = False
         self.materialize_fake_tensors: bool = False
+        self.compute_crc32: bool = True
 
 
 _serialization_tls = _SerializationLocal()
@@ -165,6 +167,34 @@ def set_default_load_endianness(endianness):
     if not isinstance(endianness, LoadEndianness) and endianness is not None:
         raise TypeError("Invalid argument type in function set_default_load_endianness")
     _default_load_endian = endianness
+
+
+_compute_crc32: bool = True
+
+
+def get_default_crc32_options() -> bool:
+    """
+    Get whether :func:`torch.save` computes and writes crc32 for each record.
+
+    Defaults to ``True``.
+    """
+    return _compute_crc32
+
+
+def set_default_crc32_options(compute_crc32: bool):
+    """
+    Set whether :func:`torch.save` computes and writes crc32 for each record.
+
+    .. note::
+        Setting this to ``False`` may make unzip of the ``torch.save`` output
+        fail or warn due to corrupted CRC32. However ``torch.load`` will be
+        able to load the file correctly.
+
+    Args:
+        compute_crc32: ``True`` or ``False``
+    """
+    global _compute_crc32
+    _compute_crc32 = compute_crc32
 
 
 _default_mmap_options: int = MAP_PRIVATE
@@ -682,9 +712,11 @@ class _open_zipfile_writer_file(_opener):
             # For filenames with non-ascii characters, we rely on Python
             # for writing out the file.
             self.file_stream = io.FileIO(self.name, mode="w")
-            super().__init__(torch._C.PyTorchFileWriter(self.file_stream))
+            super().__init__(
+                torch._C.PyTorchFileWriter(self.file_stream, _compute_crc32)
+            )
         else:
-            super().__init__(torch._C.PyTorchFileWriter(self.name))
+            super().__init__(torch._C.PyTorchFileWriter(self.name, _compute_crc32))
 
     def __exit__(self, *args) -> None:
         self.file_like.write_end_of_file()
@@ -700,7 +732,7 @@ class _open_zipfile_writer_buffer(_opener):
                 raise AttributeError(msg)
             raise TypeError(msg)
         self.buffer = buffer
-        super().__init__(torch._C.PyTorchFileWriter(buffer))
+        super().__init__(torch._C.PyTorchFileWriter(buffer, _compute_crc32))
 
     def __exit__(self, *args) -> None:
         self.file_like.write_end_of_file()
