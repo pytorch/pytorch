@@ -37,7 +37,7 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
   }
 
   bool isPinnedPtr(const void* data) const override {
-    FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
+    return false;
   }
 
   Allocator* getPinnedMemoryAllocator() const override {
