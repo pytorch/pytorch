@@ -300,17 +300,19 @@ def _load_global_deps() -> None:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
-        # As PyTorch is not purelib, but nvidia-*-cu12 is
+        # As PyTorch is not purelib, but nvidia-*-cu12 is.
+        # Note that the order of cuda_libs is important,
+        # as some of them depend on others.
         cuda_libs: _Dict[str, str] = {
+            "cuda_runtime": "libcudart.so.*[0-9]",
+            "nvjitlink": "libnvJitLink.so.*[0-9]",
             "cublas": "libcublas.so.*[0-9]",
             "cudnn": "libcudnn.so.*[0-9]",
             "cuda_nvrtc": "libnvrtc.so.*[0-9]",
-            "cuda_runtime": "libcudart.so.*[0-9]",
             "cuda_cupti": "libcupti.so.*[0-9]",
             "cufft": "libcufft.so.*[0-9]",
             "cufile": "libcufile.so.*[0-9]",
             "curand": "libcurand.so.*[0-9]",
-            "nvjitlink": "libnvJitLink.so.*[0-9]",
             "cusparse": "libcusparse.so.*[0-9]",
             "cusolver": "libcusolver.so.*[0-9]",
             "nccl": "libnccl.so.*[0-9]",
