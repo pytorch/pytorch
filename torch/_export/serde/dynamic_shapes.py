@@ -11,7 +11,8 @@ from torch.export.dynamic_shapes import (
     _tree_map_with_path,
     Dim,
 )
-from torch.utils._pytree import tree_map
+from torch.export.exported_program import ExportedProgram
+from torch.utils._pytree import BUILTIN_TYPES, LeafSpec, TreeSpec, tree_map
 
 from .serialize import _dataclass_to_dict
 
@@ -39,7 +40,7 @@ class DynamicShapesSpec:
 
 def _postprocess_serialized_shapes(
     dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None],
-    dims: Dict[str, Dict[str, Union[int, List[str], None]]],
+    dims: Dict[str, RootDim],
     to_dict: Optional[bool] = False,
 ) -> Union[DynamicShapesSpec, Dict[str, Any]]:
     """
@@ -47,15 +48,12 @@ def _postprocess_serialized_shapes(
     """
     from torch.utils._sympy.numbers import int_oo
 
-    dims = {
-        k: RootDim(
-            min=v["min"],  # type: ignore[arg-type]
-            max=None if v["max"] is int_oo else v["max"],  # type: ignore[arg-type]
-            derived=sorted(v["derived"]),  # type: ignore[arg-type]
-        )
-        for k, v in sorted(dims.items())
-    }
-    spec = DynamicShapesSpec(dynamic_shapes=dynamic_shapes, dims=dims)
+    for dim in dims.values():
+        dim.max = None if dim.max is int_oo else dim.max
+        dim.derived = sorted(set(dim.derived))
+    spec = DynamicShapesSpec(
+        dynamic_shapes=dynamic_shapes, dims=dict(sorted(dims.items()))
+    )
     if to_dict:
         return _dataclass_to_dict(spec)
     else:
@@ -127,7 +125,7 @@ def _dump_dynamic_shapes(
     }
     ```
     """
-    dims: Dict[str, Dict[str, Any]] = {}
+    dims: Dict[str, RootDim] = {}
 
     def _standardize_shapes(path, tensor, shape):  # type: ignore[no-untyped-def]
         """
@@ -165,20 +163,23 @@ def _dump_dynamic_shapes(
         # track root dim
         root = val.root if isinstance(val, _DerivedDim) else val  # type: ignore[attr-defined]
         if root.__name__ not in dims:
-            dims[root.__name__] = {
-                "min": root.min,
-                "max": root.max,
-                "derived": set(),
-            }
+            dims[root.__name__] = RootDim(
+                min=root.min,
+                max=root.max,
+                derived=[],
+            )
 
         # track derived dims
         if isinstance(val, _DerivedDim):
-            dims[root.__name__]["derived"].add(val.__name__)
+            dims[root.__name__].derived.append(val.__name__)
 
         return val.__name__
 
     if dynamic_shapes is None:
-        return {"dynamic_shapes": None, "dims": {}}
+        if to_dict:
+            return {"dynamic_shapes": None, "dims": {}}
+        else:
+            return DynamicShapesSpec(dynamic_shapes=None, dims={})
 
     # convert to tuple of specs, for each arg/kwarg
     kwargs = kwargs or {}
@@ -319,3 +320,108 @@ def _load_dynamic_shapes(
         return dim_cache[val]
 
     return tree_map(deserialize_shape, dynamic_shapes)
+
+
+def _infer_dynamic_shapes(
+    ep: ExportedProgram, to_dict: Optional[bool] = False
+) -> Union[DynamicShapesSpec, Dict[str, Any]]:
+    """
+    Utility function for dynamic shapes serialization.
+    Infers placeholder shapes from an ExportedProgram, and returns a DynamicShapesSpec or corresponding dictionary
+    that represents the dynamic_shapes input to export(), by reading the program's input TreeSpec.
+
+    NOTE: this function is not well-supported for programs exported with out-of-order kwargs.
+    """
+    import sympy
+
+    from torch.export.graph_signature import InputKind
+
+    dims: Dict[str, RootDim] = {}
+    symbol_map: Dict[sympy.Symbol, str] = {}
+
+    def _replace_call_spec(
+        call_spec: Union[LeafSpec, TreeSpec]
+    ) -> Union[LeafSpec, TreeSpec]:
+        """
+        Takes the input spec, and replaces non-builtin types with lists, to match how they'd be specified for dynamic_shapes.
+        """
+        if isinstance(call_spec, LeafSpec):
+            return call_spec
+        if call_spec.type in BUILTIN_TYPES:
+            return TreeSpec(
+                type=call_spec.type,
+                context=call_spec.context,
+                children_specs=[
+                    _replace_call_spec(arg) for arg in call_spec.children_specs
+                ],
+            )
+        else:
+            return TreeSpec(
+                type=list,
+                context=None,
+                children_specs=[
+                    _replace_call_spec(arg) for arg in call_spec.children_specs
+                ],
+            )
+
+    def _extract_shapes_from_placeholders(ep: ExportedProgram) -> Tuple[Any]:
+        """
+        Extracts placeholder shapes from the ExportedProgram to match the dynamic_shapes input structure.
+        Returns tuple of dynamic_shapes spec for each original model (arg/kwarg) input.
+        """
+        user_inputs = {
+            spec.arg.name
+            for spec in ep.graph_signature.input_specs
+            if spec.kind == InputKind.USER_INPUT
+        }
+        placeholders = [
+            node
+            for node in ep.graph.nodes
+            if node.op == "placeholder" and node.name in user_inputs
+        ]
+        flat_shapes = [
+            list(val.shape)
+            if isinstance(val := node.meta.get("val"), torch.Tensor)
+            else None
+            for node in placeholders
+        ]
+        in_spec = _replace_call_spec(ep.call_spec.in_spec)
+        shape_args, shape_kwargs = in_spec.unflatten(flat_shapes)
+        return shape_args + tuple(
+            shape_kwargs.values()
+        )  # NOTE: this won't work for out-of-order kwargs
+
+    def _track_dim_from_symints(
+        val: Union[None, int, torch.SymInt]
+    ) -> Union[None, int, str]:
+        """
+        Tracks dims, ranges, derived dims for FakeTensor shapes extracted from ExportedProgram placeholders.
+        """
+        if val is None or isinstance(val, int):  # non-tensor input or static
+            return val
+        if isinstance(val, torch.SymInt) and val.node.expr.is_number:  # static
+            return int(val.node.expr)
+
+        assert isinstance(val, torch.SymInt)
+        expr = val.node.expr
+
+        # track root symbol
+        root = next(iter(expr.free_symbols))
+        if root not in symbol_map:
+            symbol_map[root] = f"d{len(dims)}"
+            dims[symbol_map[root]] = RootDim(
+                min=ep.range_constraints[root].lower,
+                max=ep.range_constraints[root].upper,
+                derived=[],
+            )
+
+        # track derived dims
+        sub_expr = expr.subs(symbol_map)
+        if not isinstance(expr, sympy.Symbol):
+            dims[symbol_map[root]].derived.append(str(sub_expr))
+
+        return str(sub_expr)
+
+    tree_shapes = _extract_shapes_from_placeholders(ep)
+    serialized_shapes = tree_map(_track_dim_from_symints, tree_shapes)
+    return _postprocess_serialized_shapes(serialized_shapes, dims, to_dict=to_dict)
