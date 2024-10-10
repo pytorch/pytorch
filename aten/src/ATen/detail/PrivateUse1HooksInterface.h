@@ -42,6 +42,26 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `hasPrimaryContext`.");
   }
 
+  c10::Stream getCurrentStream(DeviceIndex device) const override {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `getCurrentStream`.");
+    return c10::Stream::unpack3(-1, 0, c10::DeviceType::PrivateUse1);
+  }
+
+  c10::Stream getDefaultStream(DeviceIndex device) const override {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `getDefaultStream`.");
+    return c10::Stream::unpack3(-1, 0, c10::DeviceType::PrivateUse1);
+  }
+
+  void setCurrentStream(const c10::Stream& stream) const override {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `setCurrentStream`.");
+  }
+
   void init() const override {}
 
   virtual void resizePrivateUse1Bytes(
