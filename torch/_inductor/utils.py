@@ -805,6 +805,37 @@ def clear_inductor_caches():
         obj.cache_clear()
 
 
+def is_windows():
+    return sys.platform == "win32"
+
+
+def unload_module_from_path(module_path:str):
+    if is_windows():
+        import ctypes, _ctypes
+        from ctypes import wintypes, cdll
+
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+
+        kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+        kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+        hMod = kernel32.GetModuleHandleW(module_path)
+        if (hMod != 0):
+            _ctypes.FreeLibrary(hMod)
+
+def enum_and_unload_modules(cache_dir: str):
+    '''
+    Enum the module files from cache dir.
+    '''
+    module_files = []
+    for root, dirs, files in os.walk(cache_dir):
+        for file in files:
+            if file.endswith(".pyd"):
+                module_files.append(os.path.join(root, file))
+    print(module_files)
+
+    for modules_file in module_files:
+        unload_module_from_path(modules_file)
+
 @contextlib.contextmanager
 def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
     """
@@ -836,15 +867,11 @@ def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
                             }
                         )
         if delete:
+            enum_and_unload_modules(inductor_cache_dir)
             shutil.rmtree(inductor_cache_dir)
     except Exception:
-        if not _IS_WINDOWS:
-            """
-            Windows can't delete the loaded modules, because the modules binaries are opened.
-            TODO: discuss if have better solution to handle this issue.
-            """
-            log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
-            raise
+        log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
+        raise
     finally:
         clear_inductor_caches()
 
