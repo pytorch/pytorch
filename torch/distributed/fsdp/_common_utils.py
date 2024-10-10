@@ -93,7 +93,9 @@ class _FSDPDeviceHandle:
         Custom backend must first register a module with the same name with {device.type} on torch.
         """
         if device.type == "cuda":
-            return cast(_FSDPDeviceHandle, torch.cuda)
+            handle = cast(_FSDPDeviceHandle, torch.cuda)
+            handle.set_device(device)
+            return handle
         elif device.type == "mtia":
             return cast(_FSDPDeviceHandle, torch.mtia)
         return cls(device)
