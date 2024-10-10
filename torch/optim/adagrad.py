@@ -8,6 +8,7 @@ from .optimizer import (
     _default_to_fused_or_foreach,
     _device_dtype_check_for_fused,
     _differentiable_doc,
+    _params_doc,
     _foreach_doc,
     _get_scalar_dtype,
     _get_value,
@@ -216,8 +217,7 @@ Adagrad.__doc__ = (
     """
     + rf"""
     Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
+        {_params_doc}
         lr (float, Tensor, optional): learning rate (default: 1e-2)
         lr_decay (float, optional): learning rate decay (default: 0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
