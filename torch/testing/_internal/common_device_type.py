@@ -14,6 +14,7 @@ from functools import partial, wraps
 from typing import Any, ClassVar, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 import torch
+from torch._inductor.utils import is_gpu
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     _get_torch_rocm_version,
@@ -1205,8 +1206,8 @@ class skipIf:
                 self.device_type is None
                 or self.device_type == slf.device_type
                 or (
-                    isinstance(self.device_type, tuple)
-                    and slf.device_type in self.device_type
+                    self.device_type == "gpu"
+                    and is_gpu(slf.device_type)
                 )
             ):
                 if (isinstance(self.dep, str) and getattr(slf, self.dep, True)) or (
@@ -1240,7 +1241,7 @@ class skipXPUIf(skipIf):
 # Skips a test on XPU or CUDA if the condition is true.
 class skipGPUIf(skipIf):
     def __init__(self, dep, reason):
-        super().__init__(dep, reason, device_type=("xpu", "cuda"))
+        super().__init__(dep, reason, device_type="gpu")
 
 
 # Skips a test on Lazy if the condition is true.
