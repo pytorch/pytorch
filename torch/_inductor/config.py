@@ -266,7 +266,7 @@ intra_node_bw = 300
 inter_node_bw = 25
 
 # enable slow autotuning passes to select algorithms
-max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
+max_autotune = True
 
 # enable slow autotuning passes to select pointwise/reductions algorithms
 max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") == "1"

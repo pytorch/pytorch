@@ -1317,7 +1317,6 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
 
     @classmethod
     def can_fuse(cls, producer: BaseSchedulerNode, consumer: BaseSchedulerNode) -> bool:
-        return False
         why = WhyNoFuse(producer, consumer)
         if producer.is_foreach() and consumer.is_foreach():
             producer = typing.cast(ForeachKernelSchedulerNode, producer)
@@ -2573,6 +2572,31 @@ class Scheduler:
             - self.score_fusion(): assigns priority to a given fusion
         """
         fused_nodes = OrderedSet(nodes)
+        if fusion_log.isEnabledFor(logging.DEBUG):
+            fusion_log.debug("fuse_nodes_once, candidates:")
+            for node in fused_nodes:
+                fusion_log.debug("  " + node.debug_str_short())  # noqa: G003
+        for node1, node2 in self.get_possible_fusions(nodes):
+            node1 = self.name_to_fused_node[node1.get_first_name()]
+            node2 = self.name_to_fused_node[node2.get_first_name()]
+            if self.can_fuse(node1, node2) and not self.will_fusion_create_cycle(
+                node1, node2
+            ):
+                if not self.speedup_by_fusion(node1, node2):
+                    continue
+                fusion_log.debug(
+                    "fusing %s with %s", node1.get_name(), node2.get_name()
+                )
+
+                # above can_fuse asserts that node2 has the same device
+                device = node1.get_device()
+                node3 = self.get_backend(device).fuse(node1, node2)
+                fused_nodes.remove(node1)
+                fused_nodes.remove(node2)
+                fused_nodes.add(node3)
+                self.name_to_fused_node.update(
+                    {n.get_name(): node3 for n in node3.get_nodes()}
+                )
         nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         nodes = self.topological_sort_schedule(nodes)
         self.prune_redundant_deps(nodes)
