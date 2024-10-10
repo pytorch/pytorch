@@ -1435,8 +1435,8 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
         });
       });
     } else {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
-        self.scalar_type(), "index_select", [&index_contig, &self, &result, &dim, &numel] {
+      AT_DISPATCH_V2(
+        self.scalar_type(), "index_select", AT_WRAP([&index_contig, &self, &result, &dim, &numel] {
         auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
         auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
 
@@ -1453,7 +1453,7 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
             *(result_data_ptr + i * result_stride) = *self_ip;
           }
         });
-      });
+        }), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, AT_EXPAND(AT_FLOAT8_TYPES));
     }
   }
 
