@@ -374,11 +374,23 @@ def get_runner_prefix(
     fleet_prefix = ""
     prefixes = []
     for experiment_name, experiment_settings in settings.experiments.items():
-        enabled = False
 
         if not experiment_settings.all_branches and is_exception_branch(branch):
             log.info(
                 f"Branch {branch} is an exception branch. Not enabling experiment {experiment_name}."
+            )
+            continue
+
+        if check_experiments:
+            if experiment_name not in check_experiments:
+                exp_list = ", ".join(check_experiments)
+                log.info(
+                    f"Skipping experiment '{experiment_name}', as it is not in the check_experiments list: {exp_list}"
+                )
+                continue
+        elif not experiment_settings.default:
+            log.info(
+                f"Skipping experiment '{experiment_name}', as it is not a default experiment"
             )
             continue
 
@@ -389,21 +401,8 @@ def get_runner_prefix(
             if is_user_opted_in(requestor, user_optins, experiment_name)
         ]
 
-        do_check = True
-        if check_experiments:
-            if experiment_name not in check_experiments:
-                exp_list = ", ".join(check_experiments)
-                log.info(
-                    f"Skipping experiment '{experiment_name}', as it is not in the check_experiments list: {exp_list}"
-                )
-                do_check = False
-        elif not experiment_settings.default:
-            log.info(
-                f"Skipping experiment '{experiment_name}', as it is not a default experiment"
-            )
-            do_check = False
-
-        if opted_in_users and do_check:
+        enabled = False
+        if opted_in_users:
             log.info(
                 f"{', '.join(opted_in_users)} have opted into experiment {experiment_name}."
             )
@@ -411,7 +410,7 @@ def get_runner_prefix(
 
         elif experiment_settings.rollout_perc:
             # If no user is opted in, then we randomly enable the experiment based on the rollout percentage
-            if do_check and random.uniform(0, 100) <= experiment_settings.rollout_perc:
+            if random.uniform(0, 100) <= experiment_settings.rollout_perc:
                 log.info(
                     f"Based on rollout percentage of {experiment_settings.rollout_perc}%, enabling experiment {experiment_name}."
                 )
