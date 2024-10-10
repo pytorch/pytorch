@@ -1242,10 +1242,13 @@ def _get_stage_shapes(
 class PipelineStage(_PipelineStageBase):
     """
     A class representing a pipeline stage in a pipeline parallelism setup.
-    This class is created manually by providing a example input (and optionally output)
-    as opposed to the PipelineStage class that is outputed from pipeline().
-    This class extends the `_PipelineStageBase` class and can similarly be used
-    in `PipelineScheule`.
+
+    PipelineStage assumes sequential partitioning of the model, i.e. the model is split into chunks where outputs from
+    one chunk feed into inputs of the next chunk, with no skip connections.
+
+    PipelineStage performs runtime shape/dtype inference automatically by propagating the outputs from stage0 to
+    stage1 and so forth, in linear order.  To bypass shape inference, pass the `input_args` and `output_args` to each
+    PipelineStage instance.
 
     Args:
         submodule (nn.Module): The PyTorch module wrapped by this stage.
