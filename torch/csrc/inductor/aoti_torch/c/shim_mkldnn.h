@@ -88,7 +88,7 @@ aoti_torch_cpu_mkldnn__convolution_transpose_pointwise(
     const char** algorithm,
     AtenTensorHandle* ret0);
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_mkldnn_rnn_layer(
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_onednn_rnn_layer(
     AtenTensorHandle input,
     AtenTensorHandle weight0,
     AtenTensorHandle weight1,
