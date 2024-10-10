@@ -6,6 +6,7 @@ from functools import partial, wraps
 from typing import Sequence
 
 import numpy as np
+import numpy.typing as npt
 
 import torch
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -206,7 +207,7 @@ def reference_reduction_numpy(f, supports_keepdims=True):
     """
 
     @wraps(f)
-    def wrapper(x: np.ndarray, *args, **kwargs):
+    def wrapper(x: npt.NDArray, *args, **kwargs):
         # Copy keys into a set
         keys = set(kwargs.keys())
 

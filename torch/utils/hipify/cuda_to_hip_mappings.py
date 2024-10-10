@@ -8568,6 +8568,7 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
 
 CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
     [
+        ("PYTORCH_NO_CUDA_MEMORY_CACHING", ("PYTORCH_NO_CUDA_MEMORY_CACHING", API_CAFFE2)),
         ("cuda_stream", ("hip_stream", API_CAFFE2)),
         # if the header is a native hip folder (under hip directory),
         # there is no need to add a hip path to it; the trie in hipify script
