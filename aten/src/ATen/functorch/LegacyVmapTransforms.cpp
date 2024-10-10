@@ -102,7 +102,7 @@ static Tensor moveDimToFrontAndExpand(Tensor tensor, std::optional<int64_t> dim,
   } else {
     tensor = tensor.unsqueeze(0);
     auto expanded_sizes = tensor.sym_sizes().vec();
-    expanded_sizes[0] = size;
+    expanded_sizes[0] = std::move(size);
     tensor = tensor.expand_symint(expanded_sizes);
   }
   return tensor;
