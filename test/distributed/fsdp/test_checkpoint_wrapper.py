@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
-import unittest
 from copy import deepcopy
 from functools import partial
 
@@ -16,7 +15,8 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     OffloadWrapper,
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import run_tests, TEST_HPU, TestCase
 from torch.utils.checkpoint import checkpoint
 
 
@@ -130,8 +130,7 @@ class CheckpointWrapperTest(TestCase):
         m(torch.randn(2, 1)).sum().backward()
         self.assertEqual(2, count)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
-    def test_checkpoint_wrapper_parity(self):
+    def test_checkpoint_wrapper_parity(self, device):
         """
         Tests that using checkpoint_wrapper or the functional
         torch.utils.checkpoint (with the same reentrant config)
@@ -155,9 +154,11 @@ class CheckpointWrapperTest(TestCase):
                 self.use_reentrant = use_reentrant
                 wrp = partial(
                     checkpoint_wrapper,
-                    checkpoint_impl=CheckpointImpl.REENTRANT
-                    if use_reentrant
-                    else CheckpointImpl.NO_REENTRANT,
+                    checkpoint_impl=(
+                        CheckpointImpl.REENTRANT
+                        if use_reentrant
+                        else CheckpointImpl.NO_REENTRANT
+                    ),
                 )
                 for i in range(self.n):
                     l = nn.Sequential(
@@ -184,12 +185,18 @@ class CheckpointWrapperTest(TestCase):
                 use_checkpointing,
                 use_wrapper=use_wrapper,
                 use_reentrant=use_reentrant,
-            ).cuda()
-            x = torch.randn(10000, 256, requires_grad=True).cuda()
-            torch.cuda.reset_peak_memory_stats()
-            loss = a(x).sum()
-            loss.backward()
-            return torch.cuda.max_memory_allocated()
+            ).to(device)
+            x = torch.randn(10000, 256, requires_grad=True).to(device)
+            if TEST_HPU:
+                torch.hpu.reset_peak_memory_stats()
+                loss = a(x).sum()
+                loss.backward()
+                return torch.hpu.max_memory_allocated()
+            else:
+                torch.cuda.reset_peak_memory_stats()
+                loss = a(x).sum()
+                loss.backward()
+                return torch.cuda.max_memory_allocated()
 
         functional_no_reentrant = test(
             use_checkpointing=True, use_wrapper=False, use_reentrant=False
@@ -333,13 +340,12 @@ class CheckpointWrapperTest(TestCase):
         for fqn, _ in lin.named_parameters():
             self.assertTrue(fqn in state_dict, msg=f"{fqn} not in state_dict.")
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
-    def test_checkpoint_wrapper_cpu_offload(self):
+    def test_checkpoint_wrapper_cpu_offload(self, device):
         model = nn.Sequential(
             nn.Linear(10, 10),
             nn.Linear(10, 10),
             nn.Linear(10, 10),
-        ).cuda()
+        ).to(device)
 
         # Patch saved_tensor_hooks to make the unpack keep the tensor on CPU for
         # testing, otherwise the tensor access during the DFS will cause orig
@@ -358,7 +364,7 @@ class CheckpointWrapperTest(TestCase):
 
         model = offload_wrapper(model)
 
-        inp = torch.randn(3, 10, device="cuda")
+        inp = torch.randn(3, 10, device=device)
         loss = model(inp).sum()
 
         # All autograd saved tensors should be offloaded to CPU.
@@ -386,5 +392,7 @@ class CheckpointWrapperTest(TestCase):
         torch.autograd.graph.saved_tensors_hooks.__init__ = orig_init
 
 
+devices = ("cuda", "hpu")
+instantiate_device_type_tests(CheckpointWrapperTest, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()

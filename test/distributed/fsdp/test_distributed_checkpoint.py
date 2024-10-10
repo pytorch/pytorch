@@ -13,10 +13,10 @@ from torch.distributed.checkpoint import (
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType
 from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel
 from torch.distributed.fsdp.wrap import enable_wrap, wrap
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, SkipModel
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
@@ -64,21 +64,21 @@ class TestDistributedCheckpoint(FSDPTest):
             new_params = list(new_model.parameters())
             self.assertNotEqual(params, new_params)
 
-        writer = FileSystemWriter(self.temp_dir)
-        reader = FileSystemReader(self.temp_dir)
-        with FSDP.state_dict_type(model, state_dict_type), FSDP.state_dict_type(
-            new_model, state_dict_type
-        ):
-            state_dict = model.state_dict()
+            writer = FileSystemWriter(self.temp_dir)
+            reader = FileSystemReader(self.temp_dir)
+            with FSDP.state_dict_type(model, state_dict_type), FSDP.state_dict_type(
+                new_model, state_dict_type
+            ):
+                state_dict = model.state_dict()
 
-        save_state_dict(state_dict, writer)
+            save_state_dict(state_dict, writer)
 
-        with FSDP.state_dict_type(model, state_dict_type), FSDP.state_dict_type(
-            new_model, state_dict_type
-        ):
-            state_dict = new_model.state_dict()
-            load_state_dict(state_dict, reader)
-            new_model.load_state_dict(state_dict)
+            with FSDP.state_dict_type(model, state_dict_type), FSDP.state_dict_type(
+                new_model, state_dict_type
+            ):
+                state_dict = new_model.state_dict()
+                load_state_dict(state_dict, reader)
+                new_model.load_state_dict(state_dict)
 
         with FullyShardedDataParallel.summon_full_params(
             model
@@ -90,7 +90,7 @@ class TestDistributedCheckpoint(FSDPTest):
         # TODO: add resharding test case.
 
 
-instantiate_parametrized_tests(TestDistributedCheckpoint)
-
+devices = ("cuda", "hpu")
+instantiate_device_type_tests(TestDistributedCheckpoint, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()
