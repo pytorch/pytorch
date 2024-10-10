@@ -2783,7 +2783,7 @@ class TestFrozenOptimizations(JitTestCase):
 
                 scripted_mod = torch.jit.freeze(scripted_mod)
                 self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
-                FileCheck().check("to_mkldnn").check("prim::mkldnn_convolution").check(
+                FileCheck().check("to_mkldnn").check("prim::onednn_convolution").check(
                     "to_dense"
                 ).run(scripted_mod.graph)
 
@@ -2864,8 +2864,8 @@ class TestFrozenOptimizations(JitTestCase):
             scripted_mod = torch.jit.script(mod)
             scripted_mod = torch.jit.freeze(scripted_mod)
             self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
-            FileCheck().check("to_mkldnn").check("prim::mkldnn_convolution").check(
-                "prim::mkldnn_convolution"
+            FileCheck().check("to_mkldnn").check("prim::onednn_convolution").check(
+                "prim::onednn_convolution"
             ).check("to_dense").run(scripted_mod.graph)
             FileCheck().check_count("to_mkldnn", 1, exactly=True).run(
                 scripted_mod.graph
@@ -3387,7 +3387,7 @@ class TestMKLDNNReinplacing(JitTestCase):
 
         mod_eager = nn.Sequential(self.getConv(), nn.Hardswish(), nn.ReLU())
         mod = self.freezeAndConvert(mod_eager)
-        FileCheck().check("mkldnn_convolution").check_next(
+        FileCheck().check("onednn_convolution").check_next(
             "prim::ONEDNNHardSwish_"
         ).check_next("aten::relu_").run(mod.graph)
         self.checkResults(mod_eager, mod)

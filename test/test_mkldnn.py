@@ -181,7 +181,7 @@ class TestMkldnn(TestCase):
                       [b1, b1, b1, b1, b1, b2, b1])  # bias
         for pad, st, dil, gr, w, b in options:
             with self.assertRaises(RuntimeError) as _:
-                torch.mkldnn_convolution(input, w, b, [pad] * 2, [st] * 2, [dil] * 2, gr)
+                torch.onednn_convolution(input, w, b, [pad] * 2, [st] * 2, [dil] * 2, gr)
 
     def test_autograd_to_mkldnn(self):
         # ONEDNN only supports float32

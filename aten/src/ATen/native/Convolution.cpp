@@ -70,7 +70,7 @@
 #include <ATen/ops/miopen_convolution.h>
 #include <ATen/ops/miopen_convolution_transpose.h>
 #include <ATen/ops/miopen_depthwise_convolution.h>
-#include <ATen/ops/mkldnn_convolution.h>
+#include <ATen/ops/onednn_convolution.h>
 #include <ATen/ops/mps_convolution_backward.h>
 #include <ATen/ops/mps_convolution_transpose_backward.h>
 #include <ATen/ops/slow_conv3d.h>
@@ -1593,7 +1593,7 @@ at::Tensor _convolution(
         weight = weight.contiguous(backend_memory_format);
         bias = bias.defined() ? bias.contiguous() : bias;
       }
-      output = at::mkldnn_convolution(
+      output = at::onednn_convolution(
           input, weight, bias, params.padding, params.stride, params.dilation, params.groups);
 #else
       TORCH_INTERNAL_ASSERT(false, "Onednn backend was selected in PyTorch compiled without onednn support");
