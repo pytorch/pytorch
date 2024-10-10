@@ -892,7 +892,7 @@ Tensor onednn_convolution_transpose_pointwise(
     std::optional<c10::string_view> algorithm) {
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   bool use_channels_last =
-      weight_t.is_mkldnn() || mkldnn_conv_use_channels_last(input_t, weight_t);
+      weight_t.is_mkldnn() || onednn_conv_use_channels_last(input_t, weight_t);
   return _onednn_convolution_transpose(
       input_t,
       weight_t,
