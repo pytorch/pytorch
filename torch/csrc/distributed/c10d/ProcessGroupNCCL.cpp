@@ -596,14 +596,16 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
       currentTimepoint - workStartTime_);
   auto workTimeout = timeout ? *timeout : opTimeout_;
 
-  if (timeElapsed < workTimeout)
+  if (timeElapsed < workTimeout) {
     return false;
+  }
 
   // Timed out
 
   // There is already an error, we don't override it
-  if (exception())
+  if (exception()) {
     return true;
+  }
 
   std::string exceptionMsg = c10::str(
       logPrefix(),
@@ -640,59 +642,11 @@ void ProcessGroupNCCL::WorkNCCL::handleException(
 }
 
 void ProcessGroupNCCL::WorkNCCL::synchronize() {
-  // Call Synchronize without a timeout. We use this method to avoid adding a
-  // timeout argument to the public synchronize API.
-  synchronizeInternal(kNoTimeout);
-}
-
-void ProcessGroupNCCL::WorkNCCL::synchronizeStream() {
-  auto currentStream = at::cuda::getCurrentCUDAStream(device_.index());
-  // Block the current stream on the NCCL stream
-  ncclEndEvent_->block(currentStream);
-
-  if (avoidRecordStreams_) {
-    stashed_for_allocator_safety_->clear();
-  }
-}
-
-// Waiting on the work's corresponding CUDA events
-void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
-    std::chrono::milliseconds timeout) {
   synchronizeStream();
 
-  // In case of blocking, wait for the operation to complete.
-  if (blockingWait_) {
-    while (!isCompleted()) {
-      bool timedOut = checkTimeout(
-          timeout == kNoTimeout ? std::nullopt : std::make_optional(timeout));
-      // Explicitly abort ncclComms here before throwing this timed out
-      // exception to users.
-      // If throwing timed out excepiton without aborting nccl communicators
-      // here, it was observed that CUDA GPU will have 100% utilization and
-      // can not run new events successfully.
-      if (timedOut) {
-        std::string exceptionMsg = c10::str(
-            logPrefix(),
-            "Work ",
-            (*this),
-            " timed out in blocking wait (TORCH_NCCL_BLOCKING_WAIT=1).");
-        LOG(ERROR) << exceptionMsg;
-        break;
-      }
-      // Yield
-      std::this_thread::sleep_for(
-          std::chrono::milliseconds(kSynchronizeBusyWaitMillis));
-    }
-    // exception() includes timeout and error during blocking wait
-    if (exception()) {
-      // Abort NCCL communicators
-      abort();
-      // Throw exception (from main thread here)
-      handleException(TearDown);
-    }
-  }
-
   // Device synchronize only after we've completed timeout checks.
+  // TODO: Is this necessary for barrier if we block the cpu thread till
+  // the completion of the work?
   if (barrierTensor_.defined()) {
     // If we use the work to do barrier, we should block here
     // `dist.barrier()` only requires all CPU processes to enter this
@@ -712,7 +666,17 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
   }
 }
 
-// Same as calling synchronize().
+void ProcessGroupNCCL::WorkNCCL::synchronizeStream() {
+  auto currentStream = at::cuda::getCurrentCUDAStream(device_.index());
+  // Block the current stream on the NCCL stream
+  ncclEndEvent_->block(currentStream);
+
+  if (avoidRecordStreams_) {
+    stashed_for_allocator_safety_->clear();
+  }
+}
+
+// Same as calling synchronize() when blockingWait_ is false
 bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
   RECORD_PARAM_COMMS(
       static_cast<int>(this->seq_), // seq
@@ -727,7 +691,40 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
       -1,
       -1,
       static_cast<int>(1)); // number of device?
-  synchronizeInternal(timeout);
+
+  // In case of blockingWait or a timeout value is specified by the user, we
+  // block the CPU thread until the work is completed or timed out.
+  if (blockingWait_ || timeout != kNoTimeout) {
+    while (!isCompleted()) {
+      bool timedOut = checkTimeout(
+          timeout == kNoTimeout ? std::nullopt : std::make_optional(timeout));
+      // Explicitly abort ncclComms here before throwing this timed out
+      // exception to users.
+      // If throwing timed out excepiton without aborting nccl communicators
+      // here, it was observed that CUDA GPU will have 100% utilization and
+      // can not run new events successfully.
+      if (timedOut) {
+        std::string exceptionMsg = c10::str(
+            logPrefix(), "Work ", (*this), " timed out in blocking wait.");
+        LOG(ERROR) << exceptionMsg;
+        break;
+      }
+      // Yield
+      std::this_thread::sleep_for(
+          std::chrono::milliseconds(kSynchronizeBusyWaitMillis));
+    }
+
+    if (exception()) {
+      // Abort NCCL communicators
+      abort();
+      // Throw exception (from main thread here)
+      handleException(TearDown);
+    }
+  }
+
+  // syncrhoize() will block the current stream on the NCCL stream
+  synchronize();
+
   // TODO(kwen2501): this should be moved to c10d tests, to qualify a NCCL
   // upgrade. Once a NCCL version is qualified, this code should not be needed
   // at runtime.
