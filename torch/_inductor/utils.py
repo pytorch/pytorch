@@ -14,6 +14,7 @@ import math
 import operator
 import os
 import platform
+import re
 import shutil
 import sys
 import tempfile
@@ -34,6 +35,7 @@ from typing import (
     Protocol,
     Sequence,
     Set,
+    Tuple,
     TypeVar,
     Union,
     ValuesView,
@@ -44,6 +46,7 @@ from unittest import mock
 import sympy
 
 import torch
+from torch.utils._pytree import tree_map_only
 
 
 GPU_TYPES = ["cuda", "xpu"]
@@ -357,16 +360,15 @@ def is_pointwise_use(
 
 def gen_gm_and_inputs(target, args, kwargs):
     g = torch.fx.Graph()
-    g_args = []
-    a_args = []
-    for n, arg in enumerate(args):
-        if isinstance(arg, torch.Tensor):
-            g_args.append(g.placeholder(f"arg{n}"))
-            a_args.append(arg)
-        else:
-            g_args.append(arg)
-    assert all(not isinstance(x, torch.Tensor) for x in kwargs.values())
-    node = g.call_function(target, tuple(g_args), kwargs)
+    graph_args = []
+
+    def add_tensor_arg(arg):
+        graph_args.append(arg)
+        return g.placeholder(f"arg{len(graph_args)}")
+
+    node = g.call_function(
+        target, *tree_map_only(torch.Tensor, add_tensor_arg, (args, kwargs))
+    )
     if (
         len(target._schema.returns) == 1
         and str(target._schema.returns[0].type) == "Tensor"
@@ -375,7 +377,7 @@ def gen_gm_and_inputs(target, args, kwargs):
     g.output(node)
 
     gm = torch.fx.GraphModule({}, g)
-    return gm, a_args
+    return gm, graph_args
 
 
 def synchronize(device: str = "cuda"):
@@ -728,7 +730,9 @@ def any_is_symbolic(*args: Any) -> bool:
     return any(is_symbolic(a) for a in args)
 
 
-def get_first_incompatible_cudagraph_node(gm):
+def get_first_incompatible_cudagraph_node(
+    gm: torch.fx.GraphModule,
+) -> Optional[torch.fx.Node]:
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
     forbidden_set = {
@@ -769,10 +773,6 @@ def get_first_incompatible_cudagraph_node(gm):
         if (val := node.meta.get("val")) is not None and free_unbacked_symbols(val):
             return node
     return None
-
-
-def has_incompatible_cudagraph_ops(gm):
-    return get_first_incompatible_cudagraph_node(gm) is not None
 
 
 def output_node(gm: torch.fx.GraphModule):
@@ -1071,8 +1071,7 @@ def use_max_autotune() -> bool:
 
 def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> bool:
     return (
-        use_max_autotune()
-        and layout.device.type == "cuda"
+        layout.device.type == "cuda"
         and layout.dtype in allowed_layout_dtypes
         and is_big_gpu(layout.device.index or 0)
     )
@@ -1099,7 +1098,14 @@ def use_triton_template(layout, *, enable_int32=False, enable_float8=False):
     if enable_float8:
         layout_dtypes.extend([torch.float8_e4m3fn, torch.float8_e5m2])
     return (
-        _use_template_for_cuda(layout, layout_dtypes)
+        (
+            (
+                layout.device.type == "cuda"
+                and _use_template_for_cuda(layout, layout_dtypes)
+            )
+            or (layout.device.type == "cpu" and layout.dtype in layout_dtypes)
+        )
+        and use_max_autotune()
         and _use_autotune_backend("TRITON")
         and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
     )
@@ -1118,8 +1124,10 @@ def use_cutlass_template(layout, m, n, k):
         return False
 
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
-    res = _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
-        "CUTLASS"
+    res = (
+        _use_template_for_cuda(layout, layout_dtypes)
+        and use_max_autotune()
+        and _use_autotune_backend("CUTLASS")
     )
 
     if res:
@@ -1209,6 +1217,9 @@ def use_ck_template(layout, m, n, k):
         log.warning("Please pip install Composable Kernel package")
         return False
 
+    if config.is_fbcode():
+        config.rocm.ck_dir = ck_package_dirname
+
     if not config.rocm.ck_dir:
         log.warning("Please set TORCHINDUCTOR_CK_DIR env variable")
         return False
@@ -1297,7 +1308,7 @@ class DebugDirManager:
         torch._dynamo.config.debug_dir_root = self.prev_debug_name
 
 
-def run_and_get_code(fn, *args, **kwargs):
+def run_and_get_code(fn, *args, **kwargs) -> Tuple[Any, List[str]]:
     from .graph import GraphLowering
 
     source_codes: List[str] = []
@@ -2029,6 +2040,21 @@ def remove_unaligned_input_idxs(
     return static_input_idxs
 
 
+def expr_fits_within_32bit(e: sympy.Expr):
+    from .virtualized import V
+
+    int_max = torch.iinfo(torch.int32).max
+    size_hint = V.graph.sizevars.size_hint
+    has_hint = V.graph.sizevars.shape_env.has_hint
+
+    # Allow for unhinted e as long as we can still statically prove
+    # (e.g., via ValueRanges) that it is still in bounds
+    if V.graph.sizevars.is_expr_static_and_true(e <= int_max):
+        return True
+    # Otherwise, the hint MUST exist and be in range
+    return has_hint(e) and size_hint(e) <= int_max
+
+
 def set_tracing_context_output_strides(example_inputs, compiled_graph):
     # Return the output strides to the caller via TracingContext
     context = torch._guards.TracingContext.try_get()
@@ -2070,3 +2096,29 @@ def should_use_remote_fx_graph_cache():
         jk_name = "pytorch/remote_cache:fx_graph_memcache_version_amd"
 
     return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(jk_name)
+
+
+def normalize_name(name: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_]", "_", name)
+
+
+def is_same_tensor(data: torch.Tensor, value: torch.Tensor):
+    return (
+        not data.is_mkldnn
+        and data.size() == value.size()
+        and data.stride() == value.stride()
+        and data.dtype == value.dtype
+        and data.device == value.device
+        and data.untyped_storage().data_ptr() == value.untyped_storage().data_ptr()
+        and data.storage_offset() == value.storage_offset()
+    )
+
+
+def is_same_mkldnn_tensor(data: torch.Tensor, value: torch.Tensor):
+    return (
+        data.is_mkldnn
+        and data.size() == value.size()
+        and data.dtype == value.dtype
+        and data.device == value.device
+        and torch.ops.mkldnn.data_ptr(data) == torch.ops.mkldnn.data_ptr(value)
+    )

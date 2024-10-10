@@ -484,6 +484,9 @@ class PythonWrapperCodegen(CodeGen):
         self.user_defined_kernel_cache: Dict[Tuple[Any, ...], Tuple[str, Any]] = {}
         self.unbacked_symbol_decls: Set[str] = set()  # str of sympy.Symbol
         self.computed_sizes: Set[sympy.Symbol] = set()
+        self.launcher_fn_name = None
+        # This function can be overridden to change the launcher name
+        self.set_launcher_fn_name()
 
         # this is used for tracking which GraphLowering instance---parent graph
         # or (nested) subgraph---is currently codegened; the primary use case is
@@ -526,6 +529,9 @@ class PythonWrapperCodegen(CodeGen):
         self.debug_printer = DebugPrinterManager(
             debug_printer_level=config.aot_inductor.debug_intermediate_value_printer
         )
+
+    def set_launcher_fn_name(self) -> None:
+        self.launcher_fn_name = "call"
 
     def write_constant(self, name: str, hashed: str) -> None:
         self.header.writeline(f"{name} = None  # {hashed}")
@@ -656,14 +662,21 @@ class PythonWrapperCodegen(CodeGen):
             line = f"assert not {name}.isinf().any().item()"
             self.prefix.writeline(line)
 
-    def write_prefix(self) -> None:
+    def write_async_compile_wait(self) -> None:
         self.prefix.splice(
             """
 
             async_compile.wait(globals())
             del async_compile
+            """
+        )
 
-            def call(args):
+    def write_prefix(self) -> None:
+        assert self.launcher_fn_name is not None
+        self.write_async_compile_wait()
+        self.prefix.splice(
+            f"""
+            def {self.launcher_fn_name}(args):
             """
         )
         with self.prefix.indent():
@@ -677,10 +690,13 @@ class PythonWrapperCodegen(CodeGen):
                 self.prefix.writeline("args.clear()")
 
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
-            if config.size_asserts:
-                self.codegen_input_size_asserts()
-            if config.nan_asserts:
-                self.codegen_input_nan_asserts()
+            self.codegen_input_size_and_nan_asserts()
+
+    def codegen_input_size_and_nan_asserts(self) -> None:
+        if config.size_asserts:
+            self.codegen_input_size_asserts()
+        if config.nan_asserts:
+            self.codegen_input_nan_asserts()
 
     # this function (and below) takes a graph as input so
     # that stream caching happens per graph instance. this
@@ -1117,8 +1133,8 @@ class PythonWrapperCodegen(CodeGen):
                     f"reinterpret_tensor({data.get_name()}, {size}, {stride}, {offset})"
                 )
 
-    def codegen_device_copy(self, src, dst):
-        self.writeline(f"{dst}.copy_({src})")
+    def codegen_device_copy(self, src, dst, non_blocking: bool):
+        self.writeline(f"{dst}.copy_({src}, {non_blocking})")
 
     def codegen_multi_output(self, name, value):
         self.writeline(f"{self.declare}{name} = {value}{self.ending}")
@@ -1300,11 +1316,10 @@ class PythonWrapperCodegen(CodeGen):
                         arg, 1  # type: ignore[arg-type]
                     ):
                         equal_to_1_args.append(key)
-        index_dtype = "tl.int32"
         triton_meta = {
             "signature": signature_to_meta(
                 signature,
-                size_dtype=index_dtype,
+                size_dtype=None,  # try to infer based on symints
                 indices=non_constant_indices,
                 argdefs=kernel.arg_names,
             ),
@@ -1617,12 +1632,20 @@ class PythonWrapperCodegen(CodeGen):
                 arg = arg.inner_expr
             if arg in V.graph.sizevars.inv_precomputed_replacements:
                 arg = V.graph.sizevars.inv_precomputed_replacements[arg]
-            return str(
-                V.graph.sizevars.size_hint(
-                    arg,
+
+            # For multiple expressions that depend on an unbacked symint,
+            # we want to compute them consistently for a size hint we have chosen.
+            # So, recursively compute expressions via size hints of contained symbols.
+            free_symbols = arg.free_symbols
+            size_dict = {
+                symbol: V.graph.sizevars.size_hint(
+                    symbol,
                     fallback=config.unbacked_symint_fallback,
                 )
-            )
+                for symbol in free_symbols
+            }
+            return str(arg.subs(size_dict))
+
         elif isinstance(arg, (str, int, float, bool)):
             return str(arg)
         elif isinstance(arg, list):
@@ -1658,104 +1681,102 @@ class PythonWrapperCodegen(CodeGen):
 
         gpu: Defines whether the backend is GPU. Otherwise the backend is CPU.
 
-        triton: Defines whether the GPU backend uses Triton for codegen.
-                Otherwise it uses the CUDA language for codegen.
-                Only valid when gpu == True.
+        triton: Defines whether the backend uses Triton for codegen. Otherwise it uses the CUDA language when gpu=True,
+                and C++ when gpu=False.
         """
-        if gpu:
-            device_index, call_args_str = self.prepare_triton_kernel_call(
-                device_index, call_args
-            )
-            call_args_str = ", ".join(call_args_str)
-            stream_name = self.write_get_raw_stream(device_index, V.graph)
-            if triton:
-                self.write_triton_header_once()
-                if grid is None:
-                    grid_str = grid_fn
-                else:
-                    grid_str = ", ".join(self._grid_dim_str(item) for item in grid)
-                    if grid_extra_kwargs:
-                        grid_str = f"{grid_str}, {grid_extra_kwargs}"
-                    grid_str = f"{grid_fn}({grid_str})"
-                # add debug printer code for triton kernel calls at (jit) inductor level
-                debug_printer_manager = V.graph.wrapper_code.debug_printer
-                debug_printer_manager.set_printer_args(
-                    call_args, kernel_name, arg_types, None
-                )
-                with debug_printer_manager:
-                    self.writeline(
-                        f"{kernel_name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
-                    )
-                if (
-                    config.triton.autotune_at_compile_time
-                    and kernel_name not in self.kernel_autotune_names
-                ):
-                    # Create example args for autotune in a separate epilogue
-                    assert arg_types is not None and len(call_args) == len(
-                        arg_types
-                    ), "call_args and arg_types do not match"
-
-                    tensor_args = {}
-                    all_args = []
-                    if raw_args is None:
-                        # create a dummy raw_args for uniform behavior in the following loop
-                        raw_args = [None] * len(call_args)
-                    else:
-                        assert len(raw_args) == len(
-                            call_args
-                        ), "call_args and raw_args do not match"
-
-                    for i, (arg, arg_type, raw_arg) in enumerate(
-                        zip(call_args, arg_types, raw_args)
-                    ):
-                        key = None
-                        if isinstance(arg, str) and "=" in str(arg):
-                            # arg may be passed in a kwarg style, and then we need to extract its value
-                            key, arg = arg.split("=")
-
-                        if isinstance(arg_type, torch_dtype):
-                            # workspace allocation is already generated by `generate_workspace_allocation()`
-                            # in `TritonKernel.call_kernel()`.
-                            if arg == "workspace":
-                                arg_str = "workspace"
-                                tensor_args[arg] = arg_str
-                            elif arg not in tensor_args:
-                                arg_str = self.generate_example_arg_value(
-                                    arg, arg_type, raw_arg, i
-                                )
-                                tensor_args[arg] = arg_str
-                            else:
-                                arg_str = tensor_args[arg]
-                        else:
-                            arg_str = self.generate_example_arg_value(
-                                arg, arg_type, raw_arg, i
-                            )
-                        all_args.append(arg_str if key is None else f"{key}={arg_str}")
-
-                    if grid is None:
-                        grid_str = grid_fn
-                    else:
-                        grid_str = ", ".join(
-                            self.generate_example_arg_value(g, type(g)) for g in grid
-                        )
-                        if grid_extra_kwargs:
-                            grid_str = f"{grid_str}, {grid_extra_kwargs}"
-                        grid_str = f"{grid_fn}({grid_str})"
-
-                    self.kernel_autotune_calls.writeline(
-                        f"{kernel_name}.run({', '.join(all_args)}, grid={grid_str}, stream={stream_name})"
-                    )
-                    self.kernel_autotune_calls.writeline(
-                        f"del {', '.join(arg for arg in tensor_args.values())}\n",
-                    )
-                    self.kernel_autotune_names.add(kernel_name)
-            else:
-                stream_ptr = f"c_void_p({stream_name})"
-                self.writeline(
-                    f"{kernel_name}.{kernel_name}({call_args_str}, {stream_ptr})"
-                )
-        else:
+        if not (triton or gpu):
             self.writeline(self.wrap_kernel_call(kernel_name, call_args))
+            return
+
+        device_index, call_args_str = self.prepare_triton_kernel_call(
+            device_index, call_args
+        )
+        call_args_str = ", ".join(call_args_str)
+        stream_name = self.write_get_raw_stream(device_index, V.graph)
+
+        if not triton:
+            stream_ptr = f"c_void_p({stream_name})"
+            self.writeline(
+                f"{kernel_name}.{kernel_name}({call_args_str}, {stream_ptr})"
+            )
+            return
+
+        self.write_triton_header_once()
+        if grid is None:
+            grid_str = grid_fn
+        else:
+            grid_str = ", ".join(self._grid_dim_str(item) for item in grid)
+            if grid_extra_kwargs:
+                grid_str = f"{grid_str}, {grid_extra_kwargs}"
+            grid_str = f"{grid_fn}({grid_str})"
+        # add debug printer code for triton kernel calls at (jit) inductor level
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(call_args, kernel_name, arg_types, None)
+        with debug_printer_manager:
+            self.writeline(
+                f"{kernel_name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
+            )
+        if (
+            config.triton.autotune_at_compile_time
+            and kernel_name not in self.kernel_autotune_names
+        ):
+            # Create example args for autotune in a separate epilogue
+            assert arg_types is not None and len(call_args) == len(
+                arg_types
+            ), "call_args and arg_types do not match"
+
+            tensor_args = {}
+            all_args = []
+            if raw_args is None:
+                # create a dummy raw_args for uniform behavior in the following loop
+                raw_args = [None] * len(call_args)
+            else:
+                assert len(raw_args) == len(
+                    call_args
+                ), "call_args and raw_args do not match"
+
+            for i, (arg, arg_type, raw_arg) in enumerate(
+                zip(call_args, arg_types, raw_args)
+            ):
+                key = None
+                if isinstance(arg, str) and "=" in str(arg):
+                    # arg may be passed in a kwarg style, and then we need to extract its value
+                    key, arg = arg.split("=")
+
+                if isinstance(arg_type, torch_dtype):
+                    # workspace allocation is already generated by `generate_workspace_allocation()`
+                    # in `TritonKernel.call_kernel()`.
+                    if arg == "workspace":
+                        arg_str = "workspace"
+                        tensor_args[arg] = arg_str
+                    elif arg not in tensor_args:
+                        arg_str = self.generate_example_arg_value(
+                            arg, arg_type, raw_arg, i
+                        )
+                        tensor_args[arg] = arg_str
+                    else:
+                        arg_str = tensor_args[arg]
+                else:
+                    arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg, i)
+                all_args.append(arg_str if key is None else f"{key}={arg_str}")
+
+            if grid is None:
+                grid_str = grid_fn
+            else:
+                grid_str = ", ".join(
+                    self.generate_example_arg_value(g, type(g)) for g in grid
+                )
+                if grid_extra_kwargs:
+                    grid_str = f"{grid_str}, {grid_extra_kwargs}"
+                grid_str = f"{grid_fn}({grid_str})"
+
+            self.kernel_autotune_calls.writeline(
+                f"{kernel_name}.run({', '.join(all_args)}, grid={grid_str}, stream={stream_name})"
+            )
+            self.kernel_autotune_calls.writeline(
+                f"del {', '.join(arg for arg in tensor_args.values())}\n",
+            )
+            self.kernel_autotune_names.add(kernel_name)
 
     def writeline(self, line):
         self.lines.append(line)
@@ -1789,7 +1810,7 @@ class PythonWrapperCodegen(CodeGen):
             return repr(type(s)(Shim(self.val_to_arg_str(a)) for a in s))
         elif isinstance(s, torch._ops.OpOverload):
             return _get_qualified_name(s)
-        elif isinstance(s, (ir.Buffer, ReinterpretView)):
+        elif isinstance(s, (ir.Buffer, ir.MutableBox, ReinterpretView)):
             return s.codegen_reference()
         elif has_triton_package() and isinstance(s, triton.language.dtype):  # type: ignore[possibly-undefined]
             return dtype_to_string(s)
@@ -2038,7 +2059,9 @@ class PythonWrapperCodegen(CodeGen):
             if isinstance(x, int):
                 return x
             val = V.graph._shape_env._maybe_evaluate_static(x)
-            return int(val)
+            if val is None:
+                return val
+            return int(val)  # type: ignore[call-overload]
         except Exception:
             return None
 

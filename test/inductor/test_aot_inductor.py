@@ -718,6 +718,10 @@ class AOTInductorTestsTemplate:
     )
     @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     def test_fp8(self):
+        # cuda only
+        if self.device != "cuda":
+            return
+
         class Model(torch.nn.Module):
             def __init__(self, dtype):
                 super().__init__()
@@ -2999,6 +3003,10 @@ class AOTInductorTestsTemplate:
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
     def test_runtime_checks_fp8(self):
+        # cuda only
+        if self.device != "cuda":
+            return
+
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -3305,9 +3313,7 @@ class AOTInductorTestsTemplate:
             model, example_inputs_list, dynamic_shapes=dynamic_shapes
         )
 
-    # max_autotune is disabled due to https://github.com/pytorch/pytorch/issues/135106
-    # @common_utils.parametrize("max_autotune", [False, True])
-    @common_utils.parametrize("max_autotune", [False])
+    @common_utils.parametrize("max_autotune", [True, False])
     def test_misc_1(self, max_autotune):
         if self.device == "cpu" and IS_MACOS and max_autotune:
             raise unittest.SkipTest("max_autotune not supported on macos")
@@ -3531,6 +3537,44 @@ class AOTInductorTestsTemplate:
                     count,
                 ).run(code)
 
+    def test_aoti_debug_printer_sym_inputs(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        from torch.testing._internal.triton_utils import add_kernel
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                maxlen = max(x.item(), 512)
+                a = torch.ones(maxlen, device="cuda")
+                b = torch.ones(maxlen, device="cuda")
+                out = torch.zeros_like(a)
+                # unbacked symint in grid
+                add_kernel[(1, 1, maxlen)](a, b, out, maxlen, 32)
+                return out
+
+        example_inputs = (torch.randint(high=1024, size=(1,), device=self.device),)
+
+        expected_scalar_args = [
+            "triton_poi_fused_zeros_like_0_xnumel",
+            "triton_poi_fused_ones_1_xnumel",
+            "std::max(static_cast<int64_t>(512L), static_cast<int64_t>(u0))",
+        ]
+
+        with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
+            result, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, Model(), example_inputs
+            )
+            self.assertEqual("aoti_torch_print_tensor_handle" in code, True)
+            for scalar in expected_scalar_args:
+                FileCheck().check_count(
+                    f"{scalar}",
+                    2,
+                ).run(code)
+
     def test_size_from_multi_output(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -3626,12 +3670,8 @@ def fail_non_abi_compatible_cuda(is_skip=False):
 CPU_TEST_FAILURES = {
     # TODO: error: ‘complex64’ was not declared in this scope
     "test_add_complex": fail_minimal_arrayref_interface(is_skip=True),
-    # TODO: test_conv_freezing_abi_compatible_cpu fails,
-    #   AssertionError: None, i.e. optional output is not supported
-    "test_conv_freezing": fail_with_and_without_stack_allocation(is_skip=True),
-    # TODO: test_deconv_freezing_abi_compatible_cpu fails,
-    #   AssertionError: None, i.e. optional output is not supported
-    "test_deconv_freezing": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_conv_freezing": fail_minimal_arrayref_interface(is_skip=True),
+    "test_deconv_freezing": fail_minimal_arrayref_interface(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_duplicate_constant_folding": fail_with_and_without_stack_allocation(
         is_skip=True
@@ -3649,12 +3689,8 @@ CPU_TEST_FAILURES = {
     "test_dynamic_scalar": fail_minimal_arrayref_interface(is_skip=True),
     # https://github.com/pytorch/pytorch/issues/122980
     "test_fft_c2c": fail_stack_allocation(is_skip=True),
-    # TODO: test_freezing_abi_compatible_cpu fails,
-    #   AssertionError: None, i.e. optional output is not supported
-    "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
-    # TODO: test_linear_freezing_abi_compatible_cpu fails,
-    #   AssertionError: None, i.e. optional output is not supported
-    "test_linear_freezing": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_freezing": fail_minimal_arrayref_interface(is_skip=True),
+    "test_linear_freezing": fail_minimal_arrayref_interface(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_missing_cubin": fail_with_and_without_stack_allocation(is_skip=True),
     # minimal arrayref interface only works with CPU; test crashes.
@@ -3751,8 +3787,6 @@ CUDA_TEST_FAILURES = {
     "test_quantized_linear": fail_cuda(is_skip=True),
     "test_quanatized_int8_linear": fail_cuda(is_skip=True),
     "test_custom_op_add": fail_non_abi_compatible_cuda(is_skip=True),
-    # fp8 to be re-enabled for AOTI
-    "test_fp8": fail_cuda(is_skip=True),
     "test_custom_op_all_inputs": fail_non_abi_compatible_cuda(is_skip=True),
     "test_custom_op_missing_arg_with_default_value": fail_non_abi_compatible_cuda(
         is_skip=True
@@ -3767,6 +3801,7 @@ CUDA_TEST_FAILURES = {
     "test_aoti_debug_printer_user_defined_triton_kernel": fail_non_abi_compatible_cuda(
         is_skip=True
     ),
+    "test_aoti_debug_printer_sym_inputs": fail_non_abi_compatible_cuda(is_skip=True),
 }
 
 
@@ -3830,6 +3865,7 @@ if not IS_FBCODE:
             "test_aoti_debug_printer_user_defined_triton_kernel": fail_cuda(
                 is_skip=True
             ),
+            "test_aoti_debug_printer_sym_inputs": fail_cuda(is_skip=True),
         }
     )
 
