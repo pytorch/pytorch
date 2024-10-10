@@ -51,8 +51,7 @@ fmha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
                                    at::Tensor dv,
                                    float softmax_scale,
                                    float p_dropout,
-                                   uint64_t drop_seed,
-                                   uint64_t drop_offset)
+                                   std::pair<uint64_t*, uint64_t*> drop_seed_offset)
 {
     // q: (batch_size, seqlen_q, nheads, hdim)
     ck_tile::index_t batch_stride_q = q.stride(0);
@@ -193,7 +192,7 @@ fmha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
                          static_cast<ck_tile::index_t>(mask.type),
                          p_dropout,
                          p_undrop,
-                         {drop_seed, drop_offset}};
+                         drop_seed_offset};
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
@@ -212,7 +211,6 @@ mha_bwd(const at::Tensor &dout,                   // batch_size x seqlen_q x num
         const bool is_causal,
         int window_size_left,
         int window_size_right,
-        //const float /*softcap*/,
         const bool deterministic,
         const at::Tensor philox_seed,
         const at::Tensor philox_offset)
@@ -388,15 +386,14 @@ mha_bwd(const at::Tensor &dout,                   // batch_size x seqlen_q x num
                 out,
                 softmax_lse,
                 dout_padded,
-                dq_accum,
+                nq_accum,
                 softmax_d,
                 dq,
                 dk_expanded,
                 dv_expanded,
                 softmax_scale,
                 p_dropout,
-                drop_seed,
-                drop_offset);
+                drop_seed_offset);
 
         float t = fmha_bwd(traits, args, stream_config);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_bwd");
