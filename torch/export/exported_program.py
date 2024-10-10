@@ -677,19 +677,30 @@ def _decompose_exported_program(
 
 
 class CustomDecompTable(Dict):
+    """
+    This is a custom dictionary that is specifically used for handling decomp_table in export.
+    The reason we need this is because in the new world, you can only *delete* an op from decomp
+    table to preserve it. This is problematic for custom ops because we don't know when the custom
+    op will actually be loaded to the dispatcher. As a result, we need to record the custom ops operations 
+    until we really need to materialize it (which is when we run decomposition pass.)
+    """
     def __init__(self):
         super().__init__()
         from torch._decomp import _core_aten_decompositions_post_autograd
 
+        # For aten ops, we load them up in the beginning
         self.aten_decomp_table = _core_aten_decompositions_post_autograd(
             ignore_cia=True
         )
 
         for op in _collect_all_valid_cia_ops_for_aten_namespace():
             self.aten_decomp_table[op] = _get_decomp_for_cia(op)
-
+        
+        # This is to track the *pending* deleted custom ops that haven't been materialized yet
         self.deleted_custom_ops = set()
+        # When we can materialize a custom op, we use this table
         self.additional_custom_op_decomp = {}
+        # When this is true, there shouldn't be any pending operations in the table.
         self.has_materialized = False
 
     def __getitem__(self, key):
@@ -703,13 +714,15 @@ class CustomDecompTable(Dict):
 
         if key in self.additional_custom_op_decomp:
             return self.additional_custom_op_decomp[key]
-
+        
+        # If it is materialized already, only aten_decomp_table and additional_custom_op_decomp can have
+        # the ops.
         if self.has_materialized:
             raise KeyError(f"Op {key} is not in the decomposition table")
 
         if key in self.deleted_custom_ops:
             raise KeyError(f"Op {key} is not in the decomposition table")
-
+        
         self.additional_custom_op_decomp[key] = _get_decomp_for_cia(key)
         return self.additional_custom_op_decomp[key]
 
