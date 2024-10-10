@@ -174,7 +174,7 @@ template<class FuncPtr, bool AllowLegacyTypes>
 inline KernelFunction KernelFunction::makeFromUnboxedFunction(FuncPtr func_ptr) {
     static_assert(is_compile_time_function_pointer<FuncPtr>::value, "Tried to call KernelFunction::makeFromUnboxedFunction with an invalid parameter. It must be a function pointer created with TORCH_FN.");
     static_assert(!std::is_same<typename FuncPtr::FuncType, BoxedKernelFunction>::value, "Tried to call KernelFunction::makeFromUnboxedFunction with a boxed function pointer. Please use KernelFunction::makeFromBoxedFunction instead.");
-    static_assert(FuncPtr::func_ptr() != nullptr, "Kernel function cannot be nullptr");
+    TORCH_INTERNAL_ASSERT(FuncPtr::func_ptr() != nullptr, "Kernel function cannot be nullptr");
 
 #if !defined(C10_MOBILE)
     (void)func_ptr; // Suppress unused variable warning
