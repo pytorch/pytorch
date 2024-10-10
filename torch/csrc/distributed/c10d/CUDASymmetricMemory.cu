@@ -420,11 +420,7 @@ static __global__ void barrier_kernel(
           target_rank,
           channel,
           timeout_ms);
-#if !defined(USE_ROCM)
-      __trap();
-#else
-      assert(0);
-#endif
+      trap();
     }
     auto wait_success = try_wait_signal<MemOpSem::Acquire>(
         signal_pads[rank] + world_size * channel + target_rank, timeout_ms);
@@ -436,11 +432,7 @@ static __global__ void barrier_kernel(
           target_rank,
           channel,
           timeout_ms);
-#if !defined(USE_ROCM)
-      __trap();
-#else
-      assert(0);
-#endif
+      trap();
     }
   }
 }
@@ -475,11 +467,7 @@ static __global__ void put_signal_kernel(
           dst_rank,
           channel,
           timeout_ms);
-#if !defined(USE_ROCM)
-      __trap();
-#else
-      assert(0);
-#endif
+      trap();
     }
   }
 }

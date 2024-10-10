@@ -74,10 +74,23 @@ cas(uint32_t* addr, uint32_t compare, uint32_t val) {
 #endif
 }
 
-__device__ inline size_t global_timer_ns() {
+__device__ __forceinline__ void trap() {
+#if defined(USE_ROCM)
+  assert(0);
+#else
+  __trap();
+#endif
+}
+
+__device__ __forceinline__ size_t global_timer_ns() {
+#if defined(USE_ROCM)
+  CUDA_KERNEL_ASSERT(false);
+  return 0;
+#else
   size_t val;
   asm volatile("mov.u64 %0, %globaltimer;" : "=l"(val) : : "memory");
   return val;
+#endif
 }
 
 constexpr size_t ns_per_ms = 1e6;
