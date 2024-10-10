@@ -1176,9 +1176,8 @@ class SIMDScheduling(BaseScheduling):
                     config.triton.tiling_prevents_reduction_fusion
                     and not node1.is_template()
                 ):
-                    # FIXME support multiple reduction dims
-                    is_reduction_tiling_valid = self.select_tiling(
-                        node1.get_nodes(), numel1
+                    is_reduction_tiling_valid = tuple(
+                        self.select_tiling(node1.get_nodes(), numel1).values()
                     ) in (
                         (numel1, 1),
                         (numel2, rnumel2, 1),
