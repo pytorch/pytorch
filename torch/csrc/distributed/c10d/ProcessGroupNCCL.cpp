@@ -1,5 +1,6 @@
 #ifdef USE_C10D_NCCL
 
+#include <dlfcn.h>
 #include <exception>
 #include <fstream>
 #include <map>
@@ -367,9 +368,74 @@ getNCCLCommDumpMap() {
   }
   return ncclDumpMap;
 #else
-  return std::unordered_map<
-      std::string,
-      std::unordered_map<std::string, std::string>>();
+  /*
+  The following code is designed to work with NCCL versions above 2.23.4, which
+  support the profiler plugin.
+  For information on the NCCL profiler plugin, please refer to
+  https://github.com/NVIDIA/nccl/tree/v2.23.4-1/ext-profiler/example.
+  The plugin is a shared library (.so file) that is loaded by NCCL and PyTorch.
+  Users must define the dump function in the plugin, which should dump the
+  internal buffers of the profiler plugin.
+
+  env variables:
+  1. TORCH_NCCL_ENABLE_PROFILER_PLUGIN is a boolean flag to enable the plugin.
+  2. NCCL_PROFILER_PLUGIN is the path to the plugin.
+  3. NCCL_PROFILER_PLUGIN_FUN is the name of the dump function in the plugin.
+
+  Hint:
+  1. The function name would be mangled in C++. Use readelf -s -W <plugin>.so to
+  find the mangled name.
+  */
+  std::unordered_map<std::string, std::unordered_map<std::string, std::string>>
+      ncclDumpMap;
+
+  const bool isProfilerPluginEnabled =
+      getCvarBool({"TORCH_NCCL_ENABLE_PROFILER_PLUGIN"}, false);
+  if (!isProfilerPluginEnabled) {
+    return ncclDumpMap;
+  }
+
+  const std::string profilerPluginPath = getCvarString(
+      {"NCCL_PROFILER_PLUGIN"},
+      "/packages/training_platform/libnccl_profiler_plugin.so");
+  LOG(INFO) << "NCCL_PROFILER_PLUGIN: " << profilerPluginPath;
+  if (profilerPluginPath.empty()) {
+    return ncclDumpMap;
+  }
+
+  void* handle = dlopen(profilerPluginPath.c_str(), RTLD_LAZY | RTLD_LOCAL);
+  if (handle == nullptr) {
+    LOG(WARNING) << "Failed to open handle to process: ";
+    LOG(WARNING) << "dlopen failed:" << dlerror();
+    return ncclDumpMap;
+  }
+
+  const std::string profilerPluginFun = getCvarString(
+      {"NCCL_PROFILER_PLUGIN_FUN"}, "_Z22ncclProfilerPluginDumpB5cxx11v");
+  if (profilerPluginFun.empty()) {
+    LOG(WARNING) << "NCCL_PROFILER_PLUGIN_FUN is empty";
+    return ncclDumpMap;
+  }
+  std::
+      unordered_map<std::string, std::unordered_map<std::string, std::string>> (
+          *dumpFn)() =
+          (std::unordered_map<
+              std::string,
+              std::unordered_map<std::string, std::string>>(*)())
+              dlsym(handle, profilerPluginFun.c_str());
+  if (dumpFn == nullptr) {
+    LOG(WARNING) << "Failed to find " << profilerPluginFun;
+    return ncclDumpMap;
+  }
+
+  try {
+    // nonblocking call
+    ncclDumpMap = (*dumpFn)();
+  } catch (const std::exception& e) {
+    LOG(WARNING) << "Failed to call " << profilerPluginFun << ": " << e.what();
+  }
+
+  return ncclDumpMap;
 #endif
 }
 
@@ -423,7 +489,7 @@ std::future<bool> launchAsyncGilCheck() {
 }
 
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 100;
-constexpr int64_t kSynchronizeBusyWaitMillis = 10;
+constexpr int64_t kSynchronizeBusyWaitMillis = 1;
 thread_local uint64_t ProcessGroupNCCL::ncclActiveGroupCounter_ = 0;
 
 std::ostream& operator<<(
@@ -643,27 +709,6 @@ void ProcessGroupNCCL::WorkNCCL::handleException(
 
 void ProcessGroupNCCL::WorkNCCL::synchronize() {
   synchronizeStream();
-
-  // Device synchronize only after we've completed timeout checks.
-  // TODO: Is this necessary for barrier if we block the cpu thread till
-  // the completion of the work?
-  if (barrierTensor_.defined()) {
-    // If we use the work to do barrier, we should block here
-    // `dist.barrier()` only requires all CPU processes to enter this
-    // function, hence we only need to make sure the dummy all-reduce has
-    // completed. So we would only need to sync the **current stream** back to
-    // host, and do not need to synchronize the entire device (which may have
-    // kernels running on other streams).
-    // Using `cudaStreamSynchronize` instead of `cudaDeviceSynchronize` can:
-    // - lower chance of hang;
-    // - CurrentCUDAStream is usually the context of the next operation in
-    // Python, thus blocking current stream would already block the next
-    // compute kernel;
-    // - achieve better barrier performance.
-    auto currentStream = at::cuda::getCurrentCUDAStream(device_.index());
-    // CUDAStream wrapper will correctly use a DeviceGuard here
-    currentStream.synchronize();
-  }
 }
 
 void ProcessGroupNCCL::WorkNCCL::synchronizeStream() {
@@ -692,6 +737,9 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
       -1,
       static_cast<int>(1)); // number of device?
 
+  // synchronize() will block the current stream on the NCCL stream
+  synchronize();
+
   // In case of blockingWait or a timeout value is specified by the user, we
   // block the CPU thread until the work is completed or timed out.
   if (blockingWait_ || timeout != kNoTimeout) {
@@ -713,17 +761,22 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
       std::this_thread::sleep_for(
           std::chrono::milliseconds(kSynchronizeBusyWaitMillis));
     }
-
-    if (exception()) {
-      // Abort NCCL communicators
-      abort();
-      // Throw exception (from main thread here)
-      handleException(TearDown);
-    }
+  } else if (isBarrierOp_ && !isCompleted()) {
+    // For barrier wait when timeout is unspecified, we block the CPU thread on
+    // current stream. This is to minimize the CPU barrier wait time in healthy
+    // path
+    auto currentStream = at::cuda::getCurrentCUDAStream(device_.index());
+    // CUDAStream wrapper will correctly use a DeviceGuard here
+    currentStream.synchronize();
   }
 
-  // syncrhoize() will block the current stream on the NCCL stream
-  synchronize();
+  // If exception is detected, throw it from the main CPU thread
+  if (exception()) {
+    // Abort NCCL communicators
+    abort();
+    // Throw exception (from main thread here)
+    handleException(TearDown);
+  }
 
   // TODO(kwen2501): this should be moved to c10d tests, to qualify a NCCL
   // upgrade. Once a NCCL version is qualified, this code should not be needed
@@ -971,9 +1024,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // SEGMENT_FREE action occurs.
   // We attach hooks only once at the first PG creation.
   // Attaching hooks fails if CUDACachingAllocator is not initialized, so
-  // lazyInitCUDA is called (and is a no-op if CUDA is already initialized).
+  // Init for CUDA is called (and is a no-op if CUDA is already
+  // initialized).
   if (useTensorRegisterAllocatorHook_ && !allocatorHooksAttached) {
-    at::globalContext().lazyInitCUDA();
+    at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
     c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
         &cacheAllocatorRegisterHook);
     c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
@@ -1180,7 +1234,7 @@ void ProcessGroupNCCL::abortCommsFromMap(
       gpuGuard.set_index(deviceIndex);
     }
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
-              << ncclComm->ncclComm_ << " on CUDA device: " << devName;
+              << ncclComm->repr() << " on CUDA device: " << devName;
     ncclComm->ncclCommAbort(abortReason);
     // Note that we don't remove the aborted communicators from the
     // cache. The reason is that if we do remove the communicator
@@ -2301,7 +2355,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
       size_); // worldSize
 
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
-            << ncclComm->ncclComm_
+            << ncclComm->repr()
             << " on CUDA device: " << static_cast<int>(deviceIndex);
 
   // At this point NCCL should have been initialized, hence we can accurately
@@ -2574,14 +2628,6 @@ void ProcessGroupNCCL::startCoalescing() {
   // start, which has one minor downside- we burn a seq_ if someone ever does a
   // 'start' and 'end' coalescing region without doing an operation inbetween.
 
-  // Don't bump op_id_ here, because startCoalescing isn't a logical operation.
-  // Bump it for each logical op inside the coalescing group.
-  if (coalescing_state_ & CoalP2P) {
-    seqP2P_++;
-  } else {
-    seqCollective_++;
-  }
-
   coalescedDevice_.set_index(-1);
   coalescedComm_ = nullptr;
   coalescing_state_ |= CoalActive;
@@ -2683,7 +2729,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   errorIfCapturingNonCapturableNCCL(capture_status);
 
   // Bump collective counter
-  seqCollective_++;
+  if (!coalescing_state_) {
+    seqCollective_++;
+  }
   op_id_++;
 
   auto device = getDevice(inputs[0]);
@@ -2691,6 +2739,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   auto ncclComm = getNCCLComm(key, device, opType);
 
   if (coalescing_state_ & CoalActive) {
+    if ((coalescing_state_ & CoalColl) == 0) {
+      // First op in coalesced operations
+      seqCollective_++;
+    }
     coalescing_state_ |= CoalColl;
     if (coalescedDevice_.index() < 0) {
       coalescedDevice_ = device;
@@ -2858,10 +2910,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   seqCollective_++;
 
   // For coalescingManager collectives, there is no individual c++ call per
-  // collective so there is no flight record and we increment seq*_ and op_id_
-  // together. Compare this to startCoalesing/endCoalescing flow where we
-  // increment seq_ once per group and increment op_id_ once per indvidual
-  // operation within the group
+  // collective so there is no flight record and we increment seqCollective_ and
+  // op_id_ together. Compare this to startCoalescing/endCoalescing flow where
+  // we increment either seqP2P_ or seqCollective_ once per group and increment
+  // op_id_ once per indvidual operation within the group
   op_id_++;
 
   // Currently, the API permits one scenario where inputs.size() and
@@ -3083,8 +3135,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     p2pTargetRank = isSendRecvSelf ? 0 : 1 - p2pRank;
 
     if (!coalescing_state_) {
-      // Bump P2P sequence number. Don't do so if it's a batch P2P, it will be
-      // bumped in `startCoalescing`.
+      // Bump P2P sequence number.
       seqP2P_++;
     }
   }
@@ -3096,6 +3147,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   auto ncclComm = getNCCLComm(key, device, opType, p2pRank, isSendRecvSelf);
 
   if (coalescing_state_ & CoalActive) {
+    // Bump  seqP2P_ once per coalesced group, not once per individual op.
+    if ((coalescing_state_ & CoalP2P) == 0) {
+      seqP2P_++;
+    }
     coalescing_state_ |= CoalP2P;
     if (coalescedDevice_.index() < 0) {
       coalescedDevice_ = device;
@@ -4144,7 +4199,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   // Work will take over barrierTensors
   auto ncclWork = dynamic_cast<ProcessGroupNCCL::WorkNCCL*>(work.get());
   TORCH_CHECK(ncclWork);
-  ncclWork->barrierTensor_ = std::move(barrierTensor);
+  ncclWork->isBarrierOp_ = true;
   return work;
 }
 

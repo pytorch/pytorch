@@ -292,13 +292,8 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
   // Now run all reduce with errors.
   pg.simulateError();
   work = pg.allreduce(tensors_);
-  EXPECT_THROW(work->wait(), std::runtime_error);
-
   // Verify the work item failed.
-  EXPECT_TRUE(work->isCompleted());
   EXPECT_THROW(work->wait(), std::runtime_error);
-
-  // Communicators might be aborted here, further operations would fail.
 }
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
@@ -320,6 +315,10 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
 }
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
+  // Avoid watchdog thread to throw the exception first to test the barrier
+  // throw behavior.
+  ASSERT_TRUE(
+      setenv(c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING[0].c_str(), "0", 1) == 0);
   auto options = c10d::ProcessGroupNCCL::Options::create();
   options->timeout = std::chrono::milliseconds(3000);
   ProcessGroupNCCLSimulateErrors pg(store_, 0, 1, options);
@@ -332,12 +331,10 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
   pg.simulateError();
   work = pg.allreduce(tensors_);
 
-  // Should not throw exceptions.
   work->wait();
-  pg.barrier()->wait();
-
-  EXPECT_TRUE(work->isCompleted());
-  // Communicators might be aborted here, further operations would fail.
+  // a NCCL ERROR happened before should stop the thread from passing the
+  // barrier.
+  EXPECT_THROW(pg.barrier()->wait(), std::runtime_error);
 }
 
 // Function to read what we wrote to the local disk for validation.
