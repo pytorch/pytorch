@@ -1201,7 +1201,14 @@ class skipIf:
     def __call__(self, fn):
         @wraps(fn)
         def dep_fn(slf, *args, **kwargs):
-            if self.device_type is None or self.device_type == slf.device_type:
+            if (
+                self.device_type is None
+                or self.device_type == slf.device_type
+                or (
+                    isinstance(self.device_type, tuple)
+                    and slf.device_type in self.device_type
+                )
+            ):
                 if (isinstance(self.dep, str) and getattr(slf, self.dep, True)) or (
                     isinstance(self.dep, bool) and self.dep
                 ):
@@ -1228,6 +1235,12 @@ class skipCUDAIf(skipIf):
 class skipXPUIf(skipIf):
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type="xpu")
+
+
+# Skips a test on XPU or CUDA if the condition is true.
+class skipGPUIf(skipIf):
+    def __init__(self, dep, reason):
+        super().__init__(dep, reason, device_type=("xpu", "cuda"))
 
 
 # Skips a test on Lazy if the condition is true.
