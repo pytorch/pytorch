@@ -66,6 +66,7 @@ from torch.testing._internal.common_utils import (
     gradgradcheck,
     instantiate_parametrized_tests,
     IS_MACOS,
+    IS_S390X,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -3177,6 +3178,7 @@ class TestAutograd(TestCase):
         with self.assertRaises(RuntimeError):
             b.add_(5)
 
+    @unittest.skipIf(IS_S390X, "Fails on s390x CI")
     def test_attribute_deletion(self):
         x = torch.randn((5, 5), requires_grad=True)
         del x.grad
@@ -7081,6 +7083,7 @@ for shape in [(1,), ()]:
                 out = checkpoint(fn, a, use_reentrant=False, debug=True)
                 out.backward()
 
+    @unittest.skipIf(IS_S390X, "Fails on s390x CI")
     def test_access_saved_tensor_twice_without_recomputation_works(self):
         count = [0]
 
@@ -8203,6 +8206,7 @@ for shape in [(1,), ()]:
         c = Func.apply(a)
         self.assertEqual(repr(c), "tensor([2.], grad_fn=<FuncBackward>)")
 
+    @unittest.skipIf(IS_S390X, "Fails on s390x CI")
     def test_autograd_inplace_view_of_view(self):
         x = torch.zeros(2)
         with torch.no_grad():

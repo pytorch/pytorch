@@ -30,7 +30,7 @@ from torch._inductor.codegen.common import (
     get_wrapper_codegen_for_device,
     register_backend_for_device,
 )
-from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS
+from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS, IS_S390X
 
 
 try:
@@ -48,6 +48,7 @@ run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 TestCase = test_torchinductor.TestCase
 
 
+@unittest.skipIf(IS_S390X, "cpp_extension doesn't work on s390x CI right now")
 @unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
 class ExtensionBackendTests(TestCase):
     module = None

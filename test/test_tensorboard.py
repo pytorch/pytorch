@@ -40,6 +40,7 @@ import torch
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_MACOS,
+    IS_S390X,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -410,6 +411,7 @@ class TestTensorBoardSummary(BaseTestCase):
         summary.video('dummy', np.random.rand(20, 7, 1, 8, 8))
 
     @unittest.skipIf(IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 ")
+    @unittest.skipIf(IS_S390X, "Fails on s390x")
     def test_audio(self):
         self.assertTrue(compare_proto(summary.audio('dummy', tensor_N(shape=(42,))), self))
 

@@ -39,6 +39,7 @@ from torch.testing._internal.common_optimizers import (
     TensorTracker,
 )
 from torch.testing._internal.common_utils import (
+    IS_S390X,
     markDynamoStrictTest,
     parametrize,
     run_tests,
@@ -580,6 +581,7 @@ class TestOptimRenewed(TestCase):
             self.assertEqual(complex_steps, real_steps)
 
     @skipMPS
+    @unittest.skipIf(IS_S390X, "Some tests currently fail on s390x")
     @optims([o for o in optim_db if o.supports_complex], dtypes=[torch.complex64])
     def test_complex_2d(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls

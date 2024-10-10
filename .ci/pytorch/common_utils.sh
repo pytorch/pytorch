@@ -82,13 +82,22 @@ function pip_install_whl() {
 function pip_install() {
   # retry 3 times
   # old versions of pip don't have the "--progress-bar" flag
-  pip install --progress-bar off "$@" || pip install --progress-bar off "$@" || pip install --progress-bar off "$@" ||\
-  pip install "$@" || pip install "$@" || pip install "$@"
+  if [[ "$BUILD_ENVIRONMENT" != *s390x* ]] ; then
+    pip install --progress-bar off "$@" || pip install --progress-bar off "$@" || pip install --progress-bar off "$@" ||\
+    pip install "$@" || pip install "$@" || pip install "$@"
+  else
+    pip3 install --progress-bar off "$@" || pip3 install --progress-bar off "$@" || pip3 install --progress-bar off "$@" ||\
+    pip3 install "$@" || pip3 install "$@" || pip3 install "$@"
+  fi
 }
 
 function pip_uninstall() {
   # uninstall 2 times
-  pip uninstall -y "$@" || pip uninstall -y "$@"
+  if [[ "$BUILD_ENVIRONMENT" != *s390x* ]] ; then
+    pip uninstall -y "$@" || pip uninstall -y "$@"
+  else
+    pip3 uninstall -y "$@" || pip3 uninstall -y "$@"
+  fi
 }
 
 function get_exit_code() {

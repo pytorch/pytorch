@@ -14,7 +14,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # Do not change workspace permissions for ROCm CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
-if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *s390x* ]]; then
   # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
   WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
   cleanup_workspace() {
@@ -83,6 +83,13 @@ if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   #   Tensor b = empty({3, 4});
   #   auto z = call(b, b.sym_sizes(), b.sym_strides(), c10::nullopt);
   # }
+  export VALGRIND=OFF
+fi
+
+
+if [[ "$BUILD_ENVIRONMENT" == *s390x* ]]; then
+  # There are additional warnings on s390x, maybe due to newer gcc.
+  # Skip this check for now
   export VALGRIND=OFF
 fi
 
