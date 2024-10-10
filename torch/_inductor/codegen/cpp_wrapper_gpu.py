@@ -259,14 +259,7 @@ class CppWrapperGpu(CppWrapperCpu):
         self,
         kernel_name: str,
         graph: "GraphLowering",  # for per-graph caching
-        device_index=None,
-        stream=None,
     ):
-        extra_args = ""
-        if self.device == "xpu":
-            assert stream is not None
-            extra_args = f", {stream}"
-
         keys = (get_cpp_wrapper_cubin_path_name(), "mangled_name", "shared_mem")
         kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
         self.writeline(f"if ({kernel_var_name} == nullptr) {{")
@@ -275,11 +268,11 @@ class CppWrapperGpu(CppWrapperCpu):
                 kernel_name,
                 """    """
                 + kernel_var_name
-                + f""" = loadKernel("%s", "%s", %s{extra_args}, this->cubin_dir_);"""
+                + """ = loadKernel("%s", "%s", %s, this->cubin_dir_);"""
                 if V.graph.aot_mode
                 else """    """
                 + kernel_var_name
-                + f""" = loadKernel("%s", "%s", %s{extra_args});""",
+                + """ = loadKernel("%s", "%s", %s);""",
                 keys,
             )
         )
@@ -400,7 +393,6 @@ class CppWrapperGpu(CppWrapperCpu):
         if device_index is None:
             current_device = V.graph.scheduler.get_current_device_or_throw()
             device_index = current_device.index
-
         stream = (
             "stream"
             if V.graph.aot_mode
@@ -411,9 +403,7 @@ class CppWrapperGpu(CppWrapperCpu):
             device_index, call_args = self.prepare_triton_kernel_call(
                 device_index, call_args
             )
-            kernel_var_name = self.generate_load_kernel_once(
-                kernel_name, V.graph, stream=stream
-            )
+            kernel_var_name = self.generate_load_kernel_once(kernel_name, V.graph)
 
             # args with value 1 are added into equal_to_1 and constants
             # in triton_meta (in the Python codegen) which makes them
@@ -431,12 +421,7 @@ class CppWrapperGpu(CppWrapperCpu):
 
             call_args_str = self.generate_args_decl(call_args, arg_types)
             kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
-            if self.device == "xpu":
-                self.writeline(
-                    f"std::vector<void*> {kernel_args_var} = {{{call_args_str}}};"
-                )
-            else:
-                self.writeline(f"void* {kernel_args_var}[] = {{{call_args_str}}};")
+            self.writeline(f"void* {kernel_args_var}[] = {{{call_args_str}}};")
 
             grid_var = f"{kernel_name}_grid_{next(self.grid_id)}"
             self.writeline(
