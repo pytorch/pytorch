@@ -1075,17 +1075,23 @@ This class does not support ``__members__`` property.)");
           py::arg("sizes"),
           py::arg("dtype"),
           py::arg("storage_offset") = 0)
-      .def("barrier", &SymmetricMemory::barrier, py::arg("channel") = 0)
+      .def(
+          "barrier",
+          &SymmetricMemory::barrier,
+          py::arg("channel") = 0,
+          py::arg("timeout_ms") = 0)
       .def(
           "put_signal",
           &SymmetricMemory::put_signal,
           py::arg("dst_rank"),
-          py::arg("channel") = 0)
+          py::arg("channel") = 0,
+          py::arg("timeout_ms") = 0)
       .def(
           "wait_signal",
           &SymmetricMemory::wait_signal,
           py::arg("src_rank"),
-          py::arg("channel") = 0)
+          py::arg("channel") = 0,
+          py::arg("timeout_ms") = 0)
       .def(
           "stream_write_value32",
           &SymmetricMemory::stream_write_value32,
