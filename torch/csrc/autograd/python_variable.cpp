@@ -1436,6 +1436,16 @@ PyObject* THPVariable_is_xpu(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPVariable_is_hpu(THPVariable* self, void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_getter(self, "is_hpu");
+  }
+  auto& self_ = THPVariable_Unpack(self);
+  return torch::autograd::utils::wrap(self_.is_hpu());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPVariable_is_sparse(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
@@ -1697,6 +1707,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
     {"is_cpu", (getter)THPVariable_is_cpu, nullptr, nullptr, nullptr},
     {"is_xla", (getter)THPVariable_is_xla, nullptr, nullptr, nullptr},
     {"is_xpu", (getter)THPVariable_is_xpu, nullptr, nullptr, nullptr},
+    {"is_hpu", (getter)THPVariable_is_hpu, nullptr, nullptr, nullptr},
     {"is_ipu", (getter)THPVariable_is_ipu, nullptr, nullptr, nullptr},
     {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
     {"is_sparse_csr",
