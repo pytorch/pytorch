@@ -423,6 +423,26 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 3)
 
+    @torch._dynamo.config.patch(dynamic_first_dimension=True)
+    def test_dynamic_first_dim(self):
+        def fn(x, y):
+            return x * y
+
+        # Setup the CompileCounter to track number of compilations
+        counter = CompileCounter()
+        opt_fn = torch._dynamo.optimize(counter)(fn)
+
+        # Generate two random tensors with different dynamic shapes
+        x1 = torch.randn(3, 4, 5, dtype=torch.float32)
+        x2 = torch.randn(4, 4, 5, dtype=torch.float32)
+
+        # Call the optimized function
+        opt_fn(x1, x1)
+        opt_fn(x2, x2)
+
+        # Ensure the function compiled only once
+        self.assertEqual(counter.frame_count, 1)
+
     def test_module_not_callable(self):
         def fn(x):
             return torch.fft(x)
