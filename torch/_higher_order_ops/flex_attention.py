@@ -11,7 +11,7 @@ from torch._higher_order_ops.utils import (
     reenter_make_fx,
     UnsupportedAliasMutationException,
 )
-from torch._ops import HigherOrderOperator, OpOverload
+from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     make_fx,
@@ -19,7 +19,6 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.graph_module import GraphModule
-from torch.overrides import TorchFunctionMode
 
 
 # Duplicate of _inductor/kernel/flex_attention.py to avoid circular import
@@ -67,27 +66,6 @@ def _permute_strides(out: torch.Tensor, query_strides: Tuple[int, ...]) -> torch
     new_out = out.new_empty(out.shape).as_strided(out.shape, out_strides)
     new_out.copy_(out)
     return new_out
-
-
-class TransformGetItemToIndex(TorchFunctionMode):
-    # This is needed since we want to support calling
-    # A[q_idx], where q_idx is a scalar tensor in score_mod.
-    # Today, when q_idx is a scalar tensor, we implicitly convert it to a python
-    # scalar and create a view. We do not want that behavior in this case, so we
-    # use this torchfunctionmode to override that behavior for score_mod
-    # wherever we're running it.
-    def __torch_function__(
-        self,
-        func: OpOverload,
-        types: Tuple[torch._C._TensorMeta, ...],
-        args: Tuple[object, ...] = (),
-        kwargs: Optional[Dict[str, object]] = None,
-    ) -> object:
-        if func == torch.Tensor.__getitem__:
-            index_args = pytree.tree_leaves(args[1])
-            if all(isinstance(x, torch.Tensor) for x in index_args):
-                return torch.ops.aten.index(args[0], index_args)
-        return func(*args, **(kwargs or {}))
 
 
 class FlexAttentionHOP(HigherOrderOperator):
@@ -185,6 +163,8 @@ def _math_attention_inner(
     score_mod_other_buffers: Tuple = (),
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
     working_precision = torch.float64 if query.dtype == torch.float64 else torch.float32
 
     scores = (query @ key.transpose(-2, -1)).to(dtype=working_precision)
@@ -318,6 +298,8 @@ def trace_flex_attention(
     This will produce a GraphModule that will be stored on the root tracer as "sdpa_score". We
     access this graph module in inductor to inline the score_mod function to the triton template.
     """
+    from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
     example_out = flex_attention(
         query,
         key,
@@ -414,6 +396,8 @@ def flex_attention_functionalize(
     guard against any mutations in the score_mod function, to the other_buffers since those
     are free variables.
     """
+    from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
     query_unwrapped = ctx.unwrap_tensors(query)
     key_unwrapped = ctx.unwrap_tensors(key)
     value_unwrapped = ctx.unwrap_tensors(value)
@@ -715,6 +699,8 @@ def flex_attention_autograd(
     score_mod_other_buffers: Tuple[Tensor, ...] = (),
     mask_mod_other_buffers: Tuple[Tensor, ...] = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
     with TransformGetItemToIndex():
         input_requires_grad = any(t.requires_grad for t in (query, key, value))
         if torch.is_grad_enabled() and input_requires_grad:
@@ -765,6 +751,8 @@ def sdpa_dense_backward(
     score_mod_other_buffers: Tuple,
     mask_mod_other_buffers: Tuple,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
     # Get outputs before calling repeat interleave
     actual_grad_query = torch.empty_like(query)
     actual_grad_key = torch.empty_like(key)
@@ -892,6 +880,8 @@ def trace_flex_attention_backward(
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """We already have the forward graph and joint graph from the forward pass, so we create a proxy attach both graphs"""
+    from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
     example_out = flex_attention_backward(
         query,
         key,

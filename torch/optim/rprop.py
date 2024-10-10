@@ -210,8 +210,8 @@ Rprop.__doc__ = (
             (default: (0.5, 1.2))
         step_sizes (Tuple[float, float], optional): a pair of minimal and
             maximal allowed step sizes (default: (1e-6, 50))
-        {_foreach_doc}
         {_capturable_doc}
+        {_foreach_doc}
         {_maximize_doc}
         {_differentiable_doc}
 

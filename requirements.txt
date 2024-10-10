@@ -21,4 +21,4 @@ fsspec
 lintrunner
 ninja
 packaging
-optree>=0.12.0 ; python_version <= "3.12"
+optree>=0.13.0

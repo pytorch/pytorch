@@ -475,17 +475,14 @@ class FakeTensorConverter:
 
 
 @functools.lru_cache(None)
-def init_gpu_context() -> None:
+def init_gpu_context(device: torch.device) -> None:
     # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
-    if torch.cuda.is_available():
+    if torch.cuda.is_available() or torch.xpu.is_available():
         (
-            torch.empty(1, device="cuda")
+            torch.empty(1, device=device)
             if torch.version.hip is None
-            else torch.zeros(1, device="cuda")
+            else torch.zeros(1, device=device)
         )
-
-    if torch.xpu.is_available():
-        (torch.empty(1, device="xpu"))
 
 
 @contextlib.contextmanager
@@ -691,7 +688,7 @@ class FakeTensor(Tensor):
             assert device.type != "meta"
         # normalize device.
         if device.type in ["cuda", "xpu"]:
-            init_gpu_context()
+            init_gpu_context(device)
 
         if (
             device.type
@@ -1992,6 +1989,11 @@ class FakeTensorMode(TorchDispatchMode):
                 return maybe_propagate_real_tensors(
                     func.prim_meta_impl(*args, **kwargs)
                 )
+
+        profiles = torch._dynamo.config._custom_ops_profile
+        if profiles is not None:
+            if func in profiles.data:
+                return profiles.generic_fake_kernel(func, self, *args, **kwargs)
 
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.
