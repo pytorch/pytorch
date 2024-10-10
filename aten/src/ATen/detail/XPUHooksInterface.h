@@ -42,6 +42,30 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
     TORCH_CHECK(false, "Cannot get XPU generator without ATen_xpu library.");
   }
 
+  DeviceIndex deviceCount() const override {
+    TORCH_CHECK(false, "Cannot get XPU device count without ATen_xpu library.");
+    return 0;
+  }
+
+  DeviceIndex getCurrentDevice() const override {
+    TORCH_CHECK(false, "Cannot get current device on XPU without ATen_xpu library.");
+    return -1;
+  }
+
+  c10::Stream getCurrentStream(DeviceIndex device) const override {
+    TORCH_CHECK(false, "Cannot get current stream on XPU without ATen_xpu library.");
+    return c10::Stream::unpack3(-1, 0, c10::DeviceType::XPU);
+  }
+
+  c10::Stream getDefaultStream(DeviceIndex device) const override {
+    TORCH_CHECK(false, "Cannot get default stream on XPU without ATen_xpu library.");
+    return c10::Stream::unpack3(-1, 0, c10::DeviceType::XPU);
+  }
+
+  void setCurrentStream(const c10::Stream& stream) const override {
+    TORCH_CHECK(false, "Cannot set current stream on XPU without ATen_xpu library.");
+  }
+
   virtual DeviceIndex getNumGPUs() const {
     return 0;
   }
