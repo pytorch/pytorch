@@ -2701,6 +2701,8 @@ def _automatic_dynamic(
             dynamic_size = DimDynamic.DYNAMIC
         elif static_shapes or config.assume_static_by_default or marked_static:
             dynamic_size = DimDynamic.STATIC
+        elif i == 0 and torch._dynamo.config.dynamic_first_dimension:
+            dynamic_size = DimDynamic.DYNAMIC
         else:
             dynamic_size = DimDynamic.DUCK
 
