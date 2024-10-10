@@ -761,7 +761,11 @@ else:
                 group_ranks = get_process_group_ranks(group)
                 if (
                     isinstance(mesh, torch.Tensor) and mesh.tolist() != group_ranks
-                ) or (mesh is not None and mesh != group_ranks):
+                ) or (
+                    mesh is not None
+                    and not isinstance(mesh, torch.Tensor)
+                    and mesh != group_ranks
+                ):
                     raise ValueError(
                         f"Invalid mesh {str(mesh)} for ProcessGroup with ranks {group_ranks}"
                     )
