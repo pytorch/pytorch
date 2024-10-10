@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
+from functools import lru_cache
 import logging
 import os
-from typing import Tuple, Optional
+import subprocess
+from typing import Tuple, Optional, List
 from torch._inductor.codegen.rocm.ck_template import CKTemplate
 from torch._inductor.utils import IndentedBuffer
 
@@ -10,14 +12,6 @@ from ck4inductor.util import library_path
 
 log = logging.getLogger(__name__)
 
-def _ck_conv_instances_path():
-    conv_instances_path = os.path.join(  # noqa: F821
-        library_path(), "include", "ck", "library", "tensor_operation_instance", "gpu", "grouped_conv_fwd"
-    )
-    if not os.path.exists(conv_instances_path):
-        log.error("CK library conv instances path %s does not exist", conv_instances_path)
-        return None
-    return conv_instances_path
 
 @dataclass
 class CKConvOp:
@@ -64,7 +58,11 @@ class CKConvOp:
     b_block_transfer_src_scalar_per_vector: int
     b_block_transfer_dst_scalar_per_vector_bk1: int
     b_block_lds_extra_n: bool
-    c_shuffle_block_transfer_scalar_per_vector_n_per_block: int
+
+    c_shuffle_m_xdl_per_wave_per_shuffle: int
+    c_shuffle_n_xdl_per_wave_per_shuffle: int
+    cde_block_transfer_cluster_lengths_m_block_m_per_block_n_block_n_per_block: Tuple[int, int, int, int]
+    cde_block_transfer_scalar_per_vector_n_per_block: int
     block_gemm_pipeline_scheduler: str
     block_gemm_pipeline_version: str
 
@@ -93,6 +91,130 @@ class CKConvOp:
 
     def dict_items(self):
         return asdict(self).items()
+
+
+def _ck_conv_instances_path():
+    conv_instances_path = os.path.join(  # noqa: F821
+        library_path(), "include", "ck", "library", "tensor_operation_instance", "gpu", "grouped_conv_fwd"
+    )
+    if not os.path.exists(conv_instances_path):
+        log.error("CK library conv instances path %s does not exist", conv_instances_path)
+        return None
+    return conv_instances_path
+
+
+def parse_instances(str_instances: List[str]) -> List[CKConvOp]:
+    """
+    Parse the lines containing Universal Gemm template instances into `CKGemmOperation` instances
+    """
+
+    def maybe_int(s):
+        try:
+            return int(s)
+        except ValueError:
+            return s
+
+    op_instances = []
+    for line in str_instances:
+        s_template_args = line.split("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3")[-1].strip("<>, ")
+        template_args = []
+        i_current = 0
+        while i_current < len(s_template_args):
+            if s_template_args[i_current] == " ":
+                # skip whitespace
+                i_current += 1
+                continue
+            elif s_template_args[i_current : i_current + 2] == "S<":
+                # parse template S<Index...>
+                i_next = s_template_args.find(">", i_current)
+                template_args.append(
+                    tuple(map(int, s_template_args[i_current + 2 : i_next].split(",")))
+                )
+                i_current = i_next + 2
+            else:
+                # all string attributes must be either type aliases or global constants in C++
+                i_next = s_template_args.find(",", i_current)
+                template_args.append(
+                    maybe_int(
+                        s_template_args[i_current : i_next if i_next != -1 else None]
+                    )
+                )
+                if i_next != -1:
+                    i_current = i_next + 1
+            if i_next == -1:
+                break
+
+        template_args[3] = tuple()
+        template_args[9] = tuple()
+
+        new_instance = CKConvOp(
+            *template_args,  # type: ignore[arg-type]
+        )
+
+        op_instances.append(new_instance)
+    return op_instances
+
+
+@lru_cache(None)
+def gen_conv_ops_library() -> List[CKConvOp]:
+    """
+    Parse the Universal Gemm instances defined in the composable kernel library folder.
+    """
+    ck_library_dir = _ck_conv_instances_path()
+    if not ck_library_dir:
+        return []
+
+    grep_result = subprocess.run(
+        [
+            "grep",
+            "-inR",
+            "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3",
+            ck_library_dir,
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    op_instances = parse_instances(grep_result.stdout.strip().split("\n"))
+
+    log.debug("ck instances from library: %d", len(op_instances))
+
+    return op_instances
+    schedulers = [
+        "BlockGemmPipelineScheduler::Intrawave",
+        "BlockGemmPipelineScheduler::Interwave",
+    ]
+    gemm_specs = [
+        "GemmSpecialization::Default",
+        "GemmSpecialization::MPadding",
+        "GemmSpecialization::NPadding",
+        "GemmSpecialization::KPadding",
+        "GemmSpecialization::MNPadding",
+        "GemmSpecialization::MKPadding",
+        "GemmSpecialization::NKPadding",
+        "GemmSpecialization::MNKPadding",
+    ]
+
+    # substitute templated args by looping through their domains
+    substitute_instances = []
+    for instance in op_instances:
+        sub_scheduler = instance.block_gemm_pipeline_scheduler == "BlkGemmPipeSched"
+        sub_spec = instance.gemm_specialization == "GemmSpec"
+        schedulers_range = (
+            schedulers if sub_scheduler else [instance.block_gemm_pipeline_scheduler]
+        )
+        spec_range = gemm_specs if sub_spec else [instance.gemm_specialization]
+        for scheduler in schedulers_range:
+            for spec in spec_range:
+                substitute_instances.append(
+                    replace(
+                        instance,
+                        block_gemm_pipeline_scheduler=scheduler,
+                        gemm_specialization=spec,
+                    )
+                )
+
+    return substitute_instances
 
 class CKConvTemplate(CKTemplate):
     conv_template = r"""
