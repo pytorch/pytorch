@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_MACOS,
+    IS_WINDOWS,
     parametrize,
     skipIfRocm,
     slowTest,
@@ -4203,5 +4204,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
     from torch.testing._internal.inductor_utils import HAS_CPU
 
-    if HAS_CPU and not IS_MACOS:
+    if HAS_CPU and (not IS_MACOS and not IS_WINDOWS):
         run_tests(needs="filelock")

@@ -6,7 +6,6 @@ from typing import Tuple, Union
 import torch
 import torch.testing
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
-    IS_WINDOWS,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
     TestCase as TorchTestCase,
@@ -21,7 +20,7 @@ log = logging.getLogger(__name__)
 def run_tests(needs: Union[str, Tuple[str, ...]] = ()) -> None:
     from torch.testing._internal.common_utils import run_tests
 
-    if TEST_WITH_TORCHDYNAMO or IS_WINDOWS or TEST_WITH_CROSSREF:
+    if TEST_WITH_TORCHDYNAMO or TEST_WITH_CROSSREF:
         return  # skip testing
 
     if isinstance(needs, str):
