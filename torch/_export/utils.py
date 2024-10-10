@@ -1,13 +1,13 @@
 # mypy: allow-untyped-defs
 import ast
 import dataclasses
+import functools
 import inspect
 import math
 import operator
-import functools
 import re
 from inspect import Parameter
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, TYPE_CHECKING, Set
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Type, TYPE_CHECKING
 
 import torch
 from torch._guards import detect_fake_mode
@@ -17,9 +17,9 @@ from torch._subclasses.functional_tensor import FunctionalTensor
 
 if TYPE_CHECKING:
     from torch._export.passes.lift_constants_pass import ConstantAttrMap
+    from torch._ops import OperatorBase
     from torch.export import ExportedProgram
     from torch.export.graph_signature import ExportGraphSignature
-    from torch._ops import OperatorBase
 
 from torch.export.graph_signature import InputKind, OutputKind
 from torch.utils._pytree import (
@@ -919,8 +919,9 @@ def _is_aten_op(op: "OperatorBase") -> bool:
 def _is_custom_op(op: "OperatorBase") -> bool:
     return not _is_aten_op(op)
 
+
 # We can't cache this because custom op registry API in python can still
-# add entries to the C++ dispatcher. 
+# add entries to the C++ dispatcher.
 def _materialize_cpp_cia_ops() -> None:
     """
     Utility function to query C++ dispatcher to get the all

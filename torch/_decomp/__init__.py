@@ -224,6 +224,7 @@ def get_decompositions(
     not in this set.
     """
     from torch._export.utils import _is_cia_op
+
     assert type in {"post_autograd", "pre_autograd", "meta"}
 
     registry = global_decomposition_table[type]
@@ -278,8 +279,11 @@ import torch._refs
 # Resulting opset of decomposition is core aten ops
 def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
     # If it is fbcode change, we return the old decomposition list
+    from torch._export.utils import (
+        _collect_all_valid_cia_ops_for_aten_namespace,
+        _get_decomp_for_cia,
+    )
     from torch._inductor import config
-    from torch._export.utils import _collect_all_valid_cia_ops_for_aten_namespace, _get_decomp_for_cia
 
     if config.is_fbcode():
         return _core_aten_decompositions_post_autograd(ignore_cia=False)
@@ -297,16 +301,20 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
 # to their default decomp. In old export, this will
 # be decomposed implicitly.
 def _decomp_table_to_post_autograd_aten():
-    from torch._export.utils import _collect_all_valid_cia_ops_for_aten_namespace, _get_decomp_for_cia
+    from torch._export.utils import (
+        _collect_all_valid_cia_ops_for_aten_namespace,
+        _get_decomp_for_cia,
+    )
+
     decomp_table = {}
     for k in _collect_all_valid_cia_ops_for_aten_namespace():
         decomp_table[k] = _get_decomp_for_cia(k)
     return decomp_table
 
 
-def _core_aten_decompositions_post_autograd(ignore_cia) -> (
-    Dict[torch._ops.OperatorBase, Callable]
-):
+def _core_aten_decompositions_post_autograd(
+    ignore_cia,
+) -> Dict[torch._ops.OperatorBase, Callable]:
     aten = torch.ops.aten
     # TODO Delete all mutating or CIA ops from this list
     return get_decompositions(

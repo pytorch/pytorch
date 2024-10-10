@@ -18,11 +18,7 @@ import torch._dynamo as torchdynamo
 import torch.nn.functional as F
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
-from torch.export import default_decompositions
-from torch._decomp import (
-    _decomp_table_to_post_autograd_aten,
-    get_decompositions,
-)
+from torch._decomp import _decomp_table_to_post_autograd_aten, get_decompositions
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import normalize_gm
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
@@ -36,7 +32,7 @@ from torch._export.utils import (
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._inductor.compile_fx import split_const_gm
 from torch._subclasses import FakeTensorMode
-from torch.export import Dim, export, unflatten
+from torch.export import default_decompositions, Dim, export, unflatten
 from torch.export._trace import (
     _export,
     _export_to_torch_ir,
@@ -1733,6 +1729,71 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
             "The op aten.index_put_.default",
         ):
             ep.run_decompositions({torch.ops.aten.index_put_.default: None})
+
+    def test_export_custom_decomp_table_basic_pop(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("foo123(Tensor x) -> Tensor")
+            lib.impl("foo123", lambda x: x.sin(), "CompositeImplicitAutograd")
+
+            lib.define("foo456(Tensor x) -> Tensor")
+            lib.impl("foo456", lambda x: x.sin(), "CompositeImplicitAutograd")
+
+            table = default_decompositions()
+            # Since this table hasn't been materialized yet, we shouldn't error
+            val = table.pop(torch.ops.mylib.foo123.default)
+            self.assertIsNone(val)
+
+            with self.assertRaisesRegex(KeyError, "mylib.foo123.default"):
+                table.pop(torch.ops.mylib.foo123.default)
+
+            val = table.pop(torch.ops.mylib.foo123.default, "HELLO")
+            self.assertEqual(val, "HELLO")
+
+            all_ops = set(k for k, v in table.items())
+            self.assertTrue(table.has_materialized)
+            # When we force materialize, torch.ops.mylib.foo123.default should have gone
+            self.assertFalse(torch.ops.mylib.foo123.default in all_ops)
+            self.assertTrue(torch.ops.mylib.foo456.default in all_ops)
+
+    def test_export_custom_decomp_table_container_methods(self):
+        # tests __len__
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            table = default_decompositions()
+            length_before = len(table)
+            lib.define("foo123(Tensor x) -> Tensor")
+            lib.impl("foo123", lambda x: x.sin(), "CompositeImplicitAutograd")
+
+            lib.define("foo456(Tensor x) -> Tensor")
+            lib.impl("foo456", lambda x: x.sin(), "CompositeImplicitAutograd")
+
+            table = default_decompositions()
+            self.assertEqual(len(table) - length_before, 2)
+
+        # tests __contains__
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("foo123(Tensor x) -> Tensor")
+            lib.impl("foo123", lambda x: x.sin(), "CompositeImplicitAutograd")
+
+            table = default_decompositions()
+            self.assertTrue(torch.ops.mylib.foo123.default in table)
+            del table[torch.ops.mylib.foo123.default]
+            self.assertFalse(torch.ops.mylib.foo123.default in table)
+
+        # Lot of ppl do
+        # for op in all_ops:
+        #     if op in table:
+        #        del table[op]
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("foo123(Tensor x) -> Tensor")
+            lib.impl("foo123", lambda x: x.sin(), "CompositeImplicitAutograd")
+
+            table = default_decompositions()
+            if torch.ops.mylib.foo123.default in table:
+                del table[torch.ops.mylib.foo123.default]
+
+            self.assertFalse(torch.ops.mylib.foo123.default in table)
+            table.materialize()
+            self.assertFalse(torch.ops.mylib.foo123.default in table)
 
     def test_if_post_autograd_op_preserved(self):
         class Foo(torch.nn.Module):

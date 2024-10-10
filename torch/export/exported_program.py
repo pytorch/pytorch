@@ -4,8 +4,8 @@ import contextlib
 import copy
 import dataclasses
 import functools
-import operator
 import itertools
+import operator
 import types
 import warnings
 from collections import namedtuple
@@ -45,20 +45,20 @@ if TYPE_CHECKING:
 import torch
 import torch.utils._pytree as pytree
 from torch._export.utils import (
+    _collect_all_valid_cia_ops,
+    _collect_all_valid_cia_ops_for_aten_namespace,
     _collect_and_set_constant_attrs,
     _collect_param_buffer_metadata,
     _detect_fake_mode_from_gm,
+    _get_decomp_for_cia,
+    _is_aten_op,
+    _is_custom_op,
+    _is_preservable_cia_op,
     _name_hoo_subgraph_placeholders,
     _overwrite_signature_for_non_persistent_buffers,
     _populate_param_buffer_metadata_to_new_gm,
     _rename_without_collisions,
-    _get_decomp_for_cia,
-    _collect_all_valid_cia_ops,
-    _is_preservable_cia_op,
     _special_op_to_preserve_cia,
-    _collect_all_valid_cia_ops_for_aten_namespace,
-    _is_aten_op,
-    _is_custom_op,
 )
 from torch._export.verifier import Verifier
 from torch._guards import detect_fake_mode
@@ -272,7 +272,6 @@ def _override_decomp_aten_to_variants():
 def _split_decomp_table_to_cia_and_python_decomp(
     decomp_table: Dict[torch._ops.OperatorBase, Callable]
 ) -> Tuple[Dict[torch._ops.OperatorBase, Callable], ...]:
-
     all_preservable_cia_ops = set(_collect_all_valid_cia_ops())
     cia_ops_to_callable = {}
 
@@ -681,13 +680,17 @@ class CustomDecompTable(Dict):
     def __init__(self):
         super().__init__()
         from torch._decomp import _core_aten_decompositions_post_autograd
-        self.aten_decomp_table = _core_aten_decompositions_post_autograd(ignore_cia=True)
+
+        self.aten_decomp_table = _core_aten_decompositions_post_autograd(
+            ignore_cia=True
+        )
 
         for op in _collect_all_valid_cia_ops_for_aten_namespace():
             self.aten_decomp_table[op] = _get_decomp_for_cia(op)
 
         self.deleted_custom_ops = set()
         self.additional_custom_op_decomp = {}
+        self.has_materialized = False
 
     def __getitem__(self, key):
         if key in self.aten_decomp_table:
@@ -701,41 +704,50 @@ class CustomDecompTable(Dict):
         if key in self.additional_custom_op_decomp:
             return self.additional_custom_op_decomp[key]
 
+        if self.has_materialized:
+            raise KeyError(f"Op {key} is not in the decomposition table")
+
         if key in self.deleted_custom_ops:
             raise KeyError(f"Op {key} is not in the decomposition table")
 
         self.additional_custom_op_decomp[key] = _get_decomp_for_cia(key)
         return self.additional_custom_op_decomp[key]
 
-
     def __setitem__(self, key, value):
         if _is_aten_op(key):
             self.aten_decomp_table[key] = value
             return
-        
+
         assert _is_custom_op(key)
 
         self.additional_custom_op_decomp[key] = value
+
+        if self.has_materialized:
+            return
 
         if key in self.deleted_custom_ops:
             self.deleted_custom_ops.remove(key)
 
     def keys(self):
+        if not self.has_materialized:
+            self.materialize()
+
         return itertools.chain(
             self.aten_decomp_table.keys(), self.additional_custom_op_decomp.keys()
         )
 
     def __delitem__(self, key):
         self.pop(key)
-    
+
     def update(self, extra_decomps):
         for k, v in extra_decomps.items():
             if _is_aten_op(k):
                 self.aten_decomp_table[k] = v
             else:
                 self.additional_custom_op_decomp[k] = v
-                if k in self.deleted_custom_ops:
-                    self.deleted_custom_ops.remove(k)
+                if not self.has_materialized:
+                    if k in self.deleted_custom_ops:
+                        self.deleted_custom_ops.remove(k)
 
     def __missing__(self, key):
         return not self.__contains__(key)
@@ -743,23 +755,33 @@ class CustomDecompTable(Dict):
     def __contains__(self, key):
         if _is_aten_op(key):
             return key in self.aten_decomp_table
-        
+
         if key in self.additional_custom_op_decomp:
-            return True 
-        
+            return True
+
         if not _is_preservable_cia_op(key):
-            return False 
+            return False
+
+        if self.has_materialized:
+            return False
 
         if key in self.deleted_custom_ops:
-            return False 
-        
-        self.additional_custom_op_decomp[key] = _get_decomp_for_cia(key)
+            return False
+
+        # This is bit weird, but the behaviour is that if user is querying about
+        # an custom op that hasnt been materialized, we should always say it exist
+        # The reason is from user's POV, tis table should have contained everything at the
+        # start time.
         return True
 
     def __len__(self):
+        if not self.has_materialized:
+            self.materialize()
         return len(self.aten_decomp_table) + len(self.additional_custom_op_decomp)
 
     def __iter__(self):
+        if not self.has_materialized:
+            self.materialize()
         return itertools.chain(
             self.aten_decomp_table.__iter__(),
             self.additional_custom_op_decomp.__iter__(),
@@ -773,9 +795,10 @@ class CustomDecompTable(Dict):
         new_dict.aten_decomp_table = self.aten_decomp_table.copy()
         new_dict.additional_custom_op_decomp = self.additional_custom_op_decomp.copy()
         new_dict.deleted_custom_ops = self.deleted_custom_ops.copy()
+        new_dict.has_materialized = self.has_materialized
         return new_dict
-    
-    def pop(self, *args): 
+
+    def pop(self, *args):
         def _pop_if_can(key):
             from torch._export.utils import _is_preservable_cia_op
 
@@ -786,11 +809,14 @@ class CustomDecompTable(Dict):
             if key in self.additional_custom_op_decomp:
                 return self.additional_custom_op_decomp.pop(key)
 
+            if self.has_materialized:
+                raise KeyError(f"{key} doesn't exist in the table")
+
             if key in self.deleted_custom_ops:
-                raise KeyError(f"{key} is already deleted")
+                raise KeyError(f"{key} doesn't exist in the table")
 
             if not _is_preservable_cia_op(key):
-                raise KeyError("Illegal op to the table")
+                raise KeyError(f"{key} doesn't exist in the table")
 
             self.deleted_custom_ops.add(key)
             return None
@@ -805,6 +831,8 @@ class CustomDecompTable(Dict):
                 return args[1]
 
     def items(self):
+        if not self.has_materialized:
+            self.materialize()
         return itertools.chain(
             self.aten_decomp_table.items(), self.additional_custom_op_decomp.items()
         )
@@ -820,6 +848,8 @@ class CustomDecompTable(Dict):
             elif op not in self.deleted_custom_ops:
                 self.additional_custom_op_decomp[op] = _get_decomp_for_cia(op)
 
+        self.has_materialized = True
+        self.deleted_custom_ops = set()
         return {**self.aten_decomp_table, **self.additional_custom_op_decomp}
 
 
@@ -1199,8 +1229,8 @@ class ExportedProgram:
             decomp_table[your_op] = your_custom_decomp
             ep = ep.run_decompositions(decomp_table=decomp_table)
         """
-        from torch._inductor import config
         from torch._decomp import _decomp_table_to_post_autograd_aten
+        from torch._inductor import config
 
         # FIXME delete this option after PTC, Executorch syncing is
         # bit annoying so can't get rid of it easily
@@ -1210,7 +1240,7 @@ class ExportedProgram:
                 "Please look at the docstring to see how to preserve "
                 "an operator."
             )
-        
+
         _decomp_table = (
             default_decompositions() if decomp_table is None else dict(decomp_table)
         )
@@ -1224,10 +1254,6 @@ class ExportedProgram:
         for op in _preserve_ops:
             if op in _decomp_table:
                 del _decomp_table[op]
-            # This is needed when the op they want to preserve is a
-            # CIA op.
-            elif _is_preservable_cia_op(op):
-                _decomp_table[op] = _special_op_to_preserve_cia
 
         if isinstance(_decomp_table, CustomDecompTable):
             _decomp_table = _decomp_table.materialize()
