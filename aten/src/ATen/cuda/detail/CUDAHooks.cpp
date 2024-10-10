@@ -456,6 +456,23 @@ bool CUDAHooks::isGPUArch(DeviceIndex device_index, const std::vector<std::strin
   }
   return false;
 }
+
+bool CUDAHooks::isGPUArchBuilt(DeviceIndex device_index) const {
+  const std::vector<std::string>& arch = getBuiltGPUArch();
+  return isGPUArch(device_index, arch);
+}
+
+std::vector<std::string> CUDAHooks::getBuiltGPUArch() const {
+  const std::string arches = C10_STRINGIZE(CUDA_ARCH_FLAGS);
+  static std::vector<std::string> built_arches;
+  if (!built_arches.size()) {
+    std::stringstream ss(arches);
+    std::string str;
+    while (std::getline(ss, str, ';'))
+      built_arches.push_back(str);
+  }
+  return built_arches;
+}
 #endif
 
 void CUDAHooks::deviceSynchronize(DeviceIndex device_index) const {
