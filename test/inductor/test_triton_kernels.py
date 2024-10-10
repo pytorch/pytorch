@@ -18,12 +18,12 @@ from torch._inductor.utils import run_and_get_code
 from torch._library import capture_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_device_type import expectedFailureXPU
 from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
     skipIfXpu,
     TEST_WITH_ROCM,
-    xfailIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
 from torch.testing._internal.logging_utils import logs_to_string
@@ -2914,7 +2914,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         gm = make_fx(f, tracing_mode=tracing_mode)(x, x)
         self.assertEqual(gm(x, x), x + x)
 
-    @xfailIfXpu
+    @expectedFailureXPU
     @requires_gpu
     @patch.object(torch._inductor.config, "cpp_wrapper", True)
     @patch.object(torch._inductor.config, "triton.autotune_at_compile_time", True)
