@@ -932,6 +932,7 @@ class GraphLowering(torch.fx.Interpreter):
         self, target: str, args: Tuple[object], kwargs: Dict[str, object]  # type: ignore[override]
     ) -> Union[Expr, TensorBox, None]:
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
+        target = self.qualify_name(target)
         if isinstance(example, SymTypes):
             expr = example.node.expr
             self.graph_inputs[target] = expr
@@ -961,7 +962,6 @@ class GraphLowering(torch.fx.Interpreter):
         else:
             sizes, strides = self.symbolic_sizes_strides(example)  # type: ignore[assignment]
         # TODO(jansel): handle input aliasing
-        target = self.qualify_name(target)
         tensor = TensorBox.create(
             InputBuffer(
                 target,
