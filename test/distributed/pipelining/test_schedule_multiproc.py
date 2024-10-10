@@ -278,7 +278,8 @@ class ScheduleTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
-    def test_grad_with_manual(self, ScheduleClass):
+    @parametrize("shape_inference", [True, False])
+    def test_grad_with_manual(self, ScheduleClass, shape_inference):
         full_mod = MultiMLP(d_hid, n_layers=self.world_size)
         full_mod.to(self.device)
 
@@ -302,13 +303,23 @@ class ScheduleTest(MultiProcContinousTest):
         submod_name = f"layers.{self.rank}"
         stage_module = full_mod.get_submodule(submod_name)
         chunks = 4
+
+        if shape_inference:
+            input_args = None
+            output_args = None
+        else:
+            input_args = (x.chunk(chunks)[0],)
+            with torch.no_grad():
+                output_args = stage_module(*input_args)
+
         # Create a pipeline stage to wrap that submodule
         stage = PipelineStage(
             stage_module,
             self.rank,
             self.world_size,
             self.device,
-            input_args=x.chunk(chunks)[0],
+            input_args=input_args,
+            output_args=output_args,
         )
 
         # Attach to a schedule
@@ -399,7 +410,6 @@ class ScheduleTest(MultiProcContinousTest):
                 stage_idx,
                 n_stages,
                 self.device,
-                input_args=input_args,
             )
             for stage_module, stage_idx in zip(stage_modules, stage_indices)
         ]
@@ -545,7 +555,6 @@ class ScheduleTest(MultiProcContinousTest):
                 stage_idx,
                 n_stages,
                 self.device,
-                input_args=input_args,
             )
             for stage_module, stage_idx in zip(stage_modules, rank_stages[self.rank])
         ]
@@ -633,7 +642,6 @@ class ScheduleTest(MultiProcContinousTest):
                 stage_idx,
                 n_stages,
                 self.device,
-                input_args=input_args,
             )
             for stage_module, stage_idx in zip(stage_modules, rank_stages[self.rank])
         ]
@@ -757,7 +765,6 @@ class ScheduleTest(MultiProcContinousTest):
                 stage_idx,
                 n_stages,
                 self.device,
-                input_args=input_args,
                 dw_builder=cs[stage_idx].dw_builder,
             )
             for stage_module, stage_idx in zip(stage_modules, stage_indices)

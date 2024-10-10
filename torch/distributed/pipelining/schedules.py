@@ -582,6 +582,12 @@ class PipelineScheduleSingle(_PipelineSchedule):
         self._stage.has_backward = self._has_backward
         self._stage_initialized = False
 
+    def _initialize_stage(self, args, kwargs):
+        self._stage._prepare_forward_infra(self._n_microbatches, args, kwargs)
+        if self._has_backward:
+            self._stage._prepare_backward_infra(self._n_microbatches)
+        self._stage_initialized = True
+
     def step(self, *args, target=None, losses: Optional[List] = None, **kwargs):
         """
         Run one iteration of the pipeline schedule with *whole-batch* input.
@@ -639,8 +645,7 @@ class _ScheduleForwardOnly(PipelineScheduleSingle):
 
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
         if not self._stage_initialized:
-            self._stage._prepare_forward_infra(self._n_microbatches)
-            self._stage_initialized = True
+            self._initialize_stage(arg_mbs[0], kwarg_mbs[0])
 
         # Delay send waits
         fwd_sends_to_wait: List[dist.Work] = []
@@ -691,10 +696,7 @@ class ScheduleGPipe(PipelineScheduleSingle):
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
 
         if not self._stage_initialized:
-            self._stage._prepare_forward_infra(self._n_microbatches)
-            if self._has_backward:
-                self._stage._prepare_backward_infra(self._n_microbatches)
-            self._stage_initialized = True
+            self._initialize_stage(arg_mbs[0], kwarg_mbs[0])
 
         # Delay send waits
         fwd_sends_to_wait: List[dist.Work] = []
@@ -777,10 +779,7 @@ class Schedule1F1B(PipelineScheduleSingle):
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
 
         if not self._stage_initialized:
-            self._stage._prepare_forward_infra(self._n_microbatches)
-            if self._has_backward:
-                self._stage._prepare_backward_infra(self._n_microbatches)
-            self._stage_initialized = True
+            self._initialize_stage(arg_mbs[0], kwarg_mbs[0])
 
         # Last stage has 1 warmup, second-to-last 2 warmups, ...
         # first stage `num_stages` warmups
@@ -1096,6 +1095,24 @@ class PipelineScheduleMulti(_PipelineSchedule):
         self.pipeline_order: Dict[int, List[Optional[_Action]]] = {}
         self.use_full_backward = use_full_backward
 
+    def _initialize_stages(self, args: Tuple[Any, ...], kwargs):
+        # may be 'none' value (if this stage sends its output shapes to the next stage via P2P)
+        # or real value (if this stage and next stage are on the same device)
+        next_stage_args: Tuple[Any, ...] = tuple()
+        for stage in self._stages:
+            if stage.is_first:
+                next_stage_args = stage._prepare_forward_infra(
+                    self._n_microbatches, args, kwargs
+                )
+            else:
+                next_stage_args = stage._prepare_forward_infra(
+                    self._n_microbatches, next_stage_args, kwargs
+                )
+
+            if self._has_backward:
+                stage._prepare_backward_infra(self._n_microbatches)
+        self._stages_initialized = True
+
     def _dump_csv(self, filename):
         """Dump a CSV representation of the schedule into a file with the provided filename."""
         with open(filename, "w", newline="") as csvfile:
@@ -1229,12 +1246,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
 
         if not self._stages_initialized:
-            for stage in self._stages:
-                # TODO: why do i pass args/kwargs here? its not used?
-                stage._prepare_forward_infra(self._n_microbatches)
-                if self._has_backward:
-                    stage._prepare_backward_infra(self._n_microbatches)
-            self._stages_initialized = True
+            self._initialize_stages(arg_mbs[0], kwarg_mbs[0])
 
         # Based on the plan in Step 1 created in __init__:
         # 2. Perform communication based on the pipeline_order
@@ -1463,12 +1475,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
         if not self._stages_initialized:
-            for stage in self._stages:
-                # TODO: why do i pass args/kwargs here? its not used?
-                stage._prepare_forward_infra(self._n_microbatches)
-                if self._has_backward:
-                    stage._prepare_backward_infra(self._n_microbatches)
-            self._stages_initialized = True
+            self._initialize_stages(arg_mbs[0], kwarg_mbs[0])
 
         # Based on the plan in Step 1 created in __init__:
         # 2. Perform communication based on the pipeline_order
