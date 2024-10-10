@@ -846,19 +846,22 @@ class Reduction(Loops):
         numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
 
         should_split = (
-            not V.graph.has_feature(device, BackendFeature.REDUCE_TO_SINGLE_ELEMENT)
+            config.split_reductions
+            and not V.graph.has_feature(device, BackendFeature.REDUCE_TO_SINGLE_ELEMENT)
             and reduction_type
             not in (
                 "argmax",
                 "argmin",
             )
-            and config.split_reductions
             # We don't support unbacked symints
             and _is_static(reduction_numel_hint)
             and _is_static(numel_hint)
         )
         if not should_split:
             return ReductionHint.DEFAULT, 1
+        assert (
+            not config.cooperative_reductions
+        ), "config.split_reductions and config.cooperative_reductions are mutually exclusive, disable one of them"
 
         device_interface = get_interface_for_device(get_device_type(device))  # type: ignore[arg-type] # next PR
         device_properties = device_interface.Worker.get_device_properties(device)

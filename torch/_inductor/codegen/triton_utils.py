@@ -70,7 +70,7 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
         else:
             raise NotImplementedError(f"unhandled size_dtype {size_dtype}")
     if isinstance(arg, WorkspaceArg):
-        return "*i8"
+        return _type_of(arg.dtype)
     raise NotImplementedError(f"unhandled {type(arg)}: {arg}")
 
 
