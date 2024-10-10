@@ -1039,13 +1039,16 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
         from .builder import SourcelessBuilder, wrap_fx_proxy
+        from torch._higher_order_ops.associative_scan import (
+            first_slice_copy
+        )
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
-        def arg_extractor(combine_fn, xs, dim):
-            return combine_fn, xs, dim
+        def arg_extractor(combine_fn, xs, dim, additional_inputs):
+            return combine_fn, xs, dim, additional_inputs
 
-        combine_fn, xs, dim = arg_extractor(*args, **kwargs)
+        combine_fn, xs, dim, additional_inputs = arg_extractor(*args, **kwargs)
 
         if xs.python_type() != list:
             unimplemented(
@@ -1053,35 +1056,34 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
         assert isinstance(xs, torch._dynamo.variables.lists.BaseListVariable)
 
+        dim_fake = (
+            dim.as_proxy()
+            if type(dim.as_proxy()) == int
+            else get_fake_value(dim.as_proxy().node, tx)
+        )
+        scan_length = get_fake_value(xs.items[0].as_proxy().node, tx).size()[dim_fake]
+        if scan_length == 0:
+            unimplemented(
+                "scan() operator doesn't support zero-sized tensors during tracing."
+            )
+
         # Trace the subgraph
         # TODO: Fix these pointless new_empty calls appearing in the dynamo output graph.
-        sub_args = [
-            leaf.call_method(
-                tx,
-                "new_empty",
-                args=(
-                    SourcelessBuilder.create(
-                        tx,
-                        leaf.size
-                        if leaf.size is not None
-                        else BuiltinVariable(getattr)
-                        .call_function(tx, [leaf, ConstantVariable.create("shape")], {})
-                        .items,
-                    ),
-                ),
-                kwargs={
-                    "dtype": SourcelessBuilder.create(tx, leaf.dtype),
-                    "requires_grad": SourcelessBuilder.create(tx, leaf.requires_grad),
-                },
-            )
-            for leaf in itertools.chain(xs.items, xs.items)
+        # The sub_args_inp is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
+        # the sub_args_inp shape will be (4, ).
+        sub_args_inp = [
+            _make_inlined(tx, first_slice_copy)(inp, dim) for inp in xs.items
         ]
+        sub_args_additional_inputs = [
+            t.call_method(tx, "clone", args=(), kwargs={})
+            for t in additional_inputs.items
+        ]
+        sub_args = sub_args_inp + sub_args_additional_inputs
         (
             (combine_result, combine_treespec),
             combine_graph,
             combine_lifted_freevars,
-        ) = speculate_subgraph(
-            tx,
+        ) = speculate_subgraph(tx,
             combine_fn,
             sub_args,
             sub_kwargs={},
@@ -1089,11 +1091,23 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             source_target=self.value,
             set_subgraph_inputs="flatten_manual",
         )
+        
+        # key in the combine_lifted_freevars are proxies in the root tracer.
+        # We use root tracer's proxies to create scan op's inputs.
+        def _check_phs_position_match(
+            combine_graph: torch.fx.Graph, lifted_proxies: list[torch.fx.Proxy]
+        ):
+            lifted_phs = [
+                node for node in combine_graph.nodes if node.op == "placeholder"
+            ][-len(lifted_proxies) :]
+            for ph, lifted_proxy in zip(lifted_phs, lifted_proxies):
+                if ph is not lifted_proxy.node:
+                    unimplemented(
+                        "The postion lifted freevars doesn't match the order of placeholders in subgraph."
+                    )
 
-        if combine_lifted_freevars:
-            unimplemented(
-                f"Combine fn had unexpected freevars: {combine_lifted_freevars}"
-            )
+        _check_phs_position_match(combine_graph, list(combine_lifted_freevars.values()))
+        combine_freevars_proxy = list(combine_lifted_freevars.keys())
 
         if combine_result.python_type() != list:
             unimplemented(
@@ -1102,6 +1116,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         xs_proxy = xs.as_proxy()
         combine_result_proxy = combine_result.as_proxy()
+        additional_inputs_proxy = additional_inputs.as_proxy() + combine_freevars_proxy
         for result, inp_proxy in zip(combine_result_proxy, xs_proxy):
             inp_meta = inp_proxy.node.meta["example_value"]
             combine_result_meta = result.node.meta["example_value"]
@@ -1123,6 +1138,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             make_attr(tx, combine_fn_name),
             xs_proxy,
             dim.as_proxy(),
+            additional_inputs_proxy,
         )
 
         with tx.fake_mode:
