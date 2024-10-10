@@ -133,7 +133,18 @@ def is_eager_only_torch_dispatch_mode_enabled():
 
 def set_eager_only_torch_dispatch_mode_enabled(value):
     global _eager_only_torch_dispatch_mode_enabled
+    old_value = is_eager_only_torch_dispatch_mode_enabled()
     _eager_only_torch_dispatch_mode_enabled.value = value
+    return old_value
+
+
+@contextlib.contextmanager
+def disable_eager_only_torch_dispatch_mode():
+    try:
+        prior = set_eager_only_torch_dispatch_mode_enabled(False)
+        yield
+    finally:
+        set_eager_only_torch_dispatch_mode_enabled(prior)
 
 
 def _get_current_dispatch_mode():

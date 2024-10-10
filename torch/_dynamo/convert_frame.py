@@ -24,7 +24,7 @@ from types import CodeType, FrameType, FunctionType, ModuleType
 from typing import Any, Callable, Dict, List, Optional, Set, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
-from torch.utils._python_dispatch import set_eager_only_torch_dispatch_mode_enabled
+from torch.utils._python_dispatch import disable_eager_only_torch_dispatch_mode
 
 import torch
 import torch._logging
@@ -945,12 +945,11 @@ def _compile(
             "inductor"
         ]["start_possibly_missed_reinplacing_bytes"]
         guarded_code = None
-        set_eager_only_torch_dispatch_mode_enabled(False)
         try:
-            guarded_code = compile_inner(code, one_graph, hooks, transform)
-            return guarded_code
+            with disable_eager_only_torch_dispatch_mode():
+                guarded_code = compile_inner(code, one_graph, hooks, transform)
+                return guarded_code
         except Exception as e:
-            set_eager_only_torch_dispatch_mode_enabled(True)
             fail_type = type(e).__qualname__
             fail_reason = str(e)
             # NB: e's msg is mutated here to add user stack, but we DON'T want
@@ -989,7 +988,6 @@ def _compile(
                     f"{type(e).__qualname__}: {str(e)}"
                 ).with_traceback(e.__traceback__) from None
         finally:
-            set_eager_only_torch_dispatch_mode_enabled(True)
             if tracer:
                 tracer.output.local_scope = {}
 

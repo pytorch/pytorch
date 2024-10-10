@@ -10,7 +10,7 @@ in torch._dynamo.convert_frame.
 
 from __future__ import annotations
 
-from torch.utils._python_dispatch import set_eager_only_torch_dispatch_mode_enabled
+# from torch.utils._python_dispatch import disable_eager_only_torch_dispatch_mode
 import contextlib
 import functools
 import inspect
@@ -325,7 +325,7 @@ class _TorchDynamoContext:
         cached_backends.setdefault(id(backend), backend)
 
         # def call_disable_eager_only_torch_dispatch_mode_ctx():
-        #     ctx = set_eager_only_torch_dispatch_mode_enabled(False)
+        #     ctx = disable_eager_only_torch_dispatch_mode()
         #     ctx.__enter__()
         #     return functools.partial(ctx.__exit__, None, None, None)
 

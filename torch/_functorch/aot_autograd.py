@@ -21,7 +21,7 @@ from torch._inductor.utils import BoxedBool
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass, disable_eager_only_torch_dispatch_mode
 
 
 static_inputs_log = torch._logging.getArtifactLogger(
@@ -1097,7 +1097,8 @@ def aot_module_simplified(
             flat_args.extend(params_flat)
             flat_args.extend(runtime_args)
             runtime_args.clear()
-            return compiled_fn(flat_args)
+            with disable_eager_only_torch_dispatch_mode():
+                return compiled_fn(flat_args)
 
         # Just for convenience
         boxed_forward.zero_grad = mod.zero_grad
@@ -1114,7 +1115,8 @@ def aot_module_simplified(
         full_args = []
         full_args.extend(params_flat)
         full_args.extend(runtime_args)
-        return compiled_fn(full_args)
+        with disable_eager_only_torch_dispatch_mode():
+            return compiled_fn(full_args)
 
     # Just for convenience
     forward.zero_grad = mod.zero_grad
