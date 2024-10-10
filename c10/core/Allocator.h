@@ -224,21 +224,22 @@ struct C10_API Allocator {
 // allocation InefficientStdFunctionContext, on top of the dynamic
 // allocation which is implied by std::function itself.
 struct C10_API InefficientStdFunctionContext {
-  void* ptr_;
+  void* ptr_{nullptr};
   std::function<void(void*)> deleter_;
   InefficientStdFunctionContext(void* ptr, std::function<void(void*)> deleter)
       : ptr_(ptr), deleter_(std::move(deleter)) {}
   InefficientStdFunctionContext(const InefficientStdFunctionContext&) = delete;
   InefficientStdFunctionContext(InefficientStdFunctionContext&& rhs) noexcept
-      : ptr_(rhs.ptr_), deleter_(std::move(rhs.deleter_)) {
-    rhs.ptr_ = nullptr;
-  }
+      : ptr_(std::exchange(rhs.ptr_, nullptr)),
+        deleter_(std::move(rhs.deleter_)) {}
   InefficientStdFunctionContext& operator=(
       const InefficientStdFunctionContext&) = delete;
   // NOLINTNEXTLINE(performance-noexcept-move-constructor)
   InefficientStdFunctionContext& operator=(
       InefficientStdFunctionContext&& rhs) {
-    std::exchange(*this, std::move(rhs));
+    this->~InefficientStdFunctionContext();
+    ptr_ = std::exchange(rhs.ptr_, nullptr);
+    deleter_ = std::move(rhs.deleter_);
     return *this;
   }
   ~InefficientStdFunctionContext() {
