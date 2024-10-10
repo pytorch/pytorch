@@ -70,6 +70,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.initialized_kernels: Dict[str, Kernel] = {}
         self.expr_printer = cexpr
 
+    @staticmethod
+    def create(
+        is_subgraph: bool, subgraph_name: str, parent_wrapper: PythonWrapperCodegen
+    ):
+        # TODO - support subgraph codegen by lifting functions. Check the
+        # comment at CppWrapperCpu `codegen_subgraph` function.
+        return CppWrapperCpu()
+
     def generate_kernel_call(
         self,
         kernel_name: str,
@@ -1911,6 +1919,25 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.codegen_subgraph(conditional.false_subgraph, outer_inputs, outer_outputs)
         self.writeline(ExitSubgraphLine(self))
         self.writeline("}")
+
+    def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
+        # TODO (desertfire) - This function is the old way of supporting
+        # subgraph codegen by inlining subgraphs in the output code. For python
+        # wrapper, we have moved to lifting subgraphs as functions, supported by
+        # PythonWrapperCode `codegen_subgraph` function. We should perhaps
+        # support lifting of subgraphs as functions for cpp wrapper as well.
+        try:
+            self.push_codegened_graph(subgraph.graph)
+            self.writeline(f"{self.comment} subgraph: {subgraph.name}")
+            self.codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
+            parent_graph = V.graph
+            with V.set_graph_handler(subgraph.graph):
+                subgraph.graph.codegen_subgraph(
+                    parent_graph=parent_graph,
+                )
+            self.codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
+        finally:
+            self.pop_codegened_graph()
 
     def codegen_while_loop(self, while_loop):
         name = while_loop.get_name()
