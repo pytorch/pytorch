@@ -36,6 +36,10 @@ call %INSTALLER_DIR%\activate_miniconda3.bat
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 
+call conda update cmake
+if errorlevel 1 goto fail
+if not errorlevel 0 goto fail
+
 call pip install mkl-include==2021.4.0 mkl-devel==2021.4.0
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail

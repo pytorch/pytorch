@@ -13,7 +13,7 @@ install_ubuntu() {
     cmake3="cmake=3.16*"
     maybe_libiomp_dev=""
   elif [[ "$UBUNTU_VERSION" == "22.04"* ]]; then
-    cmake3="cmake=3.22*"
+    cmake3="cmake"
     maybe_libiomp_dev=""
   else
     cmake3="cmake=3.5*"
@@ -48,7 +48,6 @@ install_ubuntu() {
     $ccache_deps \
     $numpy_deps \
     ${deploy_deps} \
-    ${cmake3} \
     apt-transport-https \
     autoconf \
     automake \
@@ -77,6 +76,15 @@ install_ubuntu() {
     unzip \
     gpg-agent \
     gdb
+
+  if [[ "$UBUNTU_VERSION" == "22.04"* ]]; then
+    test -f /usr/share/doc/kitware-archive-keyring/copyright ||
+wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor - | sudo tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null
+    echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ jammy main' | sudo tee /etc/apt/sources.list.d/kitware.list >/dev/null
+    apt-get update
+  fi
+  apt-get install -y --no-install-recommends \
+    ${cmake3}
 
   # Should resolve issues related to various apt package repository cert issues
   # see: https://github.com/pytorch/pytorch/issues/65931
