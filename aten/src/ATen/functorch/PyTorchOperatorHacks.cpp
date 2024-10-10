@@ -4,7 +4,6 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/functorch/TensorWrapper.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
-#include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <c10/util/irange.h>
 #include <ATen/NamedTensorUtils.h>

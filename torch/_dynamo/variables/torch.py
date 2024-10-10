@@ -159,7 +159,17 @@ def get_overridable_functions():
 
     from torch.overrides import get_overridable_functions as get_overridable_functions_
 
-    return set(chain(*get_overridable_functions_().values()))
+    funcs = set(chain(*get_overridable_functions_().values()))
+    more = {
+        torch.ones,
+        torch.ones_like,
+        torch.zeros,
+        torch.zeros_like,
+        torch.empty,
+        torch.full,
+    }
+    funcs.update(more)
+    return funcs
 
 
 class BaseTorchVariable(VariableTracker):
@@ -300,7 +310,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             assert len(args) == 2
             return VmapIncrementNestingCtxManagerVariable.create(
                 tx,
-                [guard_if_dyn(x) for x in args],
+                args,
             )
         elif self.value is torch._functorch.eager_transforms.jvp_increment_nesting:
             assert len(args) == 0
@@ -835,6 +845,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 len(tx.symbolic_torch_function_state.mode_stack)
             )
 
+        @register(torch._C._get_function_stack_at)
+        def handle_get_stack_at(self, tx: "InstructionTranslator", *args, **kwargs):
+            assert len(args) == 1 and not kwargs
+            ind = args[0].as_python_constant()
+            assert ind >= 0 and ind < len(tx.symbolic_torch_function_state.mode_stack)
+            return tx.symbolic_torch_function_state.mode_stack[ind]
+
         @register(torch.set_default_device)
         def handle_set_default_device(
             self, tx: "InstructionTranslator", *args, **kwargs
@@ -852,7 +869,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             else:
                 TorchFunctionModeStackVariable.register_device_context_insertion(tx)
 
-            return None
+            return ConstantVariable.create(None)
 
         return handlers
 
@@ -882,6 +899,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 ),
             )
+
+        if self.is_tensor_method():
+            return self.call_tensor_method(tx, args, kwargs)
 
         special_handler = self._get_handlers().get(self.value)
         if special_handler:
@@ -1154,6 +1174,16 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             source
         )
         return result
+
+    def call_tensor_method(self, tx, args, kwargs):
+        return args[0].call_method(tx, self.get_function().__name__, args[1:], kwargs)
+
+    def is_tensor_method(self):
+        return (
+            inspect.ismethoddescriptor(self.get_function())
+            and hasattr(self.get_function(), "__objclass__")
+            and self.get_function().__objclass__ == torch._C.TensorBase
+        ) or self.get_function() is torch.Tensor.__contains__
 
     def torch_function_override_enabled(self, tx, args, kwargs):
         return (
