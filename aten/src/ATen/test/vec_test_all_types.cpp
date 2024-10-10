@@ -453,7 +453,7 @@ namespace {
         using vec = TypeParam;
         test_unary<vec>(
             NAME_INFO(log),
-            RESOLVE_OVERLOAD(std::log),
+            RESOLVE_OVERLOAD(::log),
             [](const vec& v) { return v.log(); },
             createDefaultUnaryTestCase<vec>(TestSeed()));
     }
@@ -469,7 +469,7 @@ namespace {
         using vec = TypeParam;
         test_unary<vec>(
             NAME_INFO(log10),
-            RESOLVE_OVERLOAD(std::log10),
+            RESOLVE_OVERLOAD(::log10),
             [](const vec& v) { return v.log10(); },
             createDefaultUnaryTestCase<vec>(TestSeed()));
     }
@@ -484,7 +484,7 @@ namespace {
             .setTestSeed(TestSeed());
         test_unary<vec>(
             NAME_INFO(log1p),
-            RESOLVE_OVERLOAD(std::log1p),
+            RESOLVE_OVERLOAD(::log1p),
             [](const vec& v) { return v.log1p(); },
             test_case);
     }
