@@ -4379,6 +4379,49 @@ class TestAutograd(TestCase):
         run_test((10, 10), torch.zeros(10, 10))
         run_test((10,), 0)
 
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_node_ordering_when_none_returned(self):
+        class Matmul(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, w):
+                # x: [M, N]
+                # w: [N, K]
+                ctx.save_for_backward(x, w)
+                return x @ w
+
+            @staticmethod
+            def backward(ctx, g_out):
+                # g_out: [M, K]
+                x, w = ctx.saved_tensors
+                g_x = g_out @ w.T
+                g_w = x.T @ g_out
+                w.main_grad = g_w.float()
+                return g_x, None
+
+        executed = []
+
+        class HookFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, g):
+                executed.append("A")
+                return g
+
+        def hook(*args, **kwargs):
+            executed.append("B")
+
+        x = torch.randn((3, 3), dtype=torch.bfloat16, device="cuda", requires_grad=True)
+        x = HookFunction.apply(x)
+        w = torch.randn((3, 3), dtype=torch.bfloat16, device="cuda", requires_grad=True)
+        w.register_hook(hook)
+        o = Matmul.apply(x, w)
+        o.sum().backward()
+
+        self.assertEqual(executed, ["B", "A"])
+
     def test_current_graph_task_id(self):
         id = [-1]
 
@@ -9811,7 +9854,8 @@ for shape in [(1,), ()]:
         out = x * y
         out.sum().backward()
 
-    def test_multi_grad_all_hooks(self):
+    @scoped_load_inline
+    def test_multi_grad_all_hooks(self, load_inline):
         t1 = torch.rand(2, requires_grad=True)
         t2 = torch.rand(2, requires_grad=True)
         t3 = torch.rand(2, requires_grad=True)
@@ -9861,7 +9905,7 @@ TORCH_LIBRARY(test_multigrad_all_hooks, m) {
 }
         """
 
-        module, _ = scoped_load_inline(
+        module = load_inline(
             name="test_multigrad_all_hooks",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",

@@ -5375,11 +5375,22 @@ def remove_cpp_extensions_build_root():
         else:
             shutil.rmtree(default_build_root, ignore_errors=True)
 
-def scoped_load_inline(*args, **kwargs):
-    temp_dir = tempfile.TemporaryDirectory()
-    if kwargs.get("verbose", False):
-        print(f'Using temporary extension directory {temp_dir.name}...', file=sys.stderr)
-    assert "build_directory" not in kwargs
-    kwargs["build_directory"] = temp_dir.name
-    module = cpp_extension.load_inline(*args, **kwargs)
-    return module, temp_dir
+# Decorator to provide a helper to load inline extensions to a temp directory
+def scoped_load_inline(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        temp_dir = tempfile.TemporaryDirectory()
+
+        def load_inline(*args, **kwargs):
+            if kwargs.get("verbose", False):
+                print(f'Using temporary extension directory {temp_dir.name}...', file=sys.stderr)
+            assert "build_directory" not in kwargs
+            kwargs["build_directory"] = temp_dir.name
+            return cpp_extension.load_inline(*args, **kwargs)
+
+        try:
+            return func(*args, load_inline=load_inline, **kwargs)
+        finally:
+            temp_dir.cleanup()
+
+    return wrapper
