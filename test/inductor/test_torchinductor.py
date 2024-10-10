@@ -7697,8 +7697,6 @@ class CommonTemplate:
             check_lowp=check_lowp,
         )
 
-    # There is no deterministic implementation for scatter_add on Intel GPU.
-    @expectedFailureXPU
     def test_scatter_add3(self):
         def fn(a, dim, index, b):
             return aten.scatter_add(a, dim, index, b)
@@ -7708,6 +7706,9 @@ class CommonTemplate:
             check_lowp = False
 
         for deterministic in [False, True]:
+            if deterministic and self.device == "xpu":
+                # There is no deterministic implementation for scatter_add on Intel GPU.
+                continue
             with DeterministicGuard(deterministic):
                 self.common(
                     fn,

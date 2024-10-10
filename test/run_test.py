@@ -220,6 +220,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_cuda_nvml_based_avail",
     # temporarily sets a global config
     "test_autograd_fallback",
+    "inductor/test_compiler_bisector",
 ] + FSDP_TEST
 
 # Test files that should always be run serially with other test files,

@@ -1356,24 +1356,12 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
     def _compute_proxy(
         self, func: OpOverload, args: Tuple[object, ...], out: PySymType
     ) -> Proxy:
-        # Handle torch.sym_sum
-        n_args: Tuple[object, ...]
-        if len(args) == 1 and isinstance(args[0], (list, tuple)):
-            n_args = (
-                tuple(
-                    get_proxy_slot(a, self.tracer).force().node
-                    if isinstance(a, py_sym_types)
-                    else a
-                    for a in args[0]
-                ),
-            )
-        else:
-            n_args = tuple(
-                get_proxy_slot(a, self.tracer).force().node
-                if isinstance(a, py_sym_types)
-                else a
-                for a in args
-            )
+        n_args = tuple(
+            get_proxy_slot(a, self.tracer).force().node
+            if isinstance(a, py_sym_types)
+            else a
+            for a in args
+        )
 
         # func doesn't have a __torch_function__ that Proxy can interpose, so
         # we gotta do it manually
@@ -2214,7 +2202,14 @@ def maybe_handle_decomp(
     args: Tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> object:
+    from torch._inductor.bisect_helper import BisectionManager
+
     if op in CURRENT_DECOMPOSITION_TABLE:
+        if BisectionManager.disable_subsystem(
+            "aot_eager_decomp_partition", "decomposition", lambda: repr(op)
+        ):
+            return NotImplemented
+
         with proxy_mode:
             proxy_mode.decomp_layers += 1
             out = CURRENT_DECOMPOSITION_TABLE[op](*args, **kwargs)
