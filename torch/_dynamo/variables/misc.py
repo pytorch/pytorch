@@ -349,21 +349,6 @@ class ClosureVariable(UnknownVariable):
         codegen.append_output(codegen.create_load_closure(self.name))
 
 
-# closure variable created by an inlined function
-class InlinedClosureVariable(UnknownVariable):
-    _nonvar_fields = {
-        "name",
-        *UnknownVariable._nonvar_fields,
-    }
-
-    def __init__(self, name, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.name = name
-
-    def reconstruct(self, codegen):
-        codegen.append_output(codegen.create_load_closure(self.name))
-
-
 class NewCellVariable(VariableTracker):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
