@@ -4141,13 +4141,13 @@
     CPU: _int_mm_out_cpu
     CUDA: _int_mm_out_cuda
 
-- func: _convert_weight_to_int4pack(Tensor self, int innerKTiles) -> Tensor
+- func: _convert_weight_to_int4pack(Tensor self, int innerKTiles, int qGroupSize, int N, Tensor qScaleAndZeros, Tensor bias) -> Tensor
   dispatch:
     CPU: _convert_weight_to_int4pack_cpu
     CUDA: _convert_weight_to_int4pack_cuda
     MPS: _convert_weight_to_int4pack_mps
 
-- func: _weight_int4pack_mm(Tensor self, Tensor mat2, int qGroupSize, Tensor qScaleAndZeros) -> Tensor
+- func: _weight_int4pack_mm(Tensor self, Tensor mat2, int qGroupSize, Tensor qScaleAndZeros, int N) -> Tensor
   dispatch:
     CPU: _weight_int4pack_mm_cpu
     MPS: _weight_int4pack_mm_mps

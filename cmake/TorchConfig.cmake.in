@@ -93,6 +93,10 @@ else()
     append_torchlib_if_found(XNNPACK)
   endif()
 
+  if(@USE_KLEIDIAI@)
+    append_torchlib_if_found(kleidiai)
+  endif()
+
   append_torchlib_if_found(caffe2_protos protobuf-lite protobuf protoc)
   append_torchlib_if_found(onnx onnx_proto)
 
