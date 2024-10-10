@@ -283,6 +283,14 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     def round_decimal(a, b):
         return round(a, ndigits=b)
 
+    @staticmethod
+    def trunc_to_int(x, dtype):
+        return torch.sym_int(x)
+
+    @staticmethod
+    def to_float(x):
+        return torch.sym_float(x)
+
 
 def _to_dtype(x: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
     return torch.ops.prims.convert_element_type.default(x, dtype)
