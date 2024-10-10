@@ -3,7 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 #include <ideep.hpp>
 
 #ifndef IDEEP_PREREQ
@@ -64,4 +64,4 @@ TORCH_API int set_verbose(int level);
 
 }}
 
-#endif // AT_MKLDNN_ENABLED
+#endif // AT_ONEDNN_ENABLED

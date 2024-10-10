@@ -121,7 +121,7 @@ template std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeightsQnnp
     3>::unpack();
 #endif // USE_PYTORCH_QNNPACK
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 template <int kSpatialDim>
 std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeightsOnednn<
     kSpatialDim>::unpack() {
@@ -133,4 +133,4 @@ template std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeightsOned
     2>::unpack();
 template std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeightsOnednn<
     3>::unpack();
-#endif // #if AT_MKLDNN_ENABLED()
+#endif // #if AT_ONEDNN_ENABLED()

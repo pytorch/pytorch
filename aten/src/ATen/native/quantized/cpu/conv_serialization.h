@@ -332,7 +332,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
 
 #ifdef USE_FBGEMM
   if (ctx.qEngine() == at::QEngine::X86) {
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     bool use_onednn = onednn_utils::should_use_onednn_quant(
         weight.value(), transpose, groups, output_padding);
     if (use_onednn) {
@@ -393,7 +393,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
     );
   }
 #endif // USE_PYTORCH_QNNPACK
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
   if (ctx.qEngine() == at::QEngine::ONEDNN) {
     return PackedConvWeightsOnednn<kSpatialDim>::prepack(
       weight.value(),
@@ -406,7 +406,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
       transpose
     );
   }
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()
 TORCH_CHECK(
   false,
   "Didn't find engine for when deserializing ConvPackedParams: ",

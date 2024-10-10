@@ -2,7 +2,7 @@
 #include <ATen/Config.h>
 #include <c10/core/Allocator.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 // needs to be included only once in library.
 #include <ideep_pin_singletons.hpp>
@@ -30,4 +30,4 @@ void clear_computation_cache() {
 
 } // namespace  at::native::mkldnn
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()

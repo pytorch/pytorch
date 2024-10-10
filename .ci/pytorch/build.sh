@@ -63,9 +63,9 @@ if ! which conda; then
   # intel cpu and later run tests on machines with amd cpu.
   # Also leave out two builds to make sure non-mkldnn builds still work.
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-    export USE_MKLDNN=1
+    export USE_ONEDNN=1
   else
-    export USE_MKLDNN=0
+    export USE_ONEDNN=0
   fi
 else
   # CMAKE_PREFIX_PATH precedences
@@ -94,8 +94,8 @@ else
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
-  export USE_MKLDNN=1
-  export USE_MKLDNN_ACL=1
+  export USE_ONEDNN=1
+  export USE_ONEDNN_ACL=1
   export ACL_ROOT_DIR=/ComputeLibrary
 fi
 

@@ -96,7 +96,7 @@ void DispatchParallel(
     int8_t* packed_data) noexcept;
 
 FOR_ALL_EXTERNAL_FUNCTIONS(DECLARE_EXTERNAL_FUNCTION)
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 DECLARE_EXTERNAL_FUNCTION(nnc_mkldnn_prepacked_conv_run);
 #endif
 

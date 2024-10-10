@@ -1,6 +1,6 @@
 #include <ATen/Config.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 #include <c10/core/CPUAllocator.h>
 #include <torch/csrc/jit/codegen/onednn/LlgaTensorImpl.h>
 
@@ -157,4 +157,4 @@ at::ScalarType LlgaTensorDesc::aten_scalar_type() const {
 } // namespace jit
 } // namespace torch
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()
