@@ -46,11 +46,11 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     return 0;
   }
 
-  virtual void deviceSynchronize(c10::DeviceIndex device_index) const {
+  void deviceSynchronize(c10::DeviceIndex device_index) const override {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
-  virtual std::string showConfig() const {
+  std::string showConfig() const override {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
