@@ -45,7 +45,7 @@ cache_size_limit = 8
 # [@compile_ignored: runtime_behaviour] safeguarding to prevent horrible recomps
 accumulated_cache_size_limit = 256
 
-# [@compile_ignored: runtime_behaviour] skip tracing recursively if cache limit is hit
+# [@compile_ignored: runtime_behaviour] skip tracing recursively if cache limit is hit (deprecated: does not do anything)
 skip_code_recursive_on_cache_limit_hit = True
 
 # raise a hard error if cache limit is hit.  If you are on a model where you
