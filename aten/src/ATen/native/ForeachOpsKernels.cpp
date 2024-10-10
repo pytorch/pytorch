@@ -29,6 +29,7 @@
 #include <ATen/ops/_foreach_expm1_native.h>
 #include <ATen/ops/_foreach_floor_native.h>
 #include <ATen/ops/_foreach_frac_native.h>
+#include <ATen/ops/_foreach_global_norm_native.h>
 #include <ATen/ops/_foreach_lerp_native.h>
 #include <ATen/ops/_foreach_lgamma_native.h>
 #include <ATen/ops/_foreach_log10_native.h>
@@ -54,6 +55,7 @@
 #include <ATen/ops/_foreach_tanh_native.h>
 #include <ATen/ops/_foreach_trunc_native.h>
 #include <ATen/ops/_foreach_zero_native.h>
+#include <ATen/ops/cat.h>
 #include <ATen/ops/copy.h>
 #include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/max.h>
@@ -448,6 +450,38 @@ std::vector<Tensor> foreach_tensor_norm_slow(
     result.emplace_back(at::linalg_vector_norm(t, ord, {}, false, dtype));
   }
   return result;
+}
+
+Tensor foreach_tensor_global_norm_slow(
+    TensorList tensors,
+    const Scalar& ord,
+    std::optional<ScalarType> dtype) {
+  check_foreach_api_restrictions(tensors);
+  const double p = [](const Scalar& lp) -> double {
+    if (lp.isIntegral(false)) {
+      return lp.to<int64_t>();
+    } else if (lp.isFloatingPoint()) {
+      return lp.to<double>();
+    } else {
+      TORCH_CHECK(false, "foreach_ expects ord to be integer or float");
+    }
+  }(ord);
+  // note(crcrpar): This implementation prioritizes memory consumption over
+  // the number of cuda kernel launches. This can be implemented as
+  // `linalg_vector_norm(cat(flatten_tensors), ord, dtype)` but
+  // it should be memory hungry.
+  std::vector<Tensor> result;
+  result.reserve(tensors.size());
+  for (const auto& t : tensors) {
+    result.emplace_back(
+        at::linalg_vector_norm(t, ord, {}, false, dtype).unsqueeze(0));
+  }
+  const auto global_tensor = at::cat(result, 0);
+  if (p == 0.0) {
+    return global_tensor.sum();
+  } else {
+    return at::linalg_vector_norm(global_tensor, ord, {}, false);
+  }
 }
 
 std::vector<Tensor> foreach_tensor_max_slow(TensorList tensors) {

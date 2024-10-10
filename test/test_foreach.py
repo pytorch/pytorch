@@ -48,8 +48,9 @@ _BOOL_SUB_ERR_MSG = "Subtraction, the `-` operator"
 
 
 class RegularFuncWrapper:
-    def __init__(self, func):
+    def __init__(self, func, *, is_global_norm: bool = False):
         self.func = func
+        self.is_global_norm = is_global_norm
 
     def __call__(self, inputs, scalars=None, **kwargs):
         if scalars is not None:
@@ -65,6 +66,13 @@ class RegularFuncWrapper:
         if len(inputs) == 2 and isinstance(inputs[1], (Number, torch.Tensor)):
             # binary op with tensorlist and scalar.
             inputs[1] = [inputs[1] for _ in range(len(inputs[0]))]
+        if self.is_global_norm:
+            assert len(inputs) == 1
+            tensors = inputs[0]
+            concat_tensor = torch.cat([t.view(-1) for t in tensors])
+            ord = kwargs.get("ord", 2)
+            dtype = kwargs.get("dtype", None)
+            return self.func(concat_tensor, ord=ord, dtype=dtype)
         return [self.func(*i, **kwargs) for i in zip(*inputs)]
 
 
@@ -145,9 +153,9 @@ class TestForeach(TestCase):
     def _get_funcs(self, op):
         return (
             ForeachFuncWrapper(op.method_variant),
-            RegularFuncWrapper(op.ref),
+            RegularFuncWrapper(op.ref, is_global_norm=op.is_global_norm),
             ForeachFuncWrapper(op.inplace_variant),
-            RegularFuncWrapper(op.ref_inplace),
+            RegularFuncWrapper(op.ref_inplace, is_global_norm=op.is_global_norm),
         )
 
     # note(crcrpar): Make sure 0-size tensors are appropriately ignored by `multi_tensor_apply`
@@ -1001,14 +1009,20 @@ class TestForeach(TestCase):
 
         if dtype == torch.float16:
             # making sure the reference L2 norm values are in the range of FP16.
-            self.assertFalse(any(torch.isinf(e) for e in expect))
+            if op.name == "_foreach_global_norm":
+                self.assertFalse(torch.isinf(expect))
+            else:
+                self.assertFalse(any(torch.isinf(e) for e in expect))
         else:
-            self.assertTrue(
-                all(
-                    inputs[0][i].numel() == 0 or torch.isinf(e)
-                    for i, e in enumerate(expect)
+            if not op.is_global_norm:
+                self.assertTrue(
+                    all(
+                        inputs[0][i].numel() == 0 or torch.isinf(e)
+                        for i, e in enumerate(expect)
+                    )
                 )
-            )
+            else:
+                self.assertTrue(torch.isinf(expect))
         self.assertEqual(expect, actual, equal_nan=False)
 
     @onlyCUDA
@@ -1024,7 +1038,7 @@ class TestForeach(TestCase):
 
         import math
 
-        if op.name == "_foreach_norm":
+        if op.name in ("_foreach_norm", "_foreach_global_norm"):
             ords = (1, 2, math.inf)
         else:
             ords = (None,)
@@ -1060,7 +1074,7 @@ class TestForeach(TestCase):
         N = 65536 * 2
         disable_fastpath = False
         kwargs = {}
-        if op.name == "_foreach_norm":
+        if op.name in ("_foreach_norm", "_foreach_global_norm"):
             ord = 2
             disable_fastpath = not (
                 ord in (1, 2)

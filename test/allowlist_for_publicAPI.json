@@ -1199,6 +1199,7 @@
     "_foreach_floor_",
     "_foreach_frac",
     "_foreach_frac_",
+    "_foreach_global_norm",
     "_foreach_lgamma",
     "_foreach_lgamma_",
     "_foreach_log",
