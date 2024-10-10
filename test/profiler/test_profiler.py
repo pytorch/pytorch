@@ -1957,6 +1957,9 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             record_shapes=True,
             with_stack=True,
             schedule=torch.profiler.schedule(wait=0, warmup=0, active=5, repeat=1),
+            experimental_config=torch._C._profiler._ExperimentalConfig(
+                adjust_profiler_step=True
+            ),
         ) as prof:
             for i in range(5):
                 self._step_helper_func(prof)
