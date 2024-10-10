@@ -333,18 +333,18 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
         # Test storage pin_memory and is_pin
         cpu_storage = cpu_tensor.storage()
-        self.assertFalse(cpu_storage.is_pinned())
+        self.assertFalse(cpu_storage.is_pinned("openreg"))
 
-        cpu_storage_pinned = cpu_storage.pin_memory()
-        self.assertTrue(cpu_storage_pinned.is_pinned())
+        cpu_storage_pinned = cpu_storage.pin_memory("openreg")
+        self.assertTrue(cpu_storage_pinned.is_pinned("openreg"))
 
         # Test untyped storage pin_memory and is_pin
         cpu_tensor = torch.randn([3, 2, 1, 4])
         cpu_untyped_storage = cpu_tensor.untyped_storage()
-        self.assertFalse(cpu_untyped_storage.is_pinned())
+        self.assertFalse(cpu_untyped_storage.is_pinned("openreg"))
 
-        cpu_untyped_storage_pinned = cpu_untyped_storage.pin_memory()
-        self.assertTrue(cpu_untyped_storage_pinned.is_pinned())
+        cpu_untyped_storage_pinned = cpu_untyped_storage.pin_memory("openreg")
+        self.assertTrue(cpu_untyped_storage_pinned.is_pinned("openreg"))
 
     @unittest.skip(
         "Temporarily disable due to the tiny differences between clang++ and g++ in defining static variable in inline function"
