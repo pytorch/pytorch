@@ -969,10 +969,7 @@ def forward(self, x_1, output_1):
         self.assertEqual(compiled_out, eager_out)
 
         # Check that we're allocating the minimal # of buffers.
-        if GPU_TYPE == "xpu":
-            code_string = "empty_strided_xpu((10, ), (1, ), torch.float32)"
-        else:
-            code_string = "empty_strided_cuda((10, ), (1, ), torch.float32)"
+        code_string = f"empty_strided_{GPU_TYPE}((10, ), (1, ), torch.float32)"
 
         num_bufs_allocated = code.count(code_string)
         self.assertEqual(num_bufs_allocated, 2)
