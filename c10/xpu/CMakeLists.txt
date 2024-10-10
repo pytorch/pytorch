@@ -27,6 +27,7 @@ set(C10_XPU_HEADERS
     XPUFunctions.h
     XPUMacros.h
     XPUStream.h
+    XPUGuard.h
     impl/XPUGuardImpl.h
 )
 if(NOT BUILD_LIBTORCHLESS)
