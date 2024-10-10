@@ -4,6 +4,7 @@
 // See Note [Do not compile initializers with AVX]
 
 #include <ATen/cpu/vec/intrinsics.h>
+#include <ATen/cpu/vec/vec128/vec128_convert.h>
 #include <ATen/cpu/vec/vec128/vec128_float_neon.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/Half.h>
@@ -664,12 +665,44 @@ Vectorized<c10::Half> inline fmadd(
   return Vectorized<c10::Half>(vfmaq_f16(c, a, b));
 }
 
+// Returns (acc_low + a_low_half * b_low_half, acc_high + a_high_half * b_high_half)
+template <>
+std::pair<Vectorized<float>, Vectorized<float>> inline fmadd(
+    const Vectorized<c10::Half>& a,
+    const Vectorized<c10::Half>& b,
+    const Vectorized<float>& acc_low,
+    const Vectorized<float>& acc_high) {
+#ifdef __ARM_FEATURE_FP16_FML
+  return std::make_pair(vfmlalq_low_f16(acc_low, a, b), vfmlalq_high_f16(acc_high, a, b));
+#else
+  const auto [a_float_low, a_float_high] = convert_half_float(a);
+  const auto [b_float_low, b_float_high] = convert_half_float(b);
+  return std::make_pair(fmadd(a_float_low, b_float_low, acc_low), fmadd(a_float_high, b_float_high, acc_high));
+#endif
+}
+
 template <>
 Vectorized<c10::Half> inline fmsub(
     const Vectorized<c10::Half>& a,
     const Vectorized<c10::Half>& b,
     const Vectorized<c10::Half>& c) {
   return Vectorized<c10::Half>(vfmsq_f16(c, a, b));
+}
+
+// Returns (acc_low - a_low_half * b_low_half, acc_high - a_high_half * b_high_half)
+template <>
+std::pair<Vectorized<float>, Vectorized<float>> inline fmsub(
+    const Vectorized<c10::Half>& a,
+    const Vectorized<c10::Half>& b,
+    const Vectorized<float>& acc_low,
+    const Vectorized<float>& acc_high) {
+#ifdef __ARM_FEATURE_FP16_FML
+  return std::make_pair(vfmlslq_low_f16(acc_low, a, b), vfmlslq_high_f16(acc_high, a, b));
+#else
+  const auto [a_float_low, a_float_high] = convert_half_float(a);
+  const auto [b_float_low, b_float_high] = convert_half_float(b);
+  return std::make_pair(fmsub(a_float_low, b_float_low, acc_low), fmsub(a_float_high, b_float_high, acc_high));
+#endif
 }
 
 #endif /* defined(aarch64) && defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC) && !defined(C10_MOBILE) */
