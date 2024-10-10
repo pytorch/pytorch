@@ -77,6 +77,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from torch.fx.graph_module import _get_attr
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._pytree import TreeSpec
 from torch.utils._sympy.value_ranges import ValueRangeError
@@ -699,21 +700,12 @@ def _export_to_aten_ir(
     gm.recompile()
     graph_signature.user_outputs = _graph_output_names(gm)
 
-    # NOTE: aot_export adds symint metadata for placeholders with int values;
-    # since these become specialized, we replace such metadata with the original values
-    index = 0
     total_non_user_inputs = (
         len(graph_signature.parameters)
         + len(graph_signature.buffers)
         + len(graph_signature.input_tokens)
     )
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            if index >= total_non_user_inputs:
-                user_arg = flat_fake_args[index - total_non_user_inputs]
-                if not isinstance(user_arg, torch.Tensor):
-                    node.meta["val"] = user_arg
-            index += 1
+    set_missing_meta_vals(gm, flat_fake_args, total_non_user_inputs, constant_attrs)
 
     export_graph_signature = _convert_to_export_graph_signature(
         graph_signature, gm, _get_non_persistent_buffers(mod)
@@ -1530,14 +1522,7 @@ def _export_to_aten_ir_make_fx(
             gm.meta.update(mod.meta)
 
     flat_args = pytree.tree_leaves((fake_args, fake_kwargs))
-    index = 0
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            if index >= params_len:
-                user_arg = flat_args[index - params_len]
-                if not isinstance(user_arg, torch.Tensor):
-                    node.meta["val"] = user_arg
-            index += 1
+    set_missing_meta_vals(gm, flat_args, params_len, constant_attrs)
 
     export_graph_signature = _convert_to_export_graph_signature(
         graph_signature, gm, _get_non_persistent_buffers(mod)
@@ -1599,6 +1584,27 @@ def _export_to_aten_ir_make_fx(
         export_graph_signature,
         constants,
     )
+
+
+def set_missing_meta_vals(gm, flat_args, num_params_buffers, constant_attrs):
+    # Sets missing metadata to address two problems:
+    # 1. aot_export adds symint metadata for placeholders with int values; since
+    #    these become specialized, we replace such metadata with the original values.
+    # 2. constant attributes need to have metadata set before lifting them because
+    #    computing the graph signature depends on it.
+    index = 0
+    fake_mode = detect_fake_mode(flat_args)
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            if index >= num_params_buffers:
+                user_arg = flat_args[index - num_params_buffers]
+                if not isinstance(user_arg, torch.Tensor):
+                    node.meta["val"] = user_arg
+            index += 1
+        if node.op == "get_attr" and "val" not in node.meta:
+            val = _get_attr(gm, node.target)
+            if val in constant_attrs and isinstance(val, torch.Tensor):
+                node.meta["val"] = fake_mode.from_tensor(val, static_shapes=True)
 
 
 def _find_node(gm: torch.fx.GraphModule, name: str) -> torch.fx.Node:
