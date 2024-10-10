@@ -3,6 +3,8 @@
 
 #include <ATen/cpu/vec/intrinsics.h>
 
+#include <ATen/cpu/vec/vec128/vec128_convert.h>
+
 #if !defined(CPU_CAPABILITY_SVE)
 #include <ATen/cpu/vec/vec128/vec128_float_neon.h>
 #include <ATen/cpu/vec/vec128/vec128_half_neon.h>
