@@ -117,7 +117,7 @@ PYTHON_TO_CPP = {
     "int": "long",
     "float": "double",
     "bool": "bool",
-    "str": "std::string",
+    "str": "c10::string_view",  # TODO: std::string or c10::string_view?
     "ScalarType": "c10::ScalarType",
     "MemoryFormat": "at::MemoryFormat",
     "Layout": "at::Layout",
@@ -126,7 +126,7 @@ PYTHON_TO_CPP = {
 }
 
 CONTAINER_PYTHON_TO_CPP = {
-    "List": "std::vector",
+    "List": "torch::List",  # TODO: std::vector or torch::List ?
     "Optional": "std::optional",
 }
 
