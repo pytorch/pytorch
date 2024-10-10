@@ -2085,8 +2085,6 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_conditional(self, conditional):
         name = conditional.get_name()
 
-        self.writeline(f"{name} = [None] * {len(conditional.outputs)}")
-
         outer_inputs = [buf.codegen_reference() for buf in conditional.operands]
         outer_outputs = [f"{name}[{i}]" for i in range(len(conditional.outputs))]
 
