@@ -4,7 +4,7 @@ from typing import List
 
 import torch
 from torch import Tensor
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, realize_inputs
 
 from .. import config
 from ..pattern_matcher import Arg, CallFunction, Match, register_graph_pattern
@@ -31,12 +31,6 @@ if "decompose_mm_pass" in config.post_grad_fusion_options:
 
 def check_device(a: Tensor, b: Tensor) -> bool:
     return a.is_cuda and b.is_cuda
-
-
-def realize_inputs(inputs: List[torch.fx.Node]):
-    for inp in inputs:
-        if isinstance(inp, torch.fx.node.Node):
-            inp.meta["inductor_realize_to_strides"] = True
 
 
 def should_decompose_bmm(mat1, mat2) -> bool:
