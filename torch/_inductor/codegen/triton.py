@@ -2982,7 +2982,7 @@ class TritonKernel(SIMDKernel):
         if self.inside_reduction:
             # rnumel = r0_numel * ... * r(n-1)_numel
             reduction_trees = [tree for tree in self.range_trees if tree.is_reduction]
-            rnumel = " *".join(
+            rnumel = " * ".join(
                 sorted(f"{tree.prefix}numel" for tree in reduction_trees)
             )
             code.writeline(f"rnumel = {rnumel}")
