@@ -3,8 +3,10 @@ from dataclasses import asdict, dataclass, replace
 from functools import lru_cache
 import logging
 import os
+import random
 import subprocess
 from typing import Tuple, Optional, List
+from torch._inductor import config
 from torch._inductor.codegen.rocm.ck_template import CKTemplate
 from torch._inductor.utils import IndentedBuffer
 
@@ -392,5 +394,28 @@ class CKConvTemplate(CKTemplate):
             layout,
         )
 
+    def filter_op(self, op: CKConvOp) -> bool:
+        return op
+
     def gen_ops(self):
-        return []
+        unfiltered_instances = gen_conv_ops_library()
+        filtered_instances = list(
+            filter(lambda op: self.filter_op(op), unfiltered_instances)
+        )
+        # NB: when using a fixed list order, most likely we will pick the subset of instances
+        # which are very similar to each other. Randomizing the choice seems to solve this.
+        random.seed(-11)
+        chosen_instances = (
+            random.sample(
+                filtered_instances,
+                min(len(filtered_instances), config.rocm.n_max_profiling_configs),
+            )
+            if config.rocm.n_max_profiling_configs
+            else filtered_instances
+        )
+        log.debug(
+            "generated %d ck instances after filter: %s",
+            len(chosen_instances),
+            chosen_instances,
+        )
+        return chosen_instances
