@@ -1,14 +1,10 @@
 #include <torch/csrc/distributed/autograd/context/context.h>
 
-#include <functional>
-
 #include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 using torch::autograd::AccumulateGrad;
 
@@ -247,7 +243,7 @@ const c10::Dict<torch::Tensor, torch::Tensor> DistAutogradContext::
 
 void DistAutogradContext::runGradCallbackForVariable(
     const torch::autograd::Variable& variable,
-    GradCallback&& cb) {
+    const GradCallback& cb) {
   torch::Tensor grad;
   {
     std::lock_guard<std::mutex> guard(lock_);
@@ -285,6 +281,4 @@ ContextPtr ThreadLocalDistAutogradContext::getContextPtr() {
   return tl_context_ptr;
 }
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

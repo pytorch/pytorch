@@ -58,7 +58,7 @@ struct CuFFTParams
   }
 };
 
-static_assert(std::is_trivial<CuFFTParams>::value, "");
+static_assert(std::is_trivial_v<CuFFTParams>, "");
 
 // Returns true if the transform type has complex input
 inline bool cufft_complex_input(CuFFTTransformType type) {
