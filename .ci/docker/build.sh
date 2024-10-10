@@ -275,6 +275,7 @@ case "$image" in
     SWIFTSHADER=yes
     CONDA_CMAKE=yes
     TRITON=yes
+    GRAPHVIZ=yes
     ;;
   pytorch-linux-focal-py3.9-gcc9)
     ANACONDA_PYTHON_VERSION=3.9

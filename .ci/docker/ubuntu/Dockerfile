@@ -183,6 +183,13 @@ RUN if [ -n "${ACL}" ]; then bash ./install_acl.sh; fi
 RUN rm install_acl.sh
 ENV INSTALLED_ACL ${ACL}
 
+# (optional) install graphviz
+ARG GRAPHVIZ
+COPY ./common/install_graphviz.sh install_graphviz.sh
+RUN if [ -n "${GRAPHVIZ}" ]; then bash ./install_graphviz.sh; fi
+RUN rm install_graphviz.sh
+ENV INSTALLED_GRAPHVIZ ${GRAPHVIZ}
+
 # Install ccache/sccache (do this last, so we get priority in PATH)
 ARG SKIP_SCCACHE_INSTALL
 COPY ./common/install_cache.sh install_cache.sh
