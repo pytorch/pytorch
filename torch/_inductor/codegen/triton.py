@@ -464,12 +464,8 @@ def triton_reshape(
     """Workaround https://github.com/openai/triton/issues/2836"""
     assert isinstance(old_shape, list) and isinstance(new_shape, list)
 
-    def shape_to_str(shape: List[sympy.Expr]) -> List[str]:
-        return [str(dim) for dim in shape]
-
-    old_shape_str, new_shape_str = tuple(
-        shape_to_str(shape) for shape in (old_shape, new_shape)
-    )
+    old_shape_str = [V.kernel.index_to_str(shape) for shape in old_shape]
+    new_shape_str = [V.kernel.index_to_str(shape) for shape in new_shape]
 
     if old_shape_str == new_shape_str:
         return value
