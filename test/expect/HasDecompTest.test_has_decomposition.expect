@@ -839,6 +839,10 @@ aten::histogram.bins_tensor
 aten::histogram.bins_tensor_out
 aten::hspmm
 aten::hspmm.out
+aten::igamma_self_backward
+aten::igamma_self_backward.out
+aten::igammac_self_backward
+aten::igammac_self_backward.out
 aten::index.Tensor
 aten::index.Tensor_out
 aten::index_put

@@ -824,12 +824,14 @@
   result: auto_element_wise
 
 - name: igamma(Tensor self, Tensor other) -> Tensor
-  self: 'not_implemented("igamma: input")'
+  self: grad * igamma_self_backward(self, other)
   other: grad * exp((self - 1) * log(other) - other - lgamma(self))
+  result: self_t * igamma_self_backward(self_p, other_p) + other_t * exp((self_p - 1) * log(other_p) - other_p - lgamma(self_p))
 
 - name: igammac(Tensor self, Tensor other) -> Tensor
-  self: 'not_implemented("igammac: input")'
+  self: grad * igammac_self_backward(self, other)
   other: -grad * exp((self - 1) * log(other) - other - lgamma(self))
+  result: self_t * igammac_self_backward(self_p, other_p) - other_t * exp((self_p - 1) * log(other_p) - other_p - lgamma(self_p))
 
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   self: index_backward(grad.new_zeros_symint(self.sym_sizes(), self.options()), indices, grad)

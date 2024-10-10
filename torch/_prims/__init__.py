@@ -120,6 +120,8 @@ __all__ = [
     "hypot",
     "igamma",
     "igammac",
+    "igamma_self_backward",
+    "igammac_self_backward",
     "le",
     "lt",
     "maximum",
@@ -1086,6 +1088,20 @@ igamma = _make_elementwise_binary_prim(
 igammac = _make_elementwise_binary_prim(
     "igammac",
     impl_aten=torch.special.gammaincc,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+igamma_self_backward = _make_elementwise_binary_prim(
+    "igamma_self_backward",
+    impl_aten=torch.ops.aten.igamma_self_backward,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+igammac_self_backward = _make_elementwise_binary_prim(
+    "igammac_self_backward",
+    impl_aten=torch.ops.aten.igamma_self_backward,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )

@@ -1185,6 +1185,24 @@ void igammac_kernel(TensorIteratorBase& iter) {
       });
 }
 
+void igamma_self_backward_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+    kHalf, kBFloat16, iter.dtype(), "igamma_self_backward_cpu", [&]() {
+      cpu_kernel(iter, [](scalar_t a, scalar_t x) -> scalar_t {
+        return calc_igamma_grada(a, x);
+      });
+  });
+}
+
+void igammac_self_backward_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+    kHalf, kBFloat16, iter.dtype(), "igammac_self_backward_cpu", [&]() {
+      cpu_kernel(iter, [](scalar_t a, scalar_t x) -> scalar_t {
+        return calc_igammac_grada(a, x);
+      });
+  });
+}
+
 void nextafter_kernel(TensorIteratorBase& iter) {
   if (at::isReducedFloatingType(iter.common_dtype())) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "nextafter_cpu", [&]() {
@@ -1429,6 +1447,8 @@ REGISTER_DISPATCH(
 REGISTER_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_kernel);
 REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_kernel);
 REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(igamma_self_backward_stub, &igamma_self_backward_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(igammac_self_backward_stub, &igammac_self_backward_kernel);
 
 ALSO_REGISTER_AVX512_DISPATCH(atan2_stub, &atan2_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);

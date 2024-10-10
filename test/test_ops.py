@@ -2151,6 +2151,9 @@ class TestRefsOpsInfo(TestCase):
         "_refs.index_copy_",
         "_refs.index_fill_",
         "_refs.native_group_norm",
+        # These are backward functions and shouldn't have entry in python_ref_db
+        "_refs.igamma_self_backward",
+        "_refs.igammac_self_backward",
     }
 
     not_in_decomp_table = {
