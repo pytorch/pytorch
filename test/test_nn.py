@@ -2577,6 +2577,30 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(len(w), 1)
             self.assertIn('Please ensure they have the same size.', str(w[0]))
 
+    def test_weighted_mse_loss(self):
+        inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
+        targets = torch.tensor([1.5, 2.5, 3.5, 4.5])
+        weight = torch.tensor([1.0, 2.0, 3.0, 4.0])
+        loss = F.mse_loss(inputs, targets, weight=weight, reduction='mean')
+        expected_loss = torch.tensor(0.25)
+        self.assertTrue(torch.isclose(loss, expected_loss), f"Expected {expected_loss}, but got {loss}")
+
+    def test_weighted_l1_loss_with_weights(self):
+        inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
+        targets = torch.tensor([1.5, 2.5, 3.5, 4.5])
+        weight = torch.tensor([1.0, 2.0, 3.0, 4.0])
+        loss = F.l1_loss(inputs, targets, weight=weight, reduction='mean')
+        expected_loss = torch.tensor(0.5)
+        self.assertTrue(torch.isclose(loss, expected_loss), f"Expected {expected_loss}, but got {loss}")
+
+    def test_weighted_huber_loss(self):
+        inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
+        targets = torch.tensor([1.5, 2.5, 3.5, 4.5])
+        weight = torch.tensor([1.0, 2.0, 3.0, 4.0])
+        loss = F.huber_loss(input=inputs, target=targets, weight=weight, reduction='mean', delta=1.0)
+        expected_loss = torch.tensor(0.25)
+        print(torch.isclose(loss, expected_loss, atol=1e-6), f"Expected {expected_loss}, but got {loss}")
+
     def test_gaussian_nll_loss_broadcasting(self):
         input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
         target_full = torch.tensor([[1., 2., 3.], [1., 2., 3.]])
