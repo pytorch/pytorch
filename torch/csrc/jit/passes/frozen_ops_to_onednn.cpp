@@ -660,10 +660,10 @@ void moveConvWeightsToMKLDNN(Node* conv) {
   auto groups = constant_as<int64_t>(conv->namedInput("groups")).value();
 
   if (conv->kind() == aten::conv2d) {
-    conv_w_mkldnn = mkldnn_reorder_conv2d_weight(
+    conv_w_mkldnn = onednn_reorder_conv2d_weight(
         conv_w_mkldnn, padding, stride, dilation, groups);
   } else if (conv->kind() == aten::conv3d) {
-    conv_w_mkldnn = mkldnn_reorder_conv3d_weight(
+    conv_w_mkldnn = onednn_reorder_conv3d_weight(
         conv_w_mkldnn, padding, stride, dilation, groups);
   } else {
     TORCH_INTERNAL_ASSERT(false);
