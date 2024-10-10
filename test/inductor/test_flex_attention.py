@@ -2088,7 +2088,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         implicit_bias_sdpa_gold = bias_sdpa_gold
         implicit_bias_sdpa_gold = implicit_bias_sdpa_gold.view(H, 1, 1).expand(H, S, S)
 
-
         self._test_learnable_bias_inner(
             B,
             H,

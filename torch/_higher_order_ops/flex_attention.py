@@ -98,7 +98,7 @@ if not torch._running_with_deploy():
         for idx, idx_indim in zip(indices, indices_indims):
             # The index is not a being batched, we should unsqueeze and expand to val
             if idx_indim is None:
-                expanded_indices.append(idx.unsqueeze(0).expand(value.shape))
+                expanded_indices.append(idx.expand(value.shape))
             else:
                 # the index is being part of the vmap batch, it should be the same size as val
                 assert idx.shape == value.shape
