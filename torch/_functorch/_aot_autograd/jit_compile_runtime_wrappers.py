@@ -373,12 +373,12 @@ def aot_dispatch_autograd(
                 colored=True,
             ),
         )
-        joint_graph_str = fx_g.print_readable(
+        joint_graph_str_fn = lambda: fx_g.print_readable(
             print_output=False, include_stride=True, include_device=True
         )
         trace_structured(
             "aot_joint_graph",
-            payload_fn=lambda: joint_graph_str,
+            payload_fn=joint_graph_str_fn,
         )
 
     with torch.no_grad():
@@ -572,19 +572,19 @@ def aot_dispatch_autograd(
                     colored=True,
                 ),
             )
-            fw_module_str = fw_module.print_readable(
+            fw_module_str_fn = lambda: fw_module.print_readable(
                 print_output=False, include_stride=True, include_device=True
             )
-            bw_module_str = bw_module.print_readable(
+            bw_module_str_fn = lambda: bw_module.print_readable(
                 print_output=False, include_stride=True, include_device=True
             )
             trace_structured(
                 "aot_forward_graph",
-                payload_fn=lambda: fw_module_str,
+                payload_fn=fw_module_str_fn,
             )
             trace_structured(
                 "aot_backward_graph",
-                payload_fn=lambda: bw_module_str,
+                payload_fn=bw_module_str_fn,
             )
 
         with track_graph_compiling(aot_config, "forward"):
@@ -787,9 +787,9 @@ def aot_dispatch_autograd(
                 # update backward_time_taken_ns to be more inclusive
                 backward_time_taken_ns = getattr(compiled_bw_func, "_time_taken_ns", 0)
 
-                aot_forward_graph_str: Optional[str] = fw_module_str
-                aot_backward_graph_str: Optional[str] = bw_module_str
-                aot_joint_graph_str: Optional[str] = joint_graph_str
+                aot_forward_graph_str: Optional[str] = fw_module_str_fn()
+                aot_backward_graph_str: Optional[str] = bw_module_str_fn()
+                aot_joint_graph_str: Optional[str] = joint_graph_str_fn()
                 entry = AOTAutogradCacheEntry(
                     CompiledForward(fw_key),
                     CompiledBackward(
