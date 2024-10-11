@@ -3225,10 +3225,10 @@ def call_stride(x, i):
 
 def call_storage_offset(x):
     @torch._dynamo.disable(recursive=True)
-    def fn(x, i):
-        return x.stride(i)
+    def fn(x):
+        return x.storage_offset()
 
-    return fn(x, i)
+    return fn(x)
 
 
 # Helper function to extract relevant parts of a tensor's __dict__ to store in node meta.
