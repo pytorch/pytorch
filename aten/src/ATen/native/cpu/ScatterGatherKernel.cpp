@@ -867,8 +867,8 @@ void scatter_reduce_expanded_index_kernel(
 }
 
 void gather_expanded_index_kernel(const Tensor& result, const Tensor& self, const Tensor& index) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-    ScalarType::BFloat16, self.scalar_type(), "gather_expanded_index", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+    ScalarType::BFloat16, ScalarType::Half, self.scalar_type(), "gather_expanded_index", [&] {
       cpu_gather_expanded_index_kernel<scalar_t>(result, index, self);
   });
 }

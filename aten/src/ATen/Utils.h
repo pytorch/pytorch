@@ -13,10 +13,6 @@
 #include <c10/util/irange.h>
 
 #include <algorithm>
-#include <memory>
-#include <numeric>
-#include <sstream>
-#include <typeinfo>
 
 #define AT_DISALLOW_COPY_AND_ASSIGN(TypeName) \
   TypeName(const TypeName&) = delete;         \

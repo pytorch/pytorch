@@ -67,7 +67,7 @@ class AOTIRunnerUtil:
     @staticmethod
     def load_runner(device, so_path):
         if IS_FBCODE:
-            from .fb import test_aot_inductor_model_runner_pybind
+            from .fb import test_aot_inductor_model_runner_pybind  # @manual
 
             with tempfile.TemporaryDirectory() as temp_dir:
                 # copy *.so file to a unique path just before loading
@@ -75,6 +75,12 @@ class AOTIRunnerUtil:
                 # from the same path is loaded repetitively in a test
                 temp_so_path = os.path.join(temp_dir, "model.so")
                 shutil.copy(so_path, temp_so_path)
+
+                # We also need to copy over the serialized extern_kernel_nodes for custom ops
+                extern_kernel_nodes_path = f"{so_path[:-3]}.json"
+                if os.path.isfile(extern_kernel_nodes_path):
+                    temp_extern_kernel_nodes_path = os.path.join(temp_dir, "model.json")
+                    shutil.copy(extern_kernel_nodes_path, temp_extern_kernel_nodes_path)
 
                 return test_aot_inductor_model_runner_pybind.Runner(
                     temp_so_path, device == "cpu"

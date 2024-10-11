@@ -331,28 +331,6 @@ Tensor FunctionalInverses::_nested_get_values_inverse(const Tensor& base, const 
   }
 }
 
-Tensor FunctionalInverses::_nested_strided_to_jagged_inverse(const at::Tensor & base, const at::Tensor & mutated_view, at::functionalization::InverseReturnMode inverse_return_mode) {
-  // Mutated view is a jagged NT
-  auto cpp_nt = at::_nested_jagged_to_strided(mutated_view);
-
-  if (inverse_return_mode != InverseReturnMode::NeverView) {
-    return cpp_nt;
-  } else {
-    return cpp_nt.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
-  }
-}
-
-Tensor FunctionalInverses::_nested_jagged_to_strided_inverse(const at::Tensor & base, const at::Tensor & mutated_view, at::functionalization::InverseReturnMode inverse_return_mode) {
-  // Mutated view is a strided NT
-  auto python_nt = at::_nested_strided_to_jagged(mutated_view);
-
-  if (inverse_return_mode != InverseReturnMode::NeverView) {
-    return python_nt;
-  } else {
-    return python_nt.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
-  }
-}
-
 Tensor FunctionalInverses::unsqueeze_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t dim) {
     if (inverse_return_mode != InverseReturnMode::NeverView) {
       return at::squeeze(mutated_view, dim);

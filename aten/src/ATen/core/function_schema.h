@@ -25,7 +25,7 @@ using AliasTypeSet = std::vector<TypePtr>;
 
 bool operator==(const Argument& lhs, const Argument& rhs);
 
-struct Argument {
+struct TORCH_API Argument {
   Argument(
       std::string name = "",
       const TypePtr& type = nullptr,
@@ -622,7 +622,7 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   return out;
 }
 
-inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema);
+TORCH_API std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema);
 
 inline std::string toString(const FunctionSchema& schema) {
   std::ostringstream str;
