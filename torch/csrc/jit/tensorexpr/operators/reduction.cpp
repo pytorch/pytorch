@@ -146,7 +146,6 @@ Tensor computeMax(
   }
   BufHandle ResultBuf("max", outputShape, dtype);
   BufHandle InputBuf = std::get<BufHandle>(inputs[0]);
-  std::vector<ExprHandle> max_dims_expr;
   auto max_dim = std::get<int64_t>(inputs[1]);
   auto keep_dim = std::get<bool>(inputs[2]);
   return Tensor(

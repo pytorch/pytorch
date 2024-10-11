@@ -282,7 +282,8 @@ std::pair<tensorpipe::Allocation, TensorpipeReadBuffers> tensorpipeAllocate(
 }
 
 c10::intrusive_ptr<Message> tensorpipeDeserialize(
-    tensorpipe::Descriptor&& tpDescriptor,
+    const tensorpipe::Descriptor& tpDescriptor,
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     TensorpipeReadBuffers&& buffers) {
   // Tensors
   std::vector<at::Tensor> tensors;
@@ -319,7 +320,7 @@ c10::intrusive_ptr<Message> tensorpipeDeserialize(
   }
 
   for (const auto i : c10::irange(tpDescriptor.tensors.size())) {
-    auto& tensor = tpDescriptor.tensors[i];
+    const auto& tensor = tpDescriptor.tensors[i];
     if (tensor.targetDevice.has_value() &&
         tensor.targetDevice->type == tensorpipe::kCudaDeviceType) {
       TORCH_INTERNAL_ASSERT(
